@@ -97,10 +97,10 @@ UI.DialogColors = {
 -- Canonical row heights (the "airier" scale). A fixed-height widget factory stamps its own slot
 -- height onto the widget (widget.preferredHeight + widget.fixedRowHeight), so the layout uses THAT
 -- and a call-site number can't make the same widget type render at a different height on a different
--- page. New callers can omit the height entirely; legacy call-site numbers on fixed widgets are
--- ignored (harmless, strippable later). Variable widgets (labels, headers, spacers) are NOT stamped
--- and keep whatever height they are given. One place to retune the whole GUI's vertical rhythm.
--- THE vertical rhythm of the whole GUI.
+-- page. New callers can omit the height entirely; a call-site number on a fixed widget is
+-- ignored, and strippable later. Variable widgets (labels, headers, spacers) are NOT
+-- stamped and keep whatever height they are given. One place to retune THE vertical
+-- rhythm of the whole GUI.
 --
 -- These are SLOT heights, not gaps -- LayoutChildren stacks rows flush
 -- (y = y - height), so the gap the eye sees between two rows is:
@@ -467,8 +467,7 @@ function UI.ResolveSurfaceStyle(host, opt)
     return s
 end
 -- The outer inset around the content, and the gap UNDER the title bar too --
--- see Popout.lua's _Resize, where the content used to be anchored flush against
--- the bar while carrying 2 x this much slack below it.
+-- see Popout.lua's _Resize.
 UI.PopoutPad = 10
 
 -- ============================================================
@@ -479,13 +478,11 @@ UI.PopoutPad = 10
 -- retuned by editing the widget, and a look that is retuned by editing the
 -- widget drifts from the look everything else was tuned against.
 --
--- WHY IT IS NOT UI.RowHeight.checkbox ANY MORE. The row used to take a
--- checkbox's slot (35, so a 21px plate) on the reasoning that it is a compact
--- label-inline control and shares that shape. It reads as one: a tick, a name, a
--- value, a count and a way in, all crammed into 21px with the tick and the
--- chevron flush against the plate's own edges. The row is not a checkbox with
--- extras -- it is a PLATE, a whole-row click target that stands for a group of
--- fifteen controls, and it has to carry the weight of one.
+-- WHY IT IS NOT UI.RowHeight.checkbox. A checkbox's slot (35, so a 21px plate)
+-- crams a tick, a name, a value, a count and a way in into 21px, with the tick
+-- and the chevron flush against the plate's own edges. The row is not a
+-- checkbox with extras -- it is a PLATE, a whole-row click target that stands
+-- for a group of fifteen controls, and it has to carry the weight of one.
 --
 -- So it gets its own slot, and the slot is NOT in UI.RowHeight: nothing writes
 -- rowKind = "popoutRow" (see the ⚠ on RowCompact -- a kind nothing agrees with
@@ -844,22 +841,15 @@ local function SnapHeightEven(frame, v)
 end
 UI.SnapHeightEven = SnapHeightEven
 
--- Every frame that carries a 1px backdrop edge, so the sweep below can find them
--- without any page needing to know what it contains. Weak keys: a retired page's
--- widgets are reparented to the trash frame rather than destroyed, and this must
--- not be what keeps them reachable.
+-- The registry of frames carrying a 1px backdrop edge is `pixelBordered`, below.
+-- Weak keys: a retired page's widgets are reparented to the trash frame rather
+-- than destroyed, and the registry must not be what keeps them reachable.
 
--- Re-derive the BORDER THICKNESS of everything currently on screen. Since the
--- geometry correction was removed this no longer moves or resizes anything, so
--- the only thing it can change is how many device pixels an edge is drawn at --
--- which only matters when the SCALE changes. That is why its callers are the
--- scale slider and the window drag/resize handlers, not anything per-frame.
---
--- IsVisible (not IsShown) keeps it cheap: a widget on a page that is not open
--- has a hidden ancestor and is skipped, so the work stays proportional to what
--- is displayed rather than to everything the registry has accumulated. Safe to
--- call repeatedly -- it writes only when the computed edge width actually
--- differs, so a second call in the same state does nothing at all.
+-- The sweep that re-derives BORDER THICKNESS lives on the host
+-- (RefreshPixelBorders), not here. It moves and resizes nothing, so it matters
+-- only when the SCALE changes -- hence its callers are the scale slider and the
+-- window drag/resize handlers, not anything per-frame. IsVisible (not IsShown)
+-- keeps it cheap, and it writes only when the computed edge width differs.
 
 -- ============================================================
 -- PIXEL BORDER -- how every outlined GUI surface draws its edge.
@@ -1016,9 +1006,8 @@ local function GetPixelBorderColor(self)
 end
 
 -- Re-derive on show, so a surface built at one UI scale and opened after a scale
--- change comes up at the right thickness. Self-registering on purpose: this
--- used to be an explicit call that six floating windows each had to remember to
--- make, and a bordered frame maintaining its own border cannot be forgotten.
+-- change comes up at the right thickness. Self-registering on purpose: a
+-- bordered frame that maintains its own border cannot be forgotten.
 --
 -- Guarded on the scale it was last laid out at, because this fires for every
 -- widget on every page open. In the ordinary case -- nothing has changed since
@@ -1186,13 +1175,9 @@ end
 -- down (dialogs and floating panels, colour-configurable) -- this one is always
 -- the dark background behind a hard black edge.
 --
--- Routed through the factory rather than issuing its own backdrop, which is what
--- it used to do. It was the last thing in the GUI still drawing a border as an
--- edgeFile, and a black 1px line is the case where that reads least badly -- it
--- has enough contrast that a split across two device rows softens it instead of
--- losing it. Still worth converting: softening on every scroll is what the whole
--- pixel border exists to stop, and while this was the last holdout the entire
--- snap-registry existed to serve three call sites.
+-- Routed through the factory rather than issuing its own backdrop: a border
+-- drawn as an edgeFile softens on every scroll, which is what the pixel border
+-- exists to stop.
 local function CreatePanelBackdrop(frame)
     return CreateElementBackdrop(frame, {
         bgColor     = C_BACKGROUND,
@@ -1211,13 +1196,10 @@ P.CreatePanelBackdrop   = CreatePanelBackdrop
 -- Style a ScrollFrameTemplate scrollbar to use the pill-shaped thumb
 -- All scroll frames must use ScrollFrameTemplate (not UIPanelScrollFrameTemplate)
 --
--- This used to also quantise the scroll offset to whole device pixels, on the
--- reasoning that Blizzard's scrollbar drives the offset as a fraction of the
--- range and so parks the content on an arbitrary sub-pixel row. That was true,
--- and it did not help: a thin border is soft at SOME offsets no matter which
--- offsets you allow, and quantising only changed which ones. The border being
--- two device pixels wide is what made the question stop mattering -- it draws
--- the same amount of ink wherever it lands. Do not add it back.
+-- Do NOT quantise the scroll offset to whole device pixels here. A thin border
+-- is soft at SOME offsets whichever ones you allow, so quantising only changes
+-- which. The border being two device pixels wide is what made it stop
+-- mattering -- it draws the same ink wherever it lands.
 -- The overlay bar's state machine (StyleScrollBar's `overlay` opt). Two states
 -- and one timer, kept here rather than at the call sites so every overlay pane
 -- in the addon shrinks and grows on the same clock.

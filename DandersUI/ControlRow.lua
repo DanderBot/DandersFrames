@@ -9,10 +9,9 @@ if not UI then return end
 -- POPOUT ROW standing for a group of fifteen controls (PopoutRow.lua). But a
 -- page is never only groups. Half a dozen settings on any page are one control
 -- and nothing else -- a tick, a dropdown, a number -- and there is no group for
--- them to be the way in TO. Those used to stay behind in a 280px inline box
--- beside the bands, which is the one thing a column of plates cannot absorb: a
--- narrower rectangle with its own border, its own title and its own left edge,
--- sitting in a list whose whole argument is that every row starts at the same x.
+-- them to be the way in TO. A column of plates cannot absorb a narrower
+-- rectangle with its own border, its own title and its own left edge: every row
+-- in the list starts at the same x.
 --
 -- So a single-control setting becomes a CONTROL ROW: the SAME plate, carrying
 -- the control itself instead of a summary and a way in.

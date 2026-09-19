@@ -13,13 +13,11 @@ if not UI then return end
 -- nothing keeps the square backdrop it has always had. The library names no
 -- consumer; see Core.lua.
 --
--- ⚠ THE TRIAL IS OVER, and the header used to say the opposite ("no real
--- settings page goes through it"). The nine-slice was judged in-game at every
--- baked radius and at four UI scales through the chrome workbench's Corners
--- button, came out gap-free through the popout's open/close animation, and the
--- settings shell now ships rounded at R8. The workbench remains -- it is still
--- the only place several radii can be compared side by side -- but it drives the
--- same first-class options every real surface does, not shadows of its own.
+-- The nine-slice has been judged in-game at every baked radius and at four UI
+-- scales, and the settings shell ships rounded at R8. The chrome workbench's
+-- Corners button remains -- it is still the only place several radii can be
+-- compared side by side -- but it drives the same first-class options every
+-- real surface does, not shadows of its own.
 --
 -- ------------------------------------------------------------
 -- ☠ WHY THIS IS NOT FIFTEEN TEXTURES ANY MORE -- read this first.

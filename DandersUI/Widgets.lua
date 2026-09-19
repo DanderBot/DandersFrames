@@ -51,26 +51,13 @@ end
 -- ============================================================
 -- ATTACHING a tooltip to a settings widget — ONE way, for every factory.
 --
--- Three factories used to each have their own idea, and on one page the same
--- gesture did three different things:
---     checkbox   .tooltip       hover the container   ANCHOR_CURSOR
---     dropdown   .tooltip       hover the BUTTON      ANCHOR_CURSOR
---     slider     .tooltipText   hover the SLIDER      ANCHOR_RIGHT
--- Worse, on a dropdown and a slider the LABEL sits above the control, outside
--- its hit rect, so hovering the words never did anything — while on a checkbox
--- (label beside the box, inside the container) it did. Five more factories —
--- colour picker, font / texture dropdown, input, growth control — had no
--- tooltip support at all, so ~136 controls could not carry one.
+-- THE RULE: THE HIT AREA IS THE LABEL, and only the label.
 --
--- The rule now: THE HIT AREA IS THE LABEL, and only the label.
---
--- ⚠ This is deliberately NOT the whole widget. The first version of this hovered
--- the control too, which is the obvious reading of "make the label work" — but a
--- cursor-anchored tooltip then sits on top of the slider or dropdown you are
--- trying to read and operate, and no amount of offsetting it fully solves that,
--- because the thing you point at IS the thing being covered. Krathe's call,
--- 2026-07-27, after trying both. Reading and adjusting are separate gestures:
--- point at the words to find out what it does, point at the control to use it.
+-- ⚠ This is deliberately NOT the whole widget. A cursor-anchored tooltip then
+-- sits on top of the slider or dropdown you are trying to read and operate, and
+-- no amount of offsetting it fully solves that, because the thing you point at
+-- IS the thing being covered. Reading and adjusting are separate gestures: point
+-- at the words to find out what it does, point at the control to use it.
 --
 -- The label is a FontString and cannot take mouse input, so each widget gets one
 -- invisible frame sized to the label's own rect. That also handles a label wider
@@ -207,7 +194,7 @@ function UI:StyleButton(btn, opts)
     end
     CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
 
-    -- Optional label + leading icon. opts.icon = { texture, size (14),
+    -- Optional label + leading icon. opts.icon = { texture, size (18),
     -- color {r,g,b}, gap (4) }. opts.align controls layout:
     --   "center" (default) — centre the icon+label as a GROUP (text-only centres
     --     the label; icon-only centres the icon). Best for compact buttons whose
@@ -396,9 +383,7 @@ function UI:StyleButton(btn, opts)
     -- Neutral hover (opts.hoverTone = "neutral"): the wash is the plain C_HOVER
     -- grey and the border does NOT go accent. For surfaces that are a PLACE
     -- rather than an action -- a card header, a list row -- where an accent
-    -- hover would read as "this is a call to action". Card headers and dropdown
-    -- rows previously hand-rolled this as an OnEnter/OnLeave SetBackdropColor
-    -- swap, which duplicated the rest colours at every site.
+    -- hover would read as "this is a call to action".
     local neutralHover = opts.hoverTone == "neutral"
     -- opts.restBorderColor: let a consumer keep its OWN border identity at rest --
     -- e.g. an Aura/Text group card header tinted by that group's colour -- while
@@ -1091,11 +1076,8 @@ function UI:CreateCloseButton(parent, opts)
         if opts.onClick then opts.onClick(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
-    -- ⚠ ACCEPTS A FULL SPEC, not just a title. This took `opts.tooltip` as a bare string
-    -- and built `{ title = it }`, so EVERY caller was structurally forced into a
-    -- title-only tooltip -- the house style wants a title AND a line saying what the
-    -- thing does, and its sibling CreateOverrideResetButton already took both. That is
-    -- an API gap rather than call-site drift, so the fix belongs here.
+    -- ⚠ ACCEPTS A FULL SPEC, not just a title: the house style wants a title AND a
+    -- line saying what the thing does, as its sibling CreateOverrideResetButton takes.
     --
     -- A string still means title-only, which is correct for a close button whose title
     -- already says everything ("Close", "Remove"): the house rule prefers silence to a
@@ -1119,9 +1101,7 @@ end
 -- heavier than the thing it acts on.
 --
 -- Deliberately its own helper: StyleButton always draws chrome, and
--- CreateCloseButton is specifically the chromed "x". Before this existed, ~16
--- sites hand-rolled the same three lines (create texture, tint it dim, brighten
--- it in OnEnter and restore in OnLeave).
+-- CreateCloseButton is specifically the chromed "x".
 --
 -- NOT this: a labelled row that merely CONTAINS an icon (a collapsible section
 -- header with a title + chevron, a collapse bar). There the click target is the
@@ -1266,12 +1246,9 @@ end
 --   fillAlpha    default 0.30      borderAlpha  default 0.80
 --   fill = false outline only      edgeSize     default 2
 --
--- ⚠ NO :RefreshMoverTint(). One was defined here and documented as "call it if the
--- mode changes while a mover is shown"; nothing ever called it, in either addon. Movers
--- are rebuilt through CreateMoverBackdrop on a mode change instead, which is the same
--- work by a different route -- so the method was a second entry point to it, advertised
--- and unused. opts.color / opts.fill / opts.edgeSize are likewise never passed by any
--- of the four call sites; the defaults below are what every mover actually gets.
+-- ⚠ NO :RefreshMoverTint(). Movers are rebuilt through CreateMoverBackdrop on a
+-- mode change instead. opts.color / opts.fill / opts.edgeSize are not passed by
+-- any call site; the defaults below are what every mover actually gets.
 function UI:CreateMoverBackdrop(frame, opts)
     opts = opts or {}
     local c = opts.color
@@ -1293,9 +1270,7 @@ end
 -- the local directly). Nothing outside should be calling SetBackdrop itself --
 -- route it through here so the look, and the border mechanism, stay in one
 -- place. See the local for the opts contract: fill, outline, bgColor, borderColor,
--- edgeSize and inset. (It used to list backdropEdge and omit edgeSize and inset --
--- backwards on both counts: edgeSize and inset are passed by real callers, while
--- backdropEdge is passed by none.)
+-- edgeSize and inset.
 function UI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
@@ -1341,12 +1316,11 @@ function UI:CreateGroupBox(parent, opts)
     -- Accent is per host and can change for the session (DF flips it on the
     -- party/raid switch), so the title follows it like a section header does.
     --
-    -- ⚠ REGISTERED AGAINST THE BOX, and kept on it. This used to hand the host a
-    -- bare closure that nothing could ever take back off the listener list, so a
-    -- panel that rebuilds its group boxes left one dead listener per box behind
-    -- every time and SetAccent walked a list that only grew. Naming the owner
-    -- makes the entry droppable -- `host:UnregisterAccentListener(box)` from a
-    -- teardown path, and automatically once the box itself is collectible.
+    -- ⚠ REGISTERED AGAINST THE BOX, and kept on it. A bare closure is something
+    -- nothing can ever take back off the listener list, and a panel rebuilds its group
+    -- boxes -- naming the owner makes the entry droppable:
+    -- `host:UnregisterAccentListener(box)` from a teardown path, and automatically
+    -- once the box itself is collectible.
     box._accentListener = function(c) title:SetTextColor(c.r, c.g, c.b) end
     host:RegisterAccentListener(box._accentListener, box)
     box.title = title
@@ -1366,11 +1340,7 @@ function UI:CreateGroupBox(parent, opts)
 end
 
 
--- The addon's ONE name prompt. This was hand-rolled twice against Blizzard's
--- StaticPopup edit box — here and in the Filter Designer — each copy carrying
--- the same `self.EditBox or self.editBox or self:GetEditBox()` fallback for a
--- field name that moves between client versions. Both now come through here and
--- get toolkit chrome, so there is nothing left to keep in step.
+-- The addon's ONE name prompt.
 -- opts = { title, message, default, acceptLabel, maxLetters, onAccept(text) }
 function UI:PromptName(opts)
     opts = opts or {}
@@ -1857,12 +1827,11 @@ end
 -- SEGMENT TOGGLE
 -- A compact segmented control: the labels sit ON the buttons, all
 -- of them boxed inside one recessed track so the pair reads as a
--- single control rather than two loose buttons. This is the
--- "Border Mode: [Shared][Custom]" idiom (AuraDesigner/Options.lua)
--- with the track added; use it for short mutually-exclusive values
--- that want to sit next to the field they qualify (s / %).
+-- single control rather than two loose buttons. Use it for short
+-- mutually-exclusive values that want to sit next to the field
+-- they qualify (s / %).
 --
--- API: UI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+-- API: GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
 --   segments : ordered { value =, label =, tooltip = } — label is what
 --              shows on the button, tooltip the full name behind a terse one
 --   opts.segmentWidth (26) / opts.height (18)
@@ -1933,12 +1902,8 @@ end
 
 -- ============================================================
 -- TEXT AREA — the multi-line cousin of CreateEditBox
--- A bordered well holding a scrolling multi-line EditBox. Eight surfaces built
--- this same container + ScrollFrame + EditBox stack by hand (export/import blobs,
--- the debug log viewer and script runner, the macro body, the popup's input mode,
--- the changelog), each picking its own well colour and three of them forgetting
--- the click-to-focus, so clicking the empty space below the text did nothing.
--- One owner, and the same well as every single-line input.
+-- A bordered well holding a scrolling multi-line EditBox. One owner, and the
+-- same well as every single-line input.
 --
 -- opts:
 --   width, height        size the well; omit and anchor it yourself
@@ -2161,11 +2126,8 @@ function UI:CreateSlider(parent, opts)
 
     -- Background track.
     -- Left edge and height here; the RIGHT edge is pinned to the value box further
-    -- down, once that exists. The track used to be a fixed 180px while a dropdown
-    -- anchors TOPLEFT+TOPRIGHT and fills its container, so on any panel wider than
-    -- the 260 default the two controls ended at visibly different x positions --
-    -- and drifted further apart the wider the panel got. Both are container-driven
-    -- now, so they line up at any width instead of at one magic number.
+    -- down, once that exists. Container-driven rather than a fixed width, so the
+    -- track ends on the same x as a dropdown's opener at any panel width.
     local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
     track:SetPoint("TOPLEFT", 0, SnapLen(track, -18) or -18)
     track:SetHeight(SnapLen(track, 8) or 8)
@@ -2268,9 +2230,8 @@ function UI:CreateSlider(parent, opts)
     local function UpdateFill()
         local val = slider:GetValue()
         local pct = (val - minVal) / (maxVal - minVal)
-        -- Measured off the LIVE track, not the old hardcoded 178 (= the fixed 180
-        -- track minus the fill's 1px inset each side). The track stretches now, so
-        -- a constant here would under-fill on any panel wider than the default.
+        -- Measured off the LIVE track: it stretches, so a constant here would
+        -- under-fill on any panel wider than the default.
         local usable = (track:GetWidth() or 0) - 2
         if usable < 1 then usable = 1 end
         fill:SetWidth(math.max(1, pct * usable))
@@ -2513,10 +2474,9 @@ function UI:CreateSlider(parent, opts)
             -- The SAME height the thumb path resolves to, DERIVED rather than
             -- written down: the 16px thumb centres on the slider's (pixel-
             -- snapped) height, so its top sits (16 - h) / 2 above the slider's,
-            -- and the bubble rides 2 above that. The hardcoded -12 this replaces
-            -- was only right while SnapLen left the track on exactly -18/8, and
-            -- being right by coincidence is how a box develops a half-pixel hop
-            -- the moment it clamps.
+            -- and the bubble rides 2 above that. A constant here would only be
+            -- right for as long as SnapLen leaves the track where it is, and being
+            -- right by coincidence is how a box develops a half-pixel hop when it clamps.
             --
             -- Anchored off the SLIDER, not the container, for the same reason --
             -- but the x still reads as a container offset, because the slider is
@@ -2830,11 +2790,6 @@ function UI:CreateSlider(parent, opts)
         -- and that is ALL this tick does. No refresh, no callback -- the preview
         -- is pumped once per rendered frame from OnDragUpdate and the commit
         -- happens once, on release.
-        --
-        -- ⚠ The old code called `refresh` here on every tick AND skipped the
-        -- callback "because it will run via UpdateAll on release" -- which it
-        -- never did: nothing on the release path called it. That is the bug this
-        -- split fixes, and it is why onChanged now fires from ReleaseDrag.
         if hasDragHooks and isDragging then
             pendingValue = value
             return
@@ -2891,12 +2846,10 @@ function UI:CreateSlider(parent, opts)
             -- A TYPED VALUE IS A COMMIT, so it runs onChanged -- once -- and
             -- nothing else.
             --
-            -- ⚠ NO lightweight fallback here any more (it used to run when
-            -- onChanged was absent). `lightweight` is the PREVIEW callback now:
-            -- it exists to make a drag visible cheaply, and a slider that only
-            -- has one is a slider whose full apply is the refreshNow below.
-            -- Falling back to it would run a partial update in place of a
-            -- complete one.
+            -- ⚠ NO lightweight fallback here. `lightweight` is the PREVIEW
+            -- callback: it exists to make a drag visible cheaply, and a slider that
+            -- only has one is a slider whose full apply is the refreshNow below.
+            -- Falling back to it would run a partial update in place of a complete one.
             if callback then
                 callback()
             end
@@ -4128,11 +4081,9 @@ end
 
 -- How far the cursor-anchored tooltip is nudged off the pointer. ONE dial.
 --
--- Small on purpose. This started at 24 while the tooltip could still appear over
--- a slider or dropdown, where it had to clear the whole control. Now that the
--- hover lives on the LABEL only (see UI:AttachTooltip) there is nothing
--- underneath worth clearing — the lift just has to keep the tooltip off the
--- words you are reading, so a nudge does it.
+-- Small on purpose. The hover lives on the LABEL only (see UI:AttachTooltip),
+-- so there is nothing underneath worth clearing — the lift just has to keep
+-- the tooltip off the words you are reading.
 --
 -- ⚠ ANCHOR_CURSOR_RIGHT, not ANCHOR_CURSOR — plain ANCHOR_CURSOR DISCARDS the
 -- offsets. Verified against the client's own code rather than assumed:

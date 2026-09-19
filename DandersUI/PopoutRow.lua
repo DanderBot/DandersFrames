@@ -801,8 +801,7 @@ end
 -- alone cannot promise that. Pinning takes an instance OUT of the pool -- that
 -- is what pinning IS -- so a second click on the very same row found no pooled
 -- instance for the key and built a fresh one: two panels, one row, the same
--- controls in both. Reported in-game as "if a popout is pinned, it shouldn't be
--- able to open again as an unpinned popout. Only 1 of each popout."
+-- controls in both.
 --
 -- So the question the open path asks is about the ROW, not about the key: is any
 -- LIVE instance currently bound to me. `_bound` is the set that answers it -- the
@@ -890,9 +889,9 @@ end
 --              cross stay live -- see THE OFF GATE above
 --              OMIT IT for a group that has no on/off of its own -- a way IN and
 --              nothing else. No tick is drawn (here or in the popout's header),
---              the row reads as permanently on (no offText, no off gate), and the
---              tick's COLUMN is still reserved so the row lines up with toggled
---              rows beside it
+--              and the row reads as permanently on (no offText, no off gate).
+--              Its name starts at the plate's own padding -- no tick column is
+--              reserved. See ROW_LABEL_X
 --   summary    fn(db) -> string, rendered live in the row
 --   offText    the single word shown instead of the summary while toggled off
 --   count      declared number of controls in the group (the badge, and the
@@ -1239,10 +1238,9 @@ function UI:CreatePopoutRow(parent, opts)
 
     local label = host:CreateLabelNative(plate, { size = M.labelSize, color = C_TEXT })
     label:SetText(row._label)
-    -- ⚠ THE TICK'S COLUMN IS NO LONGER RESERVED. It was, so a ticked row and an
-    -- unticked one in the same band started their names at one x; the author
-    -- asked for everything in a box to sit fully left instead (2026-09-19), so
-    -- an unticked row's name starts at the padding. See ROW_LABEL_X above.
+    -- ⚠ THE TICK'S COLUMN IS NOT RESERVED. An unticked row's name starts at the
+    -- plate's own padding, not past a tick column that is not drawn. See
+    -- ROW_LABEL_X above.
     label:SetPoint("LEFT", plate, "LEFT", ROW_LABEL_X, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
@@ -2973,9 +2971,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- paintState is declared between the two, so a handler written up there would
     -- reach for it as a GLOBAL and quietly do nothing.
     --
-    -- Straight to row:OpenPopout(), which is the same verb the plain row's click
-    -- has always used -- so the pool, the tether, the beam and the pin-on-an-empty
-    -- pane are all reached by one path and cannot drift apart.
+    -- Routes through row:TogglePopout, whose open half is row:OpenPopout -- the
+    -- same verb the plain row's click uses, so the pool, the tether, the beam
+    -- and the pin-on-an-empty pane all sit on one path and cannot drift apart.
     if strip then
         -- TOGGLE, not open: the strip is the one control that says "this row's
         -- panel", so pressing it while that panel is up means "put it away" --

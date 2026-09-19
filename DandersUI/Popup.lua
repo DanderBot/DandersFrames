@@ -243,9 +243,8 @@ local function ConfigureForAlert(host, config)
     -- Set title
     f.TitleText:SetText(config.title or L["Notice"])
     -- config.tone tints the TITLE, matching how a toned line reads inline and in
-    -- GUI:ShowTooltip. Warnings that used to open with a coloured lead line in
-    -- the body put that emphasis in the header instead. Reset every time: the
-    -- frame is a singleton, so an untoned alert must not inherit the last tint.
+    -- GUI:ShowTooltip. Reset every time: the frame is a singleton, so an untoned
+    -- alert must not inherit the last tint.
     if config.tone and host.GetToneColor then
         local c = host:GetToneColor(config.tone)
         f.TitleText:SetTextColor(c[1], c[2], c[3])

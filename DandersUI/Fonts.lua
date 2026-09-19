@@ -184,9 +184,6 @@ end
 -- happen, because the registry itself was the thing keeping them alive. The cleanup arm in
 -- RefreshSettingsFont was unreachable, the table only ever grew as settings pages rebuilt
 -- their widgets, and every font change re-applied to fontstrings long gone from the screen.
---
--- Keying by the fontstring also retires the linear scan that used to run on every
--- SetSettingsFont call to find an existing entry.
 UI._settingsFontStrings = UI._settingsFontStrings or setmetatable({}, { __mode = "k" })
 
 -- Apply the user's settings font to a FontString with the given

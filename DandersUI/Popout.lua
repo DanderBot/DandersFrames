@@ -223,7 +223,7 @@ local STRATA_ORDER = {
 local STRATA_RANK = {}
 for i = 1, #STRATA_ORDER do STRATA_RANK[STRATA_ORDER[i]] = i end
 
--- A LITERAL single step, FULLSCREEN included (decided 2026-08-27). Landing the
+-- A LITERAL single step, FULLSCREEN included. Landing the
 -- DIALOG window's chrome on FULLSCREEN rather than FULLSCREEN_DIALOG is what
 -- keeps the ordering sane around MENUS: the kit's dropdown menus live on
 -- FULLSCREEN_DIALOG, so with the chrome one strata BELOW them, a menu opened on
@@ -317,12 +317,12 @@ end
 -- PopoutDockPos, so the dock, the glide's destination and the tests all read one
 -- answer. nil for a missing rect.
 --
--- ⚠ CENTRED ON THE ROW, not hung from its top. Hanging from the top is the story
+-- ⚠ LEVEL WITH THE ROW, not hung from its top. Hanging from the top is the story
 -- right/left docking tells, and for a SHORT popout the two readings agree -- but
 -- a tall one hung by its top puts its whole body below the row, so a group with
 -- a dozen controls opened from the third row of a list ends up level with the
--- twelfth. "At the row's height" is what this placement promises, and the centre
--- is what actually delivers it.
+-- twelfth. "At the row's height" is what this placement promises; the row sits a
+-- THIRD down the popout (see the y below), which is what delivers it.
 --
 -- The clamps, in order (later wins, because being off-screen is worse than being
 -- level with the wrong part of the window):
@@ -351,8 +351,8 @@ function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
         -- block, which is not a horizontal problem.
         local halfW = (screenW or 0) / 2
         side = (rightX + w / 2 <= halfW and rightX - w / 2 >= -halfW) and "right" or "left"
-        -- Neither side fits (a window wider than the screen): stay right and let
-        -- SetClampedToScreen deal with the overhang, exactly as _PickSide does.
+        -- Neither side fits (a window wider than the screen): it falls to "left" and
+        -- SetClampedToScreen deals with the overhang, as it does for _PickSide's flip.
     end
     local x = (side == "left") and leftX or rightX
     -- The row sits a THIRD down the popout, not at its middle. Dead-centre made
@@ -1249,8 +1249,7 @@ local function footerButton(po, i)
 end
 
 -- The strip itself, built on FIRST USE and kept. A consumer that never declares
--- actions never reaches this, which is what keeps its popout byte-for-byte the
--- one it had before this existed.
+-- actions never reaches this.
 function Popout:_EnsureFooter()
     if self._footer then return self._footer end
     local f = self.frame
@@ -2319,10 +2318,8 @@ end
 
 -- Draw / show / hide the beam for the current state.
 --
--- ⚠ THE BEAM MEANS "JOINED", NOT "STRAYED". It was the other way round to begin
--- with -- drawn only once a PINNED popout had been dragged away from its source
--- -- and that is what made the docked state read as a floating box: at the one
--- moment the two things genuinely belong together, nothing said so. Now:
+-- ⚠ THE BEAM MEANS "JOINED", NOT "STRAYED": at the one moment the two things
+-- genuinely belong together, something has to say so.
 --
 --   FOLLOWING   the beam is always up, and SHORT: from the connection point's
 --               tip to the nearest point on the source's outline, i.e. straight
@@ -2623,7 +2620,7 @@ end
 --                 instance; either may be nil. The shell anchors them in the
 --                 title bar and re-anchors the title around them
 --   onClose(popout, reason)  reason: "cross"|"family"|"source"|"api"
---   onPin(popout) / onUnpin(popout)
+--   onPin(popout) / onUnpin(popout)   onUnpin is accepted; v1 never unpins
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
 --   tetherSource  region or function -> region; the beam's far end. Temporarily
 --                 REPLACED, and exactly restored, by SetTetherOverride while a

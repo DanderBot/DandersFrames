@@ -266,12 +266,9 @@ function UI:CreateSettingsGroup(parent, width, opts)
     group.padding = padding
     group.margin = margin
 
-    -- 8%, and worth knowing why it is not 16%: it was, for a while, because an
-    -- 8% edge that split across two device rows left 4% on each and neither was
-    -- visible. Doubling it made the surviving half readable at the cost of the
-    -- whole border reading too heavy when it did NOT split. The border no longer
-    -- has to survive being split, because it no longer splits -- so the alpha
-    -- went back to the value that was right in the first place.
+    -- 8%, not 16%: the border no longer splits across two device rows, so it does
+    -- not need the doubled alpha that made a split edge readable at the cost of
+    -- the whole border reading too heavy when it did not split.
     --
     -- opts.chromeless skips the box entirely -- no fill, no border. For a group
     -- that is not a box ON a page but the whole CONTENTS of another surface: a
@@ -616,8 +613,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- substitute a guessed width — a group can legitimately be far wider than its
         -- constructed size (RefreshStates stretches layoutCol "both" groups to the full
         -- content width), so guessing squeezes those children and truncates their text.
-        -- Skip the sizing instead and let the next pass, with a real width, do it. That
-        -- matches the old behaviour, where a negative SetWidth was silently a no-op.
+        -- Skip the sizing instead and let the next pass, with a real width, do it.
         local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
 
         -- ---- the band plate's inset, and the content's inside it ---------
@@ -932,10 +928,9 @@ function UI:CreateSettingsGroup(parent, width, opts)
         end
 
         -- Update group height (add padding at bottom)
-        -- The group's own height, snapped for the same reason its children's
-        -- widths are: this is what puts its TOP border on the grid. Since the
-        -- runtime geometry correction was removed, this IS the only thing that
-        -- does -- there is no after-the-fact pass to fall back on.
+        -- The group's own height, snapped for the same reason its children's widths
+        -- are: this is what puts its TOP border on the grid, and the ONLY thing that
+        -- does -- there is no after-the-fact correction pass to fall back on.
         local totalHeight = SnapLen(self, math.abs(y) + padding)
         if totalHeight < 1 then totalHeight = 1 end
         self:SetHeight(totalHeight)
@@ -1222,8 +1217,7 @@ function UI:CreateInfoBanner(parent, opts)
 
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     -- SetTone overwrites both colours, and opts.tone is applied at the bottom of
-    -- this function -- so these defaults only show on a tone-less banner, which
-    -- previously drew an untinted (white) box because nothing coloured it.
+    -- this function -- so these defaults only show on a tone-less banner.
     CreateElementBackdrop(banner)
     -- Give the banner a defined initial height so child frames have valid positions
     -- from the very first frame (before DoRecomputeHeight has run).
@@ -1295,11 +1289,9 @@ function UI:CreateInfoBanner(parent, opts)
         -- parent's layout having run, and LayoutChildren doesn't SetWidth
         -- on hidden widgets), and the resulting SetHeight + Trigger­Host­
         -- Relayout cascade costs real work proportional to the host
-        -- SettingsGroup's widget count.  For consumers that mount banners
-        -- behind hideOn predicates that default to true (animation perf
-        -- warning at type=NONE) this used to fire one cascade per banner
-        -- at every GUI open — N indicator cards × ~25-widget group ×
-        -- proxy-backed dbTable in the Aura Designer = sustained lockup.
+        -- SettingsGroup's widget count. Without the skip, a banner mounted behind a
+        -- hideOn that defaults to true fires that cascade once per banner at every GUI
+        -- open, which on a page full of cards is a sustained lockup.
         if not banner:IsVisible() then
             deferredWhileHidden = true
             return
