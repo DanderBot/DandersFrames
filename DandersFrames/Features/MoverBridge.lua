@@ -113,13 +113,13 @@ end
 -- ============================================================
 -- PARTY VISIBLE RECT
 -- ============================================================
--- DF.container is created 500x200 (Frames/Init.lua:76) and then RESIZED from four
+-- DF.container is created 500x200 (Frames/Init.lua) and then RESIZED from four
 -- different places (Position.lua, Init.lua, Headers.lua, Core.lua), so its own size is
 -- sometimes right and sometimes a stale creation value. The proxy has to frame what the
 -- user actually sees, so union the shown party frames instead.
 --
 -- ⚠ Iterates the header's child1..child5 attributes rather than DF:GetPartyFrame(i):
--- GetPartyFrame (Headers.lua:4732) matches unit == "partyN" and so NEVER returns the
+-- GetPartyFrame (Headers.lua) matches unit == "partyN" and so NEVER returns the
 -- PLAYER's frame, which would leave the box short by one frame in every party.
 -- When test mode is previewing (which a mover session always is -- see the Unlocked
 -- callback), the live header is empty and the visible frames are the separate
@@ -184,7 +184,7 @@ local function raidRect()
     local s = db.frameScale or 1
 
     -- Test mode previews the raid frames in a separate non-secure container
-    -- (DandersFrames_Options/TestMode/TestFramePool.lua:46). The live container is empty
+    -- (DandersFrames_Options/TestMode/TestFramePool.lua). The live container is empty
     -- then, so measure what the user can actually see. Guarded: that container only
     -- exists once the load-on-demand companion is in.
     local test = DF.testRaidContainer
@@ -197,7 +197,7 @@ local function raidRect()
     if not r:IsShown() then return nil end
 
     -- anchor + ComputeRaidMainGroupAnchorOffset is EXACTLY what the container, the
-    -- mover and the test container already apply (Position.lua:2313-2359), so the
+    -- mover and the test container already apply (UpdateRaidContainerPosition), so the
     -- proxy frames the main group with no change to DF's apply logic. The lib applies
     -- a drag as a DELTA to the record (Session.lua DragDelta), so the constant offset
     -- can never accumulate.
@@ -235,16 +235,16 @@ end
 -- ============================================================
 -- Each element's def gets an openSettings that lands the user on that
 -- element's own options page, in that element's mode:
---  * DF:EnsureOptionsLoaded() pulls in the LoD companion (GUI/LoadOptions.lua:38).
---  * DF:ToggleGUI() (DandersFrames_Options/GUI/Controls.lua:3616) builds and
+--  * DF:EnsureOptionsLoaded() pulls in the LoD companion (GUI/LoadOptions.lua).
+--  * DF:ToggleGUI() (DandersFrames_Options/GUI/Controls.lua) builds and
 --    shows the window when it is not already up.
 --  * GUI.PartyButton / GUI.RaidButton :Click() is how the codebase itself
 --    switches GUI.SelectedMode programmatically (buttons published at
---    DandersFrames_Options/GUI/Panel.lua:689/694; precedent at Panel.lua:315).
+--    DandersFrames_Options/GUI/Panel.lua).
 --    Safe during an open mover session: the departing mode's lock/test
 --    cleanup in those handlers only touches the mode being LEFT, which is
 --    never the one the session claimed.
---  * GUI.SelectTab(pageId) (DandersFrames_Options/GUI/Panel.lua:1710) opens
+--  * GUI.SelectTab(pageId) (DandersFrames_Options/GUI/Panel.lua) opens
 --    the page.
 local function openOptionsPage(mode, pageId)
     local tTotal = perfStart()
@@ -296,7 +296,7 @@ local function registerElements()
         end,
         default   = { point = "CENTER", x = 0, y = -325 },
         -- Hosts DF.partyContainer and DF.partyHeader (SecureFrameTemplate /
-        -- SecureGroupHeaderTemplate, Headers.lua:1075/1118), so moving it in combat is
+        -- SecureGroupHeaderTemplate, Headers.lua), so moving it in combat is
         -- protected -- the lib defers onChanged until PLAYER_REGEN_ENABLED.
         secure    = true,
         -- ⚠ Dead while getRect is present: Registry:GetSize returns getRect's w/h and
@@ -544,9 +544,8 @@ end
 -- ============================================================
 -- One lib session shows both proxies but only ever CLAIMS the scope being edited --
 -- claiming both put the other scope's test frames on screen unasked. Owner claims are
--- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121), and since
--- Phase C retired the legacy unlock paths this bridge is the only writer of the
--- "unlock" owner string.
+-- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua), and with the legacy
+-- unlock paths retired this bridge is the only writer of the "unlock" owner string.
 
 local SCOPE_LOCK_KEY = { party = "locked", raid = "raidLocked" }
 
@@ -588,7 +587,7 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- An open DF options window would sit over the session. Remember which
     -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
     -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same
-    -- plain :Hide() its own close button uses (Panel.lua:155). Locked puts it
+    -- plain :Hide() its own close button uses (Panel.lua). Locked puts it
     -- back on the same page in the same mode, so unlocking from the settings
     -- and locking again returns the user where they were rather than to an
     -- empty screen. The mover panel's Configure button (openOptionsPage above)
@@ -616,7 +615,7 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- about them. Nothing left in the list means nothing to preview.
     if #Bridge:SessionFilter(scope).keys > 0 then
         -- claimScope -> SetTestModeOwner -> ReconcileTestMode -> Show*TestFrames ->
-        -- PinnedFrames:EnterTestMode (TestMode.lua:1962/2427): the pinned test
+        -- PinnedFrames:EnterTestMode (TestMode.lua): the pinned test
         -- containers are on screen after this line.
         local t = perfStart()
         claimScope(scope)
@@ -682,12 +681,11 @@ Mover.RegisterCallback(Bridge, "Locked", function()
             openOptionsPage(mode, page)
         end)
     else
-        -- One frame later, NOT inline (mover-hitch fix, 2026-08-24): the reopen is a
-        -- full options-window show -- ToggleGUI's open half rebuilds the current page,
-        -- a mode switch rebuilds it again in the other mode -- and it used to share
-        -- the lock frame's budget with the whole test-mode teardown above plus the
-        -- proxy fade. Same visual result (the window appears as the fade starts),
-        -- hitch split across two frames instead of stacked on one.
+        -- One frame later, NOT inline: the reopen is a full options-window show --
+        -- ToggleGUI's open half rebuilds the current page, a mode switch rebuilds it
+        -- again in the other mode -- and inline it shared the lock frame's budget with
+        -- the whole test-mode teardown above plus the proxy fade. Same visual result
+        -- (the window appears as the fade starts), hitch split across two frames.
         C_Timer.After(0, function()
             -- The user can unlock again before this fires; a reopen would drop the
             -- window on top of the fresh session (whose Unlocked closed it -- or
@@ -953,7 +951,7 @@ end
 -- ============================================================
 -- INIT
 -- Called from Core.lua's ADDON_LOADED, right after DF:InitializeFrames().
--- Registry:Register queues before the lib's own SV load (Registry.lua:65-72), so the
+-- Registry:Register queues before the lib's own SV load (Registry.lua), so the
 -- order between the two addons' ADDON_LOADED does not matter.
 -- ============================================================
 function Bridge:Init()

@@ -670,10 +670,9 @@ end
 -- retired this cycle. UpdateHighlightStyleColor was removed then; this export was
 -- missed, and kept a comment naming a caller that had just gone away.
 
--- (Removed) UpdateHighlightStyleColor, a per-style colour-only fast path that skipped
--- ApplyHighlightStyle's full tear-down. Its only consumer was the pre-12.1 Aura Designer
--- EXPIRING ticker (~3 Hz), which was deliberately retired this cycle, so the helper and its
--- DF.UpdateHighlightStyleColor export were left with zero callers across both addons.
+-- (Removed) UpdateHighlightStyleColor and its DF export, a colour-only fast path that
+-- skipped ApplyHighlightStyle's full tear-down. Its only consumer, the pre-12.1 Aura
+-- Designer EXPIRING ticker, was retired this cycle, leaving it with zero callers.
 --
 -- ⚠ KEEP THE REASON IT EXISTED. ApplyHighlightStyle is a full rebuild: it hides every edge
 -- texture, hides every dash in the animated border (~80 Hide ops), drops the frame from the
@@ -748,11 +747,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         local frameIndex = nil
         
         -- ★ frame.index is stamped at creation (TestFramePool.CreateTestFrame), so the
-        -- answer is already on the frame. This used to LINEAR-SCAN both test arrays --
-        -- up to 45 identity comparisons per frame per highlight update -- to recover a
-        -- value it was already holding. Party frames are 0-based in the pool and this
+        -- answer is already on the frame. Party frames are 0-based in the pool and this
         -- consumer wants 0-based; raid frames are 1-based, hence the shift.
-        -- (Audit, 2026-08-07.)
         if frame.dfIsTestFrame then
             if frame.isRaidFrame then
                 frameIndex = (frame.index or 1) - 1
@@ -1205,10 +1201,7 @@ end
 -- Events used:
 --   PLAYER_TARGET_CHANGED - Update all frames (old target loses selection, new gains)
 --   UNIT_THREAT_SITUATION_UPDATE - Update specific unit's frame for aggro changes
---   PLAYER_REGEN_ENABLED - Safety refresh when leaving combat (clears any stuck highlights)
---   GROUP_ROSTER_UPDATE - Safety refresh when group composition changes
---
--- Converted 2025-01-20. See PERFORMANCE_OPTIMIZATIONS.md for details.
+--   PLAYER_REGEN_ENABLED / PLAYER_ENTERING_WORLD - Safety refresh (clears stuck highlights)
 -- ============================================================
 
 local highlightEventFrame = CreateFrame("Frame")

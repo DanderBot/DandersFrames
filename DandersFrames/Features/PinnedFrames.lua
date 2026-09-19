@@ -603,12 +603,6 @@ function PinnedFrames:CleanOfflinePlayers(set, roster)
     -- against it. manualPlayers survives (Fix B), which is why this only ever
     -- reproduced for people using the auto-add role filters.
     --
-    -- Field log (2026-08-01 15:37:26, v4.9.0-alpha.1): "Mode changed from party
-    -- to raid — reinitializing" logged "2 players in set, 0 valid" — the 0 valid
-    -- IS the empty roster — and one second later the same set logged "0 players
-    -- in set". The tanks came back 21s later once the roster arrived and the
-    -- auto-add pass re-added them.
-    --
     -- roster carries a short-name ALIAS per cross-realm member on top of one
     -- exact entry each, so its size is between numMembers and 2*numMembers when
     -- healthy; fewer entries than members therefore means "not populated yet"
@@ -1547,7 +1541,6 @@ function PinnedFrames:CreateSetFrames(setIndex)
     end
     label:SetText(labelText)
     label:SetTextColor(0.8, 0.8, 1.0)
-    -- Only show label if set is enabled AND showLabel is true
     label:SetShown(set.enabled and set.showLabel)
     
     self.containers[setIndex] = container
@@ -1629,14 +1622,12 @@ function PinnedFrames:CreateSetFrames(setIndex)
     if set.enabled then
         container:Show()
         header:Show()
-        -- Label visibility based on its setting
         if label then
             label:SetShown(set.showLabel)
         end
     else
         container:Hide()
         header:Hide()
-        -- Hide label when disabled
         if label then
             label:Hide()
         end
@@ -1689,14 +1680,13 @@ function PinnedFrames:UpdateHeaderNameList(setIndex)
     end
     
     -- Clear ALL filtering/grouping attributes - nameList acts as the filter
-    -- (Same approach as flat raid mode in Headers.lua)
+    -- (Same approach as flat raid mode in Features/FlatRaidFrames.lua)
     header:SetAttribute("groupBy", nil)
     header:SetAttribute("groupingOrder", nil)
     header:SetAttribute("groupFilter", nil)  -- MUST clear this for nameList to work!
     header:SetAttribute("roleFilter", nil)
     header:SetAttribute("strictFiltering", nil)
     
-    -- Set nameList and sortMethod
     header:SetAttribute("nameList", nameList)
     header:SetAttribute("sortMethod", "NAMELIST")
     
@@ -2167,7 +2157,6 @@ local function SetChildFrameEvents(header, enabled)
     end
 end
 
--- Toggle enabled state for a set
 -- Refresh all child frames for a set (called after enabling for combat reload support)
 -- Uses FullFrameRefresh which uses Blizzard aura cache ONLY - no fallback
 function PinnedFrames:RefreshChildFrames(setIndex)
@@ -2532,9 +2521,9 @@ function PinnedFrames:UpdateLabel(setIndex)
 end
 
 -- Backwards-compat stubs for the old preview-container system (removed in
--- favour of Test Mode, which does the same job with fake frames). These
--- no-ops keep external callers (Options.lua) working until their calls are
--- cleaned up; safe to remove once all callsites are updated.
+-- favour of Test Mode, which does the same job with fake frames). These no-ops
+-- keep external callers (the Options addon's Frames and Auras pages) working
+-- until their calls are cleaned up; safe to remove once all callsites are updated.
 function PinnedFrames:ShowPreview(_) end
 function PinnedFrames:HidePreview() end
 function PinnedFrames:UpdatePreviewSet(_) end
@@ -2684,11 +2673,6 @@ function PinnedFrames:PruneOrphanedSets()
             --    everything. Header/container hides are combat-protected; in
             --    lockdown the tracking is left intact too, so the pendingPrune
             --    re-run at regen repeats the full teardown.
-            -- ★ THE ORPHAN CASE, AND IT USED TO BE COMPLETELY SILENT. This whole function
-            -- exists for "a pinned frame stuck on screen after leaving a raid", and it
-            -- logged nothing at all -- not when it found an orphan, not when combat stopped
-            -- it from hiding one. So the exact report it was written to answer produced no
-            -- evidence that it had even run, let alone what it did.
             if self.headers[i] or self.containers[i] or self.labels[i] then
                 DF:Debug("PINNED", "prune: set %d has no config in this mode%s - hiding and untracking",
                     i, inCombat and " (in combat: hide deferred, tracking kept)" or "")
@@ -3210,11 +3194,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             return  -- Reinitialize handles everything
         end
         
-        -- ★ EVERY DEFERRAL IN THIS FILE WARNS AND NOTHING LOGGED THE RESUME. Six sites say
-        -- "in combat, deferring"; none of the drains below said anything, so a log ending
-        -- at "deferring" could not tell you whether the work ever happened -- which is the
-        -- difference between "combat delayed it" and "it never came back", and those get
-        -- reported identically. One line per drain closes it.
+        -- Each drain below logs its resume: a log that ends at "deferring" cannot show
+        -- whether the deferred work ever happened. Keep one line per drain.
         -- Process pending initialization after combat
         if PinnedFrames.pendingInitialize then
             PinnedFrames.pendingInitialize = nil
@@ -3533,8 +3514,8 @@ end
 
 -- ============================================================
 -- TEST MODE INTEGRATION
--- Hooks called by TestMode/TestMode.lua when the main Test Mode
--- button is toggled. Populates ENABLED pinned sets with fake data:
+-- Hooks called by DandersFrames_Options/TestMode/TestMode.lua when the main
+-- Test Mode button is toggled. Populates ENABLED pinned sets with fake data:
 --   Boss-mode sets: the real secure boss frames get dfIsTestFrame + fake NPC data
 --   Player-mode sets: non-secure test Buttons are created per set container
 --                      with fake roster data (names/classes/health)
@@ -3561,14 +3542,12 @@ function GetSetDBForMode(setIndex, isRaidMode)
     return hlDB and hlDB.sets and hlDB.sets[setIndex]
 end
 
--- Create a single non-secure player-mode test frame parented to a pinned
--- set's test container. Mirrors the pattern used in TestMode/TestFramePool.lua
--- CreateTestFrame so the frame renders identically to live frames.
 -- Create a single non-secure "mock" test frame for a pinned set, parented to
--- the set's test container. Handles both player-mode and boss-mode sets —
--- when isBossSet is true, the `isPinnedBossFrame` marker causes
--- DF:UpdateTestFrame to route to boss test data (NPC names via
--- GetTestUnitData(i, isRaid, true)).
+-- the set's test container. Mirrors CreateTestFrame in
+-- DandersFrames_Options/TestMode/TestFramePool.lua so it renders identically to
+-- live frames. Handles both player-mode and boss-mode sets — when isBossSet is
+-- true, the `isPinnedBossFrame` marker causes DF:UpdateTestFrame to route to
+-- boss test data (NPC names via GetTestUnitData(i, isRaid, true)).
 local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isBossSet)
     local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
     local frame = CreateFrame(

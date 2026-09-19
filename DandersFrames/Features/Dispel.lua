@@ -4,12 +4,10 @@ local addonName, DF = ...
 -- DISPEL OVERLAY SYSTEM
 -- Shows colored border/glow when unit has dispellable debuff
 -- 
--- APPROACH: Per-element curves with custom colors and alphas.
--- - Each element (border, gradient, icon) has its own curve
--- - Curves use user-customizable colors per dispel type
--- - Alpha is baked into the curve based on element settings
--- - None (0) has alpha=0 = invisible
--- - Dispellable types have element's alpha = visible
+-- APPROACH: ONE shared dispel-colour curve (DF:GetDispelColorCurve, Border.lua)
+-- - Built from the account palette, user-editable per dispel type
+-- - Secret-safe; the name-keyed colour map is only the fallback
+-- - Alpha is not in the curve: it rides the dim hosts and the style passes
 -- ============================================================
 
 -- Local caching of frequently used globals for performance
@@ -327,9 +325,6 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     overlay.gradient:SetMinMaxValues(0, 1)
     overlay.gradient:SetValue(1)
     
-    -- Use Blizzard's gradient texture - this fades from solid to transparent
-    -- "Interface\\BUTTONS\\WHITE8x8" is solid, we need a gradient
-    -- Options: Create custom texture OR use existing WoW gradients
     overlay.gradient:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     overlay.gradient:GetStatusBarTexture():SetBlendMode("ADD")
     -- ☠☠ THIS IS THE OBJECT THAT PAINTED THE FRAME WHITE. Solid WHITE8x8, value at full
@@ -895,11 +890,9 @@ function DF:UpdateDispelGradientHealth(frame)
     -- ★ LEGACY OVERLAY ONLY. Its gradient StatusBar is parented to OUR healthBar, so
     -- feeding it secret health through SetValue is legal and it clips correctly.
     --
-    -- The 12.1 native slot path is deliberately NOT handled here any more: its carrier
-    -- is a plain texture anchored to the real health fill texture, so it tracks health
-    -- with no feed at all (see DispelSlotSecureInit / StyleGameMainSlot). This function
-    -- used to walk the slots to decide whether to run — that scan now proves nothing,
-    -- and this is a per-health-tick path, so it is gone with the loop it guarded.
+    -- The 12.1 native slot path is deliberately NOT handled here: its carrier is a plain
+    -- texture anchored to the real health fill texture, so it tracks health with no feed
+    -- at all (see DispelSlotSecureInit / StyleGameMainSlot).
     -- Zero-alloc; runs every health tick.
     local legacy = frame.dfDispelOverlay
     if legacy and not (legacy.gradient and legacy.gradientTracksHealth and legacy:IsShown()) then
@@ -1117,12 +1110,9 @@ local GRADIENT_TEXTURES = {
     FULL = "Interface\\Buttons\\WHITE8x8",                          -- Solid fill
 }
 
--- (DISPEL NAME TEXT COLORING removed 2026-07-25. The pair of Apply/Revert helpers and
--- the dispelNameText setting are gone: the only caller was ShowOverlayWithRGB, which is
--- the LEGACY test-mode show path -- the 12.1 slot path styles via StyleOneSlot ->
--- StyleGame*Slot and never tinted the name. So the toggle coloured the name in the
--- preview and did nothing on a live frame, which is worse than inert. Re-adding it needs an
--- occlusion-safe name tint on the slot overlay, not this.)
+-- (Dispel name-text colouring is gone. It only ever ran on the LEGACY test-mode show
+-- path (ShowOverlayWithRGB), so it coloured the name in the preview and did nothing on
+-- a live frame. Re-adding it needs an occlusion-safe name tint on the slot overlay.)
 
 -- ============================================================
 -- SHOW OVERLAY WITH RGB (for test mode)
@@ -1132,9 +1122,8 @@ local GRADIENT_TEXTURES = {
 -- last-aura bookkeeping): everything an explicit-RGB overlay needs — layout,
 -- borders, gradients, type icon, pulse anim state. `frame` is only consulted for
 -- ApplyOverlayLayout's cache key and may be nil on a slot host.
--- ⚠ The header here used to claim "reused verbatim by the 12.1 slot path". It is
--- not: the slot path styles through StyleOneSlot -> StyleGame*Slot and never calls
--- this. Grep confirms one caller, ShowOverlayWithRGB, which is test-only.
+-- ⚠ NOT reused by the 12.1 slot path: that styles through StyleOneSlot ->
+-- StyleGame*Slot and never calls this. One caller, ShowOverlayWithRGB, test-only.
 local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMultiplier, frame)
     if not overlay then return end
 
@@ -1686,13 +1675,6 @@ local function EnsureSlotWidget(btn, frame)
         btn.dfDispelWidget = w
         w:Show()
         local base = frame:GetFrameLevel()
-        -- Levels are derived from the REAL healthBar level (frame+3, Create.lua),
-        -- mirroring the legacy widget whose gradient is a healthBar CHILD at
-        -- healthBar+2. The old hardcoded base+2/base+3 assumed healthBar sat at
-        -- frame+1 — that level-tied the gradient with the health bar itself, so
-        -- the (secret-driven) fill rendered OVER the strip on live frames and
-        -- the overlay only showed across the missing-health area (live-caught:
-        -- Top Edge covering the deficit only).
         local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel()) or (base + 3)
         -- ☠ +13/+14, WAS +7/+8. The old numbers were derived from the health-content
         -- band as it stood at CREATION time — "absorb +4, heal-absorb +5, overflow +3,
@@ -1718,7 +1700,7 @@ local function EnsureSlotWidget(btn, frame)
         -- ☠ `base`, not `hbLvl`: the resolver's offsets are measured from the FRAME now,
         -- so passing the health bar's level would land the wash three levels high.
         w.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(base, dispelDB))
-        if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end   -- legacy overlay(+6)+1
+        if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end
         local iconLevel = ((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (base + 25)) + 1                -- legacy contentOverlay+26
         for _, icon in pairs(w.icons) do icon:SetFrameLevel(iconLevel) end
@@ -1908,15 +1890,14 @@ end
 -- (SetAllPoints(btn)) so it inherits the button's forbidden aspects at bind time; the
 -- tainted style pass re-positions it afterwards (validation already passed). Icon
 -- slots bind nothing — their plain type-icon textures ride the slot's SetShown.
--- ★ 68914 re-verified: SECURE context is NO LONGER REQUIRED for the bind's legality —
--- the access-constrained rejection (old Blizzard_CustomAuraButton.lua:15) was replaced
--- by ValidateInboundScriptObject (forbidden/protected/descendant-of-owner only), and a
--- tainted create+bind passes (/al accessbind, live). This init STAYS in the secure
--- initializeFrame anyway because it is the only hook that fires AT SLOT CREATION —
--- Blizzard creates overlay buttons lazily, including MID-COMBAT when a unit's first
--- dispellable debuff lands, and the style pass can't touch live buttons in combat
--- (BUILD-ONCE-LEAVE-IT). Moving create+bind there would delay the overlay's debut to
--- regen — exactly the moment it exists for. Timing, not legality, is the reason.
+-- ★ 68914: SECURE context is NOT required for the bind's legality — the
+-- access-constrained rejection was replaced by ValidateInboundScriptObject
+-- (forbidden/protected/descendant-of-owner only), and a tainted create+bind passes.
+-- This init STAYS in the secure initializeFrame anyway because it is the only hook
+-- that fires AT SLOT CREATION — Blizzard creates overlay buttons lazily, including
+-- MID-COMBAT when a unit's first dispellable debuff lands, and the style pass can't
+-- touch live buttons in combat (BUILD-ONCE-LEAVE-IT). Moving create+bind there would
+-- delay the overlay's debut to regen. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     -- Either bind API is enough (AddDispelTypeTexture is current; SetAuraBorder is the
     -- deprecated alias kept for pre-68914 clients) — see BindDispelCarriers.
@@ -2001,15 +1982,13 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
         -- ★ FULL + Show On Current Health Only: anchor to the health FILL at birth — the
         -- same write-free clip StyleGameMainSlot applies, decided on the same condition
-        -- (the legacy path's :721). Birth is mid-combat (Blizzard creates these buttons
-        -- lazily on the first dispellable debuff) and the style pass is OOC-only, so
-        -- without this the wash spans the whole button for the entire fight it was born
-        -- into — "not reflecting lost hp", field-reported 2026-08-19. The fill texture is
-        -- our OWN healthBar's; its rect already tracks current health, so there is no
-        -- per-tick feed and nothing here reads the aura. The style pass still re-anchors
-        -- on later style edits; this covers the window it cannot reach — same doctrine as
-        -- the alpha seed above (c9047644), which fixed one third of this window's
-        -- cosmetics and stopped.
+        -- (the legacy path's, in ApplyOverlayLayout). Birth is mid-combat (Blizzard creates
+        -- these buttons lazily on the first dispellable debuff) and the style pass is
+        -- OOC-only, so without this the wash spans the whole button for the entire fight it
+        -- was born into. The fill texture is our OWN healthBar's; its rect already tracks
+        -- current health, so there is no per-tick feed and nothing here reads the aura. The
+        -- style pass still re-anchors on later style edits; this covers the window it cannot
+        -- reach.
         local hfBirth = style == "FULL" and db.dispelGradientOnCurrentHealth ~= false
             and frame.healthBar and frame.healthBar.GetStatusBarTexture
             and frame.healthBar:GetStatusBarTexture()
@@ -2237,11 +2216,10 @@ local function StyleGameMainSlot(btn, frame, db)
     end
 end
 
--- GAME-COLOUR mode, per-type icon slot: presence is gated Blizzard-side by the
--- slot's includeDispelTypes filter, so the type is known at declare time and the
--- icon is a plain DF texture — no native bind at all. Positioned from the DF icon
--- settings; sits above the name/health text like the legacy icons. Dual-type units
--- overlap two icons at the same anchor (rare; mirrors the custom-mode trade-off).
+-- GAME-COLOUR mode, type badge: ONE carrier bound with a style that asks Blizzard for
+-- the dispel ART, so it shows the type of the same aura the overlay is showing (see
+-- the badge block in DispelSlotSecureInit). Positioned from the DF icon settings;
+-- sits above the name/health text.
 local function StyleGameBadge(btn, frame, db)
     -- Badge is created + bound in DispelSlotSecureInit (secure); this tainted pass
     -- only sizes, places and alphas it. It must NEVER SetAtlas/SetTexture here --
@@ -2368,17 +2346,14 @@ end
 -- All the styling for ONE slot button. Split out of StyleDispelSlots so the whole
 -- per-button pass can be pcall'd as a unit -- see the caller for why.
 local function StyleOneSlot(btn, frame, db, info)
-    -- IN-PLACE PALETTE RE-BIND (68914): Blizzard securecopy's the colour map at
-    -- bind time, so a Colours-page edit needs the carrier RE-BOUND. That used to
-    -- force a full container rebuild (the palette generation rode the plan
-    -- signature) — a visible teardown/rebuild flicker on every colour tweak.
-    -- AddDispelTypeTexture accepts a re-bind from this tainted pass now (the
-    -- access-constrained rule is gone; /al accessbind + the 68914 validator,
-    -- which only rejects EXPLICITLY forbidden / protected / non-descendant
-    -- objects — our carrier is a descendant that merely INHERITS aspects), so
-    -- re-bind the carrier we already have and skip the rebuild entirely.
-    -- Icon slots bind nothing, so they never go stale. Re-binds the WHOLE
-    -- carrier list for this button in one clear-then-append pass.
+    -- IN-PLACE PALETTE RE-BIND (68914): Blizzard securecopy's the colour map at bind
+    -- time, so a Colours-page edit needs the carrier RE-BOUND. AddDispelTypeTexture
+    -- accepts a re-bind from this tainted pass (the 68914 validator rejects only
+    -- EXPLICITLY forbidden / protected / non-descendant objects — our carrier is a
+    -- descendant that merely INHERITS aspects), so re-bind the carrier we already
+    -- have and skip the container rebuild entirely. Icon slots bind nothing, so they
+    -- never go stale. Re-binds the WHOLE carrier list for this button in one
+    -- clear-then-append pass.
     if btn._dfDispelCarriers and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
         BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
     end
@@ -2596,7 +2571,7 @@ local function StyleDispelSlots(frame, db, h, slots)
 end
 
 -- Render gate (excludes test mode — the test paint previews on the shared art
--- with Blizzard palette colours; see UpdateDispelOverlay's test branch).
+-- with the shared account palette; see UpdateDispelOverlay's test branch).
 function DF:UseFactoryForDispelOverlay(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
@@ -2842,9 +2817,9 @@ function DF:UpdateDispelOverlay(frame)
         return
     end
 
-    -- Decide whether the legacy overlay path should run (only reachable when
-    -- the factory doesn't own — dev toggle off / unsupported client). In test
-    -- mode we honour testShowDispelGlow; otherwise the enable toggle.
+    -- Decide whether the legacy overlay path should run (only reachable when the
+    -- factory doesn't own — test mode / unsupported client). In test mode we honour
+    -- testShowDispelGlow; otherwise the enable toggle.
     local shouldRun
     if inRelevantTestMode then
         shouldRun = db and db.testShowDispelGlow
@@ -2890,12 +2865,9 @@ function DF:UpdateDispelOverlay(frame)
             -- regions are geometry-matched stand-ins for the ring slot / vignette
             -- carrier. GetTestDispelColor resolves that palette and falls back to the
             -- GAME palette per type, which is also what an untouched palette holds.
-            -- ⚠ This used to resolve the palette and then OVERWRITE it with
-            -- AuraUtil.GetAuraBorderColor, so test mode always previewed Blizzard's
-            -- colours while live rendered the user's — a leftover from the era when the
-            -- overlay really did render the game palette and a game-vs-custom split
-            -- existed. That split is gone (the overlay always follows the Colours page),
-            -- so the override made the preview lie about live. Never re-add it.
+            -- ⚠ NEVER overwrite that palette with AuraUtil.GetAuraBorderColor: it made test
+            -- mode preview Blizzard's colours while live rendered the user's. There is no
+            -- game-vs-custom split — the overlay always follows the Colours page.
             local r, g, b = GetTestDispelColor(testData.dispelType, db)
 
             -- Out-of-range multiplier.
@@ -3009,10 +2981,9 @@ end
 -- ============================================================
 
 local eventFrame = CreateFrame("Frame")
--- PERFORMANCE FIX 2025-01-20: UNIT_AURA is now handled by the frame's own event handler
--- in Create.lua, which calls UpdateDispelOverlay directly. This avoids this frame
--- receiving ALL UNIT_AURA events in the game world just to filter them down.
--- eventFrame:RegisterEvent("UNIT_AURA")  -- REMOVED - handled by frame events now
+-- UNIT_AURA is deliberately NOT registered on this frame: the dispel overlay is
+-- driven per frame from the aura / refresh paths instead. Registering it here would
+-- hand this frame every UNIT_AURA in the game world just to filter them down.
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
@@ -3118,18 +3089,11 @@ end
 
 -- Dispel diagnostics. One command, one job: report what OUR overlay sees and
 -- did for a unit.
--- (Removed) the ten Blizzard-setting probes that used to live here --
--- dump/dump2/dump3/dump4, cvar/cvar1/cvar0, indicator, setindicator and
--- profile. They were archaeology from the hunt for where the game stores its
--- dispel indicator setting. DF has not read that setting since the v4.3.4
--- dispel-source rework, and the last two paths that stamped it were deleted in
--- the v5 cleanup (see the notes in Core.lua and Features/Auras.lua), so they
--- answered a question that no longer touches anything DF renders. Nothing
--- outside this handler read raidFramesDispelIndicatorType, the dispellable-
--- debuff CVars, optionTable or GetRaidProfileOption. Two of them (cvar1/cvar0)
--- also WROTE a live game CVar, which a diagnostic has no business doing.
--- (Removed) "test" went with them: it read dispelName off the player's first
--- aura, which DF:DebugDispel prints for every debuff on any unit.
+-- (Removed) The Blizzard dispel-indicator probes that used to live here --
+-- dump/dump2/dump3/dump4, cvar/cvar1/cvar0, indicator, setindicator, profile and
+-- test. DF has not read the game's dispel indicator setting since the dispel-source
+-- rework (see the notes in Core.lua and Features/Auras.lua), and two of them
+-- (cvar1/cvar0) WROTE a live game CVar, which a diagnostic must never do.
 DF:RegisterDebugSlash("DFDISPEL", "Dispel overlay state: [unit], or ids | render", false, "/dfdispel")
 SlashCmdList["DFDISPEL"] = function(msg)
     local arg = msg and msg:match("^%s*(%S+)") or nil

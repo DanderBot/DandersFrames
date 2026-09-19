@@ -1014,22 +1014,14 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
 
     local retY = -yDown
 
-    -- ═══ RETIRED 2026-08-15: the lp.testMode CENTER compensation block (#867). ═══
-    -- It folded the container's CENTER shift into TEST FRAME offsets because the test
-    -- container was "intentionally left uncompensated" while live's container carried
-    -- the shift. That split accounting is what made the unlock overlay unfaithful:
-    -- the mover was sized/positioned from the container, and in test mode the frames
-    -- drifted half a group-row out of the box it drew (Aphoex, 2026-08-15,
-    -- groups-per-row < 8). The compensation now lives in exactly ONE place —
-    -- DF:UpdateRaidContainerPosition applies ComputeRaidContainerCompensation (now
-    -- test-aware) to the live container, the TEST container and the MOVER alike — so
-    -- this calculator returns raw grid offsets in every mode and the preview differs
-    -- from live in data only. ⚠ lp.testMode is now DEBUG-ONLY: the claim that used to sit
-    -- here -- that PositionRaidFrameToGroupSlot still reads it for a playerAnchor=END
-    -- BOTTOMLEFT mirror (#875) -- is false. Grep .testMode in this file: every remaining
-    -- read is the LEAK-TEST print and the two params-swap log lines. The END mirror is
-    -- driven by playerAnchor itself, not by the mode. Keep the field for the leak test;
-    -- do not build anything on it.
+    -- The container CENTER compensation lives in exactly ONE place --
+    -- DF:UpdateRaidContainerPosition applies ComputeRaidContainerCompensation (test-aware)
+    -- to the live container, the TEST container and the MOVER alike -- so this calculator
+    -- returns raw grid offsets in every mode and the preview differs from live in data only.
+    -- ⚠ lp.testMode is DEBUG-ONLY: every remaining read in this file is the LEAK-TEST print
+    -- and the two params-swap log lines. The playerAnchor=END mirror is driven by
+    -- playerAnchor itself, not by the mode. Keep the field for the leak test; do not build
+    -- anything on it.
 
     return x, retY
 end

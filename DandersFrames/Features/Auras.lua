@@ -18,15 +18,9 @@ local InCombatLockdown = InCombatLockdown
 local issecretvalue = issecretvalue
 local C_CurveUtil = C_CurveUtil
 
--- (Removed) the 2025-01-20 aura-entry table pool (tablePool / poolSize) and the
--- cached IsAuraFilteredOutByInstanceID / strfind / tinsert / tremove. All were
--- infrastructure for the old scan-and-cache pipeline; the 12.1 container port made
--- the pool unreachable and left the rest as unused upvalues.
-
--- Forward declarations: these helpers are defined later in the file but used
--- by code above their definitions (the ClassifyAura defensive/dispel filter
--- pass), computing aura classification via the secret-safe
--- IsAuraFilteredOutByInstanceID API.
+-- Forward declaration: this helper is defined later in the file, so the later
+-- `function BuildDirectDefensiveFilters()` assigns to this file-local rather
+-- than creating a global.
 local BuildDirectDefensiveFilters
 
 -- ============================================================
@@ -1063,20 +1057,18 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- machinery above deliberately keeps reading the RAW enabled flags).
     local effBoss = boss and not (claimed and claimed.boss)
     local effRole = role and not (claimed and claimed.role)
-    -- IMPORTANT-FIRST PRECEDENCE. These records used to carry neg(true, true, true),
-    -- i.e. boss/role and priority EXCLUDED anything dispellable, CC or raid-flagged.
-    -- That made the important categories the LOWEST precedence: a priority debuff that
-    -- also carried the RAID token was pushed out of this styled record and into the
-    -- unstyled "raid" one below, so the Important Debuffs highlight silently did nothing
-    -- for it. Most boss/priority debuffs in group content DO carry RAID, so with the
-    -- Blizzard category filters enabled the highlight looked broken for about half the
-    -- auras it should have covered (field-reported; Show All mode was unaffected).
+    -- IMPORTANT-FIRST PRECEDENCE. These records must NOT carry neg(true, true, true):
+    -- excluding dispellable/CC/raid here makes the important categories the LOWEST
+    -- precedence, and most boss/priority debuffs in group content DO carry RAID, so a
+    -- priority debuff would be pushed out of this styled record into the unstyled
+    -- "raid" one below and the Important Debuffs highlight would silently do nothing
+    -- for it.
     --
-    -- Exclusivity now runs the same direction Show All mode has always used (see the
+    -- Exclusivity runs the same direction Show All mode has always used (see the
     -- ALL-mode block near the top of this file): the important records claim their auras
     -- FIRST with no negation, and the token records below subtract them via
     -- candidateFilter flags. Same no-double-render guarantee, correct precedence, and
-    -- important debuffs now genuinely lead the row rather than only sometimes.
+    -- important debuffs genuinely lead the row.
     local importantFlag   -- boss/role flag actually declared; nil if there is no such record
     local priorityDeclared = false
     if effBoss or effRole then
@@ -1360,15 +1352,9 @@ end
 -- EVENT FRAME FOR PROACTIVE UPDATES
 -- ============================================================
 
--- (Removed) ApplyBlizzardFrameSettings — the login/roster stamp of Blizzard's
--- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator. No GUI has
--- written that key since v4.3.4 (the dropdown writes dispelOverlayDispelType,
--- consumed only by DF's own overlay), so the stamp just re-imposed a frozen
--- value on Blizzard's frames every login. The key is stripped in Core.lua's
--- v5 legacy-aura cleanup.
--- DELIBERATE: this frame survives the removal above solely to feed the roster
+-- DELIBERATE: this frame does no render work. It exists solely to feed the roster
 -- diagnostics counter (/dfroster) — it tallies how many GROUP_ROSTER_UPDATE
--- handlers fire per roster change across the addon. No render work happens here.
+-- handlers fire per roster change across the addon.
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
@@ -1571,11 +1557,10 @@ function DF:IsDurationTextColorSmooth()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
     return not (g and g.durationTextColorSmooth == false)
 end
--- (Removed 2026-07-24: DF:GetDurationBorderColorScale / GetDurationBorderScaleKey and the
--- account-wide durationBorderColorScale behind them. The expiry reveal's unit is now a
--- PER-INDICATOR setting — DF.Expiration:Unit(cfg) — so one global could not express it:
--- a glyph revealing at 5 seconds and a border revealing at 30% are both legitimate at the
--- same time. Use DF:GetDurationRampKey(DF.Expiration:Unit(cfg)) to reach its ramp.)
+-- The expiry reveal's unit is PER-INDICATOR — DF.Expiration:Unit(cfg) — never an
+-- account-wide one: a glyph revealing at 5 seconds and a border revealing at 30%
+-- are both legitimate at the same time. Reach its ramp with
+-- DF:GetDurationRampKey(DF.Expiration:Unit(cfg)).
 -- ☠ MEMOISED PER SCALE, AND THE RETURNED LIST IS SHARED — do not mutate it.
 -- Every call rebuilt the whole ladder: one table for the list, one table per
 -- breakpoint, and a colorToHex string per breakpoint — from account-wide config
@@ -1692,9 +1677,9 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- GetDurationColorCurve tombstone below). Instead each band's format string EMBEDS a
     -- |cffRRGGBB escape; the C-side DurationTextBinding evaluates the SECRET remaining
     -- time against the breakpoints and renders the pre-coloured string — no aura read,
-    -- no addon ticker, secret-safe (the DF_AuraLab-proven formatter trick). Bands are
-    -- the legacy curve's colours discretised on ABSOLUTE remaining time:
-    --   <5s red · 5-15s orange · 15-60s yellow · 60s+ green (fresh).
+    -- no addon ticker, secret-safe (the DF_AuraLab-proven formatter trick). Bands come
+    -- from the account-wide colour-by-time breakpoints (GetDurationColorBreakpoints),
+    -- discretised on ABSOLUTE remaining time.
     -- (The legacy path coloured by PERCENT of total duration; a static formatter can't
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
@@ -2069,10 +2054,8 @@ function DF:ResolveDurationColorMode(raw)
     if raw == false or raw == nil then return "OFF" end
     -- A stored MODE STRING means only "on". It is never honoured as a mode: the dials are
     -- account-wide by design, and a per-consumer mode would silently opt that consumer out
-    -- of them. Strings exist because a development build briefly stored the mode here, and
-    -- an Aura Designer indicator that picked up "STEP_SECONDS" that way rendered stepped
-    -- seconds no matter what the Colours page said. Treating them as plain ON self-heals
-    -- those profiles without touching stored data.
+    -- of them. Legacy profiles holding a mode string self-heal as plain ON, with no write
+    -- to stored data.
     if type(raw) == "string" and (raw == "OFF" or not DURATION_COLOR_MODES[raw]) then
         return "OFF"
     end
@@ -2113,12 +2096,10 @@ function DF:GetDurationColorSpec(rawOrMode)
         end
         return {
             curve    = curve,
-            -- ★ Compare the FULL scale key. This briefly read `== "PERCENT"` after the
-            -- scales were renamed TEXT_*/BORDER_*, which silently bound RemainingDuration
-            -- (seconds) for EVERY mode — percent stops evaluated against remaining
-            -- seconds, red-for-life on short auras. Field-diagnosed twice 2026-07-24
-            -- (the first pass misblamed the curve domain; percent IS 0-100, matching
-            -- the stops as stored).
+            -- ★ Compare the FULL scale key. A bare `== "PERCENT"` never matches the renamed
+            -- TEXT_*/BORDER_* scales and silently binds RemainingDuration (seconds) for EVERY
+            -- mode — percent stops evaluated against remaining seconds, red-for-life on short
+            -- auras. Percent IS 0-100, matching the stops as stored.
             property = (def.scale == "TEXT_PERCENT") and Enum.DurationTextBindingProperty.RemainingPercent
                                                       or Enum.DurationTextBindingProperty.RemainingDuration,
         }
@@ -2242,9 +2223,9 @@ end
 
 -- Account-wide duration-text update rate (Wave 5a) -> the native binding's
 -- `updateInterval` (minimum seconds between automatic text refreshes; 0 = every
--- game tick). Creation-frozen: SetDurationText forwards options.updateInterval
--- to the binding once per slot (Blizzard_CustomAuraButton.lua:164), so the value
--- rides every duration spec + struct sig (rows: rowStructSig; AD: durationFmtKey).
+-- game tick). Rides every duration spec: the AD folds it into durationFmtKey, which IS
+-- structural (Rebuild), while rows re-bind it from ApplyStyle — it is deliberately NOT
+-- in rowStructSig.
 -- NORMAL — the default — returns NIL: the spec omits the key and the binding
 -- keeps Blizzard's own default cadence. The C-side default is not documented
 -- anywhere addon-readable, so the default option must not guess a number —
@@ -2413,8 +2394,7 @@ function DF:GetExpiryBorderElementFormatter(threshold, width, height, colorMode,
     return durationFormatterCache[key] or nil
 end
 
--- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one.
--- (Removed 2026-07-09; was the alpha.2 in-combat container freeze.) Blizzard's
+-- ⚠ STACKS FORMATTERS ARE FORBIDDEN on container rows — do not re-add one. Blizzard's
 -- ApplyApplicationCount calls formatter:FormatNumber(applications) in LUA with the
 -- stack count, which is SECRET in combat; formatter userdata cannot hold secrets, so
 -- the call throws inside the container's dirty pass → the dirty-flag latch bricks the
@@ -2424,13 +2404,13 @@ end
 -- other than 2 is therefore not expressible on 12.1 container rows. Duration-text
 -- formatters are NOT affected (C-side DurationTextBinding handles secrets).
 
--- (Removed 2026-07-09: GetDurationColorCurve. The smooth duration-text colour curve is
--- NOT addon-reachable on 68569 — SetDurationText{textColorCurve} drops the required
--- `property` arg, and the button's DurationTextBinding is PRIVATE, so "apply it on the
--- binding" cannot work; poking Blizzard-owned binding state on a live button is also the
--- exact touch class behind the combat dirty-latch freeze. durationColorByTime ships as
--- discrete colour BUCKETS via the duration formatter (|cRRGGBB escapes in AddBreakpoint
--- format strings — C-side, secret-safe, the NSRT-proven path): BuildDurationFormatter above.)
+-- (Removed: GetDurationColorCurve. On 68569 the smooth duration-text colour curve was
+-- NOT addon-reachable — SetDurationText{textColorCurve} dropped the required `property`
+-- arg and the button's DurationTextBinding is PRIVATE — so colour shipped as |cRRGGBB
+-- escapes baked into the duration formatter's bands (C-side, secret-safe:
+-- BuildDurationFormatter above). 68914 restored the curve; see COLOUR-BY-TIME MODES.
+-- Poking Blizzard-owned binding state on a live button remains the touch class behind
+-- the combat dirty-latch freeze.)
 
 -- (Removed 2026-07-13: BuildBuffExcludeMap / the manual aura blacklist. The filter
 -- registry supersedes it — per-spell control lives in Filter Designer presets and
@@ -2654,8 +2634,8 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     local dur
     if g("ShowDuration") ~= false then
         local durFormat = g("DurationFormat") or "NUMBER"
-        -- Colour-by-time: the stored value is a MODE (legacy profiles hold a boolean —
-        -- ResolveDurationColorMode maps true to STEP_SECONDS so they keep today's look).
+        -- Colour-by-time: the stored value is a plain ON/OFF — ResolveDurationColorMode
+        -- composes the MODE from the account-wide dials (a stored mode string counts as ON).
         -- On 68914+ every mode paints through the native colour CURVE; only the pre-68914
         -- fallback bakes |c escapes into the formatter's bands, and the two are mutually
         -- exclusive because escapes beat the curve.
@@ -2678,8 +2658,8 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         dur.formatter, dur.textFormat = DF:GetDurationFormatFields(durFormat, hideAboveT, colorByTime)
         -- Either colour path (curve or legacy buckets) owns the text colour outright, so
         -- the static colour must not stomp it. formatKey carries the mode + its scale's
-        -- stops so a change moves the rebuild signature — BOTH the formatter and the
-        -- curve are creation-frozen on the native bind.
+        -- stops, so a change moves the duration spec identity and re-binds both the
+        -- formatter and the curve from ApplyStyle (it is not in rowStructSig).
         if colorSpec then dur.color = nil end
         dur.colorCurve, dur.colorProperty = (colorSpec and colorSpec.curve), (colorSpec and colorSpec.property)
         dur.formatKey = durFormat .. DF:GetDurationColorSig(colorMode) .. (hideAboveT and (":H" .. tostring(hideAboveT)) or "")
@@ -2687,11 +2667,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- flows to the native binding's zeroDurationText — Blizzard renders NO text
         -- on zero-duration/unconfigured durations. Absent key (pre-migration db)
         -- = ON; explicit false = the pre-Wave-4 spec shape (no zeroText at all).
-        -- Creation-frozen (SetDurationText binds once) -> rides rowStructSig.
+        -- Re-binds from ApplyStyle on a spec-identity change; not in rowStructSig.
         if g("DurationHideOnPermanent") ~= false then dur.zeroText = "" end
         -- Duration-text update rate (Wave 5a, account-wide): nil at the NORMAL
         -- default (key absent -> the binding keeps Blizzard's default cadence,
-        -- byte-identical to the pre-setting spec). Creation-frozen -> rowStructSig.
+        -- byte-identical to the pre-setting spec). Re-binds from ApplyStyle, not rowStructSig.
         dur.updateInterval = DF:GetAuraDurationUpdateInterval()
     end
 
@@ -2948,7 +2928,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 or nil,
             -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
             -- No formatter: forbidden on container rows (secret trap — see the
-            -- GetStacksFormatter tombstone above). Native default = counts > 1.
+            -- stacks-formatter tombstone above). Native default = counts > 1.
             stacks = (function()
                 local st = DF.TextStyle:BuildSpec(db, prefix .. "Stack", {
                     baseSize = 10, defaultAnchor = "BOTTOMRIGHT",
@@ -3067,8 +3047,6 @@ end
 -- so the groups reuse the exact serializers. Struct half = record KEYS + per-record
 -- style (a selection edit that changes the record SET Rebuilds); tuning half = each
 -- record's filter string + candidateFilters (applies in place via ApplyTuning).
--- The combined DF:DebuffFilterRecordsSig above stays as the canonical whole-record
--- serializer (harness equivalence oracle).
 function DF:DebuffFilterRecordsStructSig(records)
     return filterStructSig(records)
 end
@@ -3081,9 +3059,8 @@ end
 -- teardown+recreate for every delta; now:
 --   rowStructSig  — changes need a Rebuild (new container): the record KEY SET
 --     (add-only topology — no RemoveAuraGroup) and per-record style, region-presence
---     toggles (ApplyStyle can't CREATE or REMOVE a region), creation-frozen formatKeys
---     + zeroText (SetDurationText binds both once per slot), tooltips, the native
---     dispel region.
+--     toggles (ApplyStyle can't CREATE or REMOVE a region), tooltips and the native
+--     dispel region. Duration format/zeroText/interval re-bind from ApplyStyle.
 --   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
 --     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
 --     every candidateFilters facet — config-wide include/exclude spell maps,
@@ -3273,7 +3250,7 @@ function DF:DriveBuffFactory(frame, db)
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
         })
-        -- Re-apply the z-order via the engine (buffs default to +40 = legacy parity). Frame Level
+        -- Re-apply the z-order via the engine (buff rows sit at +32, not ApplyZOrder's 40). Frame Level
         -- is deliberately NOT in the sig, so a level-only change never reaches _build.
         h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
@@ -3323,11 +3300,9 @@ end
 -- Filter list = the native direct-debuff filters; dispel colouring binds through
 -- AddDispelTypeTexture (68914's replacement for the deprecated SetAuraBorder alias)
 -- in the Color style, carrying customDispelColorMap — so custom per-type colours ARE
--- expressible and the account-wide Colors-page palette drives this row. (This comment
--- previously said the opposite and named the pickers as frosted; both were true on
--- 68824 and were fixed by the dispel round — the palette ships and the pickers are
--- live.) Debuff rows get NO spell-ID candidate filters: harmful spell-ID maps do
--- nothing on friendly frames (Meorawr gate).
+-- expressible and the account-wide Colors-page palette drives this row. Debuff rows
+-- get NO spell-ID candidate filters: harmful spell-ID maps do nothing on friendly
+-- frames (Meorawr gate).
 -- ============================================================
 
 -- Render gate (excludes test mode, which paints legacy icons directly).
@@ -3537,8 +3512,8 @@ end
 -- BIG_DEFENSIVE / EXTERNAL_DEFENSIVE filters. Reuses the buff bridge's config SHAPE
 -- + rowStructSig/rowTuningSig (the element-agnostic row signatures). Defensive settings have a
 -- different key layout (defensiveIcon* + defensiveBar*), so they get a dedicated
--- mapper rather than the prefix builder. Native-only on 12.1 (requires
--- on) + IsSupported → no effect on live 12.0.x.
+-- mapper rather than the prefix builder. Native-only on 12.1: gated on
+-- AuraContainer.IsSupported() → no effect on live 12.0.x.
 -- Known v1 gaps (native filters can't exclude specific instances until PTR-4):
 -- no AD/buff dedup, no range fade, CENTER growth falls back to RIGHT.
 -- ============================================================
@@ -3690,13 +3665,11 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
         -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.
         --
-        -- ★ 65, NOT the legacy 51 (fixed 2026-07-25 from a /df debug zorder dump). A row is not one
-        -- level thick: the anchor sits at +offset, Blizzard's container at +1, its buttons at
-        -- +2, and DF's own slot art stacks ON the button — border +10, duration text +13,
-        -- stack text +14. So ONE row occupies ~16 levels. At 51 the buff/debuff rows (40)
-        -- reached 60 while the defensive BUTTON sat at 57, so debuff borders and text drew
-        -- OVER the defensive icon wherever the rows overlapped. Any new row baseline must
-        -- clear the one below it by at least ~17.
+        -- ★ 65, NOT the legacy 51. A row is not one level thick: the anchor sits at +offset,
+        -- Blizzard's container at +1, its buttons at +2, and DF's own slot art stacks ON the
+        -- button — border +10, duration text +13, stack text +14. So ONE row occupies ~16
+        -- levels, and at 51 the buff/debuff rows drew OVER the defensive icon wherever they
+        -- overlapped. Any new row baseline must clear the one below it by at least ~17.
         frameLevelOffset = db.defensiveIconFrameLevel or 65,
         layout = {
             size     = db.defensiveIconSize or 24,
@@ -4256,8 +4229,7 @@ end
 -- which only bumps auraLayoutVersion — would otherwise apply "one aura event late"
 -- (the live slider lag). Called from DF:InvalidateAuraLayout right after the bump.
 -- Cheap when nothing changed: each drive is version-gated and its ApplyStyle path
--- uses the container's live layout mutators (no rebuild). Pinned-set frames catch
--- up on their next aura event (they share the same version check).
+-- uses the container's live layout mutators (no rebuild).
 local function driveFactoryRowsNow(frame)
     if not frame or not frame.unit then return end
     local db = DF:GetFrameDB(frame)
@@ -4380,10 +4352,9 @@ function DF:UpdateAuras_Enhanced(frame)
     -- Aura Designer runs when enabled; standard buffs can coexist if showBuffs is on.
     local adEnabled = DF:IsAuraDesignerEnabled(frame)
     if adEnabled then
-        -- Run AD engine (indicators, frame effects, etc.). On 12.1 the native factory
-        -- bridge (DF.AuraDesigner.Factory) owns AD when DF:UseFactoryForAD is true; the
-        -- legacy read-path engine stays byte-for-byte reachable when the gate is false
-        -- (pre-12.1 clients, test mode, or adUseFactory=false).
+        -- Run AD engine (indicators, frame effects, etc.). The native factory bridge
+        -- (DF.AuraDesigner.Factory) owns AD when DF:UseFactoryForAD is true; that gate is
+        -- false only without the aura container or in test mode, where nothing runs here.
         if DF.AuraDesigner and DF.AuraDesigner.Factory and DF:UseFactoryForAD(frame, db) then
             DF.AuraDesigner.Factory:SyncFrame(frame)
         end
@@ -4670,7 +4641,6 @@ function DF:UpdateBlizzardFrameVisibility()
         end)
     end
     
-    -- Function to safely scale container frames
     local function SafeScaleContainer(frame, hide)
         if not frame then return end
         if InCombatLockdown() then return end
@@ -4685,14 +4655,12 @@ function DF:UpdateBlizzardFrameVisibility()
         end)
     end
     
-    -- Function to safely apply just alpha
     local function SafeSetAlpha(frame, alpha)
         if frame and frame.SetAlpha then
             pcall(function() frame:SetAlpha(alpha) end)
         end
     end
     
-    -- Function to hide selection highlights
     local function HideSelectionHighlights(frame)
         if not frame then return end
         pcall(function()
@@ -5033,11 +5001,6 @@ end
 -- it is deliberately NON-DEV: a dump nobody can run on a release build is worth
 -- nothing. It reports what we actually handed the container, not what the GUI
 -- says, because the gap between those two is where aura bugs live.
---
--- It replaces a command that shared only the name: /dfauras used to toggle
--- Blizzard frame visibility and list side-menu frames. Those toggles are fully
--- exposed on the Visibility page, and frame-hunting is better served by
--- /df debug attached and /df debug mousefoci.
 -- ============================================================
 
 -- Every AuraUtil.AuraFilters member DF can consult, and where (if anywhere) it

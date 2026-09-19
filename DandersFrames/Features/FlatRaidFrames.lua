@@ -2,7 +2,6 @@ local addonName, DF = ...
 
 -- ============================================================
 -- FLAT RAID FRAMES - PinnedFrames-style implementation
--- Replaces the legacy raidCombinedHeader system
 -- Uses SecureGroupHeaderTemplate with nameList for explicit control
 -- ============================================================
 
@@ -153,8 +152,7 @@ function FlatRaidFrames:BuildSortedNameList()
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    -- ★ ONE SHARED TABLE (Core/Config.lua). This used to be a local copy; see the
-    -- header there for the three-way disagreement it caused.
+    -- ★ ONE SHARED TABLE (Core/Config.lua), never a local copy.
     local meleeSpecs = DF.MELEE_SPECS
     
     local meleeClasses = DF.MELEE_CLASSES
@@ -1475,10 +1473,8 @@ SlashCmdList["DFFLATRAID"] = function(msg)
         DF:Say("Flat raid tracing is in the debug console", "enable the FLATRAID category", "NEUTRAL")
 
     elseif msg == "info" or msg == "" then
-        -- Both halves of the flat-raid picture in one paste. These used to be
-        -- two commands: /dfflatstate dumped the container and DB settings while
-        -- /dfflatraid info dumped the header attributes. Neither was much use
-        -- without the other.
+        -- Both halves of the flat-raid picture in one paste: the container and DB
+        -- settings plus the header attributes.
         FlatRaidFrames:DebugPrint()
 
     elseif msg == "reinit" then

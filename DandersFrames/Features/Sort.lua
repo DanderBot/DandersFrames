@@ -24,9 +24,8 @@ local function canaccessvalue(v)
     return v ~= nil and not issecretvalue(v)
 end
 
--- NOTE: Previously used reusable tables here, but that caused bugs when
--- SortFrameList was called while iterating over a previous result.
--- Now we return fresh tables each time. The garbage is minimal.
+-- SortFrameList returns a FRESH table each call -- never a reusable one: it can be
+-- called while a previous result is still being iterated. The garbage is minimal.
 
 DF.Sort = {}
 local Sort = DF.Sort

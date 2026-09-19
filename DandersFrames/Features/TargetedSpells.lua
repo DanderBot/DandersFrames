@@ -88,12 +88,6 @@ local addonName, DF = ...
 -- TARGETED SPELLS SYSTEM
 -- Shows incoming enemy casts, so healers get warning of incoming damage.
 --
--- ⚠ THIS BANNER USED TO DESCRIBE THE GROUP DISPLAY, WHICH IS GONE. It advertised
--- per-member frame icons with stacking, a max-icon limit and sort-by-cast-time --
--- all of which belonged to the on-frame group feature deleted 2026-07-29/30 (see
--- the deprecation block below). A reader who skipped that block got the
--- pre-removal description of the file.
---
 -- What actually lives here now, both maintained:
 --   * Personal Targeted -- the player-only icon; compares against "player", which
 --     survived the UnitIsUnit lockdown.
@@ -108,8 +102,6 @@ local pairs, ipairs, wipe = pairs, ipairs, wipe
 local GetTime = GetTime
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
--- (Removed) the UnitGUID upvalue -- unused since dedup moved from GUIDs to unit
--- tokens. Nothing in this file has called it since.
 local UnitCastingInfo = UnitCastingInfo
 local UnitChannelInfo = UnitChannelInfo
 local UnitCastingDuration = UnitCastingDuration
@@ -124,7 +116,7 @@ local C_CVar = C_CVar
 local activeCasters = {}
 
 -- ============================================================
--- API COMPATIBILITY: Group-frame targeted spells (PERMANENTLY DISABLED)
+-- API COMPATIBILITY: Group-frame targeted spells (REMOVED)
 -- ------------------------------------------------------------
 -- Blizzard hotfixed UnitIsUnit on 2026-04-07 so that comparing a
 -- compound token like "nameplateXtarget" against a party/raid
@@ -137,26 +129,20 @@ local activeCasters = {}
 --   * The new PlayerIsSpellTarget API only answers for the player,
 --     not for arbitrary group members.
 --
--- The change is now live on retail. Group-frame Targeted Spells is
--- force-disabled unconditionally at addon load. The personal-display
--- path (compares against "player") still works and is unaffected,
--- since "player" is in the always-allowed list of UnitIsUnit args.
+-- The change is now live on retail. Group-frame Targeted Spells was removed
+-- from this file entirely. The personal-display path (compares against
+-- "player") still works and is unaffected, since "player" is in the
+-- always-allowed list of UnitIsUnit args.
 --
 -- The "Targeted List" feature replaced the per-frame icon use case. It is built and
 -- shipped -- it lives in this same file, in the Targeted List section below.
 -- ============================================================
 
--- (Removed) DF.GroupTargetedSpellsAPIBlocked and
--- DF.GroupTargetedSpellsAPIBlockedParty. Both were write-only: their last reader
--- was the Options page that went with the group display.
---
--- (Removed) ForceDisableGroupTargetedSpellSettings, which wrote
--- DF.db.raid.targetedSpellEnabled = false on every Init so "the GUI reflects the
--- disabled state". There is no GUI left to reflect it and the key has ZERO readers
--- addon-wide, so this was worse than dead: it CREATED a key nothing reads in every
--- raid profile, on every login. Removing a write is not covered by the
--- change-the-baseline rule — that rule preserves user data, and this manufactured
--- data no user set.
+-- (Removed) DF.GroupTargetedSpellsAPIBlocked/Party and
+-- ForceDisableGroupTargetedSpellSettings — all write-only, and their readers
+-- went with the group display's Options page.
+-- ⚠ The change-the-baseline rule preserves USER data; it does not cover a write
+-- that manufactures a key nothing reads, so removing such a write is in scope.
 
 -- Personal display variables (declared early for HandleTargetChange access)
 local personalContainer = nil
@@ -178,11 +164,6 @@ eventFrame:Hide()
 -- ============================================================
 -- HELPER FUNCTIONS
 -- ============================================================
-
--- (Removed) GetGroupUnits — enumerated the player plus every party/raid member so the
--- group display could ask "is this cast aimed at any of them". Its callers were the
--- on-frame group loop and the roster resolver. Personal only ever looks at "player",
--- and the Targeted List walks the party itself, so it has no callers left.
 
 -- Get current content type
 -- Returns: "openworld", "dungeon", "raid", "arena", "battleground"
@@ -297,18 +278,6 @@ local function GetEnemyUnits()
 end
 
 -- ============================================================
--- (Removed) THE GROUP-FRAME TARGETED-SPELL DISPLAY
--- ============================================================
--- The on-frame icons, their pool and layout, and the roster-fingerprint
--- machinery that resolved which party member an enemy was casting at.
--- Blizzard's 2026-04-07 UnitIsUnit hotfix removed the only way to answer that
--- question, and the feature had been force-disabled at load ever since.
---
--- Personal Targeted Spells and the Targeted List are UNAFFECTED and live: both
--- share this file, and the personal path compares against "player", which the
--- hotfix left alone. GetFrameForUnit went too - its only caller was in here.
--- ============================================================
--- ============================================================
 -- CAST EVENT HANDLING
 -- ============================================================
 
@@ -344,9 +313,7 @@ local function ProcessCastInternal(casterUnit, isChannel)
     -- Use GetTime() for start time - we can't do arithmetic on secret values from UnitCastingInfo
     local startTime = GetTime()
     
-    -- A re-entry for a caster already in the table just overwrites it below. The
-    -- group-icon cleanup that used to run here (hide every on-frame icon, bump
-    -- resolveGen, clear casterShownFrame) went with the on-frame feature.
+    -- A re-entry for a caster already in the table just overwrites it below.
     
     -- Track this caster by unit token (not GUID - GUIDs are secret values)
     activeCasters[casterUnit] = {
@@ -355,11 +322,6 @@ local function ProcessCastInternal(casterUnit, isChannel)
         isChannel = isChannel
     }
     
-    -- (Removed) the on-frame path: the group-unit loop, the party/raid content-type
-    -- checks, and the party fingerprint resolution that fed them. The locals they
-    -- needed (groupUnits, db, raidDb) went with it — the personal display resolves
-    -- its own DB below, and the cast-history block needs none of them.
-
     -- Create personal display icon (always, for every cast - use SetAlphaFromBoolean for visibility)
     --
     -- Only casterUnit and the channel flag are clean enough to log here; spellID,
@@ -502,9 +464,8 @@ local function HandleTargetChange(casterUnit)
     
     local db = GetPersonalDB()
 
-    -- Group-frame visibility update removed: see ProcessCastInternal note.
-    -- We only update the personal display now (which uses "player" comparisons,
-    -- still permitted by the new UnitIsUnit rules).
+    -- Only the personal display updates here; its "player" comparison is still
+    -- permitted under the new UnitIsUnit rules.
 
     -- Update personal display visibility using SetAlphaFromBoolean
     if db.personalTargetedSpellEnabled then
@@ -542,14 +503,8 @@ local function HandleCastStop(casterUnit, wasInterrupted)
     -- Remove from active casters (using unit token, not GUID).
     -- ⚠ The REGISTRY ITSELF STAYS. HandleTargetChange gates the PERSONAL display
     -- on activeCasters[casterUnit], and the history interrupt marking just above
-    -- reads its startTime — so this is shared infrastructure, not group state,
-    -- despite what the deletion checklist at the top of this file used to say.
-    -- Only the group's own resolveGen / casterShownFrame bookkeeping went.
+    -- reads its startTime — so this is shared infrastructure, not group state.
     activeCasters[casterUnit] = nil
-
-    -- (Removed) the on-frame teardown: the ProcessFrame closure, the
-    -- IterateAllFrames walk it drove, the interrupted visual, and the local db
-    -- they needed. The personal hide below resolves its own DB.
 
     -- Also hide personal targeted spell icon for this caster
     if GetPersonalDB().personalTargetedSpellEnabled then
@@ -593,7 +548,7 @@ end
 
 local function OnEvent(self, event, unit, ...)
     -- ============================================================
-    -- Personal / group-frame Targeted Spells branch (existing)
+    -- Personal Targeted Spells branch
     -- ============================================================
     if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_EMPOWER_START" then
         ProcessCast(unit, false)
@@ -607,9 +562,7 @@ local function OnEvent(self, event, unit, ...)
            event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "UNIT_SPELLCAST_EMPOWER_STOP" then
         HandleCastStop(unit, false)  -- Normal end
     elseif event == "UNIT_TARGET" then
-        -- Enemy changed target mid-cast. Updates the PERSONAL display; the
-        -- group-frame fingerprint re-resolve that also ran here went with the
-        -- on-frame feature.
+        -- Enemy changed target mid-cast. Updates the PERSONAL display.
         HandleTargetChange(unit)
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         -- New nameplate, check if casting
@@ -627,10 +580,6 @@ local function OnEvent(self, event, unit, ...)
     elseif event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED" then
         ScanAllEnemyCasts()
     end
-    -- (Removed) the GROUP_ROSTER_UPDATE / PLAYER_ROLES_ASSIGNED branch: it existed
-    -- only to rebuild the group-frame roster fingerprints. Both events stay
-    -- registered — the Targeted List branch below and other consumers still want
-    -- the rest of the stream.
 
     -- ============================================================
     -- Targeted List branch
@@ -654,8 +603,7 @@ local function OnEvent(self, event, unit, ...)
         -- A nameplate can appear while its owner is ALREADY casting — walking into
         -- range, turning the camera, a mob streaming into a pull. The *_START events
         -- above already fired (or never will for us), so without this the bar only
-        -- shows on that mob's NEXT cast. The Personal branch above has always done
-        -- this; the list did not. Confirmed missing in game 2026-07-30.
+        -- shows on that mob's NEXT cast.
         if DF._TargetedListPickupInProgressCast then
             DF._TargetedListPickupInProgressCast(unit)
         end
@@ -755,8 +703,8 @@ end
 -- ============================================================
 
 -- Internal: register the cast-tracking events on eventFrame.
--- Used by both the group-frame Enable path and the personal-only path
--- (when group is API-blocked but personal display is on).
+-- Shared infrastructure: the Personal Targeted display and the Targeted List
+-- both run on this frame.
 local function RegisterTargetedSpellEvents()
     eventFrame:RegisterEvent("UNIT_SPELLCAST_START")
     eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
@@ -797,10 +745,9 @@ local function RegisterTargetedSpellEvents()
 end
 
 -- Returns true if any consumer of the shared cast-event stream needs it
--- registered right now. Consumers are now the Personal Targeted Spells display
--- and the Targeted List; the group-frame display was removed, so its API-blocked
--- checks went with it. Checks both party and raid mode profiles because the addon
--- may switch modes based on group composition without us re-running this check.
+-- registered right now: the Personal Targeted Spells display and the Targeted
+-- List. Checks both party and raid mode profiles because the addon may switch
+-- modes based on group composition without us re-running this check.
 local function NeedsCastEvents()
     if not DF.db then return false end
     local function modeNeeds(modeDb)
@@ -816,8 +763,7 @@ local function NeedsCastEvents()
 end
 
 -- Public: re-evaluate whether eventFrame should be registered. Call this
--- whenever any of the gating settings change (group toggle, personal toggle,
--- API block trip).
+-- whenever a gating setting changes (personal toggle, Targeted List toggle).
 -- ⚠ THIS IS ONLY RE-EVALUATED FROM THREE PLACES: DF:InitTargetedSpells (once, from
 -- Frames/Headers.lua) and the two feature toggles. It is NOT re-run on
 -- PLAYER_ENTERING_WORLD or on a profile switch.
@@ -846,27 +792,6 @@ function DF:UpdateTargetedSpellEventRegistration()
         wipe(activeCasters)
     end
 end
-
--- (Removed) DF:EnableTargetedSpells / DisableTargetedSpells / ToggleTargetedSpells
--- and the DF.targetedSpellsEnabled flag they maintained — the flag was written in
--- two places and read in none. These were the group feature's public API; the only
--- external caller was the Indicators > Targeted Spells page, removed with it.
---
--- ⚠ Deleting them does NOT orphan event registration, which was the risk worth
--- checking: DF:UpdateTargetedSpellEventRegistration is still called by the personal
--- toggle, the Targeted List toggle, and DF:InitTargetedSpells.
-
--- (Removed) DF:ScanAllEnemyCasts — a one-line export "for unified roster handler".
--- That handler was the GROUP_ROSTER_UPDATE branch cut from OnEvent, so the wrapper
--- has no callers.
---
--- ⚠ The file-local ScanAllEnemyCasts of the same name is LIVE — OnEvent's
--- PLAYER_TARGET_CHANGED / PLAYER_FOCUS_CHANGED branch calls it. Only the DF: export
--- is gone.
-
--- (Removed) SETUP WIZARD — DF:ShowTargetedSpellSetupWizard. It existed to opt the
--- user in to the group-frame display, which is gone. This was also the ONLY caller
--- of the DF:ShowPopupWizard runtime in Popup.lua, so that runtime is now dead too.
 
 -- ============================================================
 -- PERSONAL TARGETED SPELLS DISPLAY
@@ -1165,8 +1090,7 @@ local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     local durationColor = db.personalTargetedSpellDurationColor or {r = 1, g = 1, b = 1}
     local highlightImportant = db.personalTargetedSpellHighlightImportant ~= false
     -- Important-spell highlight reads the personalTargetedSpellImportant* border keys
-    -- directly via BuildSpec (see the highlight block below); the old
-    -- personalTargetedSpellHighlightStyle/Color/Size/Inset locals are retired here.
+    -- directly via BuildSpec (see the highlight block below).
     local importantOnly = db.personalTargetedSpellImportantOnly
     
     if durationOutline == "NONE" then durationOutline = "" end
@@ -1308,8 +1232,6 @@ local function PositionPersonalIcons()
     local scale = db.personalTargetedSpellScale or 1.0
     local growthDirection = db.personalTargetedSpellGrowth or "RIGHT"
     local spacing = db.personalTargetedSpellSpacing or 4
-    -- (Removed) the maxIcons local: nothing in this function reads it any more now
-    -- that the row is not trimmed by rank. See the note above the layout loop.
 
     -- Apply pixel perfect
     if db.pixelPerfect then
@@ -1710,9 +1632,8 @@ function DF:UpdateTestPersonalTargetedSpells()
     -- Update while test mode is up and personal is enabled
     local db = GetPersonalDB()
     -- Show personal targeted spells in test mode whenever personal is enabled. This
-    -- deliberately does NOT consult a test-panel toggle: the group feature's
-    -- testShowTargetedSpell key is gone, and Personal's own testShowPersonalTargeted
-    -- is checked by DF:UpdateAllTestTargetedSpell before it reaches here.
+    -- deliberately does NOT consult a test-panel toggle: testShowPersonalTargeted is
+    -- checked by DF:UpdateAllTestTargetedSpell before it reaches here.
     local inTestMode = (DF.testMode or DF.raidTestMode) and db.personalTargetedSpellEnabled
     
     if inTestMode then
@@ -1727,8 +1648,8 @@ function DF:TogglePersonalTargetedSpells(enabled)
     else
         DF:HideAllPersonalTargetedSpells()
     end
-    -- Re-evaluate event registration: personal display can keep events alive
-    -- even when the group-frame side is off or API-blocked.
+    -- Re-evaluate event registration: the personal display can keep the shared
+    -- cast events alive on its own.
     DF:UpdateTargetedSpellEventRegistration()
 end
 
@@ -2352,19 +2273,13 @@ end
 --
 -- Party-mode only by design. We will not add raid support.
 --
--- ⚠ ALL OF THIS SHIPPED. The build plan that used to sit here ("commit #3: scaffold
--- ... #6: settings sub-tab") described work finished long ago, and reading it as
--- current made the whole section look like unfinished scaffolding. The cast
--- lifecycle, the render pipeline, the layout and the settings tab are all live below.
---
 -- The user-facing name "Targeted List" is intentionally decoupled
 -- from the internal `targetedList*` db prefix. Renaming the feature
 -- is a locale-only change; no code touches the string.
 -- ============================================================
 
--- File-scope cached APIs (project convention, commit 1a5603d).
--- These are used by the cast lifecycle and render pipeline in later
--- commits; caching them here keeps the hot path zero-lookup.
+-- File-scope cached APIs (project convention). Used by the cast lifecycle and
+-- render pipeline below; caching them here keeps the hot path zero-lookup.
 local TL_UnitSpellTargetName = UnitSpellTargetName
 local TL_UnitSpellTargetClass = UnitSpellTargetClass
 -- ☠ THE GATE FOR THE TWO ABOVE. Both of those are `SecretReturns = true` in
@@ -2385,9 +2300,6 @@ local TL_UnitInParty = UnitInParty
 local TL_UnitCanAttack = UnitCanAttack
 local TL_UnitExists = UnitExists
 local TL_UnitIsDead = UnitIsDead
--- (Removed) TL_UnitName / TL_UnitClass upvalue caches — unused. The list resolves
--- both through TL_UnitNameFromGUID / TL_UnitClassFromGUID, which is what made these
--- two look used to a substring search.
 local TL_IsInGroup = IsInGroup
 local TL_IsInRaid = IsInRaid
 local TL_GetTime = GetTime
@@ -2477,9 +2389,8 @@ end
 -- would get stuck on screen until the next reload.
 -- Returns ok, reason. The reason is a plain literal for the TARGETEDLIST log — every
 -- caller uses `if not TargetedList_IsActive() then`, so the extra return is inert
--- for them. Reasons exist because a missing bar used to be completely silent: the
--- pickup path logged only successes, so there was no way to tell which gate ate a
--- cast. Never put a secret value in one of these strings.
+-- for them. It exists so a missing bar is not silent about which gate ate the cast.
+-- Never put a secret value in one of these strings.
 local function TargetedList_IsActive()
     if not DF.db then return false, "no profile loaded yet" end
     local party = DF.db.party
@@ -2668,12 +2579,10 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
 
     -- Combat filter: suppress ambient casts from idle NPCs standing around.
     --
-    -- ⚠ ONLY applies to casts with no party-member target. This used to run before
-    -- the targeting filter and gate EVERY cast on the caster's combat flag, which
-    -- silently ate the pull-opener: a mob whose opening move is a cast is not
-    -- flagged in combat yet, so the one cast you most want to see was dropped —
-    -- and targetedListHideOutOfCombat DEFAULTS TO TRUE, so it happened out of the
-    -- box. (Measured: 10 such drops in one 19-minute session.)
+    -- ⚠ ONLY applies to casts with no party-member target. Gating EVERY cast on the
+    -- caster's combat flag silently eats the pull-opener: a mob whose opening move is a
+    -- cast is not flagged in combat yet, so the one cast you most want to see is dropped
+    -- — and targetedListHideOutOfCombat DEFAULTS TO TRUE, so it happens out of the box.
     --
     -- Ordering it after the target check makes the two cases separable, because
     -- they genuinely look different:
@@ -3016,9 +2925,6 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
         fadeDuration = (party and party.targetedListFadeOutDuration) or 0.25
     end
 
-    -- (Removed) the per-fade debug line. It answered its question -- 384 samples,
-    -- every one `dead=n` -- and then it was 384 lines of noise per session. The
-    -- sweep's cull line stays: that one fires ~11 times and reports an outcome.
     if fadeDuration and fadeDuration > 0 then
         active.fadingStartedAt = TL_GetTime()
         active.fadingDuration  = fadeDuration
@@ -3305,9 +3211,7 @@ DF._TargetedListReleaseAllBars = TargetedList_ReleaseAllBars
 
 local TL_C_ClassColor = C_ClassColor
 
--- Lazy-created render state. All nil until the feature is first
--- enabled. On stable releases these stay nil forever (gate blocks).
--- (The bar pool itself is declared later, next to its helpers.)
+-- Render state. (The bar pool itself is declared later, next to its helpers.)
 local activeBars = {}  -- ordered list of currently-displayed bars
 
 -- Per-caster bar map: casterToBar[casterUnit] = bar frame.
@@ -3900,8 +3804,7 @@ function TargetedList_ApplyBarContent(bar, activeRec)
     -- (the test ticker reads this to find the matching record).
     bar.casterUnit = casterUnit
     -- And the spellId, so TargetedList_ShowBar can re-assert the secret
-    -- important-only verdict on every later show. The release path already
-    -- cleared this field; nothing had ever assigned it.
+    -- important-only verdict on every later show.
     bar.spellId = spellId
 
     -- Spell name: test records store a clean string; live records
@@ -4393,7 +4296,6 @@ local function TargetedList_Render()
             -- Find the lowest available slot for STATIC mode.
             -- For non-STATIC modes the slot is unused but harmless.
             if not casterToSlot[unit] then
-                -- Find lowest unused slot
                 local slot = 1
                 local usedSlots = {}
                 for _, s in pairs(casterToSlot) do usedSlots[s] = true end
@@ -4560,15 +4462,15 @@ end
 --
 -- Synthetic bars driven from DF.TestData.units (the 5 test party
 -- names) and a fixed list of real spell IDs. Bypasses the live-cast
--- lifecycle entirely — test mode just acquires pooled bars, fills
--- them with clean test data, and lays them out.
+-- lifecycle: test mode spawns fake records into activeTargetedListCasts
+-- and the normal render pipeline acquires and lays out the bars.
 --
 -- Unlike live casts, test spellIds are CLEAN (they're literals in
 -- our code, not coming from UnitCastingInfo), so we can use them
 -- freely for formatting if needed.
 
 local TARGETED_LIST_TEST_SPELLS = {
-    -- {spellId, isChannel, isImportant (always true for demo), uninterruptible}
+    -- {spellId, isChannel, uninterruptible}
     {spellId = 196408, isChannel = false, uninterruptible = false},  -- Focused Assault
     {spellId = 260189, isChannel = true,  uninterruptible = false},  -- Grasping Tendrils
     {spellId = 204242, isChannel = false, uninterruptible = true},   -- Solar Beam
@@ -5029,22 +4931,21 @@ end
 -- ============================================================
 
 function DF:InitTargetedSpells()
-    -- Cast events register for whatever is live (party fingerprint group
-    -- display, personal display, and/or the Targeted List), handled by
-    -- UpdateTargetedSpellEventRegistration below.
+    -- Cast events register for whatever is live (personal display and/or
+    -- the Targeted List), handled by UpdateTargetedSpellEventRegistration
+    -- below.
 
-    -- No nameplateShowOffscreen write here. This used to force the CVar ON at
-    -- every login from a saved key that no surviving control could clear, so a
-    -- user who ticked it once in the old Targeted Spells page had it forced on
-    -- forever with no way off. The CVar is now owned outright by the checkboxes
-    -- on the Targeted List / Personal Targeted pages (DF:GetNameplateOffscreen /
-    -- DF:SetNameplateOffscreen) and the targetedSpellNameplateOffscreen key is
-    -- retired — stale copies in saved profiles are simply never read.
+    -- No nameplateShowOffscreen write here. The CVar is owned outright by the
+    -- checkboxes on the Targeted List / Personal Targeted pages
+    -- (DF:GetNameplateOffscreen / DF:SetNameplateOffscreen), and the retired
+    -- targetedSpellNameplateOffscreen key is never read, so stale copies in
+    -- saved profiles do nothing. Writing the CVar here would force it on at
+    -- every login with no surviving control able to clear it.
 
     -- Initialize personal targeted spells. Note: TogglePersonalTargetedSpells
     -- only manages the container/icons; the events that drive cast tracking
-    -- are registered separately so personal display can run even when the
-    -- group-frame feature is off or API-blocked.
+    -- are registered separately and shared, so personal display can run
+    -- whether or not the Targeted List is on.
     if GetPersonalDB().personalTargetedSpellEnabled then
         DF:TogglePersonalTargetedSpells(true)
     end

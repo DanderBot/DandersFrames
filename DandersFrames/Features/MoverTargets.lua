@@ -115,7 +115,7 @@ end
 
 -- ⚠ The player's frame comes from DF:GetPlayerFrame, never from DF's party-INDEX
 -- getter: that one matches unit == "partyN" and so can never return the player's own
--- frame. Features\MoverBridge.lua:113-118 documents the same trap.
+-- frame. Features\MoverBridge.lua documents the same trap.
 local function partyMeFrame()
     local pool = testParty()
     local f = pool and pool[0]
@@ -475,7 +475,7 @@ function MT:Init()
     registerSemantic()
     -- DF's own external API event: fires one frame after any unit frame has its `unit`
     -- attribute reassigned, which is exactly when a slot's frame stops meaning what it
-    -- did (Core/API.lua:849). CallbackHandler is embedded on DF, which IS the
+    -- did (Core/API.lua). CallbackHandler is embedded on DF, which IS the
     -- DandersFrames global, and Core\API.lua loads after this file -- fine, because Init
     -- runs on ADDON_LOADED, long after every file is in.
     if DF.RegisterCallback then

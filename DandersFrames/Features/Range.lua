@@ -1057,9 +1057,6 @@ C_Timer.After(1, function()
         rangeAnim:SetDuration(interval)
     end
     rangeAnimGroup:Play()
-    -- (Removed) DF.RangeTimer = rangeAnimGroup. Write-only -- the only mention in
-    -- either addon was this assignment, so nothing could stop, restart or inspect the
-    -- timer through it. The group is driven from this file via the local.
 end)
 
 -- Called by Options panel when user changes the range update interval slider

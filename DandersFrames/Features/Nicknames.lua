@@ -883,8 +883,6 @@ end
 
 NK.received = NK.received or {}  -- [normFull | normName] = { nick=, sender= }
 
--- Store a received nickname for a character. `fullName` is "Name-Realm" (the
--- sender reported by the addon message, or an explicit name when simulating).
 -- Incoming-nickname sanitiser. Used for received broadcasts AND plain imports.
 -- Returns a cleaned nickname, or nil to reject. Blizzard's name/profanity
 -- filters are NOT exposed to addons, so we sanitise ourselves. The important
