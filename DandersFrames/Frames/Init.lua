@@ -30,10 +30,9 @@ local reusableGroupCurrentPos = {}
 
 -- ============================================================
 -- RAID RECT SIGNAL
--- Intentionally empty: the legacy raid mover this used to resize is gone, but
--- MoverBridge hooksecurefuncs this name as its "raid rect changed" trigger
--- (relayout, flat-grid resize, test-container sync all still call it). Keep the
--- name and the call sites; the hook is the body now.
+-- Intentionally empty: MoverBridge hooksecurefuncs this name as its "raid rect
+-- changed" trigger (relayout, flat-grid resize, test-container sync all call
+-- it). Keep the name and the call sites; the hook is the body now.
 -- ============================================================
 
 function DF:SyncRaidMoverToContainer()
@@ -64,7 +63,6 @@ function DF:InitializeFrames()
     
     -- ============================================================
     -- HEADER MODE (always enabled)
-    -- Legacy frame creation has been removed
     -- All frames are now managed by SecureGroupHeaderTemplate in Headers.lua
     -- ============================================================
     headerDebug("Header mode - creating container and mover only")
@@ -214,7 +212,6 @@ function DF:UpdateRaidGroupedLayout()
         DF.FlatRaidFrames:SetEnabled(false)
     end
     
-    -- Check if we have raid headers or legacy frames
     local hasHeaders = DF.raidSeparatedHeaders or (DF.FlatRaidFrames and DF.FlatRaidFrames.header)
     local hasLegacy = DF.raidFrames and DF.raidFrames[1]
     
@@ -1091,12 +1088,10 @@ function DF:UpdateAllFrames_Now()
     -- drive re-applies; placed before the early-return branches so every path is
     -- covered. Gated on factory ownership so pre-12.1 / legacy paths pay nothing.
     -- ⚠ Asks "is the container era live at all", NOT "is a specific row active".
-    -- This used to call the two RENDER gates (UseFactoryForBuffs /
-    -- UseFactoryForDefensive), which then grew a perf-test term — so switching
-    -- Auras and Defensive off in the perf panel silently stopped the version
-    -- bump that the dispel overlay, missing-buff strip and Aura Designer also
-    -- ride, and their settings changes started applying one aura event late.
-    -- IsSupported is the question this gate actually means.
+    -- Must NOT use the RENDER gates (UseFactoryForBuffs / UseFactoryForDefensive):
+    -- they carry a perf-test term, so switching Auras or Defensive off in the perf
+    -- panel would stop the bump that the dispel overlay, missing-buff strip and
+    -- Aura Designer also ride. IsSupported is the question this gate means.
     if DF.InvalidateAuraLayout
         and DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
         DF:InvalidateAuraLayout()
@@ -1196,8 +1191,6 @@ function DF:UpdateAllFrames_Now()
     local inGroup = IsInGroup()
     local numPartyMembers = GetNumSubgroupMembers()
     
-    -- Was a DF:Out block printing to CHAT behind DF.debugEnabled. These are
-    -- visibility inputs, so they belong in the console under VISIBILITY.
     DF:Debug("VISIBILITY", "UpdateAllFrames: inGroup=%s party=%d testMode=%s soloMode=%s",
         tostring(inGroup), numPartyMembers or 0, tostring(DF.testMode), tostring(db.soloMode))
     

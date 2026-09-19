@@ -10,13 +10,11 @@ local addonName, DF = ...
 local L = DF.L
 
 -- Local caching of frequently used globals and WoW API for performance.
--- Audit finding #3 (2026-04-06): UpdateHealthFast and UpdatePower are
--- called once per unit per UNIT_HEALTH / UNIT_POWER event, and each
--- call hits 3-5 of these unit API functions. In a 25-player raid at
--- typical combat event rates that's thousands of global hash lookups
--- per second that compile to nothing with these locals in scope.
--- Matching pattern: Frames/Bars.lua:8-19 already uses this pattern
--- for its own unit API calls.
+-- UpdateHealthFast and UpdatePower are called once per unit per UNIT_HEALTH /
+-- UNIT_POWER event, and each call hits 3-5 of these unit API functions. In a
+-- 25-player raid at typical combat event rates that's thousands of global hash
+-- lookups per second that compile to nothing with these locals in scope.
+-- Frames/Bars.lua uses the same pattern for its own unit API calls.
 local pairs, type = pairs, type
 local pcall = pcall
 local InCombatLockdown = InCombatLockdown
@@ -103,8 +101,7 @@ function DF:ApplyFrameLayout(frame)
         DF:SetPixelPerfectSize(frame, frameWidth, frameHeight, db)
     end
     
-    -- NOTE: We no longer skip layout during slider drag
-    -- Throttling is now handled by ThrottledUpdateAll() instead
+    -- Layout is not skipped during slider drag; ThrottledUpdateAll() throttles instead.
     
     -- ========================================
     -- HEALTH BAR
@@ -322,7 +319,6 @@ function DF:ApplyFrameLayout(frame)
         frame.nameText:SetPoint(nameAnchor, frame, nameAnchor, db.nameTextX or 0, db.nameTextY or -2)
         
         -- Defer color AND alpha to the appearance system so OOR fading is respected.
-        -- Previously this hardcoded alpha=1.0 which overrode range fading on roster changes.
         if DF.UpdateNameTextAppearance then
             DF:UpdateNameTextAppearance(frame)
         elseif not db.nameTextUseClassColor then
@@ -533,8 +529,8 @@ function DF:UpdateUnitFrame(frame, source)
 
     local db = DF:GetFrameDB(frame)
 
-    -- TD legacy-text suppression: when ON, hide name/status/health text on
-    -- every branch so Phase C live TD rendering can be tested without overlap.
+    -- Legacy name/status/health text is retired in favour of the Text Designer;
+    -- this gate force-hides it on every branch (see DF:IsLegacyTextHidden).
     local hideLegacyText = DF:IsLegacyTextHidden(frame)
 
     -- ========================================
@@ -625,9 +621,8 @@ function DF:UpdateUnitFrame(frame, source)
     if not isConnected and UnitIsPlayer(unit) then
         -- Show offline state
         if frame.healthBar then
-            -- FIX: Use SetMinMaxValues(0, 100) + SetValue(100) to match UpdateHealthFast.
-            -- Previously used SetValue(1) without setting min/max, which could show as
-            -- 1% health if the bar range was 0-100 from a prior SetHealthBarValue call.
+            -- SetMinMaxValues(0, 100) + SetValue(100), matching UpdateHealthFast: without the
+            -- range, a bar left at 0-100 by a prior SetHealthBarValue renders SetValue(1) as 1%.
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(100)
         end
@@ -853,9 +848,7 @@ function DF:UpdateUnitFrame(frame, source)
 
                 -- Colour via the shared resolver (resourceBarColorMode: Power /
                 -- Class / Custom), so this matches DF:UpdateResourceBar and the
-                -- UNIT_DISPLAYPOWER path. The old inline check read only the legacy
-                -- resourceBarClassColor boolean, which ignored a "Class" pick made
-                -- via the new Color Mode dropdown.
+                -- UNIT_DISPLAYPOWER path.
                 local cr, cg, cb = DF:GetResourceBarColor(unit, db)
                 frame.dfPowerBar:SetStatusBarColor(cr, cg, cb, 1)
                 frame.dfPowerBar:Show()
@@ -949,9 +942,9 @@ function DF:UpdateHealthFast(frame)
 
     local db = DF:GetFrameDB(frame)
 
-    -- TD legacy-text suppression: keep the health bar / absorbs / power
-    -- working, but force the text widgets hidden so Phase C live TD
-    -- rendering can be tested without visual overlap.
+    -- Legacy text is retired in favour of the Text Designer: the health bar /
+    -- absorbs / power keep working, the text widgets are force-hidden
+    -- (see DF:IsLegacyTextHidden).
     local hideLegacyText = DF:IsLegacyTextHidden(frame)
 
     -- ========================================
@@ -1178,11 +1171,6 @@ function DF:UpdateHealthFast(frame)
 end
 
 -- ============================================================
--- LEGACY FRAME CREATION (for backwards compatibility)
--- These now just call the unified CreateUnitFrame
--- ============================================================
-
--- ============================================================
 -- DEDICATED POWER BAR UPDATE
 -- ============================================================
 -- Separate function for power bar updates, can be called independently
@@ -1222,9 +1210,7 @@ function DF:UpdatePower(frame)
 
     -- Update colour via the shared resolver so the UNIT_DISPLAYPOWER / shapeshift
     -- path honours resourceBarColorMode (Power / Class / Custom), not just the
-    -- legacy resourceBarClassColor boolean. Previously a shapeshift fired this
-    -- handler and reverted a "Class" bar back to power colour, because the inline
-    -- legacy check didn't see a "Class" pick made via the new Color Mode dropdown.
+    -- legacy resourceBarClassColor boolean.
     local cr, cg, cb = DF:GetResourceBarColor(unit, db)
     frame.dfPowerBar:SetStatusBarColor(cr, cg, cb, 1)
     frame.dfPowerBar:Show()
@@ -1265,12 +1251,6 @@ function DF:UpdateFrame(frame)
     if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
-
--- (Removed 2026-08-04) DF:UpdateHealth -- 142 lines, ZERO callers anywhere in either
--- addon: only its own definition, a Profiler wrap-array string and two comments that
--- named it as the health driver. The live driver is DF:UpdateHealthFast, dispatched
--- from Frames/Headers.lua. It also owned two of the four (now removed) health-mirror
--- feed calls, which made the mirror look better wired than it was.
 
 -- ============================================================
 -- Apply all visual styles to a frame (called when settings change).

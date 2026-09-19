@@ -10,19 +10,6 @@ local GetTime = GetTime
 local UnitExists = UnitExists
 local issecretvalue = issecretvalue or function() return false end
 
--- (Removed) a "PERFORMANCE FIX: default colors for UpdateDefensiveBar fallbacks /
--- avoids creating tables on every call" banner introducing no table -- there is no
--- default-colour table anywhere in this file. It advertised an optimisation that is
--- not here, which is worse than silence: the next reader trusts it and stops looking.
-
--- (Removed) DF:GetRaidBuffIcons + DF.RaidBuffIconCache — a spellID -> icon-texture
--- set built "for fallback filtering (when spellId is secret)". That fallback was
--- never wired: nothing read the cache except /df debug debugraidbuffs, a dump of the
--- thing itself. 12.1 answered the same question from the other end — the native
--- excludeSpellIDs union carries real spell IDs (missingBuffHideFromBar in
--- Features/Auras.lua) — so matching by texture is superseded, not just unused.
--- DF.RaidBuffs itself is very much live; only the icon projection is gone.
-
 function DF:UpdateMissingBuffIcon(frame, forceUpdate)
     if not frame or not frame.unit then return end
 
@@ -35,10 +22,10 @@ function DF:UpdateMissingBuffIcon(frame, forceUpdate)
     local db = DF:GetFrameDB(frame)
 
     -- 12.1 FACTORY SEAM: the read-free layout-push widget (Auras.lua bridge) owns
-    -- the feature — the UnitHasBuff scan below reads aura data, which is sealed.
-    -- Routing here keeps this function's trigger cadence (aura events + the OOC
-    -- timer) driving the widget's NON-aura guards. Legacy body stays for pre-12.1
-    -- clients and test mode.
+    -- the feature, because reading aura data here is sealed. Routing here keeps this
+    -- function's trigger cadence (aura events + the OOC timer) driving the widget's
+    -- NON-aura guards. When the factory is inactive there is no render left to do --
+    -- only the factory strip to hide.
     if DF.UseFactoryForMissingBuff and DF:UseFactoryForMissingBuff(frame, db) then
         DF:DriveMissingBuffFactory(frame, db)
         return
@@ -49,8 +36,6 @@ function DF:UpdateMissingBuffIcon(frame, forceUpdate)
         frame.dfMissingStripShown = false
     end
 
-    -- 12.1: the layout-push widget above owns the feature. The legacy
-    -- UnitHasBuff scan render is gone (sealed aura reads).
 end
 
 -- Update missing buff icons for all frames (called on a timer, out of combat only)
@@ -102,10 +87,8 @@ end
 -- SHARED DEFENSIVE BAR LAYOUT (live + test mode)
 -- ============================================================
 -- Pure layout math from db alone — no unit reads — so test mode positions
--- through the exact code live uses. Single source: before this, test mode
--- kept its own copy that skipped the pixel-perfect scale fold and the
--- pixel-grid snap (the drift class that caused bug 951).
---
+-- through the exact code live uses. Keep it single-source: a second copy drifts
+-- on the pixel-perfect scale fold and the pixel-grid snap (bug 951).
 function DF:UpdateDefensiveBar(frame)
     if not frame or not frame.unit then return end
 
@@ -144,7 +127,7 @@ function DF:UpdateDefensiveBar(frame)
         return
     end
     -- A container was built but the factory path is now inactive (test mode / toggle off):
-    -- hide it so the legacy render below can't double up.
+    -- hide it so nothing of it is left on screen.
     if frame.defensiveFactory then
         frame.defensiveFactory:SetIntentShown(false)
         frame.dfDefFactoryShown = false

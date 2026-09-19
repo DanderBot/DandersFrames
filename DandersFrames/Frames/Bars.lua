@@ -265,9 +265,7 @@ function DF:LayoutResourceBar(frame, db)
     end
 
     -- Frame level - relative to the main frame. The default 20 puts it ABOVE the frame
-    -- border (+13, see Frames/Create.lua CreateFrameBorder); below 13 renders under it.
-    -- ⚠ This comment used to read "Default 2 ... below the frame border (at +10)" — the
-    -- default has been 20 on the line below, and the border moved to 13 on 2026-08-14.
+    -- border (+14, see Frames/Create.lua CreateFrameBorder); below 14 renders under it.
     local frameLevelOffset = db.resourceBarFrameLevel or 20
     bar:SetFrameLevel(frame:GetFrameLevel() + frameLevelOffset)
     if bar.border then
@@ -370,19 +368,15 @@ end
 -- ABSORB BAR LOGIC
 -- ============================================================
 --
--- UpdateAbsorb performance pattern (2026-04-09):
+-- UpdateAbsorb performance pattern:
 --
--- UpdateAbsorb fires on UNIT_ABSORB_AMOUNT_CHANGED (plus cascading
--- calls from UpdateHealthFast, UpdateUnitFrame, FullFrameRefresh, and
--- several other sites). In raid combat it hits 90-100 calls per game
--- frame during Peak/tk bursts.
---
--- Pre-refactor the function did a full layout rebuild on every call:
--- 20+ frame API calls for anchors/strata/level/orientation, texture/
--- color/blend mode re-apply, overshield glow repositioning (another
--- 12+ API calls), etc. Almost all of this is layout state that only
--- changes when the user adjusts settings or the parent frame resizes.
--- The only things that genuinely change per-event are:
+-- UpdateAbsorb fires on UNIT_ABSORB_AMOUNT_CHANGED (plus cascading calls
+-- from UpdateHealthFast, UpdateUnitFrame, FullFrameRefresh, and several
+-- other sites). In raid combat it hits 90-100 calls per game frame during
+-- bursts, so a full layout rebuild per call is not affordable -- and almost
+-- all of that layout state only changes when the user adjusts settings or
+-- the parent frame resizes. The only things that genuinely change
+-- per-event are:
 --
 --   * maxHealth (UnitHealthMax) — occasionally (level up, stat procs)
 --   * absorbs (UnitGetTotalAbsorbs) — every event (that's why we fire)
@@ -390,15 +384,11 @@ end
 --     this is secret-safe and changes per-event independently of
 --     absorbs (the absorb amount vs current-missing-health ratio)
 --
--- Fix: AbsorbLayoutStateChanged compares ~25 layout settings + parent
--- frame dimensions against values cached on frame.dfAbsorbState. If
--- nothing changed, we take a minimal fast path that only does the
--- value-related work. If anything changed, we run the full rebuild
--- (same code as before this refactor) and cache the new state at the
--- end.
---
--- This is the same pattern as the Dispel overlay refactor (commit
--- cd6746e), applied to UpdateAbsorb.
+-- So AbsorbLayoutStateChanged compares the layout settings + parent frame
+-- dimensions against values cached on frame.dfAbsorbState. If nothing
+-- changed, take the minimal fast path that only does the value-related
+-- work. If anything changed, run the full rebuild and cache the new state
+-- at the end.
 -- ============================================================
 
 local DEFAULT_ABSORB_COLOR = {r = 0, g = 0.835, b = 1, a = 0.7}
@@ -905,13 +895,6 @@ function DF:UpdateAbsorb(frame, testIndex)
         frame.absorbOverflowBar:Hide()
     end
 
-    -- NOTE (2026-04-09): the old code used to hide frame.totalAbsorb,
-    -- frame.overAbsorbGlow, and frame.totalAbsorbOverlay here. Those
-    -- fields are Blizzard CompactUnitFrame elements and DF frames are
-    -- built from SecureUnitButtonTemplate, not CompactUnitFrame — so
-    -- those fields are ALWAYS nil on our frames. The old Hide() calls
-    -- were literally no-ops guarded by always-nil checks. Removed.
-    
     -- Create custom absorb bar if needed
     if not frame.dfAbsorbBar then
         frame.dfAbsorbBar = CreateFrame("StatusBar", nil, frame)
@@ -1098,12 +1081,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
         customBar:SetFrameLevel(absorbLevel)
         
-        -- Re-assert the texture's tiling mode. This block used to force tiling OFF
-        -- unconditionally "to prevent dense repeating in narrow bars" — which is
-        -- still the right default, and ApplyBarTextureTiling keeps it for every
-        -- stretched texture. But it runs AFTER the texture is applied above, so a
-        -- blanket SetHorizTile(false) here silently undid the tiling for textures
-        -- that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture instead.
+        -- Re-assert the texture's tiling mode. This runs AFTER the texture is applied
+        -- above, so never blanket SetHorizTile(false) here — that silently undoes the
+        -- tiling for textures that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture
+        -- instead: ApplyBarTextureTiling keeps tiling off for every stretched texture.
         DF:ApplyBarTextureTiling(customBar, tex)
         
         if customBar.bg then customBar.bg:Hide() end
@@ -1188,10 +1169,8 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- missing-health clamp measures against the NET heal.
             -- ⚠ NOT "and the wash". The wash runs mode 1 (Total) on purpose — the netting
             -- is ASYMMETRIC, and netting both sides guarantees one is always zero (see the
-            -- note on the heal-absorb calculator). This comment claimed all three agreed
-            -- on mode 0, which would have been an argument for the exact symmetry that was
-            -- tried and reverted. The rule is: everything measuring SPACE nets; the wash,
-            -- which reports how much healing will be eaten, does not.
+            -- note on the heal-absorb calculator). The rule is: everything measuring SPACE
+            -- nets; the wash, which reports how much healing will be eaten, does not.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator
@@ -1421,12 +1400,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
         customBar:SetFrameLevel(absorbLevel)
         
-        -- Re-assert the texture's tiling mode. This block used to force tiling OFF
-        -- unconditionally "to prevent dense repeating in narrow bars" — which is
-        -- still the right default, and ApplyBarTextureTiling keeps it for every
-        -- stretched texture. But it runs AFTER the texture is applied above, so a
-        -- blanket SetHorizTile(false) here silently undid the tiling for textures
-        -- that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture instead.
+        -- Re-assert the texture's tiling mode. This runs AFTER the texture is applied
+        -- above, so never blanket SetHorizTile(false) here — that silently undoes the
+        -- tiling for textures that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture
+        -- instead: ApplyBarTextureTiling keeps tiling off for every stretched texture.
         DF:ApplyBarTextureTiling(customBar, tex)
         
         if customBar.bg then customBar.bg:Hide() end
@@ -1512,10 +1489,8 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- missing-health clamp measures against the NET heal.
             -- ⚠ NOT "and the wash". The wash runs mode 1 (Total) on purpose — the netting
             -- is ASYMMETRIC, and netting both sides guarantees one is always zero (see the
-            -- note on the heal-absorb calculator). This comment claimed all three agreed
-            -- on mode 0, which would have been an argument for the exact symmetry that was
-            -- tried and reverted. The rule is: everything measuring SPACE nets; the wash,
-            -- which reports how much healing will be eaten, does not.
+            -- note on the heal-absorb calculator). The rule is: everything measuring SPACE
+            -- nets; the wash, which reports how much healing will be eaten, does not.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator
@@ -2020,11 +1995,9 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         -- ☠ The resolved slot, not healthLevel + 3 -- see DF:ResolveHealAbsorbBarLevel.
         bar:SetFrameLevel(healAbsorbLevel)
         
-        -- Re-assert the texture's own tiling. This used to force it OFF outright
-        -- "to prevent dense repeating in narrow bars", which is still the default
-        -- for every stretched texture — but it runs after the texture is applied,
-        -- so a blanket clear here silently undid tiling for the textures that opt
-        -- into it. Ask the texture instead.
+        -- Re-assert the texture's own tiling. This runs AFTER the texture is applied, so a
+        -- blanket clear here silently undoes tiling for the textures that opt into it --
+        -- ask the texture instead. Off is still the default for every stretched texture.
         DF:ApplyBarTextureTiling(bar, bar.dfAppliedTexture)
         
         if bar.bg then bar.bg:Hide() end
@@ -2412,9 +2385,9 @@ function DF:UpdateHealPrediction(frame, testIndex)
             calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and OVERHEAL_CEILING or 1.0)
             -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
             -- This IS the engine default the bar has ridden all along — pinned
-            -- explicitly so it can never drift, and so the heal-absorb bar (now also
-            -- mode 0) provably agrees with it. The netting is engine-side, where
-            -- arithmetic on secret values is legal.
+            -- explicitly so it can never drift. The netting is engine-side, where
+            -- arithmetic on secret values is legal. The heal-absorb bar is
+            -- deliberately mode 1 (Total): see the netting note in UpdateHealAbsorb.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
             
             -- SPLIT needs the per-source breakdown, so query with the player as
@@ -2544,8 +2517,6 @@ function DF:UpdateHealPrediction(frame, testIndex)
     if mode == "FLOATING" then
         bar:SetParent(frame)
         
-        -- Follows the frame's own strata. (The removed healPredictionStrata key defaulted to
-        -- SANDWICH, which selected exactly this branch; the other one was unreachable.)
         bar:SetFrameStrata(frame:GetFrameStrata())
 
         bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 10))
@@ -2643,11 +2614,10 @@ function DF:UpdateHealPrediction(frame, testIndex)
         
         -- ★ ONE PATH, TEST AND LIVE. Anchoring to the health FILL TEXTURE is what
         -- makes the prediction start exactly where health ends, at any health value
-        -- and in any orientation, without knowing the value at all. The preview used
-        -- to compute the same position from healthBar:GetWidth() minus the border
-        -- inset -- a different basis to the one the fill actually uses -- and the two
-        -- drifted apart by inset * (1 - 2 * health): overlap below half health, a
-        -- visible gap above it. See the note on the test-data block above.
+        -- and in any orientation, without knowing the value at all. Never recompute
+        -- the position from healthBar:GetWidth() minus the border inset: that is a
+        -- different basis to the fill's own, and the two drift apart by
+        -- inset * (1 - 2 * health). See the note on the test-data block above.
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
 
@@ -2704,8 +2674,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
             -- Full-width segment; StatusBar fills the others' proportion. The preview
             -- reaches here with othersHeals already set (applyTestHeals), so it takes
-            -- the same path -- it used to size the segment by hand and inherited the
-            -- primary's drift on top of its own.
+            -- the same path -- do not size the segment by hand.
             AnchorHealPredSegment(seg2, prevTex, healthOrient, barWidth, barHeight)
             seg2:SetMinMaxValues(0, maxHealth)
             DF.SetBarValue(seg2, othersHeals, frame)
@@ -2734,8 +2703,7 @@ end
 -- `testName` is the only preview fork and it is pure DATA: the name a fabricated unit
 -- token cannot answer (DF:GetFrameName reaches UnitName / Nicknames on a real player).
 -- Truncation, the ELLIPSIS/CUT mode and the legacy-text suppression then run identically
--- for both. The preview used to restate the truncation block byte-for-byte, so a change
--- to the format only had to land in one of the two copies to desync them. Same shape as
+-- for both -- never restate them on a preview path. Same shape as
 -- DF:UpdatePetName(frame, testName).
 function DF:UpdateName(frame, testName)
     if not frame or not frame.unit then return end
@@ -2908,10 +2876,9 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
         shouldShow = false
     end
 
-    -- Edge-triggered. This used to be TWO unconditional lines per call, and
-    -- UpdateAllRoleIcons walks every party and raid frame from nine GUI option
-    -- callbacks — so dragging the role-icon scale slider emitted ~80 lines per drag
-    -- frame, none of which said anything had changed. Only a transition is a fact.
+    -- Edge-triggered: only a transition is a fact. UpdateAllRoleIcons walks every
+    -- party and raid frame, and GUI option callbacks drive it, so logging here
+    -- unconditionally floods the console on any slider drag.
     if frame.dfLastRoleShown ~= shouldShow or frame.dfLastRole ~= role then
         DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
             tostring(frame.unit), tostring(role), tostring(shouldShow),
@@ -3313,10 +3280,9 @@ function DF:DebugRestedIndicator()
     o:Field("IsInRaid()", IsInRaid() and "yes" or "no", IsInRaid() and "good" or "neutral")
 end
 
--- Raid buff definitions: {spellID, configKey, name, class}
--- Icons are looked up dynamically using GetSpellTexture
 -- Raid buff definitions: {spellID or {spellID, spellID2, ...}, configKey, name, class}
 -- Some buffs have multiple spell IDs (e.g., cast spell vs applied buff)
+-- Icons are looked up dynamically using GetSpellTexture
 DF.RaidBuffs = {
     {{1459, 432778}, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE"},
     {21562, "missingBuffCheckStamina", "Power Word: Fortitude", "PRIEST"},

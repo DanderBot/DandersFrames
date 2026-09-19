@@ -9,21 +9,11 @@ local addonName, DF = ...
 -- FRAME CONTAINERS
 -- ============================================================
 
--- NOTE: Party/raid frames are now created by SecureGroupHeaderTemplate in Headers.lua
--- These legacy tables are kept empty for backwards compatibility
--- Access frames via DF:IteratePartyFrames() and DF:IterateRaidFrames() instead
--- Legacy frame references for backward compatibility
--- In the old (pre-header) system, these were populated directly:
---   DF.playerFrame = CreatePartyFrame("player")
---   DF.partyFrames[i] = CreatePartyFrame("party"..i)
---   DF.raidFrames[i] = CreateRaidFrame("raid"..i)
--- Now frames are managed by SecureGroupHeaderTemplate, so these use
--- proxy tables that dynamically resolve via the header-based getters.
--- This preserves the API for external addons using AllowAddOnTableAccess.
--- (CreatePartyFrame / CreateRaidFrame themselves were deleted 2026-07-25 — by then
---  they were thin wrappers over DF:CreateUnitFrame with no callers left. The three
---  lines above are kept deliberately, as history: they are what the proxy tables
---  below are standing in for.)
+-- NOTE: Party/raid frames are created by SecureGroupHeaderTemplate in Headers.lua.
+-- Access frames via DF:IteratePartyFrames() and DF:IterateRaidFrames().
+-- The tables below are proxies that resolve dynamically through the header-based
+-- getters, which preserves the legacy API for external addons using
+-- AllowAddOnTableAccess.
 DF.playerFrame = nil  -- Updated by Headers.lua OnAttributeChanged when unit=="player"
 DF.partyFrames = setmetatable({}, {
     __index = function(_, k)
@@ -147,12 +137,10 @@ DF.SetHealthBarValue = SetHealthBarValue
 -- Helper to set missing health bar value safely
 -- Uses UnitHealthMissing API which is safe with secret values
 -- IMPORTANT: We pass values directly to StatusBar APIs without arithmetic
--- ★ SHARED WITH THE PREVIEW. UpdateTestFrame used to restate this whole function
--- (~55 lines: value, texture, all four colour modes) because every read here is a
--- unit API and a test frame carries a REAL token, so live's reads would answer about
--- an actual group member. The preview stamps (dfHealthPct / dfIsDead / dfClassToken)
--- replace exactly those reads and nothing else -- a DATA fork, not a second renderer.
--- (Audit, 2026-08-07.)
+-- ★ SHARED WITH THE PREVIEW. A test frame carries a REAL unit token, so live's reads
+-- would answer about an actual group member. The preview stamps (dfHealthPct /
+-- dfIsDead / dfClassToken) replace exactly those reads and nothing else -- a DATA
+-- fork, not a second renderer.
 local function SetMissingHealthBarValue(bar, unit, frame)
     if not bar then return end
 
@@ -270,20 +258,17 @@ DF.SetMissingHealthBarValue = SetMissingHealthBarValue
 -- ============================================================
 -- HEALTH TEXT
 -- ============================================================
--- ★ THE ONE LEGACY HEALTH-TEXT FORMATTER. There were FOUR: Frames/Update.lua wrote
--- it out twice verbatim, and TestMode wrote two more that disagreed with them and with
--- each other -- different default format, a hardcoded "%%" that ignored Hide % Symbol,
--- a different DEFICIT sign test, and two format aliases (CURRENT_MAX, CURRENT_PERCENT)
--- that only the preview rendered even though old profiles can still hold them.
+-- ★ THE ONE LEGACY HEALTH-TEXT FORMATTER. Keep it that way: the copies it replaced
+-- disagreed on the default format, on Hide % Symbol, on the DEFICIT sign test, and on
+-- the CURRENT_MAX / CURRENT_PERCENT aliases that old profiles can still hold.
 --
 -- ⚠ The whole subsystem is parked, not dead: DF:IsLegacyTextHidden returns a hardcoded
--- true for every non-pet frame, so nothing here reaches the screen today. The per-profile
--- expression it replaced is commented out directly above it. Parked code that exists in
--- four disagreeing copies is exactly what comes back wrong when the switch flips.
+-- true for every non-pet frame, so nothing here reaches the screen today. The
+-- per-profile expression it replaced is commented out inside that function.
 --
 -- The preview supplies numbers through stamps; live reads the unit. Values from the unit
 -- APIs may be SECRET -- pass them straight to SetFormattedText("%%s", ...), never compare
--- or do arithmetic on them. (Audit, 2026-08-07.)
+-- or do arithmetic on them.
 function DF:ApplyHealthText(frame, db, hideLegacyText)
     local fs = frame and frame.healthText
     if not fs then return end
@@ -348,8 +333,7 @@ function DF:ApplyHealthText(frame, db, hideLegacyText)
 
     elseif fmt == "CURRENT_PERCENT" then
         -- Legacy stored value; TextDesigner/Migration.lua still translates it, so a
-        -- profile can hold it. Live used to fall through and leave whatever text was
-        -- there from the previous format.
+        -- profile can hold it.
         local curr = testPct and frame.dfTestCurrentHealth or UnitHealth(unit, true)
         local pct = testPct and (testPct * 100) or DF.GetSafeHealthPercent(unit)
         local pctFmt = db.healthTextHidePercent and " %.0f" or " %.0f%%"
@@ -528,11 +512,10 @@ function DF:GetFrameDB(frame)
     end
 end
 
--- Returns true when the user has flipped the Text Designer
--- "Hide Legacy Text" toggle on for the frame's mode (party/raid).
--- Used by legacy text-widget update paths (nameText / healthText /
--- statusText / pet equivalents) to early-return-with-Hide so Phase C
--- live TD rendering can be tested without visual overlap.
+-- Returns true when legacy text must be hidden for this frame -- today that is
+-- every non-pet frame, regardless of profile (see the gate inside). Legacy
+-- text-widget update paths (nameText / healthText / statusText / pet equivalents)
+-- call this and early-return-with-Hide so Text Designer rendering has no overlap.
 function DF:IsLegacyTextHidden(frame)
     -- LEGACY-TEXT-CLEANUP (v4.4.x): Legacy name/health/status text is retired in
     -- favour of the Text Designer. Every legacy text render path funnels through

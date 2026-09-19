@@ -28,7 +28,7 @@ local function ShortCaller(level)
     -- level=2 -> direct caller of the function that calls ShortCaller.
     local info = debugstack(level or 2, 1, 0)
     if not info then return "?" end
-    -- debugstack format: "...\Frames\Position.lua:1841: in function 'SetPositionRecord'\n"
+    -- debugstack format: "...\Frames\Position.lua:<line>: in function 'SetPositionRecord'\n"
     local file, line = info:match("([^\\/]+):(%d+):")
     if file then return file .. ":" .. line end
     return "?"
@@ -929,8 +929,6 @@ end
 --         scalar in when IT moved rather than the record (see lastNoted below);
 -- route = while the RAID db drives the record, a write is offered to the active auto
 --         layout first (the scalars are layout-overridable).
--- Phase B added "personal" (personalTargetedPosition, raid-layout routed) and
--- "targetedList" (targetedListPosition, party-only) on the Phase A pattern.
 local RECORD_SPECS = {
     party = { key = "position", xKey = "anchorX", yKey = "anchorY", x = 0, y = -325,
               db = function() return DF:GetDB() end },
@@ -1271,14 +1269,10 @@ end
 -- ============================================================
 -- BLIZZARD EDIT MODE — stand down while it is open
 -- ============================================================
--- Entering /edit left DF half-dressed. The game closes DandersFramesGUI and
--- DandersFramesTestPanel for us -- both are in UISpecialFrames -- but the position
--- panel is NOT, so it stayed up, and behind it the grid, the movers and the test
--- preview all kept running: two grids overlapping and fake party frames sitting on
--- top of Blizzard's own editor. Field-reported.
---
--- The actual gap is that DF had no Edit Mode integration at all; the two windows
--- that did close were closing by accident of UISpecialFrames membership.
+-- Edit Mode closes DandersFramesGUI and DandersFramesTestPanel for us -- both are
+-- in UISpecialFrames -- but the position panel is NOT, so it stays up, and behind
+-- it the grid, the movers and the test preview all keep running on top of
+-- Blizzard's own editor.
 --
 -- Locking is the right response and needs nothing new: LockFrames/LockRaidFrames
 -- already hide the position panel, the grid, the movers and the pinned drag chrome,

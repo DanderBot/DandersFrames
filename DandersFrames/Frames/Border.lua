@@ -39,11 +39,10 @@ local Border = DF.Border
 -- Create a border widget anchored to `parent` (or opts.anchorTo).
 -- opts:
 --   anchorTo          frame to cover (default: parent)
---   frameLevelOffset  level above parent (default: 2 — NOT 10, which this line claimed
---                     long after the default changed. Any parent that stacks CHILD
+--   frameLevelOffset  level above parent (default: 2). Any parent that stacks CHILD
 --                     FRAMES over its own rect must pass this explicitly: unit and pet
---                     frames pass 10, aura buttons pass DF.AuraButtonLevels.BORDER.
---                     See the note at the default itself for why.)
+--                     frames pass 14, aura buttons pass DF.AuraButtonLevels.BORDER.
+--                     See the note at the default itself for why.
 --   layer             texture draw layer for the solid edges (default: "BORDER")
 --   solidOnly         hot-path SOLID border: skips the SetGradient/CreateColor
 --                     gradient-clear in both Apply (SOLID) and SetColor, so live
@@ -261,21 +260,14 @@ end
 -- deterministic, so the built keys are cached and reused forever.
 local borderKeyMemo = {}
 
--- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call.
--- 395af09f killed the 37 string concats but left one allocation behind: `k`
--- captured memo and prefix, so a fresh closure was built on every call -- and
--- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
--- of boss).
+-- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call --
+-- BuildSpec runs per bordered element per tick.
 --
 -- THE UPVALUES ARE SHARED, so BuildSpec saves and restores them around its body
--- (see below) and reentrancy is CORRECT rather than merely forbidden. It cannot
--- currently happen -- the body reaches DF:GetClassColor, DF:GetTestUnitData,
--- DF:GetUnitRole and the Border:Resolve* helpers, and none of those calls
--- BuildSpec -- but relying on that was a comment enforcing an invariant nothing
--- checked. A resolver that ever did build a spec would have started reading
--- another prefix's keys: a wrong border, silently, with nothing at the call site
--- to explain it. Stack discipline costs two locals and no allocation, which is
--- cheaper than the assert that would only have caught it on a debug build.
+-- (see below) and reentrancy is CORRECT rather than merely forbidden. Nothing in
+-- the body reenters today, but a resolver that ever built a spec would start
+-- reading another prefix's keys: a wrong border, silently, with nothing at the
+-- call site to explain it.
 local bsMemo, bsPrefix
 local function k(suffix)
     local key = bsMemo[suffix]
@@ -361,12 +353,10 @@ function Border:BuildSpec(dbTable, prefix, ctx)
         blendMode     = dbTable[k("BorderBlendMode")] or "BLEND",
         pixelPerfect  = dbTable.pixelPerfect,
     }
-    -- Gradient is now a STYLE (selected via the Border Style dropdown) rather
-    -- than an independent toggle. The legacy `<prefix>BorderGradientEnabled`
-    -- boolean is migrated to `<prefix>BorderStyle = "GRADIENT"` on db load
-    -- (MigrateFrameBorderKeys / equivalent) but we still honour a stale
-    -- `true` here as a safety net in case the migration hasn't run on some
-    -- code path.
+    -- GRADIENT is a STYLE (the Border Style dropdown). The legacy
+    -- `<prefix>BorderGradientEnabled` boolean is migrated to
+    -- `<prefix>BorderStyle = "GRADIENT"` on db load (MigrateFrameBorderKeys), but a
+    -- stale `true` is still honoured here in case the migration hasn't run.
     if style == "GRADIENT" or dbTable[k("BorderGradientEnabled")] then
         spec.style = "GRADIENT"
         spec.gradient = {
@@ -1008,26 +998,11 @@ end
 -- ============================================================
 
 
--- Lazy-create the shared OnUpdate driver for custom animations.
---
--- Parenting: normal borders parent the driver to `border`, so it inherits the
--- border's shown-state and stops ticking automatically when the border hides.
--- secretRect borders (AD / aura-container slot children) live inside a
--- CustomAuraButton subtree whose intrinsic onUpdateMode="disabled" suppresses
--- OnUpdate through EVERY descendant -- a driver parented under `border` there
--- would install its OnUpdate but never fire (Blink / DF_PULSATE and the DF
--- particle effects all looked frozen). Host those drivers on UIParent so their
--- OnUpdate actually dispatches; the tick closures capture `border` by reference
--- and keep driving the border's own child textures (render-side SetAlpha /
--- SetPoint on OUR textures -- no secret read, no secure op). Visibility still
--- rides the slot's secret show/hide (the textures are slot children); only the
--- MOTION now comes from the external driver.
---
--- Cost of the external host: the driver no longer auto-hides with the border,
--- so its teardown is EXPLICIT. StopAnimation (below) clears the OnUpdate +
--- Hides it, and the aura-container teardown path calls StopAnimation on every
--- slot border so a de-configured / winner-changed / rebuilt AD border leaves no
--- orphaned ticking driver.
+-- Teardown is EXPLICIT: the shared driver is parented to UIParent, not to a
+-- border, so it does not auto-hide when one hides. StopAnimation unregisters the
+-- border (and the driver hides once the registry empties), and the aura-container
+-- teardown path calls StopAnimation on every slot border, so a de-configured /
+-- winner-changed / rebuilt AD border leaves no orphaned ticking entry.
 -- Shared OnUpdate driver: ONE UIParent-hosted frame ticks a registry of every
 -- animated border, instead of a CreateFrame + OnUpdate per border. secretRect
 -- borders (AD / aura-container slot children) MUST be driven externally — the
@@ -1240,8 +1215,7 @@ end
 --
 -- Inset sign: positive = INWARD (smaller rect, animation closer to centre);
 -- negative = OUTWARD (larger rect, animation further from centre).
--- Matches Border Inset semantics. The previous "Extent" parameter was an
--- outward-only inset (Inset = -Extent).
+-- Matches Border Inset semantics.
 -- (forward-declared above with `local ensureAnimRect` so callers earlier in
 -- the file resolve through the local binding.)
 function ensureAnimRect(border, inset, offsetX, offsetY)
@@ -2017,11 +1991,10 @@ local function buildPixelAnims(border, anim)
 end
 
 -- ===== DF_PROC (proc flare — DF-owned ProcGlow stand-in) =====
--- Steps Blizzard's proc-loop flipbook atlas BY HAND on the shared driver: the
--- native FlipBook AnimationGroup won't tick inside a container-button subtree
--- (same reason the particle effects use the external driver), so we advance the
--- 6×5 = 30-frame grid ourselves via SetTexCoord. Renders the golden proc glow
--- taint-safe on aura buttons. Parented to the animRect (never the native button).
+-- Steps Blizzard's proc-loop flipbook atlas BY HAND on the shared driver: advances
+-- the 6×5 = 30-frame grid via SetTexCoord (buildProcAnims is the declarative twin
+-- for container borders). Renders the golden proc glow taint-safe on aura buttons.
+-- Parented to the animRect (never the native button).
 local PROC_ATLAS          = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
 local PROC_START_ATLAS    = "UI-HUD-ActionBar-Proc-Start-Flipbook"
 local PROC_ROWS           = 6
@@ -2195,10 +2168,8 @@ local function procTick(border, anim, dt)
     t:SetAlpha(1)
 end
 
--- DF_PROC, DECLARATIVE. The comment on stepProcFlipbook says the native FlipBook
--- "won't tick inside a container-button subtree" — that was the same wrong reading that
--- retired animation everywhere, and this is its replacement. A FlipBook animation is
--- declarative, so it runs there; only the hand-stepping did not.
+-- DF_PROC, DECLARATIVE. A FlipBook animation is declarative, so it DOES run inside a
+-- container-button subtree; only the per-frame hand-stepping does not.
 --
 -- ★ SetAtlas, NOT SetTexture(info.file). A FlipBook with frame width/height 0 derives
 -- its grid from the region's own texture rect, which is what confines the walk to the
@@ -2260,7 +2231,7 @@ end
 
 -- ===== DF_FLASH (button-glow flash — DF-owned ButtonGlow stand-in) =====
 -- The classic action-button glow METHOD, reimplemented on our shared driver
--- (native Animations don't tick in container-button subtrees): a 0.5s intro where
+-- (buildFlashAnims is the declarative twin for container borders): an intro where
 -- an outer glow collapses (2F→F) while an inner glow expands (F/2→F) under a
 -- bright spark flare, then the inner glow fades out as Blizzard's crawling "ants"
 -- fade in — the outer glow lands at F and STAYS as the steady state, so nothing
@@ -2275,11 +2246,8 @@ local FLASH_ANTS_FW     = 48 / 256    -- one frame's size in UV units
 local FLASH_INTRO_DUR   = 0.8         -- full intro length (the classic glow runs 0.5s on a
                                       -- 45px action button; slower reads right on small aura
                                       -- icons). Glows land at 60%, hand-off fills the rest.
-                                      -- ⚠ Briefly 0.5 during the 2026-08-27 LCG-parity pass,
-                                      -- reverted to the shipped value for a clean A/B
-                                      -- baseline before re-judging. (The side-by-side
-                                      -- harness it was judged against is local-only and
-                                      -- is deliberately not part of the shipped addon.)
+                                      -- ⚠ Kept at the shipped value for a clean A/B baseline; re-judge
+                                      -- side by side against the real thing before retuning.
 local FLASH_FRAME_SCALE = 1.4         -- F: glow frame = icon + 20% each side
 -- Crop rectangles inside the IconAlert sheet (facts of the asset's layout):
 local FLASH_UV_SPARK    = { 0.00781250, 0.61718750, 0.00390625, 0.26953125 }
@@ -2727,9 +2695,9 @@ end
 -- registerAnimTick/unregisterAnimTick if a DF-owned off-button frame ever
 -- needs the shared driver again.)
 
--- Stop every LCG glow we might have started AND tear down any custom
--- animator state. Cheap: each Stop is a no-op when its glow frame isn't
--- present; the driver Hide is a no-op when no driver exists.
+-- Tear down every animator this border might be running: the shared driver tick,
+-- the declarative groups and the overlay / particle pools. Cheap: each teardown is
+-- a no-op when its textures never existed, as is the driver Hide with no driver.
 function Border:StopAnimation(border)
     if not border then return end
     -- ☠ NEVER-ANIMATED BORDERS: leave without touching a single region.
@@ -2785,8 +2753,8 @@ function Border:StopAnimation(border)
     -- full opacity on each re-render -- most visibly in the burst of relayouts
     -- when joining a raid whose members are in another zone -- until the next
     -- range tick re-dimmed them. DF_PULSATE is the only effect that touches the
-    -- wrapper alpha (every other effect uses per-edge alpha / overlays / LCG
-    -- glow), and activeAnimation still holds the prior effect here (it's cleared
+    -- wrapper alpha (every other effect uses per-edge alpha or its own overlay
+    -- textures), and activeAnimation still holds the prior effect here (it's cleared
     -- just below), so gate the reset on it.
     if border.activeAnimation == "DF_PULSATE" and border.SetAlpha then
         -- ⚠ RESTORE THE OOR FADE, NOT FULL OPACITY. This block already exists because a
@@ -2842,9 +2810,9 @@ local function animSpecHash(anim)
     }, "|")
 end
 
--- OnUpdate-driver effects: those whose motion is driven by the shared anim
--- driver's OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
--- StartAnimation verifies the driver is actually live for these before no-opping.
+-- OnUpdate-driver effects: those whose motion is driven by the shared anim driver's
+-- OnUpdate (as opposed to the static shape modes). The dedupe in StartAnimation
+-- verifies the driver is actually live for these before no-opping.
 local DRIVER_ANIMS = { DF_DASH = true, DF_PULSATE = true, BLINK = true, DF_ORBIT = true, DF_PROC = true, DF_FLASH = true, DF_PIXEL = true }
 
 function Border:StartAnimation(border, spec)
@@ -3052,11 +3020,10 @@ function Border:StartAnimation(border, spec)
     -- DF Pulsate: soft alpha fade pulse on the border's 4 edges.  Distinct
     -- from the LCG-driven Pulsate (which surrounds the border with a
     -- particle ring) — DF_PULSATE keeps the border itself visible and just
-    -- fades its opacity smoothly between 0.05 and 1.0.  Inherited from
-    -- AD's legacy expiring border pulse; exposed as a first-class animation
-    -- type so it works as either a continuous Border Animation OR as the
-    -- value the new Expiring Animation dropdown will swap in below
-    -- threshold (Stage 5.1d.2+).  Uses the shared anim driver; on
+    -- fades its opacity smoothly between 0.05 and 1.0.  Exposed as a
+    -- first-class animation type so it works as either a continuous Border
+    -- Animation OR as the value the Expiring Animation dropdown swaps in
+    -- below threshold.  Uses the shared anim driver; on
     -- StopAnimation the existing resetEdgeAlphas() restores the edges
     -- back to alpha 1 so the next render is clean.
     if anim.type == "DF_PULSATE" then
@@ -3216,9 +3183,9 @@ end
 --   color         {r,g,b,a} or {r=,g=,b=,a=}; alpha lives in the colour
 --   inset         signed pixels: positive moves edges INSIDE the parent's
 --                 bounds; negative moves them outside. Default 0 (edges flush
---                 with parent corners as set up in :New). Honoured only in
---                 the SOLID 4-edge mode — backdrop-template mode anchors the
---                 backdrop child via SetPoint(-1,1)/(1,-1) implicitly.
+--                 with parent corners as set up in :New). Honoured in every
+--                 mode — the solid edges, the anchor-only texture pieces and
+--                 the backdrop child all re-anchor with it on each Apply.
 --   offsetX       signed pixels: translates the WHOLE border widget along the
 --                 X axis (positive = right). Independent of `inset`, which
 --                 changes the border's relationship to its own bounds.
@@ -3300,9 +3267,9 @@ function Border:Apply(border, spec)
         if border.bd then border.bd:Hide() end
         hideTexPieces(border)
         border.activeTexture = nil
-        -- Tear down any running glow when the border is hidden, otherwise
-        -- the LCG glow keeps rendering around the unit with no visible
-        -- border underneath it.
+        -- Tear down any running animation when the border is hidden, otherwise
+        -- the effect keeps rendering around the unit with no visible border
+        -- underneath it.
         self:StopAnimation(border)
         -- ☠ AND THE SHADOW. Same reasoning as the glow above, and it was missed:
         -- border.shadow is a lazily-created frame parented to border:GetParent(), not to
@@ -3511,8 +3478,6 @@ function Border:Apply(border, spec)
             local bd = border.bd
             -- Re-anchor with the inset offsets on every Apply so texture borders honour
             -- BorderInset and update live, matching the solid/gradient edges above.
-            -- (Previously SetAllPoints(border) once at creation: inset was ignored and
-            -- never updated.) inset == 0 reproduces the old flush layout exactly.
             bd:ClearAllPoints()
             bd:SetPoint("TOPLEFT", border, "TOPLEFT", inset, -inset)
             bd:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset, inset)

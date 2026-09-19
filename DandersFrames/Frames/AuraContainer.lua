@@ -110,7 +110,6 @@ local warnedCurve, warnedBorder = false, false
 -- Same defect as the warnedRestyle/warnedInitFrame split below; found by audit, not by a
 -- report, because that is the nature of it: the second failure never spoke.
 local warnedDispelBorder, warnedDispelText = false, false
--- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
 -- Slot subtrees the client turned FORBIDDEN under us -- see placeButton and the
@@ -351,8 +350,7 @@ local function setContainerProviderDeaf(c, deaf)
         return
     end
 
-    -- "It did not error" is NOT proof it took — a silent refusal is the case that
-    -- error" is NOT proof it took — a silent refusal is the case that matters.
+    -- "It did not error" is NOT proof it took — a silent refusal is the case that matters.
     local okQ, stillRegistered = pcall(c.IsEventRegistered, c, PROVIDER_EVENT)
     if not okQ then
         AuraContainer._providerDeafOK, why = true, "accepted; IsEventRegistered unavailable (UNVERIFIED)"
@@ -484,13 +482,11 @@ function AuraContainer._queueTestBounce()
         -- never fill, so every badge sits parked in its window — the "missing"
         -- preview. Enabling would fill the groups with sample HELPFUL auras
         -- (spell-ID filters are stripped in test) and push every badge out.
-        -- TEST HANDLES ONLY, matching rebuildAll. "Built DISABLED" above is the
-        -- other half of this pair, and only a container built while _testMode was
-        -- on is disabled (build()'s SetEnabled folds in `not testMode`). Once
-        -- rebuildAll stopped rebuilding live handles they were no longer disabled
-        -- either, so an unscoped loop issued a pointless setEnabled+refresh on
-        -- every live container at test entry — refresh() is a Hide/Show bounce
-        -- that re-arms a full aura parse, so it was not free.
+        -- TEST HANDLES ONLY, matching rebuildAll. Only a container built while _testMode
+        -- was on is disabled (build()'s SetEnabled folds in `not testMode`), so an
+        -- unscoped loop would issue a pointless setEnabled+refresh on every live
+        -- container — refresh() is a Hide/Show bounce that re-arms a full aura parse,
+        -- so it is not free.
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed and h._testFrame and h.backend and h.config
                and h.config.enabled ~= false and h.config.mode ~= "missing" then
@@ -542,14 +538,12 @@ local function reparseContainer(c)
     end
 end
 
--- ⚠ CHUNKED, deliberately (mover-hitch fix, 2026-08-24). The kick used to run the
--- whole walk synchronously inside SetTestMode(false), which itself runs inside the
--- test-mode exit — the mover's lock/Save & Exit path included. Every refresh() is a
--- Hide/Show bounce that re-arms a full engine-side aura parse, and N of those in one
--- frame — stacked on the rest of the exit teardown — was a visible freeze (and the
--- shape of the bug-1090 watchdog trip). Spreading the bounces over frames bounds the
--- per-frame cost; the purge still COMPLETES, just a few frames later, and a live row
--- is at worst briefly stale instead of the whole client hitching.
+-- ⚠ CHUNKED, deliberately. Running the whole walk synchronously inside
+-- SetTestMode(false) — which itself runs inside the test-mode exit, the mover's
+-- lock/Save & Exit path included — stacks N Hide/Show bounces, each re-arming a
+-- full engine-side aura parse, into one frame: a visible freeze. Spreading the
+-- bounces over frames bounds the per-frame cost; the purge still COMPLETES, just
+-- a few frames later, and a live row is at worst briefly stale.
 --
 -- Correctness contract, unchanged from the synchronous version:
 --   * Every live handle and every slot-owner container is still bounced exactly once
@@ -815,7 +809,7 @@ end
 -- The context that plausibly changes a C-side parse. Recorded on EVERY finding so the
 -- log can be read as a correlation rather than a mystery — "assist=0" appearing on every
 -- drift line would name the trigger outright.
--- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix in checkOutOfRangeAttribution).
 local function sentinelCtx(unit)
     local parts = { "exists=" .. (UnitExists(unit) and 1 or 0) }
     local oka, a = pcall(UnitCanAssist, "player", unit)
@@ -827,13 +821,11 @@ local function sentinelCtx(unit)
     return table.concat(parts, " ")
 end
 
--- One polarity's self-contradiction, with the DISCRIMINATOR the first version lacked.
+-- One polarity's self-contradiction, with a DISCRIMINATOR.
 -- ★ Comparing the contradiction's count against the PLAIN polarity's separates two
 -- different faults that look identical in a bare count:
 --   equal   -> the "!" component was DROPPED ("HARMFUL|!HARMFUL" degraded to "HARMFUL")
 --   unequal -> the contradiction resolved to something else entirely
--- The old line asserted the second without ever measuring the first, and 12 matches on a
--- unit carrying 12 debuffs is exactly what a dropped negation looks like.
 local function checkContradiction(unit, polarity)
     local str = polarity .. "|!" .. polarity
     local contra = auraCountOn(unit, str)
@@ -1262,11 +1254,10 @@ function AuraContainer.SetTestMode(on)
             else C_UnitAuras.SwitchAuraDataProvider(true) end
         end)
         AuraContainer._ownsProviderSwitch = false
-        -- ★ The live-side kick is QUEUED before the test rebuild (it used to run
-        -- synchronously here — see the chunking note on _kickLiveParse). The provider
-        -- reset above has already happened, so every bounced row parses real data;
-        -- the bounces themselves land over the next few frames instead of stacking
-        -- on this one, which was the mover lock/Save & Exit hitch.
+        -- ★ The live-side kick is QUEUED before the test rebuild (see the chunking note
+        -- on _kickLiveParse). The provider reset above has already happened, so every
+        -- bounced row parses real data; the bounces land over the next few frames
+        -- instead of stacking on this one — the mover lock/Save & Exit hitch.
         AuraContainer._kickLiveParse()
         rebuildAll()
     end
@@ -1341,7 +1332,7 @@ local function normalizeFilters(filter)
                 -- onInit: a consumer secure-init hook (overlay dispel carriers) run
                 -- INSIDE initializeFrame so its regions are created in secure context
                 -- (SetAuraBorder rejects textures created in the tainted style pass —
-                -- children of the secret aura button are access-constrained, cab.lua:15).
+                -- children of the secret aura button are access-constrained).
                 -- style: per-record button overrides (scale / badge). See applyRecordStyle
                 -- — a group whose membership IS the predicate can be styled unconditionally.
                 out[#out + 1] = { f = canonicalFilter(f.filter), key = f.key, candidateFilters = f.candidateFilters,
@@ -1471,7 +1462,7 @@ local helperGateDark = false
 -- ═══ ROLE EXCLUSION ═══
 -- Never mark someone you would not infuse. The cooldown gate is ONE switch for everyone; this
 -- is PER UNIT, and it works at the same chokepoint because the container config carries
--- `unit` (buildBorderConfig et al, Factory.lua:1028).
+-- `unit` (buildBorderConfig et al in AuraDesigner/Factory.lua).
 --
 -- ⚠ FAILS OPEN, DELIBERATELY. DF:GetUnitRole answers nil or "NONE" when a group has no
 -- assigned roles -- common in hand-made groups, never in queued content. Everyone then reads
@@ -1546,9 +1537,6 @@ end
 -- Shared with the SOUND path (Factory): sound registers per unit and never passes the
 -- container funnel, so exclusion must be answerable from outside it -- or a cue plays
 -- for a unit nothing marks.
--- ⚠ THE NAME KEPT ITS "Role", so the one caller in Factory.lua did not have to change while
--- the ANSWER widened. That is the wrong trade -- a name that describes half of what it does
--- is how the next reader gets it wrong -- so the verb is renamed and the caller with it.
 function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit) end
 
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
@@ -1681,16 +1669,12 @@ local function filterHasPlayerToken(f)
 end
 
 -- The lock itself, taking a filter STRING and its candidate filters. Split out from
--- recordCandidateFilters 2026-08-30 because the audit found the claim above ("the ONE
--- place every record's filter string and candidate filters meet") was TRUE ONLY OF THE
--- GROUP PATH. The SLOT path — SlotOwner's AddAuraSlot and SlotHandle:ApplyTuning — hands
--- its candidateFilters straight to the engine and never passes through here, so every
--- Aura Designer PLACED My Buffs indicator was emitting HELPFUL|PLAYER with no lock at
--- all. The commit that introduced the chokepoint claimed it covered "every AD pool"; it
--- covered AD containers (filter/debuff groups) and missed AD slots.
--- ⚠ ONE IMPLEMENTATION, THREE CALLERS, on purpose — the whole argument for a chokepoint
--- was that per-site locking gives every site a chance to be missed, and per-site locking
--- is exactly what missed the slots.
+-- recordCandidateFilters because that chokepoint covers the GROUP path only: the
+-- SLOT path — SlotOwner's AddAuraSlot and SlotHandle:ApplyTuning — hands its
+-- candidateFilters straight to the engine and never passes through it, so Aura
+-- Designer PLACED indicators would otherwise emit HELPFUL|PLAYER with no lock.
+-- ⚠ ONE IMPLEMENTATION, THREE CALLERS, on purpose — per-site locking gives every
+-- site a chance to be missed, and that is exactly what missed the slots.
 local function applyCasterLock(filterString, cf)
     if not filterHasPlayerToken(filterString) then return cf end
     -- ☠ NEVER OVERRIDE AN EXPLICIT VALUE. The debuff row's "nonplayer" record sets
@@ -1917,9 +1901,8 @@ end
 -- UNIT_AURA — engine staleness, unrelated to the gate) and the visibility/phase
 -- probes (cross-instance data is frozen and "Only Mine" attribution is unfixed —
 -- this hotfix touched neither).
--- ⚠ DECLARED HERE, with the other gate predicates, because its FIRST caller is the
--- build-time cinematic-latch seed (~:3400) — far above the verdict twins. Declared
--- beside them it would compile as a nil GLOBAL at that seed: the exact
+-- ⚠ DECLARED HERE, with the other gate predicates, far above its callers. Declared
+-- lower down it would compile as a nil GLOBAL at its first caller: the exact
 -- "declared below its first caller" trap GateAppliesTo documents.
 local function UnitExemptFromHelpfulGate(unit)
     if not UnitIsPlayerControlledOrGroupMember then return false end
@@ -2090,9 +2073,6 @@ end
 --   bindNative(slot, config) — registers each region with its Blizzard inbound setter
 --     (SetIcon/SetDurationCooldown/SetDurationText/…). NATIVE slots only; a plain slot
 --     lacks these methods so each bind is skipped. Bind-once per region.
---   styleButton(slot, config) — the Custom-path wrapper: regions then native bind,
---     preserving the original behaviour. _build and ApplyStyle call this; increment 2
---     will call the two halves separately per backend.
 --
 -- RE-RUNNABLE: regions are created-once + updated in place (ApplyStyle re-runs it on a
 -- slider drag without teardown). NEVER Show()/Hide() a region handed to a native setter
@@ -2515,9 +2495,7 @@ local function styleButton_regions(slot, config)
         -- that sweeps round with it, bling the flash when it completes. They must follow
         -- the swipe by default, or "Hide Cooldown Swipe" removes the dark fill and leaves
         -- a yellow line still sweeping the icon — which is exactly how this was reported.
-        -- Edge used to default to ON regardless (`cdSpec.edge ~= false` with no producer
-        -- ever emitting `edge`), and bling was never set at all, so it sat at whatever
-        -- CooldownFrameTemplate ships with. An explicit cdSpec.edge / cdSpec.bling still wins.
+        -- An explicit cdSpec.edge / cdSpec.bling still wins.
         --
         -- ⚠ Written as if/else on purpose. The `x == nil and a or b` idiom is WRONG here:
         -- when the key is nil and the fallback is false it yields b, silently re-enabling
@@ -3153,12 +3131,11 @@ local function bindNative(slot, config)
     -- The stamp lands AFTER the pcall, not before: a bind-once flag set up front latches
     -- a FAILED bind permanently, and the warn latch is one-shot per session, so the
     -- second failure would be silent too. (Same fix the duration-text and dispel binds
-    -- already carry.) ★ The latch is now warnedPandemicRegion, one of three -- this
-    -- comment said `warnedPandemic`, a single flag shared with the border and cover
-    -- sites, which meant the "second failure is silent" it warns about was ALSO true
-    -- across the three of them. Split; the reasoning here was right and under-applied. A client older than PTR 8 has no AddPandemicRegion, so the gate
-    -- simply never matches and the feature is absent rather than erroring — the region
-    -- is never created either, since the factory/rows only emit a spec when it exists.
+    -- already carry.) This site's latch is warnedPandemicRegion — see the three-latch
+    -- rule at the declaration.
+    -- A client older than PTR 8 has no AddPandemicRegion, so the gate simply never
+    -- matches and the feature is absent rather than erroring — the region is never
+    -- created either, since the factory/rows only emit a spec when it exists.
     if slot.dfPandemicHolder and slot.AddPandemicRegion and not slot._boundPandemic then
         local ok, err = pcall(slot.AddPandemicRegion, slot, slot.dfPandemicHolder)
         if ok then
@@ -3356,8 +3333,7 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 --   * CENTER growth IS expressible and IS implemented — see the `if out.center` branch
 --     in resolveGrowthLayout below, which computes flowAnchor/pinPoint/pinX/pinY for
 --     both the vertical and horizontal centred stacks, and the paragraph above it that
---     explains the box-pin approach. (This line used to say CENTER "falls back to
---     Right": written before that branch existed, and left behind when it landed.)
+--     explains the box-pin approach.
 --   * Scale: applied to the container itself — buttons, fonts, borders and spacing all
 --     render at row scale (the legacy defensive stride model; buff rows historically
 --     didn't scale the spacing term — the flow can't express that split, and scaling
@@ -3956,9 +3932,7 @@ function NativeBackend:build()
     if InCombatLockdown() then handle:_deferRebuild(); return end
 
     -- OUR OWN plain per-consumer container, parented to the handle's anchor frame. Insecure
-    -- creation is fine — taint.log proved the old combat freeze was unrelated secret-value
-    -- compares (Config.lua SafeSetFont / Auras.lua legacy scan), both fixed — and this exact
-    -- plain-create pattern is confirmed to run live in combat.
+    -- creation is fine — this exact plain-create pattern is confirmed to run live in combat.
     local ok, c = pcall(CreateFrame, "AuraContainer", nil, handle.frame, "CustomAuraContainerTemplate")
     if not ok or not c then
         if not warnedCreate then
@@ -4008,13 +3982,12 @@ function NativeBackend:build()
     if isOverlay then
         c:SetAllPoints(handle.frame)          -- overlay covers the host region
     elseif isMissing then
-        -- LAYOUT-PUSH INVERSION (probe 32, live-confirmed 2026-07-10): pin the container
-        -- just outside the clip window's LEFT edge. The container self-sizes to content
-        -- (secret SetSize each layout pass — Blizzard_CustomAuraContainer.lua:738), so an
-        -- empty group leaves the badge (anchored to the container's TOPLEFT below) parked
-        -- inside the window; one blank button's cell pushes it fully out. The button
-        -- itself always renders LEFT of the window -> clipped, and the container is
-        -- mouse-dead so nothing floats over the unit frame.
+        -- LAYOUT-PUSH INVERSION: pin the container just outside the clip window's LEFT
+        -- edge. The container self-sizes to content (secret SetSize each layout pass —
+        -- Blizzard_CustomAuraContainer.lua), so an empty group leaves the badge (anchored
+        -- to the container's TOPLEFT below) parked inside the window; one blank button's
+        -- cell pushes it fully out. The button itself always renders LEFT of the window
+        -- -> clipped, and the container is mouse-dead so nothing floats over the unit frame.
         c:ClearAllPoints()
         c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
         local setFlowAnchor = c.SetFlowLayoutAnchorPoint
@@ -4641,9 +4614,9 @@ function NativeBackend:applyGroupTuning()
     -- it is left alone rather than enabled blind.
     if mode == "missing" then return end
     -- Test mode declares its own groups with curated paint stamped per button at create
-    -- (a styled group pinned first, then one shared plain group) — tuning them in place
-    -- would not re-stamp that paint. Handle:ApplyTuning rebuilds the preview instead, so
-    -- this path is never reached in test mode; guard anyway.
+    -- (one group per preview slot) — tuning them in place would not re-stamp that paint.
+    -- Handle:ApplyTuning rebuilds the preview instead, so this path is never reached in
+    -- test mode; guard anyway.
     if AuraContainer._testMode then return end
     -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
     -- setters have nothing to act on — it needs the slot-side setters instead. The
@@ -4696,11 +4669,9 @@ function NativeBackend:applyGroupTuning()
     -- TUNING signature, not the struct one, so every setting that flips a pool's
     -- gate exposure -- Show All Buffs, a filter-category selection, missing-buff
     -- hide-from-bar, defensive dedupe -- lands HERE and never re-enters build().
-    -- The flag used to be written only in build(), and IdentityGateSweep only
-    -- visits handles already flagged, so a handle that BECAME vulnerable was never
-    -- reconsidered: on a cross-faction unit (UnitCanAssist false) the gate fails
-    -- open and an "only these spells" row renders every buff. Recompute from the
-    -- records this call is about to push, then re-apply.
+    -- On a cross-faction unit (UnitCanAssist false) the gate fails open and an
+    -- "only these spells" row renders every buff, so recompute from the records
+    -- this call is about to push.
     self.handle._idGateVulnerable = nil
     self.handle._idGateSourceRelative = nil
     self.gatedGroupKeys = nil
@@ -4802,11 +4773,10 @@ end
 -- next frame) = the immediate refresh, OOC only (Show re-arms the parse, same op class
 -- as enable). In combat: mark-only best-effort — combat aura events are frequent, so the
 -- flags get picked up on the next one.
--- ★ RETURNS WHETHER AN IMMEDIATE RE-PARSE HAPPENED. ⚠ The old claim here — that
--- UpdateAllAuras "repaints from the candidate set it already has" — was falsified at
--- source on 2026-08-24: it marks ParseAuras (full membership re-run); the limitation
--- is ARMING/timing (addon-context marks process at the next OnShow / UNIT_AURA), not
--- scope. The return distinguishes "processed now" from "processed at the next arm".
+-- ★ RETURNS WHETHER AN IMMEDIATE RE-PARSE HAPPENED. UpdateAllAuras marks ParseAuras
+-- (a full membership re-run); the limitation is ARMING/timing (addon-context marks
+-- process at the next OnShow / UNIT_AURA), not scope. The return distinguishes
+-- "processed now" from "processed at the next arm".
 function NativeBackend:refresh()
     local c = self.container
     if not c then return false end
@@ -5032,10 +5002,9 @@ end
 --   swipe -> Cooldown:SetCooldownFromDurationObject
 --   text  -> our own DurationTextBinding, options mirrored 1:1 from bindNative
 -- The C side then drives all three per-frame with ZERO Lua per frame; the only Lua
--- left is one re-arm per aura cycle (scheduleTestRearm). Live-verified on 68824 via
--- /al nativetimer: bars sweep, text honours the binding's own updateInterval, the
--- loop survives a MUTATE-ONLY re-arm (the native side holds a reference, so
--- SetTimeFromStart alone restarts everything), and a colour curve applies smoothly.
+-- left is one re-arm per aura cycle (scheduleTestRearm), which mutates the shared
+-- duration for bar and text and re-drives the swipe separately — SetTimeFromStart
+-- alone does NOT restart slot.dfCD.
 -- Returns true when the slot is natively driven; false = caller keeps the ticker.
 -- Drive a PREVIEW FontString from a duration spec exactly as a live row is driven: one
 -- DurationTextBinding, the shared formatter selection, the shared Duration object. Live
@@ -5445,10 +5414,8 @@ function Handle:_paintTestSlot(slot, index)
     -- preview lies) — there is no native bind to drive it on a fake aura.
     -- ★ Reads the SAME map the live bind hands to customDispelTextMap
     -- (DF:GetGameDispelTextMap), so preview and live show identical letters rather
-    -- than merely similar ones. Its predecessor derived them independently
-    -- (`debuffType:sub(1, 2)`), which agreed with live only by coincidence and only
-    -- in English. Live no longer depends on the colorblindMode CVar either, so the
-    -- two paths now genuinely match instead of the preview over-promising.
+    -- than merely similar ones. Live no longer depends on the colorblindMode CVar,
+    -- so the two paths genuinely match.
     if slot.dfSymbol then
         local sym
         if e.debuffType then
@@ -6398,18 +6365,17 @@ function Handle:_setDeathLatch(on)
     end
 end
 
--- ★★ VISIBILITY LATCH, handle half — RESTORED 2026-08-30. Deliberately a SEPARATE
--- flag from the death latch rather than a second writer of it: a unit can be dead,
--- invisible, both or neither, and clearing one condition must never clear the other.
--- Same actuation, same re-parse on clear (a unit that was outside your world produced
--- no aura events while it was away, so the standing parse is stale by definition).
+-- ★★ VISIBILITY LATCH, handle half. Deliberately a SEPARATE flag from the death
+-- latch rather than a second writer of it: a unit can be dead, invisible, both or
+-- neither, and clearing one condition must never clear the other. Same actuation,
+-- same re-parse on clear (a unit that was outside your world produced no aura
+-- events while it was away, so the standing parse is stale by definition).
 -- See AuraContainer.SetUnitVisibilityLatched for what drives it and why it exists.
--- ⚠ THE ARGUMENT IS IGNORED ON PURPOSE. Callers used to pass the verdict they had just
--- computed for SOME unit; the only correct verdict is the one for the unit this handle is
--- bound to RIGHT NOW, so we recompute. Keeping the parameter means every existing caller
--- (SetUnitVisibilityLatched, Handle:SetUnit, the slot-owner retarget) becomes correct
--- without changing a single call site, and a caller that reasons about the wrong unit can
--- no longer poison this handle.
+-- ⚠ THE ARGUMENT IS IGNORED ON PURPOSE. The only correct verdict is the one for the
+-- unit this handle is bound to RIGHT NOW, so we recompute. Keeping the parameter keeps
+-- every existing caller (SetUnitVisibilityLatched, Handle:SetUnit, the slot-owner
+-- retarget) correct without changing a call site, and a caller that reasons about the
+-- wrong unit can no longer poison this handle.
 function Handle:_setVisLatch(_on)
     local want = handleVisDark(self) or nil
     if self._visLatched == want then return end
@@ -6459,7 +6425,7 @@ function Handle:_applyEnabled(on)
 end
 
 -- Retarget the container's unit. ★ 68914 re-verified: SetUnit is NOT combat-locked
--- (plain mixin state; Blizzard's own TargetFrame.lua:65 retargets its container on
+-- (plain mixin state; Blizzard's own TargetFrame.lua retargets its container on
 -- every target change, i.e. constantly in combat; /al combatops ran it clean). The
 -- deferral is KEPT for DISPLAY correctness: the partition kick that makes a retarget
 -- actually render (the Hide/Show bounce in NativeBackend:setUnit) is OOC-only, so a
@@ -6550,18 +6516,14 @@ function Handle:ApplyStyle(style, layout)
         local ok, err = pcall(function()
             -- Member buttons restyle from their own record view here too, or an
             -- ApplyStyle would repaint them with the container's shared style and
-            -- silently undo per-member styling — the same revert that used to eat the
-            -- important-debuff size step, one path along.
+            -- silently undo per-member styling.
             styleButton_regions(b, styleConfigFor(self, b))
             -- Per-record overrides, re-applied from the button's stash. This path calls
             -- styleButton_regions DIRECTLY rather than going through _acceptSlot, so it
             -- does not inherit the re-apply there — and styleButton_regions always resets
             -- the button to the SHARED config size. Without this line the important-debuff
-            -- size step survived a rebuild but was silently reverted by every ApplyStyle,
-            -- which is why a test frame snapped back to normal while a pinned frame (which
-            -- rebuilds instead of restyling) looked correct. Traced 2026-07-30: the button
-            -- measured the SCALED size immediately after applyRecordStyle, so the revert
-            -- was always downstream, never in the style itself.
+            -- size step survives a rebuild but is silently reverted by every ApplyStyle
+            -- (a test frame snaps back to normal while a pinned frame looks correct).
             applyRecordStyle(b, self, b.dfImpRecStyle)
             if native then
                 -- ☠ BUILD-TIME SHAPE, not the live global — same reason as
@@ -6634,7 +6596,7 @@ end
 
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
 -- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText/
--- updateInterval, dispel flags). Optionally merge a partial config first. Combat-guarded (defers to regen).
+-- updateInterval, dispel flags). Combat-guarded (defers to regen).
 -- Structural rebuild. `config` REPLACES the handle's config WHOLESALE when given —
 -- both bridge callers (buff/defensive) pass a COMPLETE freshly-built config. The
 -- previous pairs()-merge could never CLEAR a key that went nil: a disabled
@@ -7899,12 +7861,10 @@ local function ensureOwner(frame, unit)
     -- frame's own range state) and effectively a no-op in whole-frame mode, where the
     -- unit-frame cascade covers the anchor anyway.
     --
-    -- ⚠ HONEST STATUS: this shipped mid-hunt as THE fix for "AD indicators don't fade out
-    -- of range" (2026-08-26) and it was NOT that bug — the field fault was group
-    -- containers being absent from ElementAppearance's AD_STORE_KEYS walk entirely, fixed
-    -- separately. The birth-order hole above is real but was never proven to be biting.
-    -- Kept because it is one cheap call at a rare event; if it is ever suspected of
-    -- misbehaving, deleting it outright is safe.
+    -- ⚠ HONEST STATUS: this is NOT the fix for "AD indicators don't fade out of range" —
+    -- that fault was group containers being absent from ElementAppearance's AD_STORE_KEYS
+    -- walk, fixed separately. The birth-order hole above is real but was never proven to
+    -- be biting. Kept because it is one cheap call at a rare event; deleting it is safe.
     if DF.UpdateAuraDesignerAppearance then
         pcall(DF.UpdateAuraDesignerAppearance, DF, frame)
     end
@@ -8091,8 +8051,8 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     owner.slots[slotKey] = handle
     owner.seq = owner.seq + 1
 
-    -- Slot registry (weak keys so a dropped slot GCs with its owner). Post-demolition
-    -- its consumers are the death latch (SetUnitDeathLatched loops it) and the dump.
+    -- Slot registry (weak keys so a dropped slot GCs with its owner). Looped by the
+    -- death and visibility latches, the latch reconciler, checkDarkMismatch and the dump.
     AuraContainer._slotHandles = AuraContainer._slotHandles
         or setmetatable({}, { __mode = "k" })
     AuraContainer._slotHandles[handle] = true
@@ -8233,10 +8193,10 @@ end
 -- empty string: ANY filter-string park rests on invisible C semantics that a build can
 -- change silently. Hence the SECOND LOCK below.
 local SLOT_PARK_FILTER = "HELPFUL|!HELPFUL"
--- ⚠ Also on the module table: NativeBackend:ApplyTuning pushes the park string for
--- slot-backed rows and sits EARLIER in this file, where the local is not yet in scope. The
--- field resolves at call time, so both writers park with the identical string -- which they
--- must, or whichever runs last decides and one of them is the retired convention.
+-- ⚠ Also exported on the module table: any other writer must park with the IDENTICAL
+-- string, or whichever runs last decides and one of them is the retired convention.
+-- Nothing pushes it today -- a dark slot keeps its own live filter and the CF lock
+-- below is what parks it (see _pushFilter).
 AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- ★ THE SECOND LOCK — candidate-filter park, and the one that is PROVABLE. maxDuration
 -- excludes every aura unconditionally at 0: a timed aura fails `duration > 0`, a
@@ -8578,9 +8538,9 @@ function SlotHandle:_cf()
     return cf
 end
 
--- One gate edge, one slot: re-push the (now re-derived) candidates. The lockdown branch is
--- the recovery path's own shape -- no native tuning setter runs in combat, and
--- _replayTuning drains the deferral on the way out, itself reading through _cf().
+-- One gate edge, one slot: re-push the (now re-derived) candidates. It ATTEMPTS the push
+-- in combat and defers only when the call actually fails (see the note below);
+-- _replayTuning drains any deferral on the way out, itself reading through _cf().
 function SlotHandle:_applyHelperGate()
     if self._lastCandidateFilters == nil then return false end
     -- ⚠ SKIP PARKED SLOTS. A parked slot renders nothing, so pushing candidates at it
@@ -8677,8 +8637,8 @@ end
 -- offsets, bar geometry, tooltip placement).
 --
 -- ⚠ Combat: Handle:ApplyStyle defers to regen because restyling live buttons mid-combat
--- diverges from the build-once-leave-it pattern. Same rule here -- the caller re-drives
--- on its own version gate, so dropping the pass is correct rather than lossy.
+-- diverges from the build-once-leave-it pattern. Same rule here, and the pass is
+-- DEFERRED AND REPLAYED rather than dropped -- see the note inside.
 function SlotHandle:ApplyStyle(style, layout)
     local cfg, btn = self.config, self.button
     if not (cfg and btn) then return false end
@@ -9013,7 +8973,7 @@ function AuraContainer:Create(parent, config)
         -- re-anchors it to the container when a build lands; teardown re-parks it.
         --
         -- ★ 68914: AddAuraGroup stamps ForbiddenAspect.UntrustedLayoutScriptExecution
-        -- on the container (Blizzard_CustomAuraContainer.lua:321), and SetPoint REFUSES
+        -- on the container (Blizzard_CustomAuraContainer.lua), and SetPoint REFUSES
         -- a dependent that doesn't already carry the aspect ("Anchoring disallowed as
         -- dependent object would inherit forbidden aspects" — field-hit in a dungeon).
         -- Aspects are NEVER granted implicitly via SetParent/SetPoint, and tainted
@@ -9286,7 +9246,7 @@ function AuraContainer.ReconcileUnitLatch(unit)
     local gone = not UnitExists(unit)
     local visible = false
     if not gone then
-        -- issecretvalue FIRST, as its own statement -- see the UnitInRange fix at :844.
+        -- issecretvalue FIRST, as its own statement -- see the UnitInRange fix above.
         local okv, vis = pcall(UnitIsVisible, unit)
         local secret = issecretvalue and issecretvalue(vis) or false
         if okv and not secret and vis then visible = true end
@@ -9521,10 +9481,10 @@ function AuraContainer.DebugDumpIdentityGate()
                 sa2Txt, canTxt,
                 tostring(s.parked or false),
                 tostring(s._deathLatched or false),
-                -- ⚠ live= is the INTENDED filter. pushed= is the actuation: the park
-                -- string means the consumer Park or the death latch won. pushOK= is
-                -- whether the setter was refused (lockdown); nil pushed= means
-                -- _pushFilter has not run since load.
+                -- ⚠ live= is the INTENDED filter. pushed= is what _pushFilter last sent:
+                -- a dark slot keeps its OWN live filter now (the CF lock parks it; the
+                -- park string is no longer pushed). pushOK= is whether the setter was
+                -- refused (lockdown); nil pushed= means _pushFilter has not run since load.
                 safeTxt(s.liveFilter), safeTxt(s._pushedFilter), tostring(s._pushOK)))
         end
     end

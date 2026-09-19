@@ -1,10 +1,8 @@
 local addonName, DF = ...
 
--- Header tracing, routed to the debug console's HEADERS category. This was 68
--- inline `if DF.debugHeaders then print(...) end` guards behind a chat-only
--- toggle; funnelling them through one printer makes the console the single
--- place to turn header logging on or off, and puts the output in the copyable
--- log instead of the chat frame.
+-- Header tracing, routed to the debug console's HEADERS category. One printer,
+-- so the console is the single place to turn header logging on or off and the
+-- output lands in the copyable log instead of the chat frame.
 local headerDebug = DF:MakeDebugPrinter("HEADERS")
 
 -- ============================================================
@@ -195,11 +193,9 @@ end
 -- ============================================================
 -- UNIT FRAME MAP REBUILD
 -- Rebuilds unitFrameMap by scanning all visible header children.
--- Called after wipe(unitFrameMap) to ensure the centralized event
--- dispatcher can find frames for incoming UNIT_HEALTH etc. events.
 -- Without this, if OnAttributeChanged("unit") doesn't fire (because
--- unit assignments haven't changed), the map stays empty and all
--- unit events are silently dropped — causing health desync.
+-- unit assignments haven't changed), the map stays incomplete and
+-- unit events are silently dropped - causing health desync.
 -- ============================================================
 function DF:CountUnitFrameMap()
     local count = 0
@@ -208,10 +204,9 @@ function DF:CountUnitFrameMap()
 end
 
 function DF:RebuildUnitFrameMap()
-    -- Targeted cleanup: remove stale entries where the frame is hidden
-    -- or no longer assigned to that unit. This replaces the old destructive
-    -- wipe(unitFrameMap) pattern — we keep valid entries so UNIT_HEALTH
-    -- events are never silently dropped during transitions.
+    -- Targeted cleanup: remove stale entries where the frame is hidden or no
+    -- longer assigned to that unit. Keep valid entries so UNIT_HEALTH events
+    -- are never silently dropped during transitions.
     for unit, frame in pairs(unitFrameMap) do
         if not frame:IsShown() or frame:GetAttribute("unit") ~= unit then
             unitFrameMap[unit] = nil
@@ -244,9 +239,7 @@ function DF:RebuildUnitFrameMap()
         end
         
         if not unit then return end
-        -- Accept the child if it is shown (lightweight check) OR if its
-        -- parent header is shown — covers the brief window where children
-        -- haven't fully resolved their visibility after a header Show().
+        -- Accept the child only if it is shown (lightweight check).
         if not child:IsShown() then return end
         
         unitFrameMap[unit] = child
@@ -511,8 +504,7 @@ SlashCmdList["DFROSTER"] = function(msg)
         wipe(DF.RosterDebug.events)
         DF.RosterDebug.startTime = GetTime()
         DF.RosterDebug.enabled = true
-        -- Via CmdPath, not a hardcoded spelling: /dfroster is no longer a bind
-        -- after the one-command rework, and the path stays right if roster ever
+        -- Via CmdPath, not a hardcoded spelling: the path stays right if roster ever
         -- moves between the everyday and debug listings.
         DF:Say("Started monitoring. Join/leave groups, then run "
             .. DF:CmdPath("roster") .. " again to see results.")
@@ -555,11 +547,6 @@ end
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local UnregisterStateDriver = UnregisterStateDriver
-
--- (Removed) DF.POSITION_HEADER_SNIPPET, a secure-snippet string never handed to any
--- restricted environment — one hit in the whole repo, its own definition. Its banner read
--- "This is the ONLY function that moves headers", which was actively misleading: nothing
--- ever executed it, and header positioning is done by the plain-Lua functions in this file.
 
 -- ============================================================
 -- UNIT MENU CLASSIFIER FIX
@@ -852,12 +839,8 @@ function DF:InitializeHeaderChild(frame)
                     -- frame specifically. SecureSort uses it as party slot 0,
                     -- setting secure paths and swap frame refs on it, and
                     -- UpdateAllFrames drives its unit watch and its click-cast
-                    -- registration from it. A pinned frame showing the player was
-                    -- being adopted here, which hands all of that the wrong frame.
-                    --
-                    -- The sibling write fifty lines above already guards exactly
-                    -- this ("Skip for pinned frames - they must not remove main
-                    -- frame entries"); this one never got the same treatment.
+                    -- registration from it. A pinned frame must NEVER be adopted
+                    -- here -- it hands all of that the wrong frame.
                     if not self.isPinnedFrame then
                         DF.playerFrame = self
                     end
@@ -1198,10 +1181,6 @@ function DF:CreateContainers()
 end
 
 -- ============================================================
--- PLAYER HEADER (Separate - for solo mode + self first/last)
--- ============================================================
-
--- ============================================================
 -- PARTY HEADER (Single header for player + party1-4)
 -- ============================================================
 
@@ -1276,11 +1255,8 @@ function DF:CreatePartyHeader()
     DF.partyHeader:SetAttribute("frameHeight", snapInit(db.frameHeight or 50))
     DF.partyHeader:SetAttribute("spacing", spacing)
     DF.partyHeader:SetAttribute("horizontal", horizontal)
-    -- (The `growFromCenter` attribute write that used to sit here was removed. It read a
-    -- db key nothing defines or writes, and the ONLY snippet that consumed it was the
-    -- isPlayerHeader branch of SetupSecurePositioning -- a branch never installed, since
-    -- the separate player header was folded into partyHeader. CENTER growth is live and
-    -- correct via `selfCentering`, which DF:SetGrowFromCenter writes.)
+    -- CENTER growth is NOT `growFromCenter` (a db key nothing defines or writes);
+    -- it is `selfCentering`, which DF:SetGrowFromCenter writes.
 
     -- SetFrameRef for secure snippets (Phase 3) - only if available
     if DF.partyHeader.SetFrameRef then
@@ -1361,8 +1337,7 @@ function DF:CreateArenaHeader()
     local horizontal = (db.growDirection == "HORIZONTAL")
     -- Same stride snap as the party header above, for the same reason — the arena header
     -- is that code with a different frame set, so a fractional spacing accumulates here
-    -- identically. Fixed together deliberately: leaving one of a copied pair unsnapped is
-    -- how this survived in party while the grouped raid handler had it all along.
+    -- identically.
     local function snapInit(value)
         if db.pixelPerfect and DF.PixelPerfect then
             return DF:PixelPerfect(value)
@@ -1442,9 +1417,6 @@ function DF:CreateRaidHeaders()
     DF:CreateRaidCombinedHeader()
     DF:CreateRaidSeparatedHeaders()
     -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning.
-    -- The commented-out DF:CreateRaidPlayerHeader() call that sat here is gone with
-    -- it: that function no longer exists anywhere, so uncommenting the line would
-    -- have thrown rather than restored the old behaviour.
 
     -- Create secure position handler for raid groups
     DF:CreateRaidPositionHandler()
@@ -1508,16 +1480,8 @@ end
 
 -- ============================================================
 -- APPLY FLAT LAYOUT ATTRIBUTES
--- Sets up the combined header based on growDirection and flat layout settings
--- Uses SecureGroupHeaderTemplate attributes:
---   point, xOffset, yOffset - how units position relative to each other
---   unitsPerColumn - units before wrapping to next column/row
---   maxColumns - maximum columns/rows
---   columnAnchorPoint, columnSpacing - how columns/rows position
--- ============================================================
--- OPTION A SIMPLIFICATION: This is now the single source of truth for flat layout.
--- Sets all attributes AND positions the header within the container.
--- Let SecureGroupHeaderTemplate auto-size the header based on visible children.
+-- Flat layout is owned by the FlatRaidFrames module; this is a
+-- legacy entry point that delegates to it.
 -- ============================================================
 function DF:ApplyFlatLayoutAttributes()
     -- Legacy function - now delegates to FlatRaidFrames
@@ -2026,18 +1990,6 @@ function DF:ComputeRaidContainerCompensation()
     if not db.raidUseGroups then return 0, 0 end
     if (db.raidGroupAnchor or "START") ~= "CENTER" then return 0, 0 end
 
-    -- ★ ONE compensation, MODE-AWARE — this function is now the single source of the
-    -- CENTER shift. The live container, the TEST container and the MOVER all take it
-    -- in UpdateRaidContainerPosition; the test frame calculator carries NONE of it
-    -- (its old lp.testMode comp block is retired — see CalculateRaidGroupPosition).
-    -- The unlock overlay is only faithful if all three read the SAME number, which is
-    -- why there is exactly one ("overlay is not faithful when groups-per-row < 8",
-    -- Aphoex 2026-08-15: content sat half a group-row below the box because the
-    -- container carried the shift and the mover never did).
-    -- In test mode the populated count comes from the TEST roster (5 per group,
-    -- mirroring LightweightPositionRaidTestFrames): the handler attributes describe
-    -- the LIVE roster, which solo is ZERO populated groups — the comp would read 0
-    -- while the preview simulates eight.
     local numPopulated = 0
     if DF.raidTestMode then
         local testCount = db.raidTestFrameCount or 10
@@ -2089,7 +2041,7 @@ function DF:ComputeRaidContainerCompensation()
 
     -- The drift dimension depends on growDirection: HORIZONTAL = vertical drift,
     -- VERTICAL = horizontal drift. (Per the snippet's totalHeight/populatedHeight
-    -- vs totalWidth/populatedWidth selection at lines 2492-2498.)
+    -- vs totalWidth/populatedWidth selection.)
     local groupDim, populatedDim
     if isHorizontal then
         groupDim = groupHeight
@@ -4291,7 +4243,7 @@ function DF:FullFrameRefresh(frame)
     if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
 end
 
--- Refresh all LIVE frames (party, arena, and raid) - calls FullFrameRefresh on each
+-- Refresh all LIVE frames (party, arena, raid, and pinned) - calls FullFrameRefresh on each
 -- Use this when settings change that affect data-driven content (health text format, name truncation, etc.)
 function DF:RefreshLiveFrames()
     -- Skip if in test mode (live frames aren't visible)
@@ -4743,9 +4695,6 @@ function DF:ApplyRaidFlatSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- (Removed) DF:RefreshRaidFlatFrames -- no callers; see the note on its group-frame
--- twin above. FlatRaidFrames:RefreshAllChildFrames, which it delegated to, is live.
-
 -- Toggle raid group debug backgrounds
 function DF:ToggleRaidDebugBackgrounds()
     if not DF.raidSeparatedHeaders then
@@ -4999,10 +4948,6 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
             tostring(contentType), tostring(inRaid), tostring(inParty), tostring(skipRaidReposition),
             debugstack(2, 1, 0) or "?")
     end
-
-    -- (Removed) an IsInInstance() call whose BOTH return values were unused — the
-    -- "ARENA DEBUG" trace it fed is long gone, so the call did nothing but cost an
-    -- API round trip on every visibility evaluation.
 
     -- Solo mode check
     local showSolo = db.soloMode and not inParty and not inRaid and not inArena
@@ -5724,7 +5669,7 @@ headerCombatFrame:SetScript("OnEvent", function()
     end
 
     -- Process orphan pendingRaidVisibilityUpdate (set by UpdateLiveRaidFrames
-    -- in Init.lua when called during combat — previously never consumed)
+    -- in Init.lua when called during combat)
     if DF.pendingRaidVisibilityUpdate then
         DF.pendingRaidVisibilityUpdate = nil
         -- Replay what UpdateLiveRaidFrames does: show raidContainer + sync headers
@@ -5779,11 +5724,6 @@ headerCombatFrame:SetScript("OnEvent", function()
 end)
 
 -- ============================================================
--- MAIN INITIALIZATION
--- Call this to set up the header-based frame system
--- ============================================================
-
--- ============================================================
 -- SORTING (Phase 2)
 -- Configure sort method and grouping for headers
 -- ============================================================
@@ -5802,8 +5742,6 @@ function DF:SetPartySorting(sortMethod, groupBy, groupingOrder)
         DF:Err("Cannot change sorting in combat")
         return
     end
-    
-    -- Player header doesn't need sorting (only 1 frame)
     
     -- Party header
     if DF.partyHeader then
@@ -6155,8 +6093,7 @@ function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
                 -- An empty string is a live value to SecureGroupHeaderTemplate, and
                 -- once the cache is dropped below, ApplyRaidGroupSorting's nil clear
                 -- compares equal to the empty cache entry and is skipped, leaving
-                -- groupBy="" applied. That used to be harmless because the raid loop
-                -- wrote its nils raw and unconditionally every tick; it no longer does.
+                -- groupBy="" applied.
                 header:SetAttribute("groupingOrder", groupingOrder)
                 header:SetAttribute("groupBy", groupBy)
                 if sortMethod then
@@ -7066,9 +7003,6 @@ function DF:ApplyHeaderSettings_Now()
         -- size forcing, it should be added deliberately and confirmed in game.
     end
     
-    -- Schedule private aura reanchor after ALL attribute changes settle.
-    -- This catches the showRaid false/true toggle above which can cause a second
-    -- round of unit reassignments after the sorting functions have already run.
 end
 
 -- ============================================================
@@ -7088,8 +7022,6 @@ function DF:CreateHeaderFrames()
         return
     end
     
-    -- forceHeaderMode is already set at file scope
-
     -- Create containers and headers (this is the combat-safe part)
     DF:CreateContainers()
 
@@ -7156,8 +7088,6 @@ function DF:FinalizeHeaderInit()
     
     -- ============================================================
     -- CRITICAL: Set DF.initialized for header mode
-    -- This was previously only set in Init.lua for legacy mode,
-    -- but header mode returns early from InitializeFrames().
     -- Without this, event handlers check "if not DF.initialized then return"
     -- and never process events!
     -- ============================================================
@@ -7640,8 +7570,6 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             tostring(arg1), tostring(arg2), tostring(IsInRaid()), tostring(IsInGroup()),
             GetNumGroupMembers(), tostring(isInInstance), tostring(instanceType or "nil"))
 
-        -- ARENA DEBUG: Log instance detection state at PEW entry
-        
         -- FIX: Clear ALL caches to force re-validation of all frames
         -- This fixes health desync when WoW shuffles unit slots without changing unit strings
         -- (e.g., raid1=PlayerA before zone, raid1=PlayerB after zone)
@@ -7965,7 +7893,6 @@ function DF:ProcessRosterUpdate()
         -- Visibility update — skip grouped-raid reposition (flat raids don't use it)
         DF:UpdateHeaderVisibility(true)
 
-        -- TEST 2: HasRosterMembershipChanged check - OK
         if not HasRosterMembershipChanged() then
             DF:Debug("ROSTER", "  Flat raid: roster unchanged, skipping sorting")
             -- FIX: Even though roster hasn't changed, unitFrameMap may be empty
@@ -7980,12 +7907,11 @@ function DF:ProcessRosterUpdate()
         DF:Debug("ROSTER", "  Flat raid: roster changed, applying sorting")
         DF:ApplyRaidFlatSorting()
         
-        -- TEST 4: UpdateRestedIndicator - OK (group labels not needed for flat layout)
+        -- Group labels are not needed for the flat layout
         if DF.UpdateRestedIndicator then
             DF:UpdateRestedIndicator()
         end
         
-        -- TEST 5: UpdateDefaultPlayerFrame - OK
         if DF.UpdateDefaultPlayerFrame then
             DF:UpdateDefaultPlayerFrame()
         end
@@ -8025,7 +7951,6 @@ function DF:ProcessRosterUpdate()
     -- with the same roster data
     if not groupedHeadersEmpty and not HasRosterMembershipChanged() then
         DF:Debug("ROSTER", "  Roster unchanged — skipping sorting, rebuilding unitFrameMap")
-        -- Roster is identical - skip sorting
         -- Visibility update already handled above
         -- FIX: Rebuild unitFrameMap in case it was wiped (e.g., by PLAYER_ENTERING_WORLD)
         -- but OnAttributeChanged didn't fire because unit assignments are unchanged.
@@ -8218,7 +8143,7 @@ end
 -- they caused on unit changes (missed events, stale health values).
 -- ========================================
 local headerChildEventFrame = CreateFrame("Frame")
--- Core unit events (formerly per-frame RegisterUnitEvent)
+-- Core unit events
 headerChildEventFrame:RegisterEvent("UNIT_HEALTH")
 headerChildEventFrame:RegisterEvent("UNIT_MAXHEALTH")
 headerChildEventFrame:RegisterEvent("UNIT_NAME_UPDATE")
@@ -8378,12 +8303,11 @@ local function FindPinnedFrameForUnit(unit)
     return frame
 end
 
--- TextDesigner live-text refresh helper. No-op unless the TD module loaded
--- (alpha builds only — DF.UpdateTextDesigner is nil otherwise). Driven from
--- the central dispatcher rather than from each update function's tail, so the
--- refresh fires once per event regardless of which fast/slow internal path the
--- update function took (the big bar functions have fast-path early returns that
--- a tail hook would miss, leaving text stale in combat).
+-- TextDesigner live-text refresh helper. No-op unless the TD module loaded.
+-- Driven from the central dispatcher rather than from each update function's
+-- tail, so the refresh fires once per event regardless of which fast/slow
+-- internal path the update function took (the big bar functions have fast-path
+-- early returns that a tail hook would miss, leaving text stale in combat).
 local function tdRefresh(frame, pinnedFrame, hint)
     if not DF.UpdateTextDesigner then return end
     if frame then DF:UpdateTextDesigner(frame, hint) end
@@ -8435,10 +8359,9 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
     
-    -- NOTE: UNIT_AURA is no longer handled here — see externalDefSubscriber
-    -- below, which subscribes to the roster unit event dispatcher. UpdateAuras
-    -- and UpdateDispelOverlay are driven by hooksecurefunc on
-    -- CompactUnitFrame_UpdateAuras (Auras.lua) to ensure fresh cache data.
+    -- NOTE: UNIT_AURA is not handled here — see externalDefSubscriber below,
+    -- which subscribes to the roster unit event dispatcher. UpdateAuras and
+    -- UpdateDispelOverlay are driven elsewhere, not from this handler.
 
     -- UNIT_POWER_UPDATE / UNIT_MAXPOWER / UNIT_DISPLAYPOWER: Update power bar
     if event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
@@ -8926,9 +8849,8 @@ end)
 -- The dispatcher (RosterEvents.lua) uses RegisterUnitEvent at the C++ level
 -- so this only fires for player/partyN/raidN — never nameplates, target,
 -- focus, mouseover, or any other unit token. UpdateAuras and
--- UpdateDispelOverlay are still driven by hooksecurefunc on
--- CompactUnitFrame_UpdateAuras (Auras.lua) for cache freshness, so this
--- subscriber's only job is to drive UpdateExternalDefIcon.
+-- UpdateDispelOverlay are driven elsewhere, so this subscriber's only job
+-- is to drive UpdateExternalDefIcon.
 local externalDefSubscriber = {}
 function externalDefSubscriber:OnUnitAura(event, unit)
     if not DF.headersInitialized then return end
@@ -9037,7 +8959,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         DF:SetPartyOrientation(false, growFrom, selfPos)
         DF:SetRaidOrientation(false, raidGrowFrom)
     
-    -- Phase 3: Grow from anchor (start/center/end)
+    -- Grow from anchor (start/center/end)
     elseif cmd == "grow" then
         local mode = args[2] and args[2]:upper() or "START"
         if mode == "START" or mode == "CENTER" or mode == "END" then
