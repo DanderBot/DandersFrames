@@ -3125,6 +3125,24 @@ function DF:CreateGUI()
             page:RefreshStates()
             page:RefreshStates()
         end
+        -- ☠ CLIENT WORKAROUND, NOT A FIX OF OURS: NUDGE THE SCROLL 1px AND BACK.
+        -- After a resize-grip drag some inline panes were left with NO RECT at all
+        -- (GetRect() -> nil on the holder and everything under it) while their plate,
+        -- anchors, sizes, levels and visibility were all correct -- so the box drew
+        -- empty until a scroll. Measured in game 2026-09-19; UpdateScrollChildRect and
+        -- re-setting the SAME offset both did nothing, lifting the frame level did
+        -- nothing, a real 1px move and back repaired every pane. A scroll-offset
+        -- change makes the client re-resolve every rect under the scroll child.
+        -- Next frame, so it lands after the relayout's own anchor changes settle.
+        -- Moves away from whichever end the page is sitting at, so it never clamps.
+        if page.GetVerticalScroll and C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if not page:IsVisible() then return end
+                local v = page:GetVerticalScroll() or 0
+                page:SetVerticalScroll(v > 0 and v - 1 or v + 1)
+                page:SetVerticalScroll(v)
+            end)
+        end
     end
 
     GUI.RefreshCurrentPage = function()
