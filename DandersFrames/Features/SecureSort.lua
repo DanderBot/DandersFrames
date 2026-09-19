@@ -355,7 +355,7 @@ function SecureSort:ScanGroupForSpecs()
     wipe(self.inspectQueue)
     
     -- Cache player's own spec
-    local playerSpecID = GetSpecializationInfo(GetSpecialization() or 0)
+    local playerSpecID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 0)
     if playerSpecID then
         self:CacheUnitSpec("player", playerSpecID)
     end
@@ -1163,7 +1163,7 @@ roleUpdateFrame:SetScript("OnEvent", function(self, event, arg1)
     -- Handle spec changes (always process - caches spec and triggers FlatRaidFrames re-sort)
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         -- Re-cache player spec
-        local playerSpecID = GetSpecializationInfo(GetSpecialization() or 0)
+        local playerSpecID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 0)
         if playerSpecID then
             SecureSort:CacheUnitSpec("player", playerSpecID)
         end

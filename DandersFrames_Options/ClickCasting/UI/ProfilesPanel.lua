@@ -525,7 +525,7 @@ function CC:RefreshProfilesPanel()
         -- No `or 1` mask: with spec unresolved, GetProfileForLoadout(1, ...) would
         -- return SPEC 1's assignment and this label would claim "[Linked]" or name
         -- an "[Override]" profile that isn't yours. Report nothing instead.
-        local specIndex = GetSpecialization()
+        local specIndex = C_SpecializationInfo.GetSpecialization()
         local loadoutID = 0
         if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
             loadoutID = C_ClassTalents.GetActiveConfigID() or 0
@@ -584,7 +584,7 @@ function CC:RefreshLoadoutAssignments()
     local numSpecs = self:GetNumSpecs()
     
     for specIndex = 1, numSpecs do
-        local _, specName, _, specIcon = GetSpecializationInfo(specIndex)
+        local _, specName, _, specIcon = C_SpecializationInfo.GetSpecializationInfo(specIndex)
         if specName then
             -- Spec header
             local specHeader = CreateFrame("Frame", nil, self.loadoutContent, "BackdropTemplate")

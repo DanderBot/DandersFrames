@@ -1495,8 +1495,8 @@ local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
 -- the one unit it can get it for, and leaves the shared function alone. If the flip is ever
 -- right addon-wide it should be its own change with its own testing, not a passenger on ours.
 local function helperUnitRole(unit)
-    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecialization and GetSpecializationRole then
-        local spec = GetSpecialization()
+    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecializationRole then
+        local spec = C_SpecializationInfo.GetSpecialization()
         local role = spec and GetSpecializationRole(spec)
         if role and role ~= "NONE" then return role end
     end

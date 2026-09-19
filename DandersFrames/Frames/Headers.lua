@@ -4587,7 +4587,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
 
         local specID
         if UnitIsUnit(unit, "player") then
-            specID = GetSpecializationInfo(GetSpecialization())
+            specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization())
         else
             local cache = DF.SecureSort and DF.SecureSort.specCache
             if cache then

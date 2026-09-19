@@ -128,16 +128,16 @@ CC.GetPlayerClass = GetPlayerClass
 -- rest of the session. Returning nil makes the unresolved state visible, so a
 -- caller cannot be silently wrong by forgetting to pre-check.
 local function GetCurrentSpec()
-    return GetSpecialization()
+    return C_SpecializationInfo.GetSpecialization()
 end
 
 -- Get current talent loadout config ID
 local function GetCurrentLoadoutConfigID()
     -- Try GetLastSelectedSavedConfigID first - this is the saved loadout that was selected
     if C_ClassTalents and C_ClassTalents.GetLastSelectedSavedConfigID then
-        local specIndex = GetSpecialization()
+        local specIndex = C_SpecializationInfo.GetSpecialization()
         if specIndex then
-            local specID = GetSpecializationInfo(specIndex)
+            local specID = C_SpecializationInfo.GetSpecializationInfo(specIndex)
             if specID then
                 local savedConfigID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
                 if savedConfigID and savedConfigID > 0 then
@@ -163,9 +163,9 @@ local function GetLoadoutName(configID)
     
     -- First try: look up from spec's loadout list (most reliable for saved loadouts)
     if C_ClassTalents and C_ClassTalents.GetConfigIDsBySpecID then
-        local specIndex = GetSpecialization()
+        local specIndex = C_SpecializationInfo.GetSpecialization()
         if specIndex then
-            local specID = GetSpecializationInfo(specIndex)
+            local specID = C_SpecializationInfo.GetSpecializationInfo(specIndex)
             if specID then
                 local configIDs = C_ClassTalents.GetConfigIDsBySpecID(specID)
                 if configIDs then
@@ -202,7 +202,7 @@ CC.GetLoadoutName = GetLoadoutName
 -- Get spec name from spec index
 local function GetSpecName(specIndex)
     if not specIndex then return "Unknown" end
-    local _, name = GetSpecializationInfo(specIndex)
+    local _, name = C_SpecializationInfo.GetSpecializationInfo(specIndex)
     return name or "Unknown"
 end
 
@@ -504,7 +504,7 @@ function CC:CheckLoadoutProfileSwitch()
     -- events, loading screens, arena prep) re-run this check once real data
     -- arrives. GetCurrentSpec() now returns nil rather than masking to 1, so
     -- this is the one place that decides what an unknown spec means.
-    if not GetSpecialization() then
+    if not C_SpecializationInfo.GetSpecialization() then
         self.loadoutCheckUnresolved = true
         DF:Debug("CLICK", "CheckLoadoutProfileSwitch: spec data not ready — deferred to resolve watchers")
         return
@@ -581,7 +581,7 @@ function CC:GetSpecLoadouts(specIndex)
     local loadouts = {}
     
     if C_ClassTalents and C_ClassTalents.GetConfigIDsBySpecID then
-        local specID = GetSpecializationInfo(specIndex)
+        local specID = C_SpecializationInfo.GetSpecializationInfo(specIndex)
         if specID then
             local configIDs = C_ClassTalents.GetConfigIDsBySpecID(specID)
             if configIDs then
@@ -842,11 +842,11 @@ function CC:GetSpellValidityStatus(spellName)
         -- No `or 1` mask: if spec is unresolved, every specIndex comparison below
         -- fails and the spell is reported "valid_class" rather than being falsely
         -- claimed as spec 1's.
-        local currentSpec = GetSpecialization()
+        local currentSpec = C_SpecializationInfo.GetSpecialization()
         local numSpecs = GetNumSpecializations() or 4
         
         for specIndex = 1, numSpecs do
-            local specID = GetSpecializationInfo(specIndex)
+            local specID = C_SpecializationInfo.GetSpecializationInfo(specIndex)
             if specID then
                 -- Check class and spec talent trees
                 local configID = C_ClassTalents.GetActiveConfigID()
