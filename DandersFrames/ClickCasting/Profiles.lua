@@ -120,13 +120,11 @@ CC.GetPlayerClass = GetPlayerClass
 
 -- Get current spec index, or nil if the game has not resolved it yet.
 --
--- Deliberately does NOT fall back to spec 1. This helper used to return
--- `GetSpecialization() or 1`, and that mask is what shipped the "none of my
--- binds work in my first arena of the day" bug: at the first login of a session
--- GetSpecialization() is briefly nil, the fallback made that look like spec 1,
--- and the loadout check switched spec-2+ players onto spec 1's profile for the
--- rest of the session. Returning nil makes the unresolved state visible, so a
--- caller cannot be silently wrong by forgetting to pre-check.
+-- Deliberately does NOT fall back to spec 1. `GetSpecialization() or 1` masks
+-- the brief nil at the first login of a session as spec 1, and the loadout
+-- check then switches spec-2+ players onto spec 1's profile for the rest of
+-- the session. Returning nil makes the unresolved state visible, so a caller
+-- cannot be silently wrong by forgetting to pre-check.
 local function GetCurrentSpec()
     return GetSpecialization()
 end

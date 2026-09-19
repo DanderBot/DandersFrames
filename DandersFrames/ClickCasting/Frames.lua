@@ -78,7 +78,7 @@ function CC:InitializeSavedVariables()
     end
 
     -- Retired: the persisted "re-wipe Blizzard's click-cast profile on every
-    -- enable" flag (see the removal note in DisableBlizzardClickCast).
+    -- enable" flag (see the removal note in DisableBlizzardClickCasting).
     -- Clearing is a one-time, explicitly confirmed action now.
     self.db.clearBlizzardOnEnable = nil
 
@@ -398,12 +398,11 @@ function CC:InitializeSecureFrames()
             if not CC.registeredFrames or not CC.registeredFrames[frame] then return end
             if not (CC.db and CC.db.enabled) then return end
             CC:Defer("reassert", frame)
-            -- Visible so a roster-reset reapply can be seen in the log (was
-            -- silent). Guarded because this fires on every CompactUnitFrame_SetUnit
-            -- roster shuffle: DF:Debug drops the line itself when debug is off, but
-            -- its ARGUMENTS are evaluated first, so the GetName and tostring calls
-            -- happened regardless. DebugActive rather than DF.debugEnabled so the
-            -- args are also skipped when CLICK specifically is filtered off.
+            -- Guarded because this fires on every CompactUnitFrame_SetUnit roster
+            -- shuffle: DF:Debug drops the line itself when debug is off, but its
+            -- ARGUMENTS are evaluated first, so the GetName and tostring calls cost
+            -- regardless. DF:DebugActive("CLICK") skips the args too when the CLICK
+            -- category is filtered off.
             if DF:DebugActive("CLICK") then
                 DF:Debug("CLICK", "Reassert queued for %s (SecureUnitButton_OnLoad, combat=%s)",
                     frame:GetName() or "unnamed", tostring(InCombatLockdown()))
@@ -636,13 +635,11 @@ function CC:DisableBlizzardClickCasting()
     
     -- Hook into Blizzard's click cast system to prevent conflicts
     if not self.blizzardClickCastDisabled then
-        -- (Removed) The clearBlizzardOnEnable auto re-wipe. Pressing "Clear
-        -- Blizzard Bindings" once used to persist the flag and silently
-        -- ResetCurrentProfile() — a PERMANENT wipe of the user's native
-        -- click-cast profile — on every future enable. Clearing is now a
-        -- one-time action taken only when the button is pressed (with a
-        -- permanence warning in the dialog); the stored flag is stripped in
-        -- InitializeSavedVariables.
+        -- (Removed) The clearBlizzardOnEnable auto re-wipe: it silently
+        -- ResetCurrentProfile()'d the user's native click-cast profile on every
+        -- enable. Clearing is now one-time, only when the "Clear Blizzard
+        -- Bindings" button is pressed (with a permanence warning in the dialog);
+        -- the stored flag is stripped in InitializeSavedVariables.
 
         -- Clear any existing Blizzard click cast config on our frames
         if SetUnitFrameClickCastConfig then
@@ -690,11 +687,10 @@ function CC:DisableBlizzardClickCasting()
             hooksecurefunc(ClickBindingFrame, "Show", function(self)
                 if CC.db and CC.db.enabled then
                     -- Version-safe: 12.x documents only GetMouseFoci (which is
-                    -- topmost-first); GetMouseFocus is legacy. This was the one
-                    -- unguarded call site left in the addon, and it sits inside a
-                    -- secure hook that runs every time Blizzard's click-cast panel
-                    -- opens -- so if the old global goes away it throws in there
-                    -- and our own "hide it over our frames" protection never runs.
+                    -- topmost-first); GetMouseFocus is legacy. This sits inside a secure hook
+                    -- that runs every time Blizzard's click-cast panel opens -- so if the old
+                    -- global goes away it throws in there and our own "hide it over our
+                    -- frames" protection never runs.
                     local mouseoverFrame
                     if GetMouseFoci then
                         mouseoverFrame = GetMouseFoci()[1]
@@ -1077,11 +1073,9 @@ function CC:SetupClickCastFramesGlobal()
     -- Re-register any frames that were already in ClickCastFrames.
     --
     -- Through EnsureRegistered, not RegisterFrame directly: the eligibility gate
-    -- lives in EnsureRegistered, so this loop used to register anything present
-    -- unconditionally. Anything an addon parked in the table before our
-    -- PLAYER_ENTERING_WORLD -- including a non-unit secure button, the exact
-    -- case the gate was written for after a toy button had its type1 replaced --
-    -- was adopted with no check at all.
+    -- lives in EnsureRegistered, and anything an addon parked in the table before
+    -- our PLAYER_ENTERING_WORLD -- including a non-unit secure button -- must pass
+    -- that gate.
     for frame, enabled in pairs(existingFrames) do
         if enabled then
             rawset(ClickCastFrames, frame, true)
@@ -1107,8 +1101,7 @@ end
 -- Scan for known third-party unit frame addons and register their frames
 function CC:ScanForThirdPartyFrames()
     if InCombatLockdown() then
-        -- Keyed: previously every blocked call started its own 1s retry chain,
-        -- so a long fight could leave several chains running in parallel.
+        -- Keyed so a long fight cannot leave several 1s retry chains in parallel.
         CC:DeferAfter("thirdPartyScanRetry", 1, function()
             CC:ScanForThirdPartyFrames()
         end)
@@ -1756,19 +1749,16 @@ function CC:StartDiagnosticTicker(frame)
         -- but the restricted environment no longer considers it the mouseoverbutton
         -- (some other frame's WrapScript OnEnter fired and took ownership)
         if not isSecureMouseover then
-            -- The latch suppresses only the LOG. It used to gate the repair
-            -- request too, and it is cleared only when the desync ends -- which
-            -- cannot happen while the desync persists -- so if that single
-            -- REPORT ONLY -- deliberately no repair request.
+            -- REPORT ONLY -- deliberately no repair request. The latch suppresses
+            -- only the LOG.
             --
-            -- This fires when dfIsSecureMouseover is falsy, which since the OnShow
-            -- wrap landed is almost always one of two benign things: a non-motion
-            -- enter (Blizzard skips the snippet, and OnShow now covers the case a
-            -- repair never could), or the state driver having legitimately cleared
-            -- a frame the cursor already swept off. A repair cannot fix either, and
-            -- asking for one cost a teardown of every registered frame -- which is
-            -- how this detector came to CAUSE the outage it was watching for. The
-            -- latch keeps it to one line per episode.
+            -- This fires when dfIsSecureMouseover is falsy, which is almost always
+            -- one of two benign things: a non-motion enter (Blizzard skips the
+            -- snippet, and the OnShow wrap covers the case a repair never could), or
+            -- the state driver having legitimately cleared a frame the cursor already
+            -- swept off. A repair cannot fix either, and asking for one costs a
+            -- teardown of every registered frame. The latch keeps it to one line per
+            -- episode.
             if not CC.diagDesyncReported then
                 CC.diagDesyncReported = true
                 DF:DebugError("CLICK", "MOUSEOVERBUTTON DESYNC on %s at tick %d! dfIsSecureMouseover=nil wrapEnter=%d wrapLeave=%d kbActive=%s",
@@ -1794,14 +1784,13 @@ function CC:StopDiagnosticTicker()
 end
 
 -- Bounded retry for the two ways hover-handler setup can fail without erroring
--- (no secure header, or WrapScript itself refusing). Both used to re-arm every
--- 2s forever with a log line per pass: across 40 raid frames that is ~20 lines a
--- second indefinitely, which buries the very diagnosis the log exists for.
+-- (no secure header, or WrapScript itself refusing). Unbounded re-arming logs
+-- a line per pass per frame, which buries the very diagnosis the log exists for.
 --
 -- Retry a few times, then give up ONCE, loudly. Giving up leaves
 -- dfKeyboardHandlersSetup unset, so a later organic trigger (zone-in
 -- registration, a repair) can still pick the frame up -- this bounds the noise,
--- it does not permanently abandon the frame the way the pre-4.9 code did.
+-- it does not permanently abandon the frame.
 --
 -- Returns true when a retry was scheduled, false when the attempt budget is
 -- spent (the caller should just return either way).
@@ -1845,14 +1834,12 @@ function CC:SetupSecureHandlers(frame)
     -- OnLeave only fires when truly leaving to the 3D world, not when hovering children.
     -- This allows us to safely clear bindings on OnLeave.
     
-    -- No secure header means no hover binds at all on this frame. This used to
-    -- fall straight through to the insecure hooks and still mark the frame as
-    -- set up, so the frame reported handlersSetup=true with enterCount=0 forever
-    -- (the "HOVER BUT NO KB BINDINGS / OnEnter DID NOT FIRE" signature) and no
-    -- retry was ever scheduled, because nothing errored. Treat it like the
-    -- WrapScript failure below: say so, and retry -- but bounded (see
+    -- No secure header means no hover binds at all on this frame. Treat it like
+    -- the WrapScript failure below: say so, and retry -- but bounded (see
     -- WRAP_RETRY_LIMIT), because an unbounded 2s re-arm across 40 raid frames is
-    -- a log flood, and the log is how these get diagnosed.
+    -- a log flood, and the log is how these get diagnosed. Falling through to the
+    -- insecure hooks while marking the frame set up leaves handlersSetup=true with
+    -- enterCount=0 forever and no retry, because nothing errored.
     if not (self.header and self.header.WrapScript) then
         if not self:ScheduleWrapRetry(frame, frameName, "no secure header") then return end
         self:CreateClickCastHeader()
@@ -2027,9 +2014,6 @@ function CC:SetupSecureHandlers(frame)
         -- OnShow/OnHide go through CreateSimpleWrapper instead, which has NO
         -- motion parameter -- they fire unconditionally. So this closes the gap
         -- in one frame, during combat, using only sanctioned secure calls.
-        -- Field-measured before this existed: ~1s of dead keys on a pinned boss
-        -- frame the moment it spawned (2026-07-27), recovering only when the
-        -- cursor moved off and back.
         --
         -- Guarded on IsUnderMouse so a frame merely being shown does not steal
         -- the hover, and on mouseoverbutton ~= self so a show while already
@@ -2067,8 +2051,7 @@ function CC:SetupSecureHandlers(frame)
 
         local wrapSuccess = pcall(function()
             -- Standard WrapScript - our bindings run in pre script (before other handlers)
-            -- Note: Previously tried post parameter for Clicked compatibility, but it broke
-            -- click casting entirely. Reverted 2025-01-20.
+            -- Do not use the post parameter: it breaks click casting entirely.
             self.header:WrapScript(frame, "OnEnter", onEnterSnippet)
             self.header:WrapScript(frame, "OnLeave", onLeaveSnippet)
             self.header:WrapScript(frame, "OnHide", onHideSnippet)
@@ -2076,11 +2059,11 @@ function CC:SetupSecureHandlers(frame)
         end)
 
         if not wrapSuccess then
-            -- WrapScript failed. This used to mark the frame as set up anyway,
-            -- which made the failure PERMANENT for the session — the guard at
-            -- the top of this function blocked every later attempt. Retry
-            -- instead (bounded): leave the flag unset so the retry re-runs the
-            -- full setup, hooks included, since we return before installing them.
+            -- WrapScript failed. Retry instead (bounded), and leave
+            -- dfKeyboardHandlersSetup unset so the retry re-runs the full setup, hooks
+            -- included, since we return before installing them. Marking the frame set
+            -- up here makes the failure PERMANENT for the session: the guard at the
+            -- top of this function blocks every later attempt.
             self:ScheduleWrapRetry(frame, frameName, "WrapScript failed")
             return
         end
@@ -2192,10 +2175,6 @@ function CC:SetupSecureHandlers(frame)
         -- did not. If OnEnter fired as well, the claim merely repeated work that was
         -- already going to happen -- harmless, but not a justification for carrying
         -- the path. Logged at WARN so it stands out in a capture.
-        --
-        -- This measurement is what retired the state-driver reclaim: over 46 minutes
-        -- and five pulls it produced six redundant claims and zero load-bearing
-        -- ones, while OnShow produced five load-bearing and none redundant.
         local showClaimedNow = showClaimed > prevShowClaimed
         if showClaimedNow and hasKeyboardBindings then
             local via = "OnShow"
@@ -2229,9 +2208,8 @@ function CC:SetupSecureHandlers(frame)
                 -- Reported, not repaired. Blizzard runs a wrapped OnEnter snippet
                 -- only when the enter came from cursor MOTION, so this is expected
                 -- client behaviour rather than a fault, and the OnShow wrap is what
-                -- actually covers it. The repair request that used to live here
-                -- re-wrapped every registered frame for a condition it could not
-                -- affect.
+                -- actually covers it. A repair request here would re-wrap every
+                -- registered frame for a condition it cannot affect.
                 DF:DebugWarn("CLICK", "  WrapScript OnEnter DID NOT FIRE (enterCount=%d leaveCount=%d)", wrapEnterCount, wrapLeaveCount)
                 DF:DebugWarn("CLICK", "  frame visible=%s shown=%s mouseOver=%s combat=%s",
                     tostring(self:IsVisible()), tostring(self:IsShown()),
@@ -2338,8 +2316,7 @@ function CC:SetupSecureHandlers(frame)
             -- frame's claim, on the mouseoverstate driver above, or on the
             -- backstop below. Without this field the log cannot tell a
             -- show-claim from a motion-enter after the fact, and the two have
-            -- completely different release paths — a 2026-08-01 user log was
-            -- misread for exactly that reason.
+            -- completely different release paths.
             local showClaimed = self:GetAttribute("dfShowClaimed") or 0
             DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
@@ -2574,7 +2551,6 @@ function CC:ProfileHasKeyboardBindings()
     return result
 end
 
--- Legacy alias for compatibility
 -- Refresh binding attributes on all registered frames
 -- Call this when bindings change
 function CC:RefreshKeyboardBindings()
@@ -2592,14 +2568,12 @@ function CC:RefreshKeyboardBindings()
         end
     end
     
-    -- Also sweep DF's own frames. The loop that used to be here read
-    -- `DF.unitFrames`, a table nothing in the addon assigns, so it silently did
-    -- nothing; DF:IterateAllFrames is the real accessor. Mostly redundant with
-    -- the registeredFrames pass above -- RegisterAllFrames walks the party,
-    -- separated-raid, flat-raid and pet headers -- but NOT redundant in arena:
-    -- it has no arena-header walk, while IterateAllFrames special-cases arena
-    -- (party/raid headers are hidden there). Idempotent and off the hot path,
-    -- so the overlap costs one extra pass over <=40 frames when bindings change.
+    -- Also sweep DF's own frames through DF:IterateAllFrames, the real accessor.
+    -- Mostly redundant with the registeredFrames pass above -- RegisterAllFrames
+    -- walks the party, separated-raid, flat-raid and pet headers -- but NOT
+    -- redundant in arena: it has no arena-header walk, while IterateAllFrames
+    -- special-cases arena (party/raid headers are hidden there). Idempotent and
+    -- off the hot path, so the overlap costs one extra pass over <=40 frames.
     if DF and DF.IterateAllFrames then
         DF:IterateAllFrames(function(frame)
             if frame and frame.dfKeyboardHandlersSetup then
@@ -2842,12 +2816,10 @@ function CC:RunBindingRepair(reason, force)
 
     -- 2b. Re-wrap the secure OnEnter/OnLeave/OnHide handlers on every frame
     --     that has them. A wrap can DIE mid-session while the frame's insecure
-    --     hooks keep firing (field case 2026-07-20: after a player-housing
-    --     session the party buttons' wraps stopped executing — enterCount
-    --     stuck at 0 — so hover keybinds fell through to the action bars, and
-    --     the old repair rebuilt snippets but never re-wrapped, so it could
-    --     detect this exact state yet not fix it). WrapScript stacks, so
-    --     RewrapSecureHandlers unwraps first; both directions are pcall'd.
+    --     hooks keep firing (enterCount stuck at 0, hover keybinds falling
+    --     through to the action bars), and rebuilding snippets alone cannot fix
+    --     that. WrapScript stacks, so RewrapSecureHandlers unwraps first; both
+    --     directions are pcall'd.
     local rewrapped = 0
     local rewrapSeen = {}
     local function rewrap(frame)
@@ -2902,9 +2874,8 @@ function CC:UnregisterFrame(frame)
     -- unregistered while still only PENDING (created, no unit yet, then hidden
     -- before its unit arrived) or while sitting in the combat-deferred "register"
     -- set. Both must go before the early returns below, because a frame in either
-    -- state is NOT in registeredFrames -- so this function used to return without
-    -- touching them, and the queued registration then took over, one combat
-    -- later, a frame the caller had just explicitly opted out of.
+    -- state is NOT in registeredFrames -- otherwise the queued registration
+    -- re-adopts, one combat later, a frame the caller explicitly opted out of.
     if self.pendingRegistration then self.pendingRegistration[frame] = nil end
     if self.deferred and type(self.deferred.register) == "table" then
         self.deferred.register[frame] = nil

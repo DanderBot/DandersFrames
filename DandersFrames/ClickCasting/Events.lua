@@ -37,11 +37,10 @@ function CC:RegisterEvents()
     -- profile check (see CC:ResolveColdStartProfile)
     eventFrame:RegisterEvent("SPELLS_CHANGED")
 
-    -- Player housing can invalidate secure wraps on unit frames
-    -- (field case 2026-07-20: hover keybinds dead after a housing session,
-    -- wraps no longer executing). The repair re-wraps, so run it on every
-    -- editor-mode change. pcall'd: the event only exists on clients with
-    -- housing.
+    -- Player housing can invalidate secure wraps on unit frames (hover keybinds
+    -- go dead after a housing session, wraps no longer executing). The repair
+    -- re-wraps, so run it on every editor-mode change. pcall'd: the event only
+    -- exists on clients with housing.
     pcall(function() eventFrame:RegisterEvent("HOUSE_EDITOR_MODE_CHANGED") end)
     
     eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -96,12 +95,9 @@ function CC:RegisterEvents()
         elseif event == "PLAYER_ENTERING_WORLD" then
             CC:ScheduleZoneSettle()
         elseif event == "GROUP_ROSTER_UPDATE" then
-            -- Roster churn creates and retires frames -- including third-party
-            -- ones, whose only route in is the ClickCastFrames table that cannot
-            -- report a retry (see ReconcileClickCastFrames). This module used to
-            -- register no roster event at all and relied entirely on the
-            -- SecureUnitButton_OnLoad hook plus a login-only scan, which is how a
-            -- party->raid change could leave frames dead until a /reload.
+            -- Roster churn creates and retires frames -- including third-party ones, whose
+            -- only route in is the ClickCastFrames table that cannot report a retry
+            -- (see ReconcileClickCastFrames).
             if InCombatLockdown() then
                 CC:Defer("bindingRefresh")
             else
@@ -152,9 +148,9 @@ end
 function CC:ScheduleZoneSettle()
     CC:DeferAfter("zoneSettle", 0.5, function()
                 -- NOTE (12.1 lane): the retail original also called
-                -- CC:MigrateBindingsToRootSpells() here. That one-time rewrite was
-                -- REMOVED on this lane (ClickCasting/Bindings.lua:300), so the call
-                -- is deliberately dropped rather than ported -- it would be a nil
+                -- CC:MigrateBindingsToRootSpells() here. That one-time rewrite was REMOVED
+                -- on this lane (see the "(Removed)" note in ClickCasting/Bindings.lua), so
+                -- the call is deliberately dropped rather than ported -- it would be a nil
                 -- call on every zone-in.
                 CC:RegisterAllFrames()
                 -- Register Blizzard frames if any binding needs them
@@ -198,15 +194,9 @@ end
 -- DEFERRED WORK QUEUE
 -- ============================================================
 -- Click casting cannot touch secure state in combat, so work blocked by
--- combat lockdown has to be replayed afterwards. This used to be ten
--- separate self.needsX / self.pendingX flags, each with its own set-site and
--- its own hand-written drain line in OnCombatEnd. Adding a deferral meant
--- remembering to add a matching drain; forgetting silently dropped the work
--- for the rest of the session (that is how the arena cold-start bug and the
--- keyboard-refresh drop both happened).
---
--- Now there is one queue. Register the job here, call CC:Defer("job"), and
--- the drain is automatic and ordered. Three job kinds:
+-- combat lockdown has to be replayed afterwards. One queue handles all of it:
+-- register the job here, call CC:Defer("job"), and the drain is automatic and
+-- ordered. Three job kinds:
 --   flag  - "do this thing later", no payload, dedupes to a single run
 --   value - carries one value (a profile name, a repair reason); policy
 --           "first" keeps the earliest, "last" keeps the most recent
@@ -469,8 +459,7 @@ function CC:DrainDeferred(onlyJob)
         end
     end
 
-    -- Surface what recovered at combat end / init. Previously silent, so a log
-    -- showed "queued for combat end" with no confirmation the work ever ran.
+    -- Surface what recovered at combat end / init.
     if ran then
         DF:Debug("CLICK", "DrainDeferred ran: %s", ran)
     end
