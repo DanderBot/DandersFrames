@@ -711,6 +711,24 @@ do
     local savedBR = CS.BuildReport
     CS.BuildReport = function() return rep(90) end
     eq(CS:CacheKey({}), S(rep(90)), "cachekey: a fresh index keys on the live report")
+
+    -- ☠ AFTER A PARTY/RAID SWITCH the index is stale for the new mode, yet the
+    -- ledger's retained build for that mode may be showing exactly the right
+    -- list. The key used to read "!stale" there on every visit, so every visit
+    -- after a switch rebuilt (and leaked) the page. An index that can be put back
+    -- together from the pages' retained builds is, and the key is the report's.
+    stale = true
+    local assembled = 0
+    DF.Search.TryReuseRegistry = function() assembled = assembled + 1; stale = false; return true end
+    eq(CS:CacheKey({}), S(rep(90)),
+       "cachekey: a stale index that can be re-assembled from retained builds keys on the report, not '!stale'")
+    eq(assembled, 1, "cachekey: ...by re-assembling it")
+    eq(started, 0, "cachekey: ...and still never starting an index build")
+    stale = true
+    DF.Search.TryReuseRegistry = function() return false end
+    eq(CS:CacheKey({}), "!stale", "cachekey: an index that cannot be re-assembled still keys as stale")
+    DF.Search.TryReuseRegistry = nil
+    stale = false
     CS.BuildReport = savedBR
 
     DF.Search, InCombatLockdown = savedSearch, savedICL

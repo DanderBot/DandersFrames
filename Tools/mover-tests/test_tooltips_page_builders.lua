@@ -222,9 +222,10 @@ do
 end
 
 -- ============================================================
--- 2. THE ANCHOR GATE -- classic still rebuilds, the pane must not
--- Picking an Anchor To re-gates the three controls under it. Classic has always
--- paid for that with a page REBUILD and still does. A rebuild inside a pane
+-- 2. THE ANCHOR GATE -- a state pass in both layouts
+-- Picking an Anchor To re-gates the three controls under it. Classic used to pay
+-- for that with a page REBUILD, which leaked the page per pick; it re-lays the
+-- page now. A rebuild inside a pane
 -- retires the row the user is clicking through and the helper's prologue closes
 -- the panel on the way in, so the pane runs the state passes instead -- which is
 -- what the rebuild was buying.
@@ -238,8 +239,10 @@ do
               "anchor gate: ...branching on which layout the group was built for")
         check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
               "anchor gate: ...the pane re-runs the state passes")
-        check(gate:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-              "anchor gate: ...and classic still rebuilds, exactly as it always did")
+        check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
+              "anchor gate: ...and classic re-lays the page")
+        check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
+              "anchor gate: ...without rebuilding it (the rebuild leaked the page)")
     end
 
     -- No builder rebuilds the page directly any more, and every popout mount

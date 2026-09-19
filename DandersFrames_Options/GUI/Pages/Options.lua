@@ -173,7 +173,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         label = L["Copy"],
                         onClick = function()
                             DF:CopySectionSettings(prefixes, mode)
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            -- It ended in FullProfileRefresh, which already rebuilt this page.
+                            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },
                     { label = L["Cancel"] },
@@ -225,7 +226,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                                 onClick = function()
                                     DF.db.linkedSections[pageId] = true
                                     DF:CopySectionSettings(prefixes, mode)
-                                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                                    -- It ended in FullProfileRefresh, which already rebuilt this page.
+                                    if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                                 end,
                             },
                             { label = L["Cancel"] },
@@ -279,7 +281,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         label = L["Reset"],
                         onClick = function()
                             DF:ResetSectionSettings(prefixes, mode)
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            -- It ended in FullProfileRefresh, which already rebuilt this page.
+                            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },
                     { label = L["Cancel"] },
@@ -815,8 +818,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ☠ WHAT AN "ANCHOR TO" CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
         -- LAYOUTS. Picking an anchor re-gates the three controls under it (the
         -- Anchor position greys under Game Default; the two offsets grey unless
-        -- the tooltip is pinned to the frame or icon). Classic has always paid
-        -- for that with a whole page REBUILD, and it keeps doing exactly that.
+        -- the tooltip is pinned to the frame or icon). Classic used to pay for
+        -- that with a whole page REBUILD (now a state pass -- see below).
         --
         -- The pane must not. A rebuild retires every widget on the page including
         -- the row the user is clicking through, and the helper's own prologue
@@ -825,11 +828,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- is the hideOn/disableOn passes, and that is precisely what the pane's
         -- own refresh does: ReflowPane re-runs the group's child states and
         -- re-sizes the panel round it, then the page's own RefreshStates runs.
+        --
+        -- ★ CLASSIC NO LONGER REBUILDS EITHER. What the rebuild bought there is the
+        -- same state pass, over a page whose three controls carry their gates as
+        -- disableOn -- and the rebuild leaked the whole page on every pick (see
+        -- RelayoutCurrentPage in GUI/Panel.lua).
         local function AnchorGateRefresh(tools2)
             if tools2.popout then
                 tools2.refreshStates()
             else
-                GUI:RefreshCurrentPage()
+                GUI.RelayoutCurrentPage()
             end
         end
 
@@ -2276,13 +2284,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the helper's own prologue closes every open panel on the way in. What
         -- the pane's own refresh does instead is precisely the two passes:
         -- ReflowPane re-runs the group's child states and re-sizes the panel
-        -- round it, then the page's RefreshStates runs. Classic keeps the
-        -- rebuild, unchanged.
+        -- round it, then the page's RefreshStates runs. Classic used to keep
+        -- the rebuild (now a state pass -- see below).
+        --
+        -- ★ CLASSIC NO LONGER REBUILDS EITHER: every sibling these gate carries
+        -- its gate as hideOn/disableOn, so the page's state pass is all the
+        -- rebuild bought -- and the rebuild leaked the whole page per click.
         local function GateRefresh(tools2)
             if tools2.popout then
                 tools2.refreshStates()
             else
-                GUI:RefreshCurrentPage()
+                GUI.RelayoutCurrentPage()
             end
         end
 
@@ -4720,7 +4732,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local borderTools = {
                 group  = appearanceGroup,
                 parent = self.child,
-                refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
+                -- A state pass, not a rebuild: every border control carries its
+                -- gate as hideOn/disableOn (GUI:CreateBorderControls).
+                refreshStates = function() GUI.RelayoutCurrentPage() end,
                 shadowDisableWhen = BorderOff,
             }
             BuildBorderGroup(borderTools)

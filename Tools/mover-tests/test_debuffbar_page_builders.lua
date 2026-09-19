@@ -317,10 +317,11 @@ do
 end
 
 -- ============================================================
--- 3. THE DURATION FORMAT GATE -- classic still rebuilds, the pane must not
+-- 3. THE DURATION FORMAT GATE -- a state pass in BOTH layouts
 -- Picking a format re-gates the two Hide Above controls (neither composes with
--- Percent). Classic has always paid for that with a page REBUILD and still does.
--- A rebuild inside a pane retires the row the user is clicking through.
+-- Percent). Classic used to pay for that with a page REBUILD, which leaked the
+-- whole page into GUI._trashFrame per pick; it re-lays the page now. A rebuild
+-- inside a pane retires the row the user is clicking through.
 -- ============================================================
 print("-- Debuff Bar page: the duration format gate")
 do
@@ -331,14 +332,16 @@ do
               "format gate: ...branching on which layout the group was built for")
         check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
               "format gate: ...the pane re-runs the state passes")
-        check(gate:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-              "format gate: ...and classic still rebuilds, exactly as it always did")
+        check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
+              "format gate: ...and classic re-lays the page")
+        check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
+              "format gate: ...without rebuilding it (the rebuild leaked the page)")
     end
 
-    -- ...and that is the ONLY page rebuild left anywhere on this page.
+    -- ...and no page rebuild is left anywhere on this page.
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage") do rebuilds = rebuilds + 1 end
-    eq(rebuilds, 1, "format gate: exactly one page rebuild left on the page, and it is classic's")
+    eq(rebuilds, 0, "format gate: no page rebuild left on the page")
 
     for _, b in ipairs({ "BuildDebuffVisibilityGroup", "BuildDebuffFilterGroup",
                          "BuildDebuffBlacklistGroup", "BuildDebuffOrderGroup",
