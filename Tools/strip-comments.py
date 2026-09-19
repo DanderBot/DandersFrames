@@ -172,7 +172,10 @@ def run_comments_only(ref):
         new = open(path, "rb").read()
         checked += 1
         compile_or_die(dump, new, ("@" + rel).encode("utf-8"), rel)
-        if chunks(old.stdout.decode("utf-8")) != chunks(new.decode("utf-8")):
+        # git hands back LF, a Windows checkout has CRLF: without this a multi-line
+        # string constant reads as a code change. Lua itself folds both to \n.
+        lf = lambda b: b.decode("utf-8").replace("\r\n", "\n")
+        if chunks(lf(old.stdout)) != chunks(lf(new)):
             bad += 1
             print("CODE CHANGED: %s" % rel)
     print("strip-comments: %d changed files checked against %s, %d with code changes" % (checked, ref, bad))
