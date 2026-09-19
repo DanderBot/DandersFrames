@@ -614,9 +614,8 @@ function Engine:PIH_SetGateEnabled(on)
     -- run: "never hide" and "resume from the cooldown" both mean SHOW, and there is nothing
     -- to show. Without this, ticking the cooldown option while disabled lit the helper up.
     if not pihEnabled then return pihGateEnabled end
-    -- ⚠ BOTH ARMS GO THROUGH pihShouldShow NOW. Switching the cooldown gate off no longer
-    -- means "open" outright -- "combat only" may still be holding it shut, and forcing it
-    -- open here would have ignored that setting entirely.
+    -- ⚠ BOTH ARMS GO THROUGH pihShouldShow. Switching the cooldown gate off must not mean
+    -- "open" outright -- "combat only" may still be holding it shut.
     if not pihGateEnabled then
         pihManual = nil
         pihSet(not pihShouldShow())
@@ -741,11 +740,8 @@ function Engine:PIH_ApplySaved()
     -- players and nobody else", so an empty one would silence the helper completely -- for a
     -- user who had added two names and removed them again, which is exactly the moment they
     -- would expect it to go back to normal rather than break.
-    -- ⚠ AND `playersOn` DECIDES WHETHER IT IS PUSHED AT ALL (2026-09-11). The list used to be
-    -- its own switch -- names meant narrowing, none meant everyone -- which made "stop
-    -- narrowing tonight" and "throw the names away" the same action. Krathe: "I might want to
-    -- add my raid team to the list but turn off showing only for those players in a pug group
-    -- without having to add/remove them all each time."
+    -- ⚠ AND `playersOn` DECIDES WHETHER IT IS PUSHED AT ALL. The names stay stored while the
+    -- narrowing is switched off, so "stop narrowing tonight" is not "throw the names away".
     -- ⚠ ABSENT MEANS ON, so every profile written before today loads exactly as it did.
     -- ⚠ THE PANEL'S P.PIH_Apply MAKES THE SAME DECISION THE SAME WAY. These are the two halves
     -- of one push (login and live edit) and they have drifted apart once already -- the live
@@ -947,15 +943,10 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
 end)
 
 -- === DIAGNOSTIC COMMAND ===
--- WHAT SURVIVED, AND WHY. This began as the feature's entire control surface -- twelve
--- subcommands driving a throwaway filter, a settable gate spell, role lists, sound and a
--- rebuild probe. Every one of those is either in the settings panel now or was scaffolding for
--- a feature that did not exist yet, so it went with the rest of the test rig.
---
--- Three states stayed, and they are not scaffolding: forcing the gate open or dark is the only
--- way to watch the helper's behaviour without sitting out a real Power Infusion cooldown -- and
--- Power Infusion needs a friendly target, so without this EVERY check of the gate would need a
--- second player in the group.
+-- WHAT SURVIVED, AND WHY. Three states stayed, and they are not scaffolding: forcing the gate
+-- open or dark is the only way to watch the helper's behaviour without sitting out a real Power
+-- Infusion cooldown -- and Power Infusion needs a friendly target, so without this EVERY check
+-- of the gate would need a second player in the group.
 --
 -- Registered through DF:RegisterDebugSlash rather than as a loose SLASH_ global, so it lists
 -- itself in the debug registry beside every other diagnostic instead of being reachable only by
@@ -964,9 +955,8 @@ end)
 -- THE COMMAND IS "/df debug pi". "/dfpi" below is the REGISTRY SPELLING, not a working bind:
 -- RegisterDebugSlash routes a /df-prefixed alias to DebugSlashBySub and deliberately creates no
 -- SLASH_ global, because the addon retired the one-word /dfsomething forms -- they filled the
--- global slash namespace to document a spelling nobody needed twice. Same shape as /dfarena and
--- /dfpinned. During development this WAS a bare /dfpi; anyone whose fingers remember that needs
--- the long form now.
+-- global slash namespace to document a spelling nobody needed twice. Same shape as /dfarena
+-- and /dfpinned.
 DF:RegisterDebugSlash("DFPI", "Power Infusion Helper: force the gate open or dark, or show its state", false, "/dfpi")
 SlashCmdList["DFPI"] = function(msg)
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()

@@ -3,13 +3,11 @@ local addonName, DF = ...
 -- ============================================================
 -- AURA BLACKLIST CONFIG  —  DEBUFFS ONLY (by design)
 --
--- WHERE THE UI WENT (this note moved here from AuraBlacklist/Options.lua, which is
--- deleted): the debuff blacklist now lives inside the Filter Designer,
--- FilterRegistry/Options.lua -> "Debuffs > Blacklist", giving one home for all
--- per-spell aura control. ONLY the old standalone Options page was removed. This
--- backend is unchanged (DF.AuraBlacklist.DebuffSpells / .AlternateSpellIDs /
--- .BuildExcludeMap, consumed by Features/Auras.lua applyDebuffBlacklist) and stored
--- db.debuffBlacklist data carries over.
+-- WHERE THE UI IS: the debuff blacklist lives inside the Filter Designer,
+-- DandersFrames_Options/FilterRegistry/UI/Options.lua -> "Debuffs > Blacklist", giving
+-- one home for all per-spell aura control. This backend is unchanged
+-- (DF.AuraBlacklist.DebuffSpells / .AlternateSpellIDs / .BuildExcludeMap, consumed by
+-- Features/Auras.lua applyDebuffBlacklist) and stored db.debuffBlacklist data carries over.
 --
 -- DF is whitelist-by-design for BUFFS: the Filter Designer / Aura Filters let the
 -- user opt IN to exactly the buffs they want to see, so a buff "blacklist" is
@@ -52,12 +50,8 @@ DF.AuraBlacklist.DebuffSpells = {
     -- Mythic+ keystone scaling debuff. NeverSecret (confirmed via /al secretcensus),
     -- so it's hideable. icon omitted → resolved live.
     --
-    -- ⚠ Hidden by default, like every other entry here (PR #228). It used to be the
-    -- one opt-in exception, on the grounds that it is informative as well as noisy —
-    -- but it sits on every player for the whole dungeon, so it tells you nothing you
-    -- cannot read off the keystone, and carving out an exception made the list read
-    -- as half-enabled. If that call is ever revisited, PartyDefaults.debuffBlacklist
-    -- is the other half of it.
+    -- ⚠ Hidden by default, like every other entry here (PR #228). If that call is ever
+    -- revisited, PartyDefaults.debuffBlacklist is the other half of it.
     { spellId = 206151, display = "Challenger's Burden" },
 }
 
