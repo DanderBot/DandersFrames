@@ -247,11 +247,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== VISIBILITY (a 280 box in column 1 in classic, the Content band's
         -- first row) =====
-        -- Show Buffs is the master switch for this whole page — every other group
-        -- greys out under it — so it leads, above even the filters. It used to sit
-        -- fourth, below Filters / Order & Limits / Deduplication, where the one
-        -- control that decides whether the bar exists at all was the hardest thing
-        -- on the page to find.
+        -- Show Buffs is the master switch for this whole page — most other groups grey
+        -- out under it (BuffsOffRow names the two that do not) — so it leads, above
+        -- even the filters. It used to sit fourth, below Filters / Order & Limits /
+        -- Deduplication, where the one control that decides whether the bar exists at
+        -- all was the hardest thing on the page to find.
         --
         -- Named for what the box DOES, not "Settings": everything on the page is a
         -- setting, and a generic label is worst exactly where this one now sits.
@@ -464,7 +464,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 BuffFilterChanged()
             end), 30)
             -- ☠ `.tooltip` IS THE BODY, not the title. ResolveTooltipSpec
-            -- (DandersFrames/GUI/Widgets.lua) turns a string .tooltip into
+            -- (DandersUI/Widgets.lua) turns a string .tooltip into
             -- { title = the widget's own label, lines = { it } } -- and it never reads
             -- .tooltipDesc at all. Setting .tooltip to the LABEL therefore rendered the
             -- label twice and threw the explanation away, on every one of these.
@@ -1848,9 +1848,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== VISIBILITY (a 280 box in column 1 in classic, the Content band's
         -- first row) =====
         -- Leads the page for the same reason it does on Buff Bar: Show Debuffs is the
-        -- master switch everything else greys out under, so it must not be the fourth
-        -- box down. Same name as its twin — the two pages are read as a pair, and a
-        -- box holding the same two controls must not be called two different things.
+        -- master switch most groups grey out under (see DebuffsOffRow), so it must not
+        -- be the fourth box down. Same name as its twin — the two pages are read as a
+        -- pair, and a box holding the same two controls must not have two names.
         --
         -- ☠ ONE CONTROL BEHIND THE TICK, AND IT IS STILL A ROW RATHER THAN TWO
         -- CONTROL ROWS -- the Buff Bar's reasoning, verbatim: the row is where the
@@ -2020,8 +2020,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ A CAUTION BANNER, CONDITIONAL — not a permanent grey caption. It was a
             -- banner on the old shared Filters page (catCaution, gated on this same
             -- switch) and became a static label when the debuff half moved here in
-            -- cf70ac00; that page still carries a "see catCaution" comment pointing at
-            -- the symbol the move deleted. Two things were lost with it:
+            -- cf70ac00. Two things were lost with it:
             --   * it was CONDITIONAL. All Debuffs is on by default and is the correct
             --     setting, so a permanent caption warns the overwhelming majority of
             --     users about a state they are not in -- and the reader who IS in it

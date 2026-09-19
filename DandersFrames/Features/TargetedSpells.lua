@@ -1273,8 +1273,8 @@ local function PositionPersonalIcons()
     -- invisible ones. Hiding costs nothing to remove: an icon not aimed at you is
     -- already alpha 0, so an "uncapped" row is exactly as clean on screen and can
     -- no longer suppress the cast that matters.
-    -- ⚠ Max Icons still bounds the icon POOL in ShowPersonalTargetedSpellIcon; it
-    -- just no longer decides what renders. Fixing the label is a separate call.
+    -- ⚠ Max Icons no longer decides what renders, and does NOT bound the icon pool
+    -- (ShowPersonalTargetedSpellIcon adds icons past it). Label fix: a separate call.
     wipe(personalOrderBuf)
     for _, iconIndex in pairs(personalActiveSpells) do
         local icon = personalIcons[iconIndex]
@@ -2961,8 +2961,8 @@ local function TargetedList_OnInterruptibilityChange(casterUnit, isInterruptible
     -- Commit #5: apply to the bar via SetVertexColorFromBoolean.
 end
 
--- ☠ FORWARD DECLARATIONS -- both are defined MUCH further down (casterToBar at ~3183,
--- TargetedList_ApplyBarContent at ~3682) and are used by the handler immediately below.
+-- ☠ FORWARD DECLARATIONS -- both are defined MUCH further down (casterToBar and
+-- TargetedList_ApplyBarContent) and are used by the handler immediately below.
 -- Without these the handler compiled them as nil GLOBALS: `casterToBar and
 -- casterToBar[unit]` silently yielded nil, so `if bar then` never ran and mid-cast
 -- re-sync did nothing on every pushback, channel extension and empower stage. It parses

@@ -144,7 +144,7 @@ function CC:CreateClickCastUI(parent)
     -- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning opens
     -- a popup, and the write happens in that popup's confirm callback, not on the click.
     -- The box stays ticked optimistically while the popup is up, and the popup's CANCEL
-    -- path unchecks it (Dialogs.lua:762, 779, 871, 881, 1024) -- so the click must leave
+    -- path unchecks it (both popups, in Dialogs.lua) -- so the click must leave
     -- the visual alone. An "abort and revert" hook is exactly wrong for this shape: it
     -- would put the box back before the user has answered, and confirming would then
     -- leave click-casting enabled with the box unticked.

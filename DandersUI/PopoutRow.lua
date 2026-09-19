@@ -1000,9 +1000,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- border, the outline that should have sat on it, and the plate's edge below
     -- both. Reported as "the bottom bar is still there only when selected".
     --
-    -- ⚠ Read from `opts`, not from row._compact, because that field is set some
-    -- 150 lines below this one. A term read above the line that assigns it is
-    -- nil, and this file has already shipped that mistake once.
+    -- ⚠ Read from `opts`, not from row._compact, because that field is set later
+    -- in this function. A term read above the line that assigns it is nil, and
+    -- this file has already shipped that mistake once.
     row.popoutInset = { 0, 0, 0, opts.compact and M.gapCompact or M.gap }
 
     row._label   = opts.label or ""
@@ -2311,7 +2311,7 @@ function UI:CreatePopoutRow(parent, opts)
         --
         -- ⚠ THE SELF GOES IN. The kit's own factories alias their private
         -- repaints onto `refreshValue` and at least one of them USES its self
-        -- (the checkbox's is `function(self) self:Refresh() end`), so a bare
+        -- (the anchor grid's is `function(self) self:Refresh() end`), so a bare
         -- call would error on the day this row hoists one -- the same fallback
         -- chain ControlRow.lua spells out at its own RefreshValue.
         for _, h in ipairs(hoists or {}) do

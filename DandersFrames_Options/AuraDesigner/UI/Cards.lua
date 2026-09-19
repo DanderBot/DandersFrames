@@ -215,7 +215,7 @@ local function pihSeedRecords()
     return out
 end
 
--- The same set as flat ids, plus the racials, which is what the seeder wants.
+-- The same set as flat ids, which is what the seeder wants.
 -- ☠ RACIALS ARE NOT SEEDED HERE ANY MORE. They were, and it made the cooldown list mean
 -- two things at once: "this player is bursting" and "this player pressed something that makes the
 -- burst bigger". A racial alone is not a burst window -- Berserking with nothing behind it is not
@@ -227,17 +227,16 @@ local function pihSeedIDs()
     return out
 end
 
--- The three signals, in the order they read on the panel.
+-- The two signals, in the order they read on the panel.
 --
 -- ⚠ `surface` is the DEFAULT ONLY. The surface a signal actually occupies is wherever its
 -- mark is found, so moving one (3b's dropdowns) needs no stored field and no conversion of
 -- anyone's saved settings -- the effect moves and the mark moves with it.
 --
--- ☠ BURST AND STRONG SHARE ONE RECORD, because they share one spell list on purpose: trimming
--- a spell should trim it for both. A record holds one effect per surface, so those two cannot
--- merely CLASH on a surface -- the second would overwrite the first and a signal would vanish.
--- pihCreateSignal refuses that rather than letting it happen quietly, and the surface
--- dropdown resolves it by SWAPPING the two signals (see P.PIH_SetSurface).
+-- ☠ A RECORD HOLDS ONE EFFECT PER SURFACE, so two signals on one record cannot merely CLASH
+-- on a surface -- the second would overwrite the first and a signal would vanish.
+-- pihCreateSignal refuses that rather than letting it happen quietly. (Burst and the retired
+-- Strong signal shared a record; the surface dropdown that SWAPPED them is gone too.)
 -- ☠ TWO SIGNALS, AND THE THIRD WAS RETIRED ON PURPOSE. "Big cooldown with a trinket or
 -- potion" was the only signal that judged two things at once, which made it the only one that
 -- could not be an icon, the only one carrying a condition chain, and the only one that could
@@ -343,8 +342,6 @@ local function pihEnsureFilter(name, presetKeys, extraIDs, wipeFirst)
     -- ☠ SEED ONLY WHAT WE JUST BUILT. Re-seeding an existing list on every create would undo
     -- both kinds of trimming the user is entitled to: the class ticks, and any hand edit made
     -- on the Filters page. A list that quietly refills itself is not a list anyone can own.
-    -- (The amplifier list passes wipeFirst and so is always rebuilt -- correctly, because its
-    -- contents ARE the two amplifier ticks and nothing else.)
     if (not existing) or wipeFirst then
         for _, catKey in ipairs(presetKeys or {}) do
             local recs = R.ByCategory and R.ByCategory[catKey]
@@ -453,9 +450,9 @@ end
 -- ⚠ ORDERED BY SURFACE, not by pairs(). The pool walk is hash order, so "the first hit" was
 -- previously whichever the iterator happened to reach last -- harmless when a signal had one,
 -- and a source of flicker the moment it has three.
--- ☠ ITS OWN TABLE RATHER THAN PIH_SURFACE_ORDER, and not for tidiness: that local is declared
--- ~400 lines BELOW here, so naming it would compile as a nil GLOBAL read -- the exact
--- "declared below its first caller" trap UnitExemptFromHelpfulGate documents in this file.
+-- ☠ ITS OWN TABLE, and not for tidiness: PIH_SURFACE_ORDER (since removed) was declared far
+-- BELOW here, so naming it would have compiled as a nil GLOBAL read -- the "declared below
+-- its first caller" trap UnitExemptFromHelpfulGate documents in Frames/AuraContainer.lua.
 -- Kept in the same order as the menu, and it only has to be self-consistent: this decides
 -- which hit is called primary, not what anything renders.
 PIH_K.RANK  = {
@@ -523,21 +520,21 @@ local function pihFound()
 end
 
 -- ─────────────────────────────────────────────────────────────
--- THE COOLDOWN-ICON GROUP -- RETIRED (schema 5, 2026-09-09)
+-- THE COOLDOWN-ICON GROUP -- RETIRED (schema 5, 2026-09-09), REBUILT IN P.PIH_AddIconGroup
 -- ─────────────────────────────────────────────────────────────
--- ☠☠ IT SHIPPED, IT GOT STUCK, AND THE TWO FINDERS BELOW ARE ALL THAT IS LEFT OF IT.
+-- ☠☠ IT SHIPPED, IT GOT STUCK, AND IT WAS RETIRED -- THIS IS THE RETIREMENT NOTE. The group
+-- has since come back on purpose: see the note above P.PIH_AddIconGroup for what changed.
 -- The helper used to be able to draw a Filter Group of live cooldown icons, ticked on from
 -- a row buried under "Classes and Cooldowns". Krathe, 2026-09-09: "I have stuck PI Helper
 -- Cooldown - Icons on my AD despite that not even being an option now for PI helper."
--- ⚠ AND HE WAS RIGHT ABOUT THE SCOPE, WHICH IS WHY IT IS NOT COMING BACK. The helper's
--- question is "is this player worth infusing", not "which cooldown did they press" -- a
--- board of per-spell icons answers the second question at the price of the first. The
+-- ⚠ AND HE WAS RIGHT ABOUT THE SCOPE, WHICH IS WHY IT WAS NOT MEANT TO COME BACK. The
+-- helper's question is "is this player worth infusing", not "which cooldown did they press"
+-- -- a board of per-spell icons answers the second question at the price of the first. The
 -- effects a user adds now are the AD's own: border, health bar, background, name/health
--- text, square, bar, and an Icon that shows POWER INFUSION's artwork rather than the
--- trigger's.
+-- text, square, bar, and an Icon showing POWER INFUSION's artwork or the trigger's own.
 -- ⚠ THE FINDERS SURVIVE THE FEATURE ON PURPOSE. pihSweep deletes any group a shipped
--- build left behind, and PIH_Remove sweeps again as a belt-and-braces -- both need to be
--- able to FIND one, and a profile that has never been swept still has one to find.
+-- build left behind and needs to be able to FIND one, and a profile that has never been
+-- swept still has one to find.
 --
 -- The original design note, kept because it is the argument that has to be re-made if
 -- anyone proposes this again:
@@ -659,10 +656,10 @@ function S.PIH_PreviewPool()
     return out
 end
 
--- ☠ THE ICON GROUP NO LONGER COUNTS, BECAUSE IT NO LONGER EXISTS (schema 5, 2026-09-09).
--- It used to: an icons-only helper had no marked effect, so without the second test the
--- enable tick read off while a group was still drawing. The group is gone -- see the
--- cooldown-icon block below -- so the marks are once again the whole answer.
+-- ☠ THE ICON GROUP DOES NOT COUNT HERE -- ONLY MARKS ON EFFECTS DO.
+-- It used to (until schema 5, 2026-09-09): an icons-only helper had no marked effect, so
+-- without the second test the enable tick read off while a group was still drawing. The group
+-- is back (P.PIH_AddIconGroup, below) and still has no marked effect, so alone it reads false.
 function P.PIH_Exists()
     return next(pihFound()) ~= nil
 end
@@ -1539,16 +1536,6 @@ local function pihPlace(key, auraName, surface, carried)
     return true
 end
 
--- ☠ PICKING AN OCCUPIED SURFACE SWAPS THE TWO SIGNALS. Decided with the user 2026-08-24, after
--- the alternatives were tried and rejected in turn: greying the row misuses the dropdown's group
--- heading and mangles the menu; hiding it makes a possible thing look impossible and reads as
--- "you could never have had that"; refusing on click is a control that looks like it works.
--- Swapping is the only version where every row in the list is a real option and none of them
--- lies -- and it is almost certainly what someone meant, since they wanted that surface for the
--- other signal in the first place.
---
--- Only ever fires between signals on the SAME record, which is the only case that cannot simply
--- coexist; see pihSurfaceTakenBy.
 -- ★★★ THE MULTI-SURFACE API (2026-09-08) — add and remove ONE surface at a time.
 -- ☠ THESE REPLACE THE DROPDOWN'S "MOVE THE SIGNAL THERE" MODEL. PIH_SetSurface answers
 -- "which single surface is this signal on", which is why picking an occupied one had to SWAP
@@ -4690,7 +4677,7 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
                 {r = 0.14, g = 0.14, b = 0.17, a = 1},
                 {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
 
-            -- Remove × button on each tag (unless it's the last one)
+            -- Remove × button on each tag (not on the only trigger of an ungrouped effect)
             -- ☠ DECLARED OUTSIDE the branch: the edit pencil below anchors to it,
             -- and a `local` inside the `if` is invisible out here. Read from there
             -- it was a nil GLOBAL, and SetPoint treats a nil relativeTo as the
@@ -7516,8 +7503,8 @@ local function pihMakeTools(parent, opts)
     -- time. It is a timing race, and no number can win one.
     --
     -- ⭐ Verified, and the asymmetry is the whole story: AddWidget stamps
-    -- `_slotHeightExplicit` when a call site pins a height (Sections.lua:125).
-    -- CreateLabel CHECKS it (Sections.lua:479) and skips its re-measure entirely, so a
+    -- `_slotHeightExplicit` when a call site pins a height (DandersUI/Sections.lua).
+    -- CreateLabel CHECKS it (GUI/Sections.lua) and skips its re-measure entirely, so a
     -- pinned label is fixed at build and never corrects itself. CreateInfoBanner never
     -- checks it -- its DoRecomputeHeight and TriggerHostRelayout run whatever you passed.
     -- So the box's final height depends on when the panel happened to be built relative
@@ -8655,9 +8642,9 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     end
 
     -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
-    -- ☠ DO NOT MOUNT IT HERE AGAIN. The helper now has its own page beside the designer
-    -- (Auras > Power Infusion Helper -- see AuraDesigner/UI/PIHelperPage.lua and the
-    -- CreateSubTab in GUI/Pages/Auras.lua). Krathe's call, 2026-09-08: the settings were
+    -- ☠ DO NOT MOUNT IT HERE AGAIN. The helper is a POOL TAB of the designer, beside My
+    -- Buffs / Debuffs / Any Buff -- it has no page of its own; see the Power Infusion
+    -- Helper note in GUI/Pages/Auras.lua. Krathe's call, 2026-09-08: the settings were
     -- "not very clear how to use it or even how to find it", and the behaviour panel and
     -- the appearance of the records it creates were on opposite ends of one page.
     --

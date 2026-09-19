@@ -790,20 +790,14 @@ end
     -- ☠ GUI:LinkToSetting, not a hand-rolled SelectTab + timer. It owns both timings
     -- (0.12 for the tab to build, 0.05 for the scroll to settle) and it calls
     -- Search:ScrollToSection itself. The search breadcrumb learned this the hard way
-    -- -- see the note at Features/Search.lua:898.
+    -- -- see the note in Search:NavigateToTab.
     --
     -- ⚠ BORDER ONLY, and both flags are required: FlashWidget's fill is opt-OUT
     -- (`opts.fill ~= false`), so passing border alone outlines AND washes the target.
     -- "Defensive Filters" resolves to a whole settings group, which is a large area
     -- for a filled pulse (same call as the search breadcrumb, Krathe 2026-08-07).
     --
-    -- ⚠ Only the Defensive Icon has an entry. The Aura Designer's filter selection is
-    -- not a page section at all -- it lives per filter GROUP, inside a card the user
-    -- may never have created -- so there is nothing stable to scroll to, and a section
-    -- that does not resolve lands you on the page with no flash, which reads as a dead
-    -- link. Same for the Buffs page, where the bar is the whole page rather than a
-    -- section of it.
-    -- Every consumer now has a named section to land on, because every consumer now
+    -- Each page listed below now has a named section to land on, because each now
     -- picks its own filters. Before the move only the Defensive Icon did, which is
     -- why it was the only entry here.
     --
@@ -1052,13 +1046,6 @@ end
     -- The chips also carry, by having different counts from different places, the
     -- fact that each consumer chooses its filters somewhere different.
     --
-    -- ☠ THEY SWAP WITH THE TAB, and the set is a different SIZE on each side. The
-    -- chips claim to say what is drawing on what this page controls, so while the
-    -- Debuffs tab is showing they have to answer for DEBUFFS -- a buff-filter count
-    -- sitting above a list of Blizzard categories is not merely unhelpful, it is the
-    -- page telling you the two are the same system when the whole point is that they
-    -- are not.
-    --
     -- The Defensive Icon has no debuff chip because it has no debuff side: its
     -- selection is buff filters only. That absence is correct and is itself part of
     -- the answer -- do not add a greyed one "for symmetry".
@@ -1236,9 +1223,8 @@ end
     -- Share the row between the chips and the help button pinned to its right edge.
     -- Runs on every resize AND after every text change, because the widths are what
     -- keep the labels from colliding.
-    -- ⚠ Divides by the SHOWN count, not the pool size. The Debuffs tab uses two of
-    -- the three, and sizing for three there would leave a chip's width of dead space
-    -- before the help button.
+    -- ⚠ Works from the SHOWN chips, not the pool size: sizing for a hidden one would
+    -- leave a chip's width of dead space before the help button.
     -- ☠ AND THEY WRAP, BECAUSE ONE ROW HAS A FLOOR THIS PAGE CAN NO LONGER PAY.
     -- The help glyph is pinned to the row's right edge and CHIP_MIN_W is the point
     -- past which a label like "Defensive Icon  2 filters" stops being readable, so
@@ -1322,8 +1308,8 @@ end
     -- ========== "HOW THIS WORKS" ==========
     -- The one thing banner copy cannot carry: the SHAPE. A sentence can define what
     -- a filter is. It cannot show that three different displays each pick their
-    -- filters in a different place, or that the Debuffs tab is a separate system
-    -- wearing the same controls -- and those two facts are what the page is actually
+    -- filters in a different place, or that Blizzard's debuff categories are a
+    -- separate system -- and those two facts are what the page is actually
     -- confusing about.
     --
     -- A labelled LIST rather than drawn art, on purpose: it wraps at any locale
@@ -3410,13 +3396,6 @@ end
         end
     end
     pageRef._fdRefreshAll = RefreshAll
-    -- Cross-page entry: the Aura Filters "Edit Debuff Blacklist" button navigates
-    -- here (SelectTab builds synchronously) then calls this to land directly on
-    -- the Blacklist entry instead of the default buff preset.
-    -- ⚠ Both entry points must move the TAB as well as the selection. Selecting the
-    -- Blacklist while the Buffs tab is showing would select a row that is not on
-    -- screen -- the right pane would fill with blacklist spells while the left list
-    -- still showed buff filters, and nothing would say why.
     -- ☠ _fdSelectBlacklist IS GONE, not stubbed. It landed this page on the Optional
     -- Debuffs entry, and there is no such entry here -- that list is on the Debuff
     -- Bar page. Anything wanting it should SelectTab("auras_debuffs"). A stub that
@@ -4509,12 +4488,12 @@ end
             row = GUI:CreatePopoutRow(parent, {
                 label   = "",
                 db      = tools.RowDB,
-                -- ☠ AND IT IS PAINTED, WHICH TOOK A KIT OPT-IN. A strip row's corner
-                -- is blanked while the row is on, because on every other page that
-                -- corner held a VALUE READOUT the controls beneath already said
+                -- ☠ AND IT IS PAINTED, BECAUSE THIS ROW IS COMPACT. A strip row's
+                -- corner is blanked while the row is on, because on every other page
+                -- that corner held a VALUE READOUT the controls beneath already said
                 -- better. This page is a LIST, and the corner is the only thing that
-                -- makes the list readable without opening all seventeen rows -- so
-                -- `keepSummary` below asks for the exception rather than the rule.
+                -- makes the list readable without opening all seventeen rows -- a
+                -- compact row has no strip, so the kit paints it with no flag.
                 --
                 -- Count first, then who uses it: the count is the one fact that
                 -- differs between two rows with the same consumers, and it is what

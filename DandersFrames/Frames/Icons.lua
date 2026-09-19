@@ -189,7 +189,7 @@ end
 -- DF[name] and never calls it, so it profiled nothing.
 --
 -- ⚠ Its SINGULAR sibling above, DF:UpdateExternalDefIcon, is a different matter and
--- stays: that one has seven real call sites.
+-- stays: that one has real call sites in Create.lua, Headers.lua and Init.lua.
 
 -- Update auras on all frames (combat transitions and the full profile refresh).
 --

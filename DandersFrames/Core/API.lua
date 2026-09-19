@@ -37,8 +37,8 @@ function DandersFrames_Export(profileKey)
         -- that is what gets written to disk.
         --
         -- Reachable throws inside the window: next() on a non-table colour/linkedSections
-        -- table (legacy or import-corrupted profiles), DF:DeepCopy (no cycle guard), and
-        -- LibSerialize on an unserializable value.
+        -- table (legacy or import-corrupted profiles) and LibSerialize on an
+        -- unserializable value.
         --
         -- pcall, then restore, then re-raise nothing -- a failed export returns nil, which
         -- is this function's documented failure value.

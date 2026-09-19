@@ -54,7 +54,7 @@ DF.TestData = {
         -- both to share: raising healPrediction did nothing at all, because the ceiling was
         -- the headroom, not the value. Reported as "hard to notice" (Krathe, 2026-08-14).
         -- ⇒ A preview value is only visible if the frame has ROOM for it. Same trap on
-        -- Tankerino below, which is at health 1.0 and therefore cannot show its
+        -- Tankerino above, which is at health 1.0 and therefore cannot show its
         -- healPrediction at all.
         {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.70, maxHealth = 85000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.22, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
         -- THE out-of-range unit, and the only one — so the fade has a subject with
@@ -183,14 +183,14 @@ DF.TestData = {
         -- catches a dispellable entry more often, so the rate climbs; accepted rather
         -- than decoupling the overlay from the icons again, which is the bug being fixed.
         -- ⚠ Same-class entries must still sit EXACTLY 5 apart (see the buff pool):
-        -- ROGUE at 4/9 and WARRIOR at 5/10.
+        -- WARRIOR at 1/6 (Rend, Mortal Wounds).
         -- ★ THE ONLY Bleed ENTRY, and it has to live in slot 1. DF ships five dispel
         -- colours (Border.lua: Magic, Curse, Disease, Poison, Bleed, with Enrage sharing
         -- Bleed's red) and the pool had no Bleed at all, so that colour could be set on
-        -- the Colors page and never previewed. Slot 1 is the one TYPED slot whose 5-apart
-        -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
-        -- the class spacing. Converting Rake or Rend instead would have been simpler and
-        -- was rejected: they are two of the four untyped slots that set the 60% density.
+        -- the Colors page and never previewed. Slot 1 is a TYPED slot, and Rend is WARRIOR
+        -- like its 5-apart partner (Mortal Wounds at 6), so the class spacing holds. Typing
+        -- one of the four untyped slots instead would have been simpler and was rejected:
+        -- they set the 60% density.
         {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
         {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
         {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
@@ -257,7 +257,7 @@ DF.TestData = {
 --   5. An out-of-range frame carries STATIC badges only.
 --
 -- ⚠ COVERAGE IS FRONT-LOADED, because raidTestFrameCount is user-driven (1-40).
--- Frames 1-10 cover every primary indicator; the four secondary status icons (summon,
+-- Frames 1-10 cover every primary indicator; the three secondary status icons (summon,
 -- phased, vehicle) start at 11. Everything appears by 20. Below 10 frames the
 -- preview is necessarily partial — that is a property of the slider, not a gap here.
 --
@@ -638,7 +638,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     -- Apply animation if enabled (only for alive units) - health only, not absorbs
     -- ☠ WAS `0.65 + (wave * 0.35)`, WHICH THREW AWAY THE UNIT'S CONFIGURED HEALTH.
     -- Every party scenario collapsed onto one curve centred at 65%, so switching
-    -- Animate Health on erased the five frames' distinct levels (100 / 95 / 60 / 30)
+    -- Animate Health on erased the five frames' distinct levels (100 / 70 / 60 / 30)
     -- and switching it off brought them back. The raid and boss branches always did
     -- this correctly -- `baseHealth + wave * 0.15` -- and this now matches them, so
     -- the three agree and the scenarios survive the toggle. (Audit, 2026-08-07.)
@@ -2931,7 +2931,7 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
 
     -- ☠ A SECOND, UNREACHABLE PARTY LAYOUT USED TO LIVE HERE -- ~76 lines behind
     -- 'Fallback: if SecureSort not available'. Features/SecureSort.lua is
-    -- unconditional in the .toc (line 124) and assigns DF.SecureSort at load, so the
+    -- unconditional in the .toc and assigns DF.SecureSort at load, so the
     -- branch above always returns and this never ran. It also used a DIFFERENT
     -- growthAnchor formula to CalculateSlotPosition -- a third statement of the same
     -- geometry that no longer had to agree with anything. (Audit, 2026-08-07.)
@@ -4616,11 +4616,11 @@ function DF:CreateTestPanel()
     -- 1-5 previews that many. A checkbox plus a slider whose 0 means the same thing is two
     -- controls for one decision, and they can disagree — checkbox off with the slider at 3
     -- reads as broken.
-    -- ⚠ CONSEQUENCE, deliberate: the defensive preview is no longer a PRESET toggle. It
-    -- behaves like the Buffs/Debuffs counts, which presets have always left alone as a
-    -- working preference — so Static/Combat/Healer/Full no longer force it on or off, and
-    -- `GetActiveTestPreset` no longer compares it. That is the consistent answer once it
-    -- became a count rather than a boolean.
+    -- ⚠ It remains a PRESET toggle, as a count: `testDefensiveCount` is declared in
+    -- TEST_TOGGLE_KEYS and listed `= true` in the presets that want the row on, and
+    -- TEST_COUNT_KEYS translates that to 1 / 0 on apply. GetActiveTestPreset compares
+    -- it through the same translation, so Default/Auras/Healer/Full turn the row on
+    -- and Combat turns it off.
     -- ⚠ Also lost: the checkbox's click-through to the Defensive Icon settings page. The
     -- slider row is a plain frame with no pageId hook.
 

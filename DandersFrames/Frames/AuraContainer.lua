@@ -216,7 +216,7 @@ function AuraContainer.HasSort()        return AuraContainer.IsSupported() end
 -- combat-fatal probe IsSupported already has to tiptoe around.
 --
 -- So probe the pair of C APIs the window is computed from instead
--- (Blizzard_CustomAuraButton.lua:612 — UpdatePandemicWindow calls both). They are plain
+-- (Blizzard_CustomAuraButton.lua — UpdatePandemicWindow calls both). They are plain
 -- C_UnitAuras entries, always readable, `SecretArguments = "AllowedWhenTainted"`, and
 -- they shipped in the same build as the registrar. Their absence is the same "older than
 -- PTR 8" answer with none of the caveats.
@@ -1561,19 +1561,19 @@ function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit
 -- worth re-testing rather than re-arguing (audited 2026-08-30 against the live 12.1
 -- client dump). The field is UNDOCUMENTED — zero entries across every
 -- Blizzard_APIDocumentationGenerated aura file — and has exactly ONE semantic consumer
--- in the whole client: TargetFrameAuraContainer.lua:406. Everything else merely carries
--- it (AuraUtil packs it, CustomAuraContainer lists it as a boolean candidate field,
--- AuraContainerUtil:95 compares it, EditModeAuraDataProvider stubs it true).
+-- in the whole client: TargetFrameAuraContainer.lua (ShouldShowAuraAsDebuff). The rest
+-- merely carry it (AuraUtil packs it, CustomAuraContainer lists it as a boolean candidate
+-- field, AuraContainerUtil compares it, EditModeAuraDataProvider stubs it true).
 --   1. THE STRONGEST ARGUMENT IS OUR OWN SHIPPED FEATURE, not Blizzard's code. The
 --      "Non-Player Debuffs" category is nothing but isFromPlayerOrPlayerPet = false, and
 --      what it promises users is dropping OTHER PLAYERS' Sated and Forbearance. It
 --      shipped in 5.2.0 and no report has ever said those still show. Under a "cast by
 --      you" reading that option could not work at all.
---   2. The one consumer is coherent only under this reading. Line 406 hides player-
+--   2. The one consumer is coherent only under this reading. It hides player-
 --      sourced auras on a hostile NPC target — the long-standing "don't show every
 --      raider's DoTs on the boss" rule. Under a "you" reading it would instead HIDE YOUR
---      OWN aura, contradicting line 396 three lines above it, which exists precisely to
---      show yours.
+--      OWN aura, contradicting the own-caster check earlier in the same function, which
+--      exists precisely to show yours.
 --   3. PEER FIELD TEST, and the one piece of hard measurement anyone has: EllesmereUI
 --      8.7.4's raid-frame aura module states that the boolean "matches auras cast by ANY
 --      player (field-verified: same-spec allies' buffs passed it), so own-cast filtering
@@ -1588,8 +1588,8 @@ function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit
 --      the only counter-argument worth raising — that the FIELD name mirrors
 --      AuraUtil.AuraFilters.Player word for word — because Blizzard's own parameter name
 --      for it said "a player", not "the player".
---   ⚠ An earlier version of this note claimed line 406 would be DEAD CODE under the "you"
---      reading. That is not airtight and should not be repeated: 406 is still reachable
+--   ⚠ An earlier version of this note claimed that branch would be DEAD CODE under the "you"
+--      reading. That is not airtight and should not be repeated: it is still reachable
 --      when sourceUnit is nil, so the branch would be reachable either way. The
 --      self-contradiction in (2), not deadness, is what does the work.
 -- ✅✅ SETTLED IN GAME, 2026-08-30 (Krathe, /df debug auraexp caster, 5-man party).
@@ -1618,8 +1618,8 @@ function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit
 -- which under the correct reading can only mean the caster was not resolvable at all in
 -- that state. The lock catches the failure by failing CLOSED on unresolved caster data,
 -- not by identifying auras as yours. It is checked in DoesAuraPassCandidateFilters
--- (Blizzard_AuraContainerUtil.lua:95), OUTSIDE the identity-gate block (which closes ~45
--- lines earlier, so no gate state can skip it), as a strict equality — nil or false
+-- (Blizzard_AuraContainerUtil.lua), OUTSIDE the identity-gate block (which closes earlier
+-- in that function, so no gate state can skip it), as a strict equality — nil or false
 -- REJECTS.
 --
 -- ✅✅ THE WHOLE CHAIN IS NOW MEASURED, cross-instance, 2026-08-30 (Krathe,
@@ -2973,7 +2973,7 @@ local function bindNative(slot, config)
     -- ☠ A PINNED ICON IS NEVER BOUND, AND NOT BINDING IT IS THE WHOLE MECHANISM.
     -- SetIcon hands our texture to Blizzard, which then repaints it from the MATCHED AURA on
     -- every display update -- so a slot that pins its own art (style.icon.staticSpellID, set
-    -- once by styleButton) must stay unbound or the art it was given is overwritten by the
+    -- by styleButton_regions) must stay unbound or the art it was given is overwritten by the
     -- first aura that matches. Unbound, the texture is an ordinary DF-owned region: nothing
     -- else writes it, and the ENGINE still owns whether the button is SHOWN at all, which is
     -- exactly the division we want -- Blizzard decides "does this unit match", we decide what
@@ -5521,9 +5521,9 @@ end
 --                     the engine path runs, so styling cannot diverge.
 --   * _paintTestSlot— the SAME painter, untouched. The AD editor canvas has painted
 --                     plain CreateFrame("Frame") slots this way since it shipped.
---   * layoutRow     — the SAME positioner live uses off config.layout, including the
---                     pixel-perfect snap. No second layout implementation exists to
---                     drift, which is the failure mode this whole design is avoiding.
+--   * AnchorUtil flow — the SAME public flow the container uses (via flowSlotsIntoBox,
+--                     below), off config.layout, pp snap included. layoutRow is ONLY the
+--                     fallback when that flow is unavailable -- see the ☠ note below.
 -- Everything downstream (ApplyStyle, the test ticker, teardown) already iterates
 -- self.buttons and does not care where a button came from.
 --
@@ -6713,7 +6713,7 @@ function AuraContainer.SetHelperGate(dark)
     -- re-parse every placed indicator in the addon per gate flip. Read off the module table,
     -- not a local: the registry is declared thousands of lines below this function, and a
     -- later-declared local here would silently read as a nil global (this file has been
-    -- bitten by exactly that; see the note above GateAppliesTo).
+    -- bitten by exactly that).
     local deferred = 0
     for h in pairs(AuraContainer._slotHandles or {}) do
         if h.config and h.config.dfGate and h._applyHelperGate then
@@ -8331,7 +8331,7 @@ end
 -- filter push that actuates it can be refused in lockdown — and before this, the latch
 -- plus the early-return meant a refused push was never retried, so the old visual kept
 -- rendering forever. On failure, queue the regen replay: _replayTuning re-runs
--- _pushFilter, which re-derives from parked/_gateHidden/liveFilter at drain time, so
+-- _pushFilter, which re-derives from parked / the latches / liveFilter at drain time, so
 -- whatever the state is BY THEN is what gets pushed (a Park then Restore in the same
 -- fight collapses to one correct push).
 function SlotHandle:Park()
@@ -9208,7 +9208,7 @@ end
 -- Visibility clears on a definite, non-secret "visible". A unit that no longer EXISTS
 -- clears both — nothing can render it, and leaving the entry would re-latch its
 -- containers at build if the token were ever reused.
--- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix in checkOutOfRangeAttribution).
 -- ⚠ Both loops CLEAR the table they are traversing. That is legal Lua: setting an
 -- EXISTING key to nil during a pairs() traversal is explicitly permitted (adding a new
 -- key is not, and neither loop does). Both setters only ever nil an existing key here.
@@ -9365,7 +9365,7 @@ end
 -- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
 -- vulnerable ones — an under-flagged handle is exactly the failure this dump
 -- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
--- answer, the stored gate verdict, and the window's actual visibility
+-- answer, the consumer's shown intent, and the window's actual visibility
 -- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
 -- print by project convention.
 -- ☠ EVERY INTERPOLATED VALUE IN THIS DUMP GOES THROUGH THIS. Slot keys and filter

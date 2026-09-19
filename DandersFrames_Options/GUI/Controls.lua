@@ -1,6 +1,6 @@
 -- Part 4 of the GUI toolkit, split from the original GUI.lua.
 -- These re-declarations are aliases of the SAME objects the first part
--- created; they add no state. See docs/reorg-tools/splits.manifest.
+-- created; they add no state.
 -- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
@@ -1020,9 +1020,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 -- next to bars that rendered fine, which reads as "DF is broken"
                 -- rather than "this texture is gone".
                 --   Showing the FALLBACK is also the honest preview: it is what the
-                -- bar will actually render. The label independently degrades to
-                -- "Select..." because GetTextureNameFromPath cannot name a dead
-                -- path, so the missing state is still signalled.
+                -- bar will actually render. The label independently names the file
+                -- and tags it "(missing)", so the missing state is still signalled.
                 -- Also applies the texture's tiling: a tiled texture must PREVIEW
                 -- tiled, even though an 80x16 swatch shows a crop of the tile.
                 DF:SafeSetTexture(btn.Preview, val)
@@ -2905,9 +2904,9 @@ local ROSTER_ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check
 local ROSTER_ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close"
 
 -- ★ THE GROUP, AS A SORTED LIST OF { name, fullName, class, role, group }.
--- ⚠ ONE READER FOR BOTH WIDGETS. It was a local inside the dual-column one, and the compact
--- one needs exactly the same answer -- including the `-Realm` suffix, which is what makes a
--- name written by one list mean the same thing to the other.
+-- ⚠ ONE READER FOR BOTH WIDGETS IS THE INTENT, NOT THE STATE: only the compact one calls
+-- this; the dual-column one still has its own copy (GetGroupRoster). The two MUST agree --
+-- including the `-Realm` suffix, so a name one list writes means the same to the other.
 -- ☠ NO `+ 1` ON UnitInRaid. It already returns an index GetRaidRosterInfo takes directly --
 -- Blizzard passes it straight through in both CompactUnitFrame and CompactRaidFrameManager.
 -- The +1 read the NEXT member's subgroup, so every unit reported its neighbour's group and
@@ -3088,10 +3087,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
                         -- both CompactUnitFrame (GetUnitFrameRaidRole) and
                         -- CompactRaidFrameManager. The +1 read the NEXT member's subgroup, so
                         -- every unit reported its neighbour's group and the last member in the
-                        -- raid got nil and silently fell back to group 1. DF's three other
-                        -- UnitInRaid consumers (TextDesigner/DataSource GetGroupNumber and both
-                        -- Frames/Init sites) already pass it through unmodified; this was the
-                        -- only site that disagreed.
+                        -- raid got nil and silently fell back to group 1. DF's other UnitInRaid
+                        -- consumers (TextDesigner/DataSource GetGroupNumber and the Frames/Init
+                        -- site) already pass it through unmodified; this was the only site that
+                        -- disagreed.
                         local _, _, subgroup = GetRaidRosterInfo(raidIndex)
                         group = subgroup or 1
                     end
@@ -4025,7 +4024,7 @@ end
 -- SEARCHABLE DROPDOWN WIDGET, KEY-VALUE EDITOR WIDGET and BRANCH EDITOR WIDGET.
 -- There is no CreateSelectableList, CreateSearchableDropdown, CreateKeyValueEditor or
 -- CreateBranchEditor anywhere in the repo -- three of the four described the Wizard
--- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in GUI.lua and
+-- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in Core.lua and
 -- Popup.lua). Four banners in a row with nothing between them read as "these widgets
 -- are somewhere in this file", which costs a search every time.
 

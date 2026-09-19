@@ -50,8 +50,8 @@ local BuildDirectDefensiveFilters
 -- next access instead of never. `__index` fires for every key because this table is
 -- permanently empty. These are config-build paths, not per-frame ones, so the extra
 -- hop is irrelevant.
---   ⚠ The literal fallback at the RaidPlayerDispellable site below predates this and
--- is now redundant, but harmless — left alone rather than churn a working line.
+--   ⚠ The literal "RAID" fallbacks at the two AuraFilters.Raid sites below are an idiom
+-- that predates this: now redundant, but harmless — left alone rather than churn them.
 local AuraFilters = setmetatable({}, {
     __index = function(_, key)
         local t = AuraUtil and AuraUtil.AuraFilters
@@ -4057,8 +4057,8 @@ end
 -- RefreshFactoryRows, which fires on an aura-LAYOUT bump (a settings change) and
 -- additionally bails in combat. Death is neither, so a companion dying mid-pull
 -- left the badge asserting "missing Fortitude" on a corpse until the next
--- settings change or combat end — field-reported in a follower dungeon,
--- confirmed via /dfdead (UnitIsDeadOrGhost was already true; nothing re-asked).
+-- settings change or combat end — field-reported in a follower dungeon
+-- (UnitIsDeadOrGhost was already true; nothing re-asked).
 -- Unit-state changes call THIS instead: non-secret reads plus one SetShown on a
 -- DF-owned strip, so it is combat-safe and a no-op when nothing changed.
 function DF:RefreshMissingBuffVisibility(frame)

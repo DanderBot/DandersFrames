@@ -525,8 +525,8 @@ end
 
 -- Dispel-type colour for a debuff, via C_UnitAuras.GetAuraDispelTypeColor.
 -- Lazy-builds `DF.debuffBorderCurve` from C_CurveUtil if it isn't already
--- present (Auras.lua / Dispel.lua build the same one independently today;
--- this serves as a shared lazy fallback).
+-- present. DF:GetDispelColorCurve is the ONLY builder of that curve;
+-- Features/Dispel.lua only invalidates it (DF:InvalidateDispelColorCurve).
 -- Account-wide dispel-type colour curve, built from DF.db.dispelColors (edited on
 -- the Colors page; seeded from the old debuff-border palette). Per the API doc,
 -- GetAuraDispelTypeColor "remaps the dispel type to a colour via a curve, with the

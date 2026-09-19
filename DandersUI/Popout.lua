@@ -73,8 +73,8 @@ local function perfStop(host, name, t0)
 end
 
 -- The box model comes from the theme (see Theme.lua's note on both): the frame's
--- height is TITLE_H + PAD + content + PAD, and a consumer sizing a fixed panel
--- has to be able to work that out without reading this file.
+-- height is TITLE_H + PAD + content + PAD (+ FOOTER.height with `actions`, see _Resize),
+-- and a consumer sizing a fixed panel has to work that out without reading this file.
 local PAD        = UI.PopoutPad          -- outer inset around the content
 local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip, top pad included
 local TITLE      = UI.PopoutTitle        -- topPad / row / fill / sepAlpha
@@ -841,28 +841,6 @@ function Popout:_SetChromeStrata(strata)
     end
 end
 
--- Keep the popout -- and with it the beam and the outline -- clear of the WINDOW
--- it is docked outside of: ONE STRATA ABOVE it, at the level its slot in the
--- host's stack names. See STACK_BASE for why the clearance is a strata boundary
--- and not a big number, and THE STACKING ORDER for what the level is now for.
---
--- ⚠ RE-RUN, NOT SET ONCE -- but no longer for the reason it used to be. The old
--- level was measured off the WINDOW's, and DandersFrames' settings window is
--- SetToplevel(true): it raises itself to the top of its strata the moment it is
--- clicked, WITHOUT MOVING A PIXEL, so a level taken once at Follow went stale from
--- the first click onwards. A level that is a function of the STACK is immune to
--- that -- nothing the window does can move a popout's place among its peers. What
--- the re-run still buys is a window that changes STRATA under a popout that is
--- already up, and re-asserting both against anything else that moved them. It
--- costs two getter calls on a tick that is already reading two rects, so it stays.
---
--- With no window it puts everything back on the base strata: a POOLED popout is
--- re-used for whatever the next consumer asks of it, and one that was raised for a
--- window must not carry that into a placement that has no window.
--- The level this popout's SLOT names, on the frame and on the chrome that goes
--- with it. The beam and the source outline are separate frames and are re-seated
--- through _SyncChromeLevel, which measures off the popout -- so they travel with
--- their own panel's band and never with another's.
 -- ☠ THE TITLE BAR AND ITS BUTTONS RIDE THE FRAME'S LEVEL, AND MUST BE TOLD.
 -- The frame itself is mouse-enabled and raises on mouse-down (see the OnMouseDown
 -- wiring below), so anything in the header that is not ABOVE it is not clickable:
@@ -932,6 +910,10 @@ function Popout:_SyncHeaderLevel()
     liftTo(self.headerRight, want)
 end
 
+-- The level this popout's SLOT names, on the frame and on the chrome that goes
+-- with it. The beam and the source outline are separate frames and are re-seated
+-- through _SyncChromeLevel, which measures off the popout -- so they travel with
+-- their own panel's band and never with another's.
 function Popout:_ApplyStackLevel()
     local f = self.frame
     local want = stackLevel(self._stackSlot)
@@ -942,6 +924,10 @@ function Popout:_ApplyStackLevel()
     self:_SyncHeaderLevel()
 end
 
+-- The level this popout's SLOT names, on the frame and on the chrome that goes
+-- with it. The beam and the source outline are separate frames and are re-seated
+-- through _SyncChromeLevel, which measures off the popout -- so they travel with
+-- their own panel's band and never with another's.
 function Popout:_SyncWindowLevel()
     local win, f = self.outsideOf, self.frame
     if not win then

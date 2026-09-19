@@ -822,9 +822,9 @@ local function BuildEffectsTabRows(ctx, shell)
     -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
     -- ☠ DO NOT MOUNT IT HERE AGAIN. This layout used to carry the helper as a band of
     -- popout rows -- a card row acting as the family header, then one indented row per
-    -- section. It now has its own page beside the designer (Auras > Power Infusion
-    -- Helper -- AuraDesigner/UI/PIHelperPage.lua), which composes the same shared parts
-    -- from Cards.lua and needs no band here.
+    -- section. It is now a POOL TAB of the designer (beside My Buffs / Debuffs /
+    -- Any Buff), built from the same shared parts in Cards.lua, and needs no band
+    -- here.
     --
     -- ⚠ WHAT WENT WITH IT: the fold key "ad_pihelper", the per-band dirty flag and the
     -- deferred page refresh all existed to keep a panel open while its own page rebuilt

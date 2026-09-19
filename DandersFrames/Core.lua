@@ -568,8 +568,8 @@ end
 -- which is load-bearing.
 --
 -- ☠ WHY THIS LIVES IN Core.lua AND NOT IN Debug/MemoryTest.lua
--- The flag table is declared at TOC line 160; every consumer of it loads
--- earlier (Border 91, Icons 99, Auras 110, AD Factory 125, TD Render 134). The
+-- The flag table is declared in the on-demand companion (Debug/MemoryTest.lua);
+-- every consumer (Border, Auras, AD Factory, TD Render, ...) loads earlier. The
 -- old idiom was `DF.MemTest and not DF.MemTest.enableX`, which reads a MISSING
 -- key as nil -> `not nil` -> true -> DISABLED. So any window where a consumer
 -- knew about a flag the table did not yet declare silently switched that system
@@ -2556,8 +2556,8 @@ function DF:LightweightUpdateBackgroundColor()
         -- strings that were discarded on the spot.
         --
         -- ⚠ Its sibling frame.dfCurrentBgTexture IS a real guard and stays: it is
-        -- tested at Frames/Update.lua:385 before re-applying a texture. The two names
-        -- read alike, which is most of why this one survived.
+        -- tested in Frames/Update.lua (ApplyFrameLayout) before re-applying a texture.
+        -- The two names read alike, which is most of why this one survived.
 
         -- Determine class color for CLASS mode
         local cr, cg, cb = 0, 0, 0
@@ -3501,10 +3501,10 @@ end
 -- green bar the user can fix in two clicks; the failure mode of over-reaching is silently
 -- rewriting a texture choice someone made on purpose.
 --
--- ☠ AND IT REFUSES TO RUN ON AN EMPTY REGISTRY. The valid set is built from LSM's live
--- registrations, so if this ever ran before Config.lua registered ours, EVERY DF path
--- would look unrecognised and the pass would rewrite the lot. Below a plausible count it
--- bails WITHOUT stamping the flag, so it simply tries again next login.
+-- ☠ AND IT REFUSES TO RUN ON AN EMPTY MANIFEST. The valid set is DF.SHIPPED_MEDIA (built
+-- by Config.lua), NOT LSM's live registrations, so if this ever ran before that was
+-- filled, EVERY DF path would look unrecognised and the pass would rewrite the lot. On a
+-- missing or empty manifest it bails at once, so it simply tries again next login.
 local TEXTURE_REPAIR_KEYS = {
     "healthTexture", "backgroundTexture", "missingHealthTexture", "reducedMaxHealthTexture",
     "absorbBarTexture", "healAbsorbBarTexture", "healPredictionTexture",
@@ -4256,18 +4256,6 @@ function DF:MigrateOORTextAlpha()
         end
     end
 end
--- One-shot per-profile, two independently-guarded steps so a profile already
--- through step 1 still receives step 2.
---
--- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
--- import path trusted it -- clearing BOTH guards on every import so the payload got
--- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
--- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
--- legacy inset from a value the user set after migrating, so re-running it destroyed
--- those settings profile-wide. Re-arming step 2's guard is now conditional on the
--- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
---
--- Anything added here must state which of the two shapes it is.
 -- Step existing centred-and-wrapping raid layouts onto Center Mode = Fixed, so their
 -- frames stay where they have always been instead of picking up the corrected Default.
 --
@@ -4325,6 +4313,18 @@ function DF:MigrateRaidCenterMode()
     end
 end
 
+-- One-shot per-profile, two independently-guarded steps so a profile already
+-- through step 1 still receives step 2.
+--
+-- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
+-- import path trusted it -- clearing BOTH guards on every import so the payload got
+-- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
+-- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
+-- legacy inset from a value the user set after migrating, so re-running it destroyed
+-- those settings profile-wide. Re-arming step 2's guard is now conditional on the
+-- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
+--
+-- Anything added here must state which of the two shapes it is.
 function DF:MigrateBorderInsetFold()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -7256,11 +7256,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             -- and the Debug page's category descriptions on the same
                             -- screen were already raw, so the two disagreed.
                             --
-                            -- ⚠ Time-sensitive, which is why it is not a style nit: the
-                            -- packager's -S flag uploads English source strings to the
-                            -- portal on the next build. Once developer text is in front
-                            -- of translators for ten languages, removing it is a portal
-                            -- cleanup rather than a git revert.
+                            -- ⚠ Time-sensitive, which is why it is not a style nit: CurseForge
+                            -- discovers English source strings server-side from the uploaded
+                            -- package, so developer text reaches the portal on the next build.
+                            -- Once it is in front of translators for ten languages, removing it
+                            -- is a portal cleanup rather than a git revert.
                             o:Line(DF.DEBUG_GROUP_NAMES[g], "NEUTRAL")
                             for _, r in ipairs(rows) do
                                 -- One typeable form per row, in O.CMD.

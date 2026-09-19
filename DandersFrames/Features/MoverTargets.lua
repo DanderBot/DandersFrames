@@ -174,7 +174,7 @@ end
 
 -- The player's own raid frame. In a raid the player is "raidN", not "player", so the map
 -- has no "player" key to read -- UnitInRaid gives the N directly (it is the same index
--- GetRaidRosterInfo takes; see the ☠ note at DandersFrames_Options/GUI/Controls.lua:2919
+-- GetRaidRosterInfo takes; see the ☠ NO `+ 1` note in DandersFrames_Options/GUI/Controls.lua
 -- for why there is no +1). The "player" fallback covers a party/solo roster, where the
 -- header does key the player's frame that way.
 -- In test mode the first raid frame is the stand-in player (TestMode.lua:2726 sets

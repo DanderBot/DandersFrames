@@ -1204,7 +1204,7 @@ function DF:CreatePartyHeader()
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
     -- absent from Config -- so it was always nil and all three sites took the VERTICAL
     -- branch whatever the user chose. The rest of the addon spells this
-    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    -- `growDirection == "HORIZONTAL"`.
     --
     -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
     -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
@@ -1229,7 +1229,7 @@ function DF:CreatePartyHeader()
     -- ⚠ Snap the LOCAL too, not just the stored attribute: the local feeds xOffset/yOffset,
     -- which IS the stride the header repeats. Snapping only the "spacing" attribute below
     -- would leave the actual layout fractional and look like a fix.
-    -- ★ The grouped raid handler has always done this (snapInit, ~:2101). Party and arena
+    -- ★ The grouped raid handler already does this (its own snapInit). Party and arena
     -- were the two headers that never got it.
     local function snapInit(value)
         if db.pixelPerfect and DF.PixelPerfect then
@@ -1323,7 +1323,7 @@ function DF:CreateArenaHeader()
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
     -- absent from Config -- so it was always nil and all three sites took the VERTICAL
     -- branch whatever the user chose. The rest of the addon spells this
-    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    -- `growDirection == "HORIZONTAL"`.
     --
     -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
     -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
@@ -5145,7 +5145,7 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
     --
     -- The real fix gates the SHOW paths while leaving the hide logic reachable, which
     -- needs a client to confirm against leaving a raid, a raid converting to a party, and
-    -- the combat-deferred replay. See docs/12.1-final-audit-phase1.md (V40).
+    -- the combat-deferred replay.
     local db = DF:GetRaidDB()
 
     -- Show container
@@ -5453,13 +5453,13 @@ function DF:UpdatePartyHeaderLayout()
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
     -- absent from Config -- so it was always nil and all three sites took the VERTICAL
     -- branch whatever the user chose. The rest of the addon spells this
-    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    -- `growDirection == "HORIZONTAL"`.
     --
     -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
     -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
     -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
-    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
-    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers run from the
+    -- PLAYER_REGEN_ENABLED handler, so it runs LAST on leaving combat with nothing
     -- re-applying the correct value behind it. Symptom: a party layout change queued
     -- during combat flips you to vertical when combat ends.
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
@@ -6990,9 +6990,9 @@ function DF:ApplyHeaderSettings_Now()
         DF:ApplyRaidFlatSorting()
         
         -- ☠ A "FINAL SIZE FORCING" block used to sit here. It has never run for anyone.
-        -- Its gate was `raidFlatPlayerAnchor ~= "CENTER"` and that key is seeded "CENTER"
-        -- by the defaults table and written by no control anywhere in this repo's
-        -- history, so the condition was false on every profile, on every apply.
+        -- Its gate was `raidFlatPlayerAnchor ~= "CENTER"` and that key was seeded "CENTER"
+        -- by the defaults table (seed since removed) and written by no control anywhere in
+        -- this repo's history, so the condition was false on every profile, on every apply.
         --
         -- It is deleted rather than repointed at raidFlatFrameAnchor along with the
         -- readers above. That key only offers START/END, so repointing would have turned

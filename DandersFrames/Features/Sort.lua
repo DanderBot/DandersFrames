@@ -397,11 +397,11 @@ function Sort:TriggerResort()
     self:ClearCache()
 
     -- ☠ A SecureSort push/trigger block used to sit here, gated on
-    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set:
-    -- SecureSort:Initialize() has no reachable caller (see Features/SecureSort.lua),
-    -- so the whole block was dead and its comment -- "SecureSort is now the only
-    -- system that positions party frames" -- had it exactly backwards. Party frames
-    -- are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
+    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set --
+    -- SecureSort.initialized is only ever assigned false and Features/SecureSort.lua
+    -- has no Initialize function -- so the block was dead and its comment ("SecureSort
+    -- is now the only system that positions party frames") had it backwards. Party
+    -- frames are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
     --
     -- Clearing the unit cache is the real work this function does, and it is live.
 end

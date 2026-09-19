@@ -2422,7 +2422,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- bands' edges. A box built at the band width but added to a COLUMN
             -- would be worse than what it replaced -- the layout pass only stretches
             -- a "both" widget and never narrows a column one (GUI/Panel.lua's
-            -- LayoutPage), so on a widened two-column window it would run straight
+            -- PageRefreshStates), so on a widened two-column window it would run straight
             -- over whatever sits in column 2.
             local generalGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
             generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
@@ -3797,7 +3797,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ☠ THE SCALE HINT'S refreshContent SURVIVES THE MOVE, and it has to:
         -- the pane's reflow calls the group's RefreshChildStates, which walks
         -- groupChildren calling refreshContent on every shown child (DandersUI
-        -- Sections.lua ~738). So the hint re-computes inside an open panel exactly
+        -- Sections.lua). So the hint re-computes inside an open panel exactly
         -- as it did inline on the page.
         local function BuildRenderingGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -6339,11 +6339,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- beside whatever was above it -- which is why, when Appearance was the
         -- only band here, it was hoisted above the first column box.
         --
-        -- With every group converted there is no flow to unbalance: a run of
-        -- "both" widgets is a run of sync points over two columns that are
-        -- already equal, which is a plain single stack. So the order below is
-        -- purely READING order, and it is the order the page has always read in
-        -- -- the layout chain first, then how the frames look, then the mover.
+        -- The bands are no longer "both": each sets layoutColFill and is added
+        -- into column 1 or 2 below, so none of them is a sync point any more.
+        -- The order below is READING order within each column, and it is the
+        -- order the page has always read in -- the layout chain first, then how
+        -- the frames look, then the mover.
         --
         -- ⚠ AT THE DEFAULT WIDTH NONE OF THIS EVEN ARISES. 640 is a
         -- single-column page (LayoutPage's usesTwoColumns needs room for two

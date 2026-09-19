@@ -961,10 +961,8 @@ end
 -- Core/Config.lua's actual default of 1). Hoisting within one file only looks like
 -- consolidation. Fallback corrected to 1 to match Config.
 --
--- ⚠ The intensity term stays even though Core's migration now folds that key into the
--- alpha and nils it in the same pass. It costs nothing and it is the safe side of the
--- trade: a profile that somehow reaches here unmigrated keeps v4's brightness instead of
--- silently dimming. It cannot double-apply -- the fold and the nil are one call.
+-- ⚠ NO intensity term here: Core's migration folds dispelGradientIntensity into the
+-- alpha and nils the key in the same pass, so applying it again would double-apply.
 function DF:ResolveDispelGradientAlpha(db)
     if not db then return 1.0 end
     -- ☠ NO INTENSITY TERM. It was `min(alpha * intensity, 1)` — and intensity has ALREADY
@@ -1352,16 +1350,14 @@ end
 -- ============================================================
 -- 12.1 CONTAINER PATH (§24 unified overlay)
 -- ONE overlay system driven by native aura slots: Blizzard owns presence (the slot
--- button's SetShown) and — in game-colour mode — the palette (SetAuraBorder Color
--- vertex-tint); DF owns the art. Two colour-source modes:
---   "game" (default) = ONE any-dispellable slot; the native tint rides a dedicated
---     carrier texture (ONE region per slot — CustomAuraButton stores a single
---     AuraBorder, source-verified), so game mode is gradient (+darken/pulse) + a
---     second slot carrying Blizzard's bordered type icon. One overlay at a time,
---     Blizzard-identical.
---   "custom" = one slot per dispel type (includeDispelTypes); type known at declare
---     time, so the FULL art styles statically from the DF pickers (borders, EDGE
---     gradients, intensity, type icons). Rare dual-type overlap accepted.
+-- button's SetShown) and the carrier's vertex colour (tinted from DF's shared account
+-- palette, securecopy'd at bind time); DF owns the art. There is no game-vs-custom
+-- colour mode any more (Custom Colors was removed 2026-07-11).
+-- ONE any-dispellable slot carries the whole overlay: AddDispelTypeTexture APPENDS, so
+-- the gradient (+darken/pulse) or the four EDGE strips, the border ring and Blizzard's
+-- dispel-type badge all ride one button (see dispelSlotPlan's `roles` and
+-- DispelSlotSecureInit). One overlay at a time, Blizzard-identical.
+-- By-me can add a second "gap" slot with the same roles; rare dual-type overlap accepted.
 -- Me/all: "HARMFUL|RAID" (player-dispellable) vs "HARMFUL" + candidateFilters
 -- includeDispelTypes (the shared DF.DispelTypeMap). ☠ The old route here used a
 -- ProcessAura policy + processedAuraType=Dispel and was described as "the native
@@ -1727,9 +1723,9 @@ end
 -- the same pattern the debuff-row icon border, MSUF and oUF all use: create + bind
 -- inside initializeFrame; only geometry/alpha happen later in the tainted style pass
 -- (legal post-bind). WHICH carrier a slot binds (plain texture vs the tracking
--- StatusBar fill), its texture, and the colour map are all in the container SIGNATURE
--- (dispelFactoryPlanAndSig), so any change rebuilds and re-runs this with the right
--- carrier — no tainted re-bind is ever needed.
+-- StatusBar fill) and its texture are in the container SIGNATURE
+-- (dispelFactoryPlanAndSig), so a change rebuilds and re-runs this with the right
+-- carrier. The colour map is NOT: a palette edit re-binds in place (StyleOneSlot).
 -- ★ 68914: SetAuraBorder is a DEPRECATED alias (Blizzard_CustomAuraButton.lua: "will be
 -- removed after 12.1") that does ClearDispelTypeTextures() + AddDispelTypeTexture() —
 -- i.e. it REPLACES the button's texture list, which is the whole reason a slot could only
@@ -2277,8 +2273,8 @@ local function StyleGameBorderSlot(btn, frame, db)
     -- must move too: the ring is the DIM'S region, so the art draws at the dim's level,
     -- and a re-levelled holder with a stale dim moves nothing visible.
     -- ⚠ THROUGH THE RESOLVER, so it follows the slider it exists to follow. This computed
-    -- healthBar + 15 flat while the wash and the edge strips take
-    -- DF:ResolveDispelOverlayLevel(..., db) -- so pushing dispelOverlayFrameLevel up put
+    -- healthBar + 15 flat while the wash and edge strips take DF:ResolveDispelGradientLevel
+    -- (full frame: ResolveDispelOverlayLevel + 1) -- so pushing dispelOverlayFrameLevel up put
     -- the wash ABOVE its own ring, which is the one relationship the ring has. The +1 keeps
     -- the ring exactly one step over the overlay, matching borderRingHost. (Review, S3.)
     local ringHostLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())

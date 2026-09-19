@@ -560,7 +560,7 @@ function DF:UpdateUnitFrame(frame, source)
     -- missing — leaves the unit SHOWN. Blanking a healthy player's auras on a bad read
     -- is far worse than the leak this closes.
     -- ⚠ issecretvalue FIRST, as its own statement: `okv and not vis` would boolean-test a
-    -- secret before the guard could run — the exact bug fixed in AuraContainer.lua:844.
+    -- secret first — the exact bug fixed in AuraContainer.lua's checkOutOfRangeAttribution.
     -- ⚠ You are always visible to yourself, so the own-unit case never latches. UnitIsUnit,
     -- not a string compare: in raid layouts your own token is "raidN", so `unit ==
     -- "player"` silently never matched your own frame.

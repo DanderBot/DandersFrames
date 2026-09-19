@@ -1214,8 +1214,8 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
             if f and f:IsShown() and f.unit then
                 -- ☠ UnitGUID is secret while tainted. The `~=` below is the hazard:
                 -- comparing a secret throws. Guard the fresh read AND the stored
-                -- value -- the stamp at :1101 could have been written before this
-                -- guard existed, so a stale secret can still be sitting on the frame.
+                -- value -- the OnShow stamp could have been written before this guard
+                -- existed, so a stale secret can still be sitting on the frame.
                 -- Skipping the refresh is safe: the boss unit event fires again.
                 local guid = UnitGUID(f.unit)
                 if not issecretvalue(guid) and not issecretvalue(f.dfLastBossGUID)
@@ -1590,7 +1590,7 @@ function PinnedFrames:CreateSetFrames(setIndex)
     -- default point.
     --
     -- Only the LOGIN path hid it: Initialize re-applies at the end of its second loop.
-    -- The on-demand path -- which the ☠ note above calls "the normal way a set gets its
+    -- The on-demand path -- which SetEnabled's ☠ note calls "the normal way a set gets its
     -- frames" now -- returns from SetEnabled before ever reaching that second call, so a
     -- set enabled from the options panel came up as one overlapping column until the user
     -- nudged a slider or reloaded. FlatRaidFrames does this in the right order.
@@ -3566,17 +3566,17 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
     -- ☠ THIS IS A PINNED FRAME, AND TWO LIVE GUARDS ALREADY ASSUME IT SAYS SO. The pool
     -- stamped dfIsPinnedTestFrame and isPinnedBossFrame but never this one, so both of
     -- them silently took their non-pinned branch on every preview slot:
-    --   * Frames/Update.lua:126 picks the preview's test data by it. Its own ☠ note
-    --     describes the bug it was written to fix — party pools are 0-based, pinned
-    --     pools 1-based, and the boss flag has to be passed — and the fix never ran,
-    --     because the flag it tests was nil. A pinned slot kept taking another
-    --     scenario's absorbs and heals whenever the fill object was replaced.
-    --   * Frames/Bars.lua:65 gives pinned frames the resource bar's solo-mode bypass;
-    --     TestMode.lua:1773 mirrors it for the preview. Without the stamp the preview
-    --     drew a bar the live frame would not (or the reverse).
-    -- Every other reader wants preview slots included too, so this is a plain fix
-    -- rather than a scope widening: Features/Auras.lua:3136's players-only missing-buff
-    -- term is bypassed wholesale in test mode, and the rest are debug.
+    --   * Frames/Update.lua (DF:ApplyFrameLayout) picks the preview's test data by it.
+    --     Its own ☠ note describes the bug it was written to fix — party pools are
+    --     0-based, pinned pools 1-based, and the boss flag has to be passed — and the
+    --     fix never ran, because the flag it tests was nil. A pinned slot kept taking
+    --     another scenario's absorbs and heals whenever the fill object was replaced.
+    --   * Frames/Bars.lua (DF:ShouldShowResourceBar) gives pinned frames the resource
+    --     bar's solo-mode bypass; TestMode.lua (DF:UpdateTestPowerBar) mirrors it for the
+    --     preview. Without the stamp the preview drew a bar live would not (or the reverse).
+    -- Every other reader wants preview slots included too, so this is a plain fix rather
+    -- than a scope widening: the players-only missing-buff term in Features/Auras.lua
+    -- (RefreshMissingBuffVisibility) is bypassed wholesale in test mode; the rest are debug.
     frame.isPinnedFrame = true
     frame.isPinnedBossFrame = isBossSet or false
     frame.pinnedSetIndex = setIndex

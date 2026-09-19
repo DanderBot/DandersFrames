@@ -914,7 +914,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end)
 
     -- ☠ THE FOUR ACTIONS CHAIN FROM THE BAR'S RIGHT EDGE INWARDS, and they are
-    -- placed here rather than at each creation because the chain runs backwards:
+    -- placed BELOW rather than at each creation because the chain runs backwards:
     -- Delete pins to the bar, Rename to Delete, Duplicate to Rename, New to
     -- Duplicate, and the dropdown then spans from the label to New. That is what
     -- makes the bar cost its FIXED parts at any width. Left-to-right off a
@@ -2219,11 +2219,10 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noi
         -- The caution tone's ICON colour, read straight from the shared tone table
         -- so this stays in step with every banner and note that uses it.
         -- ☠ Read at CALL time, not through a file-scope alias. INFO_BANNER_TONES
-        -- is defined in GUI/Sections.lua, which lives in the load-on-demand
-        -- companion, while this file is resident -- an alias captured at load
-        -- would be nil forever and never see the companion's later publish.
-        -- This function is only ever called from a settings page, so the
-        -- companion is loaded by the time it runs.
+        -- is published on the kit's _priv by DandersUI/Widgets.lua, which the
+        -- RESIDENT addon loads, and GUI._priv falls through to it; this file
+        -- rides the load-on-demand companion, so the table is already there when
+        -- this runs. The call-time read is kept so load order can never matter.
         local ic = GUI._priv.INFO_BANNER_TONES.caution.iconColor
         tex:SetVertexColor(ic[1], ic[2], ic[3])
         noisyIcon:SetScript("OnEnter", function(self)

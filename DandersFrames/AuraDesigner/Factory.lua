@@ -1311,8 +1311,6 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
     return bestKey, bestCfg, bestMap, bestPrio, bestPool
 end
 
--- Tear down every container in a per-type store that is not the current winner (winner
--- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
 -- Destroy everything an entry owns. A condition-chain entry holds N handles, not one —
 -- released INNERMOST FIRST so a link is never orphaned by its host disappearing under it.
 local function destroyEntry(entry)
@@ -1330,6 +1328,8 @@ local function destroyEntry(entry)
     entry.handle = nil
 end
 
+-- Tear down every container in a per-type store that is not the current winner (winner
+-- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
 local function teardownExcept(store, keepName)
     for auraName, entry in pairs(store) do
         if auraName ~= keepName then

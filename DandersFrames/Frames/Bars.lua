@@ -541,14 +541,14 @@ end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
 -- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
--- geometry: the border frame draws at parent frame level +13 while the absorb
+-- geometry: the border frame draws at parent frame level +14 while the absorb
 -- overlay sits at +11, so an opaque border paints OVER a flush overlay and the
 -- shield covers the health fill exactly with nothing showing through — no inset
 -- needed.
 -- ☠ THIS PREMISE WAS SILENTLY FALSE between 2026-08-13 and 2026-08-14: the z-order
 -- convergence lifted the absorb overlay to +11 and left the border at +10, so the
 -- border stopped painting over it and this function kept returning 0 for a case it
--- no longer covered. The border moving to +13 is what makes the sentence above true
+-- no longer covered. The border moving to +14 is what makes the sentence above true
 -- again. If either number moves, RE-READ THIS — it is a dependency, not a note. Returns the pixel-snapped border size only when the border is
 -- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
 -- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
@@ -1594,8 +1594,8 @@ function DF:UpdateAbsorb(frame, testIndex)
 
         -- Configure the overflow bar (always, so it's ready when needed)
         overflowBar:ClearAllPoints()
-        -- ☠ DERIVED FROM THE ATTACHED BAR, one above it. The two are halves of one
-        -- readout, and their ORDER is the contract -- the absolute number is not.
+        -- ☠ DERIVED FROM THE ATTACHED BAR, the SAME level. The two are halves of one
+        -- readout, and that RELATION is the contract -- the absolute number is not.
         -- A DF:ResolveAbsorbBarLevel call used to sit ten lines above this one and was
         -- overwritten right here on every pass: dead code that read as a fix, and it
         -- survived an in-game confirmation because what actually fixed that report was
@@ -2478,7 +2478,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         frame.dfHealPredictionBar2:Hide()
     end
 
-    -- Level: just below the resource bar (which sits at health +2).
+    -- Level: the ladder's slot, under the resource bar (default frame +20).
     -- ☠ Was three branches on a `healPredictionStrata` key with NO UI and no writer, so the
     -- stored value was always the "SANDWICH" default. Two of the three branches produced
     -- the SAME +1 anyway, and the third (+14) was unreachable. Collapsed; nothing moved.

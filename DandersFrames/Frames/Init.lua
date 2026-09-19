@@ -237,9 +237,9 @@ function DF:UpdateRaidGroupedLayout()
     end
     
     -- ☠ A ~60-line "LEGACY MODE" block sat here, gated on
-    -- `SecureSort.raidFramesRegistered`. That flag is never set -- it is written only
-    -- by SecureSort:RegisterRaidFrames, which runs only after SecureSort:Initialize,
-    -- which has no reachable caller. The block counted active groups, sized the
+    -- `SecureSort.raidFramesRegistered`. That flag was never set: its writer ran only
+    -- after SecureSort:Initialize, which had no reachable caller. All three are gone
+    -- now (see Features/SecureSort.lua). The block counted active groups, sized the
     -- container and handed positioning to a secure sort that was never armed.
     --
     -- Everything it did is done by the live path below and by PositionRaidHeaders.

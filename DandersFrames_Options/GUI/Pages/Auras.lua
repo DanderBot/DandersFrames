@@ -1205,7 +1205,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local DISPEL_COLORS_COUNT = 6
 
             -- ☠ AND THIS ONE STAYS BEHIND ITS STRIP, which looks wrong beside the
-            -- palette above it and is not. The badge says six, one clear of
+            -- palette above it and is not. The badge says six, which is exactly
             -- INLINE_MAX -- but the badge counts SETTINGS and the threshold is
             -- measured off what a LAYOUT WOULD PLACE, which is the blurb and the
             -- Reset All button as well: seven. Opting it in would not break
@@ -1786,7 +1786,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --      example. The bar, the missing-health fill and the reduced-max
         --      overlay are exactly that.
         --
-        -- ⚠ SO THE BANDS CARRY NO HEADER -- the Fading page's sortBand rule. The
+        -- ⚠ SO THE BANDS CARRY NO HEADER -- the Sorting page's sortBand rule. The
         -- section bar directly above each band already names the section, and a
         -- header under it would say the same word twice.
         --
@@ -3592,8 +3592,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- HOLDS.
             local RESOURCE_SIZE_COUNT = 4
 
-            -- ☠ FOUR OF THIS PAGE'S ROWS MOUNT THEIR GROUP ON THE PLATE -- Size,
-            -- Position, Appearance and Background, at 4, 3, 4 and 2. Between them
+            -- ☠ FIVE OF THIS PAGE'S ROWS MOUNT THEIR GROUP ON THE PLATE -- Settings,
+            -- Size, Position, Appearance and Background, at 4, 4, 3, 4 and 2. Between them
             -- they are most of what a resource bar IS, and every one of them was a
             -- click that opened a panel holding a handful of lines. The three that
             -- keep their strip (Class Filter 13, Border 16, Colors 13) are the ones

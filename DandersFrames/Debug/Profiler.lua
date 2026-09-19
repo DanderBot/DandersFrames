@@ -235,8 +235,8 @@ local WrapFrameOnUpdate
 -- Every other consumer of this table in the addon reads it inside a function
 -- (DF:GetGlobalDB and friends) and so never hit this.
 --
--- ⚠ The install CANNOT simply move to ADDON_LOADED either: this file sits at
--- TOC line 68 deliberately (see the "Profiler.lua is loaded earlier" note in
+-- ⚠ The install CANNOT simply move to ADDON_LOADED either: this file sits early
+-- in the TOC deliberately (see the "Profiler.lua is loaded earlier" note in
 -- the TOC) so the hook is in place before the files that install an OnUpdate at
 -- THEIR file scope — five ticker/throttle singletons across Headers, StatusIcons
 -- and AutoProfiles, all of which load later. (A sixth lived in Performance.lua,
