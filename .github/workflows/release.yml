@@ -79,6 +79,25 @@ jobs:
             git tag "$VERSION"
           fi
 
+      # The repo keeps its comments; the zip ships none (they were ~45% of the Lua
+      # by size). Runs BEFORE the lib sync so the three DandersUI copies are made
+      # from the already-stripped canonical source. Line breaks are preserved, so
+      # error-report line numbers still match the repo. The script compiles every
+      # file before and after and fails the build on any bytecode difference --
+      # nothing is written unless all of them match.
+      - name: Set up Python (comment stripper)
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Strip comments from shipped Lua
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          python -m pip install --quiet lupa
+          python Tools/strip-comments.py --selftest
+          python Tools/strip-comments.py --write
+
       # DandersUI is a library, not an addon: the canonical source is <repo>/DandersUI
       # and each host loads its own copy from <host>/Libs/DandersUI. Those copies are
       # git-ignored (junctions locally), so CI has to materialise them before packaging.
