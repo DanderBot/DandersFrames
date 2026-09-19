@@ -949,7 +949,7 @@ do
     -- Below the width where a line cannot hold one named control the row folds,
     -- and every setting has to be reachable again -- which is the whole of
     -- "hidden, never removed".
-    row:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    row:SetWidth(M0.padX + M0.padX + M0.minControl - 1)
     row._LayoutPlate()
     eq(row:GetShownHoistCount(), 0, "fold: under the floor the row draws no controls")
     eq(visible(group), 5, "fold: ...and all five come back into the pane")
@@ -991,7 +991,7 @@ do
     -- ...and it goes on tracking the row. A change after BOTH are open has to
     -- reach both: a hide applied to the eager instance alone would leave the
     -- pinned panel showing the duplicate the moment the row folded and came back.
-    row:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    row:SetWidth(M0.padX + M0.padX + M0.minControl - 1)
     row._LayoutPlate()
     eq(shownIn(built[1]), 5, "second: the fold puts all five back in the first panel")
     eq(shownIn(second), 5, "second: ...and in the second one too")
@@ -1089,7 +1089,7 @@ do
     -- every instance, so the loose one gets its copies back -- and the widening
     -- that follows must NOT take them off the pinned one again, which is the one
     -- way a rule written in the announcement rather than in the apply would fail.
-    pinRow:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    pinRow:SetWidth(M0.padX + M0.padX + M0.minControl - 1)
     pinRow._LayoutPlate()
     eq(shownIn(pinBuilt[2]), 5, "pin: the fold puts all five back in the loose panel")
     eq(shownIn(pinBuilt[1]), 5, "pin: ...and leaves the pinned one whole")
@@ -1170,7 +1170,7 @@ do
     -- ...and the fold is still the way back: with nothing on the plate the pane
     -- has both settings to draw again, so the corner goes back to a count -- and
     -- says two whether the instance it is counting is pinned or not.
-    emptyRow:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    emptyRow:SetWidth(M0.padX + M0.padX + M0.minControl - 1)
     emptyRow._LayoutPlate()
     eq(emptyRow:GetShownHoistCount(), 0, "empty: under the floor the row folds")
     eq(emptyRow.stripCount:GetText(), "2 more settings",
@@ -1336,15 +1336,25 @@ do
         toggle = { key = "on" }, footerStrip = true, build = inlineMount,
     })
     inlineRow:SetWidth(401)
-    eq(inlineRow.plate:GetHeight(), M0.plateStrip + M0.footer,
-       "inline: (a bare strip row, before the claim wires anything)")
+    -- ☠ BEFORE THE CLAIM THE ROW HAS NOTHING ON ITS PLATE, so it is drawn as a
+    -- BUTTON ROW -- one short line, no strip -- and the claim below is what
+    -- turns it into a strip row. The page builds rows in exactly this order.
+    eq(inlineRow.plate:GetHeight(), M0.plateCompact,
+       "inline: before the claim wires anything the row is a button row")
+    eq(rawget(inlineRow, "_buttonRow"), true, "inline: ...and says so")
+    check(not inlineRow.footerStrip:IsShown(), "inline: ...with its strip hidden")
 
     tools.ClaimKeys(inlineRow, inlineGroup)
     check(inlineRow:IsShowingInlineContent(),
           "inline: the claim hands the eager group to the row's plate")
+    eq(rawget(inlineRow, "_buttonRow"), false,
+       "inline: a pane on the plate makes it a strip row again")
+    check(inlineRow.footerStrip:IsShown(), "inline: ...with its strip drawn")
     eq(visible(inlineGroup), #INLINE_KEYS,
        "inline: ...laid out, all three of them, rather than parked in a hidden holder")
-    local lineW = 401 - (M0.padX + M0.check + M0.labelGap) - M0.padX
+    -- The pane starts at the plate's padding, not under the row's name: the
+    -- line is the plate less padX at BOTH ends.
+    local lineW = 401 - 2 * M0.padX
     eq(inlineHolder:GetWidth(), lineW,
        "inline: ...at the plate's own control-line width, not the popout's")
     eq(inlineGroup:GetWidth(), lineW, "inline: ...and the group inside it with it")
@@ -1529,10 +1539,17 @@ do
     tools.ClaimKeys(bigRow, bigGroup)
     check(not bigRow:IsShowingInlineContent(),
           "inline: ...so the row draws nothing on its plate")
-    eq(bigRow.plate:GetHeight(), M0.plateStrip + M0.footer,
-       "inline: ...and keeps the plate a strip row has always had")
-    eq(bigRow.stripCount:GetText(), "7 more settings",
-       "inline: ...with the strip promising all seven, as before")
+    -- ☠ AND WITH NOTHING HOISTED EITHER, THAT IS A BUTTON ROW. The page still
+    -- passed footerStrip = true (every settings row does); the row has nothing
+    -- to put above a strip, so it draws as one short line whose corner says how
+    -- much is behind the click -- the pane's own count, through the provider
+    -- the claim just wired -- and never the row's value summary.
+    eq(bigRow.plate:GetHeight(), M0.plateCompact,
+       "inline: ...so it is drawn as a button row, one compact line")
+    eq(rawget(bigRow, "_buttonRow"), true, "inline: ...and says so")
+    check(not bigRow.footerStrip:IsShown(), "inline: ...with no strip under it")
+    eq(bigRow.summary:GetText(), "7 settings",
+       "inline: ...and its corner counts all seven settings behind the click")
     local bigPo, bigPane = fakePanel()
     bigMount(bigPo, bigPane)
     eq(#bigBuilt, 1, "inline: ...and its first click ADOPTS the eager group, as it always did")

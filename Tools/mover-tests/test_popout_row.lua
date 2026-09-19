@@ -130,7 +130,7 @@ UI.PopoutRow = UI.PopoutRow or {
     footer = 18, footerFill = 0.85, footerHover = 1.0,
     footerBorder = 0.6, footerOn = 0.22, footerOnHover = 0.30,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
-    plateCompact = 26, gapCompact = 4, padCompact = 6,
+    plateCompact = 32, gapCompact = 4, padCompact = 6,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
@@ -1144,16 +1144,16 @@ do
     local lblPt = few.label._points[1]
     eq(lblPt[2], few.plate, "cols: the label anchors to the plate, like every other column")
     eq(lblPt[4], PAD_X + M.check + M.labelGap,
-        "cols: past the tick's reserved column, at the label gap")
+        "cols: past the tick, at the label gap")
     check(M.labelGap > M.colGap, "cols: ...and that really is the wider of the two")
 end
 
--- A row with NO toggle RESERVES the tick's column anyway, so a band carrying
--- both kinds -- a feature you switch on, and a group that is only a way in --
--- has ONE label position rather than two 26px apart.
---
--- The same rule the badge pill already follows at the other end of the row: no
--- count, no pill, but the gear still hangs off the pill's rect.
+-- ☠ A row with NO toggle does NOT reserve the tick's column any more. It did,
+-- so a band carrying both kinds started their names at one x; the author asked
+-- for everything in a box to sit fully left instead ("everything in a box should
+-- always be fully left aligned without indenting", 2026-09-19). So an untoggled
+-- row's name is at the plate's padding, and only a row that DRAWS a tick puts
+-- its name past it.
 do
     local win = window()
     local function row(opts)
@@ -1172,9 +1172,11 @@ do
 
     local barePt, tickPt = bare.label._points[1], ticked.label._points[1]
     eq(barePt[2], bare.plate, "cols: the untoggled label anchors to the plate")
-    eq(barePt[4], PAD_X + M.check + M.labelGap,
-        "cols: ...at the tick's column width, tick or no tick")
-    eq(barePt[4], tickPt[4], "cols: which is exactly where the toggled row's label starts")
+    eq(barePt[4], PAD_X,
+        "cols: ...at the plate's own padding -- no reserved tick column")
+    eq(tickPt[4], PAD_X + M.check + M.labelGap,
+        "cols: the toggled row's label is past its tick, at the label gap")
+    check(barePt[4] < tickPt[4], "cols: so an untoggled name sits LEFT of a toggled one")
 
     -- ...and the row still reads as ON, with no off word and no gate to trip.
     bare.Refresh()
@@ -2418,7 +2420,11 @@ end
 local LINE_H, NAME_H, CONTROL_H = M.lineH, M.nameH, M.controlH
 local LINE_PAD, CELL_GAP, FOOTER_H = M.linePad, M.cellGap, M.footer
 local MIN_CONTROL, SPLIT_CELL = M.minControl, M.splitCell
-local LABEL_X = M.padX + M.check + M.labelGap
+-- ☠ WHERE THE CONTROL LINES AND THE INLINE PANE START: the plate's own padding,
+-- tick or no tick. This was LABEL_X (padX + check + labelGap) -- lines indented
+-- under the NAME -- until the author asked for everything in a box to sit fully
+-- left (2026-09-19). A line is therefore plate - 2 * padX wide.
+local LINE_X = M.padX
 -- ☠ A STRIP ROW'S TITLE LINE IS **NOT** `plate`. A plain row's plate is the
 -- whole row and is the 44 every other page's census pins; a strip row's plate is
 -- a title line, some control lines and a strip, and the title line alone is
@@ -2445,10 +2451,34 @@ end
 -- 50px slot back over a strip row's own -- so this gives the row its width and
 -- its screen position and leaves the HEIGHT to the row, which is the thing under
 -- test.
+--
+-- ☠ AND IT DECLARES ONE HOIST THAT IS NEVER DRAWN, unless `bare = true`. A strip
+-- row with NOTHING declared for its plate is drawn as a button row (section 27),
+-- so a suite about the strip needs a row that keeps one -- and a control gated
+-- away by its own `visible` is exactly the row the rule keeps as a strip row: it
+-- HAS a hoist, its feature is just off. Being never drawn, it moves no count, no
+-- line and no height, so every number below is the one a bare strip row used to
+-- give. A test that declares its own hoists replaces it (SetHoistedControls
+-- replaces the whole list), which changes nothing it measures either.
+local STRIP_CREATEFRAME = CreateFrame
 local function stripRow(opts)
     opts.db = opts.db or { on = true }
     opts.build = opts.build or counting("hoist" .. tostring(opts.label), 50)
+    local bare = opts.bare
+    opts.bare = nil
     local row = host:CreatePopoutRow(FakeUIFrame(), opts)
+    if not bare then
+        -- Under THIS file's CreateFrame: the sections after the suite restores
+        -- the globals still build strip rows, and the slider stub reaches for
+        -- the global by name.
+        local was = CreateFrame
+        CreateFrame = STRIP_CREATEFRAME
+        row:SetHoistedControls({
+            { name = "Keeper", kind = "slider", key = "keeper", db = opts.db,
+              min = 0, max = 1, step = 1, visible = function() return false end },
+        })
+        CreateFrame = was
+    end
     row:SetWidth(260)
     row:SetFakeCenter(CX - 100, CY)
     row:Show()
@@ -2597,20 +2627,21 @@ do
     -- A 401 plate is the shipped default window's (DandersUI/ControlRow.lua
     -- carries the arithmetic). Two cells fit.
     widen(row, 401)
-    local lineW = 401 - LABEL_X - M.padX
+    local lineW = 401 - LINE_X - M.padX
     local cellW = math.floor((lineW - CELL_GAP) / 2)
-    eq(lineW, 355, "cells: the control line is the plate less the name indent and the padding")
+    eq(lineW, 381, "cells: the control line is the plate less its padding at both ends -- no name indent")
     local h1, h2 = row._hoistCells[1], row._hoistCells[2]
     check(h1 ~= nil and h2 ~= nil, "cells: both declarations built a cell")
     check(h1:IsShown() and h2:IsShown(), "cells: ...and both are drawn")
     eq(h1:GetWidth(), cellW, "cells: two equal cells share the line")
     eq(h2:GetWidth(), cellW, "cells: ...exactly equal")
-    eq(cellW, 172, "cells: ...172 each at the shipped default window")
+    eq(cellW, 185, "cells: ...185 each at the shipped default window")
     eq(h1:GetHeight(), LINE_H, "cells: at the theme's line height")
     eq(LINE_H, NAME_H + CONTROL_H, "cells: which is the name tier plus the control tier")
     -- Same line, second column.
-    eq(h1._points[1][4], LABEL_X, "cells: the first cell starts at the NAME's x, not the tick's")
-    eq(h2._points[1][4], LABEL_X + cellW + CELL_GAP, "cells: the second a cell-gap along")
+    eq(h1._points[1][4], LINE_X, "cells: the first cell starts at the plate's padding, not under the name")
+    eq(h1._points[1][4], M.padX, "cells: ...which is padX exactly, tick or no tick")
+    eq(h2._points[1][4], LINE_X + cellW + CELL_GAP, "cells: the second a cell-gap along")
     eq(h1._points[1][5], -HEAD_H, "cells: line one sits directly under the title line")
     eq(h2._points[1][5], -HEAD_H, "cells: ...and both cells are on it")
     eq(row.plate:GetHeight(), HEAD_H + LINE_H + LINE_PAD + FOOTER_H,
@@ -2643,15 +2674,15 @@ do
     -- keeping clear of it. Beside a 62px lane that left 46px of live track on a
     -- 60-300 range -- about five units per pixel.
     eq(c1:GetWidth(), cellW, "track: the control fills the whole cell, lane and all")
-    eq(cellW - SLIDER_BOX - SLIDER_BOX_GAP, 114,
-        "track: so a control in a PAIR gets 114px of live track, not 46")
+    eq(cellW - SLIDER_BOX - SLIDER_BOX_GAP, 127,
+        "track: so a control in a PAIR gets 127px of live track, not 46")
     check(cellW - SLIDER_BOX - SLIDER_BOX_GAP >= 112,
         "track: ...at least the 112 ControlRow.lua sized its own slider for")
 
     -- THE SPLIT. Narrow the plate until two cells no longer fit and the pair
     -- becomes two ONE-cell lines -- the tracks get longer, not shorter.
     widen(row, 260)
-    eq(row._hoistCells[1]:GetWidth(), 260 - LABEL_X - M.padX,
+    eq(row._hoistCells[1]:GetWidth(), 260 - LINE_X - M.padX,
         "split: at 260 a cell takes the whole line")
     eq(row._hoistCells[1]._points[1][5], -HEAD_H, "split: the first is on line one")
     eq(row._hoistCells[2]._points[1][5], -(HEAD_H + LINE_H), "split: the second on line two")
@@ -2668,7 +2699,7 @@ do
     -- the exact cramp the tiers were built to fix, arriving at the other end.
     check(SPLIT_CELL > MIN_CONTROL,
         "split: the split threshold is generous and the fold floor is hard -- two numbers")
-    eq(row._hoistCells[1]:GetWidth() - SLIDER_BOX - SLIDER_BOX_GAP, 156,
+    eq(row._hoistCells[1]:GetWidth() - SLIDER_BOX - SLIDER_BOX_GAP, 182,
         "split: so a split line's track is LONGER than a pair's, not shorter")
 
     -- NEVER THREE. Three lanes plus three minimum tracks do not fit any plate
@@ -2681,7 +2712,7 @@ do
     -- three tracks here, so a rule that allowed them would show up as a narrower
     -- cell -- which is what this measures, rather than counting a third control
     -- that was never declared.
-    eq(row._hoistCells[1]:GetWidth(), math.floor((1200 - LABEL_X - M.padX - CELL_GAP) / 2),
+    eq(row._hoistCells[1]:GetWidth(), math.floor((1200 - LINE_X - M.padX - CELL_GAP) / 2),
         "cells: ...and each cell is still HALF the line, never a third of it")
 end
 
@@ -2694,7 +2725,7 @@ do
                            window = win, footerStrip = true })
     row:SetHoistedControls(twoSliders(db, seen))
     -- The floor: below the width where a line cannot hold ONE drawable control.
-    local floorW = LABEL_X + M.padX + MIN_CONTROL
+    local floorW = LINE_X + M.padX + MIN_CONTROL
     widen(row, floorW)
     eq(row:GetShownHoistCount(), 2, "fold: at the floor exactly one cell still fits")
     widen(row, floorW - 1)
@@ -2985,8 +3016,8 @@ do
         return "100x50 Spacing 2"          -- a consumer that STILL returns text
     end
 
-    -- A strip row with nothing hoisted: on -> nothing, even though the consumer
-    -- handed back a string.
+    -- A strip row with nothing DRAWN on its plate (the fixture's one hoist is
+    -- gated away): on -> nothing, even though the consumer handed back a string.
     local row = stripRow({ label = "Quiet", db = db, count = 5, window = win,
                            footerStrip = true, summary = summary, toggle = { key = "on" } })
     eq(row.summary:GetText(), "",
@@ -2996,7 +3027,7 @@ do
     row:SetHoistedControls(twoSliders(db, {}))
     widen(row, 401)
     eq(row.summary:GetText(), "", "summary: ...hoisted or not")
-    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    widen(row, LINE_X + M.padX + MIN_CONTROL - 1)
     eq(row:GetShownHoistCount(), 0, "summary: the row folded")
     eq(row.summary:GetText(), "",
         "summary: ...and folding does not bring the fragment back")
@@ -3061,9 +3092,13 @@ do
     eq(small.preferredHeight, M.plateCompact + M.gapCompact,
         "compact: ...which is what it tells the layout it needs")
     -- ⚠ The number that matters to the page, stated once so a retune of either
-    -- token has to come past this line: 17 filters must fit in under 600px.
-    check(17 * small:GetHeight() < 600,
-        "compact: seventeen filters fit in under 600px of page")
+    -- token has to come past this line: 17 filters must fit in under 650px.
+    -- It was 600 at the 26px plate; the plate went to 32 (2026-09-19: "the text
+    -- sits too close to the top and bottom edges"), which is 17 x 36 = 612 --
+    -- still well under two thirds of the 986 the strip row's height cost.
+    check(17 * small:GetHeight() < 650,
+        "compact: seventeen filters fit in under 650px of page")
+    eq(M.plateCompact, 32, "compact: the button row's plate is 32 tall")
 
     -- ...and NOTHING ELSE MOVED. The plain row above is every unconverted page in
     -- the addon, and the whole point of an opt-in is that it did not shift.
@@ -3088,11 +3123,10 @@ do
     eq(both.plate:GetHeight(), M.plateCompact,
         "compact: ...and the plate is the compact one, not the strip row's")
 
-    -- ☠ AND THE CONTENT SITS AT THE EDGES, not in the middle of the row. A plain
-    -- row indents its label past a CHECKBOX COLUMN whether or not it has a
-    -- checkbox, because a settings page needs its rows to align with each other.
-    -- A list where NO row has a toggle pays 26px per row for a control that is
-    -- never there -- "everything is cramped into the middle".
+    -- ☠ AND THE CONTENT SITS AT THE EDGES, not in the middle of the row. A list
+    -- where NO row has a toggle would pay 26px per row for a control that is
+    -- never there -- "everything is cramped into the middle". (Every row follows
+    -- this rule now; the compact row keeps only its tighter padding.)
     eq(small.label._points[1][4], M.padCompact,
         "compact: a toggle-less compact row starts its label at the padding")
     eq(small.summary._points[2][4], -M.padCompact,
@@ -3104,9 +3138,9 @@ do
     eq(both.label._points[1][4], M.padCompact + M.check + M.labelGap,
         "compact: ...and a compact row WITH a toggle still clears its checkbox")
 
-    -- ...and an unconverted row is untouched at the full LABEL_X.
+    -- ...and a plain row with a toggle clears its tick at the plain padding.
     eq(plain.label._points[1][4], M.padX + M.check + M.labelGap,
-        "compact: a row that did not ask keeps the checkbox column either way")
+        "compact: a plain row with a toggle clears its tick at padX")
 
     -- ☠ THE RIGHT-HAND CLUSTER CLOSES UP. The count pill is 22px of backdrop
     -- built between the cog and the chevron whether or not the row was given a
@@ -3315,7 +3349,7 @@ do
 
     -- THE FOLD, which is the something-to-EMPTY case: below the floor there is no
     -- control left to draw, and the pane's copies have to come back.
-    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    widen(row, LINE_X + M.padX + MIN_CONTROL - 1)
     eq(row:GetShownHoistCount(), 0, "told: under the floor the row folds")
     eq(#seen, 2, "told: ...and folding to nothing IS an announcement")
     eq(seen[2], "", "told: ...carrying an empty set")
@@ -3331,7 +3365,7 @@ do
     row:SetOnShownKeysChanged(function(_, keys) held = keys end)
     local first = held
     check(first ~= nil, "told: a consumer wired late is handed the set at once")
-    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    widen(row, LINE_X + M.padX + MIN_CONTROL - 1)
     eq(held, first, "told: every announcement hands back the same table")
     eq(next(held), nil, "told: ...which the fold has already emptied")
 
@@ -3525,7 +3559,7 @@ do
     -- pinned would be as empty as the one it refused to open. "0 more settings"
     -- says the true thing: there is nothing behind this click.
     behind = 0
-    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    widen(row, LINE_X + M.padX + MIN_CONTROL - 1)
     eq(row:GetShownHoistCount(), 0, "derived: under the floor the row folds")
     eq(row.stripCount:GetText(), "0 more settings",
        "derived: ...and an empty pane behind an empty plate is not an offer to pin")
@@ -3740,8 +3774,8 @@ do
                            window = win, footerStrip = true })
     row:SetHoistedControls(twoSliders(db, {}))
     widen(row, 401)
-    local cellW = math.floor((401 - LABEL_X - M.padX - CELL_GAP) / 2)
-    eq(cellW, 172, "dot: the shipped default window's cell, as 24.4 measures it")
+    local cellW = math.floor((401 - LINE_X - M.padX - CELL_GAP) / 2)
+    eq(cellW, 185, "dot: the shipped default window's cell, as 24.4 measures it")
 
     local h1, h2 = row._hoists[1], row._hoists[2]
     local c1, nm1 = h1.control, h1.nameText
@@ -3801,7 +3835,7 @@ do
     -- position.
     local before = lp[4]
     widen(wide, 260)
-    local wideCell = 260 - LABEL_X - M.padX
+    local wideCell = 260 - LINE_X - M.padX
     eq(wide._hoistCells[1]:GetWidth(), wideCell, "clamp: the split gave the cell the whole line")
     local sp = lc.modifiedDot._points[#lc.modifiedDot._points]
     check(sp[4] ~= before, "clamp: the dot moved with the cell, with nothing written")
@@ -4087,6 +4121,207 @@ do
     host:CloseAllPopoutRows("test")
 end
 
+-- ============================================================
+-- 27. A STRIP ROW WITH NOTHING ON ITS PLATE IS A BUTTON ROW
+-- ------------------------------------------------------------
+-- The author (2026-09-19): "every settings row that has no hoisted controls and
+-- no inline box draws as a compact button row". Every page still passes
+-- footerStrip = true; the ROW decides, from what has been DECLARED for its
+-- plate, and re-decides whenever a declaration arrives -- a page declares its
+-- hoists and its inline pane after it builds the row.
+--
+-- Its corner says how many settings are behind the click ("8 settings"), or
+-- "Off"; never the row's value summary (the rule 24.11 pins for strip rows).
+-- ============================================================
+print("-- Row: a strip row with nothing on its plate is a button row")
+
+-- ---- 27.1 the rule: nothing declared -> button row ------------------
+do
+    local win = window()
+    local db = { on = true }
+    local called = 0
+    local row = stripRow({ label = "Bare", db = db, count = 8, window = win, bare = true,
+                           footerStrip = true, toggle = { key = "on" },
+                           summary = function() called = called + 1; return "Alpha 0.30" end })
+    widen(row, 401)
+    eq(rawget(row, "_buttonRow"), true, "button: a strip row with nothing declared is a button row")
+    check(not row.footerStrip:IsShown(), "button: ...its strip is not drawn")
+    eq(row.plate:GetHeight(), M.plateCompact, "button: ...its plate is one compact line")
+    eq(row:GetHeight(), M.plateCompact + M.gap,
+        "button: ...in a slot that keeps the settings page's own gap")
+    eq(row.preferredHeight, M.plateCompact + M.gap, "button: ...re-reported to the layout")
+    eq(row.popoutInset[4], row:GetHeight() - row.plate:GetHeight(),
+        "button: the tether inset is still exactly the unpainted gap")
+
+    -- ---- the corner: the count, never the summary -------------------
+    eq(row.summary:GetText(), "8 settings", "button: its corner counts the settings behind it")
+    eq(called, 0, "button: ...and the row's summary function is never even asked")
+    row._Write(false)
+    eq(row.summary:GetText(), "Off", "button: switched off, the corner says Off")
+    row._Write(true)
+    eq(row.summary:GetText(), "8 settings", "button: ...and the count comes back on")
+    eq(called, 0, "button: no value readout at any point")
+
+    -- ---- the way in is the WHOLE row --------------------------------
+    eq(row.gear._points[1][2], row.chevron, "button: the cog closes up against the chevron")
+    eq(row.gear._points[1][4], -M.colGap, "button: ...a column gap from it")
+    eq(row.chevron._points[1][2], row.plate, "button: the chevron is back on the plate")
+    eq(row.chevron._points[1][4], -M.padX, "button: ...a pad in from its right edge")
+    check(not row.badgePill:IsShown(), "button: no count pill -- the corner carries the number")
+    eq(row.modifiedTick._points[1][2], row.chevron, "button: the modified tick follows the chevron")
+    eq(row.summary._points[2][2], row.gear, "button: the corner text ends at the cog")
+    eq(row.label._points[1][4], M.padX + M.check + M.labelGap,
+        "button: the name clears its tick, at the settings page's padding")
+
+    row:GetScript("OnEnter")()
+    eq(row.plate._fill.a, M.hoverFill, "button: the whole plate lights under the cursor")
+    row:GetScript("OnLeave")()
+    row:GetScript("OnClick")(row)
+    check(row.popout ~= nil, "button: and a click anywhere on it opens the panel")
+    eq(row.popout and row.popout.tetherSource, row,
+        "button: ...tethered to the row, not to a hidden strip")
+    row:ClosePopout()
+    host:CloseAllPopoutRows("test")
+end
+
+-- ---- 27.2 hoists make it a strip row, even gated away ----------------
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local row = stripRow({ label = "Grows", db = db, count = 5, window = win, bare = true,
+                           footerStrip = true, toggle = { key = "on" },
+                           summary = function() return "100x50" end })
+    widen(row, 401)
+    eq(rawget(row, "_buttonRow"), true, "strip again: starts as a button row")
+
+    -- A late declaration -- the order every page builds in.
+    row:SetHoistedControls(twoSliders(db, {}))
+    widen(row, 401)
+    eq(rawget(row, "_buttonRow"), false, "strip again: declaring hoists makes it a strip row")
+    check(row.footerStrip:IsShown(), "strip again: ...its strip is drawn")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_H + LINE_PAD + FOOTER_H,
+        "strip again: ...at the strip row's own title line, one control line and the strip")
+    eq(row.chevron._points[1][2], row.footerStrip, "strip again: the chevron moved back onto the strip")
+    eq(row.gear._points[1][2], row.stripCount, "strip again: ...the cog beside the strip's words")
+    eq(row.modifiedTick._points[1][2], row.chevron, "strip again: ...the tick after the chevron")
+    eq(row.stripCount:GetText(), "3 more settings", "strip again: the strip counts what is left")
+    eq(row.summary:GetText(), "", "strip again: and the title line says nothing")
+    row:GetScript("OnClick")(row)
+    eq(row.popout, nil, "strip again: the plate is inert again -- the strip is the way in")
+
+    -- ☠ A ROW WHOSE HOISTS ARE ALL GATED AWAY STILL HAS HOISTS. Its feature is
+    -- off; it is not a different kind of row, and it must not change shape
+    -- every time its tick is clicked.
+    local gated = stripRow({ label = "Gated", db = db, count = 5, window = win, bare = true,
+                             footerStrip = true, toggle = { key = "on" } })
+    gated:SetHoistedControls({
+        { name = "Frame Width", kind = "slider", key = "frameWidth", db = db,
+          min = 60, max = 300, step = 1, visible = function() return false end },
+    })
+    widen(gated, 401)
+    eq(gated:GetShownHoistCount(), 0, "gated: nothing is drawn on the plate")
+    eq(rawget(gated, "_buttonRow"), false, "gated: ...and it is still a strip row")
+    check(gated.footerStrip:IsShown(), "gated: ...with its strip")
+    -- ...and so is one folded under the floor.
+    widen(row, LINE_X + M.padX + MIN_CONTROL - 1)
+    eq(row:GetShownHoistCount(), 0, "folded: the narrow row shows no controls")
+    eq(rawget(row, "_buttonRow"), false, "folded: ...and keeps its strip")
+
+    -- ☠ AN EMPTY LIST IS NO HOISTS. Declaring nothing is not declaring something.
+    local empty = stripRow({ label = "Empty list", db = db, count = 2, window = win, bare = true,
+                             footerStrip = true })
+    empty:SetHoistedControls({})
+    widen(empty, 401)
+    eq(rawget(empty, "_buttonRow"), true, "empty: an empty hoist list leaves a button row")
+    host:CloseAllPopoutRows("test")
+end
+
+-- ---- 27.3 an inline pane makes it a strip row -----------------------
+do
+    local win = window()
+    local row = stripRow({ label = "Pane", db = { on = true }, count = 3, window = win, bare = true,
+                           footerStrip = true })
+    widen(row, 401)
+    eq(rawget(row, "_buttonRow"), true, "pane: a button row until a pane is handed over")
+    eq(row.chevron._vertex.r, 1, "pane: ...its chevron the neutral glyph a plate row draws")
+    local content = FakeUIFrame()
+    row:SetInlineContent(content, function() return 60 end)
+    eq(rawget(row, "_buttonRow"), false, "pane: ...and a strip row from then on")
+    check(row.footerStrip:IsShown(), "pane: ...with its strip drawn")
+    -- The glyphs are the accent on a strip row, repainted by the shape change
+    -- itself: SetInlineContent runs no Refresh behind it.
+    local acc = host:GetAccent()
+    eq(row.chevron._vertex.r, acc.r,
+        "pane: the chevron takes the accent without waiting for a refresh")
+end
+
+-- ---- 27.4 what the corner counts ------------------------------------
+do
+    local win = window()
+    -- A provider answers ahead of the declared number, as it does on the strip.
+    local n = 4
+    local row = stripRow({ label = "Provided", db = { on = true }, count = 9, window = win,
+                           bare = true, footerStrip = true })
+    row:SetCountProvider(function() return n end)
+    eq(row.summary:GetText(), "4 settings", "count: the provider's number, painted on the spot")
+    n = 6
+    row.Refresh()
+    eq(row.summary:GetText(), "6 settings", "count: ...re-asked on every refresh")
+    n = 0
+    row.Refresh()
+    eq(row.summary:GetText(), "", "count: none behind the click says nothing, not '0 settings'")
+
+    -- No number at all: nothing, and still no summary.
+    local quiet = stripRow({ label = "Uncounted", db = { on = true }, window = win, bare = true,
+                             footerStrip = true, summary = function() return "Value" end })
+    eq(quiet.summary:GetText(), "", "count: a row with no count paints nothing")
+
+    -- ☠ A ROW BUILT COMPACT IS UNTOUCHED: it keeps its summary, which is how the
+    -- Filter Designer's list and the AD add rows read.
+    local list = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Filter", db = { on = true }, count = 9, window = win, compact = true,
+        build = counting("btnlist", 50), summary = function() return "12 of 49 tracked" end }))
+    list._LayoutPlate()
+    eq(list.summary:GetText(), "12 of 49 tracked", "count: a compact row keeps its own corner")
+    eq(rawget(list, "_buttonRow"), nil, "count: ...and is never converted")
+    eq(list.label._points[1][4], M.padCompact, "count: ...at its own tighter padding")
+end
+
+-- ---- 27.5 everything in a box starts at the padding -----------------
+-- ☠ "everything in a box should always be fully left aligned without
+-- indenting". A row's name is at padX, or past its tick; its control lines and
+-- its inline pane start at padX whether or not it has a tick.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local plain = stripRow({ label = "No tick", db = db, count = 5, window = win,
+                             footerStrip = true })
+    plain:SetHoistedControls(twoSliders(db, {}))
+    widen(plain, 401)
+    eq(plain.label._points[1][4], M.padX, "align: an unticked row's name is at the padding")
+    eq(plain._hoistCells[1]._points[1][4], M.padX, "align: ...and so is its first control line")
+    eq(plain._hoistCells[1]._points[1][4], plain.label._points[1][4],
+        "align: ...the same x as the name above it")
+
+    local ticked = stripRow({ label = "Ticked", db = db, count = 5, window = win,
+                              footerStrip = true, toggle = { key = "on" } })
+    ticked:SetHoistedControls(twoSliders(db, {}))
+    widen(ticked, 401)
+    eq(ticked.label._points[1][4], M.padX + M.check + M.labelGap,
+        "align: a ticked row's name clears its tick")
+    eq(ticked._hoistCells[1]._points[1][4], M.padX,
+        "align: ...but its control lines do NOT indent under the name")
+    eq(ticked._hoistCells[1]:GetWidth(), math.floor((401 - 2 * M.padX - CELL_GAP) / 2),
+        "align: ...and the line is wider by the indent it lost")
+
+    local content = FakeUIFrame()
+    local asked
+    ticked:SetInlineContent(content, function(w) asked = w; return 40 end)
+    eq(content._points[1][4], M.padX, "align: the inline pane starts at the padding too")
+    eq(asked, 401 - 2 * M.padX, "align: ...and is measured at the full padded width")
+    eq(content:GetWidth(), 401 - 2 * M.padX, "align: ...and sized to it")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
 
@@ -4219,9 +4454,9 @@ do
     check(content:IsShown(), "inline: ...and it is drawn")
     check(row:IsShowingInlineContent(), "inline: ...which the row says out loud")
 
-    local lineW = 260 - LABEL_X - M.padX
+    local lineW = 260 - LINE_X - M.padX
     eq(asked[#asked], lineW,
-       "inline: measured at the CONTROL LINE's width -- the plate less the name indent")
+       "inline: measured at the CONTROL LINE's width -- the plate less its padding at both ends")
     eq(content:GetWidth(), lineW, "inline: ...and sized to it")
     eq(content:GetHeight(), H, "inline: ...at the height its own measure answered")
 
@@ -4274,9 +4509,9 @@ do
 
     -- ---- the width, which the fold and the group both depend on ------
     widen(row, 401)
-    eq(asked[#asked], 401 - LABEL_X - M.padX,
+    eq(asked[#asked], 401 - LINE_X - M.padX,
        "inline: a wider window re-measures at the wider line")
-    eq(content:GetWidth(), 401 - LABEL_X - M.padX, "inline: ...and re-sizes the frame")
+    eq(content:GetWidth(), 401 - LINE_X - M.padX, "inline: ...and re-sizes the frame")
 
     -- ---- OFF folds it away -------------------------------------------
     -- ☠ GREYED CONTROLS THAT STILL OCCUPY THE PLATE ARE THE WORST USE OF THE

@@ -87,13 +87,21 @@ local M = UI.PopoutRow
 local ROW_H   = M.slot
 local PLATE_H = M.plate
 
--- ☠ THE LABEL'S x, AND THE CONTROL LINES' LEFT EDGE, ARE ONE CONSTANT. The tick's
--- column is reserved whether or not a tick is drawn (see the label's anchor
--- below), and a control line is indented to the NAME -- so a row's second line
--- starts under the first line's first letter rather than under its tick. Named
--- once here because three things now read it; ControlRow.lua computes the same
--- expression for the same reason and says so at its own LABEL_X.
-local LABEL_X = M.padX + M.check + M.labelGap
+-- ☠ NOTHING IN A BOX IS INDENTED. This file used to have ONE constant here,
+-- LABEL_X = padX + check + labelGap, and every row laid its label, its control
+-- lines and its inline pane at it whether or not a tick was drawn -- a reserved
+-- tick column, so ticked and unticked rows lined their names up. The author
+-- asked for the opposite (2026-09-19): "everything in a box should always be
+-- fully left aligned without indenting". So:
+--
+--   * the row's NAME sits at the plate's own padding, or just past the tick on
+--     a row that has one (row._labelX, resolved once at build);
+--   * the CONTROL LINES and the INLINE PANE start at the plate's padding
+--     (row._padX) ALWAYS, tick or not -- they are the box's contents, and a
+--     tick on the title line is no reason to push them in.
+--
+-- ControlRow.lua still computes the old expression at its own LABEL_X; that is
+-- a different widget (a single setting on a plate) and was not part of this.
 
 -- The hoist half's metrics, all from the same table for the reason above it.
 -- LINE_H is the whole CELL and the two tiers inside it are NAME_H above
@@ -1042,6 +1050,11 @@ function UI:CreatePopoutRow(parent, opts)
     -- exists to avoid) and a page that passes both means the newer of them.
     row._compact = opts.compact and true or false
     row._strip = (not row._compact) and (opts.footerStrip and true or false) or false
+    -- ⚠ NOT FIXED FOR A STRIP ROW. A strip row with nothing on its plate is
+    -- drawn as a BUTTON ROW (see applyShape beside plateLayout), whose title
+    -- line is M.plateCompact -- and whether it has anything on its plate is not
+    -- known until the page has declared its hoists and its inline pane, both
+    -- AFTER this line. applyShape re-assigns it; this is the opening guess.
     local HEAD_H = row._compact and M.plateCompact
                    or (row._strip and M.plateStrip or PLATE_H)
 
@@ -1128,22 +1141,19 @@ function UI:CreatePopoutRow(parent, opts)
     --
     -- LEFT, so it centres on the plate's midline -- which is what every anchor
     -- in this build does, and the whole of "vertically centred" for this row.
-    -- ☠ THE COMPACT ROW'S OWN TWO NUMBERS. A plain row indents its label past a
-    -- CHECKBOX COLUMN whether or not it has a checkbox -- LABEL_X is padX + check
-    -- + labelGap, unconditionally -- because on a settings page the rows must
-    -- align with each other and most of them do have one. A LIST of rows that
-    -- none of them have a toggle is the opposite case: every row pays 26px of
-    -- indent for a control that is never there, and the content reads as pushed
-    -- into the middle of the row.
+    -- ☠ THE LEFT EDGE, ONE RULE FOR EVERY ROW. The label sits at the plate's
+    -- padding, or just past the tick when the row has one -- never past a tick
+    -- column that is not drawn (see the note at the head of this file for the
+    -- old reserved column and why it went). The compact row always worked this
+    -- way; every other row now does too.
     --
-    -- So a compact row indents for the column only when it actually has one, and
-    -- uses the tighter side padding at both ends. A row that did not ask for
-    -- compact is untouched by both, which is what keeps every census pinning
-    -- LABEL_X true.
+    -- ⚠ A COMPACT row keeps its tighter side padding at both ends: 10 is right
+    -- for a plate whose widgets need air around them, and on a LIST of single
+    -- lines it reads as the content pushed into the middle. A strip row drawn
+    -- as a BUTTON ROW (applyShape) keeps M.padX, so its name lines up with the
+    -- strip rows around it in the same band.
     local PAD_X = row._compact and M.padCompact or M.padX
-    local ROW_LABEL_X = row._compact
-        and (PAD_X + (row._hasToggle and (M.check + M.labelGap) or 0))
-        or LABEL_X
+    local ROW_LABEL_X = PAD_X + (row._hasToggle and (M.check + M.labelGap) or 0)
     row._padX, row._labelX = PAD_X, ROW_LABEL_X
 
     local cb
@@ -1229,16 +1239,10 @@ function UI:CreatePopoutRow(parent, opts)
 
     local label = host:CreateLabelNative(plate, { size = M.labelSize, color = C_TEXT })
     label:SetText(row._label)
-    -- ☠ THE TICK'S COLUMN IS RESERVED WHETHER OR NOT A TICK IS DRAWN, exactly as
-    -- the count badge's is (see badgePill:SetShown just above: no count, no pill,
-    -- but the gear still hangs off the pill's RECT so the right-hand columns land
-    -- at the same x on every row).
-    --
-    -- The left column had the other rule until a page mixed the two kinds. A row
-    -- with a feature to switch on and a row that is only a way IN to a group are
-    -- both rows, they sit in the same band, and anchoring the label to `cb or
-    -- plate` started their names 26px apart -- which is the ragged list the
-    -- right-hand columns were made fixed to avoid. One constant, both kinds.
+    -- ⚠ THE TICK'S COLUMN IS NO LONGER RESERVED. It was, so a ticked row and an
+    -- unticked one in the same band started their names at one x; the author
+    -- asked for everything in a box to sit fully left instead (2026-09-19), so
+    -- an unticked row's name starts at the padding. See ROW_LABEL_X above.
     label:SetPoint("LEFT", plate, "LEFT", ROW_LABEL_X, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
@@ -1471,14 +1475,23 @@ function UI:CreatePopoutRow(parent, opts)
         if stripCount.SetWordWrap then stripCount:SetWordWrap(false) end
         row.stripCount = stripCount
 
-        -- ☠ THE CLUSTER MOVES; IT IS NOT REBUILT. The gear and the chevron are
-        -- the same two textures the title line carried, re-anchored onto the
-        -- strip -- so the row's own Refresh goes on fading them with the toggle
-        -- and there is no second pair to keep in step. Right-aligned in the same
-        -- order and at the same gaps they had up there: cog, count, chevron.
+        stripCount:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
+    end
+
+    -- ---- WHERE THE WAY-IN CLUSTER SITS: on the strip, or on the plate ----
+    -- Two functions rather than one block each, because a strip row can move
+    -- between the two shapes after it is built: it is drawn as a BUTTON ROW
+    -- until the page declares something for its plate, and as a strip row from
+    -- then on (see applyShape beside plateLayout).
+    --
+    -- ☠ THE CLUSTER MOVES; IT IS NOT REBUILT. The gear and the chevron are the
+    -- same two textures the title line carried, re-anchored onto the strip -- so
+    -- the row's own Refresh goes on fading them with the toggle and there is no
+    -- second pair to keep in step. Right-aligned in the same order and at the
+    -- same gaps they had up there: cog, count, chevron.
+    local function anchorClusterToStrip()
         chevron:ClearAllPoints()
         chevron:SetPoint("RIGHT", strip, "RIGHT", -M.padX, 0)
-        stripCount:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
         gear:ClearAllPoints()
         gear:SetPoint("RIGHT", stripCount, "LEFT", -M.colGap, 0)
 
@@ -1511,22 +1524,38 @@ function UI:CreatePopoutRow(parent, opts)
     -- So the cog closes up against the chevron and the summary right-aligns to
     -- the cog, which puts the whole right-hand cluster together at the edge. A
     -- compact row that DOES want a number puts it in its summary, where this page
-    -- already puts "17 of 26 tracked".
-    if row._compact then
+    -- already puts "17 of 26 tracked". The chevron itself is placed by
+    -- plateLayout's title-line pass, on the plate.
+    --
+    -- ⚠ `reparent` IS FOR THE BUTTON ROW ONLY. On a strip row the tick was
+    -- moved onto the strip, which a button row HIDES -- so it has to come back
+    -- to the plate or the mark goes with the strip. A row built compact never
+    -- moved it and is left exactly as it was.
+    local function anchorClusterToPlate(reparent)
         badgePill:Hide()
         gear:ClearAllPoints()
         gear:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
         -- The dot follows the chevron for the strip's own reason: it needs
         -- something bigger than itself to notch onto, and with the pill gone the
         -- only thing at this end is the glyph it must not sit on top of.
+        if reparent then modTick:SetParent(plate) end
         modTick:ClearAllPoints()
         modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
     end
 
+    if row._strip then anchorClusterToStrip() end
+    if row._compact then anchorClusterToPlate(false) end
+
+    -- IS THE STRIP DRAWN RIGHT NOW? Every "is this a strip row" question below
+    -- asks THIS, not `strip`: the strip frame exists on every row that asked for
+    -- one, and a strip row drawn as a button row keeps it, hidden, for the day
+    -- the page declares something for its plate. applyShape owns it.
+    local stripLive = row._strip
+
     -- ---- the control lines ----------------------------------------
     -- One CELL per hoisted control, in two tiers: the name across the cell's
     -- full width, the control across the cell's full width beneath it. Cells on
-    -- a line are equal and every row indents to the same LABEL_X, which is the
+    -- a line are equal and every row starts them at its own padX, which is the
     -- whole of "the tracks start and end at the same x down the page" -- the
     -- argument the four right-hand columns above are fixed for, one axis over.
     local hoists = nil             -- the declarations, in the order they were given
@@ -1638,6 +1667,20 @@ function UI:CreatePopoutRow(parent, opts)
     -- see. Guarded on the toggle having been read at least once: construction
     -- lays out before its first Refresh, and `on` is what decides between the
     -- summary and the off text.
+    -- WHAT A BUTTON ROW'S CORNER SAYS: how many settings are behind the click.
+    -- The same number the strip would have painted -- the provider's when there
+    -- is one, the declared count otherwise -- and with nothing on the plate
+    -- there is nothing to take off it, so it is the whole of it. Blank when the
+    -- row knows no number, or the number is none: "0 settings" is a row saying
+    -- nothing twice.
+    local function buttonCountText()
+        local provider = rawget(row, "_countProvider")
+        local n
+        if provider then n = max(provider() or 0, 0) else n = row._count end
+        if type(n) ~= "number" or n <= 0 then return "" end
+        return format((L and L["%d settings"]) or "%d settings", n)
+    end
+
     local function paintSummary()
         if row._toggledOn == nil then return end
         local text
@@ -1663,8 +1706,18 @@ function UI:CreatePopoutRow(parent, opts)
             -- removed it again when the compact row landed with no caller left --
             -- the rule below is about VALUE READOUTS, and a row with no controls
             -- has none to read out.
-            if strip then
+            --
+            -- ☠ AND A BUTTON ROW PAINTS ITS COUNT, NEVER ITS SUMMARY. A strip
+            -- row with nothing on its plate is drawn as a button row (applyShape),
+            -- and its corner says how much is behind the click -- "8 settings" --
+            -- which is the strip's own number moved up, not a value readout. The
+            -- rule above is about value readouts in a row's corner and it holds
+            -- here too: this row is a strip row that happens to have nothing
+            -- hoisted, so its `summary` is never consulted.
+            if stripLive then
                 text = ""
+            elseif row._buttonRow then
+                text = buttonCountText()
             else
                 text = opts.summary and opts.summary(resolveDB(opts.db)) or ""
             end
@@ -1683,6 +1736,61 @@ function UI:CreatePopoutRow(parent, opts)
         return ok and true or false
     end
 
+    -- ---- A STRIP ROW WITH NOTHING ON ITS PLATE IS A BUTTON ROW -------
+    -- ☠ The author (2026-09-19): every settings row that has no hoisted controls
+    -- and no inline box draws as a compact BUTTON ROW -- one short line, the
+    -- whole row the click target, the count in its corner -- instead of a title
+    -- line with a strip under it and nothing between them.
+    --
+    -- ☠ DECIDED HERE, IN THE ROW, AND RE-DECIDED ON EVERY LAYOUT. Not at build,
+    -- because at build nothing is known: a page builds the row, THEN declares
+    -- its hoists (SetHoistedControls) and THEN hands it an inline pane
+    -- (SetInlineContent), in whichever order the page happens to write them --
+    -- and both of those already re-run plateLayout on the spot. Not in the
+    -- options half either: pages call CreatePopoutRow directly and there is no
+    -- moment over there at which "this page has finished declaring" is true.
+    -- So the row starts as a button row and becomes a strip row the moment
+    -- something is declared for its plate. The slot it was holding is
+    -- re-reported by the layout pass either way, which is the idiom every
+    -- late declaration on this row already relies on.
+    --
+    -- ⚠ DECLARED, NOT SHOWN. A row whose hoists are all gated away (its feature
+    -- is off), or folded away (the window is too narrow), or whose inline pane
+    -- has folded with its toggle, still HAS them -- it is a strip row whose
+    -- plate happens to be empty right now, and it keeps its strip so the row
+    -- does not change shape every time its tick is clicked.
+    --
+    -- ⚠ ONLY ON A ROW THAT ASKED FOR A STRIP. A row built compact, and a row
+    -- that never asked for a strip at all, have one shape for life.
+    --
+    -- Answers whether the shape MOVED, so the title line's anchors can be
+    -- re-laid even when their vertical offset did not change.
+    local shapeSet = false
+    local function applyShape()
+        if not strip then return false end
+        local button = not inlineFrame and not (hoists and #hoists > 0)
+        if shapeSet and button == row._buttonRow then return false end
+        shapeSet = true
+        row._buttonRow = button
+        stripLive = not button
+        strip:SetShown(not button)
+        HEAD_H = button and M.plateCompact or M.plateStrip
+        if button then anchorClusterToPlate(true) else anchorClusterToStrip() end
+        -- The way-in glyphs are the accent on a strip and neutral on a plate;
+        -- a shape change can arrive without a Refresh behind it (an inline
+        -- pane handed over late does not run one), so they are repainted here.
+        local on = row._toggledOn ~= false
+        if stripLive then
+            local acc = row._accent or host:GetAccent()
+            gear:SetVertexColor(acc.r, acc.g, acc.b, on and 1 or OFF_ALPHA)
+            chevron:SetVertexColor(acc.r, acc.g, acc.b, on and 1 or OFF_ALPHA)
+        else
+            gear:SetVertexColor(1, 1, 1, on and 0.6 or OFF_ALPHA * 0.6)
+            chevron:SetVertexColor(1, 1, 1, on and 0.5 or OFF_ALPHA * 0.5)
+        end
+        return true
+    end
+
     -- ---- the plate's own size, and everything anchored inside it ----
     --
     -- ☠ ONE FUNCTION, RE-RUN, RATHER THAN ARITHMETIC DONE ONCE AT BUILD. Three
@@ -1694,16 +1802,22 @@ function UI:CreatePopoutRow(parent, opts)
     local function plateLayout()
         if not (strip or hoists or inlineFrame) then return end
 
+        -- The shape first: HEAD_H, the strip and the title line's anchors all
+        -- follow from it.
+        local shapeMoved = applyShape()
+
         local db = resolveDB(opts.db)
 
-        -- The width available to a control line: the plate, less the name
-        -- indent on the left and the plate's own padding on the right. DERIVED
-        -- FROM THE PLATE rather than read off a cell -- at build the cells have
-        -- no resolved width and would answer 0.
+        -- The width available to a control line: the plate, less the plate's
+        -- own padding at BOTH ends -- the lines and the inline pane start at the
+        -- padding, not under the name (see the note at the head of this file).
+        -- DERIVED FROM THE PLATE rather than read off a cell -- at build the
+        -- cells have no resolved width and would answer 0.
         local plateW = plate:GetWidth() or 0
         if not plateW or plateW <= 0 then plateW = row:GetWidth() or 0 end
         if not plateW or plateW <= 0 then plateW = UI.PopoutContentWidth or 260 end
-        local lineW = plateW - (row._labelX or LABEL_X) - (row._padX or M.padX)
+        local padX = row._padX or M.padX
+        local lineW = plateW - 2 * padX
 
         -- Two cells, one, or none. NEVER three: three minimum controls and two
         -- gaps do not fit the plate at any window size the shell allows.
@@ -1792,7 +1906,7 @@ function UI:CreatePopoutRow(parent, opts)
                 cell:SetSize(cellW, LINE_H)
                 cell:ClearAllPoints()
                 cell:SetPoint("TOPLEFT", plate, "TOPLEFT",
-                              LABEL_X + col * (cellW + CELL_GAP),
+                              padX + col * (cellW + CELL_GAP),
                               -(HEAD_H + (lineN - 1) * LINE_H))
                 -- The control gets the WHOLE cell, because the name is above it
                 -- rather than beside it. Re-sized here because the cell's width
@@ -1886,11 +2000,14 @@ function UI:CreatePopoutRow(parent, opts)
                 inlineShown = inlineH > 0
             end
             if inlineShown then
-                -- The same left indent and the same right margin the control
-                -- lines take, so a pane's controls and a hoisted cell start and
-                -- end at the same x down a column of rows.
+                -- The same left edge and the same right margin the control
+                -- lines take -- the plate's own padding, tick or no tick -- so a
+                -- pane's controls and a hoisted cell start and end at the same x
+                -- down a column of rows. The pane's own group adds nothing to it
+                -- (PopoutContent builds it with padding = 0), so its first
+                -- control lands at the row name's x on an unticked row.
                 inlineFrame:ClearAllPoints()
-                inlineFrame:SetPoint("TOPLEFT", plate, "TOPLEFT", LABEL_X, -inlineTop)
+                inlineFrame:SetPoint("TOPLEFT", plate, "TOPLEFT", padX, -inlineTop)
                 inlineFrame:SetSize(lineW, inlineH)
                 inlineFrame:Show()
             else
@@ -1910,7 +2027,7 @@ function UI:CreatePopoutRow(parent, opts)
         if inlineShown then bodyH = (inlineTop - HEAD_H) + inlineH end
         local plateH = HEAD_H + bodyH
                      + ((bodyH > 0) and LINE_PAD or 0)
-                     + (strip and FOOTER_H or 0)
+                     + (stripLive and FOOTER_H or 0)
         local headDY = (plateH - HEAD_H) / 2
         if plate:GetHeight() ~= plateH then plate:SetHeight(plateH) end
 
@@ -1921,24 +2038,27 @@ function UI:CreatePopoutRow(parent, opts)
         -- offset, applied to all of them, keeps the constraints consistent by
         -- construction (see section 24 of the rework log for what two vertical
         -- constraints that disagree actually do to a frame).
-        if headDY ~= (row._headDY or 0) then
+        -- ⚠ ...AND WHENEVER THE SHAPE MOVED, whether or not the offset did: a
+        -- button row and a strip row can both sit at headDY 0 with the chevron
+        -- in two different places.
+        if shapeMoved or headDY ~= (row._headDY or 0) then
             row._headDY = headDY
             if cb then
                 cb:ClearAllPoints()
-                cb:SetPoint("LEFT", plate, "LEFT", row._padX or M.padX, headDY)
+                cb:SetPoint("LEFT", plate, "LEFT", padX, headDY)
             end
             label:ClearAllPoints()
-            label:SetPoint("LEFT", plate, "LEFT", row._labelX or LABEL_X, headDY)
+            label:SetPoint("LEFT", plate, "LEFT", row._labelX, headDY)
             summary:ClearAllPoints()
             summary:SetPoint("LEFT", label, "RIGHT", M.colGap, 0)
-            if strip then
+            if stripLive then
                 -- The cluster is on the strip, so the summary runs to the
                 -- plate's own padding instead of stopping at the gear.
-                summary:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
+                summary:SetPoint("RIGHT", plate, "RIGHT", -padX, headDY)
             else
                 summary:SetPoint("RIGHT", gear, "LEFT", -M.colGap, 0)
                 chevron:ClearAllPoints()
-                chevron:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
+                chevron:SetPoint("RIGHT", plate, "RIGHT", -padX, headDY)
             end
         end
 
@@ -2013,7 +2133,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- cursor landed while one 18px band answered the click would be pointing
         -- at the wrong part of itself. Every unconverted row still lifts, exactly
         -- as it always did, which is the whole of "no other page moves".
-        local plateHover = row._hovered and not strip
+        local plateHover = row._hovered and not stripLive
         if active then
             paintPlate(accent.r, accent.g, accent.b,
                        plateHover and M.activeHover or M.activeFill,
@@ -2216,7 +2336,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- The plate and the label, in one place shared with the active repaint.
         paintState()
         summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, on and 1 or 0.7)
-        if strip then
+        if stripLive then
             -- ON THE STRIP THE CLUSTER IS THE WAY IN, and the way in is drawn in
             -- the accent -- cog, count and chevron together, so the strip reads
             -- as one object rather than as two grey glyphs either side of a
@@ -2498,6 +2618,8 @@ function UI:CreatePopoutRow(parent, opts)
     function row:SetCountProvider(fn)
         row._countProvider = (type(fn) == "function") and fn or nil
         paintStripCount()
+        -- ...and a button row's corner, which says the same number.
+        paintSummary()
         return row
     end
 
@@ -2690,7 +2812,7 @@ function UI:CreatePopoutRow(parent, opts)
             -- the beam and the clip gate) describing ONE rect, which is the
             -- contract _TetherRegion exists to hold. A strip declares no
             -- popoutInset, so its whole rect is ink -- which it is.
-            tetherSource = strip or row,
+            tetherSource = (stripLive and strip) or row,
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
             onClose = function(p, reason) forgetInstance(host, p, reason) end,
@@ -2843,7 +2965,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- Button carrying a hover, an OnSizeChanged and a tooltip -- and a script that
     -- is simply absent is indistinguishable from one nobody remembered to write.
     row:SetScript("OnClick", function()
-        if strip then return end
+        if stripLive then return end
         row:OpenPopout()
     end)
 

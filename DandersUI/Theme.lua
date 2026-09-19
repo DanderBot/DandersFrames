@@ -670,12 +670,17 @@ UI.PopoutRow = {
     -- strip beneath it. A row that is only ever a NAME and a SUMMARY pays for
     -- neither, and on a page that is a LIST of such rows it pays for them once
     -- per item: the Filter Designer's seventeen filters cost 986px of scrolling
-    -- at 48+10, against 510 at these numbers.
+    -- at 48+10, against 612 at these numbers.
+    --
+    -- ⚠ 32, NOT THE 26 IT SHIPPED AT: at 26 the 12pt name sat too close to the
+    -- plate's top and bottom edges (2026-09-19). Every strip row with nothing
+    -- on its plate is drawn at this height too now (PopoutRow's applyShape), so
+    -- it is a settings-page row height as well as a list row's.
     --
     -- ⚠ AND THE GAP SHRINKS WITH IT. M.gap is 10 because "the strip needs the
     -- rows further apart"; ten points of air under a twenty-six point row reads
     -- as a list that has come apart. Four keeps them a list.
-    plateCompact = 26,
+    plateCompact = 32,
     gapCompact   = 4,
     -- ⚠ AND A TIGHTER SIDE PADDING WITH THEM. 10 is right for a plate whose
     -- widgets need air around them; on a single line of text it reads as the

@@ -468,6 +468,9 @@ L["%d of %d spells"] = true
 L["%d override"] = true
 L["%d overrides"] = true
 L["%d players"] = true
+-- A settings row with nothing on its plate is a one-line button: its corner
+-- says how many settings are behind the click.
+L["%d settings"] = true
 L["%d spells"] = true
 L["%d-%d players"] = true
 L["%d-%d%%"] = true
