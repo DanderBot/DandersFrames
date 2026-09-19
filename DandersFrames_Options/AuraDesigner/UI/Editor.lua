@@ -2355,6 +2355,13 @@ end
 -- REFRESH
 -- ============================================================
 
+-- Is the designer the page on screen right now? Asked by callers off this page
+-- (GUI.lua's section-toggle hook) before they ask for a redraw.
+function DF:AuraDesigner_IsPageShown()
+    local f = S.rowsMode and S.page or S.mainFrame
+    return f and f.IsVisible and f:IsVisible() and true or false
+end
+
 function DF:AuraDesigner_RefreshPage()
     -- ☠ IN THE POPOUT LAYOUT THERE IS NO S.mainFrame TO REFRESH. This verb means
     -- "the data moved, redraw the page", and the page harness's own rebuild is
@@ -2366,6 +2373,15 @@ function DF:AuraDesigner_RefreshPage()
     -- just clicked reads as the panel falling shut. Those go through
     -- P.ADStructuralRedraw, which re-flows the pane instead.
     if S.rowsMode then
+        -- ☠ NOT ON SCREEN -> MARK IT STALE, DO NOT REBUILD. A rebuild parks the whole
+        -- page in GUI._trashFrame, which is never freed, and callers off this page
+        -- (a Colour-by-Time edit, the global font apply, a section toggled on any
+        -- other page) used to pay one designer page each. The next visit rebuilds
+        -- it once through the page's cached path.
+        if S.page and S.page.IsVisible and not S.page:IsVisible() then
+            if S.page.Invalidate then S.page:Invalidate() end
+            return
+        end
         if S.framePreview and S.framePreview.RefreshGeometry then
             S.framePreview.RefreshGeometry()
         end
