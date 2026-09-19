@@ -998,9 +998,6 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     end)
     
     -- "Don't show again" checkbox (small, bottom center)
-    -- ⚠ Its state used to be read off the TEXTURE (`if self.check:IsShown()`), with the
-    -- native checked state left behind entirely. The row keeps the two in step and makes
-    -- the checked state authoritative, so the db no longer depends on what is painted.
     local dontShowCb = DF.GUI:CreateCheckRow(popup, {
         label      = L["Don't show this warning again"],
         accent     = CC.ACCENT,

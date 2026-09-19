@@ -40,12 +40,10 @@ DF.AuraDesigner = DF.AuraDesigner or {}
 DF.AuraDesigner._uiState = S
 DF.AuraDesigner._priv    = P
 
--- Load-time constants. Both used to be assigned inside BuildAuraDesignerPage,
--- which made them mutable and so un-splittable. Neither ever actually varies:
--- every caller arrives as DF.GUI -> SetupGUIPages -> here, and Adapter was only
--- ever assigned DF.AuraDesigner.Adapter. Resolving them at load lets each split
--- part re-declare them as plain aliases -- which is why 412 of this file's
--- reference sites needed no change at all.
+-- Load-time constants. Neither ever varies: every caller arrives as
+-- DF.GUI -> SetupGUIPages -> here, and Adapter is only ever
+-- DF.AuraDesigner.Adapter. Resolving them at load lets each split part
+-- re-declare them as plain aliases.
 -- Both source files load earlier in the TOC, so these are populated here.
 local GUI = DF.GUI
 local Adapter = DF.AuraDesigner.Adapter
@@ -58,7 +56,6 @@ S.selectedSpec = nil         -- Current spec key being viewed
 -- values, zero visual change) so they track any future palette change in
 -- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
 -- populated at parse time.
--- (C_PANEL removed — unreferenced; reclaimed for the 200-locals ceiling.)
 local C_ELEMENT    = DF.GUI.Colors.element
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 
@@ -822,11 +819,6 @@ P.OtherPoolDisplayName = OtherPoolDisplayName
 -- one: a spell tracked for ANY spec would double-render for that spec when
 -- also in the shared other pool); "other" walks the flat other pool with
 -- nil-spec identity. Pure — no editor state.
---
--- ⚠ It used to say "exposed for the SDD harness". There is no SDD harness: that
--- comment was the only mention of one anywhere in the repo, and the DF.* export it
--- justified had no readers either. The local below is live and used by
--- CrossPoolTrackedIDs; only the export is gone.
 -- ☠ AN EMPTIED AURA RECORD IS NOT AN ABSENT ONE. Deleting an aura's last effect
 -- leaves its config table behind on purpose: S.CleanupAdHocAura prunes only the
 -- SYNTHETIC records (ad-hoc "#id" and filter-owned "@preset:"/"@custom:"), and its
@@ -1408,9 +1400,6 @@ local TYPE_DEFAULTS = {
         BorderAnimationCornerLength = 10,
         -- Draw above the frame's class border (parent+10) / aggro (parent+9).
         drawAboveFrameBorder = true,
-        -- (The "Expiring-border overrides (Stage 5.4)" label that sat here belonged to
-        -- keys that no longer exist -- it was heading showWhenMissing, which is
-        -- unrelated.)
         showWhenMissing = false,
         pandemicColorEnabled = false,
         pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},

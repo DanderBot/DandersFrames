@@ -1280,7 +1280,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
-                    -- RESTORED 2026-08-27 (removed in the 12.1 retirement, 961d1e13).
                     -- This border is the whole-frame presence ring, drawn on an
                     -- OVERLAY-mode container — the one surface the AuraContainer
                     -- ANIMATION FILTER reopens, because it is a single ring per frame.
@@ -1674,9 +1673,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --   * Show When Missing — P4.5 SHIPPED: the effect now renders via the read-free
         --     missing-mode container (tint / ring shown while the buff is absent), so the
         --     roadmap overlay is gone and the checkbox is fully editable under the factory.
-        --   * Tint Entire Bar (healthbar only) — NO LONGER blocked. The filled health-mirror
-        --     bar makes the current-health-fill variant (tintWholeBar=false) expressible
-        --     read-free, so both settings work under the factory.
         --   * Gradient border style -- UNFROSTED 2026-07-25 to test the claim behind it.
         --     The frost said gradient "needs a resolved rect to compute its direction+
         --     extent" and so degrades to solid on a secret-anchored slot. Re-reading

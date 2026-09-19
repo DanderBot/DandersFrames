@@ -112,9 +112,9 @@ local function PopoutWidth() return GUI.PopoutContentWidth or 260 end
 -- ------------------------------------------------------------
 -- My Buffs / Debuffs / Any Buff as three tab buttons, in a slice of S.mainFrame
 -- (Editor.lua). The band layout no longer mounts this: two stacked tab strips
--- read as tabs inside tabs, so its pool is a picker on the scope row below. The
--- three pools differ on two axes the labels can't carry, so each tab explains
--- itself on hover -- and the picker carries all three explanations at once.
+-- read as tabs inside tabs, so its pool sits on the canvas as folder tabs
+-- instead (S.BuildPoolTabs). The three pools differ on two axes the labels
+-- can't carry, so each tab explains itself on hover.
 -- ============================================================
 -- ⚠ A FUNCTION, NOT A FILE-SCOPE TABLE. Every label and every tooltip line is an
 -- L[...] lookup, and a table built at load freezes whatever locale was live then

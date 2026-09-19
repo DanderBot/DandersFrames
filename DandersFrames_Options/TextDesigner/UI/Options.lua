@@ -15,28 +15,23 @@ local L = DF.L
 -- ============================================================
 
 -- Neutrals come from the shared palette, same as the Aura Designer does, so a
--- palette change reaches both. These were a hand-copied set that happened to
--- match; only the genuinely bespoke tones below stay local.
+-- palette change reaches both. Only the genuinely bespoke tones below stay local.
 local C_BACKGROUND = DF.GUI.Colors.background
 local C_BORDER     = DF.GUI.Colors.border
 local C_TEXT       = DF.GUI.Colors.text
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 -- Card body backdrop — distinctly darker than C_ELEMENT (the header colour)
 -- so the body content visually separates from the header. Mirrors AD's
--- two-layer card chrome (AuraDesigner/Options.lua:4463-4468).
+-- two-layer card chrome.
 local C_BODY_BG    = {r = 0.09, g = 0.09, b = 0.09, a = 1}
--- Recessed dark backdrop for the list panel — distinctly darker than C_ELEMENT
--- (the card color) so cards visibly sit "on top" of the panel surface.
 -- Right-side settings panel chrome. Mirrors AD's rightPanel backdrop
--- (AuraDesigner/Options.lua:5989-5993) — dark fill + dim translucent border —
--- so the tab strip + per-tab content sit on a visible panel surface.
+-- (AuraDesigner/UI/Editor.lua) -- dark fill + dim translucent border -- so the
+-- tab strip + per-tab content sit on a visible panel surface.
 local C_RIGHT_PANEL_BG     = {r = 0.10, g = 0.10, b = 0.10, a = 1}
 local C_RIGHT_PANEL_BORDER = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}
 
--- Destructive action red — matches Aura Designer's delete X cross palette.
-
 -- Primary-CTA backdrop multipliers (applied to the theme accent color).
--- Mirrors AuraDesigner/Options.lua:4894-4915 "+ Add Indicator" button.
+-- Mirrors AuraDesigner/UI/Cards.lua's "+ Add Indicator" button.
 local CTA_BG_RESTING     = 0.10
 local CTA_BORDER_RESTING = 0.50
 local CTA_BG_HOVER       = 0.20
@@ -71,9 +66,6 @@ end
 
 -- ============================================================
 -- TEXT DESIGNER - GUI BUILDER
--- Phase 1: non-functional UI scaffold. Adds tab-level controls
--- (master toggle, Add Element button) and the empty state.
--- Card list, picker, and per-card editor land in subsequent tasks.
 -- ============================================================
 
 local CreateFrame = CreateFrame
@@ -81,11 +73,9 @@ local pairs, ipairs = pairs, ipairs
 
 -- ============================================================
 -- CONTENT TYPE CATALOG
--- 23 types organized into 6 categories. Each entry:
---   { key = "internal_id", label = L["Display Name"], category = "Health" }
+-- 24 types organized into 7 categories. Each entry:
+--   { key = "internal_id", label = L["Display Name"], category = "health" }
 -- The picker (search + pills + grouped list) reads this table.
--- Phase 2 will add per-type renderers; Phase 1 just stores `contentType` on
--- each element instance.
 -- ============================================================
 
 local CONTENT_CATEGORIES = {
@@ -691,8 +681,6 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         place(rout, EDIT_BOX_ROW_H)
 
     -- Text Group: concatenates 2+ child content values with a user separator.
-    -- Phase 1 stores groupItems / groupSeparator on the element; Phase 2 will
-    -- wire the runtime renderer.
     elseif ct.key == "group" then
         elem.groupItems = elem.groupItems or {}
         elem.groupSeparator = elem.groupSeparator or " / "
@@ -717,9 +705,9 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
 
     end
     -- Types with no Content-section fields fall through:
-    -- class, power_type_string, level, race, faction (and the legacy
-    -- race_level_faction / status_text). They render only the section header,
-    -- which is fine.
+    -- class, power_type_string, level, race, faction, status_text (and the
+    -- legacy race_level_faction). They render only the section header, which is
+    -- fine.
 
     return y - SECTION_GAP
 end
@@ -1084,9 +1072,9 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart, group)
     elem.color = elem.color or {r = 1, g = 1, b = 1, a = 1}
     if elem.useClassColor == nil then elem.useClassColor = false end
 
-    -- Override tracking — the Phase 2 renderer falls back to globalDefaults
-    -- for any Appearance field this element hasn't explicitly overridden.
-    -- Each callback below sets the matching flag the first time a user edits it.
+    -- Override tracking -- the renderer falls back to globalDefaults for any
+    -- Appearance field this element hasn't explicitly overridden. Each callback
+    -- below sets the matching flag the first time a user edits it.
     elem.overrides = elem.overrides or {}
 
     -- Font (LSM-aware dropdown). Use GUI:CreateFontDropdown if available;
@@ -1322,7 +1310,7 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     end)
 
     -- ── Themed search bar ────────────────────────────────────
-    -- Mirrors the global settings search bar pattern (Features/Search.lua:1001-1100).
+    -- Mirrors the global settings search bar pattern (Search:CreateSearchBar).
     -- Wrapper Frame holds a magnifying glass icon, EditBox, placeholder, and clear-X.
     local searchBar = CreateFrame("Frame", nil, drop, "BackdropTemplate")
     searchBar:SetSize(248, 28)
@@ -1647,8 +1635,8 @@ end
 -- ============================================================
 -- ELEMENT CARD
 -- A collapsible card representing one text element. Built using the same
--- direct-frame pattern as AuraDesigner's CreateEffectCard
--- (AuraDesigner/Options.lua:4278-4879):
+-- direct-frame pattern as AuraDesigner's S.CreateEffectCard
+-- (AuraDesigner/UI/Cards.lua):
 --   - Outer card  = layout-only Frame, no backdrop
 --   - Header      = BackdropTemplate Button with its own backdrop + hover
 --   - Body        = separate BackdropTemplate Frame with its own backdrop
@@ -1659,10 +1647,10 @@ end
 -- y-cursor with totalCardH. The card is layout-only; the header and body each
 -- own their own backdrop so there's no underlying surface bleeding through.
 --
--- Section builder signatures (preserved from before the AD-clone refactor):
---   BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart)
---   BuildAppearanceSection(GUI, parent, elem, card, yStart)
---   BuildPositionSection(GUI, parent, elem, tdDB, card, yStart)
+-- Section builder signatures:
+--   BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart, isGroupItem, group)
+--   BuildAppearanceSection(GUI, parent, elem, card, yStart, group)
+--   BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group)
 local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     local HEADER_HEIGHT = 30
 
@@ -1809,9 +1797,7 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     })
     card.body = body
 
-    -- Build content sections inside body. BuildAppearanceSection's signature
-    -- is (GUI, parent, elem, card, yStart) — the section builders were not
-    -- changed in Phase 2.1.
+    -- Build content sections inside body.
     local yEnd = BuildContentSection(GUI, body, elem, tdDB, state, page, card, -10)
     yEnd = BuildAppearanceSection(GUI, body, elem, card, yEnd)
     yEnd = BuildPositionSection(GUI, body, elem, tdDB, card, yEnd)
@@ -1885,8 +1871,8 @@ end
 
 -- ============================================================
 -- CARD LIST RENDERER
--- Mirrors AuraDesigner's full-rebuild pattern (AuraDesigner/Options.lua:4882+
--- BuildEffectsTab): every render destroys all existing cards and rebuilds
+-- Mirrors AuraDesigner's full-rebuild pattern (S.BuildEffectsTab in
+-- AuraDesigner/UI/Cards.lua): every render destroys all existing cards and rebuilds
 -- them from scratch. No pool. This eliminates a class of "stale frame state
 -- during reuse" bugs (card heights, dropdown options, etc.) at the cost of
 -- a few CreateFrame calls per interaction — TD has at most ~20 elements and
@@ -1898,8 +1884,7 @@ local function RenderCardList(GUI, page, tdDB, state)
     -- to listChild, so if its width is 0/1 (e.g. before lazy sizing kicks in)
     -- they'll end up with negative width and render invisibly.
     -- Guard against transient 0: don't overwrite a good width with nothing.
-    -- Nil-guard: during Phase 2.1 the Texts tab is still a stub, so
-    -- state.listContainer / state.listChild may not exist yet.
+    -- Nil-guard: state.listContainer / state.listChild may not exist yet.
     if state.listContainer and state.listChild then
         local cw = state.listContainer:GetWidth()
         if cw and cw > 1 then
@@ -1922,11 +1907,10 @@ local function RenderCardList(GUI, page, tdDB, state)
         state.cardFrames = {}
     end
 
-    -- Filter: only render non-group elements on Texts tab. Groups will get
-    -- their own UI on the Groups tab (Task 3.x). Additionally honor the
-    -- per-category filter chip selected on the Texts tab. When activeFilter is
-    -- nil (e.g. RenderCardList called before BuildTextsTab has wired chips up)
-    -- behave as if "_all" is selected so the pre-2.2 all-pass behavior holds.
+    -- Filter: only render non-group elements on the Texts tab -- groups have their
+    -- own UI on the Groups tab. Additionally honor the per-category filter chip
+    -- selected on the Texts tab. When activeFilter is nil (e.g. RenderCardList
+    -- called before BuildTextsTab has wired chips up) behave as if "_all" is selected.
     local activeFilter = state.activeFilter
     local elementsToShow = {}
     for _, elem in ipairs(tdDB.elements) do
@@ -1963,9 +1947,8 @@ local function RenderCardList(GUI, page, tdDB, state)
 
     -- Build fresh cards. CreateTextElementCard returns (card, totalCardH);
     -- we advance the y-cursor with that local rather than card:GetHeight()
-    -- — same pattern as AD's BuildEffectsTab caller (AuraDesigner/Options.lua:5147).
-    -- Skip building cards entirely if listChild isn't available yet (Phase 2.1
-    -- stub state). Task 2.2 wires listChild up in BuildTextsTab.
+    -- -- same pattern as AD's S.BuildEffectsTab caller.
+    -- Skip building cards entirely if listChild isn't available yet.
     if not state.listChild then return end
 
     local y = 0
@@ -1978,7 +1961,7 @@ local function RenderCardList(GUI, page, tdDB, state)
     state.listChild:SetHeight(math.max(1, -y + 4))
 end
 
-DF.TextDesigner.RenderCardList = RenderCardList  -- exposed for Task 6+
+DF.TextDesigner.RenderCardList = RenderCardList
 
 -- FullRebuildCards rebuilds the Texts tab card list and (if the Groups tab
 -- has been built) the Groups tab card list too. Every render is a full
@@ -2018,13 +2001,8 @@ local function GetState(page)
 end
 
 -- ============================================================
--- TAB STRIP / TAB CONTENT STUBS
--- Phase 1.1 wires up the outer shell. The stubs below get fleshed out in
--- subsequent tasks:
---   BuildTabStrip   → Task 1.3 (tab strip + state.SelectTab)
---   BuildTextsTab   → Phase 2  (master toggle, list, cards, picker)
---   BuildGroupsTab  → Phase 3  (text-group definitions)
---   BuildGlobalTab  → Phase 4  (global text settings)
+-- TAB STRIP / TAB CONTENT
+-- BuildTabStrip, BuildTextsTab, BuildGroupsTab, BuildGlobalTab.
 -- ============================================================
 
 -- Three-tab strip (Texts / Text Groups / Global). Returns the strip frame so
@@ -2032,7 +2010,7 @@ end
 -- state.tabStrip. SelectTab is also exposed on state for external callers.
 local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- BackdropTemplate so the strip gets a darker fill than the right-panel
-    -- chrome — mirrors AuraDesigner/Options.lua:5996-6000 (its tabBar).
+    -- chrome — mirrors AD's tabBar (AuraDesigner/UI/Editor.lua).
     -- Shared underline-tab style (mirrors the Pinned Frames / Aura Designer tabs):
     -- a transparent strip with a baseline; each tab is a StyleButton in `tab` mode.
     local strip = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -2070,10 +2048,9 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     state.SelectTab = SelectTab
 
     -- Tabs share the strip width equally. Mirrors AD's tabBar layout
-    -- (AuraDesigner/Options.lua:6017-6021 + 6051-6057): each button gets
-    -- (stripWidth / #tabs) on every OnSizeChanged pass so resizing the parent
-    -- (or first paint when strip width is finally non-zero) keeps tabs
-    -- proportional.
+    -- (AuraDesigner/UI/Editor.lua): each button gets (stripWidth / #tabs) on
+    -- every OnSizeChanged pass so resizing the parent (or first paint when the
+    -- strip width is finally non-zero) keeps tabs proportional.
     local tabButtons = {}
     for i, def in ipairs(tabDefs) do
         local btn = CreateFrame("Button", nil, strip, "BackdropTemplate")
@@ -2119,7 +2096,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     UpdateTabCounts()
 
     -- Resize tabs equally when the strip is resized (e.g. mode swap,
-    -- first paint). Mirrors AD:6051-6057.
+    -- first paint). Mirrors AD's tabBar OnSizeChanged.
     strip:SetScript("OnSizeChanged", function(self, w, h)
         local tabW = (w - (#tabDefs - 1) * TAB_GAP) / #tabDefs
         for _, btn in ipairs(tabButtons) do
@@ -2131,7 +2108,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
 
     -- Belt-and-braces post-build sync: OnSizeChanged may not fire if the
     -- strip's geometry is already known at this point. Schedule a deferred
-    -- resync the same way AD does (AuraDesigner/Options.lua:6173-6182).
+    -- resync the same way AD does (AuraDesigner/UI/Editor.lua).
     C_Timer.After(0, function()
         if strip and strip:IsVisible() and strip:GetWidth() > 10 then
             local tabW = (strip:GetWidth() - (#tabDefs - 1) * TAB_GAP) / #tabDefs
@@ -2350,8 +2327,7 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
     local COL_W = (hostW > 40) and (hostW - 8 - RIGHT_INSET) or nil
     -- ── "+ Add Text Element" hero CTA ──
     -- Shared primary CTA via the styler: accent fill + white label (matches AD's
-    -- "+ Add Indicator"; previously a bespoke theme-coloured fontstring, which is
-    -- why the two designers' hero labels didn't match).
+    -- "+ Add Indicator").
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     addBtn:SetHeight(32)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
@@ -2363,8 +2339,8 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
     state.addBtn = addBtn
 
     -- ── Section caption ──
-    -- Mirrors AuraDesigner/Options.lua:5025-5030 (the ACTIVE INDICATORS heading
-    -- between the Add CTA and the chip row).
+    -- Mirrors the ACTIVE INDICATORS heading in AuraDesigner/UI/Cards.lua (between
+    -- the Add CTA and the chip row).
     --
     -- ⚠ NAMED, because THREE things read it: the caption's own anchor, the filter
     -- glyph that rides the same line, and Measure below. It was two literals and a
@@ -2515,7 +2491,7 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
 end
 
 -- Texts tab content: the head area above, then the scrolling card list below.
--- Mirrors AD's BuildEffectsTab structure (AuraDesigner/Options.lua:4882+).
+-- Mirrors AD's S.BuildEffectsTab structure (AuraDesigner/UI/Cards.lua).
 local function BuildTextsTab(GUI, parent, state, tdDB, page)
     BuildTextsHeadArea(GUI, parent, state, tdDB, page)
     -- The list anchors under the chip row, which the head area owns now.
@@ -2570,10 +2546,8 @@ end
 -- ============================================================
 -- GROUP CARD
 -- A collapsible card representing one Text Group element (elem.contentType
--- == "group"). Structural clone of CreateTextElementCard but stripped down:
--- the group body shows ONLY the Content section (which already renders the
--- separator + item list + add-item picker). Groups are layout containers, so
--- there's no Appearance or Position section.
+-- == "group"). Structural clone of CreateTextElementCard: the body carries
+-- the Content, Appearance and Position sections.
 -- ============================================================
 
 local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
@@ -2586,8 +2560,8 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, yPos)
 
     -- Group accent color used by both header (chip, arrow, title) and the
-    -- header/body border tints — mirrors AuraDesigner/Options.lua:5245 and
-    -- 5317-5318 (gc * 0.35 for header border, gc * 0.20 for body border).
+    -- header/body border tints — mirrors AuraDesigner/UI/Editor.lua (gc * 0.35
+    -- for header border, gc * 0.20 for body border).
     local groupColor = CATEGORY_COLORS.group
     local headerBorder = {
         r = groupColor.r * 0.35,
@@ -2762,9 +2736,8 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
         card.collapsed = not card.collapsed
         GUI:GetCollapsedGroups()[cardKey] = card.collapsed or nil
         ApplyCollapseState()
-        -- RenderGroupCardList is defined in Task 3.2. Resolving via
-        -- DF.TextDesigner.* at click-time means the nil at function-define
-        -- time is harmless; once the function lands, clicks pick it up.
+        -- RenderGroupCardList is defined below this builder, so resolving via
+        -- DF.TextDesigner.* at click-time is what makes the forward reference work.
         if DF.TextDesigner.RenderGroupCardList then
             DF.TextDesigner.RenderGroupCardList(GUI, page, tdDB, state)
         end
@@ -2874,8 +2847,8 @@ local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset, o
     end)
 
     -- ── Section caption ──
-    -- Mirrors AuraDesigner/Options.lua:5025-5030 (small dim heading between
-    -- the Add CTA and the list).
+    -- Mirrors the ACTIVE INDICATORS heading in AuraDesigner/UI/Cards.lua (small
+    -- dim heading between the Add CTA and the list).
     local groupsCaption = parent:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(groupsCaption, 9, "")
     groupsCaption:SetText(L["Text Groups"]:upper())
@@ -2936,9 +2909,8 @@ local function BuildGroupsTab(GUI, parent, state, tdDB, page)
 end
 
 -- Global tab — defaults shared by every text element that hasn't overridden
--- the corresponding Appearance field. Phase 4 only stores the defaults and
--- the per-element overrides table; the resolver that falls back to these
--- values lands in Phase 2 of the larger TD work.
+-- the corresponding Appearance field. The fallback resolver is
+-- resolveAppearance in TextDesigner/Render.lua.
 local function BuildGlobalTab(GUI, parent, state, tdDB, page, group)
     local defaults = tdDB.globalDefaults
     -- Preset-based, so no per-setting auto-layout override star/reset here either
@@ -3023,10 +2995,6 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page, group)
     place(classColorCheck, 44)
     -- Apply the initial grey state on build.
     UpdateColorGrey()
-
-    -- LEGACY-TEXT-CLEANUP (v4.4.x): The "Hide Legacy Text" toggle is hidden via
-    -- `if false` — legacy text is now force-hidden everywhere (see
-    -- DF:IsLegacyTextHidden in Frames/Core.lua). Restore by removing the wrap.
 
     -- ── IMPORT CURRENT TEXT SETTINGS ──────────────────────────
     -- Rebuilds the element list from the addon's built-in name / health /
@@ -3177,7 +3145,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- Override RefreshStates: TD doesn't use the Add() widget helper, so the
     -- default calculation would shrink page.child to ~40px tall, collapsing
     -- our list panel into an inside-out degenerate rect. Set page.child to
-    -- the full page viewport instead. (Mirrors AuraDesigner/Options.lua:5849.)
+    -- the full page viewport instead. (Mirrors AD's S.page.RefreshStates override.)
     -- Installed every call (even when short-circuited) because RefreshStates
     -- may be invoked freshly on tab re-open.
     page.RefreshStates = function(self)
@@ -3524,8 +3492,8 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewPanel.RefreshGeometry()
 
     -- Preview Scale slider (top-left of preview panel, below the FRAME PREVIEW
-    -- label). Mirrors AuraDesigner/Options.lua:3872-3885 — release callback +
-    -- lightweight per-tick callback so the mockFrame scales live during drag.
+    -- label). Mirrors AD's Preview Scale slider (AuraDesigner/UI/Cards.lua) —
+    -- release callback + per-tick callback so the mockFrame scales live on drag.
     -- ⚠ BOTH callbacks go through RefreshGeometry, never SetScale directly — a raw
     -- SetScale is exactly what let the mock climb out of its box.
     local scaleSlider = GUI:CreateSlider(previewPanel, L["Preview Scale"], 0.75, 2.5, 0.05, tdDB, "previewScale",
@@ -3548,7 +3516,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
 
     -- ── RIGHT-SIDE CONTAINER ───────────────────────────────────
     -- Dark panel chrome wrapping the tab strip + per-tab content frames.
-    -- Mirrors AD's rightPanel (AuraDesigner/Options.lua:5989-5993).
+    -- Mirrors AD's rightPanel (AuraDesigner/UI/Editor.lua).
     local rightAnchorFrame = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
     rightAnchorFrame:SetPoint("TOPLEFT", previewPanel, "TOPRIGHT", 6, 0)
     rightAnchorFrame:SetPoint("BOTTOMRIGHT", page.child, "BOTTOMRIGHT", 0, 0)

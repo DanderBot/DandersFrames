@@ -1313,9 +1313,7 @@ DF.ExportCategoryInfo = {
     },
 }
 
--- (DF.ExportPresets removed: it was defined here and referenced nowhere. The export
--- page's quick-picks are declared inline at GUI/Pages/Modules.lua, and drifted out of
--- sync with this table long ago -- two sources for one list, one of them unread.)
+-- Export-page quick-picks are declared inline in GUI/Pages/Modules.lua, not here.
 
 -- ===========================================
 -- HELPER FUNCTIONS
@@ -1476,30 +1474,15 @@ DF.ExportLocalOnly = {
     minimapIcon = true,                                 -- minimap button state
     useSecureHeaders = true,                            -- internal escape hatch (no GUI)
 
-    -- (Removed) five dead-legacy declarations: frameBorderAlpha, auraSourceMode,
-    -- defensiveIconShowSwipe, highlightFrames, resurrectionIconHideInCombat. They
-    -- hedged against cleanup PRs that had not landed yet — "still present in Config
-    -- defaults on this branch but no longer read anywhere". Those PRs have landed:
-    -- none of the five is a Config key any more, and only frameBorderAlpha still
-    -- exists as a name anywhere (as a signature FIELD derived from
-    -- frameBorderColor.a in Frames/Bars.lua — an unrelated symbol). With no default
-    -- to suppress, the entries suppressed nothing.
 }
 
 -- Keys that legitimately appear in category lists WITHOUT a Config default
--- (GUI-write-only keys where nil is meaningful — plus top-level/legacy
--- carriers). roleBorderColor* left this set with the profile-root roleColors
--- move (the legacy per-mode keys no longer export; roleColors rides the
--- full-export payload like classColors).
+-- (GUI-write-only keys where nil is meaningful -- plus top-level/legacy carriers).
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
     auraDesignerEnabled = true,                         -- lazy by design, no Config default
     textDesigner = true,                                -- legacy inline table
-    -- (Removed) auraDesigner, defensiveIconBorderColorSource and
-    -- missingBuffIconBorderColorSource. All three now HAVE Config defaults, so the
-    -- allowlist no longer suppressed anything for them — they resolve as normal
-    -- exported keys with defaults. textDesigner stays: it genuinely has none.
     raidPlayerGroupFirst = true,
     raidAutoProfiles = true,                            -- top-level key, special-cased in Profile.lua
     -- Config.lua lists this as `= nil` (documentation only — a nil assignment

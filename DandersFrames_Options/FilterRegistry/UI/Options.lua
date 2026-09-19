@@ -38,7 +38,7 @@ end
 -- The async load-on-demand spell tooltip (R.ShowSpellTooltip), the fixed
 -- class grouping order (R.PickerClassOrder), the localized class names
 -- (R.ClassDisplayName) and the class-coloured name styling
--- (R.ApplyClassNameColor) live in FilterRegistry/SpellPicker.lua — shared
+-- (R.ApplyClassNameColor) live in FilterRegistry/UI/SpellPicker.lua — shared
 -- with the spell database picker. That file loads AFTER this one, so bind
 -- them at build time (inside BuildFilterDesignerPage), never at file scope.
 
@@ -52,8 +52,7 @@ end
 -- ============================================================
 -- NAME PROMPT + DELETE CONFIRM
 -- Both go through the addon's own popup: GUI:PromptName for the name, and a
--- plain alert for the confirm. This file used to carry its own copy of the
--- Blizzard StaticPopup idiom, duplicated from the Designer preset bar.
+-- plain alert for the confirm.
 -- ============================================================
 
 -- DF.GUI, not GUI: this file's `GUI` is a local inside BuildFilterDesignerPage,
@@ -495,7 +494,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- in particular, and a page builds long after every file has.
     local BAND_GAP = GUI.DESIGNER_BAND_GAP or 10
 
-    -- Shared helpers from FilterRegistry/SpellPicker.lua (loads after this
+    -- Shared helpers from FilterRegistry/UI/SpellPicker.lua (loads after this
     -- file — safe here because pages build long after load time)
     local CLASS_ORDER = R.PickerClassOrder
     local ClassDisplayName = R.ClassDisplayName
@@ -563,11 +562,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- needing to know the layout's padding, which is not this page's business.
     local PANEL_H_FRACTION = 0.90
     local PANEL_H = 490   -- replaced by ResolvePanelHeight() before first layout
-    -- 240 until the right-hand header stopped needing so much room: the search box
-    -- and the Add-from-Database button used to share one row and fight for width, so
-    -- the right column was sized around the worst case. They are on separate rows
-    -- now, and the 30px goes to the filter list, where long custom names and the
-    -- longer preset names were the things actually running out of space.
+    -- Widened from 240: the extra width goes to the filter list, where long custom
+    -- names and the longer preset names were the things running out of space.
     local LEFT_W = 270
     local LEFT_ROW_H = 24
     -- Left-list selection accent bar. Declared here because the row's on/off box is
@@ -585,8 +581,6 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     --           list look like a set of things you can click rather than lines of
     --           text — it was never the problem and must not be flattened.
     --   hover = C_HOVER, the value the main nav uses, well clear of the panel.
-    -- The old hover was 0.12, exactly the panel's own value, so hovering dissolved a
-    -- row INTO the background instead of lighting it up. That was the whole bug.
     local C = GUI.Colors
     local ROW_REST_R,  ROW_REST_G,  ROW_REST_B  = C.background.r, C.background.g, C.background.b
     local ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B = C.hover.r, C.hover.g, C.hover.b
@@ -605,8 +599,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     --
     -- row.check is deliberately not wired in: its checked mark is accent-coloured, so
     -- it separates from the wash by HUE rather than by a few percent of grey, and it
-    -- takes no mouse of its own. (The membership BUTTON that used to live here did
-    -- need the full SetHovered treatment -- it is gone, and so is that branch.)
+    -- takes no mouse of its own.
     --
     -- This does not move the row's own colour, which the main nav shares. The
     -- button's own OnEnter/OnLeave still owns its look while the mouse is on it;
@@ -639,7 +632,6 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local SECTION_H = 26 -- section-label slot (bumped for the larger DFFontNormal labels)
     local SPELL_ROW_H = 26
     local CLASS_HEADER_H = 22
-    -- (TOP_INSET moved up beside PANEL_CHROME_H — the two are one sum now.)
     -- One dial for the status line's vertical cost. HEADER_H and the two rows below
     -- the title all derive from it, so they cannot drift apart again.
     local STATUS_ROW_H = 18
@@ -651,10 +643,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
 
     -- ========== STATE ==========
     -- ⚠ Page state lives here, at the top, because a local declared further down the
-    -- file reads as a nil GLOBAL from a closure created earlier. (This note used to
-    -- explain the placement of `leftTab` specifically -- there is no such local any
-    -- more; the tab strip it belonged to is gone. The rule it states still applies to
-    -- everything below.)
+    -- file reads as a nil GLOBAL from a closure created earlier.
     local selKind = "preset" -- "preset" | "custom"
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
@@ -697,8 +686,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local SELECTABLE_KIND = { preset = true, custom = true }
 
     -- ========== FILTER SELECTION (which filters are ON for this mode) ==========
-    -- Moved here from the old Aura Filters page. Same live-resolution rule as the
-    -- blacklist above and for the same reason: this page builds ONCE and its guard
+    -- Resolve the db LIVE, never at build time: this page builds ONCE and its guard
     -- path never re-captures a db, so a capture taken at build time would write to
     -- whichever mode happened to be selected then -- ticking a filter in Raid would
     -- silently edit Party.
@@ -726,10 +714,6 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- READ-ONLY from here on. Every setter went to the page that owns the control it
     -- drove; what stays is what the status line and the consumer chips need in order
     -- to REPORT which filters each consumer is using.
-    -- (IsPresetOn / IsCustomOn are gone. They answered "is this filter on for the
-    -- CURRENT mode", which is a question this page can no longer sensibly ask -- it
-    -- has no mode. FilterConsumers walks both modes and reads the selection tables
-    -- itself.)
     local function GetFlag(key)
         local mdb = ModeDB()
         return (mdb and mdb[key]) and true or false
@@ -757,10 +741,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
 -- ticked off, a hand-built one can have nothing off, answers enabled == total, and keeps
 -- the single number it has always shown.
 -- ⚠ THIS REPLACED A LOCAL `CustomSpellCount`, which moved to the registry as
--- R:CustomFilterCounts. Two call sites for it arrived on main AFTER this branch forked
--- (the Filter Designer list rework) and merged in CLEANLY, leaving calls to a function
--- this branch had deleted -- a nil-call with no conflict to warn anyone. Keep both
--- readers pointed here.
+-- R:CustomFilterCounts. Keep both readers of the count pointed here.
 local function CustomCountText(cfId)
     local R = DF.FilterRegistry
     if not (R and R.CustomFilterCounts and cfId) then return format(L["%d spells"], 0) end
@@ -788,26 +769,14 @@ end
     end
 
     -- ========== INFO BANNER ==========
-    -- The banner text + tone swap by selection: the buff filters are a whitelist
-    -- (opt-in — nothing shows until a filter carrying it is on), the blacklist is
-    -- the inverse (opt-out — you name what to hide rather than what to show).
-    -- Naming that flip is what keeps the Hide/Show rows from reading like the
-    -- Enable/Disable ones above.
+    -- ONE banner, never swapped by selection: RefreshRight always sets BUFF_BANNER.
+    -- The buff filters are a whitelist -- opt-in, nothing shows until a filter
+    -- carrying it is on. The text also has to carry what you can DO with one, since
+    -- buff filters are editable and you can add your own.
     --
-    -- ⚠ The blacklist copy must NOT say debuffs "all show" — the Aura Filters page
-    -- carries a debuffFilter selection that already restricts them, so opt-out
-    -- describes the MECHANISM here, not the starting state.
-    --
-    -- Each text also has to carry what you can DO, because the two halves differ:
-    -- buff filters are editable and you can add your own, while the blacklist is a
-    -- fixed catalog (BlacklistDebuffs) with search, add-by-ID, add-from-database
-    -- and Duplicate all hidden or disabled. "This list is fixed" is what answers
-    -- the missing add button.
-    --
-    -- Both texts are ~2 lines, so the swap barely changes the banner height. RefreshRight
-    -- drives the swap; SetHTML is idempotent so it only recomputes on a real
-    -- buff<->blacklist transition. HTML mode so the buff copy links back to the
-    -- Aura Filters page (which links here) — SetHTML re-tints the link per theme.
+    -- HTML mode so the copy can link to the consumer pages -- SetHTML re-tints those
+    -- links per theme, and it is idempotent, so a repaint only recomputes on a real
+    -- text change.
     local function fdBannerLink(text, pageId)
         local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
         local col = string.format("|cFF%02X%02X%02X",
@@ -867,33 +836,22 @@ end
             GUI.SelectTab(pageId)
         end
     end
-    -- Krathe's copy, 2026-08-09, adopted verbatim bar three fixes (a "bellow"
-    -- typo, "are a list" -> "are lists" for the plural subject, and "Buff Bar" ->
-    -- "Buff Bar" to agree with the page of that name and the status line's
-    -- L["Buff Bar (%s)"] a few inches right of here).
     --
     -- Three beats, in the order a newcomer needs them: what a filter IS, what you may
     -- do to one, and what selecting it does. The first predecessor opened on the
     -- freedom ("You have full control over buff filters"), which answers a question the
     -- reader has not reached -- they do not yet know what the thing is.
     --
-    -- ⚠ This comment described beat one for a while before the copy actually had it:
-    -- a draft opened "This page designs BUFF filters", which is what the PAGE does,
-    -- not what a filter IS. Naming the activity still assumes the reader knows the
-    -- noun. Fixed 2026-08-10 -- beat one is the em-dash appositive ("lists of the
-    -- buffs you want to see"), and it is a definition or this comment is lying again.
+    -- ⚠ Beat one is the em-dash appositive ("lists of the buffs you want to see"),
+    -- and it has to stay a DEFINITION: naming the activity ("This page designs BUFF
+    -- filters") still assumes the reader knows the noun.
     --
     -- ⚠ This banner now carries the ENTIRE model, because the section headers no
     -- longer help: they read "Built-In Filters" / "Custom Buff Filters", which name
-    -- the groups but say nothing about the checkbox. "Selecting them below" is
-    -- therefore the ONLY statement of what a tick does, and "below" is a real
-    -- reference to the list underneath -- do not reorder the page so that stops being
-    -- true, and do not trim that clause as redundant. It is not redundant any more.
+    -- the groups but say nothing about the checkbox. "Then pick the ones you want"
+    -- is therefore the ONLY statement of what a tick does -- do not trim that clause
+    -- as redundant. It is not redundant any more.
     --
-    -- ⚠ It also supersedes the old "one sentence, deliberately" rule. That rule was a
-    -- reaction to a predecessor running to two paragraphs and six links; three short
-    -- sentences and two links is not that, and the page had been under-explaining
-    -- itself -- which is the complaint this rewrite answers.
     --
     -- It does NOT say "editing a filter changes it everywhere it is used". That
     -- warning is not dropped, it is placed where it can be accurate: the STATUS LINE
@@ -977,19 +935,11 @@ end
     -- strip, and the Debuffs banner moved to the Debuff Bar page as that group's
     -- subtitle. BUFF_BANNER below is the only banner constant left; the DEBUFF_BANNER
     -- that other comments in this file pointed at is gone.
-    -- (The Debuffs-tab banner went to the Debuff Bar page as that group's subtitle.)
     -- The "unselect one to hide it" clause above is the part nobody can guess: the box
     -- means what it means everywhere else on the page -- this debuff shows -- so
     -- hiding one is an UNselect, on a list called Blacklist. "Unselect", not "untick":
     -- the box draws a filled square, not a tick glyph, and select/unselect is now the
     -- page's one vocabulary for a checkbox at either level.
-    --
-    -- The only real warning on the page, and the reason it is worded around the
-    -- COMBINATION: any single category obviously misses things, so saying that adds
-    -- nothing. What is surprising is that switching on every category still is not
-    -- All Debuffs, because Blizzard tagged some debuffs with none of them and we
-    -- cannot widen the categories. Shown only while the categories are in play.
-    -- (The all-categories completeness caution went with them.)
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
         html = true,
@@ -1012,8 +962,8 @@ end
     -- export collector in Profile.lua; a walk that handled only one shape would
     -- silently under-report, which is the failure mode that matters here.
     --
-    -- ⚠ GROUPS ARE NO LONGER THE ONLY WAY. As of 12.1 alpha 18 an Aura Designer
-    -- EFFECT can reference a filter too, as a plain string rather than a selection
+    -- ⚠ GROUPS ARE NOT THE ONLY WAY. An Aura Designer EFFECT can reference a filter
+    -- too, as a plain string rather than a selection
     -- table -- either filed under the "@preset:<key>" / "@custom:<id>" aura key (a
     -- filter-owned effect) or listed as one of an effect's TRIGGERS. A walk that
     -- only visits filterSelection reports a filter driving nothing but an effect as
@@ -1136,17 +1086,13 @@ end
     -- neighbour, which is what made the chips look merged. Both are the same bug --
     -- a constant standing in for a measurement.
     local CHIP_GAP  = 6
-    -- Square: the help control is the "?" glyph alone. It was a 128px labelled
-    -- button, which spent most of a chip's worth of the row saying something the
-    -- icon already says -- and the chips are the part of this row that has to fit
-    -- three variable-length labels.
+    -- Square: the help control is the "?" glyph alone, so the row's width goes to the
+    -- chips, which have to fit three variable-length labels.
     local CHIP_HELP_W = CHIP_H
     local CHIP_MIN_W  = 92
 
-    -- A POOL, bound per refresh, not one button per definition: the two tab sets are
-    -- different lengths, so a per-definition build would have to create and destroy
-    -- frames on a tab switch. Every handler reads self.chipDef, which RefreshChips
-    -- rebinds -- nothing closes over a definition.
+    -- A POOL, bound per refresh, not one button per definition: every handler reads
+    -- self.chipDef, which RefreshChips rebinds -- nothing closes over a definition.
     --
     -- ⚠ StyleButton only creates btn.Text when opts.text is a NON-EMPTY string, so
     -- the placeholder is a space rather than "". With "" there is no fontstring and
@@ -1192,7 +1138,7 @@ end
             end
         end)
         b:HookScript("OnLeave", function() GUI:HideTooltip() end)
-        b:Hide()   -- RefreshChips shows the ones this tab uses
+        b:Hide()  -- RefreshChips shows the ones it binds
         chipButtons[i] = b
     end
 
@@ -1206,7 +1152,6 @@ end
         if n == 1 then return L["1 filter"] end
         return format(L["%d filters"], n)
     end
-    -- (The category and group counters went with the debuff chips.)
 
     -- Every Aura Designer config this MODE actually resolves to: its own, plus any
     -- pinned set that overrides it with a different preset. Same scope as the status
@@ -1236,9 +1181,8 @@ end
         return out
     end
 
-    -- Counts FILTERS, not auras -- the tab strip above already carries the aura
-    -- total, and repeating it here would make two numbers on one screen that look
-    -- comparable and are not.
+    -- Counts FILTERS, not auras -- an aura total beside these would put two numbers
+    -- on one screen that look comparable and are not.
     local function ChipDetail(key)
         if key == "buff" then
             -- All Buffs overrides the selection entirely, so a filter count would be
@@ -1365,9 +1309,8 @@ end
                 b.Text:SetText(format("%s  |cff8a8f9f%s|r", def.label, ChipDetail(def.key)))
                 b:Show()
             else
-                -- Hidden, not left showing stale text: the pool is longer than the
-                -- debuff set, and an unbound chip would keep whatever the buff tab
-                -- last wrote into it.
+                -- Hidden, not left showing stale text: an unbound chip would keep whatever was
+                -- last written into it.
                 b:Hide()
             end
         end
@@ -1461,12 +1404,10 @@ end
     GUI:CreatePanelBackdrop(leftPanel, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
 
     local leftScroll = CreateFrame("ScrollFrame", nil, leftPanel, "ScrollFrameTemplate")
-    leftScroll:SetPoint("TOPLEFT", 4, -6) -- was -32, clearing a tab strip that no longer exists
+    leftScroll:SetPoint("TOPLEFT", 4, -6)
     -- Clears the action strip at the foot of the panel: three 20px rows, 4px gutters,
     -- a 6px margin under them and the rule + gap above (6 + 20 + 4 + 20 + 4 + 20 + 6
-    -- = 80, +6 of air). It briefly went to 6 while those buttons lived on the
-    -- right-hand header; they came back down here because that header row could not
-    -- fit them and a variable-width filter name at every window width.
+    -- = 80, +6 of air).
     leftScroll:SetPoint("BOTTOMRIGHT", -24, 86)
     DF.GUI.StyleScrollBar(leftScroll)
 
@@ -1477,12 +1418,6 @@ end
     -- Section labels (created once, positioned during refresh; only their COLOUR is
     -- touched by RefreshLeft). DFFontNormal to match the right-column header title
     -- (titleText) — same weight both sides.
-    --
-    -- The filter headers used to carry a second, smaller fontstring beneath them
-    -- ("Selected filters show on the buffs bar") explaining the column of checkboxes.
-    -- That sentence IS the header now, so the hint is gone -- a 10px grey footnote
-    -- under a header reading "Filters" put the meaning in the quietest text on the
-    -- panel and the noise in the loudest.
     local function CreateSectionLabel(text)
         local fs = leftContent:CreateFontString(nil, "OVERLAY", "DFFontNormal")
         fs:SetJustifyH("LEFT")
@@ -1494,11 +1429,9 @@ end
     -- the header on BOTH tabs and repeated the tab strip four rows above it.
     --
     -- ⚠ The header no longer says what selecting a row does. That statement lives in
-    -- the page banner ("Selecting them below will add them to the Buff bar") and
-    -- nowhere else, so the banner is load-bearing now -- see the note on BUFF_BANNER.
-    -- An intermediate version of this change put the sentence in the header instead
-    -- ("Shown on the buff bar"); Krathe took it back out, because a header should name
-    -- a group.
+    -- the page banner and nowhere else, so the banner is load-bearing now -- see the
+    -- note on BUFF_BANNER. A header should name a group, so do not put the sentence
+    -- back here.
     --
     -- ⚠ Sentence case, and no letter-spacing -- the design mock showed a letter-spaced
     -- uppercase header and neither survives the port: WoW FontStrings have no
@@ -1528,10 +1461,6 @@ end
     -- The per-tab aura COUNT went with it. It was this page's one feedback loop while
     -- the page owned selection; the consumer chips above now do that job, and do it
     -- for all three consumers instead of one.
-
-    -- (The rule that separated the scope switches from the filter list went with the
-    -- switches. Both its texture and its placer had no callers left -- the only two
-    -- were the buff scope block and the debuff branch.)
 
     -- Places a section label and returns the new y, so the caller cannot forget to
     -- account for the row it took.
@@ -1569,8 +1498,8 @@ end
     GUI:CreatePanelBackdrop(headerPanel, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
 
     -- Row 1: the filter's name and its counts, and nothing else. The actions on that
-    -- filter (Reset/Duplicate/Rename/Delete) used to share this row, pinned right --
-    -- see the strip at the foot of the LEFT panel for why they no longer do.
+    -- filter (Reset/Duplicate/Rename/Delete) live in the strip at the foot of the
+    -- LEFT panel.
     -- The mode caption. Clicking a row in the left list silently switches this pane
     -- from a list you are choosing FROM to a filter you are editing, with no
     -- affordance announcing it and nothing afterwards saying you are in it -- so the
@@ -1628,8 +1557,8 @@ end
     statusDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
 
     local statusText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    -- Anchored to the DOT, not the title: hiding the dot (the blacklist, which has
-    -- no switch of its own) then leaves the text where it was rather than sliding it.
+    -- Anchored to the DOT, not the title: hiding the dot then leaves the text where
+    -- it was rather than sliding it.
     statusText:SetPoint("LEFT", statusDot, "RIGHT", 6, 0)
     statusText:SetPoint("RIGHT", headerPanel, "RIGHT", -10, 0)
     statusText:SetJustifyH("LEFT")
@@ -1766,8 +1695,8 @@ end
     -- Title + one scope line, matching every other Reset on the addon (see the
     -- Reset Page button in Options.lua). The title names WHAT is being reset —
     -- this button is per-selection, not per-page — and the line says what it
-    -- leaves alone. The button only ever shows for a modified preset or for
-    -- Optional Debuffs, so those are the only two cases to word.
+    -- leaves alone. The button only ever shows for a modified preset or a curated
+    -- custom list, so those are the only two cases to word.
     resetBtn:HookScript("OnEnter", function(self)
         GUI:ShowTooltip(self, {
             title = format(L["Reset: %s"], CurrentDisplayName()),
@@ -1779,8 +1708,7 @@ end
     resetBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     resetBtn:Hide()
     -- Presets, and CURATED CUSTOM LISTS -- the ones we seeded, which have a default to go
-    -- back to (R:IsCuratedFilter). It used to branch for the Optional Debuffs list; that
-    -- list and its reset moved to the Debuff Bar page together.
+    -- back to (R:IsCuratedFilter).
     -- ⚠ THE TWO RESETS DIFFER IN WHAT THEY UNDO, and both match what the button says.
     -- A preset's is an overrides layer, so clearing it restores every tick. A curated
     -- list's ALSO restores any seeded spell that went missing -- but never prunes what
@@ -1817,10 +1745,8 @@ end
     -- Anything on row 3 that is NOT an edit box aligns through this.
     local BTN_ON_EB = 16
 
-    -- Row 2: search, the full width of the panel. It used to share this row with the
-    -- Add-from-Database button and shrink to fit it; the two have nothing to do with
-    -- each other, and the button belongs with the other way of putting a spell into a
-    -- filter, which is row 3.
+    -- Row 2: search, the full width of the panel. The Add-from-Database button belongs
+    -- with the other way of putting a spell into a filter, which is row 3.
     local searchBox = GUI:CreateEditBox(headerPanel, "", nil, nil, nil, 170, L["Search..."])
     searchBox:SetPoint("TOPLEFT", 10, -ROW2_Y)
     searchBox:SetPoint("TOPRIGHT", -10, -ROW2_Y)
@@ -2008,21 +1934,12 @@ end
     -- Created after the search box on purpose: SelectFilter clears the active
     -- search, so these handlers must close over the searchBox local.
     --
-    -- All four act on the SELECTED filter, which is what this strip uniformly means,
-    -- and they sit at the foot of the list that holds that selection. They spent one
-    -- build up on the right-hand header beside the filter NAME, which reads well but
-    -- does not fit: that row also carries the name and its spell counts, both of
-    -- which grow rightward, so at a long name or a narrower window the counts ran
-    -- under the buttons. Capping the name only moved the collision to the counts --
-    -- a four-button strip and a variable-width label cannot share one row at every
-    -- width the GUI can be dragged to. Down here the strip has a fixed 240px panel
-    -- to itself and nothing to collide with.
+    -- All four act on the SELECTED filter, and they sit at the foot of the list
+    -- that holds that selection: a four-button strip and a variable-width label
+    -- cannot share one row at every width the GUI can be dragged to.
     --
-    -- Two columns of two, 6px margins and a 4px gutter. The old objection to a
-    -- bottom strip -- that "Rename" appeared directly beneath the Debuffs section
-    -- header -- died with the tabs: the list is one tab's worth of filters now, not
-    -- two stacked sections, and the divider above the strip marks it as chrome
-    -- rather than another list row.
+    -- Two columns of two, 6px margins and a 4px gutter, with a divider above the
+    -- strip marking it as chrome rather than another list row.
     local ACT_BTN_W = (LEFT_W - 12 - 4) / 2
 
     -- NOT `local function` -- assigns the file-scope forward declaration above, so
@@ -2038,12 +1955,9 @@ end
         RefreshAll()
     end
 
-    -- The add action lives INSIDE the Custom buff filters section, not in the
-    -- bottom strip. Down there it sat directly beneath the Debuffs header AND was
-    -- the only never-disabled button in the strip, so it read as "add a debuff
-    -- filter" — which is not a thing that exists. A row in the section it creates
-    -- into cannot be misread. Parented to the scroll content and positioned by
-    -- RefreshLeft along with the rest of the list.
+    -- The add action lives INSIDE the Custom buff filters section, not in the bottom
+    -- strip: a row in the section it creates into cannot be misread. Parented to the
+    -- scroll content and positioned by RefreshLeft along with the rest of the list.
     local addRow = CreateFrame("Button", nil, leftContent, "BackdropTemplate")
     addRow:SetHeight(LEFT_ROW_H - 2)
     -- `tinted`, not `ghost`: ghost draws NO border at all (it is meant to sit in a
@@ -2066,11 +1980,9 @@ end
         end)
     end)
     -- Cross-page affordance: the Aura Designer's "Create Filter" button navigates
-    -- here and pulses this row. Exposed as a FUNCTION rather than the raw widget
-    -- (which is what it used to be, back when the button was pinned to the bottom
-    -- strip and therefore always on screen): the row now lives in a scroll frame,
-    -- so scrolling it into view is part of the cue. A pulse below the fold is no
-    -- cue at all, and it would fail silently.
+    -- here and pulses this row. Exposed as a FUNCTION, not the raw widget: the row
+    -- lives in a scroll frame, so scrolling it into view is part of the cue -- a
+    -- pulse below the fold is no cue at all, and it would fail silently.
     local addRowY = 0   -- set by RefreshLeft, which owns the list's geometry
     -- ☠ IN THE BAND LAYOUT THERE IS NO SINGLE FILTER LIST TO OPEN -- the PAGE is
     -- the list, one row per filter -- so this means "put the filter band where the
@@ -2394,9 +2306,7 @@ end
         addBox:SetEnabled(isCustom)
         addBtn:SetDisabled(not isCustom)
         dbBtn:SetDisabled(not isCustom)
-        -- ⚠ These four used to be HIDDEN outright for the Optional Debuffs list,
-        -- because that list was fixed and they could not act on it. Every remaining
-        -- selection is an editable filter, so they are simply always shown --
+        -- ⚠ Every selection is an editable filter, so these four are always shown --
         -- disabled-with-tooltip for a preset, live for a custom.
         searchBox:Show()
         dbBtn:Show()
@@ -2449,11 +2359,9 @@ end
         row.dot.tooltipText = L["Override active"]
         row.dot.tooltipSubText = L["This built-in filter has been changed from its defaults."]
 
-        -- The filter's own on/off switch. This is the control that used to live a
-        -- page away on Aura Filters, which is what let you carefully edit the spells
-        -- inside a filter that was never switched on. Its click does NOT reach the
-        -- row (see GUI:CreateRowToggle): switch it on to feed the bar, click
-        -- anywhere else on the row to select it and edit its contents.
+        -- The filter's own on/off switch. Created here but hidden on every bind by
+        -- BindLeftRow -- this list selects a filter for EDITING, not for a bar. Its
+        -- click does NOT reach the row (see GUI:CreateRowToggle).
         --
         -- ⚠ Offset derived from the selection accent, not picked by eye. That bar is
         -- 3px wide at x=2, so its right edge is x=5, and the box has to clear it by
@@ -2505,15 +2413,6 @@ end
         return row
     end
 
-    -- `toggle` is optional: { checked = bool, greyed = bool, onToggle = fn(checked) }.
-    -- Omitted means this row has no on/off of its own (the Blacklist, which is always
-    -- in force) -- the box is hidden and the name takes its place, so the row does not
-    -- read as an unselected filter.
-    --
-    -- `greyed` is the All Buffs / All Debuffs case: the specific filters below a scope
-    -- switch stay VISIBLE and dim rather than disappearing. The old page hid them,
-    -- which is the same convention breach we fixed on six other pages -- you could not
-    -- see what you would be turning back on.
     local function BindLeftRow(row, y, kind, key, nameStr, countStr, modified, selected)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, -y)
@@ -2698,12 +2597,9 @@ end
         -- Right-aligned chip: "+N" extra spellIDs, or the unknown-ID caption.
         -- Anchored per bind to whatever control that row ends up showing.
         --
-        -- There used to be an 'i' button here too, on all sixty rows, whose entire
-        -- job was one line: the spell's canonical + variant IDs -- an expansion of
-        -- the "+2" chip sitting immediately beside it. The row already raises a spell
-        -- tooltip when you hover its icon or name, so the IDs are appended to THAT
-        -- (ShowGameTooltip takes `lines` and re-appends them after a late spell load,
-        -- so they survive the repaint). One hover, one tooltip, sixty fewer buttons.
+        -- The spell's canonical + variant IDs ride on the row's own spell tooltip
+        -- (hover the icon or the name): ShowGameTooltip takes `lines` and re-appends
+        -- them after a late spell load, so they survive the repaint.
         row.chip = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
         row.chip:SetJustifyH("RIGHT")
         row.chip:SetTextColor(0.5, 0.5, 0.5)
@@ -2714,9 +2610,7 @@ end
         row.name:SetPoint("RIGHT", row.chip, "LEFT", -6, 0)
         row.name:SetJustifyH("LEFT")
 
-        -- Tooltip hotspot: the icon and name only. The whole row used to raise the
-        -- spell tooltip, so it fired while you were reaching for Enable/Disable or
-        -- the info button, and it anchored off the row's full width. Three anchor
+        -- Tooltip hotspot: the icon and name only, never the whole row. Three anchor
         -- points give it the row's full height but stop at the name's right edge.
         --   motion propagates -> the ROW still gets OnEnter/OnLeave for its shading
         --   clicks propagate  -> the row's toggle still fires over the name
@@ -2731,12 +2625,9 @@ end
         hot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
         hot:EnableMouse(true)
         -- Propagation applied by ApplyRowPropagation below (combat-deferred).
-        -- The ID line rides along with the game tooltip now that the 'i' button is
-        -- gone. Raw rows (an id typed into a custom filter that the database does not
-        -- know) have no game tooltip to hang it on, and used to have NO hover at all
-        -- -- the 'i' was the only way to see what you had added -- so they get our
-        -- own tooltip instead. That is the one place this change adds a hover rather
-        -- than removing a button.
+        -- The ID line rides along with the game tooltip. Raw rows (an id typed into a
+        -- custom filter that the database does not know) have no game tooltip to hang
+        -- it on, so they get our own tooltip instead.
         hot:SetScript("OnEnter", function()
             local lines
             local ids = row._infoIDs and format(L["Spell IDs: %s"], row._infoIDs)
@@ -2758,8 +2649,7 @@ end
         row.hot = hot
 
         -- The "+N" chip is a CONTROL on multi-ID records: it opens the record into one
-        -- row per spell ID so a single ID can be untracked. It sat here as inert text
-        -- announcing "this row is 2 spell IDs" and offering nothing to do about it.
+        -- row per spell ID so a single ID can be untracked.
         --
         -- ⚠ MOTION propagates, CLICKS do not — the opposite split to row.hot above, and
         -- both halves matter. Without motion propagation this frame swallows the row's
@@ -2860,11 +2750,9 @@ end
 
         -- Chip hugs whichever control the row is showing.
         --
-        -- ⚠ Anchored to that control's LEFT EDGE, never to the row's right with a
-        -- magic offset. It WAS a magic offset once (-74, sized for a 64px button) and
-        -- widening the button pushed its left edge underneath the neighbour, so
-        -- hovering the row painted a hover wash under something else and it read as a
-        -- bleeding highlight. Deriving it from the neighbour cannot drift again.
+        -- ⚠ Anchored to that control's LEFT EDGE, never to the row's right with a magic
+        -- offset: a fixed offset ends up under the neighbour when that control widens,
+        -- painting the row's hover wash under something else.
         row.check:SetShown(showCheck)
         row.chip:ClearAllPoints()
         row.chip:SetPoint("RIGHT", showCheck and row.check or row.remove, "LEFT", -6, 0)
@@ -2879,10 +2767,9 @@ end
         -- a caption, so both leave it hidden rather than offering a dead click target.
         local chipIsControl = (not isChild) and item.rec
             and item.rec.alts and #item.rec.alts > 0
-        -- A control has to LOOK unlike inert text, or it stays undiscovered — which is
-        -- how this shipped: the chip announced "2 spell IDs" in the same grey as the
-        -- captions and offered nothing. Narrowed records take the theme colour so a
-        -- record that no longer tracks everything reads at a glance.
+        -- A control has to LOOK unlike inert text, or it stays undiscovered. Narrowed
+        -- records take the theme colour so a record that no longer tracks everything
+        -- reads at a glance.
         if chipIsControl then
             if R:IsRecordNarrowed(item.rec) then
                 local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
@@ -2974,10 +2861,7 @@ end
                     RefreshAll()
                 end
             else
-                -- One toggle shape left: a preset's spell in or out of that preset. The
-                -- inverse-polarity branch belonged to the Optional Debuffs list, which
-                -- wrote a hidden-set rather than the registry; it went to the Debuff Bar
-                -- page along with the list.
+                -- One toggle shape left: a preset's spell in or out of that preset.
                 local key, prec = selKey, item.rec
                 row._onAction = function()
                     R:SetSpellEnabled(key, prec, not R:IsSpellEnabled(key, prec))
@@ -3034,10 +2918,8 @@ end
             if b.UpdateTheme then b.UpdateTheme() end
         end
 
-        -- ⚠ The label TEXT is set once, at creation, and no longer here -- it is
-        -- static, and the pair of SetText calls that used to live at this spot only
-        -- existed to feed the hint fontstrings that no longer exist. Only the colour
-        -- is per-refresh, because the theme is.
+        -- ⚠ The label TEXT is set once, at creation: it is static. Only the colour is
+        -- per-refresh, because the theme is.
         --
         -- ⚠ The headers name their GROUP (Built-In / Custom) and deliberately do NOT
         -- say what a checkbox does. This page has two jobs and the checkbox belongs to
@@ -3126,9 +3008,7 @@ end
             y = y + LEFT_ROW_H
         end
 
-        -- Standing frames, now always shown. They were SetShown(leftTab == "buffs")
-        -- while there was a Debuffs tab they had to disappear for; there is no other
-        -- tab left to hide from.
+        -- Standing frames, always shown: there is no other tab to hide from.
         addRow:Show()
         importRow:Show()
 
@@ -3155,20 +3035,10 @@ end
         -- look like it handled a case that cannot occur, since selKind only ever
         -- holds "preset" or "custom".
         --
-        -- ⚠ The page banner is never a warning any more. It carried the debuff
-        -- completeness caution for a while, which meant flipping All Debuffs off
-        -- turned the top of the page gold AND displaced the tab's own explanation --
-        -- a warning about one switch, four inches from that switch, evicting the copy
-        -- that says what the whole tab is. That caution is now a banner of its own
-        -- directly under All Debuffs, beside the control it is about, and nothing has
-        -- to give up its slot for it.
+        -- ⚠ The page banner is never a warning. The debuff completeness caution is a
+        -- banner of its own directly under All Debuffs, beside the control it is about.
         -- ⚠ It lives on the DEBUFF BAR page, not here: GUI/Pages/Indicators.lua,
-        -- pageDebuffs, still named `catCaution`. This pointer used to say "see
-        -- catCaution" meaning the local a few hundred lines up, and cf70ac00 -- the
-        -- commit that moved the debuff half off this page -- deleted that local and
-        -- left the reference behind. The banner went with it: it came back as a
-        -- permanent grey caption on the new page, losing both its condition and its
-        -- tone, and stayed that way until 2026-08-21.
+        -- pageDebuffs, named `catCaution`.
         --
         -- The rule that leaves behind: this banner says "here is how this tab works"
         -- and is always info; anything that says "this will silently miss things"
@@ -3239,9 +3109,8 @@ end
         -- what made the old line read as self-contradictory, and it stopped being
         -- true the moment the buff bar became one consumer among three.
         statusDot:Show()
-        -- ⚠ The buff bar is inside FilterConsumers now, not bolted on here. It used
-        -- to be read separately and labelled with the CURRENT mode, which is what
-        -- made this line deny half the truth on a page that has no mode.
+        -- ⚠ The buff bar is inside FilterConsumers, not bolted on here: this page has
+        -- no mode, so it must not be read separately and labelled with the current one.
         local places = {}
         for _, c in ipairs(FilterConsumers(selKind, selKey)) do
             places[#places + 1] = UsageLabel(c)
@@ -3469,9 +3338,7 @@ end
         local function RenderGroup(token)
             local g = groups[token]
             if not g or #g == 0 then return end
-            -- Always a class header now. It was skipped for the flat Optional Debuffs
-            -- list, where "All Classes" added nothing; every remaining view is a
-            -- class-grouped filter.
+            -- Always a class header: every view is a class-grouped filter.
             usedHeaders = usedHeaders + 1
             local hdr = AcquireClassHeader(usedHeaders)
             hdr:ClearAllPoints()
@@ -4162,10 +4029,10 @@ end
 
             -- (3) WHO IS USING IT. The dot carries the state so the text can stay
             -- plain, exactly as the island's status line does.
-            -- ⚠ BOTH POINTS AT THE SAME y. The island anchors its status text LEFT
-            -- off the dot and RIGHT off a SHORT panel, which is only harmless because
-            -- that panel is a header's height; this container is 414 tall, so a RIGHT
-            -- anchor taken from its vertical middle would drop the line 180px.
+            -- ⚠ BOTH POINTS AT THE SAME y. The island anchors its status text LEFT off
+            -- the dot and RIGHT off a SHORT panel, which is only harmless because that
+            -- panel is a header's height; this container is PANE.paneH tall -- 414 at its
+            -- shortest -- so a RIGHT anchor from its vertical middle drops the line far.
             local usedDot = c:CreateTexture(nil, "OVERLAY")
             usedDot:SetSize(8, 8)
             usedDot:SetPoint("TOPLEFT", 1, -(PANE.yStatus + 4))
@@ -4849,10 +4716,9 @@ end
         -- The two labels are the island's own, so the two layouts name the same
         -- thing the same way and no new string reaches a translator.
         do
-            -- ⚠ 40, STATED, because CreateHeader declares no height of its own --
-            -- ResolveRowHeight would fall back to its 55 and the two headings would
-            -- tower over a list of 30px rows. Every other page in the addon passes
-            -- this same 40.
+            -- ⚠ 40 IS NOT WHAT THE HEADINGS GET. CreateHeader marks itself fixedRowHeight
+            -- with its own preferredHeight, so ResolveRowHeight ignores the literal a call
+            -- site passes. Passed anyway, as every other page in the addon does.
             local HEADER_H = 40
             filterBand:AddWidget(GUI:CreateHeader(parent, L["Built-In Filters"]), HEADER_H)
             for i = 1, #R.Categories do AcquireFilterRow(i) end
@@ -5205,9 +5071,9 @@ end
         rightArea:Hide()
 
         -- ---- THE CROSS-PAGE ENTRY POINTS ----
-        -- Published rather than captured, and read at CALL time by the three verbs
-        -- ~1,400 lines above: they are created long before this arm runs, so an
-        -- upvalue taken up there would freeze nil.
+        -- Published rather than captured, and read at CALL time by OpenFilterList,
+        -- _fdFocusNewFilter and _fdFocusFilter: they are created long before this arm
+        -- runs, so an upvalue taken up there would freeze nil.
         pageRef._fdOpenFilterPanel = FocusFilterPanel
         pageRef._fdNewFilter = NewFilterFlow
         -- "Scroll to the filter band" is what OpenFilterList means here. The band is

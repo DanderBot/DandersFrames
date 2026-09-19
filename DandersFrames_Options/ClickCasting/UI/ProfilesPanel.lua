@@ -77,8 +77,7 @@ function CC:CreateProfilesPanelContent()
     local newBtn = CreateSmallButton(btnRow, L["New"], 10)  -- Width will be set by anchors
     newBtn:SetPoint("LEFT", 0, 0)
     newBtn:SetPoint("RIGHT", btnRow, "CENTER", -2, 0)
-    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
-    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(newBtn, {
         text = L["New"], accent = themeColor, tinted = true,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = C.text },
@@ -153,8 +152,7 @@ function CC:CreateProfilesPanelContent()
     local exportBtn = CreateSmallButton(ioRow, L["Export"], 10)
     exportBtn:SetPoint("LEFT", 0, 0)
     exportBtn:SetPoint("RIGHT", ioRow, "CENTER", -2, 0)
-    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
-    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(exportBtn, {
         text = L["Export"], accent = themeColor, tinted = true,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload", size = 12, color = C.text },
@@ -412,9 +410,7 @@ function CC:RefreshProfilesPanel()
     local yOffset = 0
     
     -- Both row states ride the shared styler, so the hover is the same theme wash
-    -- as every other button in the addon. These rows used to hand-roll a flat
-    -- 0.15 grey in OnEnter and restate all three rest fills in OnLeave, which is
-    -- how they ended up as the one hover that ignored the theme entirely.
+    -- as every other button in the addon.
     --   SELECTED (what Rename/Delete act on) -> SetActive's accent fill + border
     --   ACTIVE   (the profile actually in use) -> green rest border + the dot
     -- Two separate cues, so a row that is selected but NOT active still reads
@@ -748,9 +744,8 @@ end
 -- PROFILE DIALOGS
 -- =========================================================================
 
--- These all used to be Blizzard StaticPopups raised above our UI by hand, because
--- the settings window sits at FULLSCREEN_DIALOG and a StaticPopup opens behind it.
--- DF's own popup lives at that strata already, so the raise helper is gone.
+-- Use DF's own popup, not a Blizzard StaticPopup: the settings window sits at
+-- FULLSCREEN_DIALOG and a StaticPopup opens behind it.
 
 function CC:ShowNewProfileDialog()
     DF.GUI:PromptName({

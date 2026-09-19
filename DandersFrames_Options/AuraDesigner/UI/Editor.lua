@@ -2397,8 +2397,7 @@ function DF:AuraDesigner_RefreshPage()
     end
 
     -- Subtle class-color hint on the preview border, dimmed to 0.5 alpha so it
-    -- stays as quiet as the Text Designer's neutral border (just tinted to the
-    -- spec). Was previously full alpha = the harsh "white line" (white for Priest).
+    -- stays as quiet as the Text Designer's neutral border (just tinted to the spec).
     if S.framePreview then
         local resolvedSpec = currentSpec or S.selectedSpec
         local specInfoEntry = resolvedSpec and DF.AuraDesigner.SpecInfo[resolvedSpec]

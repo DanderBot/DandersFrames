@@ -78,15 +78,12 @@ DF.TestData = {
         -- ★ THE ONLY MISSING-BUFF FRAME now (it shows here by default — no field needed).
         -- ⚠ If this unit ever gains showMissingBuff = false, the strip is previewed
         -- NOWHERE. Check the other four before turning it off here.
-        -- ★ ALSO THE ONLY BG-CARRIER FRAME in party (Krathe, 2026-08-08). It was raid-only
-        -- before, on the reasoning that it would overlap the leader's ready-check icon —
-        -- but the ready check has since moved to Мишок, and the real constraint was broader:
-        -- bgCarrierIcon sat on the CENTRE BUS, and all five party frames already have their
-        -- centre claimed, so there was nowhere clear to put it.
-        -- ⇒ Fixed at the SOURCE, not in the preview: the icon's live default moved to
-        -- TOPRIGHT -2,-2 (Config.lua). It now has its own lane on every frame, here and in
-        -- game alike — no preview-only offset, which would have broken "previews differ in
-        -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
+        -- ★ ALSO THE ONLY BG-CARRIER FRAME in party. bgCarrierIcon sat on the CENTRE BUS,
+        -- and all five party frames already have their centre claimed, so it was fixed at
+        -- the SOURCE, not in the preview: the icon's live default is TOPRIGHT -2,-2
+        -- (Config.lua). It has its own lane on every frame, here and in game alike — no
+        -- preview-only offset, which would have broken "previews differ in DATA, never
+        -- RENDERING". This frame's centre still belongs to phasedIcon.
         -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
         {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45, showPing = true},  -- Missing buffs, phased, in vehicle, BG carrier, ping, has HoT
     },
@@ -168,10 +165,9 @@ DF.TestData = {
         -- ★ THE ONE LONG BUFF, and the pool needs exactly one: it is the only entry that
         -- exercises the minutes side of the countdown formats and a duration bar that
         -- barely moves. 10 minutes is Earth Shield's real duration — durations here are
-        -- honest, per the Beacon note above. ⚠ It no longer crosses the HOUR boundary,
-        -- which the old 3600s entries did; that format is now unpreviewed. Deliberate —
-        -- Krathe's call was "keep just 1 longer buff... maybe 5min or something", and an
-        -- hour-long buff on a party frame only ever means a raid buff.
+        -- honest, per the Beacon note above. ⚠ Nothing crosses the HOUR boundary, so that
+        -- format is unpreviewed — deliberate, since an hour-long buff on a party frame
+        -- only ever means a raid buff.
         {icon = "Interface\\Icons\\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
         {icon = "Interface\\Icons\\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
     },
@@ -297,9 +293,8 @@ local RAID_ALLOC = {
     -- on frame 2: it carries the AFK countdown, and an oversized badged
     -- icon lands on the same region — the party tank hit exactly that.
     IMPORTANTDEBUFF = { [7] = true, [16] = true },
-    -- Healer bars. Deliberately sparse: the old `i % 2 == 0 or i % 3 == 1` put heal
-    -- prediction on 14 of the first 20 frames, which reads as "every frame is being
-    -- healed" rather than as an example of the bar.
+    -- Healer bars. Deliberately sparse: heal prediction on most frames reads as "every
+    -- frame is being healed" rather than as an example of the bar.
     ABSORB     = { [7] = true, [20] = true },
     HEALABSORB = { [10] = true, [20] = true },
     HEALPRED   = { [7] = true, [20] = true },
@@ -782,11 +777,9 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- clobbers the other regardless of order.
     if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(frame) end
 
-    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
-    -- restatements (value, texture, all four colour modes, the dead-colour override)
-    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
-    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
-    -- needed here. (Audit, 2026-08-07.)
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. DF.SetMissingHealthBarValue
+    -- reads the frame stamps, so there is one renderer; it also owns the BACKGROUND-mode
+    -- hide, so no branch is needed here.
     if frame.missingHealthBar then
         DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
@@ -900,8 +893,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local db = DF:GetFrameDB(frame)
 
     -- Set dfInRange for test mode - consumed by the range/alpha systems
-    -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
-    -- Otherwise set true (in range)
     local isTestOutOfRange = db.testShowOutOfRange and testData.outOfRange and not testData.status
     frame.dfInRange = not isTestOutOfRange
     
@@ -911,10 +902,8 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     DF.SetBarValueSmoothed(frame.healthBar, healthValue, db.smoothBars)
 
-    -- ★ LIVE'S INSET, not a restatement of it. This was ten lines that re-anchored both
-    -- bars by db.framePadding, under a comment saying it was "matching what UpdateUnitFrame
-    -- does unconditionally for live frames" — which is the divergence class named in every
-    -- audit of this file. UpdateReducedMaxHealth below may re-clip the right edge after.
+    -- ★ LIVE'S INSET, not a restatement of it. UpdateReducedMaxHealth below may re-clip
+    -- the right edge after.
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
@@ -924,21 +913,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
-    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
-    -- restatements (value, texture, all four colour modes, the dead-colour override)
-    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
-    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
-    -- needed here. (Audit, 2026-08-07.)
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. DF.SetMissingHealthBarValue
+    -- reads the frame stamps, so there is one renderer; it also owns the BACKGROUND-mode
+    -- hide, so no branch is needed here.
     if frame.missingHealthBar then
         DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
 
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Name through the LIVE renderer, supplying only the fabricated name. This block
-    -- used to restate DF:UpdateName's truncation verbatim -- the nameTextLength read,
-    -- the ELLIPSIS/CUT branch, the UTF8Sub calls -- so the two could drift on any
-    -- format change, and the preview also skipped live's legacy-text suppression.
+    -- Name through the LIVE renderer, supplying only the fabricated name.
     DF:UpdateName(frame, testData.name)
     
     -- ☠ (Removed) THE PER-ELEMENT ALPHA BLOCK, and the three tables it existed to fill:
@@ -1094,10 +1078,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         
         -- Apply out of range effect to auras: the container rows fade as one
         -- (alpha on the row's plain anchor frame is ours to set).
-        -- ★ Row fades through the live functions now. They compose the same three
-        -- inputs this used to (row opacity x dead fade x out-of-range) and, since
-        -- 2026-08-07, use the row's own opacity as the BASE -- which live had been
-        -- dropping. One implementation, so the slider cannot mean two things.
+        -- ★ Row fades through the live functions. They compose the same three inputs
+        -- (row opacity x dead fade x out-of-range) and use the row's own opacity as the
+        -- BASE. One implementation, so the slider cannot mean two things.
         if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
         if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
     end
@@ -1266,9 +1249,7 @@ function DF:UpdateTestIcons(frame, testData)
                 and "Interface\\GroupFrame\\UI-Group-LeaderIcon"
                 or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
-            -- Geometry, base alpha and frame level from the LIVE applier. (The two
-            -- arms differed only in the texture, but each carried its own verbatim
-            -- copy of the geometry block — leader kept working while assist drifted.)
+            -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.leaderIcon, db, "leaderIcon")
             end
@@ -1328,7 +1309,6 @@ function DF:UpdateTestIcons(frame, testData)
     -- dfTestIsDead stamp the preview already sets.
 end
 
--- Helper function to show icon as text or texture in test mode
 -- ★ ShowTestIconAsText and ApplyTestIconTimerFont are GONE. The first restated
 -- live's ShowIconAsText and then re-applied the font and text colour on top --
 -- work DF:ApplyStatusIconSettings already does, and doing it a second time AFTERWARDS
@@ -1639,7 +1619,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
     -- folds DF:GetStatusIconFadeAlpha into each icon's alpha, and every icon above
     -- now goes through it. Re-applying here would square the fade -- the same
     -- mistake the range and health fades made before ef3c56e0.
-    -- (Audit, 2026-08-07.)
 end
 
 -- ☠ A CORPSE CARRIES NO AURAS, so the preview must not draw any on one. Death
@@ -1720,11 +1699,10 @@ end
 
 -- The mock unit's primary resource, for DF:GetResourceBarColor's powerTokenOverride.
 --
--- ⚠ DERIVED FROM CLASS, NOT ROLE. The old inline version mapped HEALER->MANA,
--- TANK->RAGE and everything else ->ENERGY, so exactly three power colours were ever
--- previewable; the raid roster carries all thirteen classes, and FOCUS, RUNIC_POWER
--- and FURY are all editable on the Colors page with no way to see them. Role is still
--- consulted, but only where a class genuinely splits by spec role.
+-- ⚠ DERIVED FROM CLASS, NOT ROLE. The raid roster carries all thirteen classes, and
+-- FOCUS, RUNIC_POWER and FURY are all editable on the Colors page with no other way
+-- to see them. Role is still consulted, but only where a class genuinely splits by
+-- spec role.
 --
 -- ⚠ KNOWN LIMIT, deliberately not faked: the roster models class and role, not spec,
 -- so the spec-only resources -- LUNAR_POWER (Balance), MAELSTROM (Elemental/Enhance),
@@ -2298,11 +2276,6 @@ function DF:ToggleTestMode()
     -- refuse while frames are unlocked: turning the preview off mid-unlock drops
     -- your claim, unlock keeps the frames it still needs to have something to
     -- drag, and locking then hides them because nobody is left asking.
-    --
-    -- The old refusal ("Cannot disable test mode while frames are unlocked")
-    -- existed only to stop the snapshot going stale, and it never covered the
-    -- toolbar button — which closes the PANEL without coming through here at
-    -- all. That was the reported repro. See TestMode/Shim.lua.
     local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
     -- The "frames stay visible while unlocked" line is emitted by SetTestModeOwner,
     -- not here: the toolbar button releases the claim through the panel's OnHide and
@@ -2427,9 +2400,7 @@ function DF:ShowRaidTestFrames(silent)
         DF.PinnedFrames:EnterTestMode()
     end
 
-    -- Same confirmation party mode gives. Raid never announced itself at all, and
-    -- did not even take `silent` -- Panel.lua has been passing one to the Hide half
-    -- for a while, which quietly did nothing.
+    -- Same confirmation party mode gives.
     if not silent then
         DF:Say(L["Test mode enabled."])
     end
@@ -2848,9 +2819,8 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
         SecureSort:UpdateRaidLayoutParams()
         
         -- Calculate container size (for max 40 players)
-        -- ⚠ The static default table was retired with the secure-sort half; this is nil
-        -- only if UpdateRaidLayoutParams bailed on a missing raid db, in which case there
-        -- is nothing to lay out.
+        -- ⚠ lp is nil only if UpdateRaidLayoutParams bailed on a missing raid db, in
+        -- which case there is nothing to lay out.
         local lp = SecureSort.raidLayoutParams
         if not lp then return end
         local playersPerRow = lp.playersPerRow or 5
@@ -3392,14 +3362,10 @@ function DF:UpdateTestMissingBuff(frame)
 end
 
 -- The buff/debuff sibling of UpdateAllTestMissingBuff / UpdateAllTestDefensiveBar /
--- UpdateAllTestAuraDesigner. Its ABSENCE is why aura settings did not live-update in
--- test mode: every OTHER container surface had one of these and was wired to it, but
--- the buff and debuff rows had no "refresh every test frame" entry point at all. So a
--- slider drag saved the value, re-drove the LIVE frames, and left the preview stale —
--- and Aura Designer appeared to be the only thing that worked.
---
--- The per-frame drive (UpdateTestAuras) already existed and already reads every
--- setting; nothing was missing but the loop over the frames.
+-- UpdateAllTestAuraDesigner: the "refresh every test frame" entry point for the buff
+-- and debuff rows. Without it a slider drag re-drives the LIVE frames and leaves the
+-- preview stale. The per-frame drive (UpdateTestAuras) already reads every setting;
+-- this is only the loop over the frames.
 function DF:UpdateAllTestAuras()
     if DF.testMode and DF.testPartyFrames then
         for i = 0, 4 do
@@ -3459,11 +3425,6 @@ function DF:UpdateAllTestMissingBuff()
     end
 end
 
--- Test defensive spell textures (variety for multi-icon display)
--- (Removed) TEST_DEFENSIVE_SPELLS — a four-ID list (Pain Suppression, Ironbark,
--- Blessing of Sacrifice, Life Cocoon) with no readers. The defensive preview drives
--- the real 12.1 container and takes its spell from testData instead.
-
 -- Test defensive preview: drive the real 12.1 defensive container.
 function DF:UpdateTestDefensiveBar(frame, testData)
     if not frame then return end
@@ -3472,8 +3433,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
 
     -- 12.1: the live defensive row is a container (DriveDefensiveFactory) —
     -- preview through the SAME container (P5 hybrid) so styling, layout and
-    -- fonts are live-true; the legacy pool below is a dead pipeline here.
-    -- Role-scaled count mirrors the legacy preview shape (tank 3 / healer 1).
+    -- fonts are live-true.
     if DF.FactoryOwnsDefensiveRow and DF:FactoryOwnsDefensiveRow(db) then
         local role = testData and testData.role
         -- The COUNT is the on/off: 0 hides the row outright — same rule as the buff and
@@ -3563,10 +3523,6 @@ function DF:UpdateAllTestDefensiveBar()
 end
 
 
--- (Removed) TEST MODE: TARGETED SPELLS — the on-frame test painter
--- (DF:UpdateTestTargetedSpell). Orphaned once UpdateAllTestTargetedSpell stopped
--- driving it; the group-frame display it previewed is gone.
-
 -- Targeted List demo bars in test mode. This is a single global
 -- container (not per-frame), so the update function just toggles the
 -- show/hide helpers on the feature module. Safe to call with the
@@ -3598,9 +3554,7 @@ end
 
 -- ⚠ Despite the name this is NOT group-only, which is why it survives the removal
 -- of the group-frame Targeted Spells display. It also drives the PERSONAL preview
--- and the Targeted List demo bars, and is called from four places.
--- (Removed) the group half: the UpdateFrame closure that painted on-frame icons,
--- and the party/raid frame loops that existed only to drive it.
+-- and the Targeted List demo bars.
 function DF:UpdateAllTestTargetedSpell()
     if DF.testMode then
         -- Update personal targeted spells display in test mode
@@ -3619,13 +3573,10 @@ function DF:UpdateAllTestTargetedSpell()
 
     if DF.raidTestMode then
         local raidDb = DF:GetRaidDB()
-        -- (Removed) the raid frame loop — it only called the group-frame painter, and
-        -- group Targeted Spells were party-only anyway (raid was forced off).
 
         -- Show personal targeted spells in raid test mode. Personal Targeted is a
         -- player-screen overlay with PER-MODE settings, so the raid preview must gate on
-        -- the RAID profile — this read DF:GetDB() (party), so the raid panel's toggle was
-        -- ignored and the party value decided it instead.
+        -- the RAID profile.
         local db = raidDb
         if db.personalTargetedSpellEnabled and db.testShowPersonalTargeted ~= false and DF.ShowTestPersonalTargetedSpells then
             DF:ShowTestPersonalTargetedSpells()
@@ -3752,12 +3703,9 @@ function DF:CreateTestPanel()
     end
 
     panel:SetScript("OnHide", function()
-        -- Closing the panel drops the USER's claim on both scopes -- and only
-        -- that. It used to hide the frames itself, but ONLY when locked, which is
-        -- exactly how the preview got stranded: close the panel while unlocked and
-        -- the frames stayed up with nothing tracking that you had dismissed them.
-        -- Now unlock's own claim decides whether they stay, and the later lock
-        -- takes them down.
+        -- Closing the panel drops the USER's claim on both scopes -- and only that;
+        -- it must not hide the frames itself. Unlock's own claim decides whether they
+        -- stay up, and the later lock takes them down.
         DF:SetTestModeOwner("party", "user", false)
         DF:SetTestModeOwner("raid", "user", false)
         if DF.GUI and DF.GUI.UpdateTestButtonState then
@@ -3818,10 +3766,8 @@ function DF:CreateTestPanel()
     toggleBtn:SetScript("OnClick", function()
         DF:ToggleTestMode()
         -- This button and the toolbar's test button are the SAME action: turn the
-        -- preview off and close the panel. Leaving the panel open with test mode off
-        -- was the odd state -- one control closed everything, the other printed a
-        -- line and sat there. So an open panel now always means "the user is asking
-        -- for a preview", which is also what makes the toggle's label unambiguous.
+        -- preview off and close the panel. An open panel always means "the user is
+        -- asking for a preview", which is what makes the toggle's label unambiguous.
         --
         -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
         -- idempotent with the release ToggleTestMode just did.
@@ -4468,7 +4414,7 @@ function DF:CreateTestPanel()
     panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
     panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
     panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
-    -- Text Designer is alpha-gated; only offer the toggle when the module loaded.
+    -- Only offer the toggle when the Text Designer module is loaded.
     if DF.UpdateTextDesigner then
         -- Default ON: seed any profile that predates the Config default so the
         -- checkbox shows checked (migration timing can otherwise leave it nil).
@@ -4734,23 +4680,12 @@ function DF:CreateTestPanel()
     end)
     panel.defSlider = defSlider
     panel.defSliderLabel = defLabel
-    -- "Targeted Spell" was the old group-frame icon display that
-    -- Blizzard's 2026-04-07 hotfix killed. The checkbox slot is now
-    -- repurposed for the Targeted List (alpha/beta-only feature).
     panel.showTargetedListCheck = secIndicators:AddCheckbox(L["Targeted List"], "testShowTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end, "indicators_targetedlist")
     panel.animTargetedListCheck = secIndicators:AddCheckbox(L["Animate Targeted List"], "testAnimateTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end)
-    -- (Removed) the "Targeted Spells" checkbox on testShowTargetedSpell. Its painter
-    -- DF:UpdateTestTargetedSpell went with the group-frame display, and
-    -- DF:UpdateAllTestTargetedSpell — which survives — never reads that key: it
-    -- gates on personalTargetedSpellEnabled + testShowPersonalTargeted and delegates
-    -- the list to testShowTargetedList. So the box persisted a value nothing
-    -- consumed. The comment here used to justify keeping it "because it drives the
-    -- Personal Targeted preview too"; that was wrong — Personal has its own box
-    -- immediately below, which is the one that actually drives the preview.
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")
@@ -4995,10 +4930,9 @@ function DF:CreateTestPanel()
         self.debuffSlider:SetValue(debuffCount)
         self.debuffValueText:SetText(debuffCount)
         if self.debuffSlider.UpdateTheme then self.debuffSlider:UpdateTheme() end
-        -- ⚠ Fallback is 0 here, matching Config's default (and the OFF checkbox this
-        -- replaced). The two above fall back to 3 while Config seeds 2 — a pre-existing
-        -- mismatch that only shows on a db with no key at all; left alone rather than
-        -- folded into this change.
+        -- ⚠ Fallback is 0 here, but Config seeds testDefensiveCount = 1 -- the fallback
+        -- only shows on a db with no key at all. The two above fall back to 3 while
+        -- Config seeds 2, the same kind of mismatch; left alone rather than folded in.
         if self.defSlider then
             local defCount = db.testDefensiveCount or 0
             self.defSlider:SetValue(defCount)

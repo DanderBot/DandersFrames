@@ -269,9 +269,6 @@ function Profiler:CreateUI()
     --   6  gap
     --  24  the column legend that sits above it (TWO lines since Self landed)
     --  10  breathing room before the last data row
-    -- The old value was 30, which did not even clear the 28px strip that used to
-    -- live there — a full 30-row table clipped its last row behind it, and the
-    -- legend was underneath the strip entirely.
     f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 80)
     f:SetPoint("CENTER", 0, 50)
     -- Panel chrome, same as every other DF window. Was a bespoke plate from three
@@ -288,9 +285,8 @@ function Profiler:CreateUI()
     profilerFrame = f
     Profiler.frame = f   -- resident hook excludes the window; combat handlers check it
 
-    -- Title. The "DF" used to be hardcoded bright green, which matched nothing
-    -- else in the addon; the theme accent is what every section header uses and
-    -- it follows the party/raid pole like the rest of the GUI.
+    -- Title. Theme accent, what every section header uses -- it follows the
+    -- party/raid pole like the rest of the GUI.
     local title = f:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     title:SetPoint("TOPLEFT", 12, -10)
     title:SetText("Profiler")

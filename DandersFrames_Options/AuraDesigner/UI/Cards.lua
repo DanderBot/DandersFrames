@@ -193,10 +193,7 @@ PIH_K.EXTRA_IDS  = {
 }
 
 -- ⭐ ONE DEFINITION OF WHAT THE HELPER WATCHES. The seeder, the class list and the class ticks
--- all read this. Four places used to walk the category independently, which is three chances for
--- a curation change to land in some of them and not the others -- and the class tick reading a
--- different set from the seeder is exactly the kind of drift nobody notices until a tick stops
--- clearing itself.
+-- all read this, so a curation change cannot land in some of them and not the others.
 local function pihSeedRecords()
     local R = DF.FilterRegistry
     local out, seen = {}, {}
@@ -329,12 +326,10 @@ end
 
 -- Create-or-find, then seed. Idempotent: AddSpellToCustom answers "exists" for a duplicate,
 -- so re-running the recipe repairs rather than doubles.
--- `wipeFirst` empties the list before re-seeding, which is how the amplifier list is rewritten
--- in place -- see pihSyncAmplifierFilter for why it must keep its id.
--- Ownership is NOT in this list. It used to be -- a synthetic id seeded alongside the real
--- spells, which the gate read back out of the resolved map. That worked and was still wrong: a
--- fake id in real data travels with an exported profile and is unexplainable a year later. The
--- mark now lives on the effect (`cfg.pihSignal`) and reaches the engine as `config.dfGate`.
+-- `wipeFirst` empties the list before re-seeding; no caller passes it today.
+-- Ownership is NOT in this list: a fake id in real data travels with an exported profile and
+-- is unexplainable a year later. The mark lives on the effect (`cfg.pihSignal`) and reaches
+-- the engine as `config.dfGate`.
 local function pihEnsureFilter(name, presetKeys, extraIDs, wipeFirst)
     local R = DF.FilterRegistry
     if not (R and R.CreateCustomFilter) then return nil end
@@ -393,8 +388,8 @@ local function pihEnsureRacialFilter()
     return pihEnsureFilter(PIH_K.FILTERS.racials, nil, PIH_K.RACIAL_IDS)
 end
 
--- Every id in a curated list of ours, in ONE place because three callers need it and each
--- would otherwise walk both buckets itself.
+-- Every id in a curated list of ours, in ONE place rather than walking both buckets at each
+-- call site.
 -- ⚠ BOTH BUCKETS. AddSpellToCustom files a known id under `spells` and an unknown one under
 -- `rawIDs`, and which bucket a racial lands in depends on whether SpellDB knew it when it was
 -- added -- so a reader that consults one is right until the database is regenerated.
@@ -499,8 +494,6 @@ local function pihFoundAll()
     end
     return out
 end
--- ⚠ P.PIH_FoundAll was exported here and never read anywhere. The LOCAL is live -- the create
--- gate, PIH_SurfacesOf and pihPurgeStrayMarks all use it; only the export went.
 
 local function pihFound()
     local out = {}
@@ -1114,16 +1107,9 @@ local function pihCreateSignal(key, surfaceOverride, showsAura)
     end
 
     local s = P.PIH_Settings()
-    -- ⭐ A RE-ADDED SIGNAL COMES BACK WHERE THE USER LEFT IT. The surface is derived
-    -- from where the mark is found, so after a remove nothing else remembers it --
-    -- the stash is the only memory. A named surface still outranks it.
-    -- ⚠ THE STASH'S FIRST SURFACE, not "the" surface: a signal can hold several and
-    -- pihKeptSurfaces returns them in menu order. PIH_Create names each one explicitly, so
-    -- this fallback only decides where a BARE create lands.
-    -- ⚠ NO STASH TO CONSULT ANY MORE. This used to prefer the surface the signal was
-    -- last removed from, because the enable tick DELETED and rebuilt. It does not delete,
-    -- so a re-enable finds its records where it left them and nothing is ever rebuilt from
-    -- memory -- a bare create is only ever a FIRST create, and its home is the default.
+    -- ⚠ NO STASH TO CONSULT. A remove does not delete the records, so a re-enable finds them
+    -- where it left them and nothing is ever rebuilt from memory -- a bare create is only ever a
+    -- FIRST create, and its home is the signal's default surface. A named surface outranks it.
     local tgt = surfaceOverride or def.surface
 
     local cdId = pihEnsureFilter(PIH_K.FILTERS.cooldowns, nil, pihSeedIDs())
@@ -1358,14 +1344,6 @@ local function pihPurgeStrayMarks()
     return groups, effects
 end
 
--- ⚠ pihDeleteSignal WENT WITH ITS LAST CALLER (2026-09-09). It removed ONE of a signal's
--- surfaces and stashed the doomed cfg on the way out; both of its callers were the retired
--- surface API (PIH_SetSurface's move, PIH_RemoveSurface's per-row ✕).
--- ⚠ NOTHING WAS LOST WITH IT. Removing one effect is the designer's own ✕ now, and that
--- is deliberate rather than a round trip -- there is nothing to stash. The stash still
--- runs where it is meant to: P.PIH_Remove, which is the ENABLE TICK going off, and which
--- is the one path whose whole promise is that your customisations come back.
-
 -- ─────────────────────────────────────────────────────────────
 -- ⚠⚠ THE CLASH WARNING — INTACT, AND CURRENTLY UNREACHED. FLAGGED FOR KRATHE 2026-09-09.
 -- ─────────────────────────────────────────────────────────────
@@ -1396,7 +1374,7 @@ PIH_K.CONTENDED  = { border = true, nametext = true, healthtext = true }
 -- The exact candidacy test each contended surface applies, copied from the call sites rather
 -- than approximated -- a warning that fires when the user has ALREADY applied the fix is worse
 -- than one that never fires.
---   border     : ShowBorder ~= false and borderMode ~= "custom"   (Factory.lua:5682)
+--   border     : ShowBorder ~= false and borderMode ~= "custom"   (Factory:SyncFrame)
 --                ⭐ "Give this aura its own border" opts an effect OUT of the contest entirely
 --                (collectStackedBorders), so it must not count as a clash.
 --   name/health: c.color and not c.showWhenMissing                (the TEXT_MIRROR_TYPES pick)
@@ -1995,11 +1973,9 @@ local function pihApplyClass(classFile, on)
     end
 end
 
--- ⚠ NOTHING IS STORED. An earlier pass kept an "excluded classes" table beside the list and
--- re-applied it whenever the list was rebuilt. That was a second copy of the truth, and it went
--- out of step the moment anyone edited the list in the Filter Designer: the box would still
--- show Warrior unticked while the spells were back, or the reverse. The tick reads the list, the
--- click edits the list, and there is nothing in between for the two to disagree about.
+-- ⚠ NOTHING IS STORED. The tick reads the list, the click edits the list, and there is
+-- nothing in between for the two to disagree about: a second copy of the truth goes out
+-- of step the moment anyone edits the list in the Filter Designer.
 function P.PIH_SetClassOn(classFile, on)
     pihApplyClass(classFile, on)
     pihRefresh()
@@ -2076,9 +2052,8 @@ end
 -- category with three sources: things somebody presses that are worth infusing behind, as
 -- against the class cooldowns, which are the same question asked of a spellbook.
 --
--- ⚠ ONE WRITE, NOT TWO. It used to write the setting, rebuild a separate amplifier filter,
--- and then link or unlink that filter on the cooldown-icon group -- three facts that could
--- disagree. Now the setting is the choice and pihSyncTriggerExtras is the consequence.
+-- ⚠ ONE WRITE, NOT TWO. The setting is the choice and pihSyncTriggerExtras is the
+-- consequence; a separate filter kept beside it would be a second fact that can disagree.
 -- ★ HOW MANY CLASS COOLDOWNS ARE ACTUALLY LIVE, for the "Classes and Cooldowns" header.
 --
 -- ☠ THE COOLDOWNS *TICK* THAT WAS HERE IS GONE, AND IT WAS REDUNDANT AND HARMFUL. Redundant
@@ -2643,7 +2618,7 @@ local function BuildGlobalView(parent, collect)
 
     -- ── STANDARD BUFFS ──
     -- Replaces the old coexistence banner's "Disable Buffs" shortcut: standard
-    -- buff visibility is Aura Filters' job now, so this just links there.
+    -- buff visibility is the Filter Designer's job now, so this just links there.
     AddGroup(L["Standard Buffs"], function(g)
         local descFrame = CreateFrame("Frame", nil, parent)
         descFrame:SetHeight(24)
@@ -2746,10 +2721,6 @@ local function BuildGlobalView(parent, collect)
 end
 P.BuildGlobalView = BuildGlobalView
 
--- BuildPerAuraView + RefreshRightPanel removed in v4 redesign
--- Per-aura configuration is now done via flat effect cards in the Effects tab
--- (their dummy stubs were unreferenced — reclaimed for the 200-locals ceiling)
-
 -- ============================================================
 -- ENABLE BANNER
 -- ============================================================
@@ -2791,10 +2762,6 @@ local function CreateEnableBanner(parent)
         -- can answer nil before the profile DB exists, and a click with no config behind it
         -- cannot mean anything: the toggle writes through the MODE db now, but the designer
         -- being switched on still has to exist.
-        -- (This used to say the build above "guards its own read (`adDB and adDB.enabled`)
-        -- and this has to match". That stopped being true when the enable moved to the mode
-        -- -- the build reads DF:IsAuraDesignerEnabledForMode, and this guard is about the
-        -- CONFIG existing, not about its enable field.)
         local clickDB = GetAuraDesignerDB()
         if not clickDB then
             self:SetChecked(false)
@@ -3209,9 +3176,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- Mock unit frame (centered in container)
     local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
     mockFrame:SetSize(FRAME_W, FRAME_H)
-    -- -20 in the compact form: with the instruction rows gone the free space runs
-    -- from under the scale slider to the bottom edge, so the box's own centre is
-    -- 20-odd pixels above the centre of what is actually free.
+    -- -CANVAS_DY in the compact form: with the instruction rows gone the free space
+    -- runs from under the label strip to the bottom edge, so the box's own centre is
+    -- a little above the centre of what is actually free.
     -- A thumbnail's box holds nothing but the mock, so it is centred dead centre;
     -- the two band forms nudge down to clear the label strip above them.
     mockFrame:SetPoint("CENTER", container, "CENTER", 0,
@@ -3332,10 +3299,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     if thumb then container.RefreshGeometry() end
 
     -- What the host band must be for the mock to clear the furniture above it and
-    -- the padding below. Derived from the mock's own anchor: it is centred at
-    -- CENTER,0,-20, so the gap from the container's top to the mock's top is
-    -- H/2 + 20 - (h*scale)/2, and that must cover the 52px label-plus-slider
-    -- strip. Rearranged: H >= 64 + h*scale. The floor is the artifact's 132.
+    -- the padding below. The sum is P.CanvasWantedHeight's, derived there from
+    -- CANVAS_FURNITURE / CANVAS_PAD / CANVAS_DY -- do not re-derive it here. The
+    -- floor is the artifact's 132.
     --
     -- Indicators anchored outside the frame are deliberately NOT in this sum --
     -- they are what SetClipsChildren is for. Sizing the band to the widest
@@ -3448,7 +3414,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- DF.Border widget covering the mock frame, mirroring the runtime.
     container.borderOverlay = DF.Border:New(mockFrame, { frameLevelOffset = 5, layer = "OVERLAY" })
 
-    -- Click background — no-op in new UI (was used to deselect aura in old tile view)
+    -- Click background — a no-op in the current UI.
     local bgClick = CreateFrame("Button", nil, mockFrame)
     bgClick:SetAllPoints()
     bgClick:SetFrameLevel(mockFrame:GetFrameLevel() + 1)  -- Below dots and indicators
@@ -3578,10 +3544,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- ========================================
     -- PREVIEW SCALE SLIDER
     -- ========================================
-    -- ⚠ BOTH callbacks go through RefreshGeometry, never SetScale directly. They used
-    -- to set the scale raw, which is how the slider could push the mock straight out
-    -- through the top and bottom of its box: the container bounds the width, nothing
-    -- bounded the height, and 2.5x on a tall frame does not fit either way.
+    -- ⚠ BOTH callbacks go through RefreshGeometry, never SetScale directly: the
+    -- container bounds the width and nothing bounds the height, so a raw scale pushes
+    -- the mock straight out through the top and bottom of its box.
     local function ApplyPreviewScale()
         if container.RefreshGeometry then container.RefreshGeometry() end
         -- The host decides what to do about a new wanted height -- the split panel
@@ -4156,8 +4121,6 @@ P.ApplySubTabStrip = ApplySubTabStrip
 -- Which POOL tab reads as selected. Lifted out of SetMainTab because the REUSE path needs it
 -- too: a page revisit that changes the pool without rebuilding the panel (the Power Infusion
 -- Helper's nav row does exactly that) left the strip lit on the pool the panel was BUILT for.
--- Krathe, 2026-09-09: "it takes you to the enable PI page but ... is not highlighting Power
--- Infusion Helper tab up top."
 local function SyncPoolTabs()
     for key, btn in pairs(mainTabButtons) do
         if btn.SetActive then btn:SetActive(key == S.activeBuffTab) end
@@ -4596,12 +4559,9 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
         trigLabel:SetText(L["TRIGGERED BY"])
         trigLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-        -- AND/OR operator toggle (only shown with 2+ triggers)
-        -- (No multi-trigger ALL/ANY operator button: evaluating every trigger together
-        --  needs a read the 12.1 aura system cannot do for secret-anchored triggers, so
-        --  it was permanently frosted. Removed 2026-07-25 -- triggerOperator was never
-        --  read by the render path either, only by this editor's own label, so the
-        --  toggle changed nothing. Triggers combine as ANY/OR. The tags stay editable.)
+        -- No multi-trigger ALL/ANY operator button: evaluating every trigger together
+        -- needs a read the 12.1 aura system cannot do for secret-anchored triggers.
+        -- Triggers combine as ANY/OR; the tags stay editable.
 
         -- Build display name lookup for tags. Other-pool trigger names are
         -- SpellDB names / ad-hoc keys — resolved live per tag below.
@@ -5079,10 +5039,10 @@ S.BuildEffectPriorityBlock = function(body, effect, proxy, bodyWidth, baseH)
         -- multiple auras set the same frame effect, e.g. two health bar colors)
         local auraProxy = CreateAuraProxy(effect.auraName)
         local priSlider = GUI:CreateSlider(body, L["Priority"], 1, 10, 1, auraProxy, "priority")
-        -- Extra gap above (was +4) so the slider isn't squished against the
-        -- triggers / Add Trigger row, plus a little breathing room below before
-        -- the effect's Appearance group (increment 54 → 68 → 84 with the note).
-        -- x=8 matches the "TRIGGERED BY" section above (Options.lua trigContainer)
+        -- Gap above so the slider isn't squished against the triggers / Add Trigger
+        -- row, plus breathing room below before the effect's Appearance group
+        -- (increment 84 with the note).
+        -- x=8 matches the "TRIGGERED BY" section above (trigContainer, this file)
         -- so the Priority slider + note line up with the card's other elements.
         priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(baseH + h + 14))
         priSlider:SetWidth(bodyWidth - 16)
@@ -5305,7 +5265,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
     -- Eye icon (visibility toggle) — left of the ✕; grouped indicators keep it
     -- even though their ✕ is hidden. Asset + toggle idiom mirror Text Designer's
-    -- eye (TextDesigner/Options.lua): visibility / visibility_off from
+    -- eye (TextDesigner/UI/Options.lua): visibility / visibility_off from
     -- Media/Icons, bright when shown, dim when hidden, hover brighten.
     -- State lives on the raw config table: enabled == false is hidden;
     -- nil/true (legacy records) is shown.
@@ -6450,8 +6410,8 @@ S.BuildAddIndicatorPane = function(host, opts)
     end
     -- The last row's trailing gap is not spent.
     secEnd[2] = rowTop + TILE_GAP
-    -- ⚠ THE SAME DROP AS SECTION 1'S, not the 10 it used to be. Two different
-    -- gaps between three sections is the same defect as two different left edges.
+    -- ⚠ THE SAME DROP AS SECTION 1'S. Two different gaps between three sections
+    -- is the same defect as two different left edges.
     y = rowTop + TILE_GAP - SECTION_GAP
 
     -- ── 3 · WHERE? ──
@@ -6692,7 +6652,7 @@ end
 -- THE FILTER CHIPS -- WHICH EFFECT TYPE THE LIST IS SHOWING
 -- ------------------------------------------------------------
 -- ONE definition, two hosts: a wrapping row inside the split panel's column,
--- and the pane behind the popout layout's `Showing` row (AuraDesigner/UI/Rows.lua).
+-- and the pane inside the filter glyph's own popout (OpenFilterPopout below).
 -- The chips predate the all-rows rule they break -- a setting with more than one
 -- option goes in a popout -- and in a panel they also stop being a flow with
 -- nothing to flow against: the pane's width is the popout's own content width,
@@ -7074,9 +7034,9 @@ local function pihSweep()
     -- one, so the stash is a copy of something with nowhere left to go.
     end   -- from < 4
 
-    -- ── STEPS 5-6: EVERY PROFILE THAT IS NOT ALREADY ON THE CURRENT SCHEMA ──
-    -- Both are safe to re-run: one removes records that should not exist, the other writes a
-    -- set of ids that is derived from the ticks rather than added to them.
+    -- ── STEPS 5 ONWARDS: EVERY PROFILE THAT IS NOT ALREADY ON THE CURRENT SCHEMA ──
+    -- Steps 5 and 6 are safe to re-run: one removes records that should not exist, the other
+    -- writes a set of ids that is derived from the ticks rather than added to them.
 
     -- ⚠ BY MARK, ACROSS EVERY STORE -- not by id through a store-routed delete. Two earlier
     -- attempts failed here and both failed the same way: they searched the ONE store the
@@ -8061,8 +8021,7 @@ end
             function(v) P.PIH_SetPlayersOn(v); t.Refresh() end)
         -- ⚠ OFF FIRST, because off is what a pug night wants and the sentence that matters is
         -- the promise that the list survives it.
-        -- ⚠ THE EMPTY-LIST RULE LIVES ON THE ON LINE, where it applies. It used to be the note's
-        -- first sentence, back when emptiness WAS the switch.
+        -- ⚠ THE EMPTY-LIST RULE LIVES ON THE ON LINE, where it applies.
         if onCb then
             onCb.tooltip = { lines = {
                 L["Off: the helper watches everyone. Your list is kept for next time."],
@@ -8085,27 +8044,16 @@ end
         g:AddWidget(w, (w:GetHeight() or 160) + 6)
     end
 
--- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES (2026-09-09).
--- ⚠ IT WAS A TICK ON THE CARD, AFTER THE FACT. Krathe: "when you add an icon it should then
--- have a graphic like we do for the other types to then pick the type i.e an actual icon or a
--- PI icon?" -- right, because those two are as different from each other as an icon is from a
--- square, and every other such choice on this grid is made by looking at it.
--- ⚠ A SECOND STEP RATHER THAN THREE ICON TILES ON THE MAIN GRID, because a signal holds one
--- effect per surface: two of them would both be "icon" and the second could never be added.
--- The choice is about one effect, so it is asked once that effect has been chosen.
+-- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES.
+-- ⚠ A SECOND STEP RATHER THAN ICON TILES ON THE MAIN GRID. The choice is about one
+-- effect, so it is asked once that effect has been chosen.
 -- ⚠ The tick on the effect card stays -- it is how you change your mind later without
 -- deleting and re-adding.
---
--- ★★ ...AND COOLDOWN ICONS IS THE THIRD ANSWER, NOT A FOURTH TILE (2026-09-10). It stood on
--- the main grid beside Border and Square, which put a CONTAINER among a row of EFFECTS -- and
--- that mismatch is the whole of what Krathe kept hitting: it disappeared from the list it was
--- added from, it turned up under a tab that grew a moment earlier, and the tile itself
--- vanished once one existed. "I think for icon it would be best to have a sub menu so you
--- click Icon then it has PI Icon, Cooldown Icons, and the other icon choices?"
--- ⇒ Three icon answers on two axes -- HOW MANY (one effect, or one per cooldown up) and WHAT
--- PICTURE (always Power Infusion, or the buff they used). The fourth cell is nonsense: four
--- identical Power Infusion icons in a row. So: three tiles, behind Icon, and the difference
--- between a container and an effect stops being the user's problem.
+-- ⚠ COOLDOWN ICONS IS THE THIRD ANSWER, NOT A FOURTH TILE: it is a CONTAINER, and the
+-- main grid asks which kind of INDICATOR you want.
+-- ⇒ Three icon answers on two axes -- HOW MANY (one effect, or one per cooldown up) and
+-- WHAT PICTURE (always Power Infusion, or the buff they used). The fourth cell is
+-- nonsense: four identical Power Infusion icons in a row. So: three tiles, behind Icon.
 local pihAddPick = nil   -- nil = the surface grid, "icon" = the art choice
 
 -- ── EXAMPLE ART FOR THE TWO TILES WHOSE PICTURE IS NOT KNOWN IN ADVANCE ──
@@ -8270,11 +8218,9 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
         -- an unrelated fourth spell -- the tiles differ in HOW MANY, and picking different art
         -- for each would put a second difference in the picture that means nothing.
         local egIDs = pihExampleSpellIDs(3)
-        -- ★ ONE `taken` EACH, BECAUSE THEY ARE TWO EFFECTS NOW (2026-09-10). They used to share
-        -- one: the icon surface held a single record and which picture it wore was a tick on
-        -- its card, so adding either spent both. Krathe: "we can't add Power Infusion and Their
-        -- CD at the same time, we should allow this if we can?" We can -- placed instances are
-        -- per-id -- so each tile greys only when ITS OWN art is already on the frame.
+        -- ★ ONE `taken` EACH, BECAUSE THEY ARE TWO EFFECTS. Placed instances are per-id, so
+        -- Power Infusion and Their cooldown can both be on the frame, and each tile greys only
+        -- when ITS OWN art is already there.
         -- ⚠ The tick on the effect card stays and still switches one icon's picture. It is how
         -- you change your mind about an icon you have; these tiles are how you get a second.
         local pinnedHeld, dynamicHeld = P.PIH_IconArtHeld("burst")
@@ -8532,11 +8478,9 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local COL_W = (hostW > 40) and (hostW - 16) or nil
 
     -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
-    -- Was a "+ Add Indicator" button opening a 14-row dropdown across three
-    -- headed sections. Two problems that a flat card list would have made
-    -- WORSE, not better: fourteen entries is a long column at card height, and
-    -- the "from a filter" section repeats five labels from the section above it
-    -- word for word -- only the heading told them apart.
+    -- NOT one flat list of the fourteen types: fourteen entries is a long column at
+    -- card height, and the "from a filter" ones repeat five labels from the section
+    -- above word for word -- only the heading told them apart.
     --
     -- So the choice is split in two. Three pinned scope cards say what KIND of
     -- change you want; picking one takes the column over with just that scope's
@@ -8857,7 +8801,6 @@ S.BuildEffectsTab = function()
     -- same instruction here.
     local effects = CollectAllEffects({ includePIH = IsPIHelperTab() })
 
-    -- Apply filter
     local filtered = {}
     for _, effect in ipairs(effects) do
         if S.activeFilter == "all" or effect.typeKey == S.activeFilter then
@@ -8865,11 +8808,9 @@ S.BuildEffectsTab = function()
         end
     end
 
-    -- ★★ THE COOLDOWN-ICON GROUP IS A ROW IN THIS LIST (2026-09-10). Krathe: "It's confusing
-    -- when you add Cooldown Icons from effects and it appears as a layout group, it should
-    -- just show as a normal effect for PI helper." It is offered by a tile in THIS tab's add
-    -- grid, so this tab is where it has to come back -- a thing that vanishes from where you
-    -- made it and reappears behind a tab that grew a moment ago is two surprises, not one.
+    -- ★★ THE COOLDOWN-ICON GROUP IS A ROW IN THIS LIST. It is offered by a tile in THIS
+    -- tab's add grid, so this tab is where it has to come back -- a thing that vanishes
+    -- from where you made it and reappears behind another tab is two surprises, not one.
     -- ⚠ THE DESIGNER'S OWN GROUP CARD (S.CreateLayoutGroupCard), told to rebuild "effects"
     -- rather than "layout" and to drop its filter picker: what these icons watch is the
     -- cooldown list on Triggers, and offering a second way to say it here would let the two
@@ -9202,10 +9143,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
     end)
 
     -- ── BORDER ── (the placed icon's control set; gradient degrades to solid on
-    -- container slots — same known casualty as placed indicators. Animation
-    -- restored 2026-08-29 with the button-mode reopening: the group's style
-    -- table carries the BorderAnimation* keys, buildGroupBorderSpec feeds them
-    -- through the same builder as the placed indicators, and a key edit
+    -- container slots — same known casualty as placed indicators. Animation: the
+    -- group's style table carries the BorderAnimation* keys, buildGroupBorderSpec
+    -- feeds them through the same builder as the placed indicators, and a key edit
     -- rebuilds the group container — groupStyleStructSig folds
     -- rawBorderAnimStructTok.)
     AddSection(L["Border"], "border", function(g)

@@ -243,16 +243,13 @@ end
 
 -- The DF frame a foreign frame is ANCHORED to, or nil.
 --
--- ⚠ ONE pcall for the whole point walk, not one per point. It used to be per
--- point, and pcall is not cheap: EnumerateFrames covers every frame in the UI —
--- tens of thousands with a normal addon set — so a four-point frame cost four
--- protected calls each, and the scan spent most of its time in pcall overhead
--- rather than in the scan.
+-- ⚠ ONE pcall for the whole point walk, not one per point: pcall is not cheap and
+-- EnumerateFrames covers every frame in the UI -- tens of thousands with a normal
+-- addon set -- so a per-point pcall spends most of the scan in pcall overhead.
 --
--- GetNumPoints now sits INSIDE the guard too. In combat it returns a secret for
--- protected frames (a secret cannot be a for-loop limit), and having it outside
--- meant an unexpected throw took the whole scan down rather than skipping one
--- frame.
+-- GetNumPoints must sit INSIDE the guard too. In combat it returns a secret for
+-- protected frames (a secret cannot be a for-loop limit), and outside the guard an
+-- unexpected throw takes the whole scan down rather than skipping one frame.
 local function DFAnchorOf(f, dfSet)
     local np = f:GetNumPoints()
     if type(np) ~= "number" or issecretvalue(np) then return nil end

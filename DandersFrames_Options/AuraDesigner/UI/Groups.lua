@@ -116,9 +116,6 @@ local function RemoveIndicatorInstance(auraName, indicatorID)
 end
 P.RemoveIndicatorInstance = RemoveIndicatorInstance
 
--- (ChangeInstanceType removed — uncalled since the tile-strip type switcher
--- left the v4 redesign; reclaimed for the 200-locals ceiling.)
-
 -- Keys to skip when copying appearance between indicators (identity + placement +
 -- the eye toggle's hidden state — copying appearance must not hide the destination)
 local COPY_SKIP_KEYS = { id = true, type = true, anchor = true, offsetX = true, offsetY = true, enabled = true }
@@ -289,9 +286,9 @@ local function AddPandemicControls(g, parent, proxy)
 end
 P.AddPandemicControls = AddPandemicControls
 
--- Colours-S.page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
+-- Colours page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
 -- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
--- draws from the shared Colours-S.page breakpoints, so the link points there. Fixed-layout note, so
+-- draws from the shared Colours page breakpoints, so the link points there. Fixed-layout note, so
 -- size it to the group's inner width up front (the group advances Y by the height we pass).
 -- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
 local function AddDurationColorsLink(g, parent)
@@ -677,9 +674,6 @@ local function GetAuraIcon(specKey, auraName)
 end
 P.GetAuraIcon = GetAuraIcon
 
--- (CountActiveEffects removed — uncalled since the v4 flat-card redesign;
--- reclaimed for the file-scope 200-locals ceiling.)
-
 -- ============================================================
 -- MULTI-TRIGGER HELPERS
 -- Functions for managing trigger auras on frame-level effects
@@ -851,7 +845,7 @@ P.RemoveFrameEffectTrigger = RemoveFrameEffectTrigger
 -- SHARED SPELL PICKER STATE
 -- Every AD picking context (add indicator, layout-group adds,
 -- triggers) opens the shared spell database picker
--- (FilterRegistry/SpellPicker.lua) over the right panel; the
+-- (FilterRegistry/UI/SpellPicker.lua) over the right panel; the
 -- open helpers live below the tab system (OpenADPicker).
 -- ============================================================
 
@@ -873,10 +867,6 @@ P.CloseADPicker = CloseADPicker
 -- FILTER PICKER  (a small anchored dropdown of registry filters)
 -- Presets in Categories order with live counts, then customs name-sorted. No
 -- Uncategorised option by design — every consumer needs a resolvable include map.
---
--- Extracted from the filter group card's "+ Add Filter", which owned the only copy.
--- Two more consumers arrived (an effect's trigger list, and a filter OWNING an
--- effect) and forking a 120-line bespoke dropdown three ways was not on.
 --
 -- opts = {
 --   anchor    — the button to hang under; clicking it again closes (toggle)
@@ -959,10 +949,8 @@ local function OpenFilterPicker(opts)
     ApplyBackdrop(drop, GUI.Colors.background, GUI.Colors.border)
 
     -- Search box + themed scrollbar, mirroring GUI:CreateDropdown's searchable
-    -- menus (GUI/Widgets.lua) — same construction, same L["Search..."], same
-    -- StyleScrollBar pill. This picker predated opts.searchable and hand-rolled
-    -- a bare ScrollFrame: scrollable but with no scrollbar and no way to narrow
-    -- a long registry list. ScrollFrameTemplate, NOT UIPanelScrollFrameTemplate
+    -- menus (DandersUI/Widgets.lua) — same construction, same L["Search..."], same
+    -- StyleScrollBar pill. ScrollFrameTemplate, NOT UIPanelScrollFrameTemplate
     -- — StyleScrollBar styles the template's .ScrollBar and documents that rule.
     local SEARCH_H = 26
     if not drop._scrollFrame then
@@ -1423,14 +1411,6 @@ P.ANCHOR_POSITIONS = ANCHOR_POSITIONS
 -- (S.enableBanner declared on the state table)
 -- (S.framePreview declared on the state table)
 -- (S.dragHintText declared on the state table)
-
--- Layout anchors — stored during build
--- (S.contentRightInset and S.origY_framePreview are gone: both were written once in
--- Editor.lua and read nowhere, leftovers of the pre-rework layout.)
-
--- (The DF_AURA_DESIGNER_RESET_GLOBAL popup was retired with the editing-banner
--- "Reset to Global" button — the preset dropdown's "Inherit (Global)" entry now
--- clears a layout's Aura Designer preset override.)
 
 -- ============================================================
 -- UI STATE (v4 redesign — tabbed right panel)
@@ -2139,9 +2119,8 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         slot:SetFrameStrata(mockFrame:GetFrameStrata())
         slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
     end
-    -- ★ ALPHA. The canvas set size, scale, anchor, strata and level but never alpha, so an
-    -- indicator dropped to 40% rendered full-strength here while the live frame faded it
-    -- correctly — the preview disagreeing with the thing it previews.
+    -- ★ ALPHA. The canvas must apply it too: an indicator dropped to 40% has to fade here
+    -- exactly as the live frame fades it.
     -- Alpha is not in cfg because it is not a style/layout field: live applies it separately
     -- through applyPlacedAlpha, which stashes _dfADBaseAlpha for the OOR fade and writes the
     -- slot's host. The canvas has neither a handle nor an OOR pass, so it reads the SAME
@@ -2157,11 +2136,8 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     -- renders — so the FontString, its font, anchor, offsets, alpha and holder level are
     -- all container-engine output here, not decisions made in this file.
     --
-    -- This used to hand-build a FontString and hand-set its layering. Two separate bugs
-    -- came out of that in one day: the live companion moved and the canvas could not
-    -- follow, because the canvas was never DERIVED from it, only numerically matched. The
-    -- rule is the one that already covers test mode — a preview may differ in DATA, never
-    -- in RENDERING.
+    -- The canvas must be DERIVED from the live companion, never numerically matched to it.
+    -- Same rule as test mode: a preview may differ in DATA, never in RENDERING.
     --
     -- nil (hidden) whenever the live companion would also be absent: alertSlotStyle is the
     -- single gate for both, so "off", "no formatter API" and "show-when-missing" can no
@@ -2639,10 +2615,9 @@ end
 -- Exact equality on purpose: everything here comes from one resolver, so any difference
 -- at all means a second writer exists. Rounded only for display.
 -- ============================================================
--- ⚠ THROUGH DF:Out, like every other dump. This printed raw — the only bare print() in
--- either addon outside the Out builder — so it arrived with no title rule, no sections,
--- none of the shared tones and no siblings footer, in the middle of pasted logs where
--- telling one dump from the next is the whole point.
+-- ⚠ THROUGH DF:Out, like every other dump — never a bare print(). Raw output carries no
+-- title rule, no sections, none of the shared tones and no siblings footer, in the
+-- middle of pasted logs where telling one dump from the next is the whole point.
 local function DebugDumpCanvasPins()
     local AC = DF.AuraContainer
     local mockFrame = S.framePreview and S.framePreview.mockFrame
@@ -2903,10 +2878,8 @@ local function RefreshPreviewEffects(opts)
     end
     mockFrame:SetAlpha(1)
     -- Reset the shared single-target elements to their defaults ONCE, before any
-    -- aura's effects are applied. Previously the background's reset lived in an
-    -- in-loop `elseif`, so a background-less aura could wipe an earlier aura's
-    -- background depending on pairs() iteration order — the intermittent
-    -- "doesn't show on preview" report for Background / Health Bar Color.
+    -- aura's effects are applied. An in-loop reset lets a background-less aura wipe
+    -- an earlier aura's background, depending on pairs() iteration order.
     if S.framePreview.healthBg then
         S.framePreview.healthBg:SetColorTexture(0, 0, 0, 0.4)
     end
@@ -2917,11 +2890,11 @@ local function RefreshPreviewEffects(opts)
     -- Frame-level effects all draw onto the SAME single preview elements (one
     -- healthFill / healthBg / nameText / etc.), so when more than one aura
     -- configures the same type they conflict. The runtime resolves this by
-    -- priority (higher number wins; first claim per type — see prioritySort and
-    -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
+    -- priority (higher number wins; first claim per type — see pickWinner in
+    -- AuraDesigner/Factory.lua). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
     -- in descending-priority order (tiebreak by name) and apply first-wins per type.
-    -- ⚠ THE POOL IS AN ARGUMENT NOW (2026-09-08), defaulting to exactly what it always was.
+    -- ⚠ THE POOL IS AN ARGUMENT, defaulting to exactly what it always was.
     -- The Power Infusion Helper's page shows this same canvas but must paint ONLY the
     -- helper's own records -- the Any Buff pool it shares holds the user's unrelated work
     -- too, and a preview on a page about one feature that quietly renders another feature's
@@ -2932,10 +2905,8 @@ local function RefreshPreviewEffects(opts)
         if type(auraCfg) == "table" then  -- skip corrupted entries
             -- ⚠ THE HELPER'S FRAME-LEVEL EFFECTS ARE STRIPPED FOR THE DESIGNER, and ONLY the
             -- helper's -- PIHVisibleRecord hides per type key, so a user's own effect on the
-            -- same filter record still paints. Without it a helper BORDER drew itself over the
-            -- Any Buff preview, which is the half of Krathe's report that had no card to
-            -- explain it: the effects list already hid the row, so the colour on the mock frame
-            -- came from nowhere the panel would admit to.
+            -- same filter record still paints. Without it a helper border draws itself over
+            -- the Any Buff preview with no card in the effects list to explain it.
             local cfg = PIHVisibleRecord(auraCfg)
             sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = cfg, priority = cfg.priority or 5 }
         end
@@ -2959,7 +2930,7 @@ local function RefreshPreviewEffects(opts)
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
         -- ANIMATION: kept, because the live frame-level border animates again (the
-        -- AuraContainer ANIMATION FILTER reopened OVERLAY mode, 2026-08-27) and a preview
+        -- AuraContainer ANIMATION FILTER reopened OVERLAY mode) and a preview
         -- that stripped it would show something the live render does not — the one thing
         -- previews must never do. The overlay here is an editor-owned frame, not a slot
         -- child, so it is a plain DF.Border with no restriction to worry about, and the
@@ -2985,7 +2956,7 @@ local function RefreshPreviewEffects(opts)
         else
             -- Tint: blend original green with the configured color, scaled by alpha
             -- so dragging the colour picker's alpha visibly weakens the tint
-            -- (matches ApplyHealthBar in Indicators.lua: overlay = blend × alpha).
+            -- (matches healthbarBlend in AuraDesigner/Factory.lua: overlay = blend × alpha).
             local effBlend = blend * (clr.a or 1)
             local r = 0.18 * (1 - effBlend) + clr.r * effBlend
             local g = 0.80 * (1 - effBlend) + clr.g * effBlend

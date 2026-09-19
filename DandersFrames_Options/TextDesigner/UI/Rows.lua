@@ -591,10 +591,9 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
             if DF.TextDesigner.Preview then
                 DF.TextDesigner.Preview:Init(canvas.mockFrame, tdDB)
             end
-            -- What the island's rebuild guard used to do, at the right scope: the
-            -- page harness caches a valid build across revisits, so nothing would
-            -- re-read the frame size or the preview scale -- and the only thing
-            -- that needs to is the canvas, which has a verb for exactly that.
+            -- The page harness caches a valid build across revisits, so nothing would
+            -- re-read the frame size or the preview scale -- and the only thing that
+            -- needs to is the canvas, which has a verb for exactly that.
             host:HookScript("OnShow", function()
                 if canvas.RefreshGeometry then canvas.RefreshGeometry() end
                 if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshPreview() end

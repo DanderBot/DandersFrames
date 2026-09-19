@@ -42,10 +42,9 @@ end
 
 -- ============================================================
 -- SPELL TOOLTIP
--- The load-on-demand handling that used to live here is now
--- GUI:ShowGameTooltip, so the binding editor gets it too. What
--- stays local is the picker's own framing: the name to fall back
--- on, and the anchor.
+-- Load-on-demand handling lives in GUI:ShowGameTooltip, so the binding
+-- editor gets it too. What stays local is the picker's own framing: the
+-- name to fall back on.
 --
 -- isCurrent(row, spellID): is the (pooled, rebindable) row still
 -- showing this spell? Guards the async re-render against rebinds

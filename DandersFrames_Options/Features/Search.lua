@@ -28,12 +28,10 @@ local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}
 -- comes from the widget's preferredHeight (GUI.RowHeight owns that slot). These
 -- are only the card's own chrome: the breadcrumb strip above the control, and
 -- the padding around it.
--- ★ READ, NOT COPIED. Every number in this block used to be a literal justified by a
--- comment that said where the original lived ("280 is what GUI:CreateSettingsGroup
--- builds", "copied from the page layout rather than invented"). A comment is not a link:
--- it goes on claiming to mirror the page after the page has moved. They now come off
--- GUI.SettingsBox, which is the ONE declaration the page layout and CreateSettingsGroup
--- read too.
+-- ★ READ, NOT COPIED. These numbers come off GUI.SettingsBox, the ONE declaration the
+-- page layout and CreateSettingsGroup read too. A comment is not a link: a literal
+-- justified by "copied from the page layout" goes on claiming to mirror the page after
+-- the page has moved.
 local SETTINGS_BOX = DF.GUI.SettingsBox
 
 local CARD_PAD_X     = SETTINGS_BOX.pad
@@ -81,12 +79,9 @@ end
 
 local function GetThemeColor()
     -- Follow the active mode theme (party purple / raid orange) so the whole
-    -- search surface matches the rest of the GUI. Search used to pin its own blue
-    -- on the sliders, dropdowns and breadcrumb while the header followed the
-    -- theme; that half-and-half state read as a bug rather than as identity, so
-    -- the controls now inherit the theme like every other page (Krathe,
-    -- 2026-08-07). C_ACCENT survives only as the party-side fallback below, for a
-    -- GUI too early in its bootstrap to answer.
+    -- search surface matches the rest of the GUI: the controls inherit the theme
+    -- like every other page. C_ACCENT survives only as the party-side fallback
+    -- below, for a GUI too early in its bootstrap to answer.
     if DF.GUI and DF.GUI.GetThemeColor then return DF.GUI.GetThemeColor() end
     if DF.GUI and DF.GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
 end
@@ -919,8 +914,7 @@ function Search:CreateInlineSlider(parent, entry)
     --
     -- accentColor is left nil ON PURPOSE: CreateSlider falls back to
     -- GetThemeColor(), so the thumb and fill track party purple / raid orange like
-    -- every other slider. This used to pin Search's blue, which read as a bug
-    -- rather than as identity once the results header started following the theme.
+    -- every other slider.
     local db = DF.db[DF.GUI.SelectedMode]
     local minVal = entry.minVal or 0
     local maxVal = entry.maxVal or 100
@@ -933,13 +927,11 @@ function Search:CreateInlineSlider(parent, entry)
 end
 
 function Search:CreateInlineColorPicker(parent, entry)
-    -- Delegate to the shared colour picker. The copy that used to live here drove
-    -- ColorPickerFrame itself, and had drifted from the canonical one in ways that
-    -- mattered: it fired the change callbacks on the spurious swatchFunc Blizzard
-    -- raises during setup (so merely OPENING the picker committed an override and
-    -- ran a full refresh), and it rebuilt db[dbKey] as a fresh table on every
-    -- change rather than mutating in place. The shared builder handles both, plus
-    -- the themed swatch, the factory row height and the label-only tooltip.
+    -- Delegate to the shared colour picker: it ignores the spurious swatchFunc
+    -- Blizzard raises during setup (a hand-rolled copy committed an override and ran
+    -- a full refresh merely on OPENING the picker) and mutates db[dbKey] in place
+    -- rather than rebuilding it as a fresh table, plus the themed swatch, the factory
+    -- row height and the label-only tooltip.
     local db = DF.db[DF.GUI.SelectedMode]
     return DF.GUI:CreateColorPicker(parent, entry.label, db, entry.dbKey,
         entry.hasAlpha, entry.callback)
@@ -1301,10 +1293,8 @@ function Search:ScrollToSection(tabName, sectionName)
         end
         if flashTarget then break end
     end
-    -- ★ THE FAILURE THAT ACTUALLY HAPPENS. SEARCH's only other log call guards a load-order
-    -- slip that cannot occur in a shipped build, while THIS -- the section name no longer
-    -- resolving because it was renamed or moved into a group -- is the real "I clicked a
-    -- search result and nothing happened": the jump scrolls nowhere and never flashes, in
+    -- ★ THE FAILURE THAT ACTUALLY HAPPENS: a section name no longer resolving because it
+    -- was renamed or moved into a group -- the jump scrolls nowhere and never flashes, in
     -- silence. Naming both halves makes it a one-line fix instead of a hunt.
     if not flashTarget then
         DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
@@ -1508,8 +1498,7 @@ function Search:CreateResultsPanel(parent)
     -- The results panel FILLS the content box, so its right edge is the same
     -- corridor a page's is -- and it gets the same treatment: the viewport stops
     -- at the scrollbar gutter, and the bar is pinned into it against the panel
-    -- rather than left wherever ScrollFrameTemplate puts it. It used to reserve
-    -- a flat 30 here, twice the gutter, and the bar was not in most of it.
+    -- rather than left wherever ScrollFrameTemplate puts it.
     local scroll = CreateFrame("ScrollFrame", nil, panel, "ScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 10, -45)
     scroll:SetPoint("BOTTOMRIGHT", -DF.GUI.Scroll.gutter, 10)

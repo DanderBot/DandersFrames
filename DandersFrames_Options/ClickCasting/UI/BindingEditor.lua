@@ -520,11 +520,6 @@ function CC:CreateEditBindingPanel()
     -- row to run and no sound, so the caller's SetScript("OnClick") legitimately replaces
     -- the row's handler rather than working around it. That is a plain frame API call now
     -- the SetScript override is gone, not a hack.
-    --
-    -- (`yOffset` was already unused before this; dropped rather than carried. So were
-    -- the stored `group` and `desc` fields: membership is the targetRadios/combatRadios
-    -- array the caller builds, and the row captures `desc` into its tooltip at
-    -- construction, so neither was ever read back.)
     local function CreateRadioButton(parent, text, desc)
         return DF.GUI:CreateCheckRow(parent, {
             label       = text,

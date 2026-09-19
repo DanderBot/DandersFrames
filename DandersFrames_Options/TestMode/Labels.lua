@@ -346,11 +346,10 @@ local function elementShown(frame, key)
 end
 
 -- Single-region elements only. The Aura Designer produces MANY regions per frame and
--- goes through adRegions instead — which is also why the unit frame is no longer
--- handed back as an anchor here: the union needed a shared parent to anchor against,
--- a per-placement region anchors to the placement itself, and the standing warning
--- (never register the unit frame as a tooltip host, or the parent walk makes every
--- aura on the frame claim to be an indicator) stops being something to work around.
+-- goes through adRegions instead. The unit frame is never handed back as an anchor
+-- here: a per-placement region anchors to the placement itself, and the unit frame
+-- must never be registered as a tooltip host, or the parent walk makes every aura on
+-- the frame claim to be an indicator.
 local function targetOf(frame, key)
     if not elementShown(frame, key) then return nil end
     -- ☠ MISSING BUFF IS NOT ONE HANDLE. `frame.missingFactory` is a MAP of spell key
@@ -755,8 +754,7 @@ local function scanFrame(frame)
         -- ★ THE ELEMENT SAYS IT IS ON SCREEN AND YET MEASURED TO NOTHING. That is the
         -- signal a container has been rebuilt this tick and has no rect yet — the
         -- creation-tick rule — and it is the ONLY thing that distinguishes "not ready"
-        -- from "legitimately switched off". Both used to look identical here, which is
-        -- what let a partial pass declare itself finished.
+        -- from "legitimately switched off".
         if #hoverRegions == before and elementShown(frame, target.key) then
             pending = true
         end
