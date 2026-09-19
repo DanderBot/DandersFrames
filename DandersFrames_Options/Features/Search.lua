@@ -415,7 +415,13 @@ function Search:_BeginRegistryBuild()
 
             local wasShown = page:IsShown()
 
-            if page.Refresh then
+            -- RefreshForIndex, not Refresh: the same rebuild of the CURRENT mode,
+            -- but it does not invalidate the page's retained other-mode build
+            -- (GUI/Panel.lua, ONE RETAINED BUILD PER MODE) -- indexing changes no
+            -- data. Refresh is the fallback for a page without it.
+            if page.RefreshForIndex then
+                page:RefreshForIndex()
+            elseif page.Refresh then
                 page:Refresh()
             end
 

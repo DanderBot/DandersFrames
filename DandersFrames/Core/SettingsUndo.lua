@@ -220,10 +220,21 @@ local function Apply(db, key, value, mode, applyFn)
     -- safe with the window closed, but rebuilding a page nobody is looking at --
     -- or one showing the other mode's settings -- is work for nothing.
     local GUI = DF.GUI
+    local refreshed = false
     if GUI and GUI.RefreshCurrentPage and DF.GUIFrame and DF.GUIFrame:IsShown() then
         if mode == nil or mode == GUI.SelectedMode then
             GUI:RefreshCurrentPage()
+            refreshed = true
         end
+    end
+    -- ...and when it was NOT repainted now, that mode's retained page builds are
+    -- invalidated instead. A switch no longer rebuilds the page it lands on (one
+    -- build per mode is kept -- see ONE RETAINED BUILD PER MODE in the Options
+    -- addon's GUI/Panel.lua), and the write above stored a COPY, so a widget still
+    -- bound to the table it replaced would never see it.
+    if not refreshed and (mode == "party" or mode == "raid")
+       and GUI and GUI.InvalidateAllPages then
+        GUI:InvalidateAllPages(mode)
     end
 end
 

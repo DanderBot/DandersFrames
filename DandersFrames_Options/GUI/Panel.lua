@@ -2267,6 +2267,9 @@ function DF:CreateGUI()
 
     btnParty:SetScript("OnClick", function()
         DF:SyncLinkedSections()
+        -- The sync just replaced the other mode's tables for every synced page;
+        -- a retained build of those pages must not be served. See the function.
+        if GUI.InvalidateSyncedPages then GUI:InvalidateSyncedPages() end
 
         -- Carry test mode across the mode switch (raid test -> party test)
         local carryTest = false
@@ -2308,7 +2311,9 @@ function DF:CreateGUI()
         UpdateThemeColors()
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
-        GUI:RefreshCurrentPage()
+        -- Cached, not forced: a mode switch shows the other mode's build if it
+        -- is still good rather than trashing the page and building a new one.
+        GUI:RefreshCurrentPageForModeSwitch()
 
         -- Keep test mode active when switching modes (just switch which mode it runs in).
         -- Carried as the USER's claim: they had a preview up and are still asking for
@@ -2333,6 +2338,9 @@ function DF:CreateGUI()
     end)
     btnRaid:SetScript("OnClick", function()
         DF:SyncLinkedSections()
+        -- The sync just replaced the other mode's tables for every synced page;
+        -- a retained build of those pages must not be served. See the function.
+        if GUI.InvalidateSyncedPages then GUI:InvalidateSyncedPages() end
 
         -- Carry test mode across the mode switch (party test -> raid test)
         local carryTest = false
@@ -2369,7 +2377,9 @@ function DF:CreateGUI()
         UpdateThemeColors()
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
-        GUI:RefreshCurrentPage()
+        -- Cached, not forced: a mode switch shows the other mode's build if it
+        -- is still good rather than trashing the page and building a new one.
+        GUI:RefreshCurrentPageForModeSwitch()
 
         -- Keep test mode active when switching modes (just switch which mode it runs in).
         -- Carried as the USER's claim: they had a preview up and are still asking for
@@ -3146,6 +3156,12 @@ function DF:CreateGUI()
     end
 
     GUI.RefreshCurrentPage = function()
+        -- Consumed FIRST, before any return: set only for the span of one call by
+        -- GUI.RefreshCurrentPageForModeSwitch, and a flag left standing would turn
+        -- every later "data changed" refresh into a cache hit.
+        local cached = GUI._refreshCurrentPageCached
+        GUI._refreshCurrentPageCached = nil
+
         -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.
         -- The results panel is not a page, so the page loop below never reaches it — yet
         -- it lays out in the same two columns and needs the same recompute when the
@@ -3169,7 +3185,12 @@ function DF:CreateGUI()
             -- still in the dock would lay out against nothing, so make sure.
             -- No-ops when it is not parked.
             GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
-            GUI.Pages[GUI.CurrentPageName]:Refresh()
+            local page = GUI.Pages[GUI.CurrentPageName]
+            if cached and not page.singleModeBuild and page.RefreshCached then
+                page:RefreshCached()
+            else
+                page:Refresh()
+            end
             if GUI.Pages[GUI.CurrentPageName].RefreshStates then
                 GUI.Pages[GUI.CurrentPageName]:RefreshStates()
             end
@@ -3180,6 +3201,19 @@ function DF:CreateGUI()
         -- A designer preset bar can need re-reading even when its page skipped
         -- the rebuild (the sharing glyph tracks the OTHER mode's preset).
         if GUI.RefreshDesignerPresetBars then GUI:RefreshDesignerPresetBars() end
+    end
+
+    -- ★ THE PARTY/RAID TABS' REFRESH: everything RefreshCurrentPage does, but the
+    -- page goes through the CACHE instead of a forced rebuild. A switch changes no
+    -- data -- it changes which mode's build is shown -- and the forced rebuild here
+    -- was the leak (see ONE RETAINED BUILD PER MODE, above BuildPage).
+    -- ⚠ Through GUI:RefreshCurrentPage, by NAME, and a flag rather than an argument:
+    -- the Auto Layouts UI wraps that function (UpdateEditingBanner/UpdatePageOffset
+    -- after it) and its wrapper passes no arguments through.
+    GUI.RefreshCurrentPageForModeSwitch = function()
+        GUI._refreshCurrentPageCached = true
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
     end
 
     -- Invalidate EVERY page's build cache so the next time each tab is shown it
@@ -3564,7 +3598,157 @@ function DF:CreateGUI()
     -- CreateSubTab("tools", ...). Every page registers through CreateSubTab directly
     -- now, so it had no callers.
 
+    -- ============================================================
+    -- ONE RETAINED BUILD PER MODE
+    -- ------------------------------------------------------------
+    -- ☠☠ WHY THIS EXISTS: A PARTY/RAID SWITCH USED TO LEAK A WHOLE PAGE. The cache
+    -- below was keyed on ONE mode, so every switch was a cache miss: DoBuild parked
+    -- every widget on the page in GUI._trashFrame and built a fresh set. WoW never
+    -- collects a frame and nothing ever empties the trash, so each switch kept the
+    -- previous page (~800 KB measured, 2026-09-18) alive until /reload -- in the
+    -- Options addon AND in whichever addon's embedded DandersUI copy won the load
+    -- race. Reported as "memory climbs every time I flip Party/Raid".
+    --
+    -- So a page now keeps AT MOST ONE BUILD PER MODE. The build on screen lives in
+    -- the page's own fields exactly as before (children, builtForMode, cacheValid,
+    -- ...); switching mode HIDES it and parks those fields in
+    -- page._modeBuilds[itsMode], then loads the incoming mode's slot back into the
+    -- same fields. A slot that is still valid is shown again and re-stated; one
+    -- that is not (or none at all) is rebuilt by the ordinary DoBuild, which is the
+    -- only thing that ever trashes a build. Memory is bounded at "every page built
+    -- at most twice", not "once per click".
+    --
+    -- ⚠ VALUES STAY FRESH WITHOUT A REBUILD because every db-bound factory repaints
+    -- its value from its bound table on its own OnShow (SettingsWidgets.lua: the
+    -- checkbox's UpdateState, the slider's ReadValue, the dropdown's UpdateText,
+    -- the swatch's UpdateSwatch). Hiding a build and showing it again fires those.
+    -- What OnShow can NOT fix is a widget holding a TABLE that has since been
+    -- REPLACED, so every path that replaces one invalidates: a profile switch, a
+    -- mode reset or copy and a section copy all end in FullProfileRefresh ->
+    -- InvalidateAllPages; the party/raid Sync replaces the destination's table
+    -- values on every switch, so its pages are invalidated for that mode (see
+    -- GUI:InvalidateSyncedPages); and page:Refresh() -- the "data changed" call --
+    -- invalidates the page's other-mode build too. _builtDb is the belt: a build
+    -- whose mode table is no longer the live one is never served.
+    --
+    -- ⚠ A PAGE THAT KEEPS PER-BUILD STATE OUTSIDE THESE FIELDS must either list it
+    -- in page.modeBuildFields (swapped with the build) or opt out with
+    -- page.singleModeBuild = true, which keeps the old one-build behaviour exactly
+    -- (rebuild on every switch). The opted-out pages say why at their CreateSubTab.
+    -- ============================================================
+    -- The fields that belong to ONE build rather than to the page. _popoutHolders
+    -- and _popoutRowForKey are the popout page tools' (GUI:CreatePopoutPageTools):
+    -- the holders are off-page frames that build retires on its NEXT build, so they
+    -- must travel with the build or the raid build would trash the party build's.
+    local MODE_BUILD_FIELDS = {
+        "children", "builtForMode", "builtForDisabled", "builtCacheKey", "cacheValid",
+        "_builtDb", "_popoutHolders", "_popoutRowForKey", "_pendingShown",
+    }
+
+    -- Park a list of widgets in the trash frame: hide, detach anchors, and
+    -- reparent so they leave the GUI frame hierarchy entirely. WoW cannot GC
+    -- frames, but a detached subtree is not traversed during drag layout
+    -- recalculation. The ONLY place a build is retired.
+    local function RetireChildren(children)
+        if not children then return end
+        local trash = GUI._trashFrame
+        for _, child in ipairs(children) do
+            child:Hide()
+            child:ClearAllPoints()
+            if trash then child:SetParent(trash) end
+        end
+    end
+
+    -- Pages in GUI/Pages/Modules.lua that opt out (page.singleModeBuild), named
+    -- here by tab rather than flagged at their CreateSubTab:
+    --   profiles_auto         -- its disabled scrim and sidebar hint are single
+    --                            frames re-anchored to the LATEST build, and its
+    --                            content follows the auto-layout editing state.
+    --   profiles_importexport -- its buttons reach their edit boxes through page
+    --                            fields (self.exportEditBox, ...) only the latest
+    --                            build owns.
+    --   debug_console         -- registers ONE live edit box with the console per
+    --                            build and keeps self.filterRows.
+    local SINGLE_MODE_TABS = {
+        profiles_auto = true,
+        profiles_importexport = true,
+        debug_console = true,
+    }
+
     local function BuildPage(page, builderFunc)
+        if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end
+        -- Move the build on screen into its mode's slot, hidden. Anchors and
+        -- parent are kept -- it is coming back.
+        local function StashActiveBuild(self)
+            local mode = self.builtForMode
+            if not self.children then return end
+            if not mode then
+                -- A build nobody can name the mode of can never be served again.
+                RetireChildren(self.children)
+                self.children = nil
+                return
+            end
+            local slot = {}
+            for _, k in ipairs(MODE_BUILD_FIELDS) do slot[k] = self[k] end
+            if self.modeBuildFields then
+                for _, k in ipairs(self.modeBuildFields) do slot[k] = self[k] end
+            end
+            slot.themeListeners = self.child and self.child.ThemeListeners
+            -- Which top-level children were up, so they come back as they were --
+            -- a group's own rows are in this list too and RefreshStates leaves
+            -- their visibility to the group. A build swapped in and straight back
+            -- out again has not been re-shown yet; keep the record it came with.
+            if not slot._pendingShown then
+                local shown = {}
+                for i, child in ipairs(self.children) do
+                    shown[i] = child:IsShown() and true or false
+                end
+                slot._pendingShown = shown
+            end
+            for _, child in ipairs(self.children) do child:Hide() end
+            self._modeBuilds = self._modeBuilds or {}
+            self._modeBuilds[mode] = slot
+        end
+
+        -- Load `mode`'s slot into the page's fields (or clear them for a fresh
+        -- build). Nothing is SHOWN here: the caller decides whether the build is
+        -- still good, and a build about to be rebuilt should not fire its OnShows.
+        local function LoadModeBuild(self, mode)
+            local slots = self._modeBuilds
+            local slot = slots and slots[mode]
+            if slots then slots[mode] = nil end
+            slot = slot or {}
+            for _, k in ipairs(MODE_BUILD_FIELDS) do self[k] = slot[k] end
+            if self.modeBuildFields then
+                for _, k in ipairs(self.modeBuildFields) do self[k] = slot[k] end
+            end
+            if self.child then self.child.ThemeListeners = slot.themeListeners or {} end
+        end
+
+        -- Make `mode`'s build the active one. No-op when it already is.
+        local function SwapToMode(self, mode)
+            if self.builtForMode == mode then return end
+            if self.children then
+                -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST. An open popout shows widgets
+                -- wired to the OUTGOING mode's table; left open over the other
+                -- mode's page, a slider dragged in it writes into the wrong mode.
+                -- The rebuild this replaces closed them (CreatePopoutPageTools).
+                if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("modeSwitch") end
+                StashActiveBuild(self)
+            end
+            LoadModeBuild(self, mode)
+        end
+
+        -- Show the children a swapped-in build had up when it was put away.
+        local function RestorePendingShown(self)
+            local shown = self._pendingShown
+            if not shown then return end
+            self._pendingShown = nil
+            for i, child in ipairs(self.children or {}) do
+                if shown[i] then child:Show() end
+            end
+        end
+
         -- Internal: construct all widget frames for the current mode.
         -- Called on first visit and whenever the cache is invalidated.
         -- Always finishes by calling RefreshStates() so callers don't need to.
@@ -3572,19 +3756,22 @@ function DF:CreateGUI()
             local db = DF.db[GUI.SelectedMode]
             if not db then return end
 
-            -- Retire old children: hide, detach anchors, and reparent to the
-            -- trash frame so they leave the GUI frame hierarchy entirely.
-            -- WoW cannot GC frames, but a detached subtree is not traversed
-            -- during drag layout recalculation.
-            if self.children then
-                local trash = GUI._trashFrame
-                for _, child in ipairs(self.children) do
-                    child:Hide()
-                    child:ClearAllPoints()
-                    if trash then child:SetParent(trash) end
-                end
+            -- Bring this mode's previous build (if any) in, so the retire below
+            -- takes THAT one and the other mode's build stays parked.
+            if not self.singleModeBuild then
+                SwapToMode(self, GUI.SelectedMode)
+                self._pendingShown = nil
             end
+
+            RetireChildren(self.children)
             self.children = {}
+            if not self.singleModeBuild then
+                -- Marked in progress, so a builder that errors part-way leaves an
+                -- invalid build of THIS mode (retired next time) rather than one
+                -- still claiming whatever the previous build was.
+                self.builtForMode = GUI.SelectedMode
+                self.cacheValid = false
+            end
             self.child.ThemeListeners = {}
             -- Propagate RefreshStates to child so widgets can call it
             self.child.RefreshStates = function() self:RefreshStates() end
@@ -3646,6 +3833,7 @@ function DF:CreateGUI()
                 self.builtForMode = GUI.SelectedMode
                 self.builtForDisabled = true
                 self.cacheValid = true
+                self._builtDb = db
                 self:RefreshStates()
                 return
             end
@@ -3673,6 +3861,7 @@ function DF:CreateGUI()
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
+            self._builtDb = db
             -- ★ A PAGE WHOSE CONTENT IS DERIVED FROM DATA ANOTHER PAGE EDITS can
             -- register a key for what it drew (GUI.PageCacheKeys[tabName]);
             -- RefreshCached rebuilds when the key has moved. Only the Changed
@@ -3683,9 +3872,23 @@ function DF:CreateGUI()
         end
 
         -- Invalidate this page's cache so the next RefreshCached() rebuilds.
-        page.Invalidate = function(self)
-            self.cacheValid = false
-            self.builtForMode = nil
+        -- ★ BOTH MODES' BUILDS, unless a mode is named. Nothing is trashed here:
+        -- an invalid build is retired by the DoBuild that replaces it, so no build
+        -- can be parked in the trash twice.
+        page.Invalidate = function(self, mode)
+            if self.singleModeBuild then
+                self.cacheValid = false
+                self.builtForMode = nil
+                return
+            end
+            -- builtForMode is KEPT: it names the mode the children on the page
+            -- belong to, which is what lets a switch park them rather than lose them.
+            if mode == nil or self.builtForMode == mode then self.cacheValid = false end
+            if self._modeBuilds then
+                for m, slot in pairs(self._modeBuilds) do
+                    if mode == nil or m == mode then slot.cacheValid = false end
+                end
+            end
         end
 
         -- Cache-aware refresh — used ONLY by tab switching. If the cached build
@@ -3697,6 +3900,10 @@ function DF:CreateGUI()
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
 
+            -- Put the build on screen away and bring this mode's in, if the page
+            -- was last built for the other mode. Nothing is trashed by this.
+            if not self.singleModeBuild then SwapToMode(self, GUI.SelectedMode) end
+
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
             -- ⚠ Asked only when everything else says the cache is good, so a page
             -- with no key -- every page but one -- pays one table lookup for it.
@@ -3704,7 +3911,11 @@ function DF:CreateGUI()
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
                and self.builtForDisabled == isDisabled
+               and (self.singleModeBuild or self._builtDb == db)
                and (not keyFn or keyFn() == self.builtCacheKey) then
+                -- A build swapped back in comes back up as it was put away; its
+                -- widgets re-read their values on the OnShow this fires.
+                RestorePendingShown(self)
                 self:RefreshStates()
                 return
             end
@@ -3718,9 +3929,24 @@ function DF:CreateGUI()
         -- invoke it after mutating data (adding/removing list items, reset/copy/
         -- sync, profile changes, etc.) and rely on the page being reconstructed.
         -- Only tab switching uses the cache, via RefreshCached().
+        -- ★ IT REBUILDS THE CURRENT MODE ONLY -- and invalidates the page's other-
+        -- mode build, because "data changed" is exactly what that build cannot have
+        -- seen. It is retired when it is next rebuilt, not now.
         page.Refresh = function(self)
             local db = DF.db[GUI.SelectedMode]
             -- Guard against nil db (e.g., when "clicks" mode is selected)
+            if not db then return end
+            DoBuild(self)
+            if self._modeBuilds then
+                for _, slot in pairs(self._modeBuilds) do slot.cacheValid = false end
+            end
+        end
+
+        -- The settings SEARCH index's rebuild (Search:_BeginRegistryBuild). It has
+        -- to re-run the builder -- registration happens there -- but it changes no
+        -- data, so unlike Refresh() it leaves the other mode's build valid.
+        page.RefreshForIndex = function(self)
+            local db = DF.db[GUI.SelectedMode]
             if not db then return end
             DoBuild(self)
         end
@@ -3744,10 +3970,29 @@ function DF:CreateGUI()
     -- ☠ THE ONLY DEFINITION. A second one used to exist earlier in this same function and
     -- was shadowed by this one at every panel build; the guard below came from that copy.
     -- Callers guard the FUNCTION but not the TABLE, so the guard has to live here.
-    function GUI:InvalidateAllPages()
+    -- `mode` (optional): only that mode's builds -- for a write that touched the
+    -- other mode's settings and nothing else (see SettingsUndo). Omitted = both.
+    function GUI:InvalidateAllPages(mode)
         if not self.Pages then return end
         for _, page in pairs(self.Pages) do
-            if page.Invalidate then page:Invalidate() end
+            if page.Invalidate then page:Invalidate(mode) end
+        end
+    end
+
+    -- ★ THE PARTY/RAID SYNC REPLACES THE DESTINATION'S TABLES. DF:SyncLinkedSections
+    -- runs on every mode switch and DeepCopies each table-valued key of a synced
+    -- section into the other mode -- a NEW table, so a retained build of that mode
+    -- still bound to the old one would show and write a table nothing reads any
+    -- more. Called right after the sync, while SelectedMode is still the SOURCE.
+    -- Only the synced pages: a section's keys are, by prefix ownership, that page's.
+    function GUI:InvalidateSyncedPages()
+        local linked = DF.db and DF.db.linkedSections
+        local mode = self.SelectedMode
+        if not linked or not self.Pages or (mode ~= "party" and mode ~= "raid") then return end
+        local dest = (mode == "party") and "raid" or "party"
+        for pageId in pairs(linked) do
+            local page = self.Pages[pageId]
+            if page and page.Invalidate then page:Invalidate(dest) end
         end
     end
 

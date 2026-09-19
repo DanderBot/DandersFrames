@@ -617,6 +617,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     
     -- General > Nicknames (account-wide list; custom builder, no party/raid switch)
     local pageNicknames = CreateSubTab("general", "general_nicknames", L["Nicknames"])
+    -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
+    -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
+    -- The list is ACCOUNT data redrawn by the page's own Refresh, which only the
+    -- build on screen hears -- a retained other-mode build would show the old list.
+    if pageNicknames then pageNicknames.singleModeBuild = true end
     BuildPage(pageNicknames, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildNicknamesPage then
             DF.BuildNicknamesPage(GUI, self, db, Add, AddSpace)
@@ -4850,6 +4855,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Text > Text Designer
     -- See spec at docs/superpowers/specs/2026-05-22-text-designer-phase1-design.md
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
+    -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
+    -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
+    -- The designer keeps its own state beside the build (page.dfTD, a classic
+    -- island outside page.children, a swapped-in RefreshStates), none of which a
+    -- second retained build could share.
+    if pageTextDesigner then pageTextDesigner.singleModeBuild = true end
     -- ⚠ Add AND AddSpace GO THROUGH. The designer page has two arms: the classic
     -- split panel, which anchors everything inside frames of its own and needs
     -- neither, and the popout page, which emits BANDS -- and a band can only reach
@@ -4917,6 +4928,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- purely the place filters are DESIGNED. It is also buffs-only now, and "Aura
     -- Filters" implied it covered debuffs too.
     local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
+    -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
+    -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
+    -- It keeps per-build hooks and frames on the page itself (_filterDesignerBuilt,
+    -- _fdBuiltClassic, the _fd* verbs, its spacer and bands) that one page can
+    -- only hold for one build.
+    if pageFilterDesigner then pageFilterDesigner.singleModeBuild = true end
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         -- ☠ THE HELPER'S SWEEP RUNS HERE TOO, AND THIS PAGE IS WHY IT HAD TO. The sweep marks
         -- the Power Infusion Helper's seeded lists as CURATED (dfDefaults), which is what gives
@@ -4989,6 +5006,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
     -- Auras > Aura Designer
     local pageAuraDesigner = CreateSubTab("auras", "auras_auradesigner", L["Aura Designer"])
+    -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
+    -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
+    -- Same as the Text Designer: its own island, its own RefreshStates and its
+    -- remembered geometry live beside the build, not in it.
+    if pageAuraDesigner then pageAuraDesigner.singleModeBuild = true end
     -- ⚠ Add AND AddSpace GO THROUGH. The designer page has two arms: the classic
     -- split panel, which anchors everything inside one frame of its own and needs
     -- neither, and the popout page, which emits BANDS -- and a band can only reach

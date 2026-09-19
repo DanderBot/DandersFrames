@@ -1484,6 +1484,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     -- Display > Fading (moved from Indicators > Out of Range + Dead/Offline fading)
     local pageFading = CreateSubTab("display", "display_fading", L["Fading"])
+    -- ★ PER-BUILD PAGE FIELDS. The range-spell helpers reach the input and its
+    -- label through these page fields, so with a party AND a raid build retained
+    -- (see ONE RETAINED BUILD PER MODE in GUI/Panel.lua) each build must bring its
+    -- own pair back when it is swapped in.
+    if pageFading then pageFading.modeBuildFields = { "rangeSpellInput", "rangeSpellInfoLabel" } end
     BuildPage(pageFading, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top right.
         -- ☠ These prefixes are matched CASE-SENSITIVELY from the START of the key
