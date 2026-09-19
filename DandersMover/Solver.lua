@@ -54,7 +54,7 @@ end
 -- Grid snap that considers the rect's centre AND its edges per axis, and moves
 -- the rect by whichever lands on a grid line with the smallest shift. This is
 -- what lets a frame's left edge or top edge sit exactly on the grid, not only
--- its centre. (Behaviour of the legacy DandersFrames mover.)
+-- its centre.
 --
 -- Returns cx, cy, lineX, lineY: the snapped centre plus, per axis, the grid
 -- line the winning candidate (centre or edge) now sits on -- the line a snap

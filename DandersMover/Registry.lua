@@ -566,8 +566,7 @@ end
 -- Writes the toggle IsEnabled reads. Off is stored as an explicit false and on
 -- as nil (absent = enabled), so a fresh registration is on without a migration.
 -- ⚠ Explicit branches, not `cond and false or nil`: a false middle operand makes
--- that idiom fall through to nil, which is how the element toggle used to write
--- "enabled" whichever way it was clicked.
+-- that idiom fall through to nil, so both click directions would write "enabled".
 function R:SetEnabled(addon, key, enabled)
     local db = NS.db
     if not db then return end

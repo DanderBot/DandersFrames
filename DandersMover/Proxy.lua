@@ -593,12 +593,10 @@ function P:Build(filter, animate)
 end
 
 -- Mid-session rebuild: the slabs are torn down and built again against the
--- current filter; the overlay is not touched. This used to be DestroyAll +
--- Build, and DestroyAll resets the overlay -- alpha back to 1, any entrance
--- cancelled. DandersFrames re-registers its per-unit targets about 0.1s into
--- every session (RegistryChanged -> Session:RebuildProxies), so the 0.45s
--- fade-in never got past its first tenth: "unlock doesn't fade its frames in,
--- but exiting the mode does fade out".
+-- current filter; the overlay is not touched. NOT DestroyAll + Build --
+-- DestroyAll resets the overlay (alpha back to 1, any entrance cancelled), and
+-- a consumer that re-registers its targets early in a session would then cut
+-- the entrance fade short.
 function P:Rebuild(filter)
     for id in pairs(self.proxies) do self:Remove(id) end
     self:HideZones()
