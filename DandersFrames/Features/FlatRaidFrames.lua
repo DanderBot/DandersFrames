@@ -171,9 +171,9 @@ function FlatRaidFrames:BuildSortedNameList()
         -- which is precisely why the header path consults it first.
         local specID
         if UnitIsUnit(unit, "player") then
-            local spec = GetSpecialization()
+            local spec = C_SpecializationInfo.GetSpecialization()
             if spec then
-                specID = GetSpecializationInfo(spec)
+                specID = C_SpecializationInfo.GetSpecializationInfo(spec)
             end
         else
             local cache = DF.SecureSort and DF.SecureSort.specCache

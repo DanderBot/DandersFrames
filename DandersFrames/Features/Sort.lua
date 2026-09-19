@@ -82,7 +82,7 @@ function Sort:GetUnitRole(unit, db)
             
             -- For player, we can get spec directly
             if UnitIsUnit(unit, "player") then
-                specID = GetSpecializationInfo(GetSpecialization() or 1)
+                specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 1)
             else
                 -- For other players, try to get from inspection cache or guess from class
                 -- Note: In a full implementation, you'd use NotifyInspect/INSPECT_READY

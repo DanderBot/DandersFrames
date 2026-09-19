@@ -2539,7 +2539,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             
             for i = 1, numSpecs do
-                local _, name = GetSpecializationInfo(i)
+                local _, name = C_SpecializationInfo.GetSpecializationInfo(i)
                 if name then
                     local specIdx = i  -- capture for the get/set closures
                     -- Custom get/set: an unset spec reads back as "" so it displays

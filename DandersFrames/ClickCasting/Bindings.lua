@@ -1588,8 +1588,8 @@ function CC:GetAllPlayerSpells()
     
     -- Current spec ID for structural identification — the FIRST return of
     -- GetSpecializationInfo, never the localized name.
-    local currentSpecIndex = GetSpecialization()
-    local currentSpecID = currentSpecIndex and GetSpecializationInfo(currentSpecIndex) or nil
+    local currentSpecIndex = C_SpecializationInfo.GetSpecialization()
+    local currentSpecID = currentSpecIndex and C_SpecializationInfo.GetSpecializationInfo(currentSpecIndex) or nil
 
     for tabIndex = 1, numTabs do
         local skillLineInfo = C_SpellBook.GetSpellBookSkillLineInfo(tabIndex)
@@ -3735,7 +3735,7 @@ SlashCmdList["DFCCLOADOUT"] = function()
     DF:Out("Click-Casting", "loadout")
     
     -- These are functions, not methods - don't use : syntax
-    local specIndex = CC.GetCurrentSpec and CC.GetCurrentSpec() or GetSpecialization() or 0
+    local specIndex = CC.GetCurrentSpec and CC.GetCurrentSpec() or C_SpecializationInfo.GetSpecialization() or 0
     local loadoutID = CC.GetCurrentLoadoutConfigID and CC.GetCurrentLoadoutConfigID() or 0
     local loadoutName = CC.GetLoadoutName and CC.GetLoadoutName(loadoutID) or "Unknown"
     local currentProfile = CC:GetActiveProfileName()

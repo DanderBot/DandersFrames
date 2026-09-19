@@ -2047,8 +2047,8 @@ function DF:GetUnitRole(unit)
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
     if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
-       and GetSpecialization and GetSpecializationRole then
-        local spec = GetSpecialization()
+       and GetSpecializationRole then
+        local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
     end
     return role

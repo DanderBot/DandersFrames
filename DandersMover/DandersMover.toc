@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120100, 16001
 ## Title: DandersMover
 ## Notes: Shared mover and anchor system for addons. Drag, snap, anchor and undo any registered UI element.
 ## Author: Danders

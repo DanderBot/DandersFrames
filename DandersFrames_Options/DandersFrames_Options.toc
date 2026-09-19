@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120100, 16001
 ## Title: DandersFrames |cff9482c9Options|r
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders

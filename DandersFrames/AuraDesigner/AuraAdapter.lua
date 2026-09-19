@@ -323,7 +323,7 @@ end
 -- Returns the spec key for the current player, or nil if not supported
 function AuraAdapter:GetPlayerSpec()
     local _, englishClass = UnitClass("player")
-    local specIndex = GetSpecialization and GetSpecialization() or nil
+    local specIndex = C_SpecializationInfo.GetSpecialization() or nil
     if not englishClass or not specIndex then return nil end
 
     local key = englishClass .. "_" .. specIndex

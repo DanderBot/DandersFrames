@@ -2042,7 +2042,7 @@ function DF:CheckProfileAutoSwitch()
     if not DandersFramesCharDB then return end
     if not DandersFramesCharDB.enableSpecSwitch then return end
     
-    local specIndex = GetSpecialization and GetSpecialization()
+    local specIndex = C_SpecializationInfo.GetSpecialization()
     if not specIndex then return end
     
     local profileName = DandersFramesCharDB.specProfiles and DandersFramesCharDB.specProfiles[specIndex]
