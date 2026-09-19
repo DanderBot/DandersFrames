@@ -2345,7 +2345,12 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF.PinnedFrames:SeedSetBorderOverride(GetCurrentSet())
             end
             UpdateHighlightLayout()
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            -- A state pass, not a rebuild: the border controls below hide on
+            -- hideWhen, and the ones it reveals re-read the seeded values on
+            -- their own OnShow. The reset icon is not a page child, so it is
+            -- re-read by hand. (The rebuild leaked the whole page per click.)
+            refreshBorderReset()
+            GUI.RelayoutCurrentPage()
         end)
         -- Reset-to-inherited icon on the row's right, matching the refresh icon the
         -- other override controls use. Re-snapshots the border from the Based-on
@@ -2378,7 +2383,8 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             fullUpdate  = function() UpdateHighlightLayout(); refreshBorderReset() end,
             lightUpdate = function() UpdateHighlightLayout(); refreshBorderReset() end,
             lightColors = function() UpdateHighlightLayout(); refreshBorderReset() end,
-            refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
+            -- A state pass, not a rebuild (see the Override Border toggle above).
+            refreshStates = function() GUI.RelayoutCurrentPage() end,
             hideWhen   = function() return not (GetCurrentSet() and GetCurrentSet().borderOverride) end,
             sizeMin = 1, sizeMax = 16, sizeStep = 1,
         })

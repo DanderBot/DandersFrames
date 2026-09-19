@@ -334,20 +334,22 @@ do
               "gate: ...it branches on which layout mounted the builder")
         check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
               "gate: ...the pane re-runs its own state pass")
-        check(gate:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-              "gate: ...and classic still rebuilds the page, exactly as it did")
+        check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
+              "gate: ...and classic re-lays the page")
+        check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
+              "gate: ...without rebuilding it (the rebuild leaked the page)")
     end
 
     local uses = 0
     for _ in PAGE:gmatch("GateRefresh%(tools2%)") do uses = uses + 1 end
     eq(uses, 6, "gate: five callbacks go through it -- two Match Owner ticks and the three health-bar gates -- plus its own declaration")
 
-    -- Exactly two rebuilds left on the page: the gate's classic arm, and the
-    -- layout dropdown. Anything else would be a control that can be reached from
-    -- inside a pane and takes the page down with it.
+    -- Exactly one rebuild left on the page: the layout dropdown, which changes
+    -- WHICH GROUPS EXIST. Anything else would be a control that can be reached
+    -- from inside a pane and takes the page down with it.
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
-    eq(rebuilds, 2, "gate: two rebuilds on the page -- the gate's classic arm and the layout dropdown")
+    eq(rebuilds, 1, "gate: one rebuild on the page -- the layout dropdown")
     local lm = builderBody("BuildPetLayoutModeGroup")
     check(lm:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
           "gate: the layout dropdown rebuilds in BOTH layouts, because it changes which groups exist")

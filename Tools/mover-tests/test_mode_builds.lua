@@ -247,6 +247,24 @@ if BuildPage then
         eq(H.builds, 3, "modebuilds: a replaced mode table forces a rebuild")
     end
 
+    -- ...and so does a raid table swapped UNDER the auto-profile proxy: DF.db.raid
+    -- stays the same proxy, only its real table moves (a raid reset or copy).
+    do
+        local H = Harness()
+        local mt = { __realTable = { mode = "raid" } }
+        mt.__index = function(_, k) return mt.__realTable[k] end
+        H.DF.db.raid = setmetatable({}, mt)
+        H.page:RefreshCached()                 -- party
+        H:Switch("raid")
+        H:Switch("party")
+        H:Switch("raid")
+        eq(H.builds, 2, "modebuilds: a raid build behind the proxy is served while its real table stands")
+        H:Switch("party")
+        mt.__realTable = { mode = "raid" }
+        H:Switch("raid")
+        eq(H.builds, 3, "modebuilds: a real raid table swapped under the proxy forces a rebuild")
+    end
+
     -- A search-index style build of a page last shown in the other mode parks
     -- that build rather than trashing it.
     do
@@ -303,23 +321,21 @@ local function count(src, needle)
     end
 end
 
--- The mode tabs go through the cached path, and after the Sync, invalidate
--- what it replaced.
+-- The mode tabs go through the cached path, and the Sync no longer needs its
+-- pages invalidated (it copies into the existing tables -- section 3).
 eq(count(panel, "        GUI:RefreshCurrentPageForModeSwitch()"), 2,
    "modebuilds: both mode tabs refresh through the cached path")
 eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()"), 0,
    "modebuilds: no mode tab forces a rebuild any more")
-eq(count(panel, "        DF:SyncLinkedSections()\n"
-    .. "        -- The sync just replaced the other mode's tables for every synced page;\n"
-    .. "        -- a retained build of those pages must not be served. See the function.\n"
-    .. "        if GUI.InvalidateSyncedPages then GUI:InvalidateSyncedPages() end"), 2,
-   "modebuilds: both mode tabs invalidate the synced pages right after the sync")
+eq(count(panel, "        DF:SyncLinkedSections()\n"), 2, "modebuilds: both mode tabs still sync")
+eq(count(panel, "InvalidateSyncedPages()"), 0,
+   "modebuilds: ...and no longer throw the synced pages' other-mode builds away (that rebuilt them every switch)")
 
 -- The flag through RefreshCurrentPage: consumed first, and routed to the cache.
 check(panel:find("local cached = GUI._refreshCurrentPageCached\n        GUI._refreshCurrentPageCached = nil", 1, true) ~= nil,
       "modebuilds: RefreshCurrentPage consumes the cached flag before anything can return")
-check(panel:find("if cached and not page.singleModeBuild and page.RefreshCached then\n                page:RefreshCached()\n            else\n                page:Refresh()", 1, true) ~= nil,
-      "modebuilds: the flag routes to RefreshCached, and an opted-out page still to Refresh")
+check(panel:find("if cached and (cached == \"all\" or not page.singleModeBuild) and page.RefreshCached then\n                page:RefreshCached()\n            else\n                page:Refresh()", 1, true) ~= nil,
+      "modebuilds: the flag routes to RefreshCached, and an opted-out page still to Refresh unless it is \"all\"")
 check(panel:find("GUI._refreshCurrentPageCached = true\n        GUI:RefreshCurrentPage()\n        GUI._refreshCurrentPageCached = nil", 1, true) ~= nil,
       "modebuilds: the mode-switch refresh goes through GUI:RefreshCurrentPage by name (the Auto Layouts wrapper)")
 check(panel:find("function GUI:InvalidateAllPages(mode)", 1, true) ~= nil

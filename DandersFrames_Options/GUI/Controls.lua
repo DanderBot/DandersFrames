@@ -4073,7 +4073,15 @@ function DF:ToggleGUI()
         end
         
         DF.GUIFrame:Show()
-        GUI:RefreshCurrentPage()
+        -- Through the page cache, not a forced rebuild: opening the window
+        -- changes no data, and the rebuild leaked the page on screen on every
+        -- open. Why that is safe is written at GUI.RefreshCurrentPageCached
+        -- (GUI/Panel.lua).
+        if GUI.RefreshCurrentPageCached then
+            GUI.RefreshCurrentPageCached()
+        else
+            GUI:RefreshCurrentPage()
+        end
 
         -- Auto-show changelog on first open after update
         if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then

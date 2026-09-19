@@ -694,6 +694,11 @@ function DF:CreateGUI()
         local AutoProfilesUI = DF.AutoProfilesUI
         if AutoProfilesUI and AutoProfilesUI:IsEditing() then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
+            -- ...which also skips its InvalidateAllPages. The builds made while
+            -- editing show the LAYOUT's values (frame previews at its size), and
+            -- opening the window no longer rebuilds the page on screen (DF:ToggleGUI
+            -- goes through the cache), so they are thrown away here instead.
+            if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
         end
         -- Popout rows stand OUTSIDE this frame, so hiding the window does not
         -- hide them -- they would be left floating over the game with nothing to
@@ -1009,7 +1014,8 @@ function DF:CreateGUI()
         function(name)                                          -- customSet
             if name == DF:GetCurrentProfile() then return end
             DF:SetProfile(name)
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            -- SetProfile ended in FullProfileRefresh, which already rebuilt the page.
+            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() end
         end,
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
@@ -2239,10 +2245,9 @@ function DF:CreateGUI()
     -- to themeColor@0.5 rather than the neutral border.
 
     btnParty:SetScript("OnClick", function()
+        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
+        -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
-        -- The sync just replaced the other mode's tables for every synced page;
-        -- a retained build of those pages must not be served. See the function.
-        if GUI.InvalidateSyncedPages then GUI:InvalidateSyncedPages() end
 
         -- Carry test mode across the mode switch (raid test -> party test)
         local carryTest = false
@@ -2309,10 +2314,9 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
+        -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
-        -- The sync just replaced the other mode's tables for every synced page;
-        -- a retained build of those pages must not be served. See the function.
-        if GUI.InvalidateSyncedPages then GUI:InvalidateSyncedPages() end
 
         -- Carry test mode across the mode switch (party test -> raid test)
         local carryTest = false
@@ -3149,7 +3153,9 @@ function DF:CreateGUI()
             -- No-ops when it is not parked.
             GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
             local page = GUI.Pages[GUI.CurrentPageName]
-            if cached and not page.singleModeBuild and page.RefreshCached then
+            -- "all" (GUI.RefreshCurrentPageAfterFullRefresh) takes an opted-out
+            -- page through the cache too: it was rebuilt a moment ago.
+            if cached and (cached == "all" or not page.singleModeBuild) and page.RefreshCached then
                 page:RefreshCached()
             else
                 page:Refresh()
@@ -3175,6 +3181,45 @@ function DF:CreateGUI()
     -- after it) and its wrapper passes no arguments through.
     GUI.RefreshCurrentPageForModeSwitch = function()
         GUI._refreshCurrentPageCached = true
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
+    end
+
+    -- ★ THE SAME CACHED REFRESH FOR OPENING THE WINDOW (DF:ToggleGUI). Opening
+    -- changes no data either, and the forced rebuild it used to run leaked the
+    -- page on screen on every open. It is safe because everything that can
+    -- REPLACE a table a build is bound to while the window is closed invalidates:
+    --   * a profile switch / reset / copy / import -> FullProfileRefresh ->
+    --     InvalidateAllPages (window shown or not). Its combat early-return skips
+    --     that, but a switch or import re-wraps DF.db and a raid reset swaps the
+    --     real raid table -- both caught by BuildDbMatches below;
+    --   * the Party/Raid sync (DF:UpdateAll runs it, window open or not) now
+    --     copies INTO the destination's tables, so nothing is replaced -- see
+    --     THE SYNC KEEPS TABLES at the bottom of this file;
+    --   * leaving auto-layout editing by closing the window invalidates (the
+    --     window's OnHide);
+    --   * the mover, DandersMover and the API position calls write in place.
+    -- Values written while closed are repainted by each widget's own OnShow.
+    -- An opted-out page (singleModeBuild) still rebuilds, as before.
+    GUI.RefreshCurrentPageCached = function()
+        GUI._refreshCurrentPageCached = true
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
+    end
+
+    -- ★ FOR A CALLER THAT HAS JUST RUN DF:FullProfileRefresh (a profile switch,
+    -- copy, reset or import from inside the window). That already invalidated
+    -- every page AND rebuilt the one on screen, so the caller's own follow-up
+    -- RefreshCurrentPage was a second rebuild -- a second page leaked per click.
+    -- Through the cache instead, opted-out pages included ("all"): the build is a
+    -- moment old. ⚠ IN COMBAT FullProfileRefresh returns before any of that, so
+    -- there the caller's rebuild is the only refresh and it is kept.
+    GUI.RefreshCurrentPageAfterFullRefresh = function()
+        if InCombatLockdown() then
+            GUI:RefreshCurrentPage()
+            return
+        end
+        GUI._refreshCurrentPageCached = "all"
         GUI:RefreshCurrentPage()
         GUI._refreshCurrentPageCached = nil
     end
@@ -3582,11 +3627,12 @@ function DF:CreateGUI()
     -- What OnShow can NOT fix is a widget holding a TABLE that has since been
     -- REPLACED, so every path that replaces one invalidates: a profile switch, a
     -- mode reset or copy and a section copy all end in FullProfileRefresh ->
-    -- InvalidateAllPages; the party/raid Sync replaces the destination's table
-    -- values on every switch, so its pages are invalidated for that mode (see
-    -- GUI:InvalidateSyncedPages); and page:Refresh() -- the "data changed" call --
-    -- invalidates the page's other-mode build too. _builtDb is the belt: a build
-    -- whose mode table is no longer the live one is never served.
+    -- InvalidateAllPages; the party/raid Sync copies INTO the destination's
+    -- tables rather than replacing them (THE SYNC KEEPS TABLES, bottom of this
+    -- file), so it needs no invalidation at all; and page:Refresh() -- the "data
+    -- changed" call -- invalidates the page's other-mode build too. _builtDb and
+    -- _builtRealDb are the belt: a build whose mode table is no longer the live
+    -- one is never served (BuildDbMatches).
     --
     -- ⚠ A PAGE THAT KEEPS PER-BUILD STATE OUTSIDE THESE FIELDS must either list it
     -- in page.modeBuildFields (swapped with the build) or opt out with
@@ -3600,7 +3646,26 @@ function DF:CreateGUI()
     local MODE_BUILD_FIELDS = {
         "children", "builtForMode", "builtForDisabled", "builtCacheKey", "cacheValid",
         "_builtDb", "_popoutHolders", "_popoutRowForKey", "_pendingShown",
+        -- What this build registered with search, so the index can take it
+        -- rather than build the page again (page.GetIndexEntries, below).
+        "_searchEntries",
+        "_builtRealDb",
     }
+
+    -- ★ IS THIS BUILD STILL BOUND TO THE LIVE MODE TABLE? _builtDb alone cannot
+    -- say so for RAID: DF.db.raid is always the same auto-profile proxy, and a raid
+    -- reset or copy re-points the proxy at a new real table underneath it
+    -- (Core.lua's WrapDB, `mt.__realTable = value`) without changing the proxy.
+    -- A widget bound to the proxy itself still reads through, but anything a
+    -- builder read OFF it (a gradient's stop list, a class filter) is the old
+    -- table's. So the real table is compared too. A plain table is its own.
+    local function RealModeTable(db)
+        local mt = getmetatable(db)
+        return (mt and mt.__realTable) or db
+    end
+    local function BuildDbMatches(build, db)
+        return build._builtDb == db and build._builtRealDb == RealModeTable(db)
+    end
 
     -- Park a list of widgets in the trash frame: hide, detach anchors, and
     -- reparent so they leave the GUI frame hierarchy entirely. WoW cannot GC
@@ -3722,6 +3787,9 @@ function DF:CreateGUI()
 
             RetireChildren(self.children)
             self.children = {}
+            -- The retired build's search entries go with it: a build that errors
+            -- part-way must not offer the index the old build's list.
+            self._searchEntries = nil
             if not self.singleModeBuild then
                 -- Marked in progress, so a builder that errors part-way leaves an
                 -- invalid build of THIS mode (retired next time) rather than one
@@ -3791,6 +3859,9 @@ function DF:CreateGUI()
                 self.builtForDisabled = true
                 self.cacheValid = true
                 self._builtDb = db
+                self._builtRealDb = RealModeTable(db)
+                -- A banner registers nothing, and neither would an index build of it.
+                self._searchEntries = {}
                 self:RefreshStates()
                 return
             end
@@ -3814,11 +3885,39 @@ function DF:CreateGUI()
                 table.insert(self.children, sync)
             end
 
+            -- ★ REMEMBER WHAT THIS BUILD REGISTERS WITH SEARCH (Search:Register's
+            -- capture). Stamped under this page's own tab, whoever called: the
+            -- index sets the tab itself, but a Refresh from a setting's callback
+            -- would otherwise stamp whatever tab the last index step left behind.
+            -- Both are put back afterwards, so nothing outside the build sees a
+            -- difference. ⚠ A builder that errors leaves the capture pointing at
+            -- its list until the next build restores over it; entries registered
+            -- in between land in a list nothing reads. Harmless, and not worth a
+            -- pcall that would move every builder error's traceback.
+            local Search = DF.Search
+            local capture = {}
+            local prevCapture, prevTab, prevTabLabel, prevSection
+            if Search then
+                prevCapture = Search._captureEntries
+                prevTab, prevTabLabel, prevSection =
+                    Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection
+                Search._captureEntries = capture
+                Search.CurrentTab = self.tabName
+                Search.CurrentTabLabel = self.tabLabel or self.tabName
+                Search.CurrentSection = nil
+            end
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
+            if Search then
+                Search._captureEntries = prevCapture
+                Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection =
+                    prevTab, prevTabLabel, prevSection
+            end
+            self._searchEntries = capture
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
             self._builtDb = db
+            self._builtRealDb = RealModeTable(db)
             -- ★ A PAGE WHOSE CONTENT IS DERIVED FROM DATA ANOTHER PAGE EDITS can
             -- register a key for what it drew (GUI.PageCacheKeys[tabName]);
             -- RefreshCached rebuilds when the key has moved. Only the Changed
@@ -3868,7 +3967,7 @@ function DF:CreateGUI()
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
                and self.builtForDisabled == isDisabled
-               and (self.singleModeBuild or self._builtDb == db)
+               and (self.singleModeBuild or BuildDbMatches(self, db))
                and (not keyFn or keyFn() == self.builtCacheKey) then
                 -- A build swapped back in comes back up as it was put away; its
                 -- widgets re-read their values on the OnShow this fires.
@@ -3908,6 +4007,31 @@ function DF:CreateGUI()
             DoBuild(self)
         end
 
+        -- ★ THE SEARCH INDEX'S WAY OUT OF REBUILDING THIS PAGE. The entries the
+        -- page's build for the CURRENT mode registered (DoBuild's capture), or nil
+        -- when there is no such build that RefreshCached would serve as it stands.
+        -- Read-only: the build may be the one on screen or the one parked in
+        -- _modeBuilds, and nothing is swapped, shown or re-stated to answer.
+        -- ⚠ Every test RefreshCached makes, and one more: a page with a content
+        -- cache key (GUI.PageCacheKeys) always answers nil -- its key can be a
+        -- function of the index itself, and asking it from here would recurse.
+        page.GetIndexEntries = function(self)
+            local mode = GUI.SelectedMode
+            local db = DF.db[mode]
+            if not db then return nil end
+            if GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName] then return nil end
+            local build
+            if self.builtForMode == mode then
+                build = self
+            elseif self._modeBuilds then
+                build = self._modeBuilds[mode]
+            end
+            if not build or not build.cacheValid or build.builtForMode ~= mode then return nil end
+            if not self.singleModeBuild and not BuildDbMatches(build, db) then return nil end
+            if build.builtForDisabled ~= GUI:IsTabDisabledForCurrentMode(self.tabName) then return nil end
+            return build._searchEntries
+        end
+
         -- ☠ DISPATCHED BY NAME, not captured. The profiler instruments a target
         -- by REPLACING DF.GUI.PageRefreshStates, and every page is built the
         -- first time the window opens -- long before a profiling run starts --
@@ -3936,22 +4060,13 @@ function DF:CreateGUI()
         end
     end
 
-    -- ★ THE PARTY/RAID SYNC REPLACES THE DESTINATION'S TABLES. DF:SyncLinkedSections
-    -- runs on every mode switch and DeepCopies each table-valued key of a synced
-    -- section into the other mode -- a NEW table, so a retained build of that mode
-    -- still bound to the old one would show and write a table nothing reads any
-    -- more. Called right after the sync, while SelectedMode is still the SOURCE.
-    -- Only the synced pages: a section's keys are, by prefix ownership, that page's.
-    function GUI:InvalidateSyncedPages()
-        local linked = DF.db and DF.db.linkedSections
-        local mode = self.SelectedMode
-        if not linked or not self.Pages or (mode ~= "party" and mode ~= "raid") then return end
-        local dest = (mode == "party") and "raid" or "party"
-        for pageId in pairs(linked) do
-            local page = self.Pages[pageId]
-            if page and page.Invalidate then page:Invalidate(dest) end
-        end
-    end
+    -- (Removed) GUI:InvalidateSyncedPages -- the mode tabs invalidated the synced
+    -- pages' other-mode builds after every sync, because the sync REPLACED each
+    -- table-valued key it copied. It copies into the existing tables now (THE
+    -- SYNC KEEPS TABLES, bottom of this file), so every build stays bound to the
+    -- live tables and nothing needs throwing away -- which is what made each
+    -- switch rebuild (and leak) every synced page. It also only ever covered the
+    -- mode tabs, while DF:UpdateAll runs the same sync on every settings change.
 
     -- Invalidate a single page by name.
     function GUI:InvalidatePage(name)
@@ -4013,4 +4128,81 @@ function DF:ToggleGUI(...)
         return
     end
     return origToggleGUI(self, ...)
+end
+
+-- ============================================================
+-- THE SYNC KEEPS TABLES
+-- DF:CopySectionSettingsRaw (Core/Profile.lua) is the Party/Raid Sync's copy:
+-- DF:SyncLinkedSections runs it for every synced page on every mode switch AND
+-- on every DF:UpdateAll, window open or not. It gives each table-valued key it
+-- copies a NEW table (DF:DeepCopy), and a page build bound to the table it
+-- replaced would then show, and write into, a table nothing reads any more --
+-- which is why every switch used to invalidate (and so rebuild, leaking) every
+-- synced page's retained build of the other mode. See ONE RETAINED BUILD PER
+-- MODE, above BuildPage.
+--
+-- Wrapped HERE, in the companion, because the copy itself stays exactly as it
+-- is: this runs it, then pours each replacement back INTO the table it replaced
+-- and puts that table back, so the data is the copy's and every reference to the
+-- old table -- a retained page build, a search card, an undo entry -- sees it.
+-- The same move the auto layouts make when they restore a whole-table override
+-- (Core/AutoProfiles.lua, DeepReplaceInPlace), for the same reason. Nothing is
+-- retained before the companion loads, so the resident copy alone is fine then.
+-- ⚠ Only tables the copy REPLACED are touched: a scalar key, a key the proxy
+-- refused to write (an auto-profile override guard), a key the section does not
+-- own and a key that was not a table before all come out exactly as the copy
+-- left them. Written to the REAL table, like the copy's own writes land there.
+-- ============================================================
+do
+    local function ReplaceInPlace(dst, src, seen)
+        if seen[dst] then return end
+        seen[dst] = true
+        for k, v in pairs(src) do
+            local cur = rawget(dst, k)
+            if type(v) == "table" and type(cur) == "table" and cur ~= v then
+                ReplaceInPlace(cur, v, seen)
+            else
+                dst[k] = v
+            end
+        end
+        for k in pairs(dst) do
+            if src[k] == nil then dst[k] = nil end
+        end
+    end
+
+    local origCopySectionSettingsRaw = DF.CopySectionSettingsRaw
+    if origCopySectionSettingsRaw then
+        function DF:CopySectionSettingsRaw(prefixes, srcMode, ...)
+            local db = DF.db
+            local destMode = ((srcMode or "party") == "party") and "raid" or "party"
+            local dest = db and db[destMode]
+            if type(dest) ~= "table" then
+                return origCopySectionSettingsRaw(self, prefixes, srcMode, ...)
+            end
+            local mt = getmetatable(dest)
+            local real = (mt and mt.__realTable) or dest
+            -- Every table the copy could replace, by key, before it runs. Only the
+            -- section's own keys: this runs on every UpdateAll, and the copy
+            -- touches nothing else.
+            local owns = DF.SectionOwnsKey
+            local before
+            for k, v in pairs(real) do
+                if type(v) == "table" and (not owns or owns(DF, prefixes, k)) then
+                    before = before or {}
+                    before[k] = v
+                end
+            end
+            local r1, r2 = origCopySectionSettingsRaw(self, prefixes, srcMode, ...)
+            if before then
+                for k, old in pairs(before) do
+                    local new = rawget(real, k)
+                    if type(new) == "table" and new ~= old then
+                        ReplaceInPlace(old, new, {})
+                        real[k] = old
+                    end
+                end
+            end
+            return r1, r2
+        end
+    end
 end

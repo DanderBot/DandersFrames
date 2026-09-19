@@ -1733,15 +1733,17 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Suppressed when the ROW carries this tick. Still built in classic,
             -- where it is the page's only on/off control.
             --
-            -- ⚠ AND THE PAGE REBUILD LIVES AND DIES IN HERE. Classic has always
-            -- paid for the gate with a whole-page rebuild and keeps doing exactly
-            -- that; the popout's commit (OnDispelEnableToggle) is a state pass
-            -- and a reflow, because a rebuild retires the row being clicked.
+            -- ⚠ CLASSIC USED TO PAY FOR THE GATE WITH A WHOLE-PAGE REBUILD (after
+            -- the state pass it already ran). It is the state pass alone now, like
+            -- the popout's commit (OnDispelEnableToggle): a rebuild retires the row
+            -- being clicked and leaks the page.
             if not tools2.hoistToggle then
                 group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
                     ApplyDispelSettings()
+                    -- The state pass is all the gate needs: every control under it
+                    -- hides through HideDispelOptions. The page rebuild that used
+                    -- to follow it leaked the whole page per click.
                     tools2.refreshStates()
-                    GUI:RefreshCurrentPage()
                 end), 30)
             end
             local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
@@ -2371,7 +2373,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             btn:SetActive(p == currentProfile)
             btn:SetScript("OnClick", function() 
                 DF:SetProfile(p) 
-                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                -- SetProfile ended in FullProfileRefresh, which already rebuilt this page.
+                if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
             end)
             py = py - 28
         end
@@ -2397,7 +2400,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             DF:SetProfile(text) 
             input.EditBox:SetText("")
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            -- SetProfile ended in FullProfileRefresh, which already rebuilt this page.
+            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
         end)
         createBtn:SetParent(btnRow)
         createBtn:SetPoint("LEFT", 0, 0)
@@ -2410,7 +2414,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             if DF:DuplicateProfile(text) then
                 input.EditBox:SetText("")
-                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                -- DuplicateProfile ended in FullProfileRefresh, which already rebuilt this page.
+                if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
             end
         end)
         dupeBtn:SetParent(btnRow)
@@ -2459,7 +2464,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         label = L["Reset"],
                         onClick = function()
                             DF:ResetFullProfile()
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            -- It ended in FullProfileRefresh, which already rebuilt this page.
+                            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },
                     { label = L["Cancel"] },
@@ -2484,7 +2490,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         label = L["Copy"],
                         onClick = function()
                             DF:CopyProfile(src, dest)
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            -- It ended in FullProfileRefresh, which already rebuilt this page.
+                            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() elseif GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },
                     { label = L["Cancel"] },
@@ -2967,12 +2974,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                             -- the user sitting in a half-imported profile with no message and
                             -- FullProfileRefresh never reached. Shape validation upstream makes
                             -- that unlikely; this makes it survivable and says so.
-                            local ok = pcall(DF.ApplyImportedProfile, DF, importData,
+                            local ok, applied = pcall(DF.ApplyImportedProfile, DF, importData,
                                 selectedCats, selectedFrameTypes, profileName, createNew)
                             if not ok then
                                 DF:Err(L["Import failed. Please try again or check for errors."])
                             end
-                            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                            -- A completed import returns true only after its
+                            -- FullProfileRefresh, which already rebuilt this page. Any
+                            -- other outcome may have changed data without one, so it
+                            -- keeps the rebuild.
+                            if ok and applied == true and GUI.RefreshCurrentPageAfterFullRefresh then
+                                GUI.RefreshCurrentPageAfterFullRefresh()
+                            elseif GUI.RefreshCurrentPage then
+                                GUI:RefreshCurrentPage()
+                            end
                         end,
                     },
                     { label = L["Cancel"] },

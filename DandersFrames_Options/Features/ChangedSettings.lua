@@ -421,6 +421,11 @@ function ChangedSettings:BuildReport(GUI)
     local Search = DF.Search
     if not Search then return nil, "unbuilt" end
 
+    -- An index that can be put together from the pages' retained builds is,
+    -- here and now: no builder runs, so no build, no waiter and no second
+    -- rebuild of this page when it lands (Search:TryReuseRegistry).
+    if Search.TryReuseRegistry then Search:TryReuseRegistry() end
+
     -- ⚠ THE FLAG IS CHECKED AS WELL AS THE STALENESS, and it is not redundant
     -- belt-and-braces. A build in flight has already emptied Search.Registry, so
     -- today RegistryIsStale answers true for both -- but the thing that must
@@ -450,7 +455,13 @@ function ChangedSettings:BuildReport(GUI)
             if not ok then return end
             if not (GUI and GUI.CurrentPageName == ChangedSettings.PAGE_ID) then return end
             local page = GUI.Pages and GUI.Pages[ChangedSettings.PAGE_ID]
-            if page and page.Refresh and page:IsShown() then page:Refresh() end
+            -- Through the cache: the key it was drawn under ("!building") has
+            -- moved, so this rebuilds -- without Refresh()'s invalidation of the
+            -- page's other-mode build, which nothing here touched.
+            if page and page:IsShown() then
+                if page.RefreshCached then page:RefreshCached()
+                elseif page.Refresh then page:Refresh() end
+            end
         end)
         -- Unconditionally: EnsureRegistryAsync defers every path, so there is no
         -- arm of it that can hand this call a usable registry before it returns.
@@ -508,11 +519,23 @@ end
 --   "!stale"    -- no build running and none drawn for: never equal to the
 --                  builder's own "building" key, so the revisit rebuilds, and
 --                  that rebuild is what starts the build.
+--
+-- ☠ "!stale" WAS THE KEY AFTER EVERY PARTY/RAID SWITCH. A switch invalidates the
+-- index (it is per mode), so the ledger's key read "out of date" on every visit
+-- after one -- even with the page's retained build for this mode showing exactly
+-- the right list -- and each visit rebuilt the page (and then rebuilt it AGAIN
+-- when the budgeted index landed), leaking both. The key must describe what the
+-- page SHOWS, and the index is only the means of computing it. So a stale index
+-- is first re-assembled from the pages' retained builds (Search:TryReuseRegistry:
+-- no builder runs, no frame, no waiter -- a side effect on the index only, never
+-- on a page), and the key is the real report's. "!stale" is left only for an
+-- index that cannot be had without building a page.
 -- ============================================================
 function ChangedSettings:CacheKey(GUI)
     local Search = DF.Search
     if not Search then return "!unbuilt" end
     if Search.RegistryBuilding then return "!building" end
+    if Search.TryReuseRegistry then Search:TryReuseRegistry() end
     if Search:RegistryIsStale() then
         return InCombatLockdown() and "!combat" or "!stale"
     end

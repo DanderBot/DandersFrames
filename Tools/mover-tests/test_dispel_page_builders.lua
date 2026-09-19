@@ -328,24 +328,25 @@ do
 end
 
 -- ============================================================
--- 3. THE PAGE REBUILD LIVES AND DIES IN THE CLASSIC-ONLY BRANCH
--- Classic has always paid for the gate with a whole-page rebuild. A pane must
--- not: a rebuild retires the row the user is clicking through, and the shared
--- helper's own prologue closes every open panel on the way in.
+-- 3. NO PAGE REBUILD ON THE PAGE, IN EITHER LAYOUT
+-- Classic used to pay for the gate with a whole-page rebuild after the state
+-- pass it already ran -- leaking the page into GUI._trashFrame per click. A pane
+-- must not either: a rebuild retires the row the user is clicking through, and
+-- the shared helper's own prologue closes every open panel on the way in.
 -- ============================================================
 print("-- Dispel Overlay page: no page rebuild in the popout layout")
 do
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
-    eq(rebuilds, 1, "rebuild: exactly one page rebuild left on the page")
+    eq(rebuilds, 0, "rebuild: no page rebuild left on the page")
 
     -- ...and it is inside the branch that only classic reaches.
     local body = builderBody("BuildDispelSettingsGroup")
     local hoistArm = body:match("if not tools2%.hoistToggle then(.-)\n            end")
     check(hoistArm ~= nil, "rebuild: the Enable checkbox is built behind the hoist guard")
     if hoistArm then
-        check(hoistArm:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-              "rebuild: ...and the rebuild is inside it, where only classic goes")
+        check(hoistArm:find("tools2.refreshStates()", 1, true) ~= nil,
+              "rebuild: ...and classic's tick runs the state pass, and nothing more")
     end
 
     -- Every popout mount declares itself as one; four rows, four mounts.

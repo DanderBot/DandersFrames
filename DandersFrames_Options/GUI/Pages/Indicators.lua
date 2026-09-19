@@ -1179,21 +1179,24 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ☠ WHAT A DURATION FORMAT CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
         -- LAYOUTS. Picking a format re-gates the two Hide Above controls (neither can
-        -- compose with Percent), and classic has always paid for that with a whole
-        -- page REBUILD. It keeps doing exactly that.
+        -- compose with Percent), and classic used to pay for that with a whole
+        -- page REBUILD (now a state pass -- see below).
         --
         -- The pane must not. A rebuild retires every widget on the page including the
         -- row the user is clicking through, and the helper's own prologue closes every
         -- open panel on the way in -- so the dropdown they just used would slam shut
         -- under their hand. What the rebuild was buying is the hideOn/disableOn
         -- passes, and that is precisely what the pane's own refresh does.
+        -- ★ Classic no longer rebuilds either: the two Hide Above controls carry
+        -- their gate as disableOn, so a state pass is what the rebuild bought --
+        -- and the rebuild leaked the whole page per pick.
         local function DurationFormatRefresh(tools2)
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
             if tools2.popout then
                 tools2.refreshStates()
             else
-                GUI:RefreshCurrentPage()
+                GUI.RelayoutCurrentPage()
             end
         end
 
@@ -3065,21 +3068,24 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ☠ WHAT A DURATION FORMAT CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
         -- LAYOUTS. Picking a format re-gates the two Hide Above controls (neither can
-        -- compose with Percent), and classic has always paid for that with a whole
-        -- page REBUILD. It keeps doing exactly that.
+        -- compose with Percent), and classic used to pay for that with a whole
+        -- page REBUILD (now a state pass -- see below).
         --
         -- The pane must not. A rebuild retires every widget on the page including the
         -- row the user is clicking through, and the helper's own prologue closes every
         -- open panel on the way in -- so the dropdown they just used would slam shut
         -- under their hand. What the rebuild was buying is the hideOn/disableOn
         -- passes, and that is precisely what the pane's own refresh does.
+        -- ★ Classic no longer rebuilds either: the two Hide Above controls carry
+        -- their gate as disableOn, so a state pass is what the rebuild bought --
+        -- and the rebuild leaked the whole page per pick.
         local function DurationFormatRefresh(tools2)
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
             if tools2.popout then
                 tools2.refreshStates()
             else
-                GUI:RefreshCurrentPage()
+                GUI.RelayoutCurrentPage()
             end
         end
 

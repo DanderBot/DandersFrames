@@ -121,8 +121,15 @@ function DandersFrames_Import(str, profileKey)
             local actualName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or targetName
             
             -- Refresh the GUI if it's open
-            if DF.GUIFrame and DF.GUIFrame:IsShown() and DF.GUI and DF.GUI.RefreshCurrentPage then
-                DF.GUI:RefreshCurrentPage()
+            -- ApplyImportedProfile returns true only after its FullProfileRefresh,
+            -- which already rebuilt the page on screen; a second rebuild here only
+            -- leaked it. Through the cache when the settings companion offers it.
+            if DF.GUIFrame and DF.GUIFrame:IsShown() and DF.GUI then
+                if DF.GUI.RefreshCurrentPageAfterFullRefresh then
+                    DF.GUI.RefreshCurrentPageAfterFullRefresh()
+                elseif DF.GUI.RefreshCurrentPage then
+                    DF.GUI:RefreshCurrentPage()
+                end
             end
             
             return true, actualName

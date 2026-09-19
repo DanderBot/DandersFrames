@@ -191,8 +191,18 @@ function Search:SetEntrySection(entry, section)
     BuildKeywords(entry)
 end
 
+-- ★ EVERY PAGE BUILD REMEMBERS WHAT IT REGISTERED, sealed registry or not.
+-- BuildPage's DoBuild (GUI/Panel.lua) points _captureEntries at a fresh list for
+-- the span of the builder and keeps that list with the build (page._searchEntries,
+-- one per retained mode build). That list is exactly what an index build would get
+-- by re-running the same builder in the same mode, so the index can take it from
+-- a build that is still valid instead of building the page again -- and every
+-- such rebuild leaks the page (see GUI/Panel.lua, ONE RETAINED BUILD PER MODE).
+-- An entry offered while the registry is sealed is stamped and captured but NOT
+-- added to the Registry, as before.
 function Search:Register(entry)
-    if self.RegistryBuilt then
+    local capture = self._captureEntries
+    if self.RegistryBuilt and not capture then
         return entry
     end
 
@@ -261,8 +271,22 @@ function Search:Register(entry)
     -- Auto-generate keywords from the label, the section and the tab.
     BuildKeywords(entry)
 
-    table.insert(self.Registry, entry)
+    if capture then capture[#capture + 1] = entry end
+    if not self.RegistryBuilt then
+        table.insert(self.Registry, entry)
+    end
     return entry
+end
+
+-- Append a page build's remembered entries to the registry being built, under
+-- fresh ids (ids are per registry build; nothing keys on them across builds --
+-- see cardCacheKey below).
+local function AppendIndexEntries(self, entries)
+    for _, entry in ipairs(entries) do
+        registrationId = registrationId + 1
+        entry.id = registrationId
+        self.Registry[#self.Registry + 1] = entry
+    end
 end
 
 -- Link a page's widget to the search entry it registered.
@@ -324,9 +348,44 @@ function Search:RegistryIsStale()
 end
 
 function Search:EnsureRegistry()
-    if self:RegistryIsStale() then
+    if self:RegistryIsStale() and not self:TryReuseRegistry() then
         self:BuildFullRegistry()
     end
+end
+
+-- ★ ASSEMBLE THE INDEX FROM THE BUILDS THE PAGES ALREADY HAVE, NOW, OR SAY NO.
+-- When every indexed page holds a VALID build for the current mode (its own
+-- page:GetIndexEntries answers -- GUI/Panel.lua), the index is just those
+-- builds' remembered entries end to end: no builder runs, no frame is made, and
+-- nothing has to wait a frame, so the budgeted driver and its waiters are not
+-- involved at all. This is what a Party/Raid switch costs once both modes have
+-- been indexed. Any page without a valid build -> false, and the caller goes on
+-- to the ordinary build, which still reuses every page it can (see the steps).
+-- A build already in flight owns the registry; this does not touch it.
+-- Returns true when the registry is usable afterwards.
+function Search:TryReuseRegistry()
+    if not self:RegistryIsStale() then return true end
+    if self.RegistryBuilding then return false end
+    local GUI = DF.GUI
+    if not GUI or not GUI.Pages then return false end
+
+    local lists = {}
+    for _, page in pairs(GUI.Pages) do
+        if not page.skipSearchIndex then
+            local entries = page.GetIndexEntries and page:GetIndexEntries()
+            if not entries then return false end
+            lists[#lists + 1] = entries
+        end
+    end
+
+    self.Registry = {}
+    registrationId = 0
+    self.BuiltForMode = GUI.SelectedMode
+    self._buildToken = (self._buildToken or 0) + 1
+    for _, entries in ipairs(lists) do AppendIndexEntries(self, entries) end
+    self.RegistryBuilt = true
+    self.RegistryBuilding = false
+    return not self:RegistryIsStale()
 end
 
 -- ============================================================
@@ -366,6 +425,23 @@ end
 -- run the wrong updater. `entry.sourceWidget` has the same problem from the
 -- other end: it points at a widget the NEXT build retires. So a mode switch
 -- still re-pays a full build -- it just no longer pays for it in one frame.
+--
+-- ★ ...EXCEPT THAT "A FULL BUILD" NO LONGER MEANS "EVERY BUILDER RUNS". Each
+-- page keeps one retained build PER MODE (GUI/Panel.lua), and each build keeps
+-- the entries its own builder registered (Register's capture, above). Those are
+-- per-mode by construction -- captured in the mode the build is for, callbacks,
+-- dropdown values, mode filtering and all -- which is precisely the property the
+-- per-mode cache above lacked. So a step whose page still holds a VALID build
+-- for the mode being indexed takes that build's entries and runs nothing; only a
+-- page with no valid build for this mode is built, and that build is then kept.
+-- Every index build used to trash ~34 pages (~800 KB each); now it builds a page
+-- only the first time that page is needed in a mode, or after its data changed.
+-- sourceWidget stays right too: it points into the build the entries came from,
+-- which is alive for as long as that build is valid.
+-- ⚠ A page answers for itself (page:GetIndexEntries): it says no unless the
+-- build would be served by RefreshCached as it stands -- same mode, same live
+-- mode table, same disabled state -- and a page with a content cache key
+-- (GUI.PageCacheKeys) always says no.
 -- ============================================================
 
 -- Milliseconds of CPU one slice may spend. Ellesmere's default, and for the same
@@ -405,6 +481,16 @@ function Search:_BeginRegistryBuild()
       -- Deliberately page-agnostic: any page may set `skipSearchIndex`.
       if not page.skipSearchIndex then
         ctx.steps[#ctx.steps + 1] = function()
+            -- ★ A VALID BUILD FOR THIS MODE IS INDEXED AS IT STANDS -- no builder,
+            -- nothing retired. Asked at STEP time, not when the list was made: a
+            -- budgeted drain spans frames, and the user can rebuild or invalidate
+            -- a page between slices.
+            local reuse = page.GetIndexEntries and page:GetIndexEntries()
+            if reuse then
+                AppendIndexEntries(self, reuse)
+                return
+            end
+
             self:SetCurrentTab(tabName, page.tabLabel or tabName)
             self.CurrentSection = nil
 
@@ -552,7 +638,8 @@ end
 -- do), which is the other half of why this is not just "call the budgeted
 -- builder": two surfaces asking at once must not start two builds.
 function Search:EnsureRegistryAsync(onReady)
-    if not self:RegistryIsStale() then return "ready" end
+    -- Assembled from the pages' own builds when it can be, which needs no frame.
+    if self:TryReuseRegistry() then return "ready" end
 
     if onReady then
         self._buildWaiters = self._buildWaiters or {}
@@ -1679,6 +1766,9 @@ function Search:ShowResults(query)
     -- this closure: a build takes several frames and the user goes on typing
     -- through them, so answering the query they had when they started would put
     -- stale results under a box that says something else.
+    -- (An index that can be assembled from the pages' retained builds is, first:
+    -- no builder runs and nothing waits -- see TryReuseRegistry.)
+    self:TryReuseRegistry()
     if self:RegistryIsStale() or self.RegistryBuilding then
         self:ShowBuildingMessage()
         self:EnsureRegistryAsync(function(ok)

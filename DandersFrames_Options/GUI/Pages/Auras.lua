@@ -947,7 +947,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- BOTH LAYOUTS. The button writes every swatch in its group behind the
         -- widgets' backs, so the swatches have to be repainted. Classic has always
         -- paid for that with a whole page rebuild (pageColors:Refresh), and it
-        -- keeps doing exactly that.
+        -- kept doing exactly that until the sweep below replaced it.
         --
         -- The pane must not. A rebuild retires every widget on the page, and the
         -- shared helper's own prologue closes every open panel on the way in -- so
@@ -958,9 +958,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- (SettingsWidgets.lua). ReflowMounted(true) runs it on every mounted pane,
         -- including a pinned second one. (The Tooltips page's AnchorGateRefresh is
         -- the same shape for the same reason.)
+        --
+        -- ★ CLASSIC TAKES THE SAME SWEEP NOW, over the one box the button sits in
+        -- (every swatch it writes is a colour picker in that box). The page rebuild
+        -- it used to pay leaked the whole page per click; it is kept only as the
+        -- fallback for a group without the sweep.
         local function RepaintSwatches(tools2)
             if tools2.popout then
                 tools.ReflowMounted(true)
+            elseif tools2.group and tools2.group.RefreshChildValues then
+                tools2.group:RefreshChildValues()
             elseif pageColors and pageColors.Refresh then
                 pageColors:Refresh()
             end
@@ -3390,8 +3397,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- control's `refreshValue`, which for a colour picker is its swatch
                 -- update, and ReflowMounted(true) runs it on every mounted pane
                 -- including a pinned second one.
+                -- Classic takes the same sweep over this box (every swatch the
+                -- button wrote is a colour picker in it); the page rebuild it used
+                -- to pay leaked the page, and is only the fallback now.
                 if tools2.popout then
                     tools.ReflowMounted(true)
+                elseif group.RefreshChildValues then
+                    group:RefreshChildValues()
                 elseif pageResource and pageResource.Refresh then
                     pageResource:Refresh()
                 end
