@@ -323,7 +323,6 @@ GUI:SetSurfaceStyle(GUI.SurfaceStyle)
 --   * a stale FontString wrap -> every width reads correct and the count is 0, yet the
 --     text is visibly ellipsised (and scrolling the window snaps it back, because that
 --     re-renders the string). That is CreateLabel's Reflow case, not a sizing bug.
--- Recorded because the second one cost two wrong fixes before this dump ruled out the first.
 function GUI:DebugDumpWidths()
     local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
     if not page or not page.children then
@@ -680,9 +679,7 @@ function GUI.PixelCheck()
     o:Field("px per unit", ("%.4f"):format(ppu), "NEUTRAL")
 
     o:Section("Scroll")
-    -- Reported, not judged. This used to print a red NOT SNAPPED when the offset
-    -- was off-grid, back when the scroll offset was quantised and being off-grid
-    -- meant something had gone wrong. Nothing quantises it now -- a 2px border
+    -- Reported, not judged. Nothing quantises the scroll offset -- a 2px border
     -- draws the same ink at any offset -- so an off-grid figure here is the
     -- normal state of a scrolled page, and flagging it as a fault sends the next
     -- person reading this output after a bug that is not there.
@@ -699,11 +696,9 @@ function GUI.PixelCheck()
     local dPageTop = PixelOffsetOf(page:GetTop(), ppu)
     local dPageBot = PixelOffsetOf(page:GetBottom(), ppu)
     local dPageH   = PixelOffsetOf(page:GetHeight(), ppu)
-    -- Flag EITHER edge. This used to test only the top, so it printed
-    -- "bot-0.38" on every run for weeks and never once marked it -- and an
-    -- unflagged number in a wall of numbers is an invisible one. The bottom
-    -- edge clips whatever rests against it just as hard as the top does, which
-    -- is the entire See-Also footer bug.
+    -- Flag EITHER edge. The bottom edge clips whatever rests against it just as
+    -- hard as the top does -- that is the entire See-Also footer bug -- and an
+    -- unflagged number in a wall of numbers is an invisible one.
     local badTop = dPageTop and math.abs(dPageTop) > 0.05
     local badBot = dPageBot and math.abs(dPageBot) > 0.05
     o:Section("Viewport", "the clip edge")
@@ -1317,8 +1312,6 @@ function GUI.GapCheck(mode)
         :format(#rows, tostring(pageName), nPages))
     print("  |cff808080Read: padBottom is the slack under a row -- the knob is GUI.RowHeight[kind], and slot - content IS that slack. A kind sorting to the top of the first list is over-spaced; one near zero is cramped. In the second list, 'varies' means the gap is not coming from RowHeight alone. Add 'all' for every row, 'clear' to wipe the saved capture.|r")
 end
--- (Removed) GUI.GapCheckAll — a no-arg alias for GapCheck("all"), superseded once the
--- dispatcher started forwarding the mode argument. Zero callers.
 
 -- ============================================================
 -- /df debug guiperf -- count the hook calls a settings change actually drives

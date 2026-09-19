@@ -22,7 +22,7 @@ local Mixin = Mixin
 -- The shared dialog palette (GUI.lua loads first). Neutrals are the same tables
 -- as GUI.Colors so they theme-track in lockstep; the dialog-specific tones
 -- (denser background, selected, green, red) live there too, so there is exactly
--- one copy in the addon. (A third copy lived in WizardBuilder.lua, since deleted.)
+-- one copy in the addon.
 local C = DF.GUI.DialogColors
 
 -- ============================================================
@@ -119,8 +119,7 @@ function DF:ClearSettingHighlights()
     wipe(activeHighlights)
 end
 
--- Apply a pulsing highlight overlay to one widget. Shared by
--- DF:HighlightSettings (dbKey-matched controls) and DF:HighlightWidget.
+-- Apply a pulsing highlight overlay to one widget. Used by DF:HighlightWidget.
 local function ApplyHighlightOverlay(widget)
     local overlay = GetHighlightOverlay()
     -- ⚠ RE-TINT ON EVERY USE, not once at creation. Two reasons, and either alone

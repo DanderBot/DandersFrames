@@ -170,8 +170,7 @@ local function ensureTdOverlay(frame)
     local overlay = CreateFrame("Frame", nil, frame)
     overlay:SetAllPoints(frame)
     -- Match contentOverlay (where the legacy name text lives): above the
-    -- health/power bars but below the status/defensive/aura icons. The old +100
-    -- overshot and drew TD text on top of the icon layer.
+    -- health/power bars but below the status/defensive/aura icons.
     overlay:SetFrameLevel((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
         or (frame:GetFrameLevel() + 25))
     frame._tdOverlay = overlay
@@ -487,10 +486,8 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
         local color = token and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
         if color then
             -- Reuse the appearance applyAppearance already resolved above: same elem,
-            -- same globalDefaults, same deterministic function. This used to re-resolve
-            -- the whole thing just to read one alpha, which is a wasted table (up to
-            -- four) per class-coloured element per tick -- resolveAppearance is #2 in
-            -- every combat trace.
+            -- same globalDefaults, same deterministic function. Do not re-resolve it just
+            -- to read one alpha -- resolveAppearance is #2 in every combat trace.
             fs:SetTextColor(color.r, color.g, color.b, (app.color and app.color.a) or 1)
         end
     end
@@ -552,9 +549,8 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     local globalDefaults = tdDB.globalDefaults
     -- Pre-create the FontString for every enabled element before any element is
     -- positioned, so one anchored to a later-listed element finds its target on
-    -- the very first pass (it previously fell back to frame-anchoring for one
-    -- update, making anchored layouts jump just after a reload). The same sweep
-    -- records which ids are enabled for resolveAnchorTarget's disabled check.
+    -- the very first pass. The same sweep records which ids are enabled for
+    -- resolveAnchorTarget's disabled check.
     wipe(enabledScratch)
     for _, elem in ipairs(tdDB.elements or {}) do
         if elem.enabled then
@@ -576,10 +572,8 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     end
 
     -- Sweep: hide FontStrings for elements that no longer exist in tdDB.
-    -- This handles the delete case (an element was removed; its FontString
-    -- is still cached on the frame but should not display). Cached entries
-    -- are intentionally left in place so a subsequent add reusing the id
-    -- recovers the same FontString instead of leaking another one.
+    -- Cached entries are intentionally left in place so a subsequent add reusing
+    -- the id recovers the same FontString instead of leaking another one.
     if frame._tdFontStrings then
         wipe(liveIdScratch)
         for _, elem in ipairs(tdDB.elements or {}) do

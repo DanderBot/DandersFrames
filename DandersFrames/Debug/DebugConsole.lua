@@ -54,11 +54,9 @@ local CATEGORY_GROUPS = {
             { key = "HEALTH",     desc = "Health bar value writes, including Reduced Max Health" },
             { key = "FLATRAID",   desc = "Flat raid layout and sorting", noisy = true },
             { key = "FRAMESORT",  desc = "FrameSort addon integration" },
-            -- ⚠ NOT noisy. Most of this subsystem was deleted as unreachable; of the
-            -- survivors only two call sites are reachable in live play at all, so it was
-            -- hidden by default for a firehose that no longer exists -- and a defaulted-off
-            -- category with nothing in it is the worst outcome for whoever ticks it hoping
-            -- for a trace.
+            -- ⚠ NOT noisy. Only two call sites in this subsystem are reachable in live play
+            -- at all, so there is no firehose to hide -- and a defaulted-off category with
+            -- nothing in it is the worst outcome for whoever ticks it hoping for a trace.
             { key = "SECURESORT", desc = "Spec cache, inspect queue and the raid geometry calculators" },
             -- noisy: driven by UNIT_IN_RANGE_UPDATE per unit, and fans out to pinned
             -- and boss frames — a moving raid produces a steady stream.
@@ -123,8 +121,7 @@ local CATEGORY_GROUPS = {
             { key = "TARGETEDLIST", desc = "Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup" },
             { key = "PERSONALTARGET", desc = "Personal Targeted Spells: cast pickup, target changes, and why a cast was skipped" },
             { key = "GUI",          desc = "Settings window internals — slider drag paths, relayout" },
-            -- ⚠ Also previously emitted without being registered here: its one site is
-            -- a DebugWarn for a breadcrumb that cannot navigate.
+            -- ⚠ Its one site is a DebugWarn for a breadcrumb that cannot navigate.
             { key = "SEARCH",       desc = "Settings search: breadcrumb resolution and navigation failures" },
             -- Kept out of GUI: the Blizzard-picker sync fires on every colour
             -- drag, so folding it in would make the whole GUI category noisy.
@@ -183,9 +180,9 @@ local DEFAULTS = {
 local debugDb       -- reference to DandersFramesDB_v2.debug
 local debugLog      -- reference to DandersFramesDB_v2.debugLog
 local knownCategories = {}  -- set: { ["PET"] = true, ["FONT"] = true, ... }
--- Rebuilt lazily. Init used to walk the whole persisted log (up to maxLines = 10000
--- entries) to fill this on EVERY login, enabled or not — pure load-time cost for a
--- table only the console UI reads. The walk now happens on first access instead.
+-- Rebuilt lazily, on first access: walking the whole persisted log (up to
+-- maxLines = 10000 entries) at every login is pure load-time cost for a table
+-- only the console UI reads.
 local categoriesDirty = true
 local liveEditBox         -- EditBox reference when debug tab is visible
 local needsRefresh = false  -- flag to batch refresh when tab is visible
