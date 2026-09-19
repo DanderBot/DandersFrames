@@ -275,6 +275,10 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- its own layout and has to re-run it either way; BuildPage pages re-flow
     -- themselves and need nothing here.
     onSectionToggled = function(key, expanded)
+        -- Only while the designer is the page on screen: a section toggled on any
+        -- other page changes nothing it shows, and the call would otherwise mark
+        -- it stale and cost a rebuild on the next visit.
+        if DF.AuraDesigner_IsPageShown and not DF:AuraDesigner_IsPageShown() then return end
         if DF.AuraDesigner_RefreshPage then DF:AuraDesigner_RefreshPage() end
     end,
 
