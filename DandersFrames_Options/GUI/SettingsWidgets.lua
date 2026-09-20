@@ -665,9 +665,22 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         DF.Search:SetCurrentSection(text)
     end
     
-    -- Toggle function
-    section.Toggle = function(self)
-        self.expanded = not self.expanded
+    -- THE FOLD ITSELF, WITHOUT THE REPAINT -- the arrow and the SavedVariables
+    -- slot, and nothing else.
+    --
+    -- ☠ SPLIT OUT OF Toggle FOR THE BULK VERBS. An Expand All that called Toggle
+    -- once per section would run the page's whole state pass once per section --
+    -- eleven passes over every widget on the page for one press. So the two
+    -- halves are separated: this moves ONE section, and whoever moved a batch of
+    -- them runs the page pass ONCE at the end. Toggle keeps both halves and is
+    -- byte-for-byte the same behaviour it always had.
+    --
+    -- Returns whether the section actually MOVED, so a caller can skip the page
+    -- pass entirely when nothing did.
+    section.SetExpanded = function(self, want)
+        want = want and true or false
+        if self.expanded == want then return false end
+        self.expanded = want
         if self.expanded then
             self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
         else
@@ -680,6 +693,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             local saved = GUI:GetCollapsedGroups()
             saved[persistKey] = (not self.expanded) or nil
         end
+        return true
+    end
+
+    -- Toggle function
+    section.Toggle = function(self)
+        self:SetExpanded(not self.expanded)
 
         -- Trigger layout refresh (RefreshStates handles show/hide based on expanded state)
         if parent.RefreshStates then

@@ -961,3 +961,149 @@ do
     check(ROW:find("po:Follow(tetherRegion(), { outsideOf = row._window, clipTo = row._clipTo })", 1, true) ~= nil,
           "kit: ...and so does the dock, so all three describe one rect")
 end
+
+-- ============================================================
+-- 9. EXPAND ALL / COLLAPSE ALL -- the two verbs a page of folds needs
+--
+-- ☠ WHAT WAS MISSING. Eleven folds, and the only way to shut them was eleven
+-- presses -- with no way back at all. Fold the page by hand and it is a wall of
+-- headers you must now re-open one at a time; the missing Expand All is what the
+-- design critique named.
+--
+-- ☠ THE STORE IS ADDON-WIDE AND THE VERBS ARE NOT. Every fold in the addon --
+-- the Text Designer's cards, the Aura Designer's rows, every other page's
+-- sections -- persists into the ONE table GetCollapsedGroups hands back. A bulk
+-- verb that walked THAT would silently unfold half the addon, so these walk a
+-- roster the page registered instead: a key this page never created is a key it
+-- cannot reach. That negative is asserted here as hard as the positive.
+--
+-- ☠ AND IT RELAYOUTS RATHER THAN REBUILDS. A rebuild retires the whole page into
+-- the trash frame and builds a second copy (Panel.lua's ONE RETAINED BUILD PER
+-- MODE) for a change that moves no widget and creates none. So the sections move
+-- through SetExpanded -- the fold WITHOUT the repaint -- and the page's own state
+-- pass runs once, at the end.
+--
+--   ✓ the pair exists, at the top of the page, spanning both columns
+--   ✓ the helper is GENERIC -- page tools, not page markup -- and every section
+--     on the page is registered with it
+--   ✓ the store is written through the section's own persist path
+--   ✓ the disabled rule, both ends of it
+--   ✗ nothing about runtime: that a press actually folds eleven sections, and
+--     that the pair greys at the ends, are read by eye.
+-- ============================================================
+print("-- Buff Bar page: Expand All / Collapse All")
+do
+    local CTRL_RAW = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
+
+    -- ---- (a) the page mounts the pair, once, above everything ----------
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: the page adds the pair at the top, spanning both columns")
+    -- ☠ col "both" RATHER THAN A COLUMN. The pair governs sections in BOTH
+    -- columns, so put in column 1 it would read as part of Content -- and "both"
+    -- is what carries it through the one-column fold intact. It is also a sync
+    -- point, which costs nothing at the top of a page where both columns are at
+    -- zero.
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
+    check(stripAt ~= nil and contentAt ~= nil and stripAt < contentAt,
+          "bulk: ...above the first category header, because it acts on the whole page")
+    local mounts = 0
+    for _ in PAGE:gmatch("tools%.SectionControls%(") do mounts = mounts + 1 end
+    eq(mounts, 1, "bulk: ...and exactly once")
+
+    -- ---- (b) every section on the page is on the roster -----------------
+    check(PAGE:find("tools.RegisterSection(section)", 1, true) ~= nil,
+          "bulk: OpenSection puts every section it builds on the page's roster")
+    -- In OpenSection, so no section can be left off by hand -- there is one
+    -- registration site for all eleven rather than eleven chances to forget one.
+    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    check(open:find("tools.RegisterSection(section)", 1, true) ~= nil,
+          "bulk: ...from the one place that builds them, not once per call site")
+    local regs = 0
+    for _ in PAGE:gmatch("tools%.RegisterSection%(") do regs = regs + 1 end
+    eq(regs, 1, "bulk: ...and nowhere else")
+
+    -- ---- (c) the helper is GENERIC ---------------------------------------
+    -- ⚠ THE NEXT PAGE CONVERTED PASSES ONE THING, not a copy of this markup.
+    -- Both verbs live in the shared page tools and neither knows what a buff is.
+    check(CTRL_RAW:find("RegisterSection       = RegisterSection,", 1, true) ~= nil,
+          "bulk helper: the roster verb is on the shared page tools")
+    check(CTRL_RAW:find("SectionControls       = SectionControls,", 1, true) ~= nil,
+          "bulk helper: ...and so is the strip")
+    local scBody = CTRL_RAW:match("local function SectionControls%(parent%)(.-)\n    end\n")
+    check(scBody ~= nil, "bulk helper: ...the strip builder is locatable")
+    if scBody then
+        for _, word in ipairs({ "buff", "Buff", "debuff", "Debuff" }) do
+            check(scBody:find(word, 1, true) == nil,
+                  "bulk helper: ...and says nothing about " .. word .. " -- it is page-agnostic")
+        end
+        -- ☠ THE PAGE'S OWN SECTIONS AND NOBODY ELSE'S. If this ever reads the
+        -- store directly it stops being scoped to the page, and Expand All starts
+        -- unfolding the Text Designer.
+        check(scBody:find("GetCollapsedGroups", 1, true) == nil,
+              "bulk helper: the strip never reads the addon-wide collapse store")
+        check(scBody:find("eachVisibleSection", 1, true) ~= nil,
+              "bulk helper: ...it walks the page's registered sections instead")
+        -- ...and a REBUILD would retire the whole page into the trash frame for a
+        -- change that creates no widget. Relayout only.
+        check(scBody:find("page:RefreshStates()", 1, true) ~= nil,
+              "bulk: a press relayouts through the page's own state pass")
+        for _, verb in ipairs({ "BuildPage", "DoBuild", "GUI:RefreshCurrentPage", "page:Refresh()" }) do
+            check(scBody:find(verb, 1, true) == nil,
+                  "bulk: ...and never " .. verb .. ", which would rebuild the page")
+        end
+        -- ⚠ AND ONLY WHEN SOMETHING MOVED. The buttons grey when they would do
+        -- nothing, so this is belt and braces -- but a state pass over a page of
+        -- folds is not free.
+        check(scBody:find("if moved and page.RefreshStates then", 1, true) ~= nil,
+              "bulk: ...and only when a section actually moved")
+    end
+    -- ⚠ HIDDEN SECTIONS DO NOT COUNT. The Buff Bar's two 12.1-factory extras are
+    -- off the page on a client that draws neither; counting them would leave
+    -- Expand All lit with every visible section already open.
+    check(CTRL_RAW:find("if s and s:IsShown() and s.SetExpanded then", 1, true) ~= nil,
+          "bulk: only sections the user can actually see are counted or moved")
+
+    -- ---- (d) the disabled rule, both ends --------------------------------
+    -- ☠ GREY, NOT HIDDEN -- the pack's standard gating model. A control that
+    -- vanishes and returns as the user folds things is worse than one that dims.
+    check(CTRL_RAW:find("expandBtn:SetDisabled(n == 0 or shut == 0)", 1, true) ~= nil,
+          "bulk: Expand All greys when every visible section is already open")
+    check(CTRL_RAW:find("collapseBtn:SetDisabled(n == 0 or open == 0)", 1, true) ~= nil,
+          "bulk: Collapse All greys when every visible section is already shut")
+    -- Driven from the page's state pass -- the pass that has just decided which
+    -- sections are shown -- so the verdict is never a frame stale.
+    check(CTRL_RAW:find("strip.refreshContent = function()", 1, true) ~= nil,
+          "bulk: ...re-judged on every page state pass, like every other gated control")
+
+    -- ---- (e) the store, written the way a manual fold writes it ----------
+    -- ☠ ONE PERSIST PATH, SHARED WITH THE HEADER. SetExpanded is Toggle's first
+    -- half split out: the arrow and the SavedVariables slot, and nothing else. So
+    -- a bulk fold and a click on a header leave the store in exactly the same
+    -- state, and both survive a reload the same way.
+    local setExp = WIDGETS:match("section%.SetExpanded = function%(self, want%)(.-)\n    end\n")
+    check(setExp ~= nil, "bulk store: the section exposes a repaint-free fold")
+    if setExp then
+        check(setExp:find("local persistKey = self.collapseKey or self.sectionTitleText", 1, true) ~= nil,
+              "bulk store: ...keyed on the section's own stable collapse key")
+        check(setExp:find("saved[persistKey] = (not self.expanded) or nil", 1, true) ~= nil,
+              "bulk store: ...writing the same slot a manual fold writes")
+        check(setExp:find("if self.expanded == want then return false end", 1, true) ~= nil,
+              "bulk store: ...and reports whether it actually moved, so a no-op costs no pass")
+        check(setExp:find("RefreshStates", 1, true) == nil,
+              "bulk store: ...with no page pass of its own -- that is the caller's, once")
+    end
+    -- ...and Toggle is now the pair of halves rather than a second copy of one.
+    check(WIDGETS:find("section.Toggle = function(self)\r\n        self:SetExpanded(not self.expanded)", 1, true) ~= nil
+          or WIDGETS:find("section.Toggle = function(self)\n        self:SetExpanded(not self.expanded)", 1, true) ~= nil,
+          "bulk store: a header click goes through the very same fold")
+
+    -- ---- (f) the strings ---------------------------------------------------
+    local ENUS = df_file_source("Locales/enUS.lua"):gsub("\r\n", "\n")
+    for _, key in ipairs({ "Expand All", "Collapse All" }) do
+        check(CTRL_RAW:find('L["' .. key .. '"]', 1, true) ~= nil,
+              "bulk strings: the button text is localised (" .. key .. ")")
+        check(ENUS:find('L["' .. key .. '"] = true', 1, true) ~= nil,
+              "bulk strings: ...and the key is declared in enUS (" .. key .. ")")
+    end
+end

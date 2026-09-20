@@ -247,6 +247,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- to one column, the header bar would stay half-width over a full-width
             -- band. The header and its band have to declare it as a pair.
             section.layoutColFill = true
+            -- ...and it joins the page's own roster, which is what the Expand All
+            -- / Collapse All pair walks. The page's sections and nobody else's:
+            -- the collapse store is addon-wide, so a bulk verb that read THE
+            -- STORE would unfold the designers' cards too.
+            tools.RegisterSection(section)
             Add(section, 36, col)
             local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(col), { chromeless = true })
             band.layoutColFill = true
@@ -404,8 +409,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(visibilityGroup, nil, 1)
         else
-            -- The category header the four Content sections sit under, and the only
-            -- thing on the page above the first fold.
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING. Eleven folds with no
+            -- way to open or shut them together was the critique's own finding --
+            -- fold them all by hand and the page is a wall of headers you must
+            -- re-open one at a time.
+            --
+            -- At col "both" because it belongs to the PAGE rather than to either
+            -- column: put in column 1 it would read as part of Content, and the
+            -- four Icon/Text sections it also governs are in column 2. "both" is
+            -- also a sync point, which costs nothing here -- both columns are at
+            -- zero -- and is what carries it through the one-column fold intact.
+            --
+            -- ⚠ ABOVE the category header rather than beside it. The header names
+            -- what is under it; these two act on the whole page, and a page-wide
+            -- verb sitting inside a category is a verb whose reach is misread.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The category header the four Content sections sit under, and the
+            -- first thing on the page under the bulk verbs.
             Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
             -- Show Buffs is the PAGE GATE and it is inside this section, not on its
             -- header: a fold is not a switch, and the one control that decides whether

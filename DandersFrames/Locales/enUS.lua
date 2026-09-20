@@ -743,6 +743,7 @@ L["Click %sExit Editing%s when done. Your overrides are saved to the profile. If
 L["Click-cast profile: %s"] = true
 L["Clip Health Bar"] = true
 L["Close"] = true
+L["Collapse All"] = true
 L["Color"] = true
 L["Color by Dispel Type"] = true
 L["Color by Time"] = true
@@ -952,6 +953,7 @@ L["Errors Only"] = true
 L["Evoker"] = true
 L["Exit Editing"] = true
 L["Exclamation Mark"] = true
+L["Expand All"] = true
 L["Expiring Threshold (%)"] = true
 L["Expiring Threshold (seconds)"] = true
 L["Expiration"] = true

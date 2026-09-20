@@ -5210,9 +5210,120 @@ function GUI:CreatePopoutPageTools(page)
         return full
     end
 
+    -- ============================================================
+    -- EXPAND ALL / COLLAPSE ALL -- the two verbs a page of folds needs
+    -- ------------------------------------------------------------
+    -- ☠ WHY THIS EXISTS. A converted page is eleven folds, and the only way to
+    -- shut them was eleven presses -- with no way back at all. The missing
+    -- Expand All is what the design critique named: fold everything by hand and
+    -- the page is a wall of headers you must now re-open one at a time.
+    --
+    -- ☠ IT IS THE PAGE'S OWN SECTIONS AND NOBODY ELSE'S. The collapse store is
+    -- ADDON-WIDE -- the Text Designer's cards, the Aura Designer's rows and every
+    -- other page's folds all persist into the same table -- so a bulk verb that
+    -- walked THE STORE would silently unfold half the addon. It walks a list this
+    -- page registered instead, so a key it never created is a key it cannot
+    -- touch.
+    --
+    -- ☠ AND IT RELAYOUTS RATHER THAN REBUILDS. A rebuild retires every widget on
+    -- the page into the trash frame and builds a second copy (Panel.lua's ONE
+    -- RETAINED BUILD PER MODE), which is an enormous cost for a change that moves
+    -- no widget and creates none: the state pass already hides what a shut
+    -- section registered. So the sections are moved with SetExpanded -- the fold
+    -- without the repaint -- and the page pass runs ONCE, at the end.
+    --
+    -- USAGE, for the next page converted -- two lines and no markup:
+    --
+    --     local band = tools.RegisterSection(OpenSection(...))   -- per section
+    --     Add(tools.SectionControls(self.child), 24, "both")     -- once, at the top
+    --
+    -- The strip may be built BEFORE the sections it governs: it closes over the
+    -- list rather than copying it, which is what lets it sit at the top of the
+    -- page while the sections are registered on the way down.
+    local sections = {}
+    local function RegisterSection(section)
+        if section then sections[#sections + 1] = section end
+        return section
+    end
+
+    -- ⚠ ONLY WHAT THE USER CAN SEE. A section carrying a hideOn (the Buff Bar's
+    -- two 12.1-factory extras on a client that draws neither) is not on the page,
+    -- so expanding it moves nothing the user asked about -- and counting it would
+    -- leave Expand All lit with every visible section already open.
+    local function eachVisibleSection(fn)
+        local n = 0
+        for _, s in ipairs(sections) do
+            if s and s:IsShown() and s.SetExpanded then
+                n = n + 1
+                fn(s)
+            end
+        end
+        return n
+    end
+
+    local function SectionControls(parent)
+        local strip = CreateFrame("Frame", nil, parent)
+        strip:SetHeight(22)
+
+        local function ApplyAll(want)
+            local moved = false
+            eachVisibleSection(function(s)
+                if s:SetExpanded(want) then moved = true end
+            end)
+            -- ⚠ ONE PASS, AND ONLY IF SOMETHING ACTUALLY MOVED. The buttons grey
+            -- when they would do nothing, so this is belt and braces -- but a
+            -- state pass over a page of folds is not free and a press that
+            -- changed nothing must cost nothing.
+            if moved and page.RefreshStates then page:RefreshStates() end
+        end
+
+        -- Ghost, because these act on the PAGE rather than on a setting: a solid
+        -- button at the top of a settings page reads as the page's primary
+        -- action, and neither of these is. Same skin the "+ Add set" strip uses.
+        local function mk(text, want)
+            local b = CreateFrame("Button", nil, strip, "BackdropTemplate")
+            b:SetSize(84, 20)
+            GUI:StyleButton(b, { ghost = true, text = text, font = "DFFontHighlightSmall" })
+            b:SetScript("OnClick", function() ApplyAll(want) end)
+            return b
+        end
+        local expandBtn   = mk(L["Expand All"], true)
+        local collapseBtn = mk(L["Collapse All"], false)
+        -- LEFT-ALIGNED, and deliberately not stretched across the page. The strip
+        -- is Add'd at col "both" so it spans whatever width the window gives it,
+        -- and two buttons pinned to opposite ends of THAT would sit a page apart
+        -- at 1400px. Anchored to the left edge they stay a pair, under the eye
+        -- that is already reading down the left-hand column, and the one-column
+        -- fold moves them not at all.
+        expandBtn:SetPoint("LEFT", strip, "LEFT", 0, 0)
+        collapseBtn:SetPoint("LEFT", expandBtn, "RIGHT", 6, 0)
+
+        -- GREY WHEN THEY WOULD DO NOTHING, rather than hidden: the pair is part
+        -- of the page's furniture and a control that vanishes and returns as the
+        -- user folds things is worse than one that dims. Everything already open
+        -- greys Expand All; everything already shut greys Collapse All; a page
+        -- with no visible section at all greys both.
+        --
+        -- Driven from the page's own state pass, which is the pass that has just
+        -- decided which sections are shown -- so the verdict is never a frame
+        -- stale.
+        strip.refreshContent = function()
+            local shut, open = 0, 0
+            local n = eachVisibleSection(function(s)
+                if s.expanded then open = open + 1 else shut = shut + 1 end
+            end)
+            expandBtn:SetDisabled(n == 0 or shut == 0)
+            collapseBtn:SetDisabled(n == 0 or open == 0)
+        end
+        strip.refreshContent()
+        return strip
+    end
+
     return {
         PopoutContent         = PopoutContent,
         RowDB                 = RowDB,
+        RegisterSection       = RegisterSection,
+        SectionControls       = SectionControls,
         ClaimKeys             = ClaimKeys,
         WireModifiedTick      = WireModifiedTick,
         WireFooter            = WireFooter,
