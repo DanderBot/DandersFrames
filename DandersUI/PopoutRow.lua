@@ -948,6 +948,12 @@ end
 --              padding: the beam and outline then hang over that chrome for the
 --              50-odd pixels between the row leaving the viewport and its rect
 --              leaving the window
+--   tetherTo   region, or fn(row) -> region: what the panel docks beside and
+--              traces, when the row is not itself the thing on the page. For a
+--              consumer whose row is a CONTROLLER -- a collapsible section's pin,
+--              where the plate is never shown -- so the panel leaves the header
+--              the user pressed rather than an unplaced frame. Absent = the
+--              row's own strip, or the row. See tetherRegion
 --   popoutKey  override the shared pool key (default: one per host)
 --   title      popout header title (default: label)
 --   surface    the SURFACE STYLE this row wears (Theme.lua's UI.SurfaceStyle).
@@ -1016,6 +1022,9 @@ function UI:CreatePopoutRow(parent, opts)
     row._build   = opts.build
     row._window  = opts.window
     row._clipTo  = opts.clipTo
+    -- The region the panel docks beside and traces, when that is not this row's
+    -- own plate -- see tetherRegion, beside OpenPopout.
+    row._tetherTo = opts.tetherTo
     row._key     = opts.popoutKey or DEFAULT_KEY
     row._accent  = normColor(opts.accent)
     row._onClose = (type(opts.onClose) == "function") and opts.onClose or nil
@@ -2744,6 +2753,26 @@ function UI:CreatePopoutRow(parent, opts)
         return row:OpenPopout()
     end
 
+    -- ☠ WHAT THE PANEL IS ABOUT NEED NOT BE THIS ROW'S OWN PLATE. A consumer may
+    -- drive the panel from something else entirely -- a collapsible SECTION's
+    -- header, where the row is a controller with nothing on the page at all --
+    -- and then the plate is at the origin, hidden, and docking beside it would
+    -- put the panel in the corner of the screen with a beam pointing at nothing.
+    --
+    -- opts.tetherTo names the region the panel docks beside AND traces. Both
+    -- readers take it, because the shell's contract is that they describe ONE
+    -- rect (see Popout.lua's _TetherRegion): `Follow` is what the dock is
+    -- computed from and what the clip gate watches, `tetherSource` is where the
+    -- beam lands and where the source outline is drawn.
+    --
+    -- ⚠ OPT-IN. Absent, this is the strip-or-row answer every existing page
+    -- already gets, so no unconverted row moves by a pixel.
+    local function tetherRegion()
+        local t = row._tetherTo
+        if type(t) == "function" then t = t(row) end
+        return t or (stripLive and strip) or row
+    end
+
     function row:OpenPopout()
         -- Without a window there is nothing to dock OUTSIDE of, and docking
         -- beside the row would put the panel on top of the list it came from --
@@ -2810,7 +2839,7 @@ function UI:CreatePopoutRow(parent, opts)
             -- the beam and the clip gate) describing ONE rect, which is the
             -- contract _TetherRegion exists to hold. A strip declares no
             -- popoutInset, so its whole rect is ink -- which it is.
-            tetherSource = (stripLive and strip) or row,
+            tetherSource = tetherRegion(),
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
             onClose = function(p, reason) forgetInstance(host, p, reason) end,
@@ -2834,7 +2863,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- from the frame's height, and a popout placed at the previous row's
         -- height would land in the wrong place and then jump.
         swapTo(po, row)
-        po:Follow(row, { outsideOf = row._window, clipTo = row._clipTo })
+        po:Follow(tetherRegion(), { outsideOf = row._window, clipTo = row._clipTo })
         -- ☠ AN EMPTY PANEL IS NEVER OPENED LOOSE. With every one of its settings
         -- on the plate the panel has nothing to draw, and a blank docked box
         -- beside the row is not what the strip's words offered -- they offered to

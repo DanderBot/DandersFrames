@@ -219,12 +219,12 @@ do
     -- mechanism. Panel.lua's state pass is the only thing that reads
     -- `widget.collapsibleSection` and hides what a shut section registered; a
     -- group nested inside another group never reaches it.
-    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn)", 1, true) ~= nil,
+    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder)", 1, true) ~= nil,
           "sections: the page opens a section in one named place")
     check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
           "sections: ...and closes one in another")
     local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -561,7 +561,14 @@ end
 -- ============================================================
 print("-- Buff Bar page: the popout furniture is gone")
 do
-    for _, verb in ipairs({ "GUI:CreatePopoutRow", "tools.PopoutContent", "tools.ClaimKeys",
+    -- ⚠ tools.PopoutContent IS NO LONGER ON THIS LIST, and that is the pin.
+    -- The page mounts a panel's worth of content again -- but exactly ONCE, in
+    -- OpenSection, for a section that asked for a pin. Pinned to a COUNT in
+    -- section 8 rather than to zero, so a builder that quietly grows a second
+    -- mount is still caught. Everything else a ROW brought stays gone: the page
+    -- builds no row of its own (the kit owns the one behind the pin), claims no
+    -- keys, promises no count and hangs no footer.
+    for _, verb in ipairs({ "GUI:CreatePopoutRow", "tools.ClaimKeys",
                             "tools.WireModifiedTick", "tools.WireFooter",
                             "tools.RegisterHoistedToggle", "tools.ReflowMounted",
                             "inline = true", "footerStrip" }) do
@@ -752,4 +759,205 @@ do
           "helpers: the duration-format example repaints on a group-wide value sweep")
     check(CTRL:find("if ddRefreshValue then ddRefreshValue() end", 1, true) ~= nil,
           "helpers: ...chained rather than replaced, so the caption still repaints too")
+end
+
+-- ============================================================
+-- 8. THE PIN -- one small icon, on the eight sections that decide how it LOOKS
+--
+-- ☠ WHAT SURVIVED, AND WHY ONLY THIS. Popouts are no longer how settings are
+-- REVEALED on this page -- section 1 is the fold that replaced them. The one job
+-- pinning kept is COMPARISON: holding a section's settings open in a window of
+-- their own so two pages can be read, or matched, side by side. So the header
+-- gains an icon and nothing else -- no gear, no chevron, no count, all of which
+-- were second ways IN, and the header already is the way in.
+--
+-- ☠ EIGHT SECTIONS, NOT ELEVEN, AND THE SPLIT IS THE POINT. A pin is only worth
+-- having where there is something to MATCH against another page: Appearance,
+-- Layout, Position, Border, Duration Text, Stack Count, Duration Bar, Pandemic.
+-- Visibility, Buff Filters and Order & Limits decide what SHOWS rather than how
+-- it looks, and the Hide Duplicate Buffs control row is one checkbox. Those four
+-- must stay bare, so the negative half of this is asserted as hard as the
+-- positive half -- a pin that creeps onto Buff Filters is the drift this catches.
+--
+--   ✓ which sections pass a builder and therefore get a pin, and which cannot
+--   ✓ that the panel is built by the section's OWN builder, not a second list
+--   ✓ that the title is page-qualified out of the page's own tab label
+--   ✓ the kit's opt-in guard -- a section passing nothing builds nothing
+--   ✓ that the icon is a real button with the shared tooltip, above the fold's
+--     own click area, and that it yields nothing to the summary corner
+--   ✗ nothing about runtime: that a press opens a panel, that the panel lands
+--     beside the window and that two of them can stand at once are read by eye.
+-- ============================================================
+print("-- Buff Bar page: the pin")
+
+-- The eight that decide how the bar LOOKS...
+local PINNED = {
+    { label = "Appearance",   builder = "BuildBuffAppearanceGroup" },
+    { label = "Layout",       builder = "BuildBuffLayoutGroup" },
+    { label = "Position",     builder = "BuildBuffPositionGroup" },
+    { label = "Border",       builder = "BuildBuffBorderGroup" },
+    { label = "Duration Text",builder = "BuildBuffDurationGroup" },
+    { label = "Stack Count",  builder = "BuildBuffStackGroup" },
+    { label = "Duration Bar", builder = "BuildBuffDurationBarGroup" },
+    { label = "Pandemic",     builder = "BuildBuffPandemicGroup" },
+}
+-- ...and the three that decide what SHOWS. (The fourth abstainer, Hide Duplicate
+-- Buffs, is a control row and never had an OpenSection call to put a pin on.)
+local UNPINNED = { "Visibility", "Buff Filters", "Order & Limits" }
+
+do
+    -- ---- (a) who has one, and who must not ----------------------------
+    for _, g in ipairs(PINNED) do
+        local block = sectionBlock(g.label)
+        -- ☠ THE SECTION'S OWN BUILDER IS WHAT THE PANEL IS BUILT FROM. The
+        -- builder is the LAST argument to OpenSection and it is the opt-in: a
+        -- panel showing a curated subset of its section is the exact defect the
+        -- fold exists to remove, so the page may not name a second list of
+        -- controls anywhere. One builder, mounted twice.
+        check(block:find(g.builder .. ")", 1, true) ~= nil,
+              g.label .. ": the pin is opted in with the section's OWN builder")
+        -- ...and it is still the same builder the band and the classic box use,
+        -- so "mounted twice" became "mounted three times" and no more.
+        local calls = 0
+        for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+        eq(calls, 3, g.label .. ": ...still declared once and CALLED three times -- classic box, band, panel")
+    end
+    for _, label in ipairs(UNPINNED) do
+        local block = sectionBlock(label)
+        -- The call ends at the last predicate it was given; nothing follows it.
+        check(block:find("Group)", 1, true) == nil,
+              label .. ": decides what SHOWS, so it is handed no builder and grows no pin")
+    end
+
+    -- ---- (b) exactly one mount, in one named place --------------------
+    -- Pinned to a COUNT, which is what section 5 stopped doing when it let
+    -- PopoutContent back onto the page. Two would mean a section had grown a
+    -- private mount of its own outside OpenSection.
+    local mounts = 0
+    for _ in PAGE:gmatch("tools%.PopoutContent%(") do mounts = mounts + 1 end
+    eq(mounts, 1, "pin: the page mounts panel content in exactly ONE place -- OpenSection")
+
+    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    check(open:find("local mount = tools.PopoutContent(function(group, holder, reflow)", 1, true) ~= nil,
+          "pin: ...and that mount is the pin's")
+    -- ☠ THE SAME TABLE THE BAND GETS. `popout = true` is the only field that
+    -- differs and it picks no controls -- DurationFormatRefresh reads it to
+    -- re-flow the PANE rather than re-lay the page out (section 3).
+    check(open:find("builder({ group = group, parent = holder, refreshStates = reflow, popout = true })", 1, true) ~= nil,
+          "pin: ...handed the section's builder with the band's own table")
+
+    -- ---- (c) the title names its PAGE ---------------------------------
+    -- ☠ TWO PINNED PANELS BOTH READING "Appearance" ARE UNUSABLE, and comparing
+    -- exactly those two -- this page's and the Debuff Bar's -- is what the pin is
+    -- FOR. Out of the page's own tab label, never a string per section: a second
+    -- copy of the page's name goes stale the day the tab is renamed.
+    check(open:find('title = format("%s / %s", self.tabLabel or "", label)', 1, true) ~= nil,
+          "pin: the panel's title is the PAGE's own name and the section's")
+    check(PAGE:find('"Buff Bar /', 1, true) == nil,
+          "pin: ...and no section hardcodes the page's name")
+    check(open:find("window = DF.GUIFrame", 1, true) ~= nil,
+          "pin: ...the panel docks outside the settings window")
+    check(open:find("clipTo = self", 1, true) ~= nil,
+          "pin: ...and the page's scroll frame is what clips its connected chrome")
+
+    -- ---- (d) the eager build registers nothing with search -------------
+    -- ☠ PopoutContent BUILDS ITS FIRST INSTANCE AT PAGE-BUILD TIME and every
+    -- db-bound factory registers what it is handed, so without this the registry
+    -- would carry TWO entries for every setting in a pinnable section -- one from
+    -- the band, one from the panel's copy: two identical result cards under one
+    -- label, one key and one section. The same guard a hoisted control's build
+    -- takes (Controls.lua), and the reason section 5's search claim still holds.
+    check(open:find("if Search then Search.SuppressRegistration = true end", 1, true) ~= nil,
+          "pin: the panel's eager copy is suppressed from the settings registry")
+    check(open:find("if Search then Search.SuppressRegistration = held end", 1, true) ~= nil,
+          "pin: ...and the previous value is handed back, never hardcoded to nil")
+    local SEARCH = options_file_source("Features/Search.lua"):gsub("\r\n", "\n")
+    check(SEARCH:find("if self.SuppressRegistration then", 1, true) ~= nil,
+          "pin: ...against a flag Search:Register still honours")
+
+    -- ---- (e) the kit's opt-in guard ------------------------------------
+    -- ⚠ A SECTION THAT PASSES NOTHING BUILDS NOTHING -- exactly how `summary`
+    -- and `dimOn` behave, so no existing section on any other page moves.
+    check(WIDGETS:find('local pinOpts = opts and type(opts.pin) == "table" and opts.pin or nil', 1, true) ~= nil,
+          "pin kit: the section reads opts.pin defensively")
+    check(WIDGETS:find('if pinOpts and type(pinOpts.build) == "function" then', 1, true) ~= nil,
+          "pin kit: ...and builds nothing at all without a mount to open")
+    check(WIDGETS:find("if pinRightInset then section:SetHeaderRightInset(pinRightInset) end", 1, true) ~= nil,
+          "pin kit: ...a pinned header tells the title and tag what it took; a bare one is unbounded as before")
+
+    -- ---- (f) the icon itself -------------------------------------------
+    -- ☠ A REAL BUTTON WITH A REAL TOOLTIP. CreateGlyphButton wires
+    -- host:ShowTooltip / HideTooltip for us, which is the pack's only tooltip
+    -- route -- a bare texture with a click handler bolted on would have neither.
+    check(WIDGETS:find("local pinBtn = GUI:CreateGlyphButton(section, {", 1, true) ~= nil,
+          "pin kit: the pin is built from the kit's glyph button, not hand-rolled")
+    check(WIDGETS:find('tooltip = { title = L["Pin settings in popout"] },', 1, true) ~= nil,
+          "pin kit: ...with a localised tooltip through the shared helper")
+    -- ...rather than the raw frame. Matched on the CALLS, not on the word: the
+    -- rule itself is written down in a comment a few lines above the pin.
+    check(WIDGETS:find("GameTooltip:SetOwner", 1, true) == nil
+          and WIDGETS:find("GameTooltip:Show", 1, true) == nil,
+          "pin kit: ...and this file drives no raw GameTooltip")
+    -- ☠ ABOVE THE FOLD'S OWN CLICK AREA. clickArea is SetAllPoints over the whole
+    -- header; a sibling at the same frame level takes none of the presses that
+    -- land on it, so the pin would FOLD the section instead of pinning it.
+    check(WIDGETS:find("pinBtn:SetFrameLevel(clickArea:GetFrameLevel() + 2)", 1, true) ~= nil,
+          "pin kit: ...and sits above the click area that folds the section")
+    check(WIDGETS:find('pinBtn:SetPoint("RIGHT", section, "RIGHT", -PIN_EDGE, 0)', 1, true) ~= nil,
+          "pin kit: the icon owns the header's far right")
+    -- ...and the summary steps inboard of it. The summary corner is section 6's,
+    -- and it must not be drawn under the icon.
+    check(WIDGETS:find('section.summary:SetPoint("RIGHT", section.pinBtn, "LEFT", -6, 0)', 1, true) ~= nil,
+          "pin kit: ...and the value summary stops short of it")
+    check(WIDGETS:find('section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)', 1, true) ~= nil,
+          "pin kit: ...while a section with no pin keeps the edge it always had")
+
+    -- ---- (g) the panel machinery is REUSED, not re-written --------------
+    -- ☠ NO SECOND PANEL IMPLEMENTATION. The row behind the pin is the kit's own
+    -- PopoutRow, so the panel it opens is created, tethered, pinned, closed and
+    -- SWEPT by the code every other page's rows already use -- including the
+    -- mode switch's CloseAllPopoutRows, which walks the host's panel store and
+    -- therefore finds these without being told about them.
+    check(WIDGETS:find("row = GUI:CreatePopoutRow(section, {", 1, true) ~= nil,
+          "pin kit: the panel is the kit's PopoutRow, not a second implementation")
+    check(WIDGETS:find("GUI:CreatePopout(", 1, true) == nil,
+          "pin kit: ...and the section never reaches past it to the raw popout shell")
+    check(WIDGETS:find("build   = pinOpts.build,", 1, true) ~= nil,
+          "pin kit: ...opening the mount the page handed it")
+    -- ☠ IT OPENS ALREADY PINNED. An unpinned panel lives in the host's shared
+    -- pool, ONE per key, so a second section's press would RE-TARGET the first's
+    -- panel rather than stand beside it -- and two panels standing at once is the
+    -- entire feature. Popout:Pin takes the instance out of that pool.
+    check(WIDGETS:find("if po and not po.closed and not po.pinned then po:Pin(true) end", 1, true) ~= nil,
+          "pin kit: a press pins the panel out of the shared pool, so two can stand at once")
+    check(WIDGETS:find("r:TogglePopout()", 1, true) ~= nil,
+          "pin kit: ...and a second press on a lit pin takes that panel down again")
+    check(WIDGETS:find("onClose = function() section:SetPinLit(false) end,", 1, true) ~= nil,
+          "pin kit: any close -- the cross, a mode switch's sweep -- returns the header to plain")
+
+    -- ---- (h) the tether, which is the header and not the row -------------
+    -- ☠ THE ROW IS A CONTROLLER WITH NOTHING ON THE PAGE. It is never laid out
+    -- and never shown, so its own rect is the origin: left to tether to itself
+    -- the panel would dock in the corner of the screen with its beam pointing at
+    -- nothing. opts.tetherTo is the kit's answer, and BOTH readers take it --
+    -- Popout's contract is that the dock, the beam and the clip gate describe ONE
+    -- rect.
+    check(WIDGETS:find("tetherTo = section,", 1, true) ~= nil,
+          "pin kit: the panel leaves the HEADER the user pressed")
+    -- ...and the row itself never draws. Asserted on the wiring UNIQUE to the
+    -- pin rather than on a bare `row:Hide()`, which this file already contains
+    -- in a dropdown menu loop and which therefore proves nothing.
+    check(WIDGETS:find("row:SetOnPanelPinned(function() section:SetPinLit(true) end)", 1, true) ~= nil,
+          "pin kit: ...and the header lights the moment its panel is pinned")
+    check(WIDGETS:find('row:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)', 1, true) ~= nil,
+          "pin kit: ...while the controller row is parked on the header and hidden")
+    local ROW = ui_file_source("PopoutRow.lua"):gsub("\r\n", "\n")
+    check(ROW:find("row._tetherTo = opts.tetherTo", 1, true) ~= nil,
+          "kit: CreatePopoutRow takes an explicit tether region")
+    check(ROW:find("return t or (stripLive and strip) or row", 1, true) ~= nil,
+          "kit: ...falling back to the strip-or-row every existing page already gets")
+    check(ROW:find("tetherSource = tetherRegion(),", 1, true) ~= nil,
+          "kit: ...the beam and the source outline take it")
+    check(ROW:find("po:Follow(tetherRegion(), { outsideOf = row._window, clipTo = row._clipTo })", 1, true) ~= nil,
+          "kit: ...and so does the dock, so all three describe one rect")
 end

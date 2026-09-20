@@ -319,7 +319,7 @@ end
 -- profile key per record -- a schema change smuggled in under a re-presentation.
 -- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
 --
--- opts also takes `summary` and `dimOn` -- see where they are read, below.
+-- opts also takes `summary`, `dimOn` and `pin` -- see where they are read, below.
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
@@ -409,6 +409,146 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         end
     end
 
+    -- ============================================================
+    -- Optional PIN, at the header's FAR RIGHT -- one small icon and nothing else.
+    -- ------------------------------------------------------------
+    -- ☠ WHAT THIS IS FOR, AND WHAT IT IS NOT. Popouts are no longer how settings
+    -- are REVEALED on a converted page -- the section folds open in place, which
+    -- is the whole point of the rework. The one job pinning survives for is
+    -- COMPARISON: keeping a section's settings open in a window of their own so
+    -- two pages can be read, or matched, side by side. So there is no gear, no
+    -- chevron and no count here -- every one of those was a second way IN, and
+    -- the header already is the way in.
+    --
+    -- ☠ IT OPENS ALREADY PINNED, which is why it is a pin and not an "open".
+    -- An unpinned panel lives in the host's shared pool, ONE per key: opening a
+    -- second section's panel would re-target the first's rather than stand
+    -- beside it, so the compare this exists for could never have two panels in
+    -- it. Popout:Pin takes the instance OUT of that pool, so the next section
+    -- gets a fresh one -- and a pinned panel also survives a page switch, which
+    -- is what makes Buff Bar beside Debuff Bar possible at all.
+    --
+    -- ⚠ THE SECTION DOES NOT MOVE. It keeps its header, its fold state, its
+    -- summary and its controls, and stays fully usable while its panel is up --
+    -- the pin only lights. Nothing is ever hidden behind the panel, so there is
+    -- no dead end if the panel is dragged off-screen or forgotten.
+    --
+    -- ⚠ TWO LIVE COPIES OF ONE SETTING, AND WE ONLY SYNC STATE. The panel holds
+    -- a SECOND instance of the same builder bound to the same keys, and a write
+    -- in one repaints the other's grey-gating (the mount's reflow ends in the
+    -- page's RefreshStates) but NOT its bound values -- a slider moved in the
+    -- panel leaves the page's copy drawing the old thumb until the page is
+    -- rebuilt. Known, and the reason the pin is offered for COMPARING pages
+    -- rather than for editing one setting from two places at once.
+    --
+    -- opts.pin, all opt-in -- a caller that passes nothing builds nothing:
+    --   build    the mount fn from tools.PopoutContent -- the SAME builder the
+    --            section's own band was built from, so the panel is the section
+    --            rather than a curated subset of it
+    --   title    the panel's header. PAGE-QUALIFIED by the caller ("Buff Bar /
+    --            Appearance"): two pinned panels both reading "Appearance" is
+    --            the exact complaint this answers
+    --   window   the settings window the panel docks outside of
+    --   clipTo   the scroll frame that clips this header (the connected chrome
+    --            hides while the section is scrolled out of it)
+    --   db       the table (or fn -> table) the row re-resolves on refresh
+    --   accent   per-panel accent override; absent = the host's
+    local pinOpts = opts and type(opts.pin) == "table" and opts.pin or nil
+    local pinRightInset
+    if pinOpts and type(pinOpts.build) == "function" then
+        local PIN_SIZE, PIN_EDGE = 14, 10
+        -- Built on FIRST PRESS, not here. The mount behind it is eager (search
+        -- and any build-time db seeding depend on that -- see PopoutContent),
+        -- but the ROW is pure chrome: a plate this consumer never shows, whose
+        -- only job is to own the panel. Eight of them per page, built for a
+        -- press most users never make, is eight Buttons and their textures for
+        -- nothing.
+        local row
+        local function ensureRow()
+            if row then return row end
+            -- Guarded rather than called bare, the convention every reach into
+            -- the embedded pack follows: an older copy of it without the verb
+            -- must leave the header inert, not error under the user's cursor.
+            if type(GUI.CreatePopoutRow) ~= "function" then return nil end
+            row = GUI:CreatePopoutRow(section, {
+                label   = section.sectionTitleText,
+                title   = pinOpts.title or section.sectionTitleText,
+                db      = pinOpts.db,
+                window  = pinOpts.window,
+                clipTo  = pinOpts.clipTo,
+                accent  = pinOpts.accent,
+                build   = pinOpts.build,
+                -- ☠ THE HEADER IS THE TETHER, NOT THE PLATE. The row is never
+                -- laid out and never shown, so its own rect is the origin: the
+                -- panel would dock in the corner of the screen with its beam
+                -- pointing at nothing. See PopoutRow's opts.tetherTo.
+                tetherTo = section,
+                -- ...and the header goes back to plain the moment the panel
+                -- does -- its own cross, the family sweep, a mode switch's
+                -- CloseAllPopoutRows. Fired after the unbind, so `row.popout`
+                -- is already nil here.
+                onClose = function() section:SetPinLit(false) end,
+            })
+            -- ...and it stays off the page. Not Add'd to any group, so no
+            -- layout pass can reach it; hidden so nothing draws at the origin.
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)
+            row:Hide()
+            row:SetOnPanelPinned(function() section:SetPinLit(true) end)
+            return row
+        end
+
+        -- ⚠ A REAL BUTTON WITH A REAL TOOLTIP, through the kit's glyph helper --
+        -- which wires host:ShowTooltip / HideTooltip for us. Never raw
+        -- GameTooltip, and never a bare texture with a click handler bolted on.
+        --
+        -- ☠ ABOVE THE CLICK AREA. clickArea is SetAllPoints over the whole
+        -- header and is what folds the section; a sibling at the same frame
+        -- level would hand it every press that landed on the icon, so the pin
+        -- would fold the section instead of pinning it.
+        local pinBtn = GUI:CreateGlyphButton(section, {
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\pin",
+            size    = PIN_SIZE,
+            tooltip = { title = L["Pin settings in popout"] },
+            onClick = function()
+                local r = ensureRow()
+                if not r then return end
+                r:TogglePopout()
+                -- TogglePopout opened one (rather than closing what was up), so
+                -- take it out of the shared pool before another section's press
+                -- can re-target it -- see the essay above. Pin(true) is the
+                -- silent path: the press on this icon IS the confirmation.
+                local po = r.popout
+                if po and not po.closed and not po.pinned then po:Pin(true) end
+                section:SetPinLit(po and not po.closed and true or false)
+            end,
+        })
+        pinBtn:SetPoint("RIGHT", section, "RIGHT", -PIN_EDGE, 0)
+        pinBtn:SetFrameLevel(clickArea:GetFrameLevel() + 2)
+        section.pinBtn = pinBtn
+
+        -- LIT = this section's panel is up. The accent, because that is what
+        -- every other "this one is active" mark in the pack uses; the dim text
+        -- colour otherwise, so a section nobody has pinned reads as furniture.
+        section.SetPinLit = function(self, lit)
+            self.pinLit = lit and true or false
+            if self.pinLit then
+                self.pinBtn:SetGlyph(nil, GetThemeColor())
+            else
+                self.pinBtn:SetGlyph(nil, C_TEXT_DIM)
+            end
+        end
+        section:SetPinLit(false)
+        table.insert(parent.ThemeListeners, {
+            UpdateTheme = function() section:SetPinLit(section.pinLit) end,
+        })
+
+        -- What the title and the tag must stop short of -- the widget's own
+        -- contract for anything a caller hangs on the right. Applied at the
+        -- foot of this function, because SetHeaderRightInset is declared below.
+        pinRightInset = PIN_EDGE + PIN_SIZE + 6
+    end
+
     -- Optional VALUE SUMMARY at the header's RIGHT END -- what this section is
     -- currently set to, read off a SHUT header so a folded section still says
     -- something. Painted the way a popout row paints its own
@@ -434,7 +574,15 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             -- An empty tag is zero-wide and sits flush against the title.
             section.summary = section:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
             section.summary:SetPoint("LEFT", section.tag, "RIGHT", 8, 0)
-            section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)
+            -- ⚠ INBOARD OF THE PIN WHEN THERE IS ONE. The icon owns the far
+            -- right and the value stops short of it -- an icon drawn ON TOP of
+            -- the last word of a summary is the one order that cannot be read.
+            -- A section with no pin keeps the edge it always had.
+            if section.pinBtn then
+                section.summary:SetPoint("RIGHT", section.pinBtn, "LEFT", -6, 0)
+            else
+                section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)
+            end
             section.summary:SetJustifyH("RIGHT")
             section.summary:SetWordWrap(false)
             section.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -506,6 +654,11 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- first they are re-flowed now.
         if self._previewIconData then self:SetPreviewIcons(self._previewIconData) end
     end
+
+    -- The pin's own share of the right end, declared the moment the verb for it
+    -- exists. A section with no pin never calls this and is unbounded exactly as
+    -- it was.
+    if pinRightInset then section:SetHeaderRightInset(pinRightInset) end
 
     -- SEARCH: Track current section
     if DF.Search then

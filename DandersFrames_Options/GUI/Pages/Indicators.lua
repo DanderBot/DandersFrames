@@ -179,9 +179,67 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- ⚠ EXPANDED ON A FIRST RUN, deliberately: this is a test of folding, and
         -- nothing may start hidden. The user's own folds are what persist after that.
-        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn)
+        -- ☠ THE PIN IS OPT-IN, AND ONLY FOR A SECTION THAT DECIDES HOW THE BAR
+        -- LOOKS. `builder` is the section's own builder, and passing it is what
+        -- puts the pin icon on the header: Appearance, Layout, Position, Border,
+        -- Duration Text, Stack Count, Duration Bar and Pandemic -- the eight that
+        -- answer "what does it look like", which is what a user compares against
+        -- another page. Visibility, Buff Filters, Order & Limits and the Hide
+        -- Duplicate Buffs control row decide what SHOWS rather than how it looks;
+        -- there is nothing to match between two pages there, so they pass nothing
+        -- and build nothing.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder)
+            local pin
+            if builder then
+                -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
+                -- PopoutContent builds its first instance HERE, at page-build
+                -- time, and every db-bound factory registers whatever it is
+                -- handed -- so without this the settings registry would carry
+                -- TWO entries for every setting in the section, one from the
+                -- band on the page and one from the panel's copy: two identical
+                -- result cards under one label, one key and one section. The
+                -- same guard a hoisted control's build takes, for the same
+                -- reason (Controls.lua's RegisterHoistedControls).
+                --
+                -- ⚠ ONLY THE EAGER ONE NEEDS IT. A later instance -- pin, close,
+                -- pin again -- is built long after Search.RegistryBuilt is set,
+                -- and Search:Register early-returns on that.
+                local Search = DF.Search
+                local held = Search and Search.SuppressRegistration
+                if Search then Search.SuppressRegistration = true end
+                local mount = tools.PopoutContent(function(group, holder, reflow)
+                    -- ☠ THE SECTION'S OWN BUILDER, HANDED THE SAME TABLE the band
+                    -- gets. A panel showing a curated subset of its section is the
+                    -- exact defect this rework exists to remove, so there is no
+                    -- second list of controls anywhere -- one builder, twice.
+                    --
+                    -- `popout = true` is the one field that differs, and it picks
+                    -- no controls: DurationFormatRefresh reads it to re-flow the
+                    -- PANE rather than re-lay the page out, which is what a
+                    -- control inside a panel needs.
+                    builder({ group = group, parent = holder, refreshStates = reflow, popout = true })
+                end)
+                if Search then Search.SuppressRegistration = held end
+                pin = {
+                    build  = mount,
+                    -- ☠ PAGE-QUALIFIED, OUT OF THE PAGE'S OWN TAB LABEL. Two
+                    -- pinned panels both titled "Appearance" -- this page's and
+                    -- the Debuff Bar's -- are unusable, and comparing exactly
+                    -- those two is what the pin is FOR. Never a hardcoded string
+                    -- per section: the page already knows its name, and a second
+                    -- copy of it would go stale the day the tab is renamed.
+                    --
+                    -- The separator is punctuation, not prose -- both halves are
+                    -- already localised. Same call the page's own Join makes for
+                    -- its middot.
+                    title  = format("%s / %s", self.tabLabel or "", label),
+                    window = DF.GUIFrame,
+                    clipTo = self,
+                    db     = tools.RowDB,
+                }
+            end
             local section = GUI:CreateCollapsibleSection(self.child, label, true,
-                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn })
+                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin })
             section.hideOn = hideFn
             -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
             -- page and GUI.ColumnWidth). Without it the layout pass leaves it at the
@@ -797,7 +855,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         else
             -- Column 2 opens here, with the category header its four sections sit under.
             Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)
-            local band = OpenSection(L["Appearance"], "buffs_appearance", 2, BuffAppearanceSummary, BuffsOffRow)
+            local band = OpenSection(L["Appearance"], "buffs_appearance", 2, BuffAppearanceSummary, BuffsOffRow, nil, BuildBuffAppearanceGroup)
             BuildBuffAppearanceGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -861,7 +919,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(gridGroup, nil, 1)
         else
-            local band = OpenSection(L["Layout"], "buffs_layout", 2, BuffLayoutSummary, BuffsOffRow)
+            local band = OpenSection(L["Layout"], "buffs_layout", 2, BuffLayoutSummary, BuffsOffRow, nil, BuildBuffLayoutGroup)
             BuildBuffLayoutGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -904,7 +962,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(positionGroup, nil, 1)
         else
-            local band = OpenSection(L["Position"], "buffs_position", 2, BuffPositionSummary, BuffsOffRow)
+            local band = OpenSection(L["Position"], "buffs_position", 2, BuffPositionSummary, BuffsOffRow, nil, BuildBuffPositionGroup)
             BuildBuffPositionGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -999,7 +1057,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- as the section's first control, which is where classic has always had
             -- it; there is no row left to hoist it onto, so there is no twin to
             -- suppress either. It still greys the other seventeen from inside.
-            local band = OpenSection(L["Border"], "buffs_border", 2, BuffBorderSummary, BuffsOffRow)
+            local band = OpenSection(L["Border"], "buffs_border", 2, BuffBorderSummary, BuffsOffRow, nil, BuildBuffBorderGroup)
             BuildBuffBorderGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1103,7 +1161,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         else
             -- The second category header in column 2: the two text elements.
             Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)
-            local band = OpenSection(L["Duration Text"], "buffs_duration", 2, BuffDurationSummary, BuffsOffRow)
+            local band = OpenSection(L["Duration Text"], "buffs_duration", 2, BuffDurationSummary, BuffsOffRow, nil, BuildBuffDurationGroup)
             BuildBuffDurationGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1162,7 +1220,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(stackCountGroup, nil, 2)
         else
-            local band = OpenSection(L["Stack Count"], "buffs_stack", 2, BuffStackSummary, BuffsOffRow)
+            local band = OpenSection(L["Stack Count"], "buffs_stack", 2, BuffStackSummary, BuffsOffRow, nil, BuildBuffStackGroup)
             BuildBuffStackGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1243,7 +1301,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- away would be a title over nothing -- which is why these last two sit
             -- under no category header of their own.
             local band = OpenSection(L["Duration Bar"], "buffs_durationbar", 1,
-                BuffDurationBarSummary, BuffsOffRow, HideDurationBar)
+                BuffDurationBarSummary, BuffsOffRow, HideDurationBar, BuildBuffDurationBarGroup)
             BuildBuffDurationBarGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1333,7 +1391,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- the silent-capability-skip rule. The helper's own controls already say
             -- why on an older build; this is the header agreeing with them.
             local band = OpenSection(L["Pandemic"], "buffs_pandemic", 1, BuffPandemicSummary,
-                function(d) return not pandemicSupported or BuffsOffRow(d) end, HideDurationBar)
+                function(d) return not pandemicSupported or BuffsOffRow(d) end, HideDurationBar,
+                BuildBuffPandemicGroup)
             BuildBuffPandemicGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
