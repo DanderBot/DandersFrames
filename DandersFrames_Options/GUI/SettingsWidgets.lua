@@ -318,6 +318,8 @@ end
 -- a title built from user data (a spell name, a group name) adds one PERMANENT
 -- profile key per record -- a schema change smuggled in under a re-presentation.
 -- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
+--
+-- opts also takes `summary` and `dimOn` -- see where they are read, below.
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
@@ -404,6 +406,63 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         else
             self.tag:SetText("")
             self.tag:Hide()
+        end
+    end
+
+    -- Optional VALUE SUMMARY at the header's RIGHT END -- what this section is
+    -- currently set to, read off a SHUT header so a folded section still says
+    -- something. Painted the way a popout row paints its own
+    -- (DandersUI/PopoutRow.lua): small, dim, right-justified, never wrapped.
+    --
+    -- ⚠ SHUT ONLY. Expanded, the controls themselves are the answer, and a
+    -- second copy of it sitting over them reads as a control of its own.
+    --
+    -- ⚠ OPT-IN, BOTH OF THESE. A caller that passes neither gets no fontstring
+    -- and no refreshContent, so nothing an existing section draws moves.
+    --
+    -- opts.summary  fn(db) -> string, rendered in the corner while shut
+    -- opts.dimOn    fn(db) -> bool, greys the header (SetPreviewDimmed) when the
+    --               section's own feature is off -- the header half of
+    --               grey-when-disabled, for a section whose band carries the
+    --               control half.
+    local summaryFn = opts and opts.summary or nil
+    local dimFn     = opts and opts.dimOn or nil
+    if summaryFn or dimFn then
+        if summaryFn then
+            -- ⚠ ANCHORED OFF THE TAG, NOT THE TITLE, so a section that uses both
+            -- keeps them in reading order instead of drawing one over the other.
+            -- An empty tag is zero-wide and sits flush against the title.
+            section.summary = section:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            section.summary:SetPoint("LEFT", section.tag, "RIGHT", 8, 0)
+            section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)
+            section.summary:SetJustifyH("RIGHT")
+            section.summary:SetWordWrap(false)
+            section.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            section.summary:SetText("")
+        end
+        -- Repainted by whichever state pass owns this section: Panel.lua's page
+        -- pass for a page child, DandersUI Sections' RefreshChildStates for a
+        -- group child. Both call refreshContent on a SHOWN widget, and a section
+        -- header is always shown -- only the children it registered fold away.
+        -- Toggle() ends in that same pass, so the corner fills the moment it shuts.
+        --
+        -- ⚠ DEDUPED ON THE RENDERED STRING. refreshContent runs on EVERY state
+        -- pass and SetText re-measures; the summary only moves when a setting does.
+        section.refreshContent = function(self, d)
+            if dimFn then self:SetPreviewDimmed(dimFn(d) and true or false) end
+            local fs = self.summary
+            if not fs then return end
+            local text = ""
+            if not self.expanded and summaryFn then text = summaryFn(d) or "" end
+            if self._dfSummaryText ~= text then
+                self._dfSummaryText = text
+                fs:SetText(text)
+            end
+            if self.previewDimmed then
+                fs:SetTextColor(0.5, 0.5, 0.5)
+            else
+                fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            end
         end
     end
 

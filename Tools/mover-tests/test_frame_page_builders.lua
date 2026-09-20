@@ -1603,7 +1603,11 @@ do
     -- is scoped to the page slice and this one is not.
     local SWEPT = {
         ["GUI/Pages/Options.lua"]    = 21,  -- Frame 4 + Tooltips/Pet/Settings/Fading/Visibility 17
-        ["GUI/Pages/Indicators.lua"] = 31,  -- the six aura pages
+        -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
+        -- eleven popout rows became folds on the page, so the five it used to opt
+        -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)
+        -- went with them. The other five aura pages are untouched.
+        ["GUI/Pages/Indicators.lua"] = 26,  -- the five unswept aura pages
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
         ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2

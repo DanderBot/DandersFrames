@@ -3,21 +3,30 @@ local NS = ...
 -- ============================================================
 -- BUFF BAR PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Auras > Buff Bar is the widest page the sweep has taken: TWELVE groups, eleven
--- of which become feature rows in four bands and one of which -- a lone checkbox
--- -- becomes a CONTROL ROW on the same plate.
+-- Auras > Buff Bar is the widest page the sweep has taken: TWELVE groups.
 --
---   "Content" band     Visibility (hoists showBuffs, the PAGE gate), Buff
---                      Filters, Order & Limits, and the Hide Duplicate Buffs
---                      control row.
---   "Icon" band        Appearance, Layout, Position, Border (hoists
---                      buffShowBorder through the toolkit's noShowToggle).
---   "Text" band        Duration Text (hoists buffShowDuration), Stack Count.
---   headerless band    Duration Bar (hoists buffDurationBarEnabled) and
---                      Pandemic (hoists buffPandemicEnabled through the new
---                      noEnableToggle) -- both carry the same hideOn, so a
---                      header would be a section title standing over nothing on
---                      a client with no factory row.
+-- ☠ AND IT IS NOW THE COLLAPSIBLE-SECTION TEST. Eleven of those twelve were
+-- popout ROWS -- a plate with a bottom strip that opened a floating panel, a
+-- "N more settings" badge and a pin. Testers could not find settings in it, and
+-- a control hoisted onto a row while the same control sat in the panel behind it
+-- read as two settings. So on THIS PAGE ONLY they are collapsible SECTIONS: the
+-- whole header opens and shuts the section in place, the controls live on the
+-- page, and a shut header keeps the row's old summary string in its right
+-- corner. The twelfth, a lone checkbox, is still a CONTROL ROW.
+--
+--   column 1   "Content"  Visibility, Buff Filters, Order & Limits and the
+--                         Hide Duplicate Buffs control row.
+--              ...then    Duration Bar and Pandemic, the two 12.1-factory
+--                         extras, under NO category header: both carry the same
+--                         hideOn, so a header there would be a title standing
+--                         over nothing on a client with no factory row.
+--   column 2   "Icon"     Appearance, Layout, Position, Border.
+--              "Text"     Duration Text, Stack Count.
+--
+-- ☠ THE DEBUFF BAR PAGE IS DELIBERATELY UNTOUCHED, and its own census file
+-- still pins every popout row it has. The two pages are built from the same
+-- shapes all the way down that file and normally move together; the whole point
+-- of this one is to put the two side by side in game and pick one.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db, the filter
@@ -26,17 +35,16 @@ local NS = ...
 --
 -- What that buys, and what it does not:
 --   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts, less whatever
---     the row hoisted.
---   ✓ that the Duration Format dropdown stopped rebuilding the page FROM INSIDE
---     A PANE, while classic still does exactly what it always did.
---   ✓ that the page gate greys exactly the rows it greyed boxes in classic.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
+--     slot height, in order -- UNCHANGED from the golden taken before the popout
+--     sweep, which is the evidence that neither layout's controls moved.
+--   ✓ that ONE builder still serves both layouts, and that the section branch
+--     now hands it EXACTLY what the classic branch hands it.
+--   ✓ that every section is in the column its band was in, with a STABLE
+--     collapse key rather than its localised title.
+--   ✓ that each section's summary and grey gate are the row's, verbatim.
+--   ✓ that the popout furniture is gone from this page ENTIRELY rather than
+--     half-removed -- no rows, no claims, no counts, no footers, no hoists.
+--   ✗ nothing about runtime behaviour -- the folding, the greying and the
 --     summaries are read by eye and by the in-game checklist.
 -- ============================================================
 
@@ -45,12 +53,13 @@ local NS = ...
 -- every one of them otherwise. Nothing here asserts about line endings.
 local SRC = options_file_source("GUI/Pages/Indicators.lua"):gsub("\r\n", "\n")
 local CTRL = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
+local WIDGETS = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Frame page's, plus this page's composites) ----
 -- The four extra kinds are the shared helpers this page mounts as single
 -- widgets or single blocks. Without them the census would silently skip a
 -- growth control, a whole TextStyle block and the entire border toolkit --
--- which is most of what two of these rows ARE.
+-- which is most of what two of these sections ARE.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
@@ -123,30 +132,31 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
-local function esc(s) return (s:gsub("%p", "%%%0")) end
-
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts. ⚠ The frontier keeps `colorLabel = L[...]` (the
--- TextStyle block's own option) from answering as a row label.
-local function rowOpts(labelKey)
-    local a = PAGE:find('%f[%w]label%s*=%s*L%["' .. esc(labelKey) .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
+-- ONE SECTION'S BLOCK: its OpenSection call, the builder mount under it and the
+-- CloseSection that puts its band in. Read as "from the call to the close" for
+-- the same reason the Frame page's census reads declaration-to-declaration: two
+-- of these calls wrap onto a second line, so a line-bounded match would drop
+-- half of what they say.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a collapsible section is opened for " .. labelKey)
     if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
+    local b = PAGE:find("CloseSection(band)", a, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    return PAGE:sub(a, (b or a) + #"CloseSection(band)"):gsub("%s+", " ")
 end
 
 -- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel, boxHeader, column)
+local function checkShared(builder, label, boxHeader, classicColumn, collapseKey, column, summary)
     -- ONE builder, BOTH layouts: the declaration and the two mounts.
     local calls = 0
     for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
+    eq(calls, 3, label .. ": declared once, mounted twice -- classic box and page section")
 
     -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
+    -- the column it always had. Not one line of it moved for the fold.
     check(PAGE:find('GUI:CreateHeader(self.child, L["' .. boxHeader .. '"])', 1, true) ~= nil,
-          rowLabel .. ": the classic box keeps its own header (" .. boxHeader .. ")")
+          label .. ": the classic box keeps its own header (" .. boxHeader .. ")")
     -- The box VARIABLE, found by walking every bare 280 box on the page and
     -- asking which one puts this header on itself. A fixed line distance would
     -- not do: two of these boxes carry a hideOn and an essay between the two
@@ -157,28 +167,39 @@ local function checkShared(builder, rowLabel, boxHeader, column)
         local hit = PAGE:find(want, at, true)
         if hit and hit - at < 900 then box = name break end
     end
-    check(box ~= nil, rowLabel .. ": ...and that header belongs to a bare 280 box")
+    check(box ~= nil, label .. ": ...and that header belongs to a bare 280 box")
     if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. column .. ")", 1, true) ~= nil,
-              rowLabel .. ": ...which still goes to column " .. column)
+        check(PAGE:find("Add(" .. box .. ", nil, " .. classicColumn .. ")", 1, true) ~= nil,
+              label .. ": ...which still goes to column " .. classicColumn)
     end
 
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
+    -- ---- and the section half -----------------------------------------
+    local block = sectionBlock(label)
+    -- ☠ A STABLE COLLAPSE KEY, NEVER THE TITLE. CreateCollapsibleSection keys
+    -- its SavedVariables slot on whatever it is handed, so a localised or
+    -- reworded title would write a second slot and orphan the user's fold.
+    check(block:find('OpenSection(L["' .. label .. '"], "' .. collapseKey .. '", ' .. column .. ',', 1, true) ~= nil,
+          label .. ": the section carries a stable collapse key and sits in column " .. column)
+    check(block:find(summary, 1, true) ~= nil,
+          label .. ": ...and prints the row's own summary in its shut corner")
+    -- The SAME builder the classic arm calls, handed the SAME table: no
+    -- `popout`, no `hoistToggle`, so the two mounts are one call twice.
+    check(block:find(builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          label .. ": ...and mounts the builder exactly as classic does")
+    return block
 end
 
 -- ============================================================
 -- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS VOCABULARY MOVED UP
 -- ============================================================
-print("-- Buff Bar page: the shared popout machinery and the page-scope vocabulary")
+print("-- Buff Bar page: the shared machinery and the page-scope vocabulary")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
+    -- ⚠ STILL TAKEN IN FULL, with no row left on the page. Its PROLOGUE closes
+    -- any panel a previous build left standing and retires that build's holders
+    -- -- a mode switch into this page can arrive with one open from the Debuff
+    -- Bar page -- and the page still wants BandWidth and RegisterControlRow.
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
 
@@ -193,30 +214,53 @@ do
     check(PAGE:find("_popoutRowForKey", 1, true) == nil,
           "tools: ...nor the search row map")
 
-    -- ---- the four bands ----------------------------------------------
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Content and the Factory band fill column 1,
-    -- Icon and Text column 2 -- the page's two-column split. A band has to be BUILT at
-    -- the width the layout pass will give it, because a group sizes its rows off its
-    -- width at build time; BandWidth's argument says which width that is.
-    local BAND_COL = { contentBand = 1, iconBand = 2, textBand = 2, factoryBand = 1 }
-    for _, b in ipairs({ "contentBand", "iconBand", "textBand", "factoryBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
-              "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
+    -- ---- the section helpers, declared once ---------------------------
+    -- ☠ THE SECTION AND ITS BAND ARE BOTH PAGE CHILDREN, and that is the whole
+    -- mechanism. Panel.lua's state pass is the only thing that reads
+    -- `widget.collapsibleSection` and hides what a shut section registered; a
+    -- group nested inside another group never reaches it.
+    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn)", 1, true) ~= nil,
+          "sections: the page opens a section in one named place")
+    check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
+          "sections: ...and closes one in another")
+    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn })", 1, true) ~= nil,
+          "sections: ...built from the kit's own section, at its column's width")
+    check(open:find("Add(section, 36, col)", 1, true) ~= nil,
+          "sections: ...the header is a page child, so the state pass can reach it")
+    check(open:find("GUI:CreateSettingsGroup(self.child, tools.BandWidth(col), { chromeless = true })", 1, true) ~= nil,
+          "sections: ...the band is chromeless, at the width the layout pass will give it")
+    check(open:find("section:RegisterChild(band)", 1, true) ~= nil,
+          "sections: ...and registered to the section, which is what makes the fold hide it")
+    -- ☠ EXPANDED ON A FIRST RUN. This is a test of FOLDING, so nothing may start
+    -- hidden; the user's own folds are what persist after that.
+    check(open:find("label, true,", 1, true) ~= nil,
+          "sections: ...and every section starts expanded, so nothing is hidden by default")
+    -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL. `Add` resolves a widget's slot
+    -- height on the spot, so a band Add'd while still empty gets no room.
+    local close = PAGE:match("local function CloseSection%(band%)(.-)\n        end\n")
+    check(close ~= nil and close:find("Add(band, nil, band.dfSectionCol)", 1, true) ~= nil,
+          "sections: the band is added in its own right, in the column its section is in")
+
+    -- ---- the three category headers -----------------------------------
+    -- ⚠ ADDED STRAIGHT TO A COLUMN, not into a band: there is no band spanning a
+    -- whole category any more, so the header that names one is a page child like
+    -- the sections under it.
+    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" }, { "Text", "2" } }) do
+        check(PAGE:find('Add(GUI:CreateHeader(self.child, L["' .. pair[1] .. '"]), 40, ' .. pair[2] .. ')', 1, true) ~= nil,
+              "bands: the " .. pair[1] .. " category header opens column " .. pair[2])
     end
-    for _, pair in ipairs({ { "contentBand", "Content" }, { "iconBand", "Icon" }, { "textBand", "Text" } }) do
-        check(PAGE:find(pair[1] .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. pair[2] .. '"]), 40)', 1, true) ~= nil,
-              "bands: ..." .. pair[1] .. " names its section with the locale's own " .. pair[2])
-    end
-    -- ☠ AND THE FOURTH HAS NO HEADER. Both its rows carry HideDurationBar, so a
+    -- ☠ AND THE FACTORY PAIR HAS NO HEADER. Both carry HideDurationBar, so a
     -- header there would be a section title left standing over nothing.
-    check(PAGE:find("factoryBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "bands: the factory-only band is headerless, because both its rows can hide")
+    for _, band in ipairs({ "contentBand", "iconBand", "textBand", "factoryBand" }) do
+        check(PAGE:find(band, 1, true) == nil,
+              "bands: the old " .. band .. " is gone -- every section carries a band of its own")
+    end
 
     -- ---- the vocabulary, at PAGE scope, declared exactly once ---------
-    -- The rows print the chosen value as their summary, and a summary is built
-    -- outside the group's builder -- so the word has to come out of the same
-    -- table the dropdown offers.
+    -- The sections print the chosen value as their SUMMARY, and a summary is
+    -- built outside the group's builder -- so the word has to come out of the
+    -- same table the dropdown offers.
     for _, name in ipairs({ "anchorOptions", "buffSortOptions", "durationFormatOptions",
                             "durBarPositionOptions" }) do
         local decls = 0
@@ -248,72 +292,80 @@ do
     for _ in PAGE:gmatch("self:HookScript%(\"OnShow\"") do hooks = hooks + 1 end
     eq(hooks, 1, "vocab: ...and the OnShow invalidation is hooked exactly once")
     check(builderBody("BuildBuffFilterGroup"):find("HookScript", 1, true) == nil,
-          "vocab: ...from outside the builder, so a pinned second pane cannot re-take it")
+          "vocab: ...from outside the builder, so nothing can re-take it per instance")
 end
 
 -- ============================================================
--- 2. THE PAGE GATE -- showBuffs greys the rows it greyed boxes
+-- 2. THE PAGE GATE -- showBuffs greys the sections it greyed rows
 -- ============================================================
 print("-- Buff Bar page: the page gate")
 do
     check(PAGE:find("local function BuffsOffRow(d) return not (d or db).showBuffs end", 1, true) ~= nil,
           "gate: the page names its own gate once")
 
-    -- Nine rows greyed, and they are exactly the nine groups classic dims.
-    for _, row in ipairs({ "orderRow", "appearanceRow", "layoutRow", "positionRow",
-                           "borderRow", "durationRow", "stackRow", "durBarRow" }) do
-        check(PAGE:find(row .. ".disableOn = BuffsOffRow", 1, true) ~= nil,
-              "gate: " .. row .. " greys while the bar is off")
+    -- Eight sections greyed, and they are exactly the eight the rows greyed --
+    -- which are exactly the groups classic dims. `dimOn` is the header half:
+    -- the kit greys the section title, the band's own disableOn/disableChildrenOn
+    -- greys the controls under it, exactly as they did inside a pane.
+    for _, name in ipairs({ "Order & Limits", "Appearance", "Layout", "Position",
+                            "Border", "Duration Text", "Stack Count", "Duration Bar" }) do
+        check(sectionBlock(name):find("BuffsOffRow", 1, true) ~= nil,
+              "gate: the " .. name .. " section greys while the bar is off")
     end
     -- Pandemic greys for a second reason as well: the silent-capability-skip
     -- rule, which the suppressed Enable checkbox used to carry itself.
     check(PAGE:find("return not pandemicSupported or BuffsOffRow(d)", 1, true) ~= nil,
-          "gate: the Pandemic row greys on an unsupported client too, since it holds that tick now")
+          "gate: the Pandemic section greys on an unsupported client too")
 
     -- ...and the three that classic has NEVER dimmed do not start now.
-    check(PAGE:find("visRow.disableOn", 1, true) == nil,
-          "gate: the Visibility row is not greyed -- it carries the gate's own tick")
-    check(PAGE:find("filterRow.disableOn", 1, true) == nil,
-          "gate: the Buff Filters row is not greyed -- its box never was")
+    for _, name in ipairs({ "Visibility", "Buff Filters" }) do
+        check(sectionBlock(name):find("BuffsOffRow", 1, true) == nil,
+              "gate: the " .. name .. " section is not greyed -- its box never was")
+    end
     check(PAGE:find("dedupRow.disableOn", 1, true) == nil,
           "gate: the Hide Duplicate Buffs control row is not greyed -- its box never was")
 
-    -- ☠ THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER. Only
-    -- the three panes whose first child is a GATED CONTROL need the repair.
-    check(PAGE:find("local function GatePaneFirstChild(group)", 1, true) ~= nil,
-          "gate: the index-1 repair is declared once")
-    -- Call SITES only: the declaration line is `local function
-    -- GatePaneFirstChild(group)`, which has code rather than only whitespace
-    -- between the line break and the name.
+    -- ☠ AND THE INDEX-1 REPAIR IS GONE, as a deletion rather than an omission. A
+    -- group gate used to skip child one because in a classic box that child is
+    -- the HEADER; a band's first child is a real control. DandersUI Sections'
+    -- RefreshChildStates now skips on the `isSectionHeader` MARK instead of on
+    -- the position, so a band greys from `group.disableChildrenOn` on its own.
+    -- ⚠ THE DECLARATION AND THE CALL SITES, not the WORD. The border builder's
+    -- own comment still names the repair to say why that group never needed one,
+    -- and that sentence is as true now as it was.
+    check(PAGE:find("local function GatePaneFirstChild(", 1, true) == nil,
+          "gate: the index-1 repair is gone -- the kit skips on the header MARK now")
     local gated = 0
     for _ in PAGE:gmatch("\n%s+GatePaneFirstChild%(group%)\n") do gated = gated + 1 end
-    eq(gated, 3, "gate: ...and applied at exactly three mounts (Order & Limits, Duration Text, Stack Count)")
-    -- Each of those three is a builder that sets a group-wide gate; a pane that
-    -- opens on a label or on a control with its own disableOn does not need it.
+    eq(gated, 0, "gate: ...and nothing on the page still applies it")
+    check(WIDGETS:find("container.isSectionHeader = true", 1, true) ~= nil,
+          "gate: ...and GUI:CreateHeader is what stamps that mark")
+    -- The three builders that carry a group-wide gate still carry it, because a
+    -- band is a group like any other.
     for _, b in ipairs({ "BuildBuffOrderGroup", "BuildBuffDurationGroup", "BuildBuffStackGroup" }) do
         check(builderBody(b):find("group.disableChildrenOn = function(d) return not d.showBuffs end", 1, true) ~= nil,
-              "gate: " .. b .. " carries the group gate that skips index 1")
+              "gate: " .. b .. " still carries the group gate")
     end
 end
 
 -- ============================================================
--- 3. THE DURATION FORMAT GATE -- a state pass in BOTH layouts
+-- 3. THE DURATION FORMAT GATE -- a state pass, never a rebuild
 -- Picking a format re-gates the two Hide Above controls (neither composes with
 -- Percent). Classic used to pay for that with a page REBUILD, which leaked the
--- whole page into GUI._trashFrame per pick; it re-lays the page now. A rebuild
--- inside a pane retires the row the user is clicking through.
+-- whole page into GUI._trashFrame per pick; it re-lays the page now.
 -- ============================================================
 print("-- Buff Bar page: the duration format gate")
 do
     local gate = PAGE:match("local function DurationFormatRefresh%(tools2%)(.-)\n        end")
     check(gate ~= nil, "format gate: the page decides this once, in a named function")
     if gate then
+        -- ⚠ THE PANE BRANCH STAYS, UNEXERCISED. The builder is untouched, and
+        -- leaving the branch in is what keeps it one function rather than two
+        -- the day a row comes back.
         check(gate:find("if tools2.popout then", 1, true) ~= nil,
               "format gate: ...branching on which layout the group was built for")
-        check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
-              "format gate: ...the pane re-runs the state passes")
         check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
-              "format gate: ...and classic re-lays the page")
+              "format gate: ...and the page arm re-lays the page")
         check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
               "format gate: ...without rebuilding it (the rebuild leaked the page)")
     end
@@ -332,16 +384,19 @@ do
               "format gate: " .. b .. " never rebuilds the page from inside itself")
     end
 
-    -- Every popout mount declares itself as one; eleven rows, eleven mounts.
+    -- ☠ AND NOT ONE MOUNT DECLARES ITSELF A PANE ANY MORE. Eleven did; a section
+    -- hands the builder the classic table, so a `popout = true` left behind here
+    -- would be a builder taking the pane branch on a page that has no panes.
     local popouts = 0
     for _ in PAGE:gmatch("popout = true,") do popouts = popouts + 1 end
-    eq(popouts, 11, "format gate: all eleven popout mounts declare themselves as panes")
+    eq(popouts, 0, "format gate: no mount on the page declares itself a pane")
 end
 
 -- ============================================================
 -- 4. THE ELEVEN BUILDERS, CONTROL BY CONTROL
 -- Every golden below is the census of the PRE-CHANGE source: same factories,
--- same L keys, same db keys, same slot heights, in the same order.
+-- same L keys, same db keys, same slot heights, in the same order. Not one of
+-- them moved for the fold, which is the point of keeping them here unchanged.
 -- ============================================================
 local VISIBILITY = {
     { "checkbox", "Show Buffs", "showBuffs", 30 },
@@ -418,266 +473,180 @@ local BUFF_PANDEMIC = {
     { "pandemic", "(none)", "(none)", nil },
 }
 
--- ---- the rows that hoist a tick --------------------------------------
-local HOISTED = {
+-- The eleven, in the order the page builds them. `classicColumn` is where the
+-- 280 box still goes; `column` is where the SECTION goes, which is where the
+-- band that held the row went -- the two differ on Border and Pandemic, which
+-- classic crosses for column balance and the swept layout never did.
+local SECTIONS = {
     { builder = "BuildVisibilityGroup", label = "Visibility", boxHeader = "Visibility",
-      golden = VISIBILITY, countVar = "VISIBILITY_COUNT", column = "1", hoistedIn = 1,
-      row = "visRow", band = "contentBand", toggleKey = "showBuffs",
-      toggleLabel = "Show Buffs", commit = "OnShowBuffsToggle",
-      summary = "VisibilitySummary" },
-    { builder = "BuildBuffBorderGroup", label = "Border", boxHeader = "Border",
-      golden = BUFF_BORDER, countVar = "BUFF_BORDER_COUNT", column = "1", hoistedIn = 0,
-      row = "borderRow", band = "iconBand", toggleKey = "buffShowBorder",
-      toggleLabel = "Show Border", commit = "OnBuffBorderToggle",
-      summary = "BuffBorderSummary", apply = "ApplyBuffBorder" },
-    { builder = "BuildBuffDurationGroup", label = "Duration Text", boxHeader = "Duration Text",
-      golden = BUFF_DURATION, countVar = "BUFF_DURATION_COUNT", column = "2", hoistedIn = 1,
-      row = "durationRow", band = "textBand", toggleKey = "buffShowDuration",
-      toggleLabel = "Show Duration", commit = "OnBuffDurationToggle",
-      summary = "BuffDurationSummary", apply = "ApplyBuffDurationText" },
-    { builder = "BuildBuffDurationBarGroup", label = "Duration Bar", boxHeader = "Duration Bar",
-      golden = BUFF_DURBAR, countVar = "BUFF_DURBAR_COUNT", column = "2", hoistedIn = 1,
-      row = "durBarRow", band = "factoryBand", toggleKey = "buffDurationBarEnabled",
-      toggleLabel = "Enable Duration Bar", commit = "OnBuffDurationBarToggle",
-      summary = "BuffDurationBarSummary", apply = "BuffBarChanged" },
-    { builder = "BuildBuffPandemicGroup", label = "Pandemic", boxHeader = "Pandemic",
-      golden = BUFF_PANDEMIC, countVar = "BUFF_PANDEMIC_COUNT", column = "2", hoistedIn = 0,
-      row = "pandemicRow", band = "factoryBand", toggleKey = "buffPandemicEnabled",
-      toggleLabel = "Enable", commit = "OnBuffPandemicToggle",
-      summary = "BuffPandemicSummary", apply = "ApplyBuffPandemic" },
-}
-
-for _, g in ipairs(HOISTED) do
-    print("-- Buff Bar page: " .. g.label)
-    local body = builderBody(g.builder)
-    checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.boxHeader, g.column)
-
-    -- The hoist. Two shapes: a checkbox the page itself builds (skipped behind
-    -- the flag, because classic still needs it), or a composite helper told not
-    -- to build its own -- noShowToggle for the border toolkit, noEnableToggle
-    -- for the pandemic section.
-    if g.hoistedIn == 1 then
-        check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-              g.label .. ": the enable checkbox is skipped when the row has hoisted it")
-    else
-        check(body:find("tools2.hoistToggle or nil", 1, true) ~= nil,
-              g.label .. ": the composite is told not to build its own toggle when the row has it")
-    end
-
-    local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-    check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-
-    local opts = rowOpts(g.label)
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"' .. g.toggleKey .. '"%s*}') ~= nil,
-          g.label .. ": the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": ...it declares a summary of its own")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*" .. g.commit) ~= nil,
-          g.label .. ": ...and a commit that is not a page rebuild")
-
-    -- ...into the right band.
-    check(PAGE:find("local " .. g.row .. " = " .. g.band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the " .. g.band)
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD.
-    local commit = PAGE:match("local function " .. g.commit .. "%(%)(.-)\n            end")
-                or PAGE:match("local function " .. g.commit .. "%(%)(.-)\n        end")
-    check(commit ~= nil, g.label .. ": the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              g.label .. ": ...and never rebuilds the page")
-        check(commit:find("RefreshStates()", 1, true) ~= nil,
-              g.label .. ": ...it re-runs the state passes instead")
-        check(commit:find("ReflowMounted()", 1, true) ~= nil,
-              g.label .. ": ...and reflows the open panes")
-    end
-
-    -- The hoisted toggle keeps its search entry under the SAME label and key the
-    -- suppressed checkbox carried, or the setting becomes unfindable in the
-    -- popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(' .. g.row .. ', L["' .. g.toggleLabel .. '"], "' .. g.toggleKey .. '", ' .. g.commit .. ')', 1, true) ~= nil,
-          g.label .. ": the hoisted toggle keeps its search entry")
-
-    -- The strip.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    if g.apply then
-        check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-              g.label .. ": ...and Reset Group / Hold: Defaults push the change into the frames")
-    else
-        check(PAGE:find("tools.WireFooter(" .. g.row .. ", function()", 1, true) ~= nil,
-              g.label .. ": ...and a footer with the group's own apply")
-    end
-end
-
--- ---- the rows with no tick to hoist ----------------------------------
-local WAYIN = {
+      golden = VISIBILITY, classicColumn = "1", key = "buffs_visibility", column = "1",
+      summary = "VisibilitySummary", hoistedIn = 1 },
     { builder = "BuildBuffFilterGroup", label = "Buff Filters", boxHeader = "Buff Filters",
-      golden = BUFF_FILTERS, column = "1", row = "filterRow", band = "contentBand",
+      golden = BUFF_FILTERS, classicColumn = "1", key = "buffs_filters", column = "1",
       summary = "BuffFilterSummary" },
     { builder = "BuildBuffOrderGroup", label = "Order & Limits", boxHeader = "Order & Limits",
-      golden = BUFF_ORDER, countVar = "BUFF_ORDER_COUNT", column = "1",
-      row = "orderRow", band = "contentBand", summary = "BuffOrderSummary",
-      apply = "BuffOrderChanged" },
+      golden = BUFF_ORDER, classicColumn = "1", key = "buffs_order", column = "1",
+      summary = "BuffOrderSummary" },
     { builder = "BuildBuffAppearanceGroup", label = "Appearance", boxHeader = "Appearance",
-      golden = BUFF_APPEARANCE, countVar = "BUFF_APPEARANCE_COUNT", column = "2",
-      row = "appearanceRow", band = "iconBand", summary = "BuffAppearanceSummary",
-      apply = "ApplyBuffPosition" },
+      golden = BUFF_APPEARANCE, classicColumn = "2", key = "buffs_appearance", column = "2",
+      summary = "BuffAppearanceSummary" },
     { builder = "BuildBuffLayoutGroup", label = "Layout", boxHeader = "Layout",
-      golden = BUFF_LAYOUT, countVar = "BUFF_LAYOUT_COUNT", column = "1",
-      row = "layoutRow", band = "iconBand", summary = "BuffLayoutSummary",
-      apply = "ApplyBuffPosition" },
+      golden = BUFF_LAYOUT, classicColumn = "1", key = "buffs_layout", column = "2",
+      summary = "BuffLayoutSummary" },
     { builder = "BuildBuffPositionGroup", label = "Position", boxHeader = "Position",
-      golden = BUFF_POSITION, countVar = "BUFF_POSITION_COUNT", column = "1",
-      row = "positionRow", band = "iconBand", summary = "BuffPositionSummary" },
+      golden = BUFF_POSITION, classicColumn = "1", key = "buffs_position", column = "2",
+      summary = "BuffPositionSummary" },
+    { builder = "BuildBuffBorderGroup", label = "Border", boxHeader = "Border",
+      golden = BUFF_BORDER, classicColumn = "1", key = "buffs_border", column = "2",
+      summary = "BuffBorderSummary", hoistedIn = 0 },
+    { builder = "BuildBuffDurationGroup", label = "Duration Text", boxHeader = "Duration Text",
+      golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "2",
+      summary = "BuffDurationSummary", hoistedIn = 1 },
     { builder = "BuildBuffStackGroup", label = "Stack Count", boxHeader = "Stack Count",
-      golden = BUFF_STACK, countVar = "BUFF_STACK_COUNT", column = "2",
-      row = "stackRow", band = "textBand", summary = "BuffStackSummary",
-      apply = "ApplyBuffStackText" },
+      golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "2",
+      summary = "BuffStackSummary" },
+    { builder = "BuildBuffDurationBarGroup", label = "Duration Bar", boxHeader = "Duration Bar",
+      golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "1",
+      summary = "BuffDurationBarSummary", hoistedIn = 1, hide = true },
+    { builder = "BuildBuffPandemicGroup", label = "Pandemic", boxHeader = "Pandemic",
+      golden = BUFF_PANDEMIC, classicColumn = "2", key = "buffs_pandemic", column = "1",
+      summary = "BuffPandemicSummary", hoistedIn = 0, hide = true },
 }
 
-for _, g in ipairs(WAYIN) do
+for _, g in ipairs(SECTIONS) do
     print("-- Buff Bar page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.boxHeader, g.column)
+    local block = checkShared(g.builder, g.label, g.boxHeader, g.classicColumn, g.key, g.column, g.summary)
 
-    check(body:find("hoistToggle", 1, true) == nil,
-          g.label .. ": the builder has no hoist branch, because there is nothing to hoist")
-
-    local opts = rowOpts(g.label)
-    check(opts:find("%f[%w]toggle%s*=") == nil,
-          g.label .. ": the row declares no toggle")
-    check(opts:find("onToggle", 1, true) == nil,
-          g.label .. ": ...and so no commit either")
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": ...it does declare a summary")
-    check(PAGE:find("local " .. g.row .. " = " .. g.band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the " .. g.band)
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...and its amber tick asks about exactly those keys")
-
-    if g.countVar then
-        local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-        check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-        check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-              g.label .. ": ...and hands the row that constant, not a literal")
+    -- ☠ THE HOIST BRANCH IS NEVER TAKEN ANY MORE, and the branch stays. Five
+    -- builders can suppress their own enable control for a row that carried it;
+    -- a section has no tick of its own, so every one of those controls is built
+    -- again exactly where classic has always had it. Leaving the branch in is
+    -- what keeps ONE builder serving both layouts the day a row comes back.
+    if g.hoistedIn == 1 then
+        check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
+              g.label .. ": the builder can still skip its enable checkbox, and is never asked to")
+    elseif g.hoistedIn == 0 then
+        check(body:find("tools2.hoistToggle or nil", 1, true) ~= nil,
+              g.label .. ": the composite can still be told not to build its own toggle, and is never asked to")
+    else
+        check(body:find("hoistToggle", 1, true) == nil,
+              g.label .. ": the builder has no hoist branch, because there was never anything to hoist")
     end
-    if g.apply then
-        check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-              g.label .. ": ...and its footer pushes the change into the frames")
-    end
-end
+    check(block:find("hoistToggle", 1, true) == nil,
+          g.label .. ": ...and the section mount asks for no hoist")
 
--- ============================================================
--- 5. THE COUNT ARITHMETIC
--- Each declared count is what the PANE mounts, which is the builder's census
--- less whatever left it for the row -- and for the two composite rows, what the
--- shared helper builds for the include set this page passes it.
--- ============================================================
-print("-- Buff Bar page: the declared counts")
-do
-    local function declared(name) return tonumber(PAGE:match("local " .. name .. "%s*=%s*(%d+)")) end
-
-    eq(declared("VISIBILITY_COUNT"), #VISIBILITY - 1,
-       "counts: Visibility is the census less the hoisted Show Buffs tick")
-    eq(declared("BUFF_ORDER_COUNT"), #BUFF_ORDER,
-       "counts: Order & Limits is the whole census, nothing hoisted out of it")
-    eq(declared("BUFF_APPEARANCE_COUNT"), #BUFF_APPEARANCE, "counts: Appearance")
-    eq(declared("BUFF_LAYOUT_COUNT"), #BUFF_LAYOUT, "counts: Layout")
-    eq(declared("BUFF_POSITION_COUNT"), #BUFF_POSITION,
-       "counts: Position, the growth control counting as the one widget it is")
-    -- ⚠ THE CROSS-LINK IS NOT IN THE NUMBER: it is a line of prose pointing at
-    -- another page, and the badge promises settings.
-    eq(declared("BUFF_DURATION_COUNT"), 14,
-       "counts: Duration Text -- the five page settings it keeps, the format control, and the TextStyle block's eight, less the hoisted tick")
-    eq(declared("BUFF_STACK_COUNT"), 8,
-       "counts: Stack Count is exactly the TextStyle block's eight")
-    eq(declared("BUFF_DURBAR_COUNT"), settingsIn(BUFF_DURBAR) - 1,
-       "counts: Duration Bar is the census's settings less the hoisted Enable tick")
-
-    -- ☠ THE TWO COMPOSITE COUNTS, DERIVED FROM THE HELPER RATHER THAN ASSERTED
-    -- AT IT. CreateBorderControls builds a fixed set plus one widget per include
-    -- key, and this page's include set is { inset, offset, blendMode, gradient,
-    -- shadow, alpha } with no colour source -- so the number moves the moment the
-    -- toolkit gains a control, and a literal in the page would quietly stop
-    -- matching what the pane mounts.
-    local BORDER_BASE = 4          -- Show Border, thickness, style, texture
-    local BORDER_COLOR = 1         -- the static colour picker
-    local BORDER_GRADIENT = 3      -- start, end, direction
-    local BORDER_SHADOW = 5        -- the block's tick plus colour, size, two offsets
-    local BORDER_ALPHA, BORDER_INSET, BORDER_BLEND = 1, 1, 1
-    local BORDER_OFFSET = 2
-    local borderAll = BORDER_BASE + BORDER_COLOR + BORDER_GRADIENT + BORDER_SHADOW
-                    + BORDER_ALPHA + BORDER_INSET + BORDER_BLEND + BORDER_OFFSET
-    eq(borderAll, 18, "counts: the border toolkit builds eighteen for this include set")
-    eq(declared("BUFF_BORDER_COUNT"), borderAll - 1,
-       "counts: Border is those eighteen less the hoisted Show Border")
-
-    -- Pandemic mounts the SAME toolkit for its BORDER mode, with noShowToggle
-    -- already set by the helper -- so seventeen -- plus its own six.
-    --
-    -- ⚠ THE PROSE IS NOT IN EITHER NUMBER. The helper mounts two notes (the
-    -- explainer and the unsupported-client caution) and the page adds a blurb of
-    -- its own; none of the three is a setting, and the badge promises settings.
-    local PANDEMIC_OWN = 9         -- enable, explain, unsupported note, type, flash, speed, tint colour/alpha/inset
-    local PANDEMIC_PROSE = 2       -- ...and two of those nine are notes
-    eq(declared("BUFF_PANDEMIC_COUNT"), (PANDEMIC_OWN - PANDEMIC_PROSE - 1) + (borderAll - 1),
-       "counts: Pandemic is its own six and the border toolkit's seventeen, prose in neither")
-
-    -- The filter row's count is the one that is DATA rather than a constant.
-    check(PAGE:find("local function BuffFilterCount()", 1, true) ~= nil,
-          "counts: Buff Filters counts its own rows instead of declaring a literal")
-    check(PAGE:find("return 7 + #R.Categories + customs", 1, true) ~= nil,
-          "counts: ...the seven fixed widgets plus one per category and per custom filter")
-    check(rowOpts("Buff Filters"):find("count%s*=%s*BuffFilterCount()") ~= nil,
-          "counts: ...and the row is handed that count, not a number")
-end
-
--- ============================================================
--- 6. THE CLAIMS, AND THE ONE FOOTER THIS PAGE REFUSES
--- ============================================================
-print("-- Buff Bar page: the claims and the footer refusal")
-do
-    -- ⚠ TWO KEYS THE WALK CANNOT SEE, both named through `extra`.
-    check(PAGE:find('tools.ClaimKeys(filterRow, filterContent, { "buffFilterSelection" })', 1, true) ~= nil,
-          "claims: the filter row names the selection table -- every tick behind it is a custom get/set with no db binding")
-    check(PAGE:find('tools.ClaimKeys(positionRow, positionContent, { "buffGrowth" })', 1, true) ~= nil,
-          "claims: the position row names buffGrowth -- the growth control registers nothing with search")
-
-    -- ☠ NO FOOTER ON THE FILTER ROW. Reset Group writes DeepCopy(default) into
-    -- the key, which for buffFilterSelection REPLACES the table -- and the aura
-    -- pipeline holds references to that table and its inner tables.
-    check(PAGE:find("tools.WireFooter(filterRow", 1, true) == nil,
-          "footer: the Buff Filters row has no footer, because a reset would strand the pipeline's references")
-    check(PAGE:find("tools.WireModifiedTick(filterRow)", 1, true) ~= nil,
-          "footer: ...but it keeps the amber tick, which only reads")
-
-    -- Every other converted row has one.
-    for _, row in ipairs({ "visRow", "orderRow", "appearanceRow", "layoutRow", "positionRow",
-                           "borderRow", "durationRow", "stackRow", "durBarRow", "pandemicRow" }) do
-        check(PAGE:find("tools.WireFooter(" .. row, 1, true) ~= nil,
-              "footer: " .. row .. " carries Reset Group / Hold: Defaults")
+    -- The two that can vanish outright carry the box's own factory gate, on BOTH
+    -- halves: with no factory row there is no bar, and a header standing over a
+    -- band the page has folded away would be a title over nothing.
+    if g.hide then
+        check(block:find("HideDurationBar", 1, true) ~= nil,
+              g.label .. ": the section hides with the factory gate its box carries")
+    else
+        check(block:find("HideDurationBar", 1, true) == nil,
+              g.label .. ": the section has no factory gate, because its box never had one")
     end
 end
 
 -- ============================================================
--- 7. THE CONTROL ROW, THE HIDDEN ROWS, THE BANDS AND THE PAGE'S OWN ORDER
+-- 5. THE POPOUT FURNITURE IS GONE FROM THIS PAGE, NOT HALF-GONE
+--
+-- ☠ WHAT THE ROWS TOOK WITH THEM, NAMED. No pin, no "N more settings" badge, no
+-- amber modified tick and no Reset Group / Hold: Defaults footer: all four are
+-- PopoutRow's, and there is no row left to hang them on. Classic has never had
+-- any of them either. This section is what stops the page drifting back into a
+-- half-state -- a claim without a row, a count constant nothing reads -- while
+-- the fold is being judged.
 -- ============================================================
-print("-- Buff Bar page: the control row, the bands and the order")
+print("-- Buff Bar page: the popout furniture is gone")
 do
-    -- ---- the one single-option group: a CONTROL ROW ------------------
+    for _, verb in ipairs({ "GUI:CreatePopoutRow", "tools.PopoutContent", "tools.ClaimKeys",
+                            "tools.WireModifiedTick", "tools.WireFooter",
+                            "tools.RegisterHoistedToggle", "tools.ReflowMounted",
+                            "inline = true", "footerStrip" }) do
+        check(PAGE:find(verb, 1, true) == nil,
+              "furniture: no " .. verb .. " left on the page")
+    end
+    -- The count constants went with the badge that read them.
+    local counts = 0
+    for _ in PAGE:gmatch("_COUNT") do counts = counts + 1 end
+    eq(counts, 0, "furniture: no row-count constant left, because nothing promises a number now")
+    -- ...and so did the commit callbacks a hoisted tick needed.
+    for _, fn in ipairs({ "OnShowBuffsToggle", "OnBuffBorderToggle", "OnBuffDurationToggle",
+                          "OnBuffDurationBarToggle", "OnBuffPandemicToggle" }) do
+        check(PAGE:find(fn, 1, true) == nil,
+              "furniture: the hoisted-tick commit " .. fn .. " is gone with the tick")
+    end
+
+    -- ☠ THE ONE THING THAT DID NOT GO: the filter row's refusal of a footer is
+    -- now moot, but the REASON is still true and still written down, because the
+    -- day a footer comes back to this page it must not come back here. Reset
+    -- Group writes DeepCopy(default) into the key, which for buffFilterSelection
+    -- REPLACES the table -- and the aura pipeline holds references to it.
+    check(PAGE:find("NEVER reassign buffFilterSelection", 1, true) ~= nil,
+          "furniture: the filter selection table's no-reassign rule is still stated")
+
+    -- ---- and SEARCH is covered by the section, not by a claim ---------
+    -- ☠ A ROW HAD TO BE TOLD ITS OWN NAME (ClaimKeys' two halves): it has no
+    -- header, so nothing on the page answered to it and every control behind it
+    -- registered under whichever band header was built last. A SECTION needs
+    -- neither half. CreateCollapsibleSection moves Search.CurrentSection itself,
+    -- so every control built after it takes that breadcrumb through the ordinary
+    -- widget path -- exactly as it does in classic -- and its GetText is what
+    -- ScrollToSection and every GUI:LinkToSetting{ section = ... } find it by.
+    check(WIDGETS:find("DF.Search:SetCurrentSection(text)", 1, true) ~= nil,
+          "search: CreateCollapsibleSection stamps the breadcrumb every control after it registers under")
+    check(WIDGETS:find("section.GetText = function(self) return self.sectionTitleText end", 1, true) ~= nil,
+          "search: ...and answers to its own name, which is what a jump finds it by")
+end
+
+-- ============================================================
+-- 6. THE SUMMARY OPT-IN THE KIT GAINED
+-- A popout row painted its summary; a section had nowhere to put one. Added to
+-- GUI:CreateCollapsibleSection as `opts.summary` (and `opts.dimOn` beside it),
+-- both opt-in, so no existing section moves.
+-- ============================================================
+print("-- Buff Bar page: the section summary opt-in")
+do
+    check(WIDGETS:find("local summaryFn = opts and opts.summary or nil", 1, true) ~= nil
+      and WIDGETS:find("local dimFn     = opts and opts.dimOn or nil", 1, true) ~= nil,
+          "summary: the section reads both options off opts")
+    -- ⚠ OPT-IN, and that is what keeps every existing caller still: no summary
+    -- and no dim means no fontstring and no refreshContent at all.
+    check(WIDGETS:find("if summaryFn or dimFn then", 1, true) ~= nil,
+          "summary: ...and builds nothing at all for a caller that passes neither")
+    -- Painted the way a popout row paints its own: right-aligned, never wrapped.
+    check(WIDGETS:find('section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)', 1, true) ~= nil,
+          "summary: ...pinned to the header's right corner")
+    check(WIDGETS:find('section.summary:SetJustifyH("RIGHT")', 1, true) ~= nil,
+          "summary: ...right-justified, like the row's was")
+    -- ☠ SHUT ONLY. Expanded, the controls themselves are the answer.
+    check(WIDGETS:find("if not self.expanded and summaryFn then", 1, true) ~= nil,
+          "summary: ...and shown only while the section is shut")
+    -- ⚠ DEDUPED. refreshContent runs on EVERY state pass and SetText re-measures.
+    check(WIDGETS:find("if self._dfSummaryText ~= text then", 1, true) ~= nil,
+          "summary: ...written only when the rendered string actually moved")
+    -- The dim half routes through the section's existing greying verb rather
+    -- than a second colour path of its own.
+    check(WIDGETS:find("if dimFn then self:SetPreviewDimmed(dimFn(d) and true or false) end", 1, true) ~= nil,
+          "summary: the grey gate goes through the section's own SetPreviewDimmed")
+end
+
+-- ============================================================
+-- 7. THE CONTROL ROW, THE SECTIONS THAT CAN HIDE, AND THE PAGE'S OWN ORDER
+-- ============================================================
+print("-- Buff Bar page: the control row, the columns and the order")
+do
+    -- ---- the one single-option group: STILL a CONTROL ROW ------------
+    -- ⚠ NOT A SECTION. One checkbox behind a fold is a fold that buys nothing,
+    -- and the plate already draws the setting's own name.
     check(PAGE:find('label%s*=%s*L%["Hide Duplicate Buffs"%],\n%s*kind%s*=%s*"checkbox"') ~= nil,
           "control row: Hide Duplicate Buffs is a checkbox control row")
-    check(PAGE:find("contentBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into the Content band with the rows it belongs beside")
+    check(PAGE:find("dedupBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "control row: ...mounted into a band of its own in column 1")
+    check(PAGE:find("Add(dedupBand, nil, 1)", 1, true) ~= nil,
+          "control row: ...which goes into column 1, beside the Content sections")
     check(PAGE:find("})), 30)", 1, true) == nil,
           "control row: ...with no call-site slot height, because the factory owns it")
     -- ⚠ NAMED FOR THE SETTING, not for the box: of "Deduplication" and "Hide
@@ -700,16 +669,16 @@ do
     for _ in PAGE:gmatch("local DEDUP_TIP = L%[") do dedupTips = dedupTips + 1 end
     eq(dedupTips, 1, "control row: ...and so is the tooltip")
 
-    -- ---- the two rows that can hide entirely -------------------------
-    -- The box's own hideOn becomes the ROW's, so the band collapses the slot
-    -- rather than leaving a gap where a bar the client cannot draw would be.
-    check(PAGE:find("durBarRow.hideOn = HideDurationBar", 1, true) ~= nil,
-          "hidden rows: the Duration Bar row carries the box's own factory gate")
-    check(PAGE:find("pandemicRow.hideOn = HideDurationBar", 1, true) ~= nil,
-          "hidden rows: ...and so does the Pandemic row")
+    -- ---- the two sections that can hide entirely ---------------------
     check(PAGE:find("durBarGroup.hideOn = HideDurationBar", 1, true) ~= nil
       and PAGE:find("pandemicGroup.hideOn = HideDurationBar", 1, true) ~= nil,
-          "hidden rows: ...and classic still puts it on the boxes")
+          "hidden sections: classic still puts the factory gate on the boxes")
+    -- ...and OpenSection puts the same predicate on the header AND its band, so
+    -- neither half is left standing when the other goes.
+    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    check(open:find("section.hideOn = hideFn", 1, true) ~= nil
+      and open:find("band.hideOn = hideFn", 1, true) ~= nil,
+          "hidden sections: ...and a section hides its header and its band together")
 
     -- ---- twelve bare 280 boxes left, all inside a classicLayout arm ---
     local bare = 0
@@ -720,23 +689,26 @@ do
     check(PAGE:find("bandStyle", 1, true) == nil,
           "boxes: the band skin is never restated as a literal (this page needs none)")
 
-    -- ---- the Add order ------------------------------------------------
-    -- Four bands in two columns -- Content and Factory left, Icon and Text right --
-    -- still ADDED in reading order, because that is the order a narrow window folds
-    -- them back into when the page drops to one column.
-    local a = PAGE:find("Add(contentBand, nil, 1)", 1, true)
-    local b = PAGE:find("Add(iconBand, nil, 2)", 1, true)
-    local c = PAGE:find("Add(textBand, nil, 2)", 1, true)
-    local d = PAGE:find("Add(factoryBand, nil, 1)", 1, true)
-    check(a and b and c and d and a < b and b < c and c < d,
-          "order: the four bands sit in their columns, added in reading order")
-    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
-    -- widget otherwise, so a band placed in a column without this keeps the width it
-    -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "contentBand", "iconBand", "textBand", "factoryBand" }) do
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
-    end
+    -- ---- the two-column split, and the order inside each column ------
+    -- Content and the factory pair left, Icon and Text right -- the same split
+    -- the four bands had. Within a column the Add order IS the layout order, so
+    -- the sections are asserted in sequence rather than merely present.
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Visibility | Buff Filters | Order & Limits | Appearance | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
+       "order: the eleven sections are opened in the order the page reads in one column")
+
+    -- ☠ AND BOTH HALVES FILL THEIR COLUMN. The layout pass only resizes an
+    -- indented widget otherwise, so a header or a band placed in a column without
+    -- this keeps the width it was built at -- and on a narrow window, where the
+    -- page folds back to ONE column, a half-width header would sit over a
+    -- full-width band.
+    check(open:find("section.layoutColFill = true", 1, true) ~= nil
+      and open:find("band.layoutColFill = true", 1, true) ~= nil,
+          "order: a section's header and its band both fill their column")
+    check(PAGE:find("dedupBand.layoutColFill = true", 1, true) ~= nil,
+          "order: ...and so does the control row's band")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('Add(adBanner, 32, "both")', 1, true) ~= nil
@@ -749,15 +721,16 @@ do
 end
 
 -- ============================================================
--- 8. THE TWO SHARED-HELPER CHANGES THIS PAGE NEEDED
--- Both live in GUI/Controls.lua, both are opt-in, and both are the same move a
--- previous page already made on a neighbouring helper.
+-- 8. THE TWO SHARED-HELPER CHANGES THE POPOUT SWEEP NEEDED
+-- Both live in GUI/Controls.lua, both are opt-in. The Buff Bar page no longer
+-- ASKS for the first of them -- a section has no tick to hoist -- but the Debuff
+-- Bar page still does, and the builder still carries the branch, so the helper's
+-- contract is pinned here as it always was.
 -- ============================================================
 print("-- Buff Bar page: the shared helpers it needed")
 do
     -- (a) CreatePandemicControls gains noEnableToggle -- CreateBorderControls'
-    -- noShowToggle, for the section that owns THIS toggle. Without it the pane
-    -- would draw the same switch the row's tick already is.
+    -- noShowToggle, for the section that owns THIS toggle.
     check(CTRL:find("if not opts.noEnableToggle then", 1, true) ~= nil,
           "helpers: CreatePandemicControls can be told not to build its own Enable tick")
     local pandemicBody = CTRL:match("function GUI:CreatePandemicControls%(group, dbTable, opts%)(.-)\nend\n")
@@ -768,7 +741,7 @@ do
         -- ☠ THE KEY IS STILL READ. The group gate folds Enabled in whether or not
         -- the checkbox exists, so a pane greys behind a hoisted tick.
         check(pandemicBody:find("return not supported or gated(db) or not enabled()", 1, true) ~= nil,
-              "helpers: ...and the group gate still reads the Enabled key, so the pane greys behind a hoisted tick")
+              "helpers: ...and the group gate still reads the Enabled key")
     end
 
     -- (b) The duration-format example joins the group-wide VALUE sweep. A
@@ -779,94 +752,4 @@ do
           "helpers: the duration-format example repaints on a group-wide value sweep")
     check(CTRL:find("if ddRefreshValue then ddRefreshValue() end", 1, true) ~= nil,
           "helpers: ...chained rather than replaced, so the caption still repaints too")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ TWO THIRDS OF THE ADDON'S ROWS HIDE SIX SETTINGS OR FEWER, and a row
--- holding four was charging the same click as a row holding thirty-one. So a row
--- whose whole group is small mounts THAT GROUP under its title line, and its
--- strip stops promising what is already on screen and offers to pin a second
--- copy instead.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the pane itself and
--- counting prose. Only the refusal can be exercised against a real group, which
--- is test_popout_page_tools.lua's job -- what is stated here is which of THIS
--- page's rows asked, and that none of the others did.
---
--- Four of the eleven. The seven left hold the filter library, the border toolkit, two text blocks and Pandemic -- none of them small.
--- ============================================================
-print("-- Buff Bar page: the rows that mount their pane on the plate")
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on the page, and
-    -- whether its call ends with the opt-in. Read as "this declaration up to the
-    -- next one", the reader shape the Frame page's census uses and for the same
-    -- reason: a balanced-brace match would be defeated by the builder closure
-    -- sitting inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-
-    -- The mounts that asked, each with the pane count that earned it -- the
-    -- number the comment beside the call states, so a comment that drifted from
-    -- what the row actually holds has one place left to be caught.
-    local INLINE = {
-        -- ⚠ visMount holds ONE -- Max Buffs. Show Buffs is the row's own tick,
-        -- hoisted, and the builder skips it. It is the twin of the Debuff Bar's
-        -- Visibility row and was missed by the first sweep; the two pages
-        -- disagreed for one commit over identical panes.
-        { "visMount", 1 },
-        { "orderMount", 6 },
-        { "appearanceMount", 3 },
-        { "layoutMount", 3 },
-        { "positionMount", 4 },
-    }
-    -- ...and the rows that keep the strip they have, named rather than inferred:
-    -- a row that quietly joined the first list fails here as well as there.
-    local BEHIND = { "filterMount", "borderMount", "durationMount", "stackMount", "durBarMount", "pandemicMount" }
-
-    for _, spec in ipairs(INLINE) do
-        check(inlineMounts[spec[1]] == true,
-              "inline: " .. spec[1] .. " mounts its group on the plate (" .. spec[2] .. " settings)")
-        -- The mount reaches a ROW, and exactly one. An opt-in wired to nothing
-        -- is a pane built eagerly and then never shown.
-        local wired = 0
-        for _ in PAGE:gmatch("build%s*=%s*" .. spec[1] .. "[,%s]") do wired = wired + 1 end
-        eq(wired, 1, "inline: ..." .. spec[1] .. " is the build of exactly one row")
-    end
-    for _, name in ipairs(BEHIND) do
-        check(inlineMounts[name] ~= true,
-              "inline: " .. name .. " keeps its pane behind the strip")
-    end
-    eq(inlineCount, #INLINE, "inline: ...and no row on this page opted in unannounced")
-    eq(#calls, #INLINE + #BEHIND, "inline: every popout mount on the page is accounted for")
-
-    -- ⚠ AND NO INLINE ROW HOISTS A TWIN OF WHAT IS NOW ON ITS PLATE. Every
-    -- hoist on this page is the four-argument TICK form -- the row's own
-    -- on/off, which the builder is told to skip (`hoistToggle`) precisely
-    -- because the row owns it. The LIST form, which declares pane settings a
-    -- second time as cells, is what would be two widgets on one key over a
-    -- mounted group; there is none here, and a row going inline must not grow
-    -- one.
-    local hoists = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
-    local ticks = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%([%w_]+, L%[") do ticks = ticks + 1 end
-    eq(ticks, hoists, "inline: every hoist on the page is the row's own tick, not a pane setting declared twice")
 end
