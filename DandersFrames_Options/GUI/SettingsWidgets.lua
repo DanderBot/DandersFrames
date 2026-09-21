@@ -507,7 +507,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- level would hand it every press that landed on the icon, so the pin
         -- would fold the section instead of pinning it.
         local pinBtn = GUI:CreateGlyphButton(section, {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\pin",
+            -- The pin lives in the KIT's media, not DandersFrames' own: the old
+            -- Media\Icons\pin path does not exist and drew nothing.
+            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin",
             size    = PIN_SIZE,
             tooltip = { title = L["Pin settings in popout"] },
             onClick = function()
