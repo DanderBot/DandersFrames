@@ -5363,8 +5363,8 @@ function GUI:CreatePopoutPageTools(page)
     -- longest word on these pages ("Default (Slot Order)") still fits its opener,
     -- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
     -- Permanent Auras") still sits on one line. Below it they start to truncate.
-    -- Two tracks and the kit's own inner gutter: 2 x 200 + 10.
-    local SECTION_TWO_TRACK_MIN = 2 * 200 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+    -- Two tracks and the kit's own inner gutter: 2 x 180 + 10.
+    local SECTION_TWO_TRACK_MIN = 2 * 180 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
 
     -- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
     -- sweep's one name, and every db-bound factory carries it (slider, dropdown

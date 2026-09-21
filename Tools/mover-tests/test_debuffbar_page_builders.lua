@@ -652,8 +652,8 @@ do
           "opt-in: ...and the band's children are touched only on an opted-in band, after the builder filled it")
 
     -- ---- two per row: the kit's grid, the number chosen per pass --------
-    check(TOOLS:find("local SECTION_TWO_TRACK_MIN = 2 * 200 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)", 1, true) ~= nil,
-          "two tracks: a second track needs 200px per control plus the kit's own gutter")
+    check(TOOLS:find("local SECTION_TWO_TRACK_MIN = 2 * 180 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)", 1, true) ~= nil,
+          "two tracks: a second track needs 180px per control plus the kit's own gutter")
     local wire = TOOLS:match("local function WireTwoTrack%(band%)(.-)\n    end\n") or ""
     check(wire:find("band.LayoutChildren = function(self)", 1, true) ~= nil
       and wire:find("self.innerColumns = (inner >= SECTION_TWO_TRACK_MIN) and 2 or nil", 1, true) ~= nil
