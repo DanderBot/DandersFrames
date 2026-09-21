@@ -702,14 +702,20 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             -- keeps them in reading order instead of drawing one over the other.
             -- An empty tag is zero-wide and sits flush against the title.
             section.summary = section:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            section.summary:SetPoint("LEFT", section.tag, "RIGHT", 8, 0)
             -- ⚠ INBOARD OF THE PIN WHEN THERE IS ONE. The icon owns the far
             -- right and the value stops short of it -- an icon drawn ON TOP of
             -- the last word of a summary is the one order that cannot be read.
             -- A section with no pin keeps the edge it always had.
+            --
+            -- ☠ WITH A PIN, NO LEFT ANCHOR. SetHeaderRightInset (below) stretches
+            -- the tag to the pin and then hangs the tag off THIS string's left
+            -- edge; anchoring this to the tag as well would leave the summary a
+            -- zero-width slot between the tag's end and the pin -- it drew
+            -- nothing. apply() gives it its width instead.
             if section.pinBtn then
                 section.summary:SetPoint("RIGHT", section.pinBtn, "LEFT", -6, 0)
             else
+                section.summary:SetPoint("LEFT", section.tag, "RIGHT", 8, 0)
                 section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)
             end
             section.summary:SetJustifyH("RIGHT")
@@ -772,12 +778,22 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             -- tag ("+2 triggers", "3 indicators") has to stay readable rather than
             -- be squeezed to nothing by a long name.
             self.title:SetWordWrap(false)
+            -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
+            -- by default, so every bounded title drew centred in its box.
+            self.title:SetJustifyH("LEFT")
             self.title:SetWidth(math.max(40, math.floor(free * 0.55)))
             self.tag:SetWordWrap(false)
             self.tag:SetJustifyH("LEFT")
             self.tag:ClearAllPoints()
             self.tag:SetPoint("LEFT", self.title, "RIGHT", 8, 0)
-            self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
+            if self.summary and self.pinBtn then
+                -- The value takes the right-hand share and the tag stops short of
+                -- it; see the no-left-anchor note where the summary is built.
+                self.summary:SetWidth(math.max(20, math.floor(free * 0.45) - 8))
+                self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
+            else
+                self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
+            end
         end
         self:HookScript("OnSizeChanged", apply)
         apply()

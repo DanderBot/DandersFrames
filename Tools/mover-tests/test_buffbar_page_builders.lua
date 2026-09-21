@@ -638,6 +638,15 @@ do
     -- than a second colour path of its own.
     check(WIDGETS:find("if dimFn then self:SetPreviewDimmed(dimFn(d) and true or false) end", 1, true) ~= nil,
           "summary: the grey gate goes through the section's own SetPreviewDimmed")
+    -- A bounded title (a pinned header) must be told to sit left, or it centres
+    -- in the box SetHeaderRightInset gives it -- every pinned header did.
+    local inset = WIDGETS:find("section.SetHeaderRightInset = function", 1, true)
+    check(inset ~= nil and WIDGETS:find('self.title:SetJustifyH("LEFT")', inset, true) ~= nil,
+          "summary: a bounded header title is left-justified, not centred")
+    -- With a pin the summary takes its width from apply(), never from the tag,
+    -- or it is left a zero-width slot and draws nothing.
+    check(WIDGETS:find('self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)', 1, true) ~= nil,
+          "summary: beside a pin, the tag stops at the summary rather than squeezing it out")
 end
 
 -- ============================================================
@@ -645,23 +654,23 @@ end
 -- ============================================================
 print("-- Buff Bar page: the control row, the columns and the order")
 do
-    -- ---- the one single-option group: STILL a CONTROL ROW ------------
-    -- ⚠ NOT A SECTION. One checkbox behind a fold is a fold that buys nothing,
-    -- and the plate already draws the setting's own name.
-    check(PAGE:find('label%s*=%s*L%["Hide Duplicate Buffs"%],\n%s*kind%s*=%s*"checkbox"') ~= nil,
-          "control row: Hide Duplicate Buffs is a checkbox control row")
-    check(PAGE:find("dedupBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into a band of its own in column 1")
-    check(PAGE:find("Add(dedupBand, nil, 1)", 1, true) ~= nil,
-          "control row: ...which goes into column 1, beside the Content sections")
-    check(PAGE:find("})), 30)", 1, true) == nil,
-          "control row: ...with no call-site slot height, because the factory owns it")
-    -- ⚠ NAMED FOR THE SETTING, not for the box: of "Deduplication" and "Hide
-    -- Duplicate Buffs" the sentence is the one that survives standing alone -- and
-    -- it is the caption the classic checkbox registers, so the search result reads
-    -- the same in both layouts.
-    check(PAGE:find('tools.RegisterControlRow(dedupRow, "checkbox", "buffDeduplicateDefensives", false, DedupChanged)', 1, true) ~= nil,
-          "control row: ...registered with search through the shared verb, carrying the classic callback")
+    -- ---- the one single-option group: INSIDE BUFF FILTERS in Modern ----
+    -- As a lone control row between the cards it was the one element with its
+    -- own width, height and indent. It decides which buffs show, so it is a
+    -- filter: in Modern it is the last control of the Buff Filters section.
+    local filtersOpen = PAGE:find('OpenSection(L["Buff Filters"], "buffs_filters"', 1, true)
+    local dedupInBand = filtersOpen and PAGE:find('band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", DedupChanged), 30)', filtersOpen, true)
+    local filtersClose = filtersOpen and PAGE:find("CloseSection(band)", filtersOpen, true)
+    check(dedupInBand ~= nil and filtersClose ~= nil and dedupInBand < filtersClose,
+          "dedup: Modern puts Hide Duplicate Buffs inside the Buff Filters section")
+    check(PAGE:find("dedupCb.tooltip = DEDUP_TIP", 1, true) ~= nil,
+          "dedup: ...carrying the tooltip it always had")
+    check(PAGE:find("CreateControlRow(", 1, true) == nil and PAGE:find("dedupBand", 1, true) == nil,
+          "dedup: ...and the lone control row is gone from the page")
+    -- The hook and tooltip are declared BEFORE Buff Filters, which uses them first.
+    local fnAt = PAGE:find("local function DedupChanged%(%)")
+    check(fnAt ~= nil and filtersOpen ~= nil and fnAt < filtersOpen,
+          "dedup: the callback is declared above the section that uses it")
     check(PAGE:find('GUI:CreateHeader(self.child, L["Deduplication"])', 1, true) ~= nil,
           "control row: classic still builds the box under its own header")
     check(PAGE:find('GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", DedupChanged)', 1, true) ~= nil,
@@ -714,8 +723,6 @@ do
     check(open:find("section.layoutColFill = true", 1, true) ~= nil
       and open:find("band.layoutColFill = true", 1, true) ~= nil,
           "order: a section's header and its band both fill their column")
-    check(PAGE:find("dedupBand.layoutColFill = true", 1, true) ~= nil,
-          "order: ...and so does the control row's band")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('Add(adBanner, 32, "both")', 1, true) ~= nil

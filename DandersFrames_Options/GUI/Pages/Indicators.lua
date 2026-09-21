@@ -660,6 +660,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             manageBtn.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
         end
 
+        -- Deduplication's change hook and tooltip, declared here rather than with
+        -- its classic box below: the Modern layout puts the checkbox INSIDE the
+        -- Buff Filters section, which is built first. (It is a filter: it decides
+        -- which buffs the bar shows.) No alert banner: both halves of the toggle
+        -- are expressible (Aura Designer via excludeSpellIDs, the Defensive Bar via
+        -- its own resolved spell-ID map or a negated category -- see
+        -- BuildDirectBuffFilters / BuildAuraRowConfig).
+        local function DedupChanged()
+            -- Bump the aura layout version so the factory buff row rebuilds with the new
+            -- exclusion set (InvalidateAuraLayout -> RefreshFactoryRows -> DriveBuffFactory);
+            -- UpdateAllAuras re-scans for the legacy (pre-12.1) dedup path.
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllAuras()
+        end
+        local DEDUP_TIP = L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."]
+
         if classicLayout then
             local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
             filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Filters"]), 40)
@@ -677,6 +693,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
+            -- ⚠ HIDE DUPLICATE BUFFS LIVES HERE IN MODERN. As a lone control row
+            -- between the cards it was the one element on the page with its own
+            -- width, height and indent; it decides which buffs show, so it is a
+            -- filter, and it reads as one at the foot of this section.
+            local dedupCb = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", DedupChanged), 30)
+            dedupCb.tooltip = DEDUP_TIP
             CloseSection(band)
         end
 
@@ -777,33 +799,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CloseSection(band)
         end
 
-        -- ===== DEDUPLICATION (a 280 box in column 1 in classic, a CONTROL ROW in the
-        -- Content band here) =====
-        -- No alert banner here: both halves of the toggle are expressible (Aura
-        -- Designer via excludeSpellIDs, the Defensive Bar via its own resolved
-        -- spell-ID map or a negated category — see BuildDirectBuffFilters /
-        -- BuildAuraRowConfig), and the multi-filter duplicate one would warn about
-        -- cannot happen on a single-group buff row. What the checkbox does fits a
-        -- tooltip; a danger banner would read as "something is broken here".
-        --
-        -- ⚠ ONE SETTING IS A CONTROL ROW -- not a pane, which would be a click that
-        -- buys one tick, and not a 280 box either, which is the one shape a column of
-        -- full-width plates cannot absorb.
-        --
-        -- ⚠ AND THE ROW IS NAMED FOR THE SETTING, NOT FOR THE BOX. The Self Position
-        -- rule read the other way round: of "Deduplication" and "Hide Duplicate
-        -- Buffs", the one that survives standing alone on a plate is the sentence,
-        -- not the jargon -- and naming it that keeps the search result identical in
-        -- both layouts, because it is the caption the classic checkbox registers.
-        local function DedupChanged()
-            -- Bump the aura layout version so the factory buff row rebuilds with the new
-            -- exclusion set (InvalidateAuraLayout -> RefreshFactoryRows -> DriveBuffFactory);
-            -- UpdateAllAuras re-scans for the legacy (pre-12.1) dedup path.
-            DF:InvalidateAuraLayout()
-            DF:UpdateAllAuras()
-        end
-        local DEDUP_TIP = L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."]
-
+        -- ===== DEDUPLICATION (a 280 box in column 1 in classic; in Modern the
+        -- checkbox sits at the foot of Buff Filters, above) =====
+        -- Its hook and tooltip are declared above Buff Filters for that reason.
         if classicLayout then
             local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
             dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
@@ -811,28 +809,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             dedupCb.tooltip = DEDUP_TIP
             dedupGroup:AddWidget(dedupCb, 30)
             Add(dedupGroup, nil, 1)
-        else
-            -- ⚠ STILL A CONTROL ROW, and deliberately NOT a section. One checkbox
-            -- behind a fold is a fold that buys nothing, and the plate already draws
-            -- the setting's own name -- which is also what keeps the search result
-            -- identical in both layouts.
-            local dedupBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            dedupBand.layoutColFill = true
-            local dedupRow = dedupBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label     = L["Hide Duplicate Buffs"],
-                kind      = "checkbox",
-                -- The FUNCTION form: the table is re-resolved on each read, so a mode
-                -- switch is followed rather than frozen at whichever table this build
-                -- captured.
-                db        = tools.RowDB,
-                key       = "buffDeduplicateDefensives",
-                onChanged = DedupChanged,
-                tooltip   = DEDUP_TIP,
-            }))
-            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
-            -- are the control row's own slot).
-            tools.RegisterControlRow(dedupRow, "checkbox", "buffDeduplicateDefensives", false, DedupChanged)
-            Add(dedupBand, nil, 1)
         end
 
         -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
