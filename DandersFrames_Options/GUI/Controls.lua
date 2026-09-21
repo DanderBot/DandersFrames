@@ -5319,11 +5319,270 @@ function GUI:CreatePopoutPageTools(page)
         return strip
     end
 
+    -- ============================================================
+    -- ONE COLLAPSIBLE SECTION -- the card, and the band its controls go in
+    -- ------------------------------------------------------------
+    -- Lifted out of the Buff Bar page when the Debuff Bar was converted, so the
+    -- two pages build their cards through ONE function. Buff Bar's own
+    -- OpenSection / CloseSection are now one-line forwards to these, with the
+    -- same arguments in the same order, so nothing it draws moved.
+    --
+    -- ☠ BOTH ARE PAGE CHILDREN, and that is the whole mechanism. Panel.lua's
+    -- state pass is the only thing that reads `widget.collapsibleSection` and
+    -- hides what a shut section registered; a group nested inside another group
+    -- never reaches it. So the band is Add'd in its own right and REGISTERED to
+    -- the section.
+    --
+    -- ☠ A STABLE collapseKey, NEVER THE TITLE. CreateCollapsibleSection keys its
+    -- SavedVariables slot on whatever it is handed, so a localised or reworded
+    -- title would write a second slot and orphan the first.
+    --
+    -- ⚠ EXPANDED ON A FIRST RUN. The user's own folds are what persist after that.
+    --
+    -- ☠ THE PIN IS OPT-IN: passing `builder` is what puts it on the header, and
+    -- a page passes one only for a section that decides how the bar LOOKS. The
+    -- panel holds the section's OWN builder, mounted a second time -- never a
+    -- curated subset.
+    --
+    -- ☠ THE HEADER TICK IS OPT-IN TOO (`toggle`), and a section that passes one
+    -- MUST mount its builder with `hoistToggle = true`, so the in-body copy of
+    -- that checkbox is never built -- the tick exists in the header ONLY.
+    --
+    -- `Add` is the page builder's own Add: these tools are built before the
+    -- page's columns exist, so it is handed in rather than captured.
+    --
+    -- `extra` (nil for Buff Bar, which is what keeps it unchanged):
+    --   twoTrack     the band flows its controls two per row when it is wide
+    --                enough (see WireTwoTrack)
+    --   quietLabels  a control's own caption draws dim, so a setting can never
+    --                read as a heading (see QuietLabel)
+    --   preview      fn(db) -> preview entries for the header, beside the title
+    --                (see opts.preview on CreateCollapsibleSection)
+
+    -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
+    -- not chosen. Every factory in the kit was laid out against a 260 column; at
+    -- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
+    -- longest word on these pages ("Default (Slot Order)") still fits its opener,
+    -- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
+    -- Permanent Auras") still sits on one line. Below it they start to truncate.
+    -- Two tracks and the kit's own inner gutter: 2 x 200 + 10.
+    local SECTION_TWO_TRACK_MIN = 2 * 200 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+
+    -- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
+    -- sweep's one name, and every db-bound factory carries it (slider, dropdown
+    -- and its texture/font/outline variants, checkbox, colour picker); prose,
+    -- notes, banners, cross-links, buttons and the growth control do not. Those
+    -- take a row of their own, or a wrapping blurb lands beside the control
+    -- above it and a 155px growth block squeezes into half a card.
+    local function StampFullRows(band)
+        for _, entry in ipairs(band.groupChildren or {}) do
+            local w = entry.widget
+            if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
+                w.fullRow = true
+            end
+        end
+    end
+
+    -- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
+    -- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
+    -- 55px slider floated on the slider's label line with a hole under it --
+    -- and the next row down then read as starting in two different places.
+    -- Centring the shorter slot puts its box level with the slider's bar and
+    -- value box, which is the line the eye actually compares. Done after the
+    -- kit's pass and only on a two-track band, so no other group moves.
+    local function CentreShortSlots(group)
+        local rows = {}
+        for _, entry in ipairs(group.groupChildren or {}) do
+            local w = entry.widget
+            if w and w:IsShown() and not rawget(w, "fullRow") then
+                local _, _, _, _, y = w:GetPoint(1)
+                if y then
+                    local r = rows[y]
+                    if not r then r = { h = 0 }; rows[y] = r end
+                    r[#r + 1] = entry
+                    if (entry.height or 0) > r.h then r.h = entry.height or 0 end
+                end
+            end
+        end
+        for y, r in pairs(rows) do
+            if #r > 1 then
+                for _, entry in ipairs(r) do
+                    local dy = math.floor((r.h - (entry.height or 0)) / 2)
+                    if dy > 0 then
+                        local w = entry.widget
+                        local p, rel, rp, x = w:GetPoint(1)
+                        w:ClearAllPoints()
+                        w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
+                    end
+                end
+            end
+        end
+    end
+
+    -- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
+    -- folds to one column and back, and a resize-grip drag widens or narrows the
+    -- card, without the page being rebuilt -- a rebuild would retire the whole
+    -- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
+    -- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
+    -- only the NUMBER is chosen here, off the band's live width, right before
+    -- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
+    -- or more, one below it.
+    local function WireTwoTrack(band)
+        band.dfTwoTrack = true
+        local layout = band.LayoutChildren
+        band.LayoutChildren = function(self)
+            local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
+            self.innerColumns = (inner >= SECTION_TWO_TRACK_MIN) and 2 or nil
+            local h = layout(self)
+            if self.innerColumns then CentreShortSlots(self) end
+            return h
+        end
+    end
+
+    -- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
+    -- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
+    -- DFFontHighlightSmall in the SAME colour, and one step of size was all that
+    -- told the two apart. So on an opted-in band the caption takes the dim text
+    -- colour instead -- GUI.Colors.textDim, ~5.8:1 on the card's panel fill,
+    -- above the 4.5 floor for small text. The value it labels (the slider's
+    -- number, the dropdown's choice, the swatch) keeps its full brightness.
+    --
+    -- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
+    -- repaints its caption in SetEnabled -- text when on, textDim when off -- on
+    -- every state pass, so a one-off paint would be undone the first time the
+    -- page refreshed. Mapped instead: the "on" colour becomes the dim one, and
+    -- the "off" colour stays dim at half alpha so a greyed setting still reads
+    -- as greyed beside a live one. Any other colour (an override marker's) passes
+    -- straight through. No factory changes, and a caption on any other page is
+    -- never touched.
+    --
+    -- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
+    -- one.
+    local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
+    local function QuietLabel(fs)
+        if not fs or rawget(fs, "_dfQuiet") then return end
+        fs._dfQuiet = true
+        local set = fs.SetTextColor
+        fs.SetTextColor = function(self, r, g, b, a)
+            if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
+                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a)
+            elseif near(r, C_TEXT_DIM.r) and near(g, C_TEXT_DIM.g) and near(b, C_TEXT_DIM.b) then
+                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+            end
+            return set(self, r, g, b, a)
+        end
+        fs:SetTextColor(fs:GetTextColor())
+    end
+
+    -- A control's caption: the field the kit's slider and dropdown publish, else
+    -- the first string the factory created (the texture and font dropdowns build
+    -- theirs first and publish nothing), and on a colour picker the first string
+    -- on its button, which is where that factory draws it.
+    local function firstString(frame)
+        if not frame or not frame.GetRegions then return nil end
+        for _, r in ipairs({ frame:GetRegions() }) do
+            if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
+        end
+        return nil
+    end
+    local function CaptionOf(w)
+        local fs = rawget(w, "label")
+        if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
+        if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
+            return firstString((w:GetChildren()))
+        end
+        return firstString(w)
+    end
+    local function QuietLabels(band)
+        for _, entry in ipairs(band.groupChildren or {}) do
+            local w = entry.widget
+            if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
+                QuietLabel(CaptionOf(w))
+            end
+        end
+    end
+
+    local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
+        local pin
+        if builder then
+            -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
+            -- PopoutContent builds its first instance HERE, at page-build
+            -- time, and every db-bound factory registers whatever it is
+            -- handed -- so without this the settings registry would carry
+            -- TWO entries for every setting in the section, one from the
+            -- band on the page and one from the panel's copy. The same guard
+            -- a hoisted control's build takes (RegisterHoistedControls).
+            --
+            -- ⚠ ONLY THE EAGER ONE NEEDS IT. A later instance -- pin, close,
+            -- pin again -- is built long after Search.RegistryBuilt is set,
+            -- and Search:Register early-returns on that.
+            local Search = DF.Search
+            local held = Search and Search.SuppressRegistration
+            if Search then Search.SuppressRegistration = true end
+            local mount = PopoutContent(function(group, holder, reflow)
+                -- ☠ THE SECTION'S OWN BUILDER, HANDED THE SAME TABLE the band
+                -- gets. `popout = true` is the one field that differs, and it
+                -- picks no controls: DurationFormatRefresh reads it to re-flow
+                -- the PANE rather than re-lay the page out.
+                builder({ group = group, parent = holder, refreshStates = reflow, popout = true })
+            end)
+            if Search then Search.SuppressRegistration = held end
+            pin = {
+                build  = mount,
+                -- ☠ PAGE-QUALIFIED, OUT OF THE PAGE'S OWN TAB LABEL. Two
+                -- pinned panels both titled "Appearance" -- Buff Bar's and
+                -- Debuff Bar's -- are unusable, and comparing exactly those two
+                -- is what the pin is FOR. The separator is punctuation, not
+                -- prose -- both halves are already localised.
+                title  = string.format("%s / %s", page.tabLabel or "", label),
+                window = DF.GUIFrame,
+                clipTo = page,
+                db     = RowDB,
+            }
+        end
+        -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
+        -- in SettingsWidgets.lua).
+        local section = GUI:CreateCollapsibleSection(page.child, label, true,
+            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
+                              preview = extra and extra.preview or nil })
+        section.hideOn = hideFn
+        -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the header bar would stay
+        -- half-width over a full-width band on the one-column fold. The header
+        -- and its band have to declare it as a pair.
+        section.layoutColFill = true
+        -- ...and it joins the page's own roster, which is what the Expand All
+        -- / Collapse All pair walks.
+        RegisterSection(section)
+        Add(section, 36, col)
+        local band = GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })
+        band.layoutColFill = true
+        band.hideOn = hideFn
+        band.dfSectionCol = col
+        section:RegisterChild(band)
+        if extra and extra.twoTrack then WireTwoTrack(band) end
+        if extra and extra.quietLabels then band.dfQuietLabels = true end
+        return band
+    end
+
+    -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header. `Add`
+    -- resolves a widget's slot height ON THE SPOT, so a band Add'd while it is
+    -- still empty is a band the layout pass gives no room to. The two opt-ins
+    -- that read the band's children run here for the same reason: before this
+    -- line the builder has not put anything in it.
+    local function CloseSection(Add, band)
+        if band.dfTwoTrack then StampFullRows(band) end
+        if band.dfQuietLabels then QuietLabels(band) end
+        Add(band, nil, band.dfSectionCol)
+    end
+
     return {
         PopoutContent         = PopoutContent,
         RowDB                 = RowDB,
         RegisterSection       = RegisterSection,
         SectionControls       = SectionControls,
+        OpenSection           = OpenSection,
+        CloseSection          = CloseSection,
         ClaimKeys             = ClaimKeys,
         WireModifiedTick      = WireModifiedTick,
         WireFooter            = WireFooter,

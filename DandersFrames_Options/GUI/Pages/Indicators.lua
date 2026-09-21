@@ -124,10 +124,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- controls live on the page, and a shut header keeps the row's old summary
         -- string in its right corner.
         --
-        -- ☠ DEBUFFS IS DELIBERATELY UNTOUCHED. The two pages are built from the same
-        -- shapes all the way down this file and normally move together; this one does
-        -- not, because the whole point of the test is to put the two side by side in
-        -- game and pick one.
+        -- ☠ THE DEBUFF BAR USES THESE SAME CARDS, PLUS THREE OPT-INS THIS PAGE DOES
+        -- NOT TAKE: controls two per row, dim captions, and header previews. The
+        -- whole point is to put the two side by side in game and pick, so this page
+        -- stays exactly as it was -- it passes the shared helper no `extra`.
         --
         --   column 1    "Content"  Visibility, Buff Filters, Order & Limits and the
         --                          Hide Duplicate Buffs control row -- whether the bar
@@ -203,86 +203,20 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the header ONLY. Visibility deliberately gets none: its Show Buffs is
         -- the page's master switch, and a header tick that greys the whole page
         -- would surprise people.
+        -- ⚠ THE BODY LIVES IN THE PAGE TOOLS NOW (tools.OpenSection /
+        -- tools.CloseSection, Controls.lua), lifted there when the Debuff Bar was
+        -- converted so the two pages build their cards through one function.
+        -- Same arguments, same order, and no `extra`: this page opts into none
+        -- of the Debuff Bar's additions (two tracks, quiet captions, header
+        -- previews), so every section here draws exactly as it did.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
-            local pin
-            if builder then
-                -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
-                -- PopoutContent builds its first instance HERE, at page-build
-                -- time, and every db-bound factory registers whatever it is
-                -- handed -- so without this the settings registry would carry
-                -- TWO entries for every setting in the section, one from the
-                -- band on the page and one from the panel's copy: two identical
-                -- result cards under one label, one key and one section. The
-                -- same guard a hoisted control's build takes, for the same
-                -- reason (Controls.lua's RegisterHoistedControls).
-                --
-                -- ⚠ ONLY THE EAGER ONE NEEDS IT. A later instance -- pin, close,
-                -- pin again -- is built long after Search.RegistryBuilt is set,
-                -- and Search:Register early-returns on that.
-                local Search = DF.Search
-                local held = Search and Search.SuppressRegistration
-                if Search then Search.SuppressRegistration = true end
-                local mount = tools.PopoutContent(function(group, holder, reflow)
-                    -- ☠ THE SECTION'S OWN BUILDER, HANDED THE SAME TABLE the band
-                    -- gets. A panel showing a curated subset of its section is the
-                    -- exact defect this rework exists to remove, so there is no
-                    -- second list of controls anywhere -- one builder, twice.
-                    --
-                    -- `popout = true` is the one field that differs, and it picks
-                    -- no controls: DurationFormatRefresh reads it to re-flow the
-                    -- PANE rather than re-lay the page out, which is what a
-                    -- control inside a panel needs.
-                    builder({ group = group, parent = holder, refreshStates = reflow, popout = true })
-                end)
-                if Search then Search.SuppressRegistration = held end
-                pin = {
-                    build  = mount,
-                    -- ☠ PAGE-QUALIFIED, OUT OF THE PAGE'S OWN TAB LABEL. Two
-                    -- pinned panels both titled "Appearance" -- this page's and
-                    -- the Debuff Bar's -- are unusable, and comparing exactly
-                    -- those two is what the pin is FOR. Never a hardcoded string
-                    -- per section: the page already knows its name, and a second
-                    -- copy of it would go stale the day the tab is renamed.
-                    --
-                    -- The separator is punctuation, not prose -- both halves are
-                    -- already localised. Same call the page's own Join makes for
-                    -- its middot.
-                    title  = format("%s / %s", self.tabLabel or "", label),
-                    window = DF.GUIFrame,
-                    clipTo = self,
-                    db     = tools.RowDB,
-                }
-            end
-            -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
-            -- in SettingsWidgets.lua). This page is the only caller that opts in.
-            local section = GUI:CreateCollapsibleSection(self.child, label, true,
-                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })
-            section.hideOn = hideFn
-            -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
-            -- page and GUI.ColumnWidth). Without it the layout pass leaves it at the
-            -- width it was BUILT at -- so on a narrow window, where the page folds back
-            -- to one column, the header bar would stay half-width over a full-width
-            -- band. The header and its band have to declare it as a pair.
-            section.layoutColFill = true
-            -- ...and it joins the page's own roster, which is what the Expand All
-            -- / Collapse All pair walks. The page's sections and nobody else's:
-            -- the collapse store is addon-wide, so a bulk verb that read THE
-            -- STORE would unfold the designers' cards too.
-            tools.RegisterSection(section)
-            Add(section, 36, col)
-            local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(col), { chromeless = true })
-            band.layoutColFill = true
-            band.hideOn = hideFn
-            band.dfSectionCol = col
-            section:RegisterChild(band)
-            return band
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
         end
 
-        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header. `Add`
-        -- resolves a widget's slot height ON THE SPOT, so a band Add'd while it is
-        -- still empty is a band the layout pass gives no room to.
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header --
+        -- see tools.CloseSection.
         local function CloseSection(band)
-            Add(band, nil, band.dfSectionCol)
+            tools.CloseSection(Add, band)
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -1504,27 +1438,29 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the columns and the order they have always had -- including the Important
         -- Debuffs crossing the column notes below argue for.
         --
-        -- POPOUT turns THIRTEEN of them into feature rows in four bands, and the one
-        -- single-setting group into a CONTROL ROW on the same plate:
+        -- MODERN is the Buff Bar's collapsible-card design, section for section, so
+        -- the two pages can be compared in game -- plus the three things the Buff
+        -- Bar does NOT opt into: controls TWO PER ROW inside a card that is wide
+        -- enough, captions drawn dim so a setting never reads as a heading, and a
+        -- small live preview beside the title of four headers. Thirteen popout rows
+        -- became thirteen cards; the one control row (Hide Duplicate Debuffs) moved
+        -- into Debuff Filters, as Hide Duplicate Buffs did on the Buff Bar.
         --
-        --   "Content"   Visibility, Debuff Filters, Debuff Blacklist, Order & Limits
-        --               and the Hide Duplicate Debuffs control row -- whether the bar
-        --               exists, which debuffs reach it, which are struck back out
-        --               again, how many of them and in what order.
-        --   "Icon"      Appearance, Layout, Position, Border, Important Debuffs --
-        --               the icon itself: how big, how they grid, where they sit, what
-        --               rings them, and the one treatment applied to a SUBSET of them.
-        --   "Text"      Duration Text, Stack Count, Dispel Text -- the three things
-        --               WRITTEN on an icon.
-        --   headerless  Duration Bar -- the 12.1-factory-only extra.
-        --               ☠ NO HEADER, deliberately, and for the same reason the Buff
-        --               Bar's fourth band has none: the row carries a hideOn, so a
-        --               header would be a section title left standing over nothing on
-        --               a client with no factory row. Debuffs have no Pandemic box to
-        --               stand beside it (see the note at the foot of the page), so
-        --               this band holds one row rather than two.
+        --   column 1    "Content"  Visibility, Debuff Filters, Debuff Blacklist,
+        --                          Order & Limits -- whether the bar exists, which
+        --                          debuffs reach it, which are struck back out
+        --                          again, how many of them and in what order.
+        --               ...then    Duration Bar, the 12.1-factory-only extra, under
+        --                          NO category header: it carries a hideOn, so a
+        --                          header there would be a title left standing over
+        --                          nothing on a client with no factory row.
+        --   column 2    "Icon"     Appearance, Layout, Position, Border, Important
+        --                          Debuffs -- the icon itself.
+        --               "Text"     Duration Text, Stack Count, Dispel Text -- the
+        --                          three things WRITTEN on an icon.
         --
-        -- All three band headers are locale strings the page already ships.
+        -- The columns and the order are the old bands', so the one-column fold still
+        -- reads Content, Icon, Text, Duration Bar.
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where a toggle is hoisted,
@@ -1533,21 +1469,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- than a promise -- test_debuffbar_page_builders.lua pins the inventory of
         -- each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key claim,
-        -- the amber tick, the footer's Reset Group / Hold: Defaults, the hoisted-toggle
-        -- search repair, the control-row registration and the band width. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper both aura bars build their cards with. nil in classic,
+        -- which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        local contentBand, iconBand, textBand, factoryBand
-        if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
-            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
-            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
+        -- ONE SECTION: the Buff Bar's helper (tools.OpenSection), plus this page's
+        -- three opt-ins. `preview` is the one per-section argument; the other two
+        -- are the page's, so every card here takes them.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle, preview)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true, preview = preview })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -1643,25 +1580,28 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- bar back on.
         local function DebuffsOffRow(d) return not (d or db).showDebuffs end
 
-        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
-        -- DandersUI Sections' RefreshChildStates greys every child a
-        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
-        -- first child is always the header, and wrong for a popout pane, which has no
-        -- header at all. The Pet Frames / Resource Bar answer, verbatim: spelled onto
-        -- the widget itself, composed with whatever predicate it already carries, and
-        -- applied at the MOUNT rather than inside the builder. Never runs in classic,
-        -- where the box's own header is index 1.
+        -- ☠ NO INDEX-1 REPAIR ON THIS PAGE ANY MORE, and it is a deletion rather than
+        -- an omission -- the Buff Bar's own note. DandersUI Sections'
+        -- RefreshChildStates skips on the `isSectionHeader` MARK now, not on the
+        -- position, and a card's band has no header to carry it, so every child of a
+        -- band greys from `group.disableChildrenOn` on its own.
+
+        -- ===== THE FOUR HEADER PREVIEWS (Modern only) =====================
+        -- A tiny picture beside the title of what the section draws, read off the
+        -- live settings on every state pass and every write (opts.preview on
+        -- CreateCollapsibleSection), never baked at build.
         --
-        -- Only the four panes whose first child is a GATED CONTROL need it. A pane
-        -- opening on a label (Debuff Filters, Debuff Blacklist, Important Debuffs,
-        -- Duration Bar) or on a control carrying the page gate itself (Visibility,
-        -- Appearance, Layout, Position, Border) already greys.
-        local function GatePaneFirstChild(group)
-            local entry = group and group.groupChildren and group.groupChildren[1]
-            local w = entry and entry.widget
-            if not w then return end
-            local prev = w.disableOn
-            w.disableOn = function(d) return DebuffsOffRow(d) or (prev and prev(d)) or false end
+        -- ⚠ GREYED, NOT HIDDEN, WHEN THE FEATURE IS OFF. A preview that vanished
+        -- and came back would move the title's truncation point each time the tick
+        -- flipped; a grey one says "off" in the same place the colour said "on",
+        -- beside the header's own "Off" summary. The solid swatches are greyed by
+        -- COLOUR rather than by desaturate: desaturating a white texture tinted a
+        -- colour gives white, which would read as a colour choice.
+        local PREVIEW_WHITE = "Interface\\Buttons\\WHITE8X8"
+        local PREVIEW_OFF = { r = 0.5, g = 0.5, b = 0.5, a = 1 }
+        local function PreviewColor(c, on)
+            if not on or type(c) ~= "table" then return PREVIEW_OFF end
+            return { r = c.r or 1, g = c.g or 1, b = c.b or 1, a = 1 }
         end
 
         -- The summary convention, once: at most four items, a fixed order,
@@ -1746,15 +1686,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             maxNote:refreshContent(db)
         end
 
-        -- What the whole page's gate costs when it moves, named once: the state pass,
-        -- the aura re-scan the suppressed checkbox ran, and a repaint of every pane
-        -- standing open -- eleven of which grey with it.
-        local function OnShowDebuffsToggle()
-            self:RefreshStates()
-            DF:RefreshAllVisibleFrames()
-            if tools then tools.ReflowMounted() end
-        end
-
         local function DebuffVisibilitySummary(d)
             if not d then return "" end
             local n = tonumber(d.debuffMax)
@@ -1772,42 +1703,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(visibilityGroup, nil, 1)
         else
-            -- One: Max Debuffs. The Show Debuffs tick is HOISTED onto the row, so it
-            -- is not one of them.
-            local DEBUFF_VISIBILITY_COUNT = 1
-
-            -- ☠ ONE SETTING BEHIND THE CLICK, which is the plainest case on the page: the
-            -- pane holds Max Debuffs and a caution note that only appears while the limit
-            -- is doing something per-category. On the plate it is a slider under the title
-            -- line, and the strip offers to pin rather than to promise.
-            --
-            -- ⚠ THE TICK STAYS HOISTED. Show Debuffs is not one of the pane's settings --
-            -- the builder is told to skip it (`hoistToggle`) precisely because the ROW owns
-            -- it -- so there is no twin here to delete, and the plate folds away with it.
-            local visMount, visContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffVisibilityGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-            end, nil, { inline = true })
-            local visRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Visibility"],
-                db       = tools.RowDB,
-                toggle   = { key = "showDebuffs" },
-                summary  = DebuffVisibilitySummary,
-                count    = DEBUFF_VISIBILITY_COUNT,
-                onToggle = OnShowDebuffsToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = visMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(visRow, visContent)
-            tools.WireModifiedTick(visRow)
-            tools.WireFooter(visRow, function() DF:RefreshAllVisibleFrames() end)
-            tools.RegisterHoistedToggle(visRow, L["Show Debuffs"], "showDebuffs", OnShowDebuffsToggle)
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on sections in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The category header the four Content sections sit under.
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+            -- ☠ SHOW DEBUFFS STAYS IN THE BODY, as Show Buffs does: it is the PAGE
+            -- gate, a fold is not a switch, and a header tick that greyed the whole
+            -- page would surprise people. So no toggle here and no hoistToggle --
+            -- the builder builds it inside, exactly as classic does.
+            local band = OpenSection(L["Visibility"], "debuffs_visibility", 1, DebuffVisibilitySummary)
+            BuildDebuffVisibilityGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== DEBUFF FILTERS (a 280 box in column 1 in classic, the Content band's
@@ -1835,6 +1746,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DebuffFilterChanged()
             end), 30)
             showAllCb.tooltip = L["Show every debuff with no filtering."]
+            -- A row of its own when the card lays out two per row: it overrides the
+            -- whole list below it, so it must not read as the list's first entry.
+            -- Inert on a one-track group (classic, a pinned panel).
+            showAllCb.fullRow = true
 
             -- The only real warning here, and it is about the COMBINATION: any single
             -- category obviously misses things, so saying that adds nothing. What is
@@ -1922,15 +1837,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             dispelDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
         end
 
-        -- ☠ THE COUNT IS ARITHMETIC OVER THE CATEGORY TABLE, not a literal. The pane
-        -- mounts one tick per category, so a number written down here would be wrong
-        -- the moment Blizzard's list gains or loses one -- which it did as recently as
-        -- Non-Player Debuffs.
-        local function DebuffFilterCount()
-            -- The caption, the All Debuffs switch, the caution banner and the
-            -- dispel-mode dropdown, plus one row per category.
-            return 4 + #DEBUFF_CATEGORIES
-        end
+        -- Hide Duplicate Debuffs' tooltip. Declared here, above Debuff Filters,
+        -- because in Modern the checkbox sits at the foot of that section; classic
+        -- still builds it in its own Deduplication box further down.
+        local DEDUP_TIP = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
 
         -- What the row says with the panel shut: how much of Blizzard's list is
         -- switched on, in the "3/7" shape the Buff Filters row uses, plus which
@@ -1963,33 +1873,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(filterGroup, nil, 1)
         else
-            local filterMount, filterContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffFilterGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end)
-            local filterRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Debuff Filters"],
-                db      = tools.RowDB,
-                summary = DebuffFilterSummary,
-                count   = DebuffFilterCount(),
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = filterMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(filterRow, filterContent)
-            tools.WireModifiedTick(filterRow)
-            -- ✓ A FOOTER HERE, unlike the Buff Bar's filter row, and the difference is
-            -- checked rather than assumed: every key behind this group is a SCALAR --
-            -- seven booleans, All Debuffs and one string -- so Reset Group's
-            -- `db[key] = DeepCopy(default)` writes numbers and words rather than
-            -- replacing a table the aura pipeline is holding. The buff row's refusal
-            -- was about buffFilterSelection specifically; nothing of that shape is in
-            -- here.
-            tools.WireFooter(filterRow, DebuffFilterChanged)
+            -- ⚠ NOT DIMMED BY THE PAGE GATE, exactly as its classic box never was:
+            -- you may pick what the bar would show before you switch the bar on.
+            local band = OpenSection(L["Debuff Filters"], "debuffs_filters", 1, DebuffFilterSummary)
+            BuildDebuffFilterGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- ⚠ HIDE DUPLICATE DEBUFFS LIVES HERE IN MODERN, the Buff Bar's move.
+            -- As a lone control row between the cards it was the one element on the
+            -- page with its own width, height and indent; it decides which debuffs
+            -- show, so it is a filter, and it reads as one at the foot of this
+            -- section -- on its own row, after the dispel-mode pair above it.
+            local dedupCb = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged), 30)
+            dedupCb.tooltip = DEDUP_TIP
+            dedupCb.fullRow = true
+            CloseSection(band)
         end
 
         -- ===== DEBUFF BLACKLIST (a 280 box in column 1 in classic, the Content
@@ -2066,14 +1965,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             resetBtn.tooltip = L["Debuff Blacklist"]
         end
 
-        -- ☠ ARITHMETIC OVER THE CATALOG, not a literal: the shipped list has grown
-        -- twice already (Ride Along, Challenger's Burden) and a written-down number
-        -- would be wrong the next time it does.
-        local function DebuffBlacklistCount()
-            -- The caption, one tick per catalog entry, and Reset.
-            return 2 + #blacklistCatalog
-        end
-
         -- How much of the catalog is struck out, in the same fraction shape the two
         -- filter rows use. No word for it: "hidden" and "blacklisted" are both new
         -- locale strings for something the number already says beside a row called
@@ -2108,39 +1999,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- reason is that it belongs beside the categories it narrows.
                 Add(blGroup, nil, 1)
             else
-                local blMount, blContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildDebuffBlacklistGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end)
-                local blacklistRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Debuff Blacklist"],
-                    db      = tools.RowDB,
-                    summary = DebuffBlacklistSummary,
-                    count   = DebuffBlacklistCount(),
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = blMount,
-                    footerStrip = true,
-                }))
-                -- ⚠ THE STORED SET IS NAMED, because the walk cannot see it. Every
-                -- tick here is a CUSTOM get/set checkbox -- no db binding at all -- so
-                -- what it registers with search is a synthetic per-entry key and the
-                -- real setting, `debuffBlacklist`, is bound to nothing the walk can
-                -- find. Named through `extra`, the amber tick asks about the table the
-                -- user is actually editing.
-                tools.ClaimKeys(blacklistRow, blContent, { "debuffBlacklist" })
-                tools.WireModifiedTick(blacklistRow)
-                -- ☠ NO FOOTER ON THIS ROW, AND IT IS A REFUSAL RATHER THAN AN
-                -- OMISSION -- for a reason of its own, not the Buff Filters one.
-                -- THIS GROUP ALREADY SHIPS A RESET, inside the pane, and the two do
-                -- not do the same thing: the button above mutates the stored set IN
-                -- PLACE (see the note on it), while Reset Group writes
-                -- `db[key] = DeepCopy(default)` and REPLACES the table. Two buttons
-                -- called Reset, four inches apart, one of which is the one the group
-                -- was written to use -- the footer is the one that goes.
+                -- Decides what SHOWS, so no pin, and not dimmed by the page gate --
+                -- its classic box never was.
+                local band = OpenSection(L["Debuff Blacklist"], "debuffs_blacklist", 1, DebuffBlacklistSummary)
+                BuildDebuffBlacklistGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
         end
 
@@ -2237,55 +2103,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(debuffOrderGroup, nil, 1)
         else
-            -- Six: the sort pick, its two refinements, the long-debuff pair and the
-            -- keep-important tick.
-            local DEBUFF_ORDER_COUNT = 6
-
-            -- ☠ SIX SETTINGS, SO THE GROUP GOES ON THE PLATE, for the reason the Buff
-            -- Bar's own Order & Limits row carries at length: a row holding six was charging
-            -- the same click as this page's twenty-item Border row. The count below is the
-            -- opt-in; INLINE_MAX measured off the pane is what would refuse it.
-            local orderMount, orderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffOrderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local orderRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Order & Limits"],
-                db      = tools.RowDB,
-                summary = DebuffOrderSummary,
-                count   = DEBUFF_ORDER_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = orderMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(orderRow, orderContent)
-            tools.WireModifiedTick(orderRow)
-            tools.WireFooter(orderRow, DebuffFilterChanged)
-            orderRow.disableOn = DebuffsOffRow
+            -- Decides how many show and in what order -- what SHOWS, not how it
+            -- looks -- so no pin. Greys with the page gate, as the row did.
+            local band = OpenSection(L["Order & Limits"], "debuffs_order", 1, DebuffOrderSummary, DebuffsOffRow)
+            BuildDebuffOrderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ===== DEDUPLICATION (a 280 box in column 1 in classic, a CONTROL ROW in the
-        -- Content band here) =====
+        -- ===== DEDUPLICATION (a 280 box in column 1 in classic; in Modern the
+        -- checkbox sits at the foot of Debuff Filters, above) =====
         -- Same section, same position as the Buffs page: its own box at the top
         -- of column 1, ahead of the styling. The two pages' dedupe toggles must be
-        -- findable in the same place.
-        --
-        -- ⚠ ONE SETTING IS A CONTROL ROW -- not a pane, which would be a click that
-        -- buys one tick, and not a 280 box either, which is the one shape a column of
-        -- full-width plates cannot absorb.
-        --
-        -- ⚠ AND THE ROW IS NAMED FOR THE SETTING, NOT FOR THE BOX -- the Buff Bar's
-        -- rule, and for its reason: of "Deduplication" and "Hide Duplicate Debuffs",
-        -- the one that survives standing alone on a plate is the sentence, not the
-        -- jargon, and naming it that keeps the search result identical in both
-        -- layouts because it is the caption the classic checkbox registers.
-        local DEDUP_TIP = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
-
+        -- findable in the same place. Its tooltip is declared above Debuff Filters.
         if classicLayout then
             local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
             dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
@@ -2293,28 +2125,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             dfDedup.tooltip = DEDUP_TIP
             dedupGroup:AddWidget(dfDedup, 30)
             Add(dedupGroup, nil, 1)
-        else
-            local dedupRow = contentBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label     = L["Hide Duplicate Debuffs"],
-                kind      = "checkbox",
-                -- The FUNCTION form: the table is re-resolved on each read, so a mode
-                -- switch is followed rather than frozen at whichever table this build
-                -- captured.
-                db        = tools.RowDB,
-                key       = "debuffDeduplicateDesigner",
-                onChanged = DebuffFilterChanged,
-                tooltip   = DEDUP_TIP,
-            }))
-            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
-            -- are the popout row's own slot), which is what makes a control row and a
-            -- feature row share one rhythm in a band.
-            tools.RegisterControlRow(dedupRow, "checkbox", "debuffDeduplicateDesigner", false, DebuffFilterChanged)
         end
 
         -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
         -- row) ===== -- mirrors Buffs; see the note there.
-        local function ApplyDebuffPosition() DF:LightweightUpdateAuraPosition("debuff") end
-
         local function BuildDebuffAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             local debuffSize = group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
@@ -2350,32 +2164,27 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(appearanceGroup, nil, 2)
         else
-            -- Three: size, scale, alpha.
-            local DEBUFF_APPEARANCE_COUNT = 3
-
-            -- Three sliders, so the group goes on the plate -- the same three the Buff Bar
-            -- mounts, and mounted the same way so the two pages still read as one.
-            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffAppearanceGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Appearance"],
-                db      = tools.RowDB,
-                summary = DebuffAppearanceSummary,
-                count   = DEBUFF_APPEARANCE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = appearanceMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(appearanceRow, appearanceContent)
-            tools.WireModifiedTick(appearanceRow)
-            tools.WireFooter(appearanceRow, ApplyDebuffPosition)
-            appearanceRow.disableOn = DebuffsOffRow
+            -- Column 2 opens here, with the category header its five sections sit
+            -- under.
+            Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)
+            -- PREVIEW: a debuff icon at the bar's own Alpha (floored so a near-zero
+            -- alpha still shows a shape rather than an empty slot), desaturated
+            -- while the bar is off.
+            local function AppearancePreview(d)
+                return { {
+                    texture = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
+                    coords = { 0.08, 0.92, 0.08, 0.92 },
+                    desaturate = not d.showDebuffs,
+                    color = { r = 1, g = 1, b = 1, a = math.max(0.3, tonumber(d.debuffAlpha) or 1) },
+                } }
+            end
+            local band = OpenSection(L["Appearance"], "debuffs_appearance", 2, DebuffAppearanceSummary, DebuffsOffRow, nil,
+                BuildDebuffAppearanceGroup, nil, AppearancePreview)
+            BuildDebuffAppearanceGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== LAYOUT (a 280 box in column 1 in classic, the Icon band's second
@@ -2426,32 +2235,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(gridGroup, nil, 1)
         else
-            -- Three: icons per row and the two spacings.
-            local DEBUFF_LAYOUT_COUNT = 3
-
-            -- Three sliders -- the wrap and the two spacings -- so the group goes on the
-            -- plate, matching the Buff Bar's row of the same name.
-            local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffLayoutGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Layout"],
-                db      = tools.RowDB,
-                summary = DebuffLayoutSummary,
-                count   = DEBUFF_LAYOUT_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = layoutMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(layoutRow, layoutContent)
-            tools.WireModifiedTick(layoutRow)
-            tools.WireFooter(layoutRow, ApplyDebuffPosition)
-            layoutRow.disableOn = DebuffsOffRow
+            local band = OpenSection(L["Layout"], "debuffs_layout", 2, DebuffLayoutSummary, DebuffsOffRow, nil, BuildDebuffLayoutGroup)
+            BuildDebuffLayoutGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== POSITION (a 280 box in column 1 in classic, the Icon band's third
@@ -2488,40 +2277,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(positionGroup, nil, 1)
         else
-            -- Four: the anchor, the growth control (one widget, three stacked mini
-            -- dropdowns inside it) and the two offsets.
-            local DEBUFF_POSITION_COUNT = 4
-
-            -- Four, the growth control among them, so the group goes on the plate. Same
-            -- shape and same trade as the Buff Bar's Position row.
-            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffPositionGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Position"],
-                db      = tools.RowDB,
-                summary = DebuffPositionSummary,
-                count   = DEBUFF_POSITION_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = positionMount,
-                footerStrip = true,
-            }))
-            -- ⚠ debuffGrowth IS NAMED, because the walk cannot see it. The growth
-            -- control is three hand-built mini dropdowns in a container -- it registers
-            -- nothing with search and carries no dbKey -- so without this the row's tick
-            -- and its Reset Group would both act as though the setting were on another
-            -- page. (Its repaint after a reset is covered: the container's
-            -- refreshContent re-decomposes the stored value, and RefreshChildStates runs
-            -- it on every reflow.)
-            tools.ClaimKeys(positionRow, positionContent, { "debuffGrowth" })
-            tools.WireModifiedTick(positionRow)
-            tools.WireFooter(positionRow, function() DF:UpdateAll() end)
-            positionRow.disableOn = DebuffsOffRow
+            -- ⚠ THE GROWTH CONTROL TAKES A ROW OF ITS OWN in two-track mode: it is
+            -- three stacked mini dropdowns, 155 tall, and carries no refreshValue,
+            -- so tools.CloseSection gives it the full width. Anchor sits alone
+            -- above it and the two offsets pair up below it.
+            local band = OpenSection(L["Position"], "debuffs_position", 2, DebuffPositionSummary, DebuffsOffRow, nil, BuildDebuffPositionGroup)
+            BuildDebuffPositionGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ☠ A SECOND, DRIFTED COPY OF THE INVALIDATION CONTRACT. This nilled the curve by
@@ -2632,44 +2397,44 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- after Position, still with the geometry.
             Add(borderGroup, nil, 1)
         else
-            -- Twenty: the eighteen CreateBorderControls builds for this include set
-            -- less the hoisted Show Border, plus the three this group adds by hand.
-            local DEBUFF_BORDER_COUNT = 20
-
-            -- What the suppressed Show Border checkbox ran, and never a page rebuild:
-            -- that would retire every widget on the page including the row being
-            -- clicked, and the row's write path calls row.Refresh() after this returns.
-            local function OnDebuffBorderToggle()
-                ApplyDebuffBorder()
-                self:RefreshStates()
-                tools.ReflowMounted()
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+            -- build its own (hoistToggle -> noShowToggle). The key is still read
+            -- inside, so Color by Dispel Type and the rest grey exactly as before.
+            -- The commit is what the row's tick ran -- ApplyDebuffBorder (invalidate,
+            -- update, restyle: Show Border is structural on the aura row), the
+            -- state pass, and a repaint of a pinned panel -- never a page rebuild.
+            -- It greys with the page gate, as the in-body box did via disableWhen.
+            --
+            -- PREVIEW: a swatch in the colour the border is drawn in. With Color by
+            -- Dispel Type on (the default) that is the dispel palette, not the
+            -- static colour below it, so the swatch shows the Magic colour from the
+            -- shared palette instead -- the static one would be a colour the frames
+            -- are not using.
+            local function BorderPreview(d)
+                local on = d.showDebuffs and d.debuffShowBorder ~= false
+                local c = d.debuffBorderColor
+                if d.debuffBorderColorByType and DF.ResolveDispelColor then
+                    local r, g, b = DF:ResolveDispelColor("Magic")
+                    c = { r = r, g = g, b = b }
+                end
+                return { { texture = PREVIEW_WHITE, width = 12, height = 12, color = PreviewColor(c, on) } }
             end
-
-            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffBorderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-            end)
-            local borderRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Border"],
-                db       = tools.RowDB,
-                toggle   = { key = "debuffShowBorder" },
-                summary  = DebuffBorderSummary,
-                count    = DEBUFF_BORDER_COUNT,
-                onToggle = OnDebuffBorderToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = borderMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(borderRow, borderContent)
-            tools.WireModifiedTick(borderRow)
-            tools.WireFooter(borderRow, ApplyDebuffBorder)
-            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "debuffShowBorder", OnDebuffBorderToggle)
-            borderRow.disableOn = DebuffsOffRow
+            local band = OpenSection(L["Border"], "debuffs_border", 2, DebuffBorderSummary, DebuffsOffRow, nil, BuildDebuffBorderGroup, {
+                db = db, key = "debuffShowBorder", label = L["Show Border"],
+                isOn = function(d) return d.debuffShowBorder ~= false end,
+                disableOn = DebuffsOffRow,
+                onChanged = function()
+                    ApplyDebuffBorder()
+                    self:RefreshStates()
+                    tools.ReflowMounted()
+                end,
+            }, BorderPreview)
+            BuildDebuffBorderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ===== IMPORTANT DEBUFFS (a 280 box in column 2 in classic, the Icon band's
@@ -2686,18 +2451,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- this page"; with no columns left to balance, the two whole-icon treatments
         -- read as a pair at the foot of the band.
         --
-        -- ☠ THE HEADER SWATCH IS CLASSIC-ONLY, and that is a LOSS rather than a
-        -- decision the popout layout gets for free. The box's header carries a live
-        -- preview of the corner marker (GUI:AttachHeaderSwatch), and a popout row has
-        -- no header to hang it on -- the kit's PopoutRow has no preview slot, and
-        -- inventing one for a single consumer is a kit feature, not a page's business.
-        -- Mounting a header INSIDE the pane was the other option and is worse: every
-        -- other pane on every converted page opens straight onto its first control,
-        -- and this one would open onto a 40px repeat of the row's own name. The row's
-        -- summary carries the two facts the swatch showed in words instead (the size
-        -- step and which corner the marker sits in), and the marker's own colour
-        -- pickers are three rows into the pane. Raised for the sweep's owner rather
-        -- than solved here.
+        -- ☠ THE HEADER SWATCH IS CLASSIC-ONLY. The box's header carries a live
+        -- preview of the corner marker (GUI:AttachHeaderSwatch). The Modern card
+        -- COULD carry one now -- its header takes a live preview beside the title
+        -- (opts.preview), which four other cards on this page use -- but this one
+        -- was not in the design's list and is left for a decision rather than added
+        -- on the way past. Until then the card's summary carries the two facts the
+        -- swatch showed, in words (the size step and which corner the marker sits
+        -- in).
         local UpdateImportantSwatch   -- assigned below in classic, once the header exists
         local function ImportantChanged()
             if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
@@ -2837,58 +2598,35 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- carries Debuff Filters, Debuff Blacklist and Order & Limits.
             Add(impGroup, nil, 2)
         else
-            -- Eight: the size step, the marker tick, its size, corner, two offsets
-            -- and two colours. The blurb is prose, not a setting. The Highlight
-            -- tick is HOISTED onto the row.
-            local DEBUFF_IMPORTANT_COUNT = 8
-
-            -- What the suppressed Highlight checkbox ran, plus the two passes the row's
-            -- tick owes the pane behind it. ⚠ THE STATE PASS IS NEW: ImportantChanged
-            -- alone never re-ran one, so in classic the eight sub-controls kept their
-            -- previous grey until something else refreshed the page. The row's tick
-            -- cannot leave the pane it just gated in that state, and the fix is
-            -- popout-only -- classic's checkbox is untouched.
-            local function OnImportantToggle()
-                self:RefreshStates()
-                ImportantChanged()
-                tools.ReflowMounted()
-            end
-
-            local impMount, impContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildImportantDebuffsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ HIGHLIGHT IMPORTANT DEBUFFS IS THE HEADER'S TICK; the builder skips
+            -- its own (hoistToggle). Same label, key, tooltip and gate the in-body
+            -- box had. ⚠ THE STATE PASS IS THE ROW'S ADDITION, kept: ImportantChanged
+            -- alone never re-ran one, so the eight sub-controls would keep their old
+            -- grey after a flip. Classic's checkbox is untouched.
+            --
+            -- A pin: it decides how the important ones LOOK (size, marker), not
+            -- which debuffs show -- those were already chosen by the filters.
+            local band = OpenSection(L["Important Debuffs"], "debuffs_important", 2, ImportantDebuffsSummary, DebuffsOffRow, nil,
+                BuildImportantDebuffsGroup, {
+                    db = db, key = "debuffImportantHighlight", label = L["Highlight Important Debuffs"],
+                    tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."],
+                    disableOn = DebuffsOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        ImportantChanged()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end)
-            local importantRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Important Debuffs"],
-                db       = tools.RowDB,
-                toggle   = { key = "debuffImportantHighlight" },
-                summary  = ImportantDebuffsSummary,
-                count    = DEBUFF_IMPORTANT_COUNT,
-                onToggle = OnImportantToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = impMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(importantRow, impContent)
-            tools.WireModifiedTick(importantRow)
-            tools.WireFooter(importantRow, ImportantChanged)
-            tools.RegisterHoistedToggle(importantRow, L["Highlight Important Debuffs"], "debuffImportantHighlight", OnImportantToggle)
-            importantRow.disableOn = DebuffsOffRow
+            BuildImportantDebuffsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ===== DURATION TEXT (a 280 box in column 2 in classic, the Text band's
         -- first row) ===== — "Duration Text" for the same reason as Buffs.
-        local function ApplyDebuffDurationText()
-            DF:InvalidateAuraLayout()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdateAuraDurationText("debuff")
-        end
-
         -- ☠ WHAT A DURATION FORMAT CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
         -- LAYOUTS. Picking a format re-gates the two Hide Above controls (neither can
         -- compose with Percent), and classic used to pay for that with a whole
@@ -2980,46 +2718,28 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durationGroup, nil, 2)
         else
-            -- Fourteen: the swipe tick, the format pick, the eight text-style
-            -- controls, Color by Time, the Hide Above pair and the permanent-aura
-            -- tick. The cross-link beside Color by Time is prose, not a setting. The
-            -- Show Duration tick is HOISTED onto the row.
-            local DEBUFF_DURATION_COUNT = 14
-
-            -- What the suppressed Show Duration checkbox ran, plus the repaint of every
-            -- pane standing open.
-            local function OnDebuffDurationToggle()
-                self:RefreshStates()
-                DF:UpdateAllFrames()
-                tools.ReflowMounted()
-            end
-
-            local durationMount, durationContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffDurationGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- The second category header in column 2: the three text elements.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)
+            -- ☠ SHOW DURATION IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same commit as the in-body box plus a pinned panel's
+            -- repaint. That box greyed with the group gate (not keepEnabled), so the
+            -- tick greys with the page gate.
+            local band = OpenSection(L["Duration Text"], "debuffs_duration", 2, DebuffDurationSummary, DebuffsOffRow, nil,
+                BuildDebuffDurationGroup, {
+                    db = db, key = "debuffShowDuration", label = L["Show Duration"],
+                    disableOn = DebuffsOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        DF:UpdateAllFrames()
+                        tools.ReflowMounted()
+                    end,
                 })
-                GatePaneFirstChild(group)
-            end)
-            local durationRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Duration Text"],
-                db       = tools.RowDB,
-                toggle   = { key = "debuffShowDuration" },
-                summary  = DebuffDurationSummary,
-                count    = DEBUFF_DURATION_COUNT,
-                onToggle = OnDebuffDurationToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = durationMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(durationRow, durationContent)
-            tools.WireModifiedTick(durationRow)
-            tools.WireFooter(durationRow, ApplyDebuffDurationText)
-            tools.RegisterHoistedToggle(durationRow, L["Show Duration"], "debuffShowDuration", OnDebuffDurationToggle)
-            durationRow.disableOn = DebuffsOffRow
+            BuildDebuffDurationGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ===== STACK COUNT (a 280 box in column 2 in classic, the Text band's second
@@ -3031,8 +2751,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ☠ NO TICK TO HOIST: the stack count is drawn by the game whenever an aura has
         -- one, and every control here styles it. There is no boolean that means "am I
         -- doing anything at all", so this is a WAY IN.
-        local function ApplyDebuffStackText() DF:LightweightUpdateAuraStackText("debuff") end
-
         local function BuildDebuffStackGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
@@ -3071,31 +2789,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(stackCountGroup, nil, 2)
         else
-            -- Eight: font, scale, outline, shadow, anchor, two offsets and the colour.
-            local DEBUFF_STACK_COUNT = 8
-
-            local stackMount, stackContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffStackGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local stackRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Stack Count"],
-                db      = tools.RowDB,
-                summary = DebuffStackSummary,
-                count   = DEBUFF_STACK_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = stackMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(stackRow, stackContent)
-            tools.WireModifiedTick(stackRow)
-            tools.WireFooter(stackRow, ApplyDebuffStackText)
-            stackRow.disableOn = DebuffsOffRow
+            local band = OpenSection(L["Stack Count"], "debuffs_stack", 2, DebuffStackSummary, DebuffsOffRow, nil, BuildDebuffStackGroup)
+            BuildDebuffStackGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== DISPEL TEXT (a 280 box in column 2 in classic, the Text band's third
@@ -3169,45 +2868,43 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- lurching an already-long column by 443 every time the row backend changes.
             Add(symbolGroup, nil, 2)
         else
-            -- Eight: the text-style block's font, scale, outline, shadow, colour,
-            -- anchor and two offsets. The Show Dispel Text tick is HOISTED onto the row.
-            local DEBUFF_DISPEL_COUNT = 8
-
-            local function OnDispelTextToggle()
-                self:RefreshStates()
-                ApplyDispelText()
-                tools.ReflowMounted()
+            -- ☠ SHOW DISPEL TEXT IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same label, key, tooltip and gate (keepEnabled +
+            -- greyed while debuffs are off), and the same structural commit.
+            --
+            -- ☠ THE HIDE GATE GOES ON BOTH HALVES (OpenSection's hideFn): with no
+            -- factory row the client has no source for the letters, so the header
+            -- and its band go together rather than leaving a title over nothing.
+            --
+            -- PREVIEW: the game's own letter code for Magic, drawn in the colour
+            -- the letters are set to -- the one thing on this card you can see
+            -- without pulling a mob.
+            local function DispelPreview(d)
+                local map = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap()
+                local on = d.showDebuffs and d.debuffDispelSymbolEnabled
+                return { {
+                    text = (map and map.Magic) or "Ma",
+                    color = PreviewColor(d.debuffDispelSymbolColor, true),
+                    desaturate = not on,
+                } }
             end
-
-            local dispelMount, dispelContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffDispelTextGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local dispelRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Dispel Text"],
-                db       = tools.RowDB,
-                toggle   = { key = "debuffDispelSymbolEnabled" },
-                summary  = DebuffDispelSummary,
-                count    = DEBUFF_DISPEL_COUNT,
-                onToggle = OnDispelTextToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = dispelMount,
-                footerStrip = true,
-            }))
-            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
-            -- rather than leaving a gap where letters the client cannot write would be.
-            dispelRow.hideOn = NoFactoryRow
-            tools.ClaimKeys(dispelRow, dispelContent)
-            tools.WireModifiedTick(dispelRow)
-            tools.WireFooter(dispelRow, ApplyDispelText)
-            tools.RegisterHoistedToggle(dispelRow, L["Show Dispel Text"], "debuffDispelSymbolEnabled", OnDispelTextToggle)
-            dispelRow.disableOn = DebuffsOffRow
+            local band = OpenSection(L["Dispel Text"], "debuffs_dispeltext", 2, DebuffDispelSummary, DebuffsOffRow, NoFactoryRow,
+                BuildDebuffDispelTextGroup, {
+                    db = db, key = "debuffDispelSymbolEnabled", label = L["Show Dispel Text"],
+                    tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."],
+                    disableOn = DebuffsOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        ApplyDispelText()
+                        tools.ReflowMounted()
+                    end,
+                }, DispelPreview)
+            BuildDebuffDispelTextGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ===== DURATION BAR (a 280 box in column 2 in classic, the headerless band's
@@ -3272,45 +2969,43 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durBarGroup, nil, 2)
         else
-            -- Eight: the position pick, height, gap, the colour mode, the texture
-            -- and two colours, and Reverse Fill. The blurb is prose, not a
-            -- setting. The Enable tick is HOISTED.
-            local DEBUFF_DURBAR_COUNT = 8
-
-            local function OnDebuffDurationBarToggle()
-                self:RefreshStates()
-                DebuffBarChanged()
-                tools.ReflowMounted()
+            -- ☠ COLUMN 1, UNDER NO CATEGORY HEADER -- the old headerless band's
+            -- place. It carries a hideOn, so a header over it would be a title left
+            -- standing over nothing on a client with no factory row; the hide gate
+            -- goes on both halves (OpenSection's hideFn).
+            --
+            -- ☠ ENABLE DURATION BAR IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same commit, and the same gate the in-body box carried
+            -- as its disableOn: greyed while debuffs are off.
+            --
+            -- PREVIEW: a mini bar filled the way the bar is -- the ramp texture of a
+            -- curve colour mode, else a solid fill in the Bar Color.
+            local function DurationBarPreview(d)
+                local on = d.showDebuffs and d.debuffDurationBarEnabled
+                local curve = on and DF.GetDurationBarCurveTexture
+                    and DF:GetDurationBarCurveTexture(d.debuffDurationBarColorMode)
+                if curve then
+                    return { { texture = curve, width = 22, height = 5, color = { r = 1, g = 1, b = 1, a = 1 } } }
+                end
+                return { { texture = PREVIEW_WHITE, width = 22, height = 5,
+                           color = PreviewColor(d.debuffDurationBarColor, on) } }
             end
-
-            local durBarMount, durBarContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffDurationBarGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-            end)
-            local durBarRow = factoryBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Duration Bar"],
-                db       = tools.RowDB,
-                toggle   = { key = "debuffDurationBarEnabled" },
-                summary  = DebuffDurationBarSummary,
-                count    = DEBUFF_DURBAR_COUNT,
-                onToggle = OnDebuffDurationBarToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = durBarMount,
-                footerStrip = true,
-            }))
-            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
-            -- rather than leaving a gap where a bar the client cannot draw would be.
-            durBarRow.hideOn = NoFactoryRow
-            tools.ClaimKeys(durBarRow, durBarContent)
-            tools.WireModifiedTick(durBarRow)
-            tools.WireFooter(durBarRow, DebuffBarChanged)
-            tools.RegisterHoistedToggle(durBarRow, L["Enable Duration Bar"], "debuffDurationBarEnabled", OnDebuffDurationBarToggle)
-            durBarRow.disableOn = DebuffsOffRow
+            local band = OpenSection(L["Duration Bar"], "debuffs_durationbar", 1, DebuffDurationBarSummary, DebuffsOffRow, NoFactoryRow,
+                BuildDebuffDurationBarGroup, {
+                    db = db, key = "debuffDurationBarEnabled", label = L["Enable Duration Bar"],
+                    disableOn = DebuffsOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        DebuffBarChanged()
+                        tools.ReflowMounted()
+                    end,
+                }, DurationBarPreview)
+            BuildDebuffDurationBarGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- (No Pandemic box here, unlike Buffs. This row shows harmful auras on a FRIENDLY
@@ -3319,26 +3014,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- impossibility are worse than no controls. See BuildAuraRowConfig in
         -- Features/Auras.lua for the render-side gate that matches this.)
 
-        -- ===== THE FOUR BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
-        -- The Buffs page's split: Content and the Factory's duration bar down the left,
-        -- Icon and Text down the right. On a narrow window the page folds back to one
-        -- column and reads in exactly the order below, which is the order it always had.
-        -- ⚠ THE COLUMNS ARE NOT EVEN, AND NO BAND CAN EVEN THEM. Five rows against
-        -- eight; sending Text left only turns that into eight against five, so the
-        -- rule settles the tie and every band stays on its own side.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            contentBand.layoutColFill = true
-            iconBand.layoutColFill = true
-            textBand.layoutColFill = true
-            factoryBand.layoutColFill = true
-            Add(contentBand, nil, 1)
-            Add(iconBand, nil, 2)
-            Add(textBand, nil, 2)
-            Add(factoryBand, nil, 1)
-        end
+        -- ===== NO BAND TAIL ================================================
+        -- The four bands used to be Add'd here, at the foot, because each held every
+        -- row in its category and a band has to go in after its last row. A section's
+        -- band holds one group and is Add'd by CloseSection the moment that group is
+        -- built, so there is nothing left to defer. The two-column split is the
+        -- bands' own: Content and Duration Bar down the left, Icon and Text down the
+        -- right, and on a narrow window it folds to one column in the order above.
 
         -- See Also links
 

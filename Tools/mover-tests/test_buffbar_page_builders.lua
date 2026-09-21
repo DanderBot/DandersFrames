@@ -23,10 +23,10 @@ local NS = ...
 --   column 2   "Icon"     Appearance, Layout, Position, Border.
 --              "Text"     Duration Text, Stack Count.
 --
--- ☠ THE DEBUFF BAR PAGE IS DELIBERATELY UNTOUCHED, and its own census file
--- still pins every popout row it has. The two pages are built from the same
--- shapes all the way down that file and normally move together; the whole point
--- of this one is to put the two side by side in game and pick one.
+-- ☠ THE DEBUFF BAR NOW USES THE SAME CARDS (the section helper was lifted into
+-- the page tools for it) PLUS THREE OPT-INS THIS PAGE DOES NOT TAKE -- two per
+-- row, dim captions, header previews. Its own census file pins those; this
+-- one pins that the Buff Bar forwards with no `extra` and draws as it did.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db, the filter
@@ -132,6 +132,14 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
+-- ⚠ THE SECTION HELPER'S BODY LIVES IN THE PAGE TOOLS (GUI/Controls.lua) since
+-- the Debuff Bar was converted: this page's own OpenSection / CloseSection are
+-- one-line forwards to tools.OpenSection / tools.CloseSection, with the SAME
+-- arguments in the same order and no `extra`. Every check below that read the
+-- page's local body reads the shared one instead, flattened the same way.
+local OPEN = (CTRL:match("\n    local function OpenSection%(Add, .-\n    end\n") or ""):gsub("%s+", " ")
+local CLOSE = CTRL:match("\n    local function CloseSection%(Add, band%)(.-)\n    end\n")
+
 -- ONE SECTION'S BLOCK: its OpenSection call, the builder mount under it and the
 -- CloseSection that puts its band in. Read as "from the call to the close" for
 -- the same reason the Frame page's census reads declaration-to-declaration: two
@@ -228,12 +236,19 @@ do
           "sections: the page opens a section in one named place")
     check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
           "sections: ...and closes one in another")
-    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
+    -- ...each a forward to the shared helper, passing nothing this page did not
+    -- pass before -- in particular no `extra`, so none of the Debuff Bar's
+    -- opt-ins (two tracks, quiet captions, header previews) reach this page.
+    check(PAGE:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)\n", 1, true) ~= nil,
+          "sections: ...the page's OpenSection forwards to the shared one, with no extra")
+    check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
+          "sections: ...and so does its CloseSection")
+    local open = OPEN
+    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, preview = extra and extra.preview or nil })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
-    check(open:find("GUI:CreateSettingsGroup(self.child, tools.BandWidth(col), { chromeless = true })", 1, true) ~= nil,
+    check(open:find("GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })", 1, true) ~= nil,
           "sections: ...the band is chromeless, at the width the layout pass will give it")
     check(open:find("section:RegisterChild(band)", 1, true) ~= nil,
           "sections: ...and registered to the section, which is what makes the fold hide it")
@@ -243,7 +258,7 @@ do
           "sections: ...and every section starts expanded, so nothing is hidden by default")
     -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL. `Add` resolves a widget's slot
     -- height on the spot, so a band Add'd while still empty gets no room.
-    local close = PAGE:match("local function CloseSection%(band%)(.-)\n        end\n")
+    local close = CLOSE
     check(close ~= nil and close:find("Add(band, nil, band.dfSectionCol)", 1, true) ~= nil,
           "sections: the band is added in its own right, in the column its section is in")
 
@@ -703,7 +718,7 @@ do
           "hidden sections: classic still puts the factory gate on the boxes")
     -- ...and OpenSection puts the same predicate on the header AND its band, so
     -- neither half is left standing when the other goes.
-    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    local open = OPEN
     check(open:find("section.hideOn = hideFn", 1, true) ~= nil
       and open:find("band.hideOn = hideFn", 1, true) ~= nil,
           "hidden sections: ...and a section hides its header and its band together")
@@ -853,12 +868,15 @@ do
     -- Pinned to a COUNT, which is what section 5 stopped doing when it let
     -- PopoutContent back onto the page. Two would mean a section had grown a
     -- private mount of its own outside OpenSection.
+    -- (The one place is the shared OpenSection now, so the page itself mounts
+    -- none -- and the shared body mounts exactly one.)
     local mounts = 0
     for _ in PAGE:gmatch("tools%.PopoutContent%(") do mounts = mounts + 1 end
-    eq(mounts, 1, "pin: the page mounts panel content in exactly ONE place -- OpenSection")
-
-    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("local mount = tools.PopoutContent(function(group, holder, reflow)", 1, true) ~= nil,
+    eq(mounts, 0, "pin: the page mounts no panel content of its own -- OpenSection does")
+    local open = OPEN
+    eq(select(2, open:gsub("PopoutContent%(", "")), 1,
+       "pin: ...and the shared OpenSection mounts it in exactly ONE place")
+    check(open:find("local mount = PopoutContent(function(group, holder, reflow)", 1, true) ~= nil,
           "pin: ...and that mount is the pin's")
     -- ☠ THE SAME TABLE THE BAND GETS. `popout = true` is the only field that
     -- differs and it picks no controls -- DurationFormatRefresh reads it to
@@ -871,13 +889,13 @@ do
     -- exactly those two -- this page's and the Debuff Bar's -- is what the pin is
     -- FOR. Out of the page's own tab label, never a string per section: a second
     -- copy of the page's name goes stale the day the tab is renamed.
-    check(open:find('title = format("%s / %s", self.tabLabel or "", label)', 1, true) ~= nil,
+    check(open:find('title = string.format("%s / %s", page.tabLabel or "", label)', 1, true) ~= nil,
           "pin: the panel's title is the PAGE's own name and the section's")
     check(PAGE:find('"Buff Bar /', 1, true) == nil,
           "pin: ...and no section hardcodes the page's name")
     check(open:find("window = DF.GUIFrame", 1, true) ~= nil,
           "pin: ...the panel docks outside the settings window")
-    check(open:find("clipTo = self", 1, true) ~= nil,
+    check(open:find("clipTo = page", 1, true) ~= nil,
           "pin: ...and the page's scroll frame is what clips its connected chrome")
 
     -- ---- (d) the eager build registers nothing with search -------------
@@ -1032,16 +1050,17 @@ do
     eq(mounts, 1, "bulk: ...and exactly once")
 
     -- ---- (b) every section on the page is on the roster -----------------
-    check(PAGE:find("tools.RegisterSection(section)", 1, true) ~= nil,
-          "bulk: OpenSection puts every section it builds on the page's roster")
     -- In OpenSection, so no section can be left off by hand -- there is one
     -- registration site for all eleven rather than eleven chances to forget one.
-    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("tools.RegisterSection(section)", 1, true) ~= nil,
-          "bulk: ...from the one place that builds them, not once per call site")
+    -- (The shared OpenSection in the page tools, since the lift.)
+    local open = OPEN
+    check(open:find("RegisterSection(section)", 1, true) ~= nil,
+          "bulk: OpenSection puts every section it builds on the page's roster")
+    eq(select(2, open:gsub("RegisterSection%(section%)", "")), 1,
+       "bulk: ...from the one place that builds them, not once per call site")
     local regs = 0
     for _ in PAGE:gmatch("tools%.RegisterSection%(") do regs = regs + 1 end
-    eq(regs, 1, "bulk: ...and nowhere else")
+    eq(regs, 0, "bulk: ...and nowhere else")
 
     -- ---- (c) the helper is GENERIC ---------------------------------------
     -- ⚠ THE NEXT PAGE CONVERTED PASSES ONE THING, not a copy of this markup.
@@ -1178,8 +1197,8 @@ do
           "card: a plain section keeps its 8px arrow and 26px title")
 
     -- ---- Buff Bar passes it -----------------------------------------
-    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
+    local open = OPEN
+    check(open:find("pin = pin, card = true, toggle = toggle,", 1, true) ~= nil,
           "card: Buff Bar's OpenSection opts every section in")
 
     -- ---- the 40px header --------------------------------------------
@@ -1228,6 +1247,7 @@ do
     local callers = {
         "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
         "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
+        "GUI/Controls.lua",
     }
     local calls, carded, cardedIn = 0, 0, nil
     for _, path in ipairs(callers) do
@@ -1253,8 +1273,10 @@ do
         end
     end
     check(calls >= 20, "card: every known caller was scanned (" .. calls .. " calls)")
-    check(carded == 1 and cardedIn == "GUI/Pages/Indicators.lua",
-          "card: ...and Buff Bar's OpenSection is the only one that opts in")
+    -- The one carded call is the shared OpenSection (the page tools), which
+    -- only the two converted aura bars reach.
+    check(carded == 1 and cardedIn == "GUI/Controls.lua",
+          "card: ...and the shared OpenSection is the only one that opts in")
 end
 
 -- ============================================================
@@ -1366,6 +1388,7 @@ do
     local callers = {
         "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
         "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
+        "GUI/Controls.lua",
     }
     local toggled = 0
     for _, path in ipairs(callers) do
@@ -1374,5 +1397,5 @@ do
             if call:find("toggle%s*=") then toggled = toggled + 1 end
         end
     end
-    eq(toggled, 1, "tick: Buff Bar's OpenSection is the only caller that passes a toggle")
+    eq(toggled, 1, "tick: the shared OpenSection is the only caller that passes a toggle")
 end

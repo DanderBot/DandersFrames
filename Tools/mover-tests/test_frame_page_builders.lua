@@ -1606,8 +1606,11 @@ do
         -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
         -- eleven popout rows became folds on the page, so the five it used to opt
         -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)
-        -- went with them. The other five aura pages are untouched.
-        ["GUI/Pages/Indicators.lua"] = 26,  -- the five unswept aura pages
+        -- went with them. ⚠ 21, NOT 26, since the Debuff Bar followed it onto
+        -- the same cards: its five plate opt-ins (Visibility, Order & Limits,
+        -- Appearance, Layout, Position) went the same way. The other four aura
+        -- pages are untouched.
+        ["GUI/Pages/Indicators.lua"] = 21,  -- the four unswept aura pages
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
         ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2
