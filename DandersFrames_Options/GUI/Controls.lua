@@ -5365,6 +5365,9 @@ function GUI:CreatePopoutPageTools(page)
     -- Permanent Auras") still sits on one line. Below it they start to truncate.
     -- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
     local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+    -- Published for the resize readout (Panel.lua), which predicts the card's
+    -- track count mid-drag, before any layout pass has run.
+    GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
 
     -- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
     -- sweep's one name, and every db-bound factory carries it (slider, dropdown

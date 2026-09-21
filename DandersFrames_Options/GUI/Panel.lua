@@ -1542,6 +1542,12 @@ function DF:CreateGUI()
     -- many page columns that gives and how wide each is -- the number the
     -- two-per-row cards switch on. Repainted only when a number moves.
     local lastW, lastH
+    local function InnerTracks(cardW)
+        local min = GUI.SectionTwoTrackMin
+        local pad = GUI.SectionCard and GUI.SectionCard.pad or 12
+        if not min then return 1 end
+        return ((cardW or 0) - 2 * pad >= min) and 2 or 1
+    end
     local function ShowSizeReadout(owner)
         local w, h = math.floor(frame:GetWidth() + 0.5), math.floor(frame:GetHeight() + 0.5)
         if w == lastW and h == lastH then return end
@@ -1553,7 +1559,12 @@ function DF:CreateGUI()
         GUI:ShowTooltip(owner, {
             title = format("%d × %d", w, h),
             anchor = "ANCHOR_TOPLEFT",
-            lines = { format("%s: %d · %d px", L["Columns"], cols, math.floor(colW)) },
+            lines = {
+                format("%s: %d · %d px", L["Columns"], cols, math.floor(colW)),
+                -- Developer readout: settings per row inside a two-per-row card
+                -- (Debuff Bar) at this column width. Same test the card runs.
+                format("Inside cards: %d per row", InnerTracks(colW)),
+            },
         })
     end
     resizeHandle:SetScript("OnMouseDown", function(self, button)
