@@ -145,10 +145,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The section branch hands each one EXACTLY
-        -- what the classic branch hands it -- no `popout`, no `hoistToggle` -- so the
-        -- two mounts are now the same call twice, which is what makes "classic is
-        -- unchanged" structural rather than a promise; test_buffbar_page_builders.lua
-        -- pins the inventory of each builder against the census taken before the move.
+        -- what the classic branch hands it -- no `popout` -- so the two mounts are
+        -- the same call twice, which is what makes "classic is unchanged" structural
+        -- rather than a promise; test_buffbar_page_builders.lua pins the inventory of
+        -- each builder against the census taken before the move.
+        -- ⚠ ONE FIELD DIFFERS, ON FOUR SECTIONS ONLY: `hoistToggle = true` on
+        -- Border, Duration Text, Duration Bar and Pandemic, whose on/off tick lives
+        -- in the section HEADER (see OpenSection's `toggle`). Classic never passes
+        -- it, so its boxes still build that checkbox inside, where they always had it.
+        -- The pinned panel's copy is not handed it either: the panel has no header
+        -- tick, so it keeps the checkbox in its body.
         --
         -- ☠ WHAT THE ROWS TOOK WITH THEM. No pin, no "N more settings" badge, no
         -- amber modified tick and no Reset Group / Hold: Defaults footer on this page
@@ -188,7 +194,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Duplicate Buffs control row decide what SHOWS rather than how it looks;
         -- there is nothing to match between two pages there, so they pass nothing
         -- and build nothing.
-        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder)
+        --
+        -- ☠ THE HEADER TICK IS OPT-IN TOO, and only for a section whose feature
+        -- has an on/off: Border, Duration Text, Duration Bar and Pandemic.
+        -- `toggle` is CreateCollapsibleSection's opts.toggle, and a section that
+        -- passes one MUST mount its builder with `hoistToggle = true`, so the
+        -- in-body copy of that checkbox is never built -- the tick exists in
+        -- the header ONLY. Visibility deliberately gets none: its Show Buffs is
+        -- the page's master switch, and a header tick that greys the whole page
+        -- would surprise people.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             local pin
             if builder then
                 -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
@@ -241,7 +256,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
             -- in SettingsWidgets.lua). This page is the only caller that opts in.
             local section = GUI:CreateCollapsibleSection(self.child, label, true,
-                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true })
+                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })
             section.hideOn = hideFn
             -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
             -- page and GUI.ColumnWidth). Without it the layout pass leaves it at the
@@ -1051,14 +1066,26 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- after Position, still with the geometry.
             Add(borderGroup, nil, 1)
         else
-            -- ⚠ NO noShowToggle HERE. The toolkit builds its own Show Border checkbox
-            -- as the section's first control, which is where classic has always had
-            -- it; there is no row left to hoist it onto, so there is no twin to
-            -- suppress either. It still greys the other seventeen from inside.
-            local band = OpenSection(L["Border"], "buffs_border", 2, BuffBorderSummary, BuffsOffRow, nil, BuildBuffBorderGroup)
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+            -- build its own (hoistToggle -> noShowToggle). The key is still read
+            -- inside, so the other seventeen grey exactly as before. The commit is
+            -- the toolkit's own: refreshStates, then its fullUpdate (invalidate +
+            -- update -- Show Border is structural on the aura row). The tick greys
+            -- with the page gate, as the in-body box did through disableWhen.
+            local band = OpenSection(L["Border"], "buffs_border", 2, BuffBorderSummary, BuffsOffRow, nil, BuildBuffBorderGroup, {
+                db = db, key = "buffShowBorder", label = L["Show Border"],
+                isOn = function(d) return d.buffShowBorder ~= false end,
+                disableOn = BuffsOffRow,
+                onChanged = function()
+                    self:RefreshStates()
+                    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                    if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+                end,
+            })
             BuildBuffBorderGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
             })
             CloseSection(band)
         end
@@ -1159,10 +1186,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         else
             -- The second category header in column 2: the two text elements.
             Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)
-            local band = OpenSection(L["Duration Text"], "buffs_duration", 2, BuffDurationSummary, BuffsOffRow, nil, BuildBuffDurationGroup)
+            -- ☠ SHOW DURATION IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same commit as the in-body box. That box greyed with
+            -- the group gate (not keepEnabled), so the tick greys with the page gate.
+            local band = OpenSection(L["Duration Text"], "buffs_duration", 2, BuffDurationSummary, BuffsOffRow, nil, BuildBuffDurationGroup, {
+                db = db, key = "buffShowDuration", label = L["Show Duration"],
+                disableOn = BuffsOffRow,
+                onChanged = function()
+                    self:RefreshStates()
+                    DF:UpdateAllFrames()
+                end,
+            })
             BuildBuffDurationGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
             })
             CloseSection(band)
         end
@@ -1298,11 +1336,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- to draw, and a header standing over a band the page has already folded
             -- away would be a title over nothing -- which is why these last two sit
             -- under no category header of their own.
+            --
+            -- ☠ ENABLE DURATION BAR IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same commit, and the same gate the in-body box carried
+            -- as its disableOn: greyed while the bar is off.
             local band = OpenSection(L["Duration Bar"], "buffs_durationbar", 1,
-                BuffDurationBarSummary, BuffsOffRow, HideDurationBar, BuildBuffDurationBarGroup)
+                BuffDurationBarSummary, BuffsOffRow, HideDurationBar, BuildBuffDurationBarGroup, {
+                    db = db, key = "buffDurationBarEnabled", label = L["Enable Duration Bar"],
+                    disableOn = BuffsOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        BuffBarChanged()
+                    end,
+                })
             BuildBuffDurationBarGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
             })
             CloseSection(band)
         end
@@ -1388,12 +1438,26 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ AND IT GREYS ON AN UNSUPPORTED CLIENT AS WELL AS WHEN BUFFS ARE OFF --
             -- the silent-capability-skip rule. The helper's own controls already say
             -- why on an older build; this is the header agreeing with them.
+            --
+            -- ☠ ITS ENABLE IS THE HEADER'S TICK; the helper skips its own
+            -- (hoistToggle -> noEnableToggle) and still folds the key into its
+            -- group gate. Same label, key and commit the helper's box had, and
+            -- that box's own gate: dead on an unsupported client, greyed with the
+            -- page -- a user must not be able to switch on what cannot render.
             local band = OpenSection(L["Pandemic"], "buffs_pandemic", 1, BuffPandemicSummary,
                 function(d) return not pandemicSupported or BuffsOffRow(d) end, HideDurationBar,
-                BuildBuffPandemicGroup)
+                BuildBuffPandemicGroup, {
+                    db = db, key = "buffPandemicEnabled", label = L["Enable"],
+                    disableOn = function(d) return not pandemicSupported or BuffsOffRow(d) end,
+                    onChanged = function()
+                        self:RefreshStates()
+                        DF:InvalidateAuraLayout(); DF:UpdateAllFrames()
+                    end,
+                })
             BuildBuffPandemicGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
             })
             CloseSection(band)
         end

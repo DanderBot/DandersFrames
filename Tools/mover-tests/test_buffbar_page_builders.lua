@@ -147,7 +147,7 @@ local function sectionBlock(labelKey)
 end
 
 -- What every converted group on this page has in common.
-local function checkShared(builder, label, boxHeader, classicColumn, collapseKey, column, summary)
+local function checkShared(builder, label, boxHeader, classicColumn, collapseKey, column, summary, ticked)
     -- ONE builder, BOTH layouts: the declaration and the two mounts.
     local calls = 0
     for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
@@ -183,9 +183,14 @@ local function checkShared(builder, label, boxHeader, classicColumn, collapseKey
     check(block:find(summary, 1, true) ~= nil,
           label .. ": ...and prints the row's own summary in its shut corner")
     -- The SAME builder the classic arm calls, handed the SAME table: no
-    -- `popout`, no `hoistToggle`, so the two mounts are one call twice.
-    check(block:find(builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          label .. ": ...and mounts the builder exactly as classic does")
+    -- `popout`, so the two mounts are one call twice. A section whose on/off
+    -- tick lives in its HEADER adds exactly one field, `hoistToggle = true`,
+    -- which is what stops the builder drawing that checkbox a second time.
+    local mount = builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
+        .. (ticked and " hoistToggle = true," or "") .. " })"
+    check(block:find(mount, 1, true) ~= nil,
+          label .. (ticked and ": ...and mounts the builder as classic does, plus hoistToggle for its header tick"
+                            or ": ...and mounts the builder exactly as classic does"))
     return block
 end
 
@@ -219,12 +224,12 @@ do
     -- mechanism. Panel.lua's state pass is the only thing that reads
     -- `widget.collapsibleSection` and hides what a shut section registered; a
     -- group nested inside another group never reaches it.
-    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder)", 1, true) ~= nil,
+    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)", 1, true) ~= nil,
           "sections: the page opens a section in one named place")
     check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
           "sections: ...and closes one in another")
     local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -498,44 +503,51 @@ local SECTIONS = {
       summary = "BuffPositionSummary" },
     { builder = "BuildBuffBorderGroup", label = "Border", boxHeader = "Border",
       golden = BUFF_BORDER, classicColumn = "1", key = "buffs_border", column = "2",
-      summary = "BuffBorderSummary", hoistedIn = 0 },
+      summary = "BuffBorderSummary", hoistedIn = 0,
+      tick = { key = "buffShowBorder", label = "Show Border" } },
     { builder = "BuildBuffDurationGroup", label = "Duration Text", boxHeader = "Duration Text",
       golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "2",
-      summary = "BuffDurationSummary", hoistedIn = 1 },
+      summary = "BuffDurationSummary", hoistedIn = 1,
+      tick = { key = "buffShowDuration", label = "Show Duration" } },
     { builder = "BuildBuffStackGroup", label = "Stack Count", boxHeader = "Stack Count",
       golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "2",
       summary = "BuffStackSummary" },
     { builder = "BuildBuffDurationBarGroup", label = "Duration Bar", boxHeader = "Duration Bar",
       golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "1",
-      summary = "BuffDurationBarSummary", hoistedIn = 1, hide = true },
+      summary = "BuffDurationBarSummary", hoistedIn = 1, hide = true,
+      tick = { key = "buffDurationBarEnabled", label = "Enable Duration Bar" } },
     { builder = "BuildBuffPandemicGroup", label = "Pandemic", boxHeader = "Pandemic",
       golden = BUFF_PANDEMIC, classicColumn = "2", key = "buffs_pandemic", column = "1",
-      summary = "BuffPandemicSummary", hoistedIn = 0, hide = true },
+      summary = "BuffPandemicSummary", hoistedIn = 0, hide = true,
+      tick = { key = "buffPandemicEnabled", label = "Enable" } },
 }
 
 for _, g in ipairs(SECTIONS) do
     print("-- Buff Bar page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    local block = checkShared(g.builder, g.label, g.boxHeader, g.classicColumn, g.key, g.column, g.summary)
+    local block = checkShared(g.builder, g.label, g.boxHeader, g.classicColumn, g.key, g.column, g.summary, g.tick ~= nil)
 
-    -- ☠ THE HOIST BRANCH IS NEVER TAKEN ANY MORE, and the branch stays. Five
-    -- builders can suppress their own enable control for a row that carried it;
-    -- a section has no tick of its own, so every one of those controls is built
-    -- again exactly where classic has always had it. Leaving the branch in is
-    -- what keeps ONE builder serving both layouts the day a row comes back.
+    -- ☠ THE HOIST BRANCH IS TAKEN AGAIN, BY THE HEADER TICK. Five builders can
+    -- suppress their own enable control; four of them are now asked to, because
+    -- that control lives in their section HEADER. Visibility can, and is never
+    -- asked to: Show Buffs is the page's master switch and stays in the body.
     if g.hoistedIn == 1 then
         check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-              g.label .. ": the builder can still skip its enable checkbox, and is never asked to")
+              g.label .. ": the builder can still skip its enable checkbox")
     elseif g.hoistedIn == 0 then
         check(body:find("tools2.hoistToggle or nil", 1, true) ~= nil,
-              g.label .. ": the composite can still be told not to build its own toggle, and is never asked to")
+              g.label .. ": the composite can still be told not to build its own toggle")
     else
         check(body:find("hoistToggle", 1, true) == nil,
               g.label .. ": the builder has no hoist branch, because there was never anything to hoist")
     end
-    check(block:find("hoistToggle", 1, true) == nil,
-          g.label .. ": ...and the section mount asks for no hoist")
+    local hoists = select(2, block:gsub("hoistToggle = true", ""))
+    if g.tick then
+        eq(hoists, 1, g.label .. ": ...and the section mount asks for the hoist, once -- the tick is in the header")
+    else
+        eq(hoists, 0, g.label .. ": ...and the section mount asks for no hoist")
+    end
 
     -- The two that can vanish outright carry the box's own factory gate, on BOTH
     -- halves: with no factory row there is no bar, and a header standing over a
@@ -621,7 +633,7 @@ do
           "summary: the section reads both options off opts")
     -- ⚠ OPT-IN, and that is what keeps every existing caller still: no summary
     -- and no dim means no fontstring and no refreshContent at all.
-    check(WIDGETS:find("if summaryFn or dimFn then", 1, true) ~= nil,
+    check(WIDGETS:find("if summaryFn or dimFn or toggleOpts then", 1, true) ~= nil,
           "summary: ...and builds nothing at all for a caller that passes neither")
     -- Painted the way a popout row paints its own: right-aligned, never wrapped.
     check(WIDGETS:find('section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)', 1, true) ~= nil,
@@ -821,7 +833,8 @@ do
         -- panel showing a curated subset of its section is the exact defect the
         -- fold exists to remove, so the page may not name a second list of
         -- controls anywhere. One builder, mounted twice.
-        check(block:find(g.builder .. ")", 1, true) ~= nil,
+        -- (A ticked section passes its header tick after the builder.)
+        check(block:find(g.builder .. ")", 1, true) ~= nil or block:find(g.builder .. ", {", 1, true) ~= nil,
               g.label .. ": the pin is opted in with the section's OWN builder")
         -- ...and it is still the same builder the band and the classic box use,
         -- so "mounted twice" became "mounted three times" and no more.
@@ -1160,12 +1173,13 @@ do
       and fn:find("if cardHover then cardHover:Hide() return end", 1, true) ~= nil,
           "card: the hover wash replaces the backdrop tint only when there is a card")
     check(fn:find('section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)', 1, true) ~= nil
-      and fn:find("local TITLE_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26", 1, true) ~= nil,
+      and fn:find("local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26", 1, true) ~= nil
+      and fn:find("local TITLE_X = TICK_X\n", 1, true) ~= nil,
           "card: a plain section keeps its 8px arrow and 26px title")
 
     -- ---- Buff Bar passes it -----------------------------------------
     local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("pin = pin, card = true })", 1, true) ~= nil,
+    check(open:find("pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
           "card: Buff Bar's OpenSection opts every section in")
 
     -- ---- the 40px header --------------------------------------------
@@ -1241,4 +1255,124 @@ do
     check(calls >= 20, "card: every known caller was scanned (" .. calls .. " calls)")
     check(carded == 1 and cardedIn == "GUI/Pages/Indicators.lua",
           "card: ...and Buff Bar's OpenSection is the only one that opts in")
+end
+
+-- ============================================================
+-- 12. THE HEADER TICK -- a section's on/off, moved into its header
+-- Sections whose feature has an on/off carry that tick in the HEADER, so the
+-- feature can be switched without opening the section. MOVED, not copied: the
+-- in-body checkbox is not built in Modern (hoistToggle), so there is exactly
+-- one live copy. Classic still builds it inside its box.
+--
+-- ✗ Source-shape only: nothing here builds a frame, so where the tick draws,
+-- that it takes the click rather than folding, and how it greys are all read
+-- in game.
+-- ============================================================
+print("-- Buff Bar page: the header tick")
+do
+    -- ---- exactly these four sections get one ----------------------------
+    -- Stack Count has no on/off at all (the game draws the count whenever an
+    -- aura has one), so there is nothing to put in its header.
+    local TICKED = {
+        { label = "Border",        key = "buffShowBorder",         name = "Show Border" },
+        { label = "Duration Text", key = "buffShowDuration",       name = "Show Duration" },
+        { label = "Duration Bar",  key = "buffDurationBarEnabled", name = "Enable Duration Bar" },
+        { label = "Pandemic",      key = "buffPandemicEnabled",    name = "Enable" },
+    }
+    local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Appearance",
+                       "Layout", "Position", "Stack Count" }
+    for _, t in ipairs(TICKED) do
+        local block = sectionBlock(t.label)
+        check(block:find('db = db, key = "' .. t.key .. '", label = L["' .. t.name .. '"]', 1, true) ~= nil,
+              "tick: " .. t.label .. " carries a header tick bound to " .. t.key .. " under its own name")
+        check(block:find("onChanged = function()", 1, true) ~= nil,
+              "tick: ...and hands it the in-body checkbox's commit")
+        check(block:find("disableOn = ", 1, true) ~= nil,
+              "tick: ...and the gate the in-body checkbox carried")
+    end
+    for _, label in ipairs(UNTICKED) do
+        local block = sectionBlock(label)
+        check(block:find("key = \"", 1, true) == nil and block:find("hoistToggle", 1, true) == nil,
+              "tick: " .. label .. " has no header tick")
+    end
+    -- ☠ NOT VISIBILITY. Show Buffs is the page's master switch: it stays in the
+    -- body, built by the builder, and no header anywhere binds it.
+    check(sectionBlock("Visibility"):find("showBuffs", 1, true) == nil,
+          "tick: Visibility's Show Buffs is not hoisted into its header")
+    check(builderBody("BuildVisibilityGroup"):find('L["Show Buffs"], db, "showBuffs"', 1, true) ~= nil,
+          "tick: ...its builder still builds Show Buffs in the body")
+    local ticks = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do ticks = ticks + 1 end
+    eq(ticks, 4, "tick: exactly four mounts ask their builder to skip the in-body toggle")
+
+    -- ---- no duplicate in Modern, and classic still builds it ------------
+    -- The hoist reaches the checkbox in each of the four: two builders guard
+    -- it themselves, the two composites pass it through to the helper, and
+    -- the helpers skip on it.
+    for _, b in ipairs({ "BuildBuffDurationGroup", "BuildBuffDurationBarGroup" }) do
+        local body = builderBody(b)
+        local guard = body:find("if not tools2.hoistToggle then", 1, true)
+        local cb = body:find("GUI:CreateCheckbox(parent, L[", guard or 1, true)
+        check(guard ~= nil and cb ~= nil and cb > guard,
+              "tick: " .. b .. " builds its toggle only when not hoisted")
+    end
+    check(builderBody("BuildBuffBorderGroup"):find("noShowToggle  = tools2.hoistToggle or nil", 1, true) ~= nil,
+          "tick: the border toolkit is told to skip Show Border when hoisted")
+    check(WIDGETS:find("if not opts.noShowToggle then\n        w.show = group:AddWidget(GUI:CreateCheckbox(parent, L[\"Show Border\"]", 1, true) ~= nil,
+          "tick: ...and the toolkit honours it")
+    check(builderBody("BuildBuffPandemicGroup"):find("noEnableToggle = tools2.hoistToggle or nil", 1, true) ~= nil,
+          "tick: the Pandemic helper is told to skip Enable when hoisted")
+    check(CTRL:find("if not opts.noEnableToggle then\n        w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L[\"Enable\"]", 1, true) ~= nil,
+          "tick: ...and the helper honours it")
+    -- Classic: none of the four classic mounts passes the hoist. Every
+    -- `hoistToggle = true` on the page sits inside a section block (counted
+    -- above: four, one per ticked section), so the classic boxes have none.
+    local inBlocks = 0
+    for _, t in ipairs(TICKED) do
+        inBlocks = inBlocks + select(2, sectionBlock(t.label):gsub("hoistToggle = true,", ""))
+    end
+    eq(inBlocks, ticks, "tick: every hoist is a Modern section mount -- classic still builds the toggle in its box")
+
+    -- ---- the factory: opt-in, above the click area, real checkbox -------
+    local fn = WIDGETS:match("function GUI:CreateCollapsibleSection%(.-\nend\n") or ""
+    check(fn:find('local toggleOpts = opts and type(opts.toggle) == "table" and type(opts.toggle.key) == "string"', 1, true) ~= nil,
+          "tick: the factory reads opts.toggle, and a spec with no key is no spec")
+    check(fn:find("if toggleOpts then TITLE_X = TICK_X + TICK_SIZE", 1, true) ~= nil,
+          "tick: ...the title moves right only on a ticked header")
+    local tickAt = fn:find("\n    if toggleOpts then\n        local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,", 1, true)
+    check(tickAt ~= nil, "tick: ...built only under the opt-in, from the shared checkbox factory")
+    check(fn:find("tick:SetFrameLevel(clickArea:GetFrameLevel() + 2)", 1, true) ~= nil,
+          "tick: ...above the header's click area, so a press toggles and never folds")
+    check(fn:find('tick:SetPoint("LEFT", section, "LEFT", TICK_X, 0)', 1, true) ~= nil,
+          "tick: ...between the chevron and the title")
+    local crumb = fn:find("DF.Search:SetCurrentSection(text)", 1, true)
+    check(crumb ~= nil and tickAt ~= nil and crumb < tickAt,
+          "tick: ...after the section's search breadcrumb, so its entry lands under this section")
+    check(WIDGETS:find("container.searchEntry = DF.Search:RegisterCheckbox(label, dbKey, nil, false, callback)", 1, true) ~= nil,
+          "tick: ...and the factory registers it under its own label and key")
+    check(fn:find("box:HookScript(\"OnEnter\", function(self) GUI:ShowTooltip(self, spec) end)", 1, true) ~= nil,
+          "tick: the tooltip goes through the shared helper")
+
+    -- ---- off means greyed, never folded ----------------------------------
+    local rc = fn:match("section%.refreshContent = function%(self, d%)(.-)\n        end\n") or ""
+    check(rc:find('text = L["Off"]', 1, true) ~= nil,
+          "tick: unticked and shut, the corner reads Off")
+    check(rc:find("SetExpanded", 1, true) == nil and rc:find("Toggle(", 1, true) == nil,
+          "tick: ...and nothing on the state pass folds the section")
+    check(rc:find("tick:SetEnabled(enabled)", 1, true) ~= nil,
+          "tick: the tick greys through its own gate on the state pass")
+
+    -- ---- nobody else opts in ---------------------------------------------
+    local callers = {
+        "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
+        "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
+    }
+    local toggled = 0
+    for _, path in ipairs(callers) do
+        local src = options_file_source(path):gsub("\r\n", "\n")
+        for call in src:gmatch("GUI:CreateCollapsibleSection%b()") do
+            if call:find("toggle%s*=") then toggled = toggled + 1 end
+        end
+    end
+    eq(toggled, 1, "tick: Buff Bar's OpenSection is the only caller that passes a toggle")
 end

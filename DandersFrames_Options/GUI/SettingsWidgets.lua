@@ -319,8 +319,8 @@ end
 -- profile key per record -- a schema change smuggled in under a re-presentation.
 -- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
 --
--- opts also takes `summary`, `dimOn`, `pin` and `card` -- see where they are
--- read, below.
+-- opts also takes `summary`, `dimOn`, `pin`, `card` and `toggle` -- see where
+-- they are read, below.
 --
 -- ============================================================
 -- opts.card -- ONE CARD PER SECTION (opt-in; Buff Bar only today)
@@ -458,8 +458,21 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
     section.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
+    -- Optional ON/OFF TICK in the header (opts.toggle, built further down).
+    -- Read here because the title has to know whether it moves over for it.
+    -- ⚠ OPT-IN, and a spec without a key is no spec: every other caller passes
+    -- nothing and its title stays exactly where it was.
+    local toggleOpts = opts and type(opts.toggle) == "table" and type(opts.toggle.key) == "string"
+        and type(opts.toggle.db) == "table" and opts.toggle or nil
+    local TICK_SIZE = 18   -- the shared checkbox's box (StyleCheckButton's default)
+    -- Where the tick sits: the title's old start, one chevron-gap after the arrow.
+    local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26
+
     -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
-    local TITLE_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26
+    -- A ticked header's title moves right by the tick and one more gap; an
+    -- unticked one reserves nothing.
+    local TITLE_X = TICK_X
+    if toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleGap or 8) end
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)
@@ -696,8 +709,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     --               control half.
     local summaryFn = opts and opts.summary or nil
     local dimFn     = opts and opts.dimOn or nil
-    if summaryFn or dimFn then
-        if summaryFn then
+    -- A ticked header needs the corner too: unticked and shut, it reads "Off".
+    if summaryFn or dimFn or toggleOpts then
+        if summaryFn or toggleOpts then
             -- ⚠ ANCHORED OFF THE TAG, NOT THE TITLE, so a section that uses both
             -- keeps them in reading order instead of drawing one over the other.
             -- An empty tag is zero-wide and sits flush against the title.
@@ -733,10 +747,36 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- pass and SetText re-measures; the summary only moves when a setting does.
         section.refreshContent = function(self, d)
             if dimFn then self:SetPreviewDimmed(dimFn(d) and true or false) end
+            -- The tick repaints on the same pass: its value (a pinned panel's
+            -- copy, or any other writer, may have moved the key) and its own
+            -- gate. See the tick's own block for why it greys at all.
+            local tick = self.headerToggle
+            local tickOff = false
+            if tick then
+                tick:Refresh()
+                local tdb = d or toggleOpts.db
+                if toggleOpts.isOn then
+                    tickOff = not toggleOpts.isOn(tdb)
+                else
+                    tickOff = not tdb[toggleOpts.key]
+                end
+                local enabled = not (toggleOpts.disableOn and toggleOpts.disableOn(tdb))
+                if self._dfTickEnabled ~= enabled then
+                    self._dfTickEnabled = enabled
+                    tick:SetEnabled(enabled)
+                end
+            end
             local fs = self.summary
             if not fs then return end
             local text = ""
-            if not self.expanded and summaryFn then text = summaryFn(d) or "" end
+            -- ⚠ OFF MEANS GREYED, NOT FOLDED. An unticked section keeps whatever
+            -- fold the user left it in; shut, its corner says "Off" instead of
+            -- the value summary, because the values it would list are not drawn.
+            if not self.expanded and tickOff then
+                text = L["Off"]
+            elseif not self.expanded and summaryFn then
+                text = summaryFn(d) or ""
+            end
             if self._dfSummaryText ~= text then
                 self._dfSummaryText = text
                 fs:SetText(text)
@@ -811,7 +851,60 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     if DF.Search then
         DF.Search:SetCurrentSection(text)
     end
-    
+
+    -- ============================================================
+    -- Optional ON/OFF TICK, between the chevron and the title (opts.toggle).
+    -- ------------------------------------------------------------
+    -- For a section whose feature has a switch: the switch moves OUT of the
+    -- body and into the header, so it can be flipped without opening the
+    -- section. The caller stops building its in-body copy (the builders'
+    -- hoistToggle seam) -- two live copies of one checkbox is the defect.
+    --
+    -- ☠ THE REAL CHECKBOX, NOT A LOOK-ALIKE. GUI:CreateCheckbox, bound to the
+    -- same table and key and handed the same commit the in-body one had, so
+    -- the write, the undo record, the override bracket and DF:UpdateAll are
+    -- all the ones it always ran. Built HERE, after SetCurrentSection, so its
+    -- search entry lands under this section's title under its own label --
+    -- exactly the entry the in-body checkbox used to register.
+    --
+    -- ☠ ABOVE THE CLICK AREA, the pin's fix: clickArea covers the header and
+    -- folds it, and a press on the tick must toggle, never fold.
+    --
+    -- ⚠ THE CAPTION IS HIDDEN, the title beside it is the name. Its tooltip
+    -- hit (built over the caption) goes with it, and the tooltip rides the box
+    -- instead, through the shared helper.
+    --
+    -- toggle = { db, key, label, onChanged, tooltip?, disableOn?, isOn? }
+    --   disableOn  fn(db) -> bool: greys the tick itself (the gates its
+    --              in-body copy carried). Repainted by refreshContent.
+    --   isOn       fn(db) -> bool, when "off" is not simply a falsy key.
+    if toggleOpts then
+        local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,
+            toggleOpts.key, toggleOpts.onChanged)
+        local box = tick.checkButton
+        tick:SetSize(TICK_SIZE, TICK_SIZE)
+        tick:ClearAllPoints()
+        tick:SetPoint("LEFT", section, "LEFT", TICK_X, 0)
+        tick:SetFrameLevel(clickArea:GetFrameLevel() + 2)
+        if box then box:SetFrameLevel(tick:GetFrameLevel() + 1) end
+        if tick.label then tick.label:Hide() end
+        if tick.dfTooltipHit then tick.dfTooltipHit:Hide() end
+        tick.tooltip = toggleOpts.tooltip
+        if box then
+            local spec = type(toggleOpts.tooltip) == "table" and toggleOpts.tooltip
+                or { title = toggleOpts.label,
+                     lines = type(toggleOpts.tooltip) == "string" and { toggleOpts.tooltip } or nil }
+            if spec.title == nil then spec.title = toggleOpts.label end
+            box:HookScript("OnEnter", function(self) GUI:ShowTooltip(self, spec) end)
+            box:HookScript("OnLeave", function() GUI:HideTooltip() end)
+            -- The styler registered the box with the SECTION's listener list,
+            -- which no theme pass walks; the page's list is the one that is.
+            if not parent.ThemeListeners then parent.ThemeListeners = {} end
+            table.insert(parent.ThemeListeners, box)
+        end
+        section.headerToggle = tick
+    end
+
     -- THE FOLD ITSELF, WITHOUT THE REPAINT -- the arrow and the SavedVariables
     -- slot, and nothing else.
     --
@@ -2369,6 +2462,9 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     cb:SetPoint("LEFT", 0, 0)
     -- Box + themed check come from the shared styler (single source of truth).
     GUI:StyleCheckButton(cb, { themeRoot = parent })
+    -- Exposed for a host that mounts the box somewhere a caption cannot go (a
+    -- section header's tick -- see opts.toggle on CreateCollapsibleSection).
+    container.checkButton = cb
 
     -- Label
     local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
