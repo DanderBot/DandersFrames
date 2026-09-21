@@ -127,8 +127,34 @@ local function sample(postCombat)
                         .. tostring(owner.pendingUnit) .. " after combat")
                 end
             else
+                -- ★ WHY was nothing pending? (2026-09-21: 17 frames in one raid sat on the
+                -- previous occupant's token for up to four minutes, through out-of-combat
+                -- windows, with the Factory's retarget walk apparently never reaching
+                -- SetSlotOwnerUnit.) Record the conditions the walk needs, so the next
+                -- log says WHICH gate it fell at instead of only that it did.
+                local store = frame.dfADFactory
+                local placed = store and store.placed
+                local nPlaced, nMine, nParked = 0, 0, 0
+                if placed then
+                    for _, entry in pairs(placed) do
+                        local h = entry and entry.handle
+                        if h then
+                            nPlaced = nPlaced + 1
+                            if h.owner == owner then nMine = nMine + 1 end
+                            if h.parked then nParked = nParked + 1 end
+                        end
+                    end
+                end
+                local db = DF.GetFrameDB and DF:GetFrameDB(frame)
+                local adOn = DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
+                local fac = db and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db)
                 record("WRONG-AD-SLOTS", unit, "AD slots",
-                    "owner on " .. tostring(owner.unit) .. " with NO pending retarget")
+                    format("owner on %s with NO pending retarget | placed=%d ownedByThisOwner=%d parked=%d"
+                        .. " adEnabled=%s factory=%s visible=%s exists=%s lastSync=%s",
+                        tostring(owner.unit), nPlaced, nMine, nParked,
+                        tostring(adOn and true or false), tostring(fac and true or false),
+                        tostring(frame:IsVisible()), tostring(UnitExists(unit)),
+                        tostring(frame.dfADLastSyncAt)))
             end
         end
     end

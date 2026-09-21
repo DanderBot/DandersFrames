@@ -8804,6 +8804,13 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     local owner = ownerOf(frame)
     if not (owner and owner.container and type(unit) == "string") then return false end
     if owner.unit == unit then return true end
+    -- ★ ONE LINE PER AD SLOT RETARGET, in the log (2026-09-21). The aura ROWS have logged
+    -- theirs since the collapse; the placed indicators never did, so a raid where the
+    -- passive recorder saw slot owners sit on the previous occupant's token for minutes
+    -- had nothing in the log to say whether this function was ever reached. Roster
+    -- churn only -- a few lines per shuffle, not per event.
+    DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
+        InCombatLockdown() and " (in combat: deferred to regen)" or "")
     -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on
     -- the OLD token deliberately, so GetUnit stays truthful about what is on screen and
     -- a repeat call simply re-queues rather than reporting a retarget that has not
