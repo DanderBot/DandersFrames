@@ -124,8 +124,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- controls live on the page, and a shut header keeps the row's old summary
         -- string in its right corner.
         --
-        -- ☠ THE DEBUFF BAR USES THESE SAME CARDS, PLUS THREE OPT-INS THIS PAGE DOES
-        -- NOT TAKE: controls two per row, dim captions, and header previews. The
+        -- ☠ THE DEBUFF BAR USES THESE SAME CARDS, PLUS TWO OPT-INS THIS PAGE DOES
+        -- NOT TAKE: controls two per row, and dim captions. The
         -- whole point is to put the two side by side in game and pick, so this page
         -- stays exactly as it was -- it passes the shared helper no `extra`.
         --
@@ -207,8 +207,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- tools.CloseSection, Controls.lua), lifted there when the Debuff Bar was
         -- converted so the two pages build their cards through one function.
         -- Same arguments, same order, and no `extra`: this page opts into none
-        -- of the Debuff Bar's additions (two tracks, quiet captions, header
-        -- previews), so every section here draws exactly as it did.
+        -- of the Debuff Bar's additions (two tracks, quiet captions), so every
+        -- section here draws exactly as it did.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
         end
@@ -1439,10 +1439,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Debuffs crossing the column notes below argue for.
         --
         -- MODERN is the Buff Bar's collapsible-card design, section for section, so
-        -- the two pages can be compared in game -- plus the three things the Buff
+        -- the two pages can be compared in game -- plus the two things the Buff
         -- Bar does NOT opt into: controls TWO PER ROW inside a card that is wide
-        -- enough, captions drawn dim so a setting never reads as a heading, and a
-        -- small live preview beside the title of four headers. Thirteen popout rows
+        -- enough, and captions drawn dim so a setting never reads as a heading.
+        -- Thirteen popout rows
         -- became thirteen cards; the one control row (Hide Duplicate Debuffs) moved
         -- into Debuff Filters, as Hide Duplicate Buffs did on the Buff Bar.
         --
@@ -1476,11 +1476,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Buff Bar's helper (tools.OpenSection), plus this page's
-        -- three opt-ins. `preview` is the one per-section argument; the other two
-        -- are the page's, so every card here takes them.
-        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle, preview)
+        -- two opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true, preview = preview })
+                { twoTrack = true, quietLabels = true })
         end
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
         local function CloseSection(band)
@@ -1586,23 +1585,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- position, and a card's band has no header to carry it, so every child of a
         -- band greys from `group.disableChildrenOn` on its own.
 
-        -- ===== THE FOUR HEADER PREVIEWS (Modern only) =====================
-        -- A tiny picture beside the title of what the section draws, read off the
-        -- live settings on every state pass and every write (opts.preview on
-        -- CreateCollapsibleSection), never baked at build.
-        --
-        -- ⚠ GREYED, NOT HIDDEN, WHEN THE FEATURE IS OFF. A preview that vanished
-        -- and came back would move the title's truncation point each time the tick
-        -- flipped; a grey one says "off" in the same place the colour said "on",
-        -- beside the header's own "Off" summary. The solid swatches are greyed by
-        -- COLOUR rather than by desaturate: desaturating a white texture tinted a
-        -- colour gives white, which would read as a colour choice.
-        local PREVIEW_WHITE = "Interface\\Buttons\\WHITE8X8"
-        local PREVIEW_OFF = { r = 0.5, g = 0.5, b = 0.5, a = 1 }
-        local function PreviewColor(c, on)
-            if not on or type(c) ~= "table" then return PREVIEW_OFF end
-            return { r = c.r or 1, g = c.g or 1, b = c.b or 1, a = 1 }
-        end
 
         -- The summary convention, once: at most four items, a fixed order,
         -- "\194\183" between them, WORDS localised and numbers raw, every read
@@ -2167,19 +2149,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Column 2 opens here, with the category header its five sections sit
             -- under.
             Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)
-            -- PREVIEW: a debuff icon at the bar's own Alpha (floored so a near-zero
-            -- alpha still shows a shape rather than an empty slot), desaturated
-            -- while the bar is off.
-            local function AppearancePreview(d)
-                return { {
-                    texture = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
-                    coords = { 0.08, 0.92, 0.08, 0.92 },
-                    desaturate = not d.showDebuffs,
-                    color = { r = 1, g = 1, b = 1, a = math.max(0.3, tonumber(d.debuffAlpha) or 1) },
-                } }
-            end
             local band = OpenSection(L["Appearance"], "debuffs_appearance", 2, DebuffAppearanceSummary, DebuffsOffRow, nil,
-                BuildDebuffAppearanceGroup, nil, AppearancePreview)
+                BuildDebuffAppearanceGroup)
             BuildDebuffAppearanceGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -2404,21 +2375,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- update, restyle: Show Border is structural on the aura row), the
             -- state pass, and a repaint of a pinned panel -- never a page rebuild.
             -- It greys with the page gate, as the in-body box did via disableWhen.
-            --
-            -- PREVIEW: a swatch in the colour the border is drawn in. With Color by
-            -- Dispel Type on (the default) that is the dispel palette, not the
-            -- static colour below it, so the swatch shows the Magic colour from the
-            -- shared palette instead -- the static one would be a colour the frames
-            -- are not using.
-            local function BorderPreview(d)
-                local on = d.showDebuffs and d.debuffShowBorder ~= false
-                local c = d.debuffBorderColor
-                if d.debuffBorderColorByType and DF.ResolveDispelColor then
-                    local r, g, b = DF:ResolveDispelColor("Magic")
-                    c = { r = r, g = g, b = b }
-                end
-                return { { texture = PREVIEW_WHITE, width = 12, height = 12, color = PreviewColor(c, on) } }
-            end
             local band = OpenSection(L["Border"], "debuffs_border", 2, DebuffBorderSummary, DebuffsOffRow, nil, BuildDebuffBorderGroup, {
                 db = db, key = "debuffShowBorder", label = L["Show Border"],
                 isOn = function(d) return d.debuffShowBorder ~= false end,
@@ -2428,7 +2384,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     self:RefreshStates()
                     tools.ReflowMounted()
                 end,
-            }, BorderPreview)
+            })
             BuildDebuffBorderGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -2452,13 +2408,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- read as a pair at the foot of the band.
         --
         -- ☠ THE HEADER SWATCH IS CLASSIC-ONLY. The box's header carries a live
-        -- preview of the corner marker (GUI:AttachHeaderSwatch). The Modern card
-        -- COULD carry one now -- its header takes a live preview beside the title
-        -- (opts.preview), which four other cards on this page use -- but this one
-        -- was not in the design's list and is left for a decision rather than added
-        -- on the way past. Until then the card's summary carries the two facts the
-        -- swatch showed, in words (the size step and which corner the marker sits
-        -- in).
+        -- preview of the corner marker (GUI:AttachHeaderSwatch); the Modern card's
+        -- summary carries the two facts the swatch showed, in words (the size step
+        -- and which corner the marker sits in).
         local UpdateImportantSwatch   -- assigned below in classic, once the header exists
         local function ImportantChanged()
             if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
@@ -2875,19 +2827,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ THE HIDE GATE GOES ON BOTH HALVES (OpenSection's hideFn): with no
             -- factory row the client has no source for the letters, so the header
             -- and its band go together rather than leaving a title over nothing.
-            --
-            -- PREVIEW: the game's own letter code for Magic, drawn in the colour
-            -- the letters are set to -- the one thing on this card you can see
-            -- without pulling a mob.
-            local function DispelPreview(d)
-                local map = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap()
-                local on = d.showDebuffs and d.debuffDispelSymbolEnabled
-                return { {
-                    text = (map and map.Magic) or "Ma",
-                    color = PreviewColor(d.debuffDispelSymbolColor, true),
-                    desaturate = not on,
-                } }
-            end
             local band = OpenSection(L["Dispel Text"], "debuffs_dispeltext", 2, DebuffDispelSummary, DebuffsOffRow, NoFactoryRow,
                 BuildDebuffDispelTextGroup, {
                     db = db, key = "debuffDispelSymbolEnabled", label = L["Show Dispel Text"],
@@ -2898,7 +2837,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         ApplyDispelText()
                         tools.ReflowMounted()
                     end,
-                }, DispelPreview)
+                })
             BuildDebuffDispelTextGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -2977,19 +2916,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ ENABLE DURATION BAR IS THE HEADER'S TICK; the builder skips its own
             -- (hoistToggle). Same commit, and the same gate the in-body box carried
             -- as its disableOn: greyed while debuffs are off.
-            --
-            -- PREVIEW: a mini bar filled the way the bar is -- the ramp texture of a
-            -- curve colour mode, else a solid fill in the Bar Color.
-            local function DurationBarPreview(d)
-                local on = d.showDebuffs and d.debuffDurationBarEnabled
-                local curve = on and DF.GetDurationBarCurveTexture
-                    and DF:GetDurationBarCurveTexture(d.debuffDurationBarColorMode)
-                if curve then
-                    return { { texture = curve, width = 22, height = 5, color = { r = 1, g = 1, b = 1, a = 1 } } }
-                end
-                return { { texture = PREVIEW_WHITE, width = 22, height = 5,
-                           color = PreviewColor(d.debuffDurationBarColor, on) } }
-            end
             local band = OpenSection(L["Duration Bar"], "debuffs_durationbar", 1, DebuffDurationBarSummary, DebuffsOffRow, NoFactoryRow,
                 BuildDebuffDurationBarGroup, {
                     db = db, key = "debuffDurationBarEnabled", label = L["Enable Duration Bar"],
@@ -2999,7 +2925,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         DebuffBarChanged()
                         tools.ReflowMounted()
                     end,
-                }, DurationBarPreview)
+                })
             BuildDebuffDurationBarGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,

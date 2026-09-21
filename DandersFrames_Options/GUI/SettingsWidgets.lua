@@ -366,47 +366,6 @@ GUI.SectionCard = {
     cornersTop  = { tl = true, tr = true },
 }
 
--- ---- opts.preview's two helpers (see where the option is read) ----------
--- What a preview would draw, as one string, so an unchanged one is skipped.
-local function PreviewSignature(icons)
-    if type(icons) ~= "table" then return "" end
-    local parts = {}
-    for i, e in ipairs(icons) do
-        local c = e.color
-        parts[i] = string.format("%s|%s|%s|%s|%s|%.3f,%.3f,%.3f,%.3f",
-            tostring(e.texture), tostring(e.text), tostring(e.desaturate),
-            tostring(e.width), tostring(e.height),
-            c and c.r or -1, c and c.g or -1, c and c.b or -1, c and c.a or -1)
-    end
-    return table.concat(parts, ";")
-end
-
--- ☠ ONE HOOK FOR EVERY PREVIEW, ON THE ONE PLACE EVERY WRITE PASSES. Every
--- settings write -- the kit's widgets through the host's onSettingWritten, the
--- colour picker directly -- ends in DF.SettingsUndo:OnSettingWritten, after the
--- value has landed. Hooked (not edited) from here, once, on the first section
--- that asks for a preview; a section retired into the trash frame by a rebuild
--- is dropped from the set the next time a write walks it.
-local previewSections = setmetatable({}, { __mode = "k" })
-local previewHooked = false
-local function TrackPreviewSection(section)
-    previewSections[section] = true
-    if previewHooked then return end
-    local SU = DF.SettingsUndo
-    if not (SU and type(SU.OnSettingWritten) == "function" and hooksecurefunc) then return end
-    previewHooked = true
-    hooksecurefunc(SU, "OnSettingWritten", function()
-        local trash = GUI._trashFrame
-        for s in pairs(previewSections) do
-            if trash and s:GetParent() == trash then
-                previewSections[s] = nil
-            elseif s:IsVisible() and s.RefreshPreview then
-                s:RefreshPreview()
-            end
-        end
-    end)
-end
-
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
@@ -854,12 +813,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         local function apply()
             local w = self:GetWidth() or 0
             local free = w - TITLE_X - self.headerRightInset
-            if free < 40 then
-                -- No room for the title itself, so none for a preview beside it.
-                self._previewNoRoom = true
-                if self._PlacePreviewBesideTitle then self:_PlacePreviewBesideTitle() end
-                return
-            end
+            if free < 40 then return end
             -- 55/45: the title is the identity and wins the larger share, but the
             -- tag ("+2 triggers", "3 indicators") has to stay readable rather than
             -- be squeezed to nothing by a long name.
@@ -867,22 +821,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
             -- by default, so every bounded title drew centred in its box.
             self.title:SetJustifyH("LEFT")
-            -- ⚠ A PREVIEW BESIDE THE TITLE (opts.preview) IS PAID FOR OUT OF THE
-            -- TITLE'S SHARE, never the summary's: the two stay in their halves at
-            -- any width. When the share cannot hold both a readable title and the
-            -- preview, the preview is the one that goes. previewReserve is 0 on
-            -- every section without one, so their titles size exactly as before.
-            local share = math.max(40, math.floor(free * 0.55))
-            local reserve = self.previewReserve or 0
-            self._previewNoRoom = false
-            if reserve > 0 then
-                if share - reserve >= 40 then
-                    share = share - reserve
-                else
-                    self._previewNoRoom = true
-                end
-            end
-            self.title:SetWidth(share)
+            self.title:SetWidth(math.max(40, math.floor(free * 0.55)))
             self.tag:SetWordWrap(false)
             self.tag:SetJustifyH("LEFT")
             self.tag:ClearAllPoints()
@@ -895,11 +834,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             else
                 self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
             end
-            if self._PlacePreviewBesideTitle then self:_PlacePreviewBesideTitle() end
         end
-        -- Kept so a preview beside the title can re-bound the title when its own
-        -- width changes (see SetPreviewIcons).
-        self._applyHeaderRow = apply
         self:HookScript("OnSizeChanged", apply)
         apply()
         -- Order-independent: the swatches read this inset, so if they were placed
@@ -1090,10 +1025,6 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- underneath the delete button. headerRightInset is what the caller already
         -- says the buttons cost; the swatches start inside it.
         local x = RIGHT_INSET - (self.headerRightInset or 0)
-        -- opts.preview's placement: beside the TITLE rather than at the right end
-        -- (see _PlacePreviewBesideTitle). Sized by the same loop; placed after it.
-        local beside = self.previewBesideTitle
-        local total = 0
         for i = n, 1, -1 do  -- right-to-left so entry 1 ends up leftmost
             local data = icons[i]
             local slot = pool[i]
@@ -1108,10 +1039,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 pool[i] = slot
             end
             local dim = data.desaturate and true or false
-            -- data.width / data.height: a non-square entry (a header preview's
-            -- mini bar). Absent on every existing caller, which keeps SIZE.
-            local w = data.width or SIZE
-            slot:SetHeight(data.height or SIZE)
+            local w = SIZE
             if data.text and data.text ~= "" then
                 slot.tex:Hide()
                 slot.fs:SetText(data.text)
@@ -1154,89 +1082,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 slot.tex:Show()
             end
             slot:SetWidth(w)
-            slot._dfW = w
-            total = total + w + ((i < n) and GAP or 0)
-            if not beside then
-                slot:ClearAllPoints()
-                slot:SetPoint("RIGHT", self, "RIGHT", x, 0)
-                slot:Show()
-            end
+            slot:ClearAllPoints()
+            slot:SetPoint("RIGHT", self, "RIGHT", x, 0)
+            slot:Show()
             x = x - w - GAP
         end
         for i = n + 1, #pool do pool[i]:Hide() end
-        if beside then
-            self._previewCount = n
-            local reserve = (n > 0) and (total + 6) or 0
-            local changed = reserve ~= (self.previewReserve or 0)
-            self.previewReserve = reserve
-            -- A new width re-bounds the title first (apply places the swatches
-            -- as its last step); an unchanged one only has to place them.
-            if changed and self._applyHeaderRow then
-                self._applyHeaderRow()
-            else
-                self:_PlacePreviewBesideTitle()
-            end
-        end
-    end
-
-    -- ☠ BESIDE THE TITLE, NOT AT THE RIGHT END. The designers' swatches run in
-    -- from the right edge; a card's right end is already the summary's and the
-    -- pin's, and a preview drawn there sat on top of the value it illustrates.
-    -- So an opts.preview section draws its preview immediately after the title's
-    -- TEXT -- the string's own width, capped at the box the title was bounded to,
-    -- so a truncated title still has it flush against the ellipsis -- and the
-    -- title's share is shrunk to pay for it (SetHeaderRightInset's apply). With no
-    -- room for both, the preview hides rather than overlapping anything.
-    section._PlacePreviewBesideTitle = function(self)
-        local pool, n = self.previewIcons, self._previewCount or 0
-        if n == 0 then return end
-        local tw = self.title:GetStringWidth() or 0
-        local cap = self.title:GetWidth() or tw
-        if cap > 0 and tw > cap then tw = cap end
-        local x = TITLE_X + tw + 6
-        local show = not self._previewNoRoom
-        for i = 1, n do
-            local slot = pool[i]
-            slot:ClearAllPoints()
-            slot:SetPoint("LEFT", self, "LEFT", x, 0)
-            slot:SetShown(show)
-            x = x + (slot._dfW or slot:GetWidth() or 0) + 4
-        end
-    end
-
-    -- ============================================================
-    -- Optional LIVE PREVIEW beside the title (opts.preview)
-    -- ------------------------------------------------------------
-    -- opts.preview  fn(db) -> the same entries SetPreviewIcons takes: a tiny
-    --               picture of what the section controls (a bar in the bar's
-    --               colour, a swatch in the border's). Opt-in; nobody else moves.
-    --
-    -- ☠ READ, NEVER BAKED. Repainted on every state pass (refreshContent) AND on
-    -- every settings write (the SettingsUndo hook below) -- a colour dragged in
-    -- the picker, or a pick in the Color Mode dropdown, changes no page state,
-    -- so the state pass alone would leave the preview a step behind.
-    --
-    -- ⚠ DEDUPED ON A SIGNATURE of what it would draw, so a pass that changed
-    -- nothing costs no texture calls.
-    local previewFn = opts and type(opts.preview) == "function" and opts.preview or nil
-    if previewFn then
-        section.previewBesideTitle = true
-        section.RefreshPreview = function(self, d)
-            d = d or (DF.db and DF.db[GUI.SelectedMode or "party"])
-            if not d then return end
-            local icons = previewFn(d)
-            local sig = PreviewSignature(icons)
-            if sig == self._dfPreviewSig then return end
-            self._dfPreviewSig = sig
-            self:SetPreviewIcons(icons)
-        end
-        local inner = section.refreshContent
-        section.refreshContent = function(self, d)
-            if inner then inner(self, d) end
-            self:RefreshPreview(d)
-        end
-        TrackPreviewSection(section)
-        section:RefreshPreview()
     end
 
     -- Hover effects

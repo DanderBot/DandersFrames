@@ -5356,8 +5356,6 @@ function GUI:CreatePopoutPageTools(page)
     --                enough (see WireTwoTrack)
     --   quietLabels  a control's own caption draws dim, so a setting can never
     --                read as a heading (see QuietLabel)
-    --   preview      fn(db) -> preview entries for the header, beside the title
-    --                (see opts.preview on CreateCollapsibleSection)
 
     -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
     -- not chosen. Every factory in the kit was laid out against a 260 column; at
@@ -5543,8 +5541,7 @@ function GUI:CreatePopoutPageTools(page)
         -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
         -- in SettingsWidgets.lua).
         local section = GUI:CreateCollapsibleSection(page.child, label, true,
-            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
-                              preview = extra and extra.preview or nil })
+            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })
         section.hideOn = hideFn
         -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
         -- page and GUI.ColumnWidth). Without it the header bar would stay

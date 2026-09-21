@@ -16,10 +16,9 @@ local NS = ...
 --   column 2   "Icon"     Appearance, Layout, Position, Border, Important Debuffs.
 --              "Text"     Duration Text, Stack Count, Dispel Text.
 --
--- ...plus the three things the Buff Bar does NOT opt into, so the two can be
--- compared in game: controls TWO PER ROW inside a wide enough card, captions
--- drawn dim so a setting never reads as a heading, and a live preview beside
--- four headers' titles.
+-- ...plus the two things the Buff Bar does NOT opt into, so the two can be
+-- compared in game: controls TWO PER ROW inside a wide enough card, and captions
+-- drawn dim so a setting never reads as a heading.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db, the blacklist
@@ -36,9 +35,9 @@ local NS = ...
 --     classic hands it (plus hoistToggle where the tick moved to the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate,
 --     header tick and pin; that there is one checkbox per setting.
---   ✓ the three Debuff-Bar-only opt-ins, and that the Buff Bar asks for none.
+--   ✓ the two Debuff-Bar-only opt-ins, and that the Buff Bar asks for none.
 --   ✗ nothing about runtime behaviour -- the folding, the two-per-row flow, the
---     dim captions, the previews and the greying are read in game.
+--     dim captions and the greying are read in game.
 -- ============================================================
 
 -- ⚠ NORMALISED TO LF UP FRONT. This page file ships CRLF (the companion's files
@@ -138,7 +137,7 @@ do
     BUFFPAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The shared section helper and its three opt-ins, in the page tools.
+-- The shared section helper and its two opt-ins, in the page tools.
 local TOOLS = CTRL:match("\nfunction GUI:CreatePopoutPageTools%(page%)(.-)\nend\n") or ""
 local OPEN = (TOOLS:match("\n    local function OpenSection%(Add, .-\n    end\n") or ""):gsub("%s+", " ")
 local CLOSE = TOOLS:match("\n    local function CloseSection%(Add, band%)(.-)\n    end\n") or ""
@@ -146,7 +145,7 @@ local CLOSE = TOOLS:match("\n    local function CloseSection%(Add, band%)(.-)\n 
 -- ONE SECTION'S BLOCK: its OpenSection call, the builder mount under it and the
 -- CloseSection that puts its band in, flattened. `call` is just the OpenSection
 -- call -- everything before the band mount -- which is where the pin (a builder
--- argument), the tick and the preview are declared.
+-- argument) and the tick are declared.
 local function sectionBlock(labelKey)
     local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
     check(a ~= nil, "source: a card is opened for " .. labelKey)
@@ -197,7 +196,7 @@ do
     end
 
     -- ---- the section helpers: this page's forwards to the shared ones ----
-    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle, preview)", 1, true) ~= nil,
+    check(PAGE:find("local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)", 1, true) ~= nil,
           "sections: the page opens a card in one named place")
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
     check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,", 1, true) ~= nil,
@@ -205,7 +204,7 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes one through the shared helper too")
     -- The helper itself: the Buff Bar's card, lifted rather than copied.
-    check(OPEN:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, preview = extra and extra.preview or nil })", 1, true) ~= nil,
+    check(OPEN:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
           "sections: the shared helper builds the kit's section as a CARD, expanded on a first run, at its column's width")
     check(OPEN:find("Add(section, 36, col)", 1, true) ~= nil
       and OPEN:find("GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })", 1, true) ~= nil
@@ -409,7 +408,7 @@ local DEBUFF_DURBAR = {
 -- label, stable collapse key, card column, classic box header and column, the
 -- row's summary; `dim` = greys with the page gate, `hide` = the factory gate on
 -- both halves, `pin` = passes its builder (decides how the bar LOOKS), `tick` =
--- its on/off moved into the header, `preview` = a live picture beside the title.
+-- its on/off moved into the header.
 local CARDS = {
     { label = "Visibility",        key = "debuffs_visibility",  col = 1, box = "Visibility",       classicCol = 1,
       builder = "BuildDebuffVisibilityGroup", golden = VISIBILITY,        summary = "DebuffVisibilitySummary" },
@@ -421,14 +420,14 @@ local CARDS = {
       builder = "BuildDebuffOrderGroup",      golden = DEBUFF_ORDER,      summary = "DebuffOrderSummary", dim = true },
     { label = "Appearance",        key = "debuffs_appearance",  col = 2, box = "Appearance",       classicCol = 2,
       builder = "BuildDebuffAppearanceGroup", golden = DEBUFF_APPEARANCE, summary = "DebuffAppearanceSummary",
-      dim = true, pin = true, preview = "AppearancePreview" },
+      dim = true, pin = true },
     { label = "Layout",            key = "debuffs_layout",      col = 2, box = "Layout",           classicCol = 1,
       builder = "BuildDebuffLayoutGroup",     golden = DEBUFF_LAYOUT,     summary = "DebuffLayoutSummary", dim = true, pin = true },
     { label = "Position",          key = "debuffs_position",    col = 2, box = "Position",         classicCol = 1,
       builder = "BuildDebuffPositionGroup",   golden = DEBUFF_POSITION,   summary = "DebuffPositionSummary", dim = true, pin = true },
     { label = "Border",            key = "debuffs_border",      col = 2, box = "Border",           classicCol = 1,
       builder = "BuildDebuffBorderGroup",     golden = DEBUFF_BORDER,     summary = "DebuffBorderSummary",
-      dim = true, pin = true, preview = "BorderPreview",
+      dim = true, pin = true,
       tick = { key = "debuffShowBorder", name = "Show Border" }, composite = true },
     { label = "Important Debuffs", key = "debuffs_important",   col = 2, box = nil,                classicCol = 2,
       builder = "BuildImportantDebuffsGroup", golden = DEBUFF_IMPORTANT,  summary = "ImportantDebuffsSummary",
@@ -440,11 +439,11 @@ local CARDS = {
       builder = "BuildDebuffStackGroup",      golden = DEBUFF_STACK,      summary = "DebuffStackSummary", dim = true, pin = true },
     { label = "Dispel Text",       key = "debuffs_dispeltext",  col = 2, box = "Dispel Text",      classicCol = 2,
       builder = "BuildDebuffDispelTextGroup", golden = DEBUFF_DISPEL,     summary = "DebuffDispelSummary",
-      dim = true, hide = true, pin = true, preview = "DispelPreview",
+      dim = true, hide = true, pin = true,
       tick = { key = "debuffDispelSymbolEnabled", name = "Show Dispel Text" } },
     { label = "Duration Bar",      key = "debuffs_durationbar", col = 1, box = "Duration Bar",     classicCol = 2,
       builder = "BuildDebuffDurationBarGroup", golden = DEBUFF_DURBAR,    summary = "DebuffDurationBarSummary",
-      dim = true, hide = true, pin = true, preview = "DurationBarPreview",
+      dim = true, hide = true, pin = true,
       tick = { key = "debuffDurationBarEnabled", name = "Enable Duration Bar" } },
 }
 
@@ -527,13 +526,6 @@ for _, g in ipairs(CARDS) do
           g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
                               or ": mounts the builder exactly as classic does"))
 
-    -- The preview, beside the title.
-    if g.preview then
-        check(call:find(g.preview .. ")", 1, true) ~= nil and PAGE:find("local function " .. g.preview .. "(d)", 1, true) ~= nil,
-              g.label .. ": a live preview (" .. g.preview .. ") beside the title")
-    else
-        check(call:find("Preview", 1, true) == nil, g.label .. ": no header preview")
-    end
 end
 
 print("-- Debuff Bar page: the cards together")
@@ -636,17 +628,17 @@ do
 end
 
 -- ============================================================
--- 3. THE THREE DEBUFF-BAR-ONLY OPT-INS, AND THE BUFF BAR TAKING NONE
+-- 3. THE TWO DEBUFF-BAR-ONLY OPT-INS, AND THE BUFF BAR TAKING NONE
 -- ============================================================
-print("-- Debuff Bar page: two per row, quiet captions, header previews -- opt-in")
+print("-- Debuff Bar page: two per row and quiet captions -- opt-in")
 do
     -- ---- who asks -------------------------------------------------------
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("{ twoTrack = true, quietLabels = true, preview = preview }", 1, true) ~= nil,
-          "opt-in: every Debuff Bar card asks for two tracks and quiet captions, and passes its own preview")
+    check(fwd:find("{ twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "opt-in: every Debuff Bar card asks for two tracks and quiet captions")
     check(BUFFPAGE:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)\n", 1, true) ~= nil,
           "opt-in: the Buff Bar forwards with NO extra argument")
-    for _, word in ipairs({ "twoTrack", "quietLabels", "preview =", "Preview(" }) do
+    for _, word in ipairs({ "twoTrack", "quietLabels" }) do
         check(BUFFPAGE:find(word, 1, true) == nil, "opt-in: ...and never mentions " .. word)
     end
     -- In the helper: each opt-in is read off `extra` and nothing else, so a
@@ -655,8 +647,6 @@ do
           "opt-in: two tracks only when asked")
     check(OPEN:find("if extra and extra.quietLabels then band.dfQuietLabels = true end", 1, true) ~= nil,
           "opt-in: quiet captions only when asked")
-    check(OPEN:find("preview = extra and extra.preview or nil", 1, true) ~= nil,
-          "opt-in: a preview only when handed one")
     check(CLOSE:find("if band.dfTwoTrack then StampFullRows(band) end", 1, true) ~= nil
       and CLOSE:find("if band.dfQuietLabels then QuietLabels(band) end", 1, true) ~= nil,
           "opt-in: ...and the band's children are touched only on an opted-in band, after the builder filled it")
@@ -717,34 +707,39 @@ do
         check(ratio >= 4.5, string.format("quiet: the dim caption is %.2f:1 on the card's fill -- at least 4.5:1", ratio))
     end
 
-    -- ---- header previews ------------------------------------------------
+    -- ---- NO HEADER PREVIEWS -------------------------------------------
+    -- ☠ REMOVED ON PURPOSE (the author: "they will never be accurate; test mode
+    -- is 99% accurate, so no need for demo icons"). Pinned as ABSENT so they
+    -- cannot creep back: no preview option on the section, no preview argument
+    -- through the helper or the page, no picture functions, and -- above all --
+    -- no hook on the function every settings write passes through.
     local fn = SW:match("function GUI:CreateCollapsibleSection%(.-\nend\n") or ""
-    check(fn:find('local previewFn = opts and type(opts.preview) == "function" and opts.preview or nil', 1, true) ~= nil,
-          "preview: the section reads opts.preview, and a caller passing none builds nothing")
-    check(fn:find("section.previewBesideTitle = true", 1, true) ~= nil,
-          "preview: ...placed beside the TITLE, not at the right end the summary and pin own")
-    check(fn:find("if inner then inner(self, d) end\n            self:RefreshPreview(d)", 1, true) ~= nil,
-          "preview: ...repainted on every state pass, after the summary and tick")
-    check(fn:find("if sig == self._dfPreviewSig then return end", 1, true) ~= nil,
-          "preview: ...skipping a pass that would draw the same thing")
-    check(SW:find('hooksecurefunc(SU, "OnSettingWritten", function()', 1, true) ~= nil,
-          "preview: ...and on every settings write, so a colour drag repaints it live")
-    -- The title pays for it, never the summary: the reserve comes off the
-    -- title's share, and with no room the preview hides.
-    check(fn:find("local reserve = self.previewReserve or 0", 1, true) ~= nil
-      and fn:find("share = share - reserve", 1, true) ~= nil
-      and fn:find("self._previewNoRoom = true", 1, true) ~= nil,
-          "preview: the title's share pays for it, and it hides when there is no room")
-    check(fn:find('slot:SetPoint("LEFT", self, "LEFT", x, 0)', 1, true) ~= nil,
-          "preview: ...drawn left to right from the end of the title's text")
-    -- ...and the designers' right-aligned swatches are untouched.
-    check(fn:find('slot:SetPoint("RIGHT", self, "RIGHT", x, 0)', 1, true) ~= nil,
-          "preview: the existing right-end placement is still what every other caller gets")
-    -- Every preview reads the live db it is handed; none bakes a value.
-    for _, name in ipairs({ "AppearancePreview", "BorderPreview", "DispelPreview", "DurationBarPreview" }) do
-        local pbody = PAGE:match("local function " .. name .. "%(d%)(.-)\n            end\n") or ""
-        check(pbody:find("d%.") ~= nil, "preview: " .. name .. " reads the settings it is handed")
+    check(fn ~= "", "no preview: the section factory is readable")
+    for _, word in ipairs({ "opts.preview", "previewFn", "RefreshPreview", "previewBesideTitle",
+                            "_PlacePreviewBesideTitle", "previewReserve", "_previewNoRoom",
+                            "_applyHeaderRow", "_dfPreviewSig" }) do
+        check(fn:find(word, 1, true) == nil, "no preview: the section factory has no " .. word)
     end
+    for _, word in ipairs({ "PreviewSignature", "TrackPreviewSection", "previewSections",
+                            "previewHooked" }) do
+        check(SW:find(word, 1, true) == nil, "no preview: SettingsWidgets has no " .. word)
+    end
+    -- No file in the companion hooks the settings-write path.
+    for _, path in ipairs({ "GUI/SettingsWidgets.lua", "GUI/Controls.lua", "GUI/Pages/Indicators.lua" }) do
+        local src = options_file_source(path)
+        check(src:find('"OnSettingWritten"', 1, true) == nil,
+              "no preview: " .. path .. " hooks nothing onto OnSettingWritten")
+    end
+    check(TOOLS:find("extra.preview", 1, true) == nil,
+          "no preview: the shared section helper passes no preview")
+    check(OPEN:find("preview", 1, true) == nil, "no preview: OpenSection mentions no preview at all")
+    for _, name in ipairs({ "AppearancePreview", "BorderPreview", "DispelPreview", "DurationBarPreview",
+                            "PREVIEW_WHITE", "PREVIEW_OFF", "PreviewColor" }) do
+        check(PAGE:find(name, 1, true) == nil, "no preview: the page declares no " .. name)
+    end
+    -- ...while the designers' own right-end swatches are still there.
+    check(fn:find('slot:SetPoint("RIGHT", self, "RIGHT", x, 0)', 1, true) ~= nil,
+          "no preview: the existing SetPreviewIcons placement is untouched")
 end
 
 -- ============================================================

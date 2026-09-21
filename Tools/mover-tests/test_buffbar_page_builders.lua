@@ -25,7 +25,7 @@ local NS = ...
 --
 -- ☠ THE DEBUFF BAR NOW USES THE SAME CARDS (the section helper was lifted into
 -- the page tools for it) PLUS THREE OPT-INS THIS PAGE DOES NOT TAKE -- two per
--- row, dim captions, header previews. Its own census file pins those; this
+-- row and dim captions. Its own census file pins those; this
 -- one pins that the Buff Bar forwards with no `extra` and draws as it did.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
@@ -238,13 +238,13 @@ do
           "sections: ...and closes one in another")
     -- ...each a forward to the shared helper, passing nothing this page did not
     -- pass before -- in particular no `extra`, so none of the Debuff Bar's
-    -- opt-ins (two tracks, quiet captions, header previews) reach this page.
+    -- opt-ins (two tracks, quiet captions) reach this page.
     check(PAGE:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)\n", 1, true) ~= nil,
           "sections: ...the page's OpenSection forwards to the shared one, with no extra")
     check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
           "sections: ...and so does its CloseSection")
     local open = OPEN
-    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, preview = extra and extra.preview or nil })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -1198,7 +1198,7 @@ do
 
     -- ---- Buff Bar passes it -----------------------------------------
     local open = OPEN
-    check(open:find("pin = pin, card = true, toggle = toggle,", 1, true) ~= nil,
+    check(open:find("pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
           "card: Buff Bar's OpenSection opts every section in")
 
     -- ---- the 40px header --------------------------------------------
