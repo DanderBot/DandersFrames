@@ -224,7 +224,7 @@ do
     check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
           "sections: ...and closes one in another")
     local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
-    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(self.child, label, true, tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -1106,4 +1106,132 @@ do
         check(ENUS:find('L["' .. key .. '"] = true', 1, true) ~= nil,
               "bulk strings: ...and the key is declared in enUS (" .. key .. ")")
     end
+end
+
+-- ============================================================
+-- 11. ONE CARD PER SECTION (opts.card)
+-- The approved design draws each section as ONE card -- header and band in a
+-- single rounded plate, a hairline between them, an 8px gap to the next card.
+-- The band stays a separate page child (the state pass has to reach it), so the
+-- card is a kit rounded surface whose textures live on the header and whose
+-- rect is anchored header-top -> band-bottom. OPT-IN: this page is the only
+-- caller, and every other section must build exactly what it built before.
+--
+-- ✗ Source-shape only, like the rest of this file: nothing here builds a
+-- frame, so how the card LOOKS is unverified until it is read in game.
+-- ============================================================
+print("-- Buff Bar page: one card per section")
+do
+    -- The body of CreateCollapsibleSection, and nothing past it.
+    local fn = WIDGETS:match("function GUI:CreateCollapsibleSection%(.-\nend\n") or ""
+    check(fn ~= "", "card: the section factory is readable")
+
+    -- ---- the opt-in guard -------------------------------------------
+    check(fn:find("local CARD = opts and opts.card and GUI.SectionCard or nil", 1, true) ~= nil,
+          "card: the look is read off opts.card and nothing else")
+    -- ☠ A CALLER WITHOUT IT BUILDS THE BAR IT ALWAYS HAD: the old backdrop is
+    -- the non-card arm, and every piece of card chrome sits in the other one.
+    local plain, cardArm = fn:match("\n    if not CARD then\n(.-)\n    else\n(.-)\n    end\n")
+    check(plain ~= nil and plain:find("GUI:CreateElementBackdrop(section, {", 1, true) ~= nil,
+          "card: without the opt-in the header keeps its old element backdrop")
+    check(cardArm ~= nil and select(2, cardArm:gsub("GUI:CreateRoundedSurface%(section,", "")) == 2,
+          "card: ...and both rounded surfaces are built only in the card arm")
+    check(select(2, fn:gsub("GUI:CreateRoundedSurface%(", "")) == 2,
+          "card: ...and nowhere else in the factory")
+    check(cardArm ~= nil and cardArm:find('cardLine = section:CreateTexture(nil, "BORDER")', 1, true) ~= nil,
+          "card: the hairline texture is card-only too")
+    -- The fold hook exists only for a card, and every later reach for it is
+    -- guarded on its presence -- so a plain section's fold, registration and
+    -- hover run exactly the old code.
+    check(fn:find("\n    if CARD then\n        section.fixedRowHeight = true\n        section._ApplyCardFold = function(self)", 1, true) ~= nil,
+          "card: the fold hook is defined only under the opt-in")
+    check(fn:find("if self._ApplyCardFold then self:_ApplyCardFold() end", 1, true) ~= nil,
+          "card: ...SetExpanded reaches it only when it exists")
+    check(fn:find("if self._ApplyCardFold and widget.isSettingsGroup and not self.cardBody then", 1, true) ~= nil,
+          "card: ...and so does RegisterChild")
+    check(fn:find("if cardHover then cardHover:Show() return end", 1, true) ~= nil
+      and fn:find("if cardHover then cardHover:Hide() return end", 1, true) ~= nil,
+          "card: the hover wash replaces the backdrop tint only when there is a card")
+    check(fn:find('section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)', 1, true) ~= nil
+      and fn:find("local TITLE_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26", 1, true) ~= nil,
+          "card: a plain section keeps its 8px arrow and 26px title")
+
+    -- ---- Buff Bar passes it -----------------------------------------
+    local open = PAGE:match("local function OpenSection%(.-\n        end\n"):gsub("%s+", " ")
+    check(open:find("pin = pin, card = true })", 1, true) ~= nil,
+          "card: Buff Bar's OpenSection opts every section in")
+
+    -- ---- the 40px header --------------------------------------------
+    check(WIDGETS:find("header      = 40,", 1, true) ~= nil,
+          "card: the header row is 40 tall")
+    check(fn:find("if CARD then section:SetHeight(CARD.header) end", 1, true) ~= nil,
+          "card: ...the header frame is built at that height")
+    check(fn:find("local slot = open and CARD.header or (CARD.header + CARD.gap)", 1, true) ~= nil,
+          "card: ...open, its slot is exactly the header so the body starts under the seam; shut, it carries the gap")
+    check(fn:find("widget.margin = CARD.gap", 1, true) ~= nil
+      and fn:find("widget.padding = CARD.pad", 1, true) ~= nil,
+          "card: the body takes the card's inset and the gap to the next card")
+
+    -- ---- the title is TEXT, the accent is the chevron ----------------
+    local ut = fn:match("\n    if CARD then\n        section%.title%.UpdateTheme = function%(%)(.-)\n        end\n")
+    check(ut ~= nil, "card: the card repaints its title through its own UpdateTheme")
+    if ut then
+        check(ut:find("section.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)", 1, true) ~= nil,
+              "card: ...the title is the text colour")
+        check(ut:find("section.title:SetTextColor(nc.r", 1, true) == nil,
+              "card: ...never the accent")
+        check(ut:find("section.arrow:SetVertexColor(nc.r, nc.g, nc.b)", 1, true) ~= nil,
+              "card: ...the chevron carries the accent")
+        check(ut:find("section.title:SetTextColor(0.5, 0.5, 0.5)", 1, true) ~= nil
+          and ut:find("section.arrow:SetVertexColor(0.5, 0.5, 0.5)", 1, true) ~= nil,
+              "card: ...and dimmed greys both at SetPreviewDimmed's grey")
+    end
+
+    -- ---- the hairline -----------------------------------------------
+    check(fn:find("cardLine:SetHeight(1)", 1, true) ~= nil,
+          "card: the header/body seam is a 1-unit hairline")
+    check(fn:find("cardLine:SetShown(open)", 1, true) ~= nil,
+          "card: ...shown only while the body is showing")
+    local bA = tonumber(WIDGETS:match("borderAlpha = ([%d%.]+)"))
+    local lA = tonumber(WIDGETS:match("lineAlpha   = ([%d%.]+)"))
+    check(bA ~= nil and lA ~= nil and lA < bA,
+          "card: ...a shade under the card's border")
+
+    -- ---- the dim summary stays readable on a card --------------------
+    check(fn:find("if self.previewDimmed and not self.isCard then", 1, true) ~= nil,
+          "card: the summary keeps its readable dim on a card (0.5 grey fails 4.5:1)")
+
+    -- ---- nobody else opts in ----------------------------------------
+    -- Every file that calls CreateCollapsibleSection today. A NEW caller in a
+    -- file not listed here is not covered -- the harness cannot list a folder.
+    local callers = {
+        "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
+        "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
+    }
+    local calls, carded, cardedIn = 0, 0, nil
+    for _, path in ipairs(callers) do
+        local src = options_file_source(path):gsub("\r\n", "\n")
+        local pos = 1
+        while true do
+            local s, e = src:find("GUI:CreateCollapsibleSection(", pos, true)
+            if not s then break end
+            -- The whole call, by balancing parentheses from its opening one.
+            local depth, i = 1, e + 1
+            while depth > 0 and i <= #src do
+                local ch = src:sub(i, i)
+                if ch == "(" then depth = depth + 1 elseif ch == ")" then depth = depth - 1 end
+                i = i + 1
+            end
+            local call = src:sub(s, i - 1)
+            calls = calls + 1
+            if call:find("card%s*=") then
+                carded = carded + 1
+                cardedIn = path
+            end
+            pos = i
+        end
+    end
+    check(calls >= 20, "card: every known caller was scanned (" .. calls .. " calls)")
+    check(carded == 1 and cardedIn == "GUI/Pages/Indicators.lua",
+          "card: ...and Buff Bar's OpenSection is the only one that opts in")
 end

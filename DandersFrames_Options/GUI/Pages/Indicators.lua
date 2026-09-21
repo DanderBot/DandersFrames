@@ -238,8 +238,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     db     = tools.RowDB,
                 }
             end
+            -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
+            -- in SettingsWidgets.lua). This page is the only caller that opts in.
             local section = GUI:CreateCollapsibleSection(self.child, label, true,
-                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin })
+                tools.BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true })
             section.hideOn = hideFn
             -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
             -- page and GUI.ColumnWidth). Without it the layout pass leaves it at the

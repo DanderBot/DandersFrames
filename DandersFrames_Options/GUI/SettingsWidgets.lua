@@ -319,10 +319,59 @@ end
 -- profile key per record -- a schema change smuggled in under a re-presentation.
 -- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
 --
--- opts also takes `summary`, `dimOn` and `pin` -- see where they are read, below.
+-- opts also takes `summary`, `dimOn`, `pin` and `card` -- see where they are
+-- read, below.
+--
+-- ============================================================
+-- opts.card -- ONE CARD PER SECTION (opt-in; Buff Bar only today)
+-- ------------------------------------------------------------
+-- Without it a section is a thin bar with an accent title, and the band of
+-- controls it folds is a separate block floating under it. With it the header
+-- and that band read as ONE card: one fill, one rounded ring, a hairline between
+-- the header and the body, and a fixed gap to the next card.
+--
+-- ☠ THE BAND IS STILL A SEPARATE PAGE CHILD, and the card does not change that.
+-- Panel.lua's state pass is the only thing that hides what a shut section
+-- registered, so the band has to stay a page child it can reach. The card is
+-- drawn instead as a rounded surface whose TEXTURES live on the header (so they
+-- sit under every control in the band, which are a frame level above) and whose
+-- RECT is an invisible frame ANCHORED from the header's top to the band's
+-- bottom. Pure anchors: nothing reads a rect mid-layout, so the double
+-- RefreshStates, the one-column fold at narrow widths and a resize-grip drag all
+-- move the card with the frames it is pinned to.
+--
+-- ⚠ THE FIRST SETTINGS GROUP REGISTERED IS THE BODY, and it takes the card's
+-- inset and gap (see RegisterChild). Shut, or with no body, the card is the
+-- header alone, fully rounded.
+--
+-- ⚠ NOBODY ELSE MOVES. Every number below is read only under `card`.
+GUI.SectionCard = {
+    header      = 40,   -- header row height
+    edge        = 12,   -- chevron's inset from the card's left edge
+    chevron     = 10,   -- chevron size
+    titleGap    = 8,    -- chevron -> title
+    pad         = 12,   -- the body's inset (left, right, bottom -- and top)
+    gap         = 8,    -- card -> next card
+    radius      = 6,    -- a radius the kit has baked art for (Round.lua RADII)
+    pin         = 24,   -- the pin's square
+    pinIcon     = 14,   -- ...and the glyph inside it
+    pinEdge     = 8,    -- the pin's inset from the card's right edge
+    borderAlpha = 0.6,  -- of C_BORDER, over C_PANEL
+    lineAlpha   = 0.4,  -- the header/body hairline: a shade under the border
+    -- of C_HOVER. Capped by the summary's contrast, not by taste: the dim text
+    -- has to stay >= 4.5:1 on the HOVERED header too, and 0.75 (the row
+    -- plates' hover) takes it to ~4.4.
+    hoverAlpha  = 0.6,
+    cornersAll  = { tl = true, tr = true, bl = true, br = true },
+    cornersTop  = { tl = true, tr = true },
+}
+
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
+    local CARD = opts and opts.card and GUI.SectionCard or nil
+    section.isCard = CARD and true or false
+    if CARD then section:SetHeight(CARD.header) end
     -- The store slot: the caller's stable key when it gave one, else the title --
     -- which is what every existing caller relies on, so none of them move.
     section.collapseKey = opts and opts.collapseKey or nil
@@ -348,10 +397,50 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- Header bar with background. Same look as before, via the shared backdrop
     -- helper rather than a private copy of it, so it picks up the pixel border
     -- (and anything else that lands there) without its own wiring.
-    GUI:CreateElementBackdrop(section, {
-        bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
-        borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
-    })
+    local cardRect, cardSurface, cardHover, cardLine
+    if not CARD then
+        GUI:CreateElementBackdrop(section, {
+            bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
+            borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
+        })
+    else
+        -- The card's rect: header top -> body bottom, re-pointed by the fold (see
+        -- _ApplyCardFold). Draws nothing and takes no mouse; it only exists so
+        -- the surface below has one frame to stretch over.
+        cardRect = CreateFrame("Frame", nil, section)
+        cardRect:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)
+        cardRect:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", 0, 0)
+        -- The kit's rounded surface, not a new rounding system. Textures on the
+        -- HEADER, rect from cardRect -- the split Round.lua's anchorTo exists for.
+        -- The ring weight is the row plates' own.
+        local style = GUI:GetSurfaceStyle()
+        local bw = style and (style.rowBorderWidth or style.borderWidth) or 1
+        cardSurface = GUI:CreateRoundedSurface(section, {
+            radius      = CARD.radius,
+            borderWidth = bw,
+            fill        = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 1 },
+            border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
+            anchorTo    = cardRect,
+        })
+        -- The header's hover wash: over the card's fill, UNDER its ring (the
+        -- title-strip sublevel), over the header's rect only. Top corners round
+        -- while the body shows, all four while the card is the header alone.
+        cardHover = GUI:CreateRoundedSurface(section, {
+            radius   = CARD.radius,
+            border   = false,
+            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+            sublevel = GUI.RoundStripSublevel,
+        })
+        cardHover:Hide()
+        -- The seam between header and body. BORDER sits above the whole of
+        -- BACKGROUND, so it is inset by the ring's weight rather than drawn
+        -- over it.
+        cardLine = section:CreateTexture(nil, "BORDER")
+        cardLine:SetPoint("BOTTOMLEFT", section, "BOTTOMLEFT", bw, 0)
+        cardLine:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", -bw, 0)
+        cardLine:SetHeight(1)
+        cardLine:Hide()
+    end
 
     -- Click area
     local clickArea = CreateFrame("Button", nil, section)
@@ -360,8 +449,8 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     
     -- Expand/collapse arrow icon
     section.arrow = section:CreateTexture(nil, "OVERLAY")
-    section.arrow:SetPoint("LEFT", 8, 0)
-    section.arrow:SetSize(12, 12)
+    section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)
+    section.arrow:SetSize(CARD and CARD.chevron or 12, CARD and CARD.chevron or 12)
     if section.expanded then
         section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
     else
@@ -369,9 +458,10 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
     section.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
-    -- Section title
+    -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
+    local TITLE_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    section.title:SetPoint("LEFT", 26, 0)
+    section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)
     local c = GetThemeColor()
     section.title:SetTextColor(c.r, c.g, c.b)
@@ -391,6 +481,29 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
     if not parent.ThemeListeners then parent.ThemeListeners = {} end
     table.insert(parent.ThemeListeners, section.title)
+
+    -- A CARD'S TITLE IS TEXT, NOT ACCENT -- the accent moves to the chevron. Same
+    -- listener slot, so a mode/accent switch repaints both, and the card's own
+    -- paint rides along (it is read off the shared palette, so a retheme reaches
+    -- it here too). Dimmed greys title and chevron alike, at the grey
+    -- SetPreviewDimmed has always used.
+    if CARD then
+        section.title.UpdateTheme = function()
+            if section.previewDimmed then
+                section.title:SetTextColor(0.5, 0.5, 0.5)
+                section.arrow:SetVertexColor(0.5, 0.5, 0.5)
+            else
+                section.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                local nc = GetThemeColor()
+                section.arrow:SetVertexColor(nc.r, nc.g, nc.b)
+            end
+            cardSurface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+            cardSurface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
+            cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+            cardLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
+        end
+        section.title.UpdateTheme()
+    end
 
     -- Optional inline tag — small yellow text placed after the title to
     -- stand out as a status summary (e.g. "[Normal Dispels]"). Call
@@ -457,6 +570,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     local pinRightInset
     if pinOpts and type(pinOpts.build) == "function" then
         local PIN_SIZE, PIN_EDGE = 14, 10
+        -- A card's pin is a 24px square (glyph 14 inside it) that wears a border
+        -- while lit -- see SetPinLit.
+        if CARD then PIN_SIZE, PIN_EDGE = CARD.pin, CARD.pinEdge end
         -- Built on FIRST PRESS, not here. The mount behind it is eager (search
         -- and any build-time db seeding depend on that -- see PopoutContent),
         -- but the ROW is pure chrome: a plate this consumer never shows, whose
@@ -511,6 +627,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             -- Media\Icons\pin path does not exist and drew nothing.
             texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin",
             size    = PIN_SIZE,
+            iconSize = CARD and CARD.pinIcon or nil,
             tooltip = { title = L["Pin settings in popout"] },
             onClick = function()
                 local r = ensureRow()
@@ -538,6 +655,16 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 self.pinBtn:SetGlyph(nil, GetThemeColor())
             else
                 self.pinBtn:SetGlyph(nil, C_TEXT_DIM)
+            end
+            -- A card's lit pin is a bordered square; at rest, a bare dim glyph.
+            -- The kit's pixel border, in the accent the glyph is lit in.
+            if self.isCard then
+                if self.pinLit then
+                    local ac = GetThemeColor()
+                    GUI:ApplyPixelBorder(self.pinBtn, { ac.r, ac.g, ac.b, 1 })
+                else
+                    GUI:HidePixelBorder(self.pinBtn)
+                end
             end
         end
         section:SetPinLit(false)
@@ -608,7 +735,10 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 self._dfSummaryText = text
                 fs:SetText(text)
             end
-            if self.previewDimmed then
+            -- ⚠ NOT ON A CARD. 0.5 grey on the card's C_PANEL is ~4.2:1, under
+            -- the 4.5 floor for small text; the title and chevron already say
+            -- the section is off, so the summary keeps its readable dim.
+            if self.previewDimmed and not self.isCard then
                 fs:SetTextColor(0.5, 0.5, 0.5)
             else
                 fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -631,8 +761,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- title's share is DERIVED from the live width, not a smaller magic number.
     --
     -- ⚠ Opt-in. A section with a bare header is unbounded exactly as before, so
-    -- no existing page moves.
-    local TITLE_X = 26
+    -- no existing page moves. (TITLE_X is declared with the title, above.)
     section.SetHeaderRightInset = function(self, inset)
         self.headerRightInset = tonumber(inset) or 0
         local function apply()
@@ -695,6 +824,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             local saved = GUI:GetCollapsedGroups()
             saved[persistKey] = (not self.expanded) or nil
         end
+        if self._ApplyCardFold then self:_ApplyCardFold() end
         return true
     end
 
@@ -715,6 +845,48 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         
         -- Use a marker to check section state during RefreshStates
         widget.collapsibleSection = self
+
+        -- A card's FIRST settings group is its body: the card runs down to it,
+        -- and it takes the card's inset and the gap to the next card. Fields
+        -- LayoutChildren reads every pass, set before the builder adds a
+        -- single control to it.
+        if self._ApplyCardFold and widget.isSettingsGroup and not self.cardBody then
+            self.cardBody = widget
+            widget.padding = CARD.pad
+            widget.margin = CARD.gap
+            self:_ApplyCardFold()
+        end
+    end
+
+    -- THE CARD FOLLOWS THE FOLD. Open with a body: the card runs down to the
+    -- body's bottom, the hairline shows, the hover wash rounds its top corners
+    -- only, and the header's slot is exactly its own height so the body starts
+    -- flush under the seam (the body's margin is then the gap). Shut, or no
+    -- body: the card is the header alone, fully rounded, and the header's slot
+    -- carries the gap itself.
+    --
+    -- ⚠ layoutHeight is re-stamped here rather than left to Add: the slot is
+    -- the ONE number that differs between the two states, and Panel.lua's
+    -- positioning pass reads it fresh every run. preferredHeight + the fixed
+    -- flag is what makes Add stamp the right value the first time.
+    if CARD then
+        section.fixedRowHeight = true
+        section._ApplyCardFold = function(self)
+            local body = self.cardBody
+            local open = (body and self.expanded) and true or false
+            cardRect:ClearAllPoints()
+            cardRect:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
+            cardRect:SetPoint("BOTTOMRIGHT", open and body or self, "BOTTOMRIGHT", 0, 0)
+            cardLine:SetShown(open)
+            cardHover:SetCorners(open and CARD.cornersTop or CARD.cornersAll)
+            local slot = open and CARD.header or (CARD.header + CARD.gap)
+            self.preferredHeight = slot
+            self.layoutHeight = slot
+            -- The arrow's texture was just swapped; re-tint rather than trust the
+            -- swap to keep its vertex colour.
+            self.title.UpdateTheme()
+        end
+        section:_ApplyCardFold()
     end
     
     -- Optional header preview thumbnails — a right-aligned row of small icon
@@ -811,9 +983,11 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
 
     -- Hover effects
     clickArea:SetScript("OnEnter", function()
+        if cardHover then cardHover:Show() return end
         section:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.8)
     end)
     clickArea:SetScript("OnLeave", function()
+        if cardHover then cardHover:Hide() return end
         section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
     end)
     clickArea:SetScript("OnClick", function()
