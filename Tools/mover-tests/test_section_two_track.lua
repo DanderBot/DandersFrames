@@ -127,7 +127,7 @@ end
 check(HELPERS ~= nil and HELPERS.WireTwoTrack ~= nil, "lift: the helpers came back")
 if HELPERS and HELPERS.WireTwoTrack then
     local MIN = HELPERS.MIN
-    eq(MIN, 370, "threshold: two 180px tracks and the kit's 10px gutter")
+    eq(MIN, 330, "threshold: two 160px tracks and the kit's 10px gutter")
 
     -- A card body: chromeless, the card's 12px inset, laid out by the real kit.
     local function band(width)
@@ -140,27 +140,27 @@ if HELPERS and HELPERS.WireTwoTrack then
 
     print("-- Two tracks: the count follows the live width, on every pass")
     do
-        -- 24 + 370 = 394 is the narrowest card that gets a second track.
-        local g = band(394)
+        -- 24 + 330 = 354 is the narrowest card that gets a second track.
+        local g = band(354)
         local a = g:AddWidget(control(55, true), 55)
         local b = g:AddWidget(control(55, true), 55)
         HELPERS.StampFullRows(g)
         g:LayoutChildren()
-        eq(rawget(g, "innerColumns"), 2, "wide: a 394px card lays out two tracks")
+        eq(rawget(g, "innerColumns"), 2, "wide: a 354px card lays out two tracks")
         local ax, ay = lastPoint(a)
         local bx, by = lastPoint(b)
         eq(ay, by, "wide: ...the two sliders share a row")
         check(bx > ax, "wide: ...side by side")
-        eq(a:GetWidth(), 180, "wide: ...each exactly one 180px track")
+        eq(a:GetWidth(), 160, "wide: ...each exactly one 160px track")
 
         -- Narrowed with NO rebuild -- the page folding, or a resize-grip drag.
-        g:SetWidth(393)
+        g:SetWidth(353)
         g:LayoutChildren()
         eq(rawget(g, "innerColumns"), nil, "narrow: one pixel under, the card is one track again")
         local _, ay2 = lastPoint(a)
         local _, by2 = lastPoint(b)
         check(by2 < ay2, "narrow: ...the second slider drops under the first")
-        eq(a:GetWidth(), 393 - 24, "narrow: ...at the full inner width")
+        eq(a:GetWidth(), 353 - 24, "narrow: ...at the full inner width")
 
         -- ...and back.
         g:SetWidth(600)
