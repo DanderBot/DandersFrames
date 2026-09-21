@@ -1538,12 +1538,34 @@ function DF:CreateGUI()
     resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    -- A live size readout while the grip is held: the window's size, and how
+    -- many page columns that gives and how wide each is -- the number the
+    -- two-per-row cards switch on. Repainted only when a number moves.
+    local lastW, lastH
+    local function ShowSizeReadout(owner)
+        local w, h = math.floor(frame:GetWidth() + 0.5), math.floor(frame:GetHeight() + 0.5)
+        if w == lastW and h == lastH then return end
+        lastW, lastH = w, h
+        local cols = GUI.UsesTwoColumns and GUI.UsesTwoColumns() and 2 or 1
+        -- One column spans both halves and the gutter between them.
+        local half = GUI.ColumnWidth and GUI.ColumnWidth() or 0
+        local colW = (cols == 2) and half or (2 * half + (GUI.SettingsBox and GUI.SettingsBox.colGutter or 0))
+        GUI:ShowTooltip(owner, {
+            title = format("%d × %d", w, h),
+            anchor = "ANCHOR_TOPLEFT",
+            lines = { format("%s: %d · %d px", L["Columns"], cols, math.floor(colW)) },
+        })
+    end
     resizeHandle:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             frame:StartSizing("BOTTOMRIGHT")
+            lastW, lastH = nil, nil
+            self:SetScript("OnUpdate", ShowSizeReadout)
         end
     end)
     resizeHandle:SetScript("OnMouseUp", function(self, button)
+        self:SetScript("OnUpdate", nil)
+        GUI:HideTooltip()
         frame:StopMovingOrSizing()
         local ws = DF:GetWindowState()
         ws.width, ws.height = frame:GetWidth(), frame:GetHeight()
