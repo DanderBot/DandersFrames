@@ -2584,94 +2584,74 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Border down column 2; Frame Level back in column 1; Resource Colors last
         -- in column 2.
         --
-        -- POPOUT turns EIGHT of those boxes into feature rows across three bands,
-        -- and leaves the one-slider Frame Level box inline wearing the band skin:
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
+        -- two settings per row, dim captions, Expand All / Collapse All at the top,
+        -- and two page columns -- what the bar DOES on the left, how it LOOKS on
+        -- the right -- under the three category headers the popout bands had:
         --
-        --   "General"   Resource Bar Settings (hoisted enable), Class Filter
-        --   "Layout"    Size, Position
-        --                  ...then the Frame Level box, still a box
-        --   "Style"     Appearance, Background, Border (hoisted Show Border),
-        --               Resource Colors
+        --   column 1   "General"  Resource Bar Settings, Class Filter
+        --              "Layout"   Size, Position (+ Frame Level)
+        --   column 2   "Style"    Appearance, Background (header tick), Border
+        --                         (header tick), Resource Colors
         --
-        -- ⚠ THREE BAND HEADERS AND NOT ONE OF THEM IS A ROW LABEL -- the Pet
-        -- Frames rule. "Appearance" is a ROW on this page, so the band that holds
-        -- it is headed L["Style"] instead. All three words already ship.
+        -- ⚠ FRAME LEVEL MOVES INTO POSITION. It was the page's one lone control --
+        -- a one-slider box in classic, a control row after the popout sweep -- and
+        -- where the bar sits in the frame's stack is part of where the bar sits.
+        -- Classic keeps its own box.
         --
-        -- ⚠ AND THE BANDS ARE ADDED WHERE THEY BELONG rather than in one block at
-        -- the end (the Pet Frames shape), because the Frame Level box sits BETWEEN
-        -- two of them in this layout. `Add` resolves a widget's slot on the spot
-        -- and a band is a "both" widget and therefore a sync point, so each band
-        -- goes in once it is full and before whatever follows it on the page.
+        -- ☠ ENABLE RESOURCE BAR STAYS IN THE BODY of the first card, as Show
+        -- Debuffs does on the Debuff Bar: it is the PAGE gate, and a header tick
+        -- that greyed every other card would surprise people. Shut, that card's
+        -- corner says Off while the bar is off. Show Background and Show Border are
+        -- their own cards' on/off, so they move into those cards' headers.
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
-        -- { group, parent, refreshStates } and, where a toggle is hoisted, `popout`
-        -- and `hoistToggle`. The classic branch mounts the SAME builder into the box
-        -- it always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_resourcebar_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move.
+        -- ⚠ THE PAGE GATE GREYS EVERY OTHER CARD: its header through dimOn, its
+        -- controls through the group gate each builder has always carried.
+        --
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
+        -- The classic branch mounts the SAME builder into the box it always built,
+        -- which is what makes "classic is unchanged" structural rather than a
+        -- promise -- test_resourcebar_page_builders.lua pins the inventory of each
+        -- one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery, which carries the card helper. nil in
+        -- classic, which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        local generalBand, layoutBand, styleBand
-        if tools then
-            generalBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            generalBand:AddWidget(GUI:CreateHeader(self.child, L["General"]), 40)
-            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-            styleBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            styleBand:AddWidget(GUI:CreateHeader(self.child, L["Style"]), 40)
+        -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
+        -- here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ☠ THE PAGE-WIDE GATE REACHES THE ROWS THEMSELVES, not only the panes --
-        -- the Pet Frames rule, and this page is the second to need it. Every group
-        -- here carries `disableChildrenOn = not resourceBarEnabled` and always has;
-        -- those gates move INSIDE the builders so a pane greys exactly as its box
-        -- did. But in classic the whole page visibly dims while the bar is off, and
-        -- eight bright rows over eight grey panes would be the popout layout saying
-        -- something classic does not. A dimmed row still OPENS -- the kit's grey is
-        -- alpha and a disabled toggle, not a dead frame -- so the settings stay
-        -- readable while they are switched off.
+        -- The page gate, named once: every card but the one holding it greys its
+        -- header while the bar is off (its controls grey through the group gate
+        -- inside each builder), and the two header ticks grey with it.
         --
-        -- ⚠ THE SETTINGS ROW IS THE ONE EXCEPTION: it carries the gate's own tick,
-        -- so greying it would leave no way to turn the bar back on.
+        -- ⚠ NO INDEX-1 REPAIR ANY MORE (the old pane first-child gate). DandersUI
+        -- Sections' RefreshChildStates spares a child by its `isSectionHeader`
+        -- MARK now, not by its position, so a card's band and a pinned panel's
+        -- group -- neither of which has a header -- grey every child on their own.
         local function ResourceOffRow(d) return not (d or db).resourceBarEnabled end
-
-        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
-        -- DandersUI Sections' RefreshChildStates greys every child a
-        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
-        -- first child is always the header, and wrong for a popout pane, which has
-        -- no header at all. The Pet Frames page's answer, verbatim: spelled onto the
-        -- widget itself, composed with whatever predicate it already carries, and
-        -- applied at the MOUNT rather than inside the builder. Never runs in
-        -- classic, where the box's own header is index 1.
-        --
-        -- ⚠ IT IS NEEDED ON THE SETTINGS PANE TOO, hoisted tick or not: the tick
-        -- that leaves the pane is the gate itself, so the pane's index 1 is the
-        -- Healers checkbox -- a gated control, not the gate.
-        local function GatePaneFirstChild(group)
-            local entry = group and group.groupChildren and group.groupChildren[1]
-            local w = entry and entry.widget
-            if not w then return end
-            local prev = w.disableOn
-            w.disableOn = function(d) return ResourceOffRow(d) or (prev and prev(d)) or false end
-        end
 
         -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
         -- These three tables and the class list used to sit inside the box that
-        -- offered them. The rows print the chosen value as their SUMMARY, and a
+        -- offered them. The cards print the chosen value as their SUMMARY, and a
         -- summary is written OUTSIDE the group's builder -- so the word has to come
-        -- out of the same table the dropdown offers, or a row could say one thing
+        -- out of the same table the dropdown offers, or a card could say one thing
         -- while the control behind it says another. (The Health Bar page hoisted
         -- its six dropdown tables for exactly this reason.)
         --
         -- ⚠ THE CLASS LIST MOVES BUT THE SEED DOES NOT. The list is only data; the
         -- `db.resourceBarClassFilter` seeding block that reads it stays inside the
-        -- builder, where it runs at page-build time in both layouts -- a pane is
-        -- built EAGERLY, so the write still lands at the moment it always did.
+        -- builder, where it runs at page-build time in both layouts -- a card is
+        -- built with the page, so the write still lands at the moment it always did.
         -- Moving it would move WHEN a profile changes shape, which is what the
         -- export byte-identity gate measures.
         local RB_CLASS_LIST = {
@@ -2707,7 +2687,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         }
 
         -- The texture's display NAME, from the addon's own media resolver -- the one
-        -- GUI:CreateTextureDropdown prints on its own button, so a row and the
+        -- GUI:CreateTextureDropdown prints on its own button, so a card and the
         -- control behind it cannot disagree. Its own copy: the Health Bar page's
         -- helper of the same name is a local inside THAT page's closure.
         local function TextureName(path)
@@ -2716,19 +2696,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return nil
         end
 
-        -- ===== SETTINGS (a 280 box in column 1 in classic, the General band's
-        -- first row) =====
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the first card under
+        -- "General" in modern) =====
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does for every group on
         -- this page: in classic the box greys its own children while the bar is
-        -- off, and the pane has to do the same. One builder serving both is what
+        -- off, and a card or a pinned panel has to do the same. One builder serving both is what
         -- stops the two drifting.
         local function BuildResourceSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the group's own on/off control and keepEnabled is what
-            -- keeps it live under the group's own grey.
+            -- Built in both layouts: it is the PAGE gate, so no card hoists it
+            -- (see the page note). keepEnabled is what keeps it live under the
+            -- group's own grey. The seam stays for any future caller.
             if not tools2.hoistToggle then
                 local resourceBarEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Resource Bar"], db, "resourceBarEnabled", function()
                     DF:UpdateAllPowerEventRegistration()
@@ -2746,17 +2726,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             showInSolo.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-        -- The group's own apply: the full update its four role ticks drive. The
-        -- event re-registration the ENABLE tick drives is deliberately not here --
-        -- that key is hoisted onto the row, so it is not one of the keys a reset or
-        -- a hold ever moves.
-        local function ApplyResourceSettings()
-            DF:UpdateAllFrames()
-        end
-
         -- Which roles get a bar, in the ticks' own words. Nothing is said about
         -- Show in Solo Mode: it is the fourth item at most and it is TRUE by
-        -- default, so naming it would put a word on almost every profile's row.
+        -- default, so naming it would put a word on almost every profile's card.
         local function ResourceSettingsSummary(d)
             if not d then return "" end
             local parts = {}
@@ -2765,9 +2737,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if d.resourceBarShowDPS    then parts[#parts + 1] = L["DPS"] end
             return table.concat(parts, " \194\183 ")
         end
+        -- The card's corner: "Off" while the page gate is off -- the roles it
+        -- would list get no bar -- and the summary above otherwise.
+        local function ResourceSettingsCardSummary(d)
+            if d and not d.resourceBarEnabled then return L["Off"] end
+            return ResourceSettingsSummary(d)
+        end
 
-        -- ===== CLASS FILTER (a 280 box in column 1 in classic, the General band's
-        -- second row) =====
+        -- ===== CLASS FILTER (a 280 box in column 1 in classic, the second card
+        -- under "General" in modern) =====
         local function BuildResourceClassFilterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2801,8 +2779,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return format("%d/%d", on, #RB_CLASS_LIST)
         end
 
-        -- ===== SIZE (a 280 box in column 1 in classic, the Layout band's first
-        -- row) =====
+        -- ===== SIZE (a 280 box in column 1 in classic, the first card under
+        -- "Layout" in modern) =====
         -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION (Aphoex 5/5.1, redesigned as
         -- UX by Krathe 2026-08-22: "it auto matches the health bar depending on the
         -- orientation set but you still control how thick the bar looks").
@@ -2823,12 +2801,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- alike — anything that ends in RefreshStates. The Orientation dropdown's own
         -- callback gained the RefreshStates call for exactly that.
         --
-        -- ⚠ AND THE HOOK STILL FIRES INSIDE A PANE. refreshContent is run by
+        -- ⚠ AND THE HOOK STILL FIRES IN A PINNED PANEL. refreshContent is run by
         -- DandersUI Sections' RefreshChildStates, which is exactly what ReflowPane
         -- calls on the group it re-flows -- so tools2.refreshStates renames these
         -- two controls in a panel for the same reason self:RefreshStates renamed
-        -- them on the page. What does NOT reach them is a refresh driven from
-        -- ANOTHER pane, which is why the Orientation dropdown has its own note.
+        -- them on the page. What does NOT reach a panel is a refresh driven from
+        -- the page, which is why the Orientation dropdown has its own note.
         local function BuildResourceSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2877,17 +2855,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
         end
 
-        -- The group's own apply: the lightweight size pass its two sliders drive,
-        -- and the full update the two ticks drive.
-        local function ApplyResourceSize()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdatePowerBarSize()
-        end
-
         -- Either "the length is pinned to the health bar" or the length itself --
         -- one or the other is always meaningless -- then the thickness, which is
         -- yours in both cases. Both halves take the ORIENTATION'S word, exactly as
-        -- the controls behind them do, so the row cannot say "Width" over a slider
+        -- the controls behind them do, so the card cannot say "Width" over a slider
         -- that reads "Height".
         local function ResourceSizeSummary(d)
             if not d then return "" end
@@ -2903,8 +2874,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== POSITION (a 280 box in column 1 in classic, the Layout band's
-        -- second row) =====
+        -- ===== POSITION (a 280 box in column 1 in classic, the second card under
+        -- "Layout" in modern, where Frame Level joins it) =====
         local function BuildResourcePositionGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2914,15 +2885,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
         end
 
-        -- The group's own apply: the full update the anchor drives and the
-        -- lightweight reposition its two sliders drive.
-        local function ApplyResourcePosition()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdatePowerBarPosition()
-        end
-
         -- The anchor in the dropdown's own words, and the offsets only when they
-        -- are doing something -- a row reading "0, 1" on every default profile is
+        -- are doing something -- a card reading "0, 1" on every default profile is
         -- noise (the Border row's rule). Both numbers go in together: an X with no
         -- Y beside it reads as a coordinate with a missing half.
         local function ResourcePositionSummary(d)
@@ -2936,29 +2900,28 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Style band's
-        -- first row) — mirrors the Health Bar's Texture group:
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the first card under
+        -- "Style" in modern) — mirrors the Health Bar's Texture group:
         -- Texture, Orientation / Reverse Fill, and Smooth Bar Animation in one place. =====
         --
-        -- ☠ THE ORIENTATION PICK RE-GATES A DIFFERENT PANE, which is what makes it
+        -- ☠ THE ORIENTATION PICK RE-GATES A DIFFERENT GROUP, which is what makes it
         -- the one callback on this page that cannot just be tools2.refreshStates.
-        -- It renames the two SIZE controls through their refreshContent hooks, and
-        -- in the popout layout Size is a row of its own -- a separate group in a
-        -- separate holder. tools2.refreshStates is ReflowPane(THIS pane) plus the
-        -- PAGE's RefreshStates, and the page pass walks the page's own children;
-        -- the Size pane's group is not one of them, so the labels would keep the
-        -- old orientation's word until something else re-flowed them.
-        -- tools.ReflowMounted() is the page-scope repaint that does reach it.
+        -- It renames the two SIZE controls through their refreshContent hooks. On
+        -- the page that is the Size card's band, which the page pass reaches; a
+        -- PINNED Size panel is a separate group in a separate holder, which it does
+        -- not -- so the labels there would keep the old orientation's word until
+        -- something else re-flowed them. tools.ReflowMounted() is the page-scope
+        -- repaint that does reach it, from the card or from a pinned Appearance.
         --
         -- ⚠ WITHOUT THE VALUE SWEEP. This is a STATE change, not a write behind the
         -- widgets' backs, and ReflowMounted(true) mid-drag snaps a slider thumb back
         -- to the last committed step (the helper's own note).
         --
         -- In classic tools2.refreshStates IS self:RefreshStates(), which is exactly
-        -- what this callback always did, and there are no panes to reflow.
+        -- what this callback always did, and there is no tools and nothing to reflow.
         local function OrientationChanged(tools2)
             tools2.refreshStates()
-            if tools2.popout then tools.ReflowMounted() end
+            if tools then tools.ReflowMounted() end
         end
 
         local function BuildResourceAppearanceGroup(tools2)
@@ -2978,11 +2941,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)
         end
 
-        -- The group's own apply. All four controls drive the same full update.
-        local function ApplyResourceAppearance()
-            DF:UpdateAllFrames()
-        end
-
         -- The texture's name, and the orientation only when it is NOT the plain
         -- horizontal -- the Health Bar Texture row's rule for a value that is the
         -- default on every profile.
@@ -2998,44 +2956,33 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== BACKGROUND (a 280 box in column 2 in classic, the Style band's
-        -- second row) =====
+        -- ===== BACKGROUND (a 280 box in column 2 in classic, the second card
+        -- under "Style" in modern) =====
         --
-        -- ⚠ SHOW BACKGROUND IS NOT HOISTED, and it is the one boolean on the sweep
-        -- so far that qualifies for a hoist and does not get one. Hoisting it would
-        -- leave a pane holding a SINGLE colour swatch -- a docked panel, a beam and
-        -- a footer wrapped round one control, which is the shape the ALL-ROWS rule
-        -- sends INLINE rather than into a popout. Two controls is the smallest pane
-        -- on the sweep already (Notifications, Pet Appearance); one would be a new
-        -- low reached by choice. The tick still greys the swatch from inside the
-        -- pane, exactly as it does in the classic box.
+        -- ⚠ SHOW BACKGROUND IS THE CARD'S HEADER TICK in modern (hoistToggle), so
+        -- the card's body is the one colour swatch it gates -- no panel, beam or
+        -- footer is wrapped round it any more, which is what kept it in the pane
+        -- before. Classic still builds the checkbox in its box.
         local function BuildResourceBackgroundGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Background"], db, "resourceBarBackgroundEnabled", function()
-                tools2.refreshStates()
-                DF:UpdateAllFrames()
-            end), 30)
+            -- Suppressed when the CARD's header carries this tick.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Background"], db, "resourceBarBackgroundEnabled", function()
+                    tools2.refreshStates()
+                    DF:UpdateAllFrames()
+                end), 30)
+            end
             local bgColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "resourceBarBackgroundColor", true, nil, function() DF:LightweightUpdateResourceBarBackgroundColor() end, true), 35)
             bgColor.disableOn = function(d) return not d.resourceBarBackgroundEnabled end
         end
 
-        -- The group's own apply: the full update the tick drives and the
-        -- lightweight colour pass the swatch drives.
-        local function ApplyResourceBackground()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdateResourceBarBackgroundColor()
-        end
+        -- ⚠ NO SUMMARY, AND NOTHING IS INVENTED TO MAKE ONE. A swatch has no word;
+        -- the header tick says Off in the corner when the background is off.
 
-        -- ⚠ NO SUMMARY, AND NOTHING IS INVENTED TO MAKE ONE. Two controls: a tick
-        -- and the colour it gates. A swatch has no word, and repeating the tick's
-        -- own label back at the user ("Background -- Show Background") is noise.
-        -- The kit still draws the label, the count badge and the amber tick, which
-        -- is what an absent summary is for (the Class Colors row's precedent).
-
-        -- ===== BORDER (a 280 box in column 2 in classic, the Style band's third
-        -- row) =====
+        -- ===== BORDER (a 280 box in column 2 in classic, the third card under
+        -- "Style" in modern) =====
         -- Include set tailored for a resource indicator:
         -- alpha / inset / blendMode / gradient / shadow keep the visual
         -- toolkit; classColor / roleColor match the bar's optional class
@@ -3045,9 +2992,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- colorByType (no aura-state context).
         --
         -- ⚠ noShowToggle IS THE HOIST -- the Pet Frames border row's move, verbatim.
-        -- With it the built-in Show Border checkbox is not built and the row carries
-        -- that tick instead; showKey is still read, so borderOff still greys the
-        -- other sixteen exactly as before.
+        -- With it the built-in Show Border checkbox is not built and the card's
+        -- header carries that tick instead; showKey is still read, so borderOff
+        -- still greys the other sixteen exactly as before.
         local function BuildResourceBorderGroup(tools2)
             GUI:CreateBorderControls(tools2.group, db, "resourceBar", {
                 parent       = tools2.parent,
@@ -3066,15 +3013,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- CreateBorderControls owns the group and writes disableOn onto each
                 -- of the seventeen itself -- so the gate goes in as the CONSUMER
                 -- gate it is, which the factory composes on top of borderOff and
-                -- every widget's own predicate. nil in classic, where the box's
-                -- disableChildrenOn does the same job it always has (and where the
-                -- pane-first-child problem does not exist).
-                disableWhen  = tools2.popout and ResourceOffRow or nil,
+                -- every widget's own predicate. Modern -- the card and its pinned
+                -- panel -- passes it; nil in classic, where the box's
+                -- disableChildrenOn does the same job it always has.
+                disableWhen  = tools and ResourceOffRow or nil,
             })
         end
 
-        -- The group's own apply: the two lightweight passes every border control
-        -- drives between them.
+        -- The two lightweight passes every border control drives between them --
+        -- what the header tick's commit runs.
         local function ApplyResourceBorder()
             DF:LightweightUpdateResourceBarBorder()
             DF:LightweightUpdateResourceBarBorderColor()
@@ -3083,8 +3030,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The Pet Frames border summary plus the colour source this include set has
         -- and that one does not: thickness in pixels, the style word, where the
         -- colour comes from when it is not the static swatch, and the alpha only
-        -- when it is doing something -- a row reading "Alpha 1.00" on every default
-        -- profile is noise.
+        -- when it is doing something -- a card reading "Alpha 1.00" on every
+        -- default profile is noise.
         local function ResourceBorderSummary(d)
             if not d then return "" end
             local parts = {}
@@ -3105,31 +3052,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== RESOURCE COLORS (a 280 box in column 2 in classic, the Style band's
-        -- fourth row) =====
+        -- ===== RESOURCE COLORS (a 280 box in column 2 in classic, the last card
+        -- under "Style" in modern) =====
         --
-        -- ☠ THE ONE MIXED ROW ON THE SWEEP. Two of its keys are per-mode profile
-        -- keys (resourceBarColorMode, resourceBarCustomColor); the ten power
-        -- swatches write DF.db.powerColors, which lives at the ROOT of the profile
-        -- and is shared by party and raid -- exactly the table shape the Colors
-        -- page's three palettes have. DF.Defaults answers for DF.db.party /
-        -- DF.db.raid and nothing else, so the engine simply cannot see those ten.
-        --
-        -- It still gets the amber tick and the footer, unlike the Colors page's
-        -- rows, and the difference is that here the engine CAN answer -- for the
-        -- two keys that are its business. The unanswerable ten are skipped rather
-        -- than guessed at: Defaults:Count reports them unmodified and
-        -- GroupActions:ResetKeys writes nothing for them ("unknown means silent",
-        -- Defaults.lua's own header), so nothing false is claimed and nothing is
-        -- stamped into a table that has no per-mode default.
-        --
-        -- ⚠ THE COST, NAMED: Reset Group's tooltip says "every setting in this
-        -- group" and it moves three of the fourteen controls. That is accepted
-        -- because the ten it does not move have their own reset ONE CONTROL BELOW
-        -- them in the same pane, saying exactly what it does -- and the alternative
-        -- (no footer at all, the Colors page's answer) would leave the colour MODE,
-        -- the control that decides whether those ten are used at all, with no reset
-        -- anywhere on the page.
+        -- ⚠ THE TEN POWER SWATCHES WRITE DF.db.powerColors, which lives at the ROOT
+        -- of the profile and is shared by party and raid -- not a per-mode key.
+        -- The Reset All to Default button below is their only reset.
         local function BuildResourceColorsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -3148,10 +3076,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             -- ☠ THE SEED AND THE TEN THAT FOLLOW IT STAY WHERE THEY WERE, inside the
             -- builder and ahead of the picker that reads each one. They are
-            -- build-time writes to a non-profile table, and a pane is built EAGERLY
-            -- (page build, not first open), so they still land at the moment they
-            -- always did. Moving them, or down into the popout's open path, would
-            -- move WHEN a profile changes shape.
+            -- build-time writes to a non-profile table, and a card is built with the
+            -- page, so they still land at the moment they always did. Moving them
+            -- would move WHEN a profile changes shape.
             local powerColorsDB = DF.db.powerColors
             if not powerColorsDB then
                 DF.db.powerColors = {}
@@ -3210,11 +3137,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- including a pinned second one.
                 -- Classic takes the same sweep over this box (every swatch the
                 -- button wrote is a colour picker in it); the page rebuild it used
-                -- to pay leaked the page, and is only the fallback now.
+                -- to pay leaked the page, and is only the fallback now. A modern
+                -- CARD sweeps its own band and then any pinned copy of it.
                 if tools2.popout then
                     tools.ReflowMounted(true)
                 elseif group.RefreshChildValues then
                     group:RefreshChildValues()
+                    if tools then tools.ReflowMounted(true) end
                 elseif pageResource and pageResource.Refresh then
                     pageResource:Refresh()
                 end
@@ -3222,14 +3151,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(resetPowerBtn, 30)
         end
 
-        -- The group's own apply: the visible-frame repaint every control here
-        -- drives.
-        local function ApplyResourceColors()
-            DF:RefreshAllVisibleFrames()
-        end
-
         -- Where the colour comes from, in the dropdown's own words. The ten power
-        -- swatches have no four of anything worth naming (the Class Colors row's
+        -- swatches have no four of anything worth naming (the Class Colors card's
         -- rule), and the custom swatch is only visible under one of the three modes
         -- the word already reports.
         local function ResourceColorsSummary(d)
@@ -3241,15 +3164,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- One arm per group, in the order classic has always added them, so the
         -- classic page is unmoved: Settings (1), Class Filter (1), Size (1),
         -- Position (1), Appearance (2), Background (2), Border (2), Frame Level (1)
-        -- and Resource Colors (2).
-        --
-        -- ☠ THE THREE BANDS GO IN AT THREE DIFFERENT POINTS rather than in one
-        -- block at the end, because the Frame Level box sits BETWEEN two of them in
-        -- the popout layout. It is added at its own place in the sequence -- eighth,
-        -- where classic has it -- and the Style band's rows are AddWidget'd into the
-        -- band long before the band itself is Add'ed after the ninth. So the popout
-        -- page reads: General band, Layout band, the Frame Level box alone in
-        -- column 1, then the Style band.
+        -- and Resource Colors (2). The cards follow the same order -- the one the
+        -- one-column fold reads -- with Frame Level inside Position.
         if classicLayout then
             local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
             settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Resource Bar Settings"]), 40)
@@ -3260,59 +3176,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Four: the three role ticks and Show in Solo Mode. ⚠ FOUR IN BOTH
-            -- MODES, unlike the Pet Frames rows that count 5-or-6: Show in Solo Mode
-            -- is HIDDEN in raid, not skipped, so the pane still MOUNTS it -- and the
-            -- count is a claim about what the pane holds, not about what happens to
-            -- be on show. The enable tick is HOISTED onto the row, so it is not one
-            -- of them.
-            local RESOURCE_SETTINGS_COUNT = 4
-
-            -- ☠ NOT GUI:RefreshCurrentPage, and not a page rebuild of any kind: a
-            -- rebuild retires every widget on the page including the row being
-            -- clicked, and the row's write path calls row.Refresh() after this
-            -- returns -- on a dead frame. This is what the suppressed checkbox ran,
-            -- plus the reflow that repaints every pane behind the gate -- and this
-            -- one is the PAGE gate, so it greys the other seven rows' panes too.
-            local function OnResourceEnableToggle()
-                DF:UpdateAllPowerEventRegistration()
-                DF:UpdateAllFrames()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Four ticks, so the group goes on the plate: a pane of one-word
-            -- checkboxes is precisely the click that was buying nothing. The enable
-            -- tick stays hoisted below -- it is the ROW's own on/off rather than one
-            -- of the four, and it is the PAGE gate besides, so folding it away with
-            -- the rest would leave no way to switch the bar back on.
-            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceSettingsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local settingsRow = generalBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Resource Bar Settings"],
-                db       = tools.RowDB,
-                toggle   = { key = "resourceBarEnabled" },
-                summary  = ResourceSettingsSummary,
-                count    = RESOURCE_SETTINGS_COUNT,
-                onToggle = OnResourceEnableToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = settingsMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(settingsRow, settingsContent)
-            tools.WireModifiedTick(settingsRow)
-            tools.WireFooter(settingsRow, ApplyResourceSettings)
-            tools.RegisterHoistedToggle(settingsRow, L["Enable Resource Bar"], "resourceBarEnabled", OnResourceEnableToggle)
-            -- ⚠ AND NO disableOn ON THIS ONE. It carries the page gate's own tick;
-            -- greying it would leave no way to switch the bar back on.
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The category header the two General cards sit under.
+            Add(GUI:CreateHeader(self.child, L["General"]), 40, 1)
+            -- ☠ NO TICK: Enable Resource Bar is the page gate and stays in the body
+            -- (see the page note), built by the builder exactly as classic builds
+            -- it. No pin: which roles get a bar is behaviour, not looks.
+            local band = OpenSection(L["Resource Bar Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
+            BuildResourceSettingsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3325,66 +3202,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(classFilterGroup, nil, 1)
         else
-            -- Thirteen ticks. The PANE takes two tracks (see PopoutContent's
-            -- innerColumns): thirteen one-word class names is exactly the list the
-            -- second track exists for, and 260px of popout fits two of them. The
-            -- classic box stays one track, as it always was.
-            local RESOURCE_CLASS_FILTER_COUNT = 13
-
-            local classFilterMount, classFilterContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceClassFilterGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, 2)
-            local classFilterRow = generalBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Class Filter"],
-                db      = tools.RowDB,
-                summary = ResourceClassFilterSummary,
-                count   = RESOURCE_CLASS_FILTER_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = classFilterMount,
-                footerStrip = true,
-            }))
-            -- ☠ THE THIRTEEN TICKS ARE BOUND TO A SUB-TABLE, so the key walk sees
-            -- thirteen bare class TOKENS -- "WARRIOR", "PALADIN" -- which is right
-            -- for the search map (every one of them registers a search entry under
-            -- that token, so a hit on "Warrior" opens the panel it is behind) and
-            -- useless to the defaults engine, which knows nothing called WARRIOR.
-            -- The real key is named through `extra`, exactly as the Group Visibility
-            -- row names raidGroupVisible.
-            tools.ClaimKeys(classFilterRow, classFilterContent, { "resourceBarClassFilter" })
-            tools.WireModifiedTick(classFilterRow)
-            -- ☠ AND NO FOOTER, WHICH IS A REFUSAL RATHER THAN AN OMISSION. The tick
-            -- is a READ and it is honest -- resourceBarClassFilter ships in
-            -- PartyDefaults and the engine deep-compares tables, so the row lights
-            -- the moment a class is unticked. Reset Group and Hold: Defaults WRITE,
-            -- and a table-valued key is written by REPLACING the table
-            -- (GroupActions:DefaultFor deep-copies the default). The thirteen
-            -- checkboxes captured the OLD sub-table at build time and go on reading
-            -- and writing it, so a reset would move the frames, leave every tick
-            -- showing the pre-reset state, and leave all thirteen dead until the
-            -- next page rebuild. Making them re-resolve the table per click is the
-            -- Group Visibility shape and would work -- at the cost of changing how
-            -- classic builds them and of the thirteen per-class search entries the
-            -- custom-get/set path does not register. Classic offers no reset for
-            -- this box either, so nothing is lost by saying no.
-            classFilterRow.disableOn = ResourceOffRow
-
-            -- ★ TWO COLUMNS WHEN THERE IS ROOM. The Frame page's rule: what the bar
-            -- DOES down the left -- General, Layout and the Frame Level row -- and
-            -- how it LOOKS down the right, the Style band. Three bands against one
-            -- reads lopsided but is not: five rows against four. Every band is still
-            -- added in place and in reading order, which is the order a narrow
-            -- window folds them back into.
-            -- ⚠ layoutColFill is what makes each band track its column (see the
-            -- Frame page and GUI.ColumnWidth). Without it the layout pass leaves a
-            -- band at the width it was built at and it overhangs its neighbour.
-            generalBand.layoutColFill = true
-            Add(generalBand, nil, 1)
+            -- Thirteen class ticks, two per row on a wide card. No pin: which
+            -- classes get a bar is behaviour. Greys its header with the page gate.
+            local band = OpenSection(L["Class Filter"], "resource_classfilter", 1, ResourceClassFilterSummary, ResourceOffRow)
+            BuildResourceClassFilterGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3397,42 +3222,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(sizeGroup, nil, 1)
         else
-            -- Four: the Match tick, the Adjust For Frame Border tick, the matched
-            -- length slider and Thickness. Two of them rename themselves with the
-            -- orientation and one hides with Match; the count is what the group
-            -- HOLDS.
-            local RESOURCE_SIZE_COUNT = 4
-
-            -- ☠ FIVE OF THIS PAGE'S ROWS MOUNT THEIR GROUP ON THE PLATE -- Settings,
-            -- Size, Position, Appearance and Background, at 4, 4, 3, 4 and 2. Between them
-            -- they are most of what a resource bar IS, and every one of them was a
-            -- click that opened a panel holding a handful of lines. The three that
-            -- keep their strip (Class Filter 13, Border 16, Colors 13) are the ones
-            -- a plate could not hold; INLINE_MAX in CreatePopoutPageTools is where
-            -- that line is drawn, and it is measured off the pane rather than taken
-            -- from the badge.
-            local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceSizeGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local sizeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Size"],
-                db      = tools.RowDB,
-                summary = ResourceSizeSummary,
-                count   = RESOURCE_SIZE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = sizeMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(sizeRow, sizeContent)
-            tools.WireModifiedTick(sizeRow)
-            tools.WireFooter(sizeRow, ApplyResourceSize)
-            sizeRow.disableOn = ResourceOffRow
+            Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
+            -- A pin: the bar's length and thickness are how it LOOKS.
+            local band = OpenSection(L["Size"], "resource_size", 1, ResourceSizeSummary, ResourceOffRow, nil,
+                BuildResourceSizeGroup)
+            BuildResourceSizeGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3445,36 +3243,21 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(positionGroup, nil, 1)
         else
-            -- Three: the anchor and the two offsets.
-            local RESOURCE_POSITION_COUNT = 3
-
-            -- Three -- the anchor and the two offsets -- on the plate beside the
-            -- Size row it shares a band with.
-            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourcePositionGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local positionRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Position"],
-                db      = tools.RowDB,
-                summary = ResourcePositionSummary,
-                count   = RESOURCE_POSITION_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = positionMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(positionRow, positionContent)
-            tools.WireModifiedTick(positionRow)
-            tools.WireFooter(positionRow, ApplyResourcePosition)
-            positionRow.disableOn = ResourceOffRow
-
-            layoutBand.layoutColFill = true
-            Add(layoutBand, nil, 1)
+            -- A pin: where the bar sits is how it LOOKS.
+            local band = OpenSection(L["Position"], "resource_position", 1, ResourcePositionSummary, ResourceOffRow, nil,
+                BuildResourcePositionGroup)
+            BuildResourcePositionGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- ☠ FRAME LEVEL, THE PAGE'S LONE CONTROL, MOVED IN HERE (see the page
+            -- note). The slider classic builds in its own box, same key, same
+            -- two callback slots (nothing on commit, the frame-level reapply on
+            -- the drag tick) and the same shared tooltip; the band's group gate
+            -- greys it with the rest of Position. Card-only: a pinned Position
+            -- panel holds the builder's three.
+            band:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3487,33 +3270,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(appearanceGroup, nil, 2)
         else
-            -- Four: the texture, the orientation, the reverse-fill tick and the
-            -- smoothing tick.
-            local RESOURCE_APPEARANCE_COUNT = 4
-
-            -- Four, on the plate for the reason the Size row gives.
-            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceAppearanceGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local appearanceRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Appearance"],
-                db      = tools.RowDB,
-                summary = ResourceAppearanceSummary,
-                count   = RESOURCE_APPEARANCE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = appearanceMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(appearanceRow, appearanceContent)
-            tools.WireModifiedTick(appearanceRow)
-            tools.WireFooter(appearanceRow, ApplyResourceAppearance)
-            appearanceRow.disableOn = ResourceOffRow
+            -- The category header the four Style cards sit under.
+            Add(GUI:CreateHeader(self.child, L["Style"]), 40, 2)
+            local band = OpenSection(L["Appearance"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
+                BuildResourceAppearanceGroup)
+            BuildResourceAppearanceGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3526,35 +3291,27 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(bgGroup, nil, 2)
         else
-            -- Two: the tick and the colour it gates. See the builder's note on why
-            -- the tick is not hoisted.
-            local RESOURCE_BACKGROUND_COUNT = 2
-
-            -- Two, the smallest pane on the page and the one a click bought least
-            -- for -- a tick and the colour it gates, which is a plate two lines
-            -- tall. The tick is NOT hoisted (see the builder's note on why), so
-            -- both of them are the pane's own and both are on the plate.
-            local bgMount, bgContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceBackgroundGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
+            -- ☠ SHOW BACKGROUND IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). The commit is what the in-body checkbox ran, plus a
+            -- reflow for a pinned copy -- never a page rebuild. It greys with the
+            -- page gate. No summary: the tick's Off is the whole of what a shut
+            -- card has to say.
+            local band = OpenSection(L["Background"], "resource_background", 2, nil, ResourceOffRow, nil,
+                BuildResourceBackgroundGroup, {
+                    db = db, key = "resourceBarBackgroundEnabled", label = L["Show Background"],
+                    disableOn = ResourceOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        DF:UpdateAllFrames()
+                        tools.ReflowMounted()
+                    end,
                 })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local bgRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Background"],
-                db      = tools.RowDB,
-                count   = RESOURCE_BACKGROUND_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = bgMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(bgRow, bgContent)
-            tools.WireModifiedTick(bgRow)
-            tools.WireFooter(bgRow, ApplyResourceBackground)
-            bgRow.disableOn = ResourceOffRow
+            BuildResourceBackgroundGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         if classicLayout then
@@ -3568,101 +3325,31 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(borderGroup, nil, 2)
         else
-            -- Sixteen: the seventeen CreateBorderControls builds for this include
-            -- set, less the hoisted Show Border. Seventeen rather than the pet
-            -- row's sixteen because this set also opts into classColor and
-            -- roleColor, which together add the Border Color Source dropdown.
-            local RESOURCE_BORDER_COUNT = 16
-
-            -- What the suppressed Show Border checkbox ran: the state pass and the
-            -- full update. ☠ NOT GUI:RefreshCurrentPage -- a rebuild retires every
-            -- widget on the page including the row being clicked, and the row's
-            -- write path calls row.Refresh() after this returns, on a dead frame.
-            local function OnResourceBorderToggle()
-                ApplyResourceBorder()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceBorderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+            -- build its own (hoistToggle -> noShowToggle). The key is still read
+            -- inside, so the other sixteen grey exactly as before. The commit is
+            -- what the suppressed checkbox ran, plus a reflow for a pinned copy --
+            -- never a page rebuild. It greys with the page gate.
+            local band = OpenSection(L["Border"], "resource_border", 2, ResourceBorderSummary, ResourceOffRow, nil,
+                BuildResourceBorderGroup, {
+                    db = db, key = "resourceBarShowBorder", label = L["Show Border"],
+                    disableOn = ResourceOffRow,
+                    onChanged = function()
+                        ApplyResourceBorder()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end)
-            local borderRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Border"],
-                db       = tools.RowDB,
-                toggle   = { key = "resourceBarShowBorder" },
-                summary  = ResourceBorderSummary,
-                count    = RESOURCE_BORDER_COUNT,
-                onToggle = OnResourceBorderToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = borderMount,
-                footerStrip = true,
-            }))
-            -- ⚠ THE PANE'S GROUP HAS NO disableChildrenOn OF ITS OWN, unlike every
-            -- other builder on this page: CreateBorderControls owns the whole group
-            -- and its composition loop writes disableOn onto each widget it built,
-            -- so the page gate rides in through the factory's disableWhen (see the
-            -- builder) and on the ROW below -- and the classic arm keeps setting it
-            -- on the box, exactly as it always did. No GatePaneFirstChild either,
-            -- for the same reason: there is no group gate here to skip index 1.
-            tools.ClaimKeys(borderRow, borderContent)
-            tools.WireModifiedTick(borderRow)
-            tools.WireFooter(borderRow, ApplyResourceBorder)
-            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "resourceBarShowBorder", OnResourceBorderToggle)
-            borderRow.disableOn = ResourceOffRow
+            BuildResourceBorderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ===== FRAME LEVEL (a 280 box in column 1 in classic, a control row
-        -- here) =====
-        -- ⚠ ONE SLIDER IS NOT A FEATURE TO OPEN. A row plate, a docked panel and a
-        -- Reset Group footer wrapped round one slider costs more than the slider,
-        -- so this never earned a feature row -- it is the page's only single-option
-        -- group.
-        --
-        -- ☠ BUT IT IS NOT A BOX EITHER, ANY MORE. A 280 box between two full-width
-        -- bands is the one shape a column of plates cannot absorb: a narrower
-        -- rectangle with its own border and its own left edge, in a list whose
-        -- whole argument is that every row starts at the same x. The band skin was
-        -- an answer to the border and never to the edge. So the slider wears the
-        -- same plate the rows around it do (DandersUI/ControlRow.lua), in a
-        -- chromeless band of its own.
-        --
-        -- ⚠ ONE NAME, BECAUSE BOTH NAMES WERE THE SAME WORD. The box was headed
-        -- "Frame Level" over a slider captioned "Frame Level"; a row draws ONE
-        -- label and that is it -- no string moves, and the band carries no header,
-        -- because a header directly above one row that already says the word is the
-        -- page saying it twice.
-        --
-        -- ⚠ THE SLIDER'S TWO CALLBACK SLOTS ARE PRESERVED AS THEY WERE: nothing on
-        -- COMMIT, and the frame-level reapply on the DRAG TICK -- `lightweight`, the
-        -- kit's own name for the preview half (DandersUI/Widgets.lua's PREVIEW vs
-        -- COMMIT). The classic call passed them positionally, in slots 8 and 9.
-        --
-        -- ⚠ THE db IS THE TABLE, NOT tools.RowDB, for the Self Position row's
-        -- reason: only a TABLE binding yields the dbRef a slider needs to reach the
-        -- override markers and the search index, and the page is rebuilt on a mode
-        -- switch anyway.
-        --
-        -- ⚠ THE SHARED FRAME LEVEL SENTENCE COMES FROM THE ONE HELPER, in its spec
-        -- form (GUI/SettingsWidgets.lua): a row shows its tooltip off its own plate
-        -- because the embedded slider's caption -- which is what SetFrameLevelTooltip
-        -- stamps -- is hidden on a control row and can never fire.
-        --
-        -- ⚠ THE GATE IS SAID THE WAY EACH SHAPE SAYS IT, which is the page's own
-        -- convention rather than a third spelling: a classic BOX carries the
-        -- predicate inline as its disableChildrenOn (the border box above does the
-        -- same), and a ROW takes ResourceOffRow, exactly as the page's other eight
-        -- rows do.
-        --
-        -- ⚠ ITS PLACE IN THE SEQUENCE IS UNCHANGED -- eighth -- which is what puts
-        -- it between the Layout and Style bands in the popout layout and leaves the
-        -- classic page exactly as it was.
+        -- ===== FRAME LEVEL (a 280 box in column 1 in classic; in modern it is
+        -- the last control of the Position card, above) =====
         if classicLayout then
             local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)
             frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)
@@ -3670,20 +3357,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
             Add(frameLevelGroup, nil, 1)
         else
-            local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            local frameLevelRow = frameLevelBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label       = L["Frame Level"],
-                kind        = "slider",
-                min         = 0, max = 100, step = 1,
-                db          = db,
-                key         = "resourceBarFrameLevel",
-                lightweight = function() DF:LightweightUpdateResourceBarFrameLevel() end,
-                tooltip     = GUI:FrameLevelTooltip(),
-            }))
-            frameLevelRow.disableOn = ResourceOffRow
-            tools.RegisterControlRow(frameLevelRow, "slider", "resourceBarFrameLevel")
-            frameLevelBand.layoutColFill = true
-            Add(frameLevelBand, nil, 1)
+            -- Modern: Frame Level is the last control of the Position card.
         end
 
         if classicLayout then
@@ -3696,42 +3370,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(colorGroup, nil, 2)
         else
-            -- Thirteen: the colour-mode pick, the custom swatch, the ten power
-            -- swatches and the reset button. The button counts and the blurb does
-            -- not, because the count is what the pane offers you to PRESS OR
-            -- CHANGE (the Class Colors row's fourteen draws the same line).
-            local RESOURCE_COLORS_COUNT = 13
-
-            local colorsMount, colorsContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildResourceColorsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local colorsRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Resource Colors"],
-                db      = tools.RowDB,
-                summary = ResourceColorsSummary,
-                count   = RESOURCE_COLORS_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = colorsMount,
-                footerStrip = true,
-            }))
-            -- The claim covers all twelve keys the walk can see -- the two per-mode
-            -- ones and the ten power tokens -- because the map is what lets a search
-            -- hit on "Mana" open the panel its swatch is behind. The tick and the
-            -- footer read the same list and simply pass over the ten the engine
-            -- cannot answer for; see the builder's note.
-            tools.ClaimKeys(colorsRow, colorsContent)
-            tools.WireModifiedTick(colorsRow)
-            tools.WireFooter(colorsRow, ApplyResourceColors)
-            colorsRow.disableOn = ResourceOffRow
-
-            styleBand.layoutColFill = true
-            Add(styleBand, nil, 2)
+            -- A pin: which colour each bar is drawn in is how it LOOKS.
+            local band = OpenSection(L["Resource Colors"], "resource_colors", 2, ResourceColorsSummary, ResourceOffRow, nil,
+                BuildResourceColorsGroup)
+            BuildResourceColorsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
     end)
     

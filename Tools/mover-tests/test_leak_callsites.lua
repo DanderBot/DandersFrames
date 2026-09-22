@@ -242,5 +242,5 @@ check(frames:find("            refreshStates = function() GUI.RelayoutCurrentPag
 local repaint = auras:match("local function RepaintSwatches%(tools2%)(.-)\n        end")
 check(repaint and repaint:find("tools2.group:RefreshChildValues()", 1, true) ~= nil,
       "value sweep: classic's palette reset repaints its box instead of rebuilding the page")
-check(auras:find("                elseif group.RefreshChildValues then\n                    group:RefreshChildValues()\n                elseif pageResource and pageResource.Refresh then", 1, true) ~= nil,
-      "value sweep: ...and the power colours' reset too")
+check(auras:find("                elseif group.RefreshChildValues then\n                    group:RefreshChildValues()\n                    if tools then tools.ReflowMounted(true) end\n                elseif pageResource and pageResource.Refresh then", 1, true) ~= nil,
+      "value sweep: ...and the power colours' reset too (a modern card also repaints any pinned copy)")
