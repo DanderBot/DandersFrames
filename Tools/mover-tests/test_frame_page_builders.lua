@@ -1602,7 +1602,8 @@ do
     -- page's share of that number, which is why the count just above this one
     -- is scoped to the page slice and this one is not.
     local SWEPT = {
-        ["GUI/Pages/Options.lua"]    = 21,  -- Frame 4 + Tooltips/Pet/Settings/Fading/Visibility 17
+        -- ⚠ 20, NOT 21, since Visibility became cards: its Solo Mode opt-in.
+        ["GUI/Pages/Options.lua"]    = 20,  -- Frame 4 + Tooltips/Pet/Settings/Fading 16
         -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
         -- eleven popout rows became folds on the page, so the five it used to opt
         -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)

@@ -379,44 +379,49 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- CLASSIC is exactly what it always was: ONE 280 box in column 1 headed
         -- "Frame Display", holding all six controls in their original order.
         --
-        -- ☠ THE POPOUT LAYOUT SPLITS THAT BOX IN TWO, because it was never one
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per
+        -- group, two settings per row inside a card wide enough, dim captions,
+        -- the value summary in a shut card's corner, Expand All / Collapse All
+        -- at the top.
+        --
+        -- ☠ MODERN SPLITS THE CLASSIC BOX IN TWO, because it was never one
         -- feature. Solo Mode plus the three rested controls is a GATED group --
         -- turn Solo Mode off and none of them do anything, which is exactly what
-        -- their own disableOn predicates already say -- so it becomes a feature
-        -- ROW with the enable hoisted onto it. "Hide Self from Party Frames" is
-        -- an INDEPENDENT tick that works whether or not you ever play solo, so it
-        -- cannot go behind that gate: a row hoisting soloMode over both would
-        -- grey a setting soloing has nothing to do with (the Color Picker row's
-        -- precedent -- a hoisted tick claims to speak for everything in the
-        -- pane). It is a single option on its own, so it stays INLINE wearing the
-        -- band skin -- a pane holding one checkbox is a click that buys nothing.
+        -- their own disableOn predicates already say -- so Solo Mode is that
+        -- card's header tick. "Hide Self from Party Frames" is an INDEPENDENT
+        -- tick that works whether or not you ever play solo, so it cannot go
+        -- behind that gate: it keeps the box's own name, "Frame Display", as a
+        -- card of its own.
         --
-        -- ⚠ WHICH HEADER GOES WHERE, and no new locale string for either. The
-        -- band carries none: one row whose own label already says "Solo Mode"
-        -- does not need the word repeated above it (the Sorting page's sortBand
-        -- rule). The box keeps L["Frame Display"] -- it is the header that
-        -- checkbox has sat under all along, and what is left of that group.
+        --   column 1   Solo Mode       (tick: soloMode)
+        --   column 2   Frame Display   (Hide Self from Party Frames)
+        --
+        -- Both are behaviour, so neither is pinnable, and the two columns are
+        -- balanced rather than split by behaviour/looks.
         --
         -- ⚠ THE PAGE IS partyOnly (set just below this builder) and every widget
         -- here carries its own raid hideOn. Both are kept exactly as they were:
         -- the tab is never reachable in raid mode, and the per-widget guards are
         -- the belt that has always been there.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what the `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- the `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- The page's one band: full-width and chromeless, because a feature row's
-        -- popout docks outside the WINDOW and runs a beam back to the row, so a
-        -- row that stopped 280px in would leave that beam crossing half the page.
-        local soloBand
-        if tools then
-            soloBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ===== SOLO MODE (the top of the classic box, the band's one row) =====
+        -- ===== SOLO MODE (the top of the classic box, the first card) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db keys, same callbacks, same slot
         -- heights, same hideOn/disableOn. Guarded by
@@ -424,15 +429,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- source and checks it against the inventory it had inline.
         --
         -- ⚠ THE COMPOUND disableOn PREDICATES ARE UNCHANGED, including the
-        -- "not d.soloMode" half that the hoisted tick's own off-gate already
-        -- covers inside the pane. Classic has no row and needs that half; one
-        -- builder serving both is what stops the two drifting, and a redundant
-        -- grey costs nothing.
+        -- "not d.soloMode" half. Classic has no header tick and needs that half;
+        -- in the card it is what greys the three rested controls while the tick
+        -- is off. One builder serving both is what stops the two drifting.
         local function BuildSoloModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the group's only on/off control.
+            -- Suppressed when the card's HEADER carries this tick. Still built in
+            -- classic, where it is the group's only on/off control.
             if not tools2.hoistToggle then
                 local soloMode = group:AddWidget(GUI:CreateCheckbox(parent, L["Solo Mode"], db, "soloMode", function()
                     DF:UpdateAllFrames()
@@ -466,18 +470,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, a
-        -- control row of its own in the popout layout) =====
+        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, the
+        -- Frame Display card in Modern) =====
         -- ⚠ THE CALLBACK IS VERBATIM AND MUST STAY SO: it writes a SECURE header
         -- attribute, which is why it is gated on InCombatLockdown before it
-        -- touches showPlayer.
-        --
-        -- ☠ AND IT IS NAMED, AT PAGE SCOPE, BECAUSE BOTH LAYOUTS NOW DRIVE IT.
-        -- Classic runs it from the checkbox inside the builder below; the popout
-        -- layout runs it from a control row, which is not a checkbox and cannot
-        -- reach into the builder for it. A second copy of a body that writes a
-        -- secure attribute is exactly the duplication "verbatim" is meant to
-        -- prevent, so there is one copy and both arms point at it.
+        -- touches showPlayer. Named at page scope so there is one copy of a body
+        -- that writes a secure attribute.
         local function ApplyHideSelf()
             -- Update the secure header's showPlayer attribute
             if not InCombatLockdown() and DF.partyHeader then
@@ -517,19 +515,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- The summary, per the sweep's convention: at most four items, a
             -- fixed order, "\194\183" between them, WORDS localised and numbers
             -- raw, every read guarded because a profile mid-migration may be
-            -- missing any of these keys.
-            --
-            -- The row's own tick already says whether Solo Mode is on, so the
+            -- missing any of these keys. The header tick already says whether
+            -- Solo Mode is on (a shut card reads "Off" while it is not), so the
             -- summary is about the one thing BEHIND it -- the rested indicator
-            -- and how it is drawn. With the indicator off there is nothing left
-            -- to report and it says nothing; the kit still shows the label, the
-            -- tick and the count badge, which is what an empty summary is for.
+            -- and how it is drawn.
             --
             -- ⚠ NOTHING IS INVENTED. "Rested Indicator" is the checkbox's own
             -- label, and "Icon" / "Glow" are single words the locale already
-            -- ships -- the two sub-ticks' own labels ("    Show ZZZ Icon",
-            -- "    Show Frame Glow") carry the indent that pins them under their
-            -- parent and are far too long for a summary line.
+            -- ships -- the two sub-ticks' own labels carry the indent that pins
+            -- them under their parent and are far too long for a summary line.
             local function SoloModeSummary(d)
                 if not d then return "" end
                 if not d.restedIndicator then return "" end
@@ -539,114 +533,41 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three ticks. The blurb beside them is prose, not a setting, and the
-            -- badge counts settings. The Solo Mode tick is HOISTED onto the row,
-            -- so it is not one of them either.
-            local SOLO_MODE_COUNT = 3
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
 
-            -- The group's own apply, named once so the footer's Reset Group and
-            -- Hold: Defaults run exactly what the four controls' own callbacks do
-            -- between them.
-            local function ApplySoloMode()
-                DF:UpdateAllFrames()
-                DF:UpdateDefaultPlayerFrame()
-                DF:UpdateRestedIndicator()
-            end
+            -- ☠ SOLO MODE IS THE HEADER'S TICK, so the builder is told not to
+            -- build its own (hoistToggle). The commit is what the in-body
+            -- checkbox ran plus the state pass that greys the three rested
+            -- controls -- never a page rebuild. Decides whether a solo frame
+            -- exists at all, so no pin.
+            local soloBand = OpenSection(L["Solo Mode"], "visibility_solo", 1, SoloModeSummary, nil, nil, nil, {
+                db = db, key = "soloMode", label = L["Solo Mode"],
+                onChanged = function()
+                    DF:UpdateAllFrames()
+                    DF:UpdateDefaultPlayerFrame()
+                    self:RefreshStates()
+                end,
+            })
+            BuildSoloModeGroup({
+                group = soloBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(soloBand)
 
-            -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
-            -- page including the row being clicked, and the row's write path
-            -- calls row.Refresh() after this returns -- on a dead frame.
-            local function OnSoloModeToggle()
-                DF:UpdateAllFrames()
-                DF:UpdateDefaultPlayerFrame()
-                -- The row -- its summary and its off state -- and the pane, whose
-                -- three rested controls grey on this key from the inside too.
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Three ticks behind the row's own tick, so the group goes on the
-            -- plate -- and folds away with it, which is the state a default
-            -- profile spends most of its life in. The two sub-ticks mean nothing
-            -- until the Rested Indicator above them is on, so the summary has to
-            -- name the parent before it can report the children; a pane that says
-            -- that by its own shape says it better. The tick stays HOISTED: it is
-            -- the row's toggle, not one of the three.
-            local soloMount, soloContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildSoloModeGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    hoistToggle = true,
-                })
-            end, nil, { inline = true })
-            local soloRow = soloBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Solo Mode"],
-                db       = tools.RowDB,
-                toggle   = { key = "soloMode" },
-                summary  = SoloModeSummary,
-                count    = SOLO_MODE_COUNT,
-                onToggle = OnSoloModeToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = soloMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(soloRow, soloContent)
-            tools.WireModifiedTick(soloRow)
-            tools.WireFooter(soloRow, ApplySoloMode)
-            tools.RegisterHoistedToggle(soloRow, L["Solo Mode"], "soloMode", OnSoloModeToggle)
-
-            -- ⚠ NO hideOn ON THE ROW, which mirrors classic exactly: the box had
-            -- none either, only its children did. In raid the widgets inside
-            -- empty themselves out and the row stays where the user last saw it
-            -- -- and the tab is partyOnly, so nobody ever gets there.
-
-            -- ===== WHAT IS LEFT OF FRAME DISPLAY: A CONTROL ROW =================
-            -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT.
-            -- With Solo Mode gone to the band above, this box holds ONE tick, and a
-            -- pane holding one checkbox is a click that buys nothing. But a 280 box
-            -- beside a full-width band is the one thing a column of plates cannot
-            -- absorb: a narrower rectangle with its own border and its own left
-            -- edge, in a list whose whole argument is that every row starts at the
-            -- same x. So the tick wears the same plate the row above it does
-            -- (DandersUI/ControlRow.lua), in a band of its own.
-            --
-            -- ⚠ THE HEADER GOES WITH THE BOX. "Frame Display" named a box of six
-            -- controls; five of them left, and the one that stayed is not about
-            -- display in that sense. This page carries no band headers at all -- the
-            -- Solo Mode band above has none either -- so a header here would be the
-            -- page's only one, over a single row that already names itself. Classic
-            -- keeps the title, because classic still has the box it titles.
-            --
-            -- ⚠ THE CHILD'S hideOn BECOMES THE ROW'S, because the row IS that
-            -- child. Under the box it was the tick that hid in raid and the box
-            -- that stayed, drawn empty; the kit stamps this onto the frame and the
-            -- band's own layout collapses the whole slot instead. (The Solo Mode
-            -- row above still carries none, for the reason stated there: it stands
-            -- for a group whose CHILDREN hide, not for one control.)
-            local hideSelfBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            local hideSelfRow = hideSelfBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label     = L["Hide Self from Party Frames"],
-                kind      = "checkbox",
-                -- The FUNCTION form, like the row above: the table is re-resolved
-                -- on each read, so a mode switch is followed rather than frozen at
-                -- whichever table this build captured.
-                db        = tools.RowDB,
-                key       = "hidePlayerFrame",
-                onChanged = ApplyHideSelf,
-                hideOn    = function() return GUI.SelectedMode == "raid" end,
-                -- The tick's own sentence, unchanged. A checkbox row shows this on
-                -- the PLATE's hover rather than through a hit frame over its label
-                -- -- see the ☠ at ControlRow's interaction block -- so the whole row
-                -- answers it, which is what the box's one-line tick effectively did.
-                tooltip   = L["Removes your player frame from the DandersFrames party display."],
-            }))
-            tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")
-
-            -- Both bands, in reading order. With nothing left in a column there is
-            -- no flow to unbalance.
-            Add(soloBand, nil, "both")
-            Add(hideSelfBand, nil, "both")
+            -- ☠ HIDE SELF KEEPS THE BOX'S NAME, as a card of its own. It is what
+            -- is left of "Frame Display" once Solo Mode has its own card, and it
+            -- is not behind Solo Mode's gate and never was. No tick: the one
+            -- checkbox IS the setting. Behaviour, so no pin.
+            local displayBand = OpenSection(L["Frame Display"], "visibility_framedisplay", 2, nil)
+            BuildHideSelfGroup({
+                group = displayBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(displayBand)
         end
     end)
     -- The Visibility tab is entirely party/solo-oriented, so hide it in raid mode.

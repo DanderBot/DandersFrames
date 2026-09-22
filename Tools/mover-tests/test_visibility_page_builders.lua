@@ -3,13 +3,15 @@ local NS = ...
 -- ============================================================
 -- VISIBILITY PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Visibility is the sweep's first DISPLAY page, and the first one
--- whose conversion SPLITS a classic box rather than lifting it whole. The page
--- has always had exactly one group -- "Frame Display" -- holding two unrelated
--- things: Solo Mode with its three rested controls (a gated group, which becomes
--- a feature ROW with the enable hoisted onto it) and "Hide Self from Party
--- Frames" (an independent single tick, which becomes a CONTROL ROW -- the same
--- plate carrying the setting itself instead of a way in to a group of them).
+-- Display > Visibility: ONE classic box ("Frame Display") holding two unrelated
+-- things. In Modern they are the Debuff Bar's collapsible CARDS -- two per row
+-- inside a card wide enough, dim captions, the value summary in a shut card's
+-- corner, Expand All / Collapse All at the top:
+--
+--   column 1   Solo Mode       Solo Mode is the header's tick; the three
+--                              rested controls grey behind it.
+--   column 2   Frame Display   Hide Self from Party Frames -- independent of
+--                              Solo Mode, so never behind its tick.
 --
 -- ☠ THE SPLIT IS THE WHOLE RISK THIS FILE COVERS. Classic still builds ONE box
 -- with all six controls in their original order; it does it by mounting the two
@@ -18,27 +20,18 @@ local NS = ...
 -- so the census below is taken from the PRE-CHANGE source and both builders are
 -- checked against it.
 --
--- ⚠ AND THE SECOND BUILDER IS NOW CLASSIC'S ALONE. A control row is not a
--- checkbox in a group, so the popout arm binds the same key directly rather than
--- mounting BuildHideSelfGroup. What stops the two arms drifting is that the
--- secure apply they share is ONE named function, guarded in section 3.
---
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_frame_page_builders / test_sorting_page_builders do: it reads
--- the page's SOURCE and asserts against it.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel, so this file
+-- reads the page's SOURCE and asserts against it.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order.
---   ✓ that ONE builder serves both layouts.
---   ✓ that the declared row COUNT matches what the pane mounts, less the hoisted
---     toggle.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summary are read by eye and by the in-game checklist.
+--   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height.
+--   ✓ that ONE builder serves both layouts, and each card hands it exactly what
+--     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ each card's column, stable collapse key, summary, tick and (absent) pin.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Frame page's, verbatim) ------------------
 local KIND = {
@@ -47,9 +40,6 @@ local KIND = {
     CreateHeader = "header", CreateLabel = "label",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -99,8 +89,7 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Options.lua holds a dozen pages, and a
--- bare 280 box on one of the others is not this pass's business.
+-- The page, scoped by its own two ends.
 local PAGE
 do
     local a = SRC:find('Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}', 1, true)
@@ -109,60 +98,59 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
+-- ONE CARD'S BLOCK: its OpenSection call up to the CloseSection that puts its
+-- band in, flattened. `call` is the OpenSection call alone.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find("%)%s*Build%w+%(")
+    return block, m and block:sub(1, m) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY
--- Never its own copy: the helper exists so seven pages do not carry seven
--- drifting copies of the eager holders and the footer verbs.
+-- 1. THE SHARED MACHINERY, AND THE POPOUT FURNITURE GONE
 -- ============================================================
-print("-- Visibility page: the shared popout machinery, not a seventh copy of it")
+print("-- Visibility page: the shared machinery, and the row furniture gone")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
                          "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
                          "RefreshAfterGroupWrite", "HoldReason" }) do
         check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
               "tools: the page does not re-declare " .. v)
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "footerStrip", "inline = true", "_COUNT", "count =",
+                            "hideSelfBand", "OnSoloModeToggle", "ApplySoloMode",
+                            "INLINE_BOX", "bandStyle", "chromeless" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
 
-    -- The page's one band: chromeless, at the width the layout pass will give
-    -- it, and WITHOUT a header -- its single row's own label already says "Solo
-    -- Mode", which is the Sorting page's sortBand rule.
-    check(PAGE:find("soloBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: the solo band is chromeless, at the width the layout pass will give it")
-    check(PAGE:find("soloBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "band: ...and carries no header, because its one row's label already does")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+    check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          "rebuild: the page never rebuilds itself, in either layout")
 end
 
 -- ============================================================
--- 2. SOLO MODE -- the page's one hoisted toggle
--- Five controls, one of them the "am I doing anything" tick, which goes onto the
--- row. The blurb stays in the pane.
+-- 2. THE TWO BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
 -- ============================================================
 --
--- ⚠ THE TWO SUB-TICK LABELS ARE ONE SPACE HERE, FOUR IN THE SOURCE. The census
--- reader flattens the body with `%s+` -> " " before it matches, so the indent
--- that pins "    Show ZZZ Icon" under its parent collapses along with every
--- other run of whitespace. Written down rather than papered over: the real
--- locale keys keep their four spaces, and the enUS entries are what a translator
--- sees.
+-- ⚠ THE TWO SUB-TICK LABELS ARE ONE SPACE HERE, FOUR IN THE SOURCE: the census
+-- reader flattens whitespace before it matches.
 local SOLO_MODE = {
     { "checkbox", "Solo Mode",           "soloMode",             30 },
     { "checkbox", "Rested Indicator",    "restedIndicator",      30 },
@@ -170,28 +158,21 @@ local SOLO_MODE = {
     { "checkbox", " Show Frame Glow",    "restedIndicatorGlow",  30 },
     { "label",    "Solo Mode: Show your player frame when not in a group.", "(none)", 30 },
 }
+local HIDE_SELF = {
+    { "checkbox", "Hide Self from Party Frames", "hidePlayerFrame", 30 },
+}
 
 print("-- Visibility page: Solo Mode")
 do
     local body = builderBody("BuildSoloModeGroup")
     checkCensus(census(body), SOLO_MODE, "solo mode")
 
-    -- Declared once, mounted twice -- the classic box and the popout pane.
     local calls = 0
     for _ in PAGE:gmatch("BuildSoloModeGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "solo mode: declared once, mounted twice -- classic box and popout pane")
+    eq(calls, 3, "solo mode: declared once, mounted twice -- classic box and card")
 
-    -- The hoist, and the arithmetic it implies: the checkbox is still IN the
-    -- builder -- classic needs it -- behind the one flag the popout passes.
     check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          "solo mode: the enable checkbox is skipped when the row has hoisted it")
-    local declared = tonumber(PAGE:match("local SOLO_MODE_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "solo mode: the page declares the row's count in one place")
-    eq(declared, settingsIn(SOLO_MODE) - 1, "solo mode: ...the census's settings less the hoisted tick")
-
-    -- ⚠ THE COMPOUND GREY PREDICATES SURVIVED THE MOVE VERBATIM, including the
-    -- "not d.soloMode" half the row's own off-gate already covers. Classic has
-    -- no row and needs that half.
+          "solo mode: the in-body checkbox is skipped when the header carries it")
     check(body:find("restedIndicator.disableOn = function(d) return not d.soloMode end", 1, true) ~= nil,
           "solo mode: the indicator greys while solo mode is off, as it always did")
     local compound = 0
@@ -199,124 +180,40 @@ do
         compound = compound + 1
     end
     eq(compound, 2, "solo mode: ...and both sub-ticks keep the two-condition predicate")
-
-    -- Every widget in this group keeps its own raid guard. The tab is partyOnly
-    -- as well, and both belts stay.
     local hides = 0
-    for _ in body:gmatch('hideOn = function%(%) return GUI%.SelectedMode == "raid" end') do
-        hides = hides + 1
-    end
+    for _ in body:gmatch('hideOn = function%(%) return GUI%.SelectedMode == "raid" end') do hides = hides + 1 end
     eq(hides, 5, "solo mode: all five controls keep their own raid guard")
     check(SRC:find('GUI.Tabs["display_visibility"].partyOnly = true', 1, true) ~= nil,
           "solo mode: ...and the tab is still party-only")
 
-    local opts = rowOpts("Solo Mode")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"soloMode"%s*}') ~= nil,
-          "solo mode: the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*SoloModeSummary") ~= nil,
-          "solo mode: ...it declares a summary")
-    check(opts:find("count%s*=%s*SOLO_MODE_COUNT") ~= nil,
-          "solo mode: ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*OnSoloModeToggle") ~= nil,
-          "solo mode: ...and a commit that is not a page rebuild")
-    check(opts:find("window", 1, true) ~= nil and opts:find("clipTo", 1, true) ~= nil,
-          "solo mode: ...docked outside the window and clipped by the page's scroll frame")
-    check(opts:find("offText", 1, true) == nil,
-          "solo mode: no offText -- off here really does mean no solo frame")
+    local block, call = sectionBlock("Solo Mode")
+    check(call:find('OpenSection(L["Solo Mode"], "visibility_solo", 1, SoloModeSummary, nil, nil, nil, {', 1, true) ~= nil,
+          "solo mode: a card keyed visibility_solo in column 1, printing the group's summary, no grey, no hide, no pin")
+    check(call:find('db = db, key = "soloMode", label = L["Solo Mode"]', 1, true) ~= nil,
+          "solo mode: the header tick is bound to soloMode under the checkbox's own name")
+    check(call:find("DF:UpdateAllFrames() DF:UpdateDefaultPlayerFrame() self:RefreshStates()", 1, true) ~= nil,
+          "solo mode: ...committing what the checkbox ran, then a state pass")
+    check(block:find("BuildSoloModeGroup({ group = soloBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "solo mode: mounts the builder as classic does, plus hoistToggle for its header tick")
 
-    -- ⚠ NO hideOn ON THE ROW, mirroring classic: the box had none either, only
-    -- its children did.
-    check(PAGE:find("soloRow.hideOn", 1, true) == nil,
-          "solo mode: the row is always visible, exactly as the box was")
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD. A rebuild retires the row being
-    -- clicked, and the row's write path calls row.Refresh() after onToggle
-    -- returns -- on a dead frame.
-    local commit = PAGE:match("local function OnSoloModeToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "solo mode: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "solo mode: ...and never rebuilds the page")
-        check(commit:find("DF:UpdateAllFrames()", 1, true) ~= nil
-          and commit:find("DF:UpdateDefaultPlayerFrame()", 1, true) ~= nil,
-              "solo mode: ...it runs what the suppressed checkbox's callback ran")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              "solo mode: ...re-runs the state passes")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "solo mode: ...and reflows the open panes")
-    end
-
-    -- The hoisted toggle is re-registered with search under the SAME label and
-    -- key the suppressed checkbox carried, or the setting becomes unfindable in
-    -- the popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(soloRow, L["Solo Mode"], "soloMode", OnSoloModeToggle)', 1, true) ~= nil,
-          "solo mode: the hoisted toggle keeps its search entry")
-
-    -- The strip: claimed keys, the amber tick, and a footer whose apply is the
-    -- union of what the group's four callbacks do.
-    check(PAGE:find("tools.ClaimKeys(soloRow, soloContent)", 1, true) ~= nil,
-          "solo mode: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(soloRow)", 1, true) ~= nil,
-          "solo mode: ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(soloRow, ApplySoloMode)", 1, true) ~= nil,
-          "solo mode: ...and Reset Group / Hold: Defaults run the group's own apply")
-    local apply = PAGE:match("local function ApplySoloMode%(%)(.-)\n            end")
-    check(apply ~= nil, "solo mode: the group's apply is a named function")
-    if apply then
-        check(apply:find("DF:UpdateRestedIndicator()", 1, true) ~= nil,
-              "solo mode: ...covering the three rested controls")
-        check(apply:find("DF:UpdateAllFrames()", 1, true) ~= nil
-          and apply:find("DF:UpdateDefaultPlayerFrame()", 1, true) ~= nil,
-              "solo mode: ...and the solo frame itself")
-    end
-
-    -- The summary reuses words the locale already ships and separates them with
-    -- the convention's dot -- no new locale string was invented for this page.
     local sum = PAGE:match("local function SoloModeSummary%(d%)(.-)\n            end")
     check(sum ~= nil, "solo mode: the summary is a named function on the page")
     if sum then
-        check(sum:find('L%["Rested Indicator"%]') ~= nil,
-              "solo mode: ...naming the one feature behind the row")
-        check(sum:find('L%["Icon"%]') ~= nil and sum:find('L%["Glow"%]') ~= nil,
-              "solo mode: ...and the two ways it is drawn, in words the locale already has")
-        check(sum:find('L%["    Show ZZZ Icon"%]') == nil,
-              "solo mode: ...not the indented sub-tick labels, which are not summary words")
-        check(sum:find("\\194\\183", 1, true) ~= nil,
-              "solo mode: ...separated by the convention's dot")
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 3, "solo mode: at most four items, per the summary convention")
+        check(sum:find('L%["Rested Indicator"%]') ~= nil and sum:find('L%["Icon"%]') ~= nil
+          and sum:find('L%["Glow"%]') ~= nil, "solo mode: ...in words the locale already has")
+        check(sum:find("\\194\\183", 1, true) ~= nil, "solo mode: ...separated by the convention's dot")
     end
 end
-
--- ============================================================
--- 3. HIDE SELF FROM PARTY FRAMES -- the single option, and its CONTROL ROW
--- One independent tick. It is NOT behind Solo Mode's gate and never was, which
--- is the whole reason the box was split rather than lifted whole. Classic keeps
--- it as the foot of the Frame Display box; the popout layout gives it the row
--- plate, because one control in a 280 box beside a full-width band is the one
--- shape a column of plates cannot absorb.
--- ============================================================
-local HIDE_SELF = {
-    { "checkbox", "Hide Self from Party Frames", "hidePlayerFrame", 30 },
-}
 
 print("-- Visibility page: Hide Self from Party Frames")
 do
     local body = builderBody("BuildHideSelfGroup")
     checkCensus(census(body), HIDE_SELF, "hide self")
 
-    -- ⚠ ONE MOUNT NOW, NOT TWO. The builder is the CLASSIC box's; the popout arm
-    -- binds the same key on a control row instead, because a control row is not a
-    -- checkbox in a group and cannot be built through a group builder.
     local calls = 0
     for _ in PAGE:gmatch("BuildHideSelfGroup%(") do calls = calls + 1 end
-    eq(calls, 2, "hide self: declared once, mounted once -- the classic box")
+    eq(calls, 3, "hide self: declared once, mounted twice -- classic box and card")
 
-    -- ☠ THE SECURE WRITE IS UNTOUCHED AND STILL COMBAT-GATED -- and it is now
-    -- NAMED at page scope, because BOTH layouts drive it. A second copy of a body
-    -- that writes a secure attribute is exactly the duplication "verbatim" exists
-    -- to prevent, so the guard moved to the one copy rather than being dropped.
     local apply = PAGE:match("local function ApplyHideSelf%(%)(.-)\n        end")
     check(apply ~= nil, "hide self: the apply is a named function at page scope")
     if apply then
@@ -324,158 +221,43 @@ do
               "hide self: the secure attribute write is still gated on combat")
         check(apply:find('DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)', 1, true) ~= nil,
               "hide self: ...and writes the same attribute it always did")
-        check(apply:find("DF:ApplyHeaderSettings()", 1, true) ~= nil
-          and apply:find("DF:UpdateAllFrames()", 1, true) ~= nil,
-              "hide self: ...followed by the same two refreshes")
     end
     check(body:find('"hidePlayerFrame", ApplyHideSelf)', 1, true) ~= nil,
-          "hide self: the classic tick runs that one copy")
-    check(body:find('hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]', 1, true) ~= nil,
-          "hide self: the tooltip rode along")
+          "hide self: the tick runs that one copy")
 
-    -- ---- the control row ----------------------------------------------
-    -- It is still NOT a popout row: a pane holding one checkbox is a click that
-    -- buys nothing.
-    check(PAGE:find('GUI:CreatePopoutRow(self.child, {\n                label    = L["Hide Self from Party Frames"]', 1, true) == nil,
-          "hide self: no popout row -- a pane holding one checkbox is a click that buys nothing")
-    check(PAGE:find('label     = L["Hide Self from Party Frames"],\n                kind      = "checkbox"', 1, true) ~= nil,
-          "control row: it is a checkbox control row, named by the tick's own caption")
-    check(PAGE:find("hideSelfBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at the width the layout pass will give it")
-    check(PAGE:find("hideSelfBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into that band")
-    -- ⚠ NO BAND HEADER. "Frame Display" named a box of six controls; five left,
-    -- and this page carries no band headers at all.
-    check(PAGE:find("hideSelfBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "control row: ...and no header, because the row's own label names it")
-    -- The three things the box's tick carried, carried through the binding.
-    check(PAGE:find('key       = "hidePlayerFrame",\n                onChanged = ApplyHideSelf,', 1, true) ~= nil,
-          "control row: the key and the secure apply ride the row's binding")
-    check(PAGE:find('hideOn    = function() return GUI.SelectedMode == "raid" end,', 1, true) ~= nil,
-          "control row: ...the child's own hideOn becomes the ROW's, so the slot collapses")
-    check(PAGE:find('tooltip   = L["Removes your player frame from the DandersFrames party display."],', 1, true) ~= nil,
-          "control row: ...and the tick's sentence rides along, on the plate's own hover")
-    check(PAGE:find('tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")', 1, true) ~= nil,
-          "control row: ...and it reaches search through the shared verb")
+    local block, call = sectionBlock("Frame Display")
+    check(call:find('OpenSection(L["Frame Display"], "visibility_framedisplay", 2, nil)', 1, true) ~= nil,
+          "hide self: the box's own name as a card, keyed visibility_framedisplay, in column 2 -- no tick, no pin")
+    check(block:find("BuildHideSelfGroup({ group = displayBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          "hide self: mounts the builder exactly as classic does")
 end
 
 -- ============================================================
--- 4. THE ONE BOX, THE TWO BANDS AND THE ADD ORDER
--- Classic builds one bare 280 box and mounts both builders into it. The popout
--- layout builds two full-width bands instead -- Solo Mode's feature row, then
--- Hide Self's control row -- so nothing is left standing in a column.
+-- 3. THE CARDS TOGETHER, AND THE CLASSIC BOX
 -- ============================================================
-print("-- Visibility page: the box, the bands and the page's own order")
+print("-- Visibility page: the cards together, and the classic box")
 do
-    -- ---- classic: ONE bare box, both builders, its own header ---------
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "), "Solo Mode | Frame Display", "order: the two cards, in reading order")
+
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 1, "ticks: exactly one mount skips its in-body toggle (Solo Mode)")
+
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Solo Mode"]', 1, true)
+    check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
+
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 1, "boxes: exactly one bare 280 box left, and it is the classic branch's own")
+    eq(bare, 1, "classic: exactly one bare 280 box, the classic branch's own")
     check(PAGE:find('local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)\n            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)', 1, true) ~= nil,
-          "boxes: the classic box is built with the header it always had")
-
-    -- ---- popout: nothing is left mounted at a column's 280 ------------
-    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)", 1, true) == nil,
-          "boxes: no stay-inline 280 box is left beside the bands")
-    check(PAGE:find("INLINE_BOX", 1, true) == nil,
-          "boxes: ...and the page no longer asks for the band skin at all")
-    -- ⚠ THE FLAG WAS NEVER WRITTEN AS A LITERAL EITHER.
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "boxes: the skin was never restated as a literal")
-    -- The title belongs to the BOX, so only classic still says it.
-    local headers = 0
-    for _ in PAGE:gmatch('GUI:CreateHeader%(self%.child, L%["Frame Display"%]%)') do headers = headers + 1 end
-    eq(headers, 1, "boxes: only the classic box is headed L[\"Frame Display\"], because only it is a box")
-
-    -- ---- the Add order -----------------------------------------------
-    -- Two full-width bands in reading order. With nothing left in a column there
-    -- is no flow to unbalance, so the sync-point hole that used to force the band
-    -- above the lone column box cannot arise.
-    local band = PAGE:find('Add(soloBand, nil, "both")', 1, true)
-    local hide = PAGE:find('Add(hideSelfBand, nil, "both")', 1, true)
-    check(band ~= nil, "order: the Solo Mode band spans both columns")
-    check(hide ~= nil and band ~= nil and band < hide,
-          "order: ...and the Hide Self band spans them too, under it")
-    -- The classic box keeps column 1, which is the one thing this pass was not
-    -- allowed to move.
-    local firstBox = PAGE:find("Add(frameDisplayGroup, nil, 1)", 1, true)
-    check(firstBox ~= nil and firstBox < band,
-          "order: the classic branch still adds its box to column 1")
-    local col1 = 0
-    for _ in PAGE:gmatch("Add%(frameDisplayGroup, nil, 1%)") do col1 = col1 + 1 end
-    eq(col1, 1, "order: ...exactly once, because only classic builds it")
-
-    -- ---- the page's own furniture is untouched ------------------------
+          "classic: the box is built with the header it always had")
+    check(PAGE:find("Add(frameDisplayGroup, nil, 1)", 1, true) ~= nil,
+          "classic: ...and still goes to column 1")
     check(PAGE:find('Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)', 1, true) ~= nil,
           "page: the copy button keeps its key list and its slot")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
--- six settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and its strip offers to pin a second copy rather than
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the PANE rather than
--- off the declared count, so a row cannot claim its way onto the plate. Only the
--- refusal can be exercised against a real group, and that lives in
--- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
--- asked, and that nothing else did.
---
--- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
--- about SETTINGS; CountVisibleChildren answers for every entry a layout would
--- place, blurbs and separators included. Where the two differ below, the larger
--- is the one that has to fit.
---
--- The page's one popout row. Solo Mode's pane holds three ticks and a blurb
--- behind the row's own tick, and the two sub-ticks mean nothing until the
--- Rested Indicator above them is on -- a shape a pane states by standing
--- there and a summary can only describe. Hide Self was never a popout: one
--- checkbox is a control row.
--- ============================================================
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
-    -- whether its call carries the opt-in. Read as "this declaration up to the
-    -- next one": a balanced-brace match would be defeated by the builder closure
-    -- inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 1, "inline: 1 of this page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and then wired to a
-    -- different row fails here instead of shipping.
-    local function buildOf(var)
-        local a = PAGE:find("local " .. var .. " = ", 1, true)
-        local b = a and PAGE:find("}))", a, true)
-        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
-    end
-
-    for _, spec in ipairs({
-        { "soloRow", "soloMount" },                  -- Solo Mode, 3
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and inlineMounts[mount] == true,
-              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
-    end
 end
