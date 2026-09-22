@@ -3,57 +3,46 @@ local NS = ...
 -- ============================================================
 -- FRAME PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- The sweep turns the Frame page's remaining checkbox-gated groups into popout
--- feature rows. Each conversion is allowed to change WHERE a group is mounted
--- and nothing else: same widgets, same order, same L keys, same db keys, same
--- slot heights, in both layouts, because the classic box and the popout pane
--- are handed the SAME builder.
+-- General > Frame: ten groups. In Modern they are the Debuff Bar's collapsible
+-- CARDS -- two per row inside a card wide enough, dim captions, the value
+-- summary in a shut card's corner, Expand All / Collapse All at the top -- and
+-- every one of them now behaves the same way (the old page had three kinds of
+-- row: plated with a strip, behind a panel, and with hoisted controls):
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db. So this file does
--- what test_border_builders does for its own source-level claims (the declared
--- counts, the hoisted toggles, the band): it reads the page's SOURCE and asserts
--- against it.
+--   column 1   "Layout"      Frame Size, Layout Direction, Raid Layout Mode,
+--                            Group Layout Settings, Group Visibility, Group
+--                            Display Order, Flat Grid Settings
+--              "Movement"    Permanent Mover (tick: permanentMover)
+--   column 2   "Appearance"  Border (tick: frameShowBorder), Border Shadow
+--                            (tick: frameBorderShadowEnabled), Frame Fade
+--                            (tick: frameFadeEnabled)
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order. This is the inventory the group had INLINE before
---     the move, copied here from a census of the pre-change source, so a
---     builder that quietly dropped a control or renamed a key fails here.
---   ✓ that ONE builder serves both layouts (the classic branch and the popout
---     branch name the same function), which is what makes "classic is identical
---     to main" a structural fact rather than a promise.
---   ✓ that the declared row COUNT matches what the builder mounts, less any
---     hoisted toggle -- the badge is a claim about how much is inside.
---   ✗ nothing about runtime behaviour. The callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- Each conversion is allowed to change WHERE a group is mounted and nothing
+-- else: same widgets, same order, same L keys, same db keys, same slot heights,
+-- because the classic box and the card are handed the SAME builder.
+--
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the widget CENSUS of each builder, taken from the pre-change source.
+--   ✓ that ONE builder serves both layouts, and each card's column, stable
+--     collapse key, summary, grey and hide gates, header tick and pin.
+--   ✓ the Frame Fade engine's own reading of its tick (section 1b, driven).
+--   ✗ nothing about runtime behaviour -- read in game.
+--
+-- ⚠ THIS FILE ALSO CARRIES TWO ADDON-WIDE ROLLS (section 6): every popout row
+-- on every page carries the footer strip, and exactly which pages still opt a
+-- row onto the plate.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
--- ---- the census reader ----------------------------------------------
--- Every GUI:Create<Kind> call in a builder's body, in order, with the label,
--- the db key and the height AddWidget was given.
---
--- Newlines are collapsed first so a call split across four lines reads as one,
--- and each call's chunk runs to the START OF THE NEXT ONE -- which is what makes
--- "the first L[...] in the chunk" the label rather than some tooltip's string
--- three lines below it.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
     CreateHeader = "header", CreateLabel = "label",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own indent.
--- ⚠ Terminated on a newline + EIGHT spaces + `end`, which is the page builder's
--- indent level: everything inside one of these bodies is indented further, so
--- this is the function's own close and not one of its inline closures'.
---
--- ⚠ `tools2`, NOT `tools`. The page took GUI:CreatePopoutPageTools, so `tools` is
--- the page-scope machinery table and a builder's own opts argument had to move
--- aside -- the same rename every other converted page made, for the same reason:
--- a builder that shadowed the name could never reach the page's verbs.
+-- The body of a `local function <name>(tools2)` at the page builder's own
+-- indent (a newline + EIGHT spaces + `end`).
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -64,9 +53,11 @@ local function builderBody(name)
     return SRC:sub(a, b or a)
 end
 
+-- ☠ THE LABEL IS THE CALL'S SECOND ARGUMENT, so a control labelled from a
+-- VARIABLE (the two flat-grid controls whose names swap with the growth
+-- direction) honestly reads "(none)".
 local function census(body)
     local flat = body:gsub("%s+", " ")
-    -- Where every call starts, so a chunk can run to the next one.
     local starts = {}
     local i = 1
     while true do
@@ -79,14 +70,6 @@ local function census(body)
     for n, at in ipairs(starts) do
         local stop = starts[n + 1] and (starts[n + 1].s - 1) or #flat
         local chunk = flat:sub(at.s, stop)
-        -- ☠ THE LABEL IS THE CALL'S SECOND ARGUMENT, not "the first L[...] in the
-        -- chunk". The looser reading held only while every widget was followed by
-        -- its own tooltip; the sweep put option TABLES between calls, and a
-        -- `{ CENTER = L["Center"] }` declared after one control and used by the
-        -- next made that control report "Center" as its name. Anchored to the
-        -- call, so a control labelled from a VARIABLE (the two flat-grid controls
-        -- whose names swap with the growth direction) honestly reads "(none)"
-        -- rather than borrowing a word from the line below it.
         local label = chunk:match('GUI:Create%a+%(%s*[%w_%.]+%s*,%s*L%["([^"]+)"%]') or "(none)"
         local key   = chunk:match('%f[%w]db,%s*"([%w_]+)"') or "(none)"
         local h     = tonumber(chunk:match('%)%s*,%s*(%d+)%s*%)'))
@@ -112,27 +95,39 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The block a row is declared in, from its label down to the closing brace of
--- the CreatePopoutRow opts. Used to ask what the row DECLARED -- a toggle, a
--- count, a summary -- without building one.
-local function rowOpts(labelKey)
-    local a = SRC:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = SRC:find("}))", a, true)
-    return SRC:sub(a, (b or a) + 2)
+-- The Frame page's own source, from its copy button to the See Also bar.
+local PAGE
+do
+    local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
+    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "the Frame page builder is locatable by its own ends")
+    PAGE = SRC:sub(a or 1, b or 1)
+end
+
+-- ONE CARD'S BLOCK: from its OpenSection call to the CloseSection that puts its
+-- band in, flattened; `call` is everything before `mount` (the builder mount).
+local function sectionBlock(labelKey, mount)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find(mount, 1, true)
+    return block, m and block:sub(1, m - 1) or block
+end
+
+-- The classic box each group is still built into, with its own header.
+local function classicBox(label)
+    return PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. label:gsub("%p", "%%%0") .. "\"%]%)")
 end
 
 -- ============================================================
--- 1. FRAME FADE -- the row that had no tick, and now has a hoisted one
--- Seven controls behind one row and an eighth ON it. The group had no boolean
--- meaning "am I doing anything" for a whole release, and the candidate that
--- looked like one was wrong twice over: frameFadeSplitCombat is a MODE (both
--- states fade) and it HIDES the global slider, so hoisting IT would have given
--- the row a tick that greys the one control the group exists for. So the
--- boolean was ADDED -- frameFadeEnabled, shipped true -- rather than borrowed,
--- and the row hoists that. The census below therefore carries eight and the
--- declared count is seven, which is the arithmetic every hoisted-tick row does.
+-- 1. FRAME FADE -- its enable is the card's header tick
+-- The group had no boolean meaning "am I doing anything" for a whole release;
+-- frameFadeSplitCombat is a MODE and it HIDES the global slider, so the boolean
+-- was ADDED -- frameFadeEnabled, shipped true -- rather than borrowed.
 -- ============================================================
 local FRAME_FADE = {
     { "checkbox", "Enable Frame Fade",                 "frameFadeEnabled",            30 },
@@ -145,190 +140,86 @@ local FRAME_FADE = {
     { "dropdown", "Hover Applies To",                  "frameFadeHoverScope",         55 },
 }
 
+print("-- Frame page: Frame Fade")
 do
     local body = builderBody("BuildFrameFadeGroup")
     checkCensus(census(body), FRAME_FADE, "frame fade")
+    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
+      and body:find(".keepEnabled = true", 1, true) ~= nil,
+          "frame fade: the enable is skipped when the header carries it, and stays live in classic")
 
-    -- The hoist, and the arithmetic it implies. The checkbox is still IN the
-    -- builder -- the classic box needs it -- behind the one flag the popout
-    -- passes, so the pane mounts one fewer than the census.
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          "frame fade: the enable checkbox is skipped when the row has hoisted it")
-    check(body:find(".keepEnabled = true", 1, true) ~= nil,
-          "frame fade: ...and in classic it stays live under the group's own grey")
-
-    -- ☠ ...AND THE PANE'S FIRST CONTROL IS EXPECTED TO GREY. With the row
-    -- carrying the tick the enable checkbox is never built, so the Global Frame
-    -- Fade slider is child ONE of a group that has no header -- and the only mark
-    -- that would spare it from the gate below is a keepEnabled it must not have.
-    -- The kit used to spare child one by POSITION, which is why this row shipped
-    -- with a live slider sitting under an off switch.
+    -- ☠ ...AND THE BODY'S FIRST CONTROL IS EXPECTED TO GREY. With the header
+    -- carrying the tick, the Global Frame Fade slider is child ONE of a band with
+    -- no header -- and the only mark that would spare it is a keepEnabled it must
+    -- not have. The kit spares by MARK now, not by position.
     local hoisted = body:match("if not tools2%.hoistToggle then.-\n            end\n(.*)")
-    check(hoisted ~= nil, "frame fade: the builder's hoisting half reads on its own")
+    check(hoisted ~= nil, "frame fade: the builder's other half reads on its own")
     if hoisted then
-        local paneFirst = census(hoisted)[1]
-        check(paneFirst ~= nil, "frame fade: ...and it mounts controls of its own")
-        if paneFirst then
-            eq(paneFirst.label, FRAME_FADE[2][2], "frame fade: ...the slider first")
-            eq(paneFirst.key,   FRAME_FADE[2][3], "frame fade: ...on the global alpha key")
-        end
+        local first = census(hoisted)[1]
+        check(first ~= nil and first.key == FRAME_FADE[2][3], "frame fade: ...the global slider first")
         eq(select(2, hoisted:gsub("%.keepEnabled", "")), 0,
-           "frame fade: ...and nothing the pane mounts is spared from the gate")
+           "frame fade: ...and nothing in the body is spared from the gate")
     end
-
-    -- ...which only greys because the kit skips by MARK. `i > 1` was "except the
-    -- header" written as "except the first child" -- true of a classic box, false
-    -- of every pane, and the exact reason the slider above stayed live.
     local sections = ui_file_source("Sections.lua")
-    check(sections:find("groupOff and i > 1", 1, true) == nil,
-          "frame fade: the group gate no longer spares child one by position")
-    check(sections:find('rawget(widget, "isSectionHeader")', 1, true) ~= nil,
-          "frame fade: ...it spares the header by its mark")
-    check(sections:find('rawget(widget, "keepEnabled")', 1, true) ~= nil,
-          "frame fade: ...and the feature's own Enable by its own")
-    -- The mark is the HOST's to stamp: the kit has no header factory, so the one
-    -- factory that makes section headers has to carry it or the gate greys every
-    -- classic header in the addon the day a header grows a SetEnabled.
-    check(options_file_source("GUI/SettingsWidgets.lua")
-            :find("container.isSectionHeader = true", 1, true) ~= nil,
-          "frame fade: ...which GUI:CreateHeader is what stamps")
-    -- ⚠ INSIDE THE FADE MOUNT, not anywhere on the page. Twelve mounts on this
-    -- page pass this flag, so a page-wide find is green even when THIS one has
-    -- stopped passing it -- which is the whole bug the flag exists to prevent
-    -- (the pane would draw a second copy of the tick that is on the row).
-    local fadeMount = SRC:match(
-        "local fadeMount, fadeContent = tools.PopoutContent%(function%(group, holder, reflow%)(.-)\n            end%)")
-    check(fadeMount ~= nil, "frame fade: the pane mount is where the row says it is")
-    check(fadeMount and fadeMount:find("hoistToggle = true", 1, true) ~= nil,
-          "frame fade: ...and it is what passes the hoist flag")
-
-    -- ☠ THE GROUP GATE IS INSIDE THE BUILDER. Left on the page-level box, the
-    -- pane would not grey while the fade is off and the two layouts would
-    -- disagree about a setting that is one table read from the engine.
+    check(sections:find("groupOff and i > 1", 1, true) == nil
+      and sections:find('rawget(widget, "isSectionHeader")', 1, true) ~= nil
+      and sections:find('rawget(widget, "keepEnabled")', 1, true) ~= nil,
+          "frame fade: the group gate spares the header and the Enable by their marks, not by position")
+    check(options_file_source("GUI/SettingsWidgets.lua"):find("container.isSectionHeader = true", 1, true) ~= nil,
+          "frame fade: ...which GUI:CreateHeader stamps")
     check(body:find("group.disableChildrenOn = function(d) return not d.frameFadeEnabled end", 1, true) ~= nil,
           "frame fade: the group's grey-while-off gate is inside the builder")
 
-    -- The count badge is a CLAIM about how much is behind the row. Read out of
-    -- the page rather than retyped, so the two cannot drift.
-    local declared = tonumber(SRC:match("local FRAME_FADE_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "frame fade: the page declares the row's count in one place")
-    eq(declared, #FRAME_FADE - 1, "frame fade: ...the census less the hoisted tick")
-
-    local opts = rowOpts("Frame Fade")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"frameFadeEnabled"%s*}') ~= nil,
-          "frame fade: the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*FrameFadeSummary") ~= nil,
-          "frame fade: ...it does declare a summary")
-    check(opts:find("count%s*=%s*FRAME_FADE_COUNT") ~= nil,
-          "frame fade: ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*OnFrameFadeToggle") ~= nil,
-          "frame fade: ...and a commit that is not a page rebuild")
-
-    -- The hoisted toggle is re-registered with search under the SAME label and
-    -- key the suppressed checkbox carried, or the setting becomes unfindable in
-    -- the popout layout while staying findable in classic.
-    local hoistedLabel, hoistedKey =
-        SRC:match('RegisterHoistedToggle%(fadeRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
-    eq(hoistedLabel, FRAME_FADE[1][2], "frame fade: the hoisted toggle is re-registered under its own label")
-    eq(hoistedKey,   FRAME_FADE[1][3], "frame fade: ...and its own db key")
-
-    -- ...and the label is a phrase the addon actually ships. A missing key does
-    -- not error -- AceLocale hands back the key itself -- so the only thing that
-    -- goes wrong is that translators never see the string and every non-English
-    -- client reads the row's tick in English forever.
     check(df_file_source("Locales/enUS.lua"):find('L["' .. FRAME_FADE[1][2] .. '"] = true', 1, true) ~= nil,
-          "frame fade: the hoisted toggle's label is a shipped enUS phrase")
-
-    -- ☠ AND THE KEY IS EXPORTED. A setting left out of the category lists is
-    -- silently dropped from every profile string anyone shares -- nothing errors,
-    -- the value simply is not in the export and comes back as the default on the
-    -- other side. Its six neighbours are already named there.
+          "frame fade: the tick's label is a shipped enUS phrase")
     check(options_file_source("Core/ExportCategories.lua"):find('"' .. FRAME_FADE[1][3] .. '"', 1, true) ~= nil,
           "frame fade: ...and the key travels in a profile export")
 
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD: a rebuild retires every widget on the
-    -- page including the row being clicked, and the row's write path calls
-    -- row.Refresh() after this returns -- on a dead frame. It has to run BOTH
-    -- halves: the engine re-applies the alpha, the reflow re-runs the group gate
-    -- above so the seven controls behind the row grey with it.
-    local commit = SRC:match("local function OnFrameFadeToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "frame fade: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "frame fade: ...and never rebuilds the page")
-        check(commit:find("RefreshFrameFade()", 1, true) ~= nil,
-              "frame fade: ...it runs the group's own apply")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "frame fade: ...and re-flows the pane so the gate greys what is behind it")
-    end
-
-    -- ONE builder, BOTH layouts. This is the whole of "classic is identical to
-    -- main": the classic branch does not carry a copy of the widgets, it mounts
-    -- the same function into the box it always built.
     local calls = 0
-    for _ in SRC:gmatch("BuildFrameFadeGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "frame fade: declared once, mounted twice -- classic box and popout pane")
-    check(SRC:find('frameFadeGroup:AddWidget%(GUI:CreateHeader%(self%.child, L%["Frame Fade"%]%)') ~= nil,
-          "frame fade: the classic box still builds its own header above the group")
+    for _ in PAGE:gmatch("BuildFrameFadeGroup%(") do calls = calls + 1 end
+    eq(calls, 3, "frame fade: declared once, mounted twice -- classic box and card")
+    local box = classicBox("Frame Fade")
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, 2)", 1, true) ~= nil,
+          "frame fade: the classic box keeps its header and column 2")
 
-    -- The summary reuses words the locale already ships. A summary is the one
-    -- place a page is tempted to invent a string for; these two are the same
-    -- keys the border row's summary uses.
-    local sum = SRC:match("local function FrameFadeSummary%(d%)(.-)local FRAME_FADE_COUNT")
-    check(sum ~= nil, "frame fade: the summary is a named function on the page")
-    if sum then
-        check(sum:find('L%["Alpha"%]') ~= nil, "frame fade: ...labelling the opacity with an existing key")
-        check(sum:find('L%["Combat"%]') ~= nil, "frame fade: ...and the in-combat one with another")
-        check(sum:find("\\194\\183", 1, true) ~= nil, "frame fade: ...separated by the convention's dot")
-    end
+    local block, call = sectionBlock("Frame Fade", "BuildFrameFadeGroup({")
+    check(call:find('OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {', 1, true) ~= nil,
+          "frame fade: a card keyed frame_fade in column 2, pinnable from its own builder")
+    check(call:find('db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"]', 1, true) ~= nil,
+          "frame fade: the header tick is bound to frameFadeEnabled under the checkbox's own name")
+    check(call:find("RefreshFrameFade() self:RefreshStates() tools.ReflowMounted()", 1, true) ~= nil
+      and call:find("RefreshCurrentPage", 1, true) == nil,
+          "frame fade: ...committing the engine refresh, a state pass and a pinned-panel repaint -- never a rebuild")
+    check(block:find("BuildFrameFadeGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "frame fade: mounts the builder as classic does, plus hoistToggle for its header tick")
+
+    local sum = PAGE:match("local function FrameFadeSummary%(d%)(.-)\n            end")
+    check(sum ~= nil and sum:find('L%["Alpha"%]') ~= nil and sum:find('L%["Combat"%]') ~= nil,
+          "frame fade: the summary labels its opacities in words the locale ships")
 end
 
 -- ============================================================
 -- 1b. FRAME FADE -- WHAT THE TICK ACTUALLY DOES
--- A row tick that only greys a panel is decoration. The setting is read in ONE
--- place -- DF:GetFrameBaseAlpha (Features/ElementAppearance.lua), which every
--- writer of a whole frame's alpha multiplies by -- so that resolver is what has
--- to answer for it, and it is driven here rather than eyeballed.
+-- The setting is read in ONE place -- DF:GetFrameBaseAlpha
+-- (Features/ElementAppearance.lua) -- so that resolver is driven here.
 --
 -- ☠ THE FUNCTION IS LIFTED OUT OF THE SHIPPED SOURCE, not copied into this file.
--- ElementAppearance.lua cannot be loaded headlessly (event frames, a hundred
--- element writers), but the resolver is a pure read over one table plus three
--- client calls, so it compiles standalone against stubs for those three. A copy
--- would pass forever after the real one changed; this cannot.
---
--- Two rules, and the second is the one that ships wrong:
---   * FALSE -> 1, whatever the sliders and the split say. Off means full
---     opacity, never alpha 0.1.
---   * NIL   -> exactly what the function did before the key existed. A profile
---     is migrated on load, but a table read a moment earlier still holds nil,
---     and `not db.frameFadeEnabled` would have stopped every fade in the addon
---     for anyone whose profile had not been through the migration yet.
+--   * FALSE -> 1, whatever the sliders and the split say.
+--   * NIL   -> exactly what the function did before the key existed.
 -- ============================================================
+print("-- Frame page: the Frame Fade engine")
 do
     local ENGINE = df_file_source("Features/ElementAppearance.lua")
-
-    -- Anchored on the newline + `end` at COLUMN ZERO: every `end` inside the
-    -- function is indented, so this is the function's own close.
     local fnBody = ENGINE:match("function DF:GetFrameBaseAlpha%(db, frame%)\n(.-)\nend\n")
     check(fnBody ~= nil, "frame fade engine: the resolver is where the page says it is")
 
     if fnBody then
-        -- ⚠ THE CODE, NOT THE COMMENTS. The resolver's own comment names the
-        -- wrong spelling in order to warn about it, so a claim read off the raw
-        -- body would find `not db.frameFadeEnabled` in the very note saying never
-        -- to write it.
         local code = fnBody:gsub("%-%-[^\n]*", "")
-
-        -- ☠ FIRST, before the split branch reads a single slider. Pinned as an
-        -- ORDER claim and not just a presence one: put the gate after the split
-        -- and a switched-off fade still returns the in-combat value in combat.
         local gateAt  = code:find("db.frameFadeEnabled == false", 1, true)
         local splitAt = code:find("db.frameFadeSplitCombat", 1, true)
         check(gateAt ~= nil, "frame fade engine: the enable is read in the resolver")
         check(gateAt and splitAt and gateAt < splitAt,
               "frame fade engine: ...before the split branch reads any slider")
-        -- `== false`, never `not`: nil is a table the migration has not reached
-        -- and has to behave as the shipped default does.
         check(code:find("not db.frameFadeEnabled", 1, true) == nil,
               "frame fade engine: ...and a nil is not read as off")
 
@@ -350,9 +241,6 @@ do
         check(DFE ~= nil, "frame fade engine: ...and returns the resolver")
 
         if DFE then
-            -- The shape a switched-off profile is in: every fade value the group
-            -- can hold set to something that is NOT 1, so a resolver that read a
-            -- slider instead of the gate returns that number and is caught.
             local function fadeDB(extra)
                 local d = {
                     frameFadeEnabled          = false,
@@ -364,10 +252,6 @@ do
                 for k, v in pairs(extra or {}) do d[k] = v end
                 return d
             end
-            -- ...and the same table with the key GONE. Not `{ frameFadeEnabled =
-            -- nil }` above: a nil in a table constructor writes nothing, so the
-            -- base's `false` would have survived and every un-migrated assertion
-            -- below would have been testing the off case a second time.
             local function unmigrated(extra)
                 local d = fadeDB(extra)
                 d.frameFadeEnabled = nil
@@ -378,28 +262,21 @@ do
                "frame fade engine: off with the split off resolves to 1, not the global slider")
             eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true })), 1,
                "frame fade engine: ...off with the split on too, not the out-of-combat value")
-
             S.combat = true
             eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true })), 1,
                "frame fade engine: ...and in combat, not the in-combat value")
             S.combat = false
-
             S.instance = true
             eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true,
                                               frameFadeInstanceUsesCombat = true })), 1,
                "frame fade engine: ...and inside an instance")
             S.instance = false
-
             S.hovered = true
             eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true,
                                               frameFadeHoverUsesCombat = true })), 1,
                "frame fade engine: ...and under the mouse")
             S.hovered = false
 
-            -- NIL -- the table the migration has not reached -- answers exactly
-            -- as it did before the key existed. Asserted against the VALUES, so a
-            -- gate written `not db.frameFadeEnabled` returns 1 here and fails all
-            -- three.
             eq(DFE:GetFrameBaseAlpha(unmigrated()), 0.10,
                "frame fade engine: a nil enable still fades -- the global slider")
             eq(DFE:GetFrameBaseAlpha(unmigrated({ frameFadeSplitCombat = true })), 0.20,
@@ -408,9 +285,6 @@ do
             eq(DFE:GetFrameBaseAlpha(unmigrated({ frameFadeSplitCombat = true })), 0.30,
                "frame fade engine: ...and the in-combat value in combat")
             S.combat = false
-
-            -- ...and so does an explicit true, which is what a migrated profile
-            -- holds.
             eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeEnabled = true })), 0.10,
                "frame fade engine: an enabled fade is untouched by the gate")
         end
@@ -418,10 +292,7 @@ do
 end
 
 -- ============================================================
--- 2. PERMANENT MOVER -- the page's textbook conversion
--- One checkbox meaning "am I doing anything" and fifteen controls greying
--- behind it. The tick is HOISTED onto the row, so the builder is told to skip
--- it -- and the fifteen it still mounts is what the badge claims.
+-- 2. PERMANENT MOVER -- its enable is the card's header tick
 -- ============================================================
 local PERM_MOVER = {
     { "checkbox",    "Enable Permanent Mover", "permanentMover",                  30 },
@@ -442,284 +313,104 @@ local PERM_MOVER = {
     { "slider",      "Pull Timer Duration",    "permanentMoverPullTimerDuration", 55 },
 }
 
+print("-- Frame page: Permanent Mover")
 do
     local body = builderBody("BuildPermanentMoverGroup")
     checkCensus(census(body), PERM_MOVER, "permanent mover")
-
-    -- The hoist, and the arithmetic it implies. The checkbox is still IN the
-    -- builder -- the classic box needs it -- behind the one flag the popout
-    -- passes, so the pane mounts one fewer than the census.
-    check(body:find("if not tools2.hoistToggle then") ~= nil,
-          "permanent mover: the enable checkbox is skipped when the row has hoisted it")
-    local declared = tonumber(SRC:match("local PERM_MOVER_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "permanent mover: the page declares the row's count in one place")
-    eq(declared, #PERM_MOVER - 1, "permanent mover: ...the census less the hoisted tick")
-
-    -- The thirteen dependents keep greying on the key in BOTH layouts. The row's
-    -- toggle gate covers the pane, but the predicates are what the classic box
-    -- greys with, and one builder serves both -- so losing them would silently
-    -- ungrey the classic layout.
+    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
+          "permanent mover: the enable is skipped when the header carries it")
     local greys = 0
-    for _ in body:gmatch("disableOn%s*=%s*function%(d%) return not d%.permanentMover end") do
-        greys = greys + 1
-    end
-    eq(greys, #PERM_MOVER - 1, "permanent mover: every control but the enable greys on it")
+    for _ in body:gmatch("disableOn%s*=%s*function%(d%) return not d%.permanentMover end") do greys = greys + 1 end
+    eq(greys, #PERM_MOVER - 1, "permanent mover: every control but the enable greys on it, in both layouts")
 
-    local opts = rowOpts("Permanent Mover")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"permanentMover"%s*}') ~= nil,
-          "permanent mover: the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*PermMoverSummary") ~= nil,
-          "permanent mover: ...it declares a summary")
-    check(opts:find("count%s*=%s*PERM_MOVER_COUNT") ~= nil,
-          "permanent mover: ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*OnPermMoverToggle") ~= nil,
-          "permanent mover: ...and a commit that is not a page rebuild")
-
-    -- The hoisted toggle is re-registered with search under the SAME label and
-    -- key the suppressed checkbox carried, or the setting becomes unfindable in
-    -- the popout layout while staying findable in classic.
-    local hoisted = SRC:match('RegisterHoistedToggle%(moverRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
-    eq(hoisted, PERM_MOVER[1][2], "permanent mover: the hoisted toggle is re-registered under its own label")
-    local _, hoistedKey = SRC:match('RegisterHoistedToggle%(moverRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
-    eq(hoistedKey, PERM_MOVER[1][3], "permanent mover: ...and its own db key")
-
-    -- ONE builder, BOTH layouts, same as Frame Fade.
     local calls = 0
-    for _ in SRC:gmatch("BuildPermanentMoverGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "permanent mover: declared once, mounted twice -- classic box and popout pane")
+    for _ in PAGE:gmatch("BuildPermanentMoverGroup%(") do calls = calls + 1 end
+    eq(calls, 3, "permanent mover: declared once, mounted twice -- classic box and card")
+    check(PAGE:find("BuildPermanentMoverGroup({ group = permMoverGroup, parent = self.child })", 1, true) ~= nil
+      and PAGE:find("Add(permMoverGroup, nil, 2)", 1, true) ~= nil,
+          "permanent mover: classic mounts it exactly as it always did, in column 2")
 
-    -- The row's own band: chromeless, built at a COLUMN's width (never a literal) and
-    -- placed in column 1 under the Layout band, so its right edge lands on the same
-    -- corridor that band's rows do. It spanned both columns until the page gained its
-    -- two-column layout.
-    check(SRC:find("permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
-          "permanent mover: the band is chromeless, because the row IS the surface")
-    -- ...at the width the layout pass will stretch it to, asked for through the
-    -- shared helper rather than computed here. Section 5 pins that all three of
-    -- the page's bands ask the same way; the expression behind the name is
-    -- test_popout_page_tools' claim.
-    check(SRC:find("moverBandW", 1, true) == nil,
-          "permanent mover: ...at the width the layout pass will stretch it to")
-    check(SRC:find("Add(permMoverBand, nil, 1)", 1, true) ~= nil,
-          "permanent mover: ...and filling column 1, under the Layout band")
-    -- ...and NO header above it. The row's own label already says the words.
-    -- A HEADER, AND NOT THE ROW'S OWN NAME. The band shipped headerless (the
-    -- row already says "Permanent Mover") and in game the row read as floating
-    -- alone under 40px of bare air; the header fills that air the way
-    -- "Appearance" fills the same air above it. "Movement" names what the
-    -- section is about; a header repeating the row's label would be the page
-    -- saying it twice, which is the reason the band had no header before.
-    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)', 1, true) ~= nil,
-          "permanent mover: the band carries a header, so the row does not float alone")
-    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]', 1, true) == nil,
-          "permanent mover: ...and the header is not the row's own name said twice")
+    local block, call = sectionBlock("Permanent Mover", "BuildPermanentMoverGroup({")
+    check(call:find('OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {', 1, true) ~= nil,
+          "permanent mover: a card keyed frame_permanentmover in column 1 -- behaviour, so no pin")
+    check(call:find('db = db, key = "permanentMover", label = L["Enable Permanent Mover"]', 1, true) ~= nil,
+          "permanent mover: the header tick is bound to permanentMover under the checkbox's own name")
+    check(call:find("DF:UpdatePermanentMoverVisibility() self:RefreshStates()", 1, true) ~= nil
+      and call:find("RefreshCurrentPage", 1, true) == nil,
+          "permanent mover: ...committing what the checkbox ran plus a state pass, never a rebuild")
+    check(block:find("BuildPermanentMoverGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "permanent mover: mounts the builder plus hoistToggle for its header tick")
+
+    -- The card sits under a header naming what it is ABOUT, never its own name.
+    local headerAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Movement"]), 40, 1)', 1, true)
+    local cardAt   = PAGE:find('OpenSection(L["Permanent Mover"]', 1, true)
+    check(headerAt and cardAt and headerAt < cardAt, "permanent mover: the Movement header opens its run in column 1")
+    check(PAGE:find('CreateHeader(self.child, L["Permanent Mover"]), 40, 1)', 1, true) == nil,
+          "permanent mover: ...and the header is not the card's own name said twice")
 end
 
 -- ============================================================
--- 3. THE PAGE IS ROWS -- WHERE THE THREE BANDS ARE ADDED
---
--- Danders: "make the whole frame page using popouts -- I want to see the
--- difference." So every group on this page is a feature row now, in one of three
--- full-width bands, and the popout layout adds nothing else at all.
---
--- ☠ THAT SUSPENDS THE PRIMARIES-STAY RULE, deliberately and for this page only.
--- Frame Size and Layout Direction are what a new user opens the page for, and
--- normally a primary does not go behind a click. They are rows here so the
--- comparison is honest -- a page that kept two boxes at the top would be
--- answering a softer question -- and the revert is one tag away because the
--- classic layout is byte-identical either way, which is what section 4 pins.
---
--- The ORDER note that used to live here is still true and no longer applies:
--- layoutCol "both" is a sync point (LayoutPage drops both columns to the lower of
--- the two), so a band added into the middle of an UNBALANCED two-column flow
--- leaves a hole beside whatever was above it. There is no flow left to unbalance
--- -- a run of "both" widgets over two equal columns is a plain single stack -- so
--- the order below is purely reading order.
---
--- ⚠ WHAT THIS TEST CAN AND CANNOT SEE. Add() order IS page order (LayoutPage
--- walks self.children), so the source order of the Add calls is the claim. It is
--- not a geometry test: the page cannot be built headlessly, so the widths are on
--- the in-game checklist.
+-- 3. THE BORDER PAIR -- two cards, two header ticks, one gate between them
 -- ============================================================
-
--- The Frame page's own source, from its copy button to the See Also bar at its
--- foot. Scoped because `sizeGroup`, `layoutGroup` and `appearanceGroup` are the
--- house names for those boxes and OTHER pages in this same file use them.
-local function framePage()
-    local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
-    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
-    check(a ~= nil and b ~= nil and b > a, "the Frame page builder is locatable by its own ends")
-    return SRC:sub(a or 1, b or 1)
-end
-
--- The ten groups that became rows or were already rows, with the row LABEL each
--- one wears in the popout layout and the classic box variable it keeps. Named in
--- band order, which is also source order.
---
--- ⚠ Raid Layout Mode carries a toggle and NO count; every other converted group
--- is toggle-less with a count. Both facts are per-row claims, checked in
--- section 4 -- this list is only the roster.
-local LAYOUT_ROWS = {
-    { "sizeGroup",        "Frame Size"            },
-    { "layoutGroup",      "Layout Direction"      },
-    { "raidModeGroup",    "Raid Layout Mode"      },
-    { "groupLayoutGroup", "Group Layout Settings" },
-    { "groupVisGroup",    "Group Visibility"      },
-    { "groupOrderGroup",  "Group Display Order"   },
-    { "flatGridGroup",    "Flat Grid Settings"    },
-}
-
+print("-- Frame page: Border and Border Shadow")
 do
-    local page = framePage()
+    local border = builderBody("BuildBorderGroup")
+    check(border:find("noShowToggle = tools2.hoistToggles or nil,", 1, true) ~= nil,
+          "border: the toolkit's own Show Border is skipped when the header carries it")
+    local shadow = builderBody("BuildBorderShadowGroup")
+    check(shadow:find("noEnableToggle = tools2.hoistToggles or nil,", 1, true) ~= nil
+      and shadow:find("disableWhen  = tools2.shadowDisableWhen,", 1, true) ~= nil,
+          "border shadow: its enable is skipped the same way, and it takes Show Border's grey from outside")
 
-    local adds = {}
-    for name, col in page:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
-        adds[#adds + 1] = { name = name, col = col }
+    -- Classic: the one box, the one header, both builders back to back.
+    check(PAGE:find("if classicLayout then\n            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)\n        end", 1, true) ~= nil,
+          "classic: the Appearance box is built in classic only")
+    check(PAGE:find('if classicLayout then\n            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)\n        end', 1, true) ~= nil,
+          "classic: ...with its header, in classic only")
+    check(PAGE:find("BuildBorderGroup(borderTools)\n            BuildBorderShadowGroup(borderTools)", 1, true) ~= nil
+      and PAGE:find("shadowDisableWhen = BorderOff,", 1, true) ~= nil
+      and PAGE:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true) ~= nil,
+          "classic: ...mounting both builders into it, with the shadow gate, in column 2")
+
+    local bblock, bcall = sectionBlock("Border", "BuildBorderGroup({")
+    check(bcall:find('OpenSection(L["Border"], "frame_border", 2, BorderSummary, nil, nil, BuildBorderGroup, {', 1, true) ~= nil,
+          "border: a card keyed frame_border in column 2, pinnable")
+    check(bcall:find('db = db, key = "frameShowBorder", label = L["Show Border"]', 1, true) ~= nil
+      and bcall:find("isOn = function(d) return d.frameShowBorder ~= false end", 1, true) ~= nil
+      and bcall:find("onChanged = OnBorderToggle", 1, true) ~= nil,
+          "border: the header tick is frameShowBorder (absent reads as on), committing OnBorderToggle")
+    check(bblock:find("BuildBorderGroup({ group = borderBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggles = true, })", 1, true) ~= nil,
+          "border: mounts the builder with hoistToggles")
+
+    local sblock, scall = sectionBlock("Border Shadow", "BuildBorderShadowGroup({")
+    check(scall:find('OpenSection(L["Border Shadow"], "frame_bordershadow", 2, ShadowSummary, ShadowGatedOff, nil, BuildBorderShadowPinned, {', 1, true) ~= nil,
+          "border shadow: a card keyed frame_bordershadow in column 2, greying with Show Border, pinnable")
+    check(scall:find('db = db, key = "frameBorderShadowEnabled", label = L["Border Shadow"]', 1, true) ~= nil
+      and scall:find("disableOn = ShadowGatedOff", 1, true) ~= nil,
+          "border shadow: the header tick is frameBorderShadowEnabled, and greys while Show Border is off")
+    check(sblock:find("BuildBorderShadowGroup({ group = shadowBand, parent = self.child, refreshStates = function() self:RefreshStates() end, shadowDisableWhen = BorderOff, hoistToggles = true, })", 1, true) ~= nil,
+          "border shadow: mounts the builder with the shadow gate and hoistToggles")
+    -- ☠ A pinned panel mounts the section's builder with the standard fields
+    -- only -- so the pin goes through a wrapper that hands it the same gate.
+    local pinned = PAGE:match("local function BuildBorderShadowPinned%(tools2%)(.-)\n            end")
+    check(pinned ~= nil and pinned:find("tools2.shadowDisableWhen = BorderOff", 1, true) ~= nil
+      and pinned:find("BuildBorderShadowGroup(tools2)", 1, true) ~= nil,
+          "border shadow: the pin mounts the same builder with the same gate")
+
+    local toggle = PAGE:match("local function OnBorderToggle%(%)(.-)\n            end")
+    check(toggle ~= nil and toggle:find("ApplyBorder()", 1, true) ~= nil
+      and toggle:find("self:RefreshStates()", 1, true) ~= nil and toggle:find("RefreshCurrentPage", 1, true) == nil,
+          "border: the ticks' commit applies, re-runs the state pass, never rebuilds")
+    for _, fn in ipairs({ "BorderSummary", "ShadowSummary" }) do
+        check(PAGE:find("local function " .. fn .. "(d)", 1, true) ~= nil,
+              "summary: " .. fn .. " takes the db table and nothing else")
     end
-    check(#adds >= 10, "order: the page's Add calls are readable (" .. #adds .. " found)")
-
-    local function indexOf(name, col)
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then return i end
-        end
-    end
-    -- ⚠ THE LAST MATCH, FOR A NAME THE PAGE ADDS TWICE. appearanceGroup is added at
-    -- column 2 by BOTH layouts now -- classic has always put it there, and the popout
-    -- layout does too since the page gained two columns -- and the classic arm comes
-    -- first in source order. Taking the first match would measure the popout band's
-    -- position against the classic one and read the bands as out of order.
-    local function indexOfLast(name, col)
-        local found
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then found = i end
-        end
-        return found
-    end
-
-    -- ---- the three bands, in reading order, at the foot ---------------
-    -- ⚠ NUMBERED, NOT "both". Layout and the mover fill column 1, Appearance fills
-    -- column 2; they spanned both until this page gained its two-column layout.
-    local bandL = indexOfLast("layoutBand", "1")
-    local bandA = indexOfLast("appearanceGroup", "2")
-    local bandM = indexOfLast("permMoverBand", "1")
-    check(bandL ~= nil, "order: the Layout band is added")
-    check(bandA ~= nil, "order: ...and the Appearance band")
-    check(bandM ~= nil, "order: ...and the Permanent Mover band")
-    check(bandL and bandA and bandL < bandA, "order: Layout comes before Appearance")
-    check(bandA and bandM and bandA < bandM, "order: ...and Appearance before the mover")
-
-    -- ...and they are the LAST three, which is the whole of "the popout layout
-    -- adds nothing else": everything before them is inside a classicLayout arm.
-    local n = #adds
-    check(bandL == n - 2 and bandA == n - 1 and bandM == n,
-          "order: the three bands are the last three Adds on the page")
-
-    -- The Add trio is guarded, so the classic layout adds none of them.
-    check(SRC:find("Add(layoutBand, nil, 1)", 1, true) ~= nil
-          and SRC:find("Add(appearanceGroup, nil, 2)", 1, true) ~= nil
-          and SRC:find("Add(permMoverBand, nil, 1)", 1, true) ~= nil,
-          "order: the bands are added only in the popout layout")
-
-    -- ☠ A NUMBERED COLUMN IS EITHER CLASSIC'S, OR A BAND THAT FILLS ITS COLUMN.
-    -- The original claim was that nothing in the popout layout sat in a numbered column
-    -- at all, and the reason was sound: the layout pass only resizes an INDENTED widget,
-    -- so a full-width band dropped into a column keeps the width it was built at and
-    -- overhangs its neighbour -- "the one narrow box on a page of plates", or worse, one
-    -- lying across the other column.
-    -- ⇒ The page has two columns now, so the test becomes the CONDITION rather than the
-    -- prohibition: a numbered Add outside the classic arm is allowed exactly when the
-    -- page also declares `<name>.layoutColFill = true`, which is what makes the pass own
-    -- its width. A new group added at column 1 without that still fails here, which is
-    -- the case the original was written to catch.
-    local CLASSIC_ONLY = {
-        appearanceGroup = true, frameFadeGroup = true, permMoverGroup = true,
-    }
-    for _, e in ipairs(LAYOUT_ROWS) do CLASSIC_ONLY[e[1]] = true end
-    for _, e in ipairs(adds) do
-        if e.col == "1" or e.col == "2" then
-            local fills = SRC:find(e.name .. ".layoutColFill = true", 1, true) ~= nil
-            check(CLASSIC_ONLY[e.name] == true or fills,
-                  "order: " .. e.name .. " is at a numbered column, so it must be classic-only"
-                  .. " or declare layoutColFill")
-        end
-    end
-
-    -- ...and every one of the ten IS added at a numbered column, which is what
-    -- says the classic page still has all of them.
-    for _, e in ipairs(LAYOUT_ROWS) do
-        check(indexOf(e[1], "1") ~= nil or indexOf(e[1], "2") ~= nil,
-              "order: " .. e[1] .. " is still added as a classic box")
-    end
-
-    -- ---- the classic column assignments, unchanged -------------------
-    -- The one thing this pass was not allowed to move. Group Display Order is
-    -- column 2 and everything else in the layout chain is column 1, exactly as
-    -- before -- which is also why the BAND's row order is the page's old source
-    -- order rather than a tidied one (Group Layout and Flat Grid would read
-    -- better adjacent, and moving one past Group Visibility would have moved its
-    -- classic Add with it).
-    local CLASSIC_COL = {
-        sizeGroup = "1", layoutGroup = "1", raidModeGroup = "1",
-        groupLayoutGroup = "1", groupVisGroup = "1", groupOrderGroup = "2",
-        flatGridGroup = "1", appearanceGroup = "2", frameFadeGroup = "2",
-        permMoverGroup = "2",
-    }
-    for name, col in pairs(CLASSIC_COL) do
-        check(indexOf(name, col) ~= nil,
-              "order: the classic " .. name .. " still goes to column " .. col)
-    end
-
-    -- ---- and the band ROW order is the source order ------------------
-    -- A row is mounted with layoutBand:AddWidget, so the order of those calls IS
-    -- the band's order. Read as positions so a reordering fails here.
-    local prev = 0
-    for _, e in ipairs(LAYOUT_ROWS) do
-        local at = page:find('label   = L["' .. e[2] .. '"]', 1, true)
-                or page:find('label    = L["' .. e[2] .. '"]', 1, true)
-        check(at ~= nil, "band order: the " .. e[2] .. " row is declared")
-        check(at == nil or at > prev, "band order: ...after the row above it")
-        prev = at or prev
-    end
+    check(PAGE:find("not (shown and ", 1, true) == nil, "summary: no card subtracts a plate set")
 end
 
 -- ============================================================
--- 4. THE SEVEN CONVERSIONS
---
--- One builder per group, mounted TWICE -- into the classic box and into the
--- popout pane -- which is what makes "classic is identical to main" a structural
--- fact rather than a promise. Each is checked the way Frame Fade and Permanent
--- Mover are above: the widget census it had inline, the declared count against
--- what the builder mounts, and the row's own declarations.
+-- 4. THE LAYOUT CARDS
 -- ============================================================
-
--- What every converted group on this page has in common, so the seven blocks
--- below only have to state what is true of themselves.
-local function checkShared(builder, rowLabel, wide)
-    -- ONE builder, BOTH layouts. Three occurrences: the declaration and the two
-    -- mounts.
-    local calls = 0
-    for _ in SRC:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, at the literal every other
-    -- classic-only box on this page uses.
-    local classicBox = SRC:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. rowLabel:gsub("%p", "%%%0") .. "\"%]%)")
-    check(classicBox ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-
-    -- The row is a member of the Layout band and carries the page's eager-holder
-    -- discipline: content built at page-build time, keys claimed off it, the
-    -- amber tick wired to those keys.
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window   = DF.GUIFrame", 1, true) ~= nil
-       or opts:find("window  = DF.GUIFrame", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
-end
-
--- 4.1 FRAME SIZE -- the first primary to go behind a click.
 local FRAME_SIZE = {
     { "slider", "Frame Width",   "frameWidth",   55 },
     { "slider", "Frame Height",  "frameHeight",  55 },
@@ -727,201 +418,15 @@ local FRAME_SIZE = {
     { "slider", "Frame Scale",   "frameScale",   55 },
     { "slider", "Frame Spacing", "frameSpacing", 55 },
 }
-do
-    local body = builderBody("BuildFrameSizeGroup")
-    checkCensus(census(body), FRAME_SIZE, "frame size")
-    checkShared("BuildFrameSizeGroup", "Frame Size")
-
-    local declared = tonumber(SRC:match("local FRAME_SIZE_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "frame size: the page declares the row's count in one place")
-    eq(declared, #FRAME_SIZE, "frame size: ...and it is what the builder mounts")
-
-    local opts = rowOpts("Frame Size")
-    check(opts:find("toggle", 1, true) == nil,
-          "frame size: the row declares no toggle -- there is no 'am I doing anything' here")
-    check(opts:find("summary%s*=%s*FrameSizeSummary") ~= nil,
-          "frame size: ...it does declare a summary")
-    check(opts:find("count%s*=%s*FRAME_SIZE_COUNT") ~= nil,
-          "frame size: ...and the declared count, not a literal")
-
-    -- The summary prints the size with an ASCII x, for the reason the border
-    -- summary spells out L["Alpha"]: the settings font has no multiplication
-    -- sign, and the Permanent Mover row already prints its handle size this way.
-    local sum = SRC:match("local function FrameSizeSummary%(d%)(.-)local FRAME_SIZE_COUNT")
-    check(sum ~= nil, "frame size: the summary is a named function on the page")
-    if sum then
-        check(sum:find('"%%dx%%d"') ~= nil, "frame size: ...printing WxH in ASCII")
-        check(sum:find("\\195\\151", 1, true) == nil, "frame size: ...and never the multiplication sign")
-        -- The other three items appear only when they are doing something, and
-        -- "doing something" is asked of the defaults ENGINE rather than compared
-        -- against a number copied out of Config.lua.
-        check(sum:find("D:IsModified(d, key)", 1, true) ~= nil,
-              "frame size: ...and the conditional items ask the defaults engine")
-        for _, k in ipairs({ "frameScale", "framePadding", "frameSpacing" }) do
-            check(sum:find('changed("' .. k .. '")', 1, true) ~= nil,
-                  "frame size: ..." .. k .. " is conditional on being non-default")
-        end
-        -- Four items at most, which is the convention: the size plus three.
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        eq(items, 4, "frame size: at most four items, per the summary convention")
-    end
-end
-
--- 4.2 LAYOUT DIRECTION -- three dropdowns, at most two ever visible.
 local LAYOUT_DIR = {
     { "dropdown", "Growth Direction", "growDirection", 55 },
     { "dropdown", "Growth Direction", "growDirection", 55 },
     { "dropdown", "Frames Grow From", "growthAnchor",  55 },
 }
-do
-    local body = builderBody("BuildLayoutDirectionGroup")
-    checkCensus(census(body), LAYOUT_DIR, "layout direction")
-    checkShared("BuildLayoutDirectionGroup", "Layout Direction")
-
-    local declared = tonumber(SRC:match("local LAYOUT_DIR_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "layout direction: the page declares the row's count in one place")
-    eq(declared, #LAYOUT_DIR, "layout direction: ...and it is what the builder mounts")
-
-    -- ☠ THE TWO INVERTED LABEL MAPS SURVIVED THE MOVE. This is the regression the
-    -- ☠☠ note above the dropdowns exists to prevent, and moving them into a
-    -- builder is exactly the kind of edit that would quietly unify them.
-    --
-    -- ⚠ THEY LIVE AT PAGE SCOPE NOW, IN ONE FUNCTION, because the row HOISTS this
-    -- dropdown onto its own plate and a third copy of a map whose whole hazard is
-    -- that it has an inverse would be the same bug one edit away. So the claim is
-    -- read where the maps are, and the builder is checked for having no copy of
-    -- its own -- which is strictly more than the old body search said.
-    local maps = SRC:match("local function GrowDirectionOptions%(grouped%)(.-)\n        end")
-    check(maps ~= nil, "layout direction: the two dialects are one page-scope function")
-    if maps then
-        check(maps:find('HORIZONTAL = L["Columns"], VERTICAL = L["Rows"]', 1, true) ~= nil,
-              "layout direction: the grouped-raid map is unchanged")
-        check(maps:find('HORIZONTAL = L["Rows"], VERTICAL = L["Columns"]', 1, true) ~= nil,
-              "layout direction: ...and the flat/party map is still its inverse")
-    end
-    check(body:find('HORIZONTAL = L["', 1, true) == nil,
-          "layout direction: ...with no copy of either left in the builder")
-    check(body:find("GrowDirectionOptions(false)", 1, true) ~= nil
-      and body:find("GrowDirectionOptions(true)", 1, true) ~= nil,
-          "layout direction: the builder asks for both dialects by name")
-
-    -- ☠ AND SO IS THE ANCHOR MAP, for the same reason one control along: a
-    -- START/CENTER/END map written out twice is exactly the drift the two
-    -- growth-direction dialects carry a ☠☠ about.
-    --
-    -- ⚠ IT HAS ONE READER AGAIN. The row hoisted Frames Grow From onto its plate
-    -- for a release, which is why the map was lifted out; the whole pane is on
-    -- the plate now (see the inline census below) and the hoisted twin is gone,
-    -- so the pane's dropdown is the only caller. The function stays, because one
-    -- home for a map with an inverse is right whatever the caller count is.
-    check(SRC:find("local function GrowthAnchorOptions()", 1, true) ~= nil,
-          "layout direction: the anchor map is a page-scope function")
-    check(body:find("local anchorOptions = GrowthAnchorOptions()", 1, true) ~= nil,
-          "layout direction: ...which the pane's own dropdown asks for")
-    check(SRC:find("options = GrowthAnchorOptions()", 1, true) == nil,
-          "layout direction: ...and no hoisted twin declares it a second time")
-    -- ...and the map itself lives in exactly one place. Two literals would be
-    -- two chances for a fourth option to reach only one of the dropdowns.
-    local anchorLiterals = 0
-    for _ in SRC:gmatch('_order = { "START", "CENTER", "END" }, START= MAIN_START') do
-        anchorLiterals = anchorLiterals + 1
-    end
-    eq(anchorLiterals, 1, "layout direction: ...written out once and once only")
-
-    -- ☠ THE FOOTER MUST NOT REBUILD THE PAGE. OnGrowthDirectionChanged defers a
-    -- GUI:RefreshCurrentPage, and Hold: Defaults releases on the footer button's
-    -- own mouse-up -- a rebuild between the press and the release would retire
-    -- that button and leave the user's settings sitting at the defaults with
-    -- nothing left to restore them.
-    local apply = SRC:match("local function ApplyLayoutDirection%(%)(.-)\n            end")
-    check(apply ~= nil, "layout direction: the group's apply is a named function")
-    if apply then
-        check(apply:find("RefreshCurrentPage", 1, true) == nil,
-              "layout direction: ...and it never rebuilds the page")
-    end
-    check(SRC:find("WireFooter(dirRow, ApplyLayoutDirection)", 1, true) ~= nil,
-          "layout direction: ...which is what the footer runs")
-
-    local opts = rowOpts("Layout Direction")
-    check(opts:find("toggle", 1, true) == nil,
-          "layout direction: the row declares no toggle")
-    check(opts:find("summary%s*=%s*LayoutDirectionSummary") ~= nil,
-          "layout direction: ...it does declare a summary")
-    check(opts:find("count%s*=%s*LAYOUT_DIR_COUNT") ~= nil,
-          "layout direction: ...and the declared count, not a literal")
-
-    -- The summary reads the table it is handed, not the build-time edge words.
-    local sum = SRC:match("local function LayoutDirectionSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "layout direction: the summary is a named function on the page")
-    if sum then
-        check(sum:find("MAIN_START", 1, true) == nil and sum:find("CROSS_START", 1, true) == nil,
-              "layout direction: ...and never the build-time edge words, which go stale")
-        check(sum:find("d.raidUseGroups", 1, true) ~= nil,
-              "layout direction: ...it picks the dialect the dropdown would")
-    end
-end
-
--- 4.3 RAID LAYOUT MODE -- the one row whose TOGGLE is the group.
 local RAID_MODE = {
     { "checkbox", "Use Group-Based Layout", "raidUseGroups", 30 },
     { "label",    "Enabled: Players organized by raid groups (1-8).\\nDisabled: All players in one flat grid.", "(none)", 45 },
 }
-do
-    local body = builderBody("BuildRaidModeGroup")
-    checkCensus(census(body), RAID_MODE, "raid layout mode")
-    checkShared("BuildRaidModeGroup", "Raid Layout Mode")
-
-    check(body:find("if not tools2.hoistToggle then") ~= nil,
-          "raid layout mode: the checkbox is skipped when the row has hoisted it")
-
-    local opts = rowOpts("Raid Layout Mode")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"raidUseGroups"%s*}') ~= nil,
-          "raid layout mode: the row's tick is the group's own key")
-    check(opts:find("offText%s*=%s*L%[\"Flat\"%]") ~= nil,
-          "raid layout mode: ...and OFF is spelled Flat, because both states are a layout")
-    check(opts:find("count", 1, true) == nil,
-          "raid layout mode: no count -- there are no controls behind this row, only a blurb")
-
-    -- ☠ NO FOOTER. Reset Group and Hold: Defaults write through the generic
-    -- engine, and raidUseGroups cannot be written that way: flipping it has to
-    -- invert growDirection at the same moment or the raid silently re-orients,
-    -- and that compensation is only correct for a deliberate toggle.
-    check(SRC:find("WireFooter(raidModeRow", 1, true) == nil,
-          "raid layout mode: the row has no footer, because its key cannot be reset generically")
-    check(SRC:find("ClaimKeys(raidModeRow", 1, true) == nil,
-          "raid layout mode: ...and claims nothing, for the same reason")
-
-    -- The hoisted toggle is re-registered with search under its own label and key.
-    check(SRC:find('RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups"', 1, true) ~= nil,
-          "raid layout mode: the hoisted toggle keeps its search entry")
-
-    -- ☠ THE REBUILD IS DEFERRED IN THE POPOUT LAYOUT AND IMMEDIATE IN CLASSIC.
-    -- The row's write path runs onToggle and THEN row.Refresh() on the row it
-    -- just wrote through, so a synchronous rebuild would leave that Refresh
-    -- landing on a retired frame.
-    check(SRC:find("local function OnRaidModeToggle()", 1, true) ~= nil,
-          "raid layout mode: the popout commit is a named function")
-    local commit = SRC:match("local function OnRaidModeToggle%(%)(.-)\n            end")
-    check(commit ~= nil and commit:find("C_Timer.After(0", 1, true) ~= nil,
-          "raid layout mode: ...and its page rebuild is deferred a frame")
-    check(body:find("if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end", 1, true) ~= nil,
-          "raid layout mode: ...while the classic checkbox rebuilds immediately, as it always did")
-
-    -- The apply is shared by both, so the growDirection compensation cannot end
-    -- up in one layout and not the other.
-    check(SRC:find("local function ApplyRaidUseGroups()", 1, true) ~= nil,
-          "raid layout mode: the toggle's work is named once for both layouts")
-    local apply = SRC:match("local function ApplyRaidUseGroups%(%)(.-)\n        end")
-    check(apply ~= nil and apply:find('db.growDirection = (db.growDirection == "HORIZONTAL") and "VERTICAL" or "HORIZONTAL"', 1, true) ~= nil,
-          "raid layout mode: ...including the growDirection compensation")
-
-    -- RAID ONLY, on the ROW, exactly as it was on the box.
-    check(SRC:find('raidModeRow.hideOn = function() return GUI.SelectedMode ~= "raid" end', 1, true) ~= nil,
-          "raid layout mode: the row is raid-only, the same predicate the box carried")
-end
-
--- 4.4 GROUP LAYOUT SETTINGS -- and the two named refreshes that had to move.
 local GROUP_LAYOUT = {
     { "label",    "(none)",              "(none)",              25 },
     { "slider",   "Group Spacing",       "raidGroupSpacing",    55 },
@@ -930,123 +435,14 @@ local GROUP_LAYOUT = {
     { "dropdown", "Center Mode",         "raidGroupCenterMode", 55 },
     { "dropdown", "Players Grow From",   "raidPlayerAnchor",    55 },
 }
-do
-    local body = builderBody("BuildGroupLayoutGroup")
-    -- ⚠ SIX, NOT SEVEN. The census reader knows the six shared FACTORIES; the
-    -- corner picker is CreateAnchorGrid and is checked by name below. It is still
-    -- a control the pane mounts, which is why the declared count is seven.
-    checkCensus(census(body), GROUP_LAYOUT, "group layout")
-    checkShared("BuildGroupLayoutGroup", "Group Layout Settings")
-    check(body:find('GUI:CreateAnchorGrid(parent, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth"', 1, true) ~= nil,
-          "group layout: the corner picker is mounted, on both its keys")
-
-    local declared = tonumber(SRC:match("local GROUP_LAYOUT_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "group layout: the page declares the row's count in one place")
-    eq(declared, #GROUP_LAYOUT + 1, "group layout: ...the census plus the corner picker")
-
-    -- ☠ THE TWO NAMED REFRESHES ARE INSIDE THE BUILDER NOW, and that is the whole
-    -- of the sweep-1 finding. UpdateFramesAndGates re-asks the GROUP for a state
-    -- pass and UpdatePinMainGroup re-asks the anchor GRID for a repaint; both used
-    -- to close over the page-level box, so left outside they would have gone on
-    -- refreshing the classic branch's object -- or, in the popout layout, the
-    -- eagerly built holder rather than whichever instance the user has open.
-    check(body:find("local function UpdateFramesAndGates()", 1, true) ~= nil,
-          "group layout: the gate refresh is declared inside the builder")
-    check(body:find("if group.RefreshChildStates then group:RefreshChildStates() end", 1, true) ~= nil,
-          "group layout: ...and refreshes the group it was handed, not a captured one")
-    check(body:find("groupLayoutGroup", 1, true) == nil,
-          "group layout: ...with no reference left to the page-level box")
-    check(body:find("local function UpdatePinMainGroup()", 1, true) ~= nil,
-          "group layout: the pin commit is declared inside the builder too")
-    check(body:find("if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end", 1, true) ~= nil,
-          "group layout: ...refreshing this pane's own picker")
-
-    local opts = rowOpts("Group Layout Settings")
-    check(opts:find("toggle", 1, true) == nil, "group layout: the row declares no toggle")
-    check(opts:find("count%s*=%s*GROUP_LAYOUT_COUNT") ~= nil,
-          "group layout: ...and the declared count, not a literal")
-    check(SRC:find('groupLayoutRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end', 1, true) ~= nil,
-          "group layout: the row carries the box's own raid+groups predicate")
-end
-
--- 4.5 GROUP VISIBILITY -- eight ticks, and the only two-track pane on the page.
 local GROUP_VIS = {
     { "label",    "Choose which groups to display.", "(none)", 25 },
     { "checkbox", "Group",                           "(none)", 25 },
 }
-do
-    local body = builderBody("BuildGroupVisGroup")
-    -- ⚠ TWO ENTRIES FOR NINE WIDGETS: the eight ticks are ONE textual call inside
-    -- `for i = 1, 8`. The declared count below is what the pane actually mounts.
-    checkCensus(census(body), GROUP_VIS, "group visibility")
-    checkShared("BuildGroupVisGroup", "Group Visibility")
-    check(body:find("for i = 1, 8 do", 1, true) ~= nil,
-          "group visibility: the ticks are a loop over the eight groups")
-
-    local declared = tonumber(SRC:match("local GROUP_VIS_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "group visibility: the page declares the row's count in one place")
-    eq(declared, 9, "group visibility: ...the hint plus eight ticks")
-
-    -- The pane takes two tracks; the classic box does not, and neither does any
-    -- other pane on this page.
-    check(SRC:find("end, 2)", 1, true) ~= nil,
-          "group visibility: the pane is built with a second track")
-    check(SRC:find("groupVisHintLabel.fullRow = true", 1, true) ~= nil,
-          "group visibility: ...so the blurb takes the whole plate rather than one track")
-
-    -- ☠ THE REAL KEY IS NAMED TO ClaimKeys. The eight ticks are custom-get/set
-    -- over ONE table setting and each stamps a per-index override key the profile
-    -- does not ship, so the walk alone would leave the row with eight keys the
-    -- defaults engine cannot answer for: no amber tick, and a Reset Group that
-    -- wrote nothing while saying it had.
-    check(SRC:find('tools.ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })', 1, true) ~= nil,
-          "group visibility: the row claims the table key its ticks stand for")
-    -- ⚠ THE DOOR IS READ WHERE IT NOW LIVES. The claimer moved to the shared
-    -- helper with the rest of the machinery; the claim is unchanged -- there IS a
-    -- third argument for keys the walk cannot see, and this page is the one that
-    -- uses it.
-    check(options_file_source("GUI/Controls.lua")
-              :find("local function ClaimKeys(row, group, extra)", 1, true) ~= nil,
-          "group visibility: ...through the shared claimer's own extra-keys door")
-
-    check(SRC:find('groupVisRow.hideOn = function() return GUI.SelectedMode ~= "raid" end', 1, true) ~= nil,
-          "group visibility: the row is raid-only, the same predicate the box carried")
-end
-
--- 4.6 GROUP DISPLAY ORDER -- the drag list, in a pane.
 local GROUP_ORDER = {
     { "label",    "Drag to reorder groups. Top = first.", "(none)",               25 },
     { "checkbox", "My Group First",                       "raidPlayerGroupFirst", 25 },
 }
-do
-    local body = builderBody("BuildGroupOrderGroup")
-    checkCensus(census(body), GROUP_ORDER, "group order")
-    checkShared("BuildGroupOrderGroup", "Group Display Order")
-    check(body:find('GUI:CreateGroupOrderList(parent, db, "raidGroupDisplayOrder"', 1, true) ~= nil,
-          "group order: the drag list is mounted into the pane's own parent")
-
-    local declared = tonumber(SRC:match("local GROUP_ORDER_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "group order: the page declares the row's count in one place")
-    eq(declared, settingsIn(GROUP_ORDER) + 1, "group order: ...the census's settings plus the drag list")
-
-    -- ☠ THE LIST HAS TO REPAINT AFTER A WRITE IT DID NOT MAKE. It is bound to a
-    -- TABLE setting and the row wires Reset Group / Hold: Defaults, so without the
-    -- value-sweep alias a reset moved the raid and left the eight rows showing the
-    -- order the user had before it. Checked in the factory rather than the page,
-    -- which is where the gap was.
-    local controls = options_file_source("GUI/Controls.lua")
-    local list = controls:match("function GUI:CreateGroupOrderList(.-)\nend\n")
-    check(list ~= nil, "group order: the factory is locatable")
-    if list then
-        check(list:find("container.refreshValue = container.Refresh", 1, true) ~= nil,
-              "group order: ...and answers to the group-wide value sweep")
-    end
-
-    check(SRC:find('groupOrderRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end', 1, true) ~= nil,
-          "group order: the row carries the box's own raid+groups predicate")
-end
-
--- 4.7 FLAT GRID SETTINGS -- the other side of raidUseGroups.
 local FLAT_GRID = {
     { "label",    "All players in a unified grid. Sorting applies raid-wide.", "(none)",                    25 },
     { "slider",   "(none)",              "raidPlayersPerRow",         55 },
@@ -1056,240 +452,200 @@ local FLAT_GRID = {
     { "slider",   "Horizontal Spacing",  "raidFlatHorizontalSpacing", 55 },
     { "slider",   "Vertical Spacing",    "raidFlatVerticalSpacing",   55 },
 }
-do
-    local body = builderBody("BuildFlatGridGroup")
-    -- ⚠ TWO "(none)" LABELS, and they are not omissions: those two controls are
-    -- labelled from a VARIABLE that swaps with the growth direction (Players Per
-    -- Row / Per Column, Rows / Columns Grow From), so there is no L key at the
-    -- call site to read.
-    checkCensus(census(body), FLAT_GRID, "flat grid")
-    checkShared("BuildFlatGridGroup", "Flat Grid Settings")
 
-    local declared = tonumber(SRC:match("local FLAT_GRID_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "flat grid: the page declares the row's count in one place")
-    eq(declared, #FLAT_GRID, "flat grid: ...and it is what the builder mounts")
+local RAID      = 'function() return GUI.SelectedMode ~= "raid" end'
+local GROUPED   = 'function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end'
+local FLAT      = 'function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end'
 
-    check(SRC:find('flatGridRow.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end', 1, true) ~= nil,
-          "flat grid: the row carries the box's own raid+flat predicate")
+-- label, key, classic column, builder, golden, summary, hide gate (nil = none),
+-- pin (passes its builder).
+local LAYOUT = {
+    { label = "Frame Size", key = "frame_size", classicCol = 1, builder = "BuildFrameSizeGroup",
+      golden = FRAME_SIZE, summary = "FrameSizeSummary", pin = true },
+    { label = "Layout Direction", key = "frame_layoutdirection", classicCol = 1, builder = "BuildLayoutDirectionGroup",
+      golden = LAYOUT_DIR, summary = "LayoutDirectionSummary" },
+    { label = "Raid Layout Mode", key = "frame_raidmode", classicCol = 1, builder = "BuildRaidModeGroup",
+      golden = RAID_MODE, summary = "RaidModeSummary", hide = RAID },
+    { label = "Group Layout Settings", key = "frame_grouplayout", classicCol = 1, builder = "BuildGroupLayoutGroup",
+      golden = GROUP_LAYOUT, summary = "GroupLayoutSummary", hide = GROUPED, pin = true },
+    { label = "Group Visibility", key = "frame_groupvisibility", classicCol = 1, builder = "BuildGroupVisGroup",
+      golden = GROUP_VIS, summary = "GroupVisSummary", hide = RAID },
+    { label = "Group Display Order", key = "frame_grouporder", classicCol = 2, builder = "BuildGroupOrderGroup",
+      golden = GROUP_ORDER, summary = "GroupOrderSummary", hide = GROUPED },
+    { label = "Flat Grid Settings", key = "frame_flatgrid", classicCol = 1, builder = "BuildFlatGridGroup",
+      golden = FLAT_GRID, summary = "FlatGridSummary", hide = FLAT, pin = true },
+}
 
-    -- ...and the two mode rows are exact opposites, which is what keeps exactly
-    -- one of them in the band at a time.
-    check(SRC:find("or not db.raidUseGroups end", 1, true) ~= nil
-      and SRC:find("or db.raidUseGroups end", 1, true) ~= nil,
-          "flat grid: ...the inverse of the grouped row's, so the two never coexist")
+for _, g in ipairs(LAYOUT) do
+    print("-- Frame page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
+    local box = classicBox(g.label)
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
+
+    local block, call = sectionBlock(g.label, g.builder .. "({")
+    local want = 'OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", 1, ' .. g.summary
+    if g.hide or g.pin then want = want .. ", nil, " .. (g.hide or "nil") end
+    if g.pin then want = want .. ", " .. g.builder end
+    check(call:find(want, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column 1" .. (g.hide and ", hidden outside its mode" or "")
+          .. (g.pin and ", pinnable" or ""))
+    eq(call:find(", " .. g.builder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable from its own builder" or ": no pin"))
+    check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
+    check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          g.label .. ": mounts the builder exactly as classic does")
 end
 
--- ============================================================
--- 5. ONE WIDTH, AND NOTHING LEFT INLINE
---
--- The width batch gave every stay-inline box the page's usable width and a
--- two-track interior so the extra width bought a second control. There are no
--- stay-inline boxes any more, so the page-local INLINE_* names that batch
--- introduced are gone with them -- what STAYS is the kit half (Sections'
--- opts.bandStyle and opts.innerColumns), which other pages have yet to use.
---
--- What is pinned here is what replaced them: three bands, all built at the same
--- expression, and ten classic-only 280 boxes.
--- ============================================================
+print("-- Frame page: what the layout builders still own")
 do
-    local page = framePage()
+    -- Frame Size's summary: WxH in ASCII, the rest only when changed.
+    local sum = PAGE:match("local function FrameSizeSummary%(d%)(.-)\n            end")
+    check(sum ~= nil and sum:find('"%%dx%%d"') ~= nil and sum:find("\\195\\151", 1, true) == nil
+      and sum:find("D:IsModified(d, key)", 1, true) ~= nil,
+          "frame size: the summary prints WxH in ASCII and asks the defaults engine what changed")
 
-    -- ---- the INLINE_* names are gone from this page ------------------
-    -- Named individually rather than as a prefix scan, so this reads as a list of
-    -- things that were removed rather than as a ban on the letters.
-    for _, name in ipairs({ "INLINE_BOX", "INLINE_GRID", "INLINE_W", "INLINE_COL_1", "INLINE_COL_2" }) do
-        check(page:find(name, 1, true) == nil,
-              "inline: " .. name .. " is gone -- there are no stay-inline boxes left")
-    end
-    -- ...and the SKIN is gone with them: a band's rows are the surface, so no box
-    -- on this page asks for the plate treatment any more.
-    check(page:find("bandStyle", 1, true) == nil,
-          "inline: and nothing on the page asks for the band skin, because nothing is a box in the band's company")
+    -- Layout Direction: the two dialects, one page-scope map each.
+    local maps = PAGE:match("local function GrowDirectionOptions%(grouped%)(.-)\n        end")
+    check(maps ~= nil and maps:find('HORIZONTAL = L["Columns"], VERTICAL = L["Rows"]', 1, true) ~= nil
+      and maps:find('HORIZONTAL = L["Rows"], VERTICAL = L["Columns"]', 1, true) ~= nil,
+          "layout direction: the grouped-raid map and its inverse, once, at page scope")
+    local dir = builderBody("BuildLayoutDirectionGroup")
+    check(dir:find("GrowDirectionOptions(false)", 1, true) ~= nil and dir:find("GrowDirectionOptions(true)", 1, true) ~= nil
+      and dir:find('HORIZONTAL = L["', 1, true) == nil,
+          "layout direction: the builder asks for both dialects by name, with no copy of either")
+    local anchorLiterals = 0
+    for _ in PAGE:gmatch('_order = { "START", "CENTER", "END" }, START= MAIN_START') do anchorLiterals = anchorLiterals + 1 end
+    eq(anchorLiterals, 1, "layout direction: the anchor map is written out once")
+    local dsum = PAGE:match("local function LayoutDirectionSummary%(d%)(.-)\n            end")
+    check(dsum ~= nil and dsum:find("MAIN_START", 1, true) == nil and dsum:find("d.raidUseGroups", 1, true) ~= nil,
+          "layout direction: the summary derives its words from d, in the dropdown's dialect")
 
-    -- ---- the three bands, at ONE width ------------------------------
-    -- ⚠ THE THREE COPIES OF ONE EXPRESSION ARE GONE, which is exactly what the
-    -- note that used to stand here asked for and could not take: it was blocked on
-    -- the page owning its own machinery, and it no longer does. All three bands
-    -- ask tools.BandWidth() -- ONE name, resolved in one place -- and the
-    -- expression behind that name is pinned by test_popout_page_tools, where it
-    -- now lives, rather than retyped here.
-    --
-    -- Pinned as name-plus-call rather than as a bare count, so a band that kept
-    -- the width but lost the chromeless skin (or vice versa) still fails.
-    -- ⚠ EACH BAND NAMES ITS COLUMN. They all took the page width until this page
-    -- gained two columns; now Layout and the mover fill column 1 and Appearance fills
-    -- column 2, and BandWidth's argument is how a band says which. Still one helper and
-    -- no literals -- what is being policed is that none of them computes a width itself.
-    local function BAND(col)
-        return "GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-               .. col .. "), { chromeless = true })"
-    end
-    local BAND_COL = { layoutBand = 1, appearanceGroup = 2, permMoverBand = 1 }
-    local seen = 0
-    for _, col in pairs(BAND_COL) do
-        local from = 1
-        while true do
-            local at = page:find(BAND(col), from, true)
-            if not at then break end
-            seen, from = seen + 1, at + 1
-        end
-    end
-    -- Three: the Layout band, the Appearance band and the mover band. Any one of
-    -- them drifting is the page going back to more than one way of asking.
-    check(seen >= 3, "width: all three bands ask for the width the same way")
-    -- ...and NOTHING on the page computes it inline any more, which is the half
-    -- the count above cannot say on its own.
-    check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) == nil,
-          "width: ...through the shared helper, with no copy of the expression left on the page")
+    -- Raid Layout Mode: the tick is a MODE, so it stays in the body.
+    local raid = builderBody("BuildRaidModeGroup")
+    check(raid:find("if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end", 1, true) ~= nil,
+          "raid layout mode: the checkbox rebuilds the page, a page widget in both layouts")
+    check((select(2, sectionBlock("Raid Layout Mode", "BuildRaidModeGroup({"))):find("hoistToggle", 1, true) == nil,
+          "raid layout mode: the tick is not hoisted -- flat is a layout too, a shut card must not read Off")
+    local rsum = PAGE:match("local function RaidModeSummary%(d%)(.-)\n            end")
+    check(rsum ~= nil and rsum:find('L["Groups"]', 1, true) ~= nil and rsum:find('L["Flat"]', 1, true) ~= nil,
+          "raid layout mode: the summary names the mode either way")
+    local apply = PAGE:match("local function ApplyRaidUseGroups%(%)(.-)\n        end")
+    check(apply ~= nil and apply:find('db.growDirection = (db.growDirection == "HORIZONTAL") and "VERTICAL" or "HORIZONTAL"', 1, true) ~= nil,
+          "raid layout mode: ...and the flip still carries the growDirection compensation")
 
-    -- Each band is chromeless, because its ROWS are the surface -- and each is one
-    -- of the three names the page is allowed to build at that width.
-    for _, band in ipairs({ "layoutBand", "appearanceGroup", "permMoverBand" }) do
-        check(page:find(band .. " = " .. BAND(BAND_COL[band]), 1, true) ~= nil,
-              "width: the " .. band .. " band is chromeless, at its column's width")
-    end
+    -- Group Layout Settings: the two named refreshes are the instance's own.
+    local gl = builderBody("BuildGroupLayoutGroup")
+    check(gl:find('GUI:CreateAnchorGrid(parent, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth"', 1, true) ~= nil,
+          "group layout: the corner picker is mounted, on both its keys")
+    check(gl:find("local function UpdateFramesAndGates()", 1, true) ~= nil
+      and gl:find("if group.RefreshChildStates then group:RefreshChildStates() end", 1, true) ~= nil
+      and gl:find("groupLayoutGroup", 1, true) == nil,
+          "group layout: the gate refresh is the builder's own, never the classic box")
+    check(gl:find("if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end", 1, true) ~= nil,
+          "group layout: ...and the pin commit refreshes this instance's own picker")
 
-    -- All three bands carry a HEADER, and one rule: a header names a SECTION.
-    -- The mover band shipped without one (its one row already says "Permanent
-    -- Mover") and in game the row read as floating alone under 40px of bare
-    -- air; it now names what the section is ABOUT, which is not the row's name.
-    check(page:find('layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)', 1, true) ~= nil,
-          "width: the Layout band names itself above its rows")
-    check(page:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)', 1, true) ~= nil,
-          "width: ...and so does the one-row mover band, by what it is about")
-
-    -- ---- the classic boxes, all ten of them -------------------------
-    local bare = 0
-    for _ in page:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 10, "width: ten bare 280 boxes -- the seven converted here plus the sweep's three")
-
-    -- ---- the interior grid is per ROW, not per page -----------------
-    -- PopoutContent takes the track count as an argument and passes it straight
-    -- to the group, so a pane of sliders stays one track while the pane of eight
-    -- one-word checkboxes takes two.
-    --
-    -- ⚠ READ OUT OF THE SHARED HELPER, not the page: PopoutContent moved to
-    -- Controls.lua with the rest of the machinery. The claim is untouched -- the
-    -- track count is a per-ROW argument and not a per-page one -- so it is checked
-    -- where the argument now lives, and the page's own half (exactly one blurb
-    -- opting out of a track) stays below.
-    local controls = options_file_source("GUI/Controls.lua")
-    check(controls:find("local function PopoutContent(buildInto, innerColumns, opts)", 1, true) ~= nil,
-          "grid: the pane's track count is a per-row argument")
-    check(controls:find("innerColumns = innerColumns }", 1, true) ~= nil,
-          "grid: ...handed to the group rather than restated")
+    -- Group Visibility: eight ticks and one full-row blurb.
+    local gv = builderBody("BuildGroupVisGroup")
+    check(gv:find("for i = 1, 8 do", 1, true) ~= nil and gv:find("groupVisHintLabel.fullRow = true", 1, true) ~= nil,
+          "group visibility: a loop over the eight groups, the hint a row of its own")
     local marks = 0
-    for _ in page:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end
-    eq(marks, 1, "grid: exactly one blurb opts out of a track, in the one two-track pane")
+    for _ in PAGE:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end
+    eq(marks, 1, "group visibility: ...and the only fullRow mark on the page")
+
+    -- Group Display Order: the drag list answers to the group-wide value sweep.
+    check(builderBody("BuildGroupOrderGroup"):find('GUI:CreateGroupOrderList(parent, db, "raidGroupDisplayOrder"', 1, true) ~= nil,
+          "group order: the drag list is mounted into the builder's own parent")
+    local list = options_file_source("GUI/Controls.lua"):match("function GUI:CreateGroupOrderList(.-)\nend\n")
+    check(list ~= nil and list:find("container.refreshValue = container.Refresh", 1, true) ~= nil,
+          "group order: ...and answers to the group-wide value sweep")
+
+    -- The grouped and flat cards read opposite sides of raidUseGroups.
+    check(PAGE:find(GROUPED, 1, true) ~= nil and PAGE:find(FLAT, 1, true) ~= nil,
+          "flat grid: the grouped and flat cards' gates are inverses, so the two never coexist")
 end
 
 -- ============================================================
--- 6. THE FOOTER STRIP, AND WHAT THIS PAGE HOISTS
---
--- The popout sweep put every setting behind a click and the feedback was "less
--- overwhelming but much harder to find what ur looking for". So this page --
--- and, for now, only this page -- puts its commonly-changed controls back ON the
--- plate, named, and moves the way in to a footer strip so that a row WITH
--- hoisted controls and a row without still open the same way, from the same
--- place.
---
--- ☠ A HOISTED CONTROL IS THE PANEL'S OWN SETTING SHOWN TWICE, NEVER A COPY OF
--- DATA. Which makes this section's real job arithmetic rather than inventory:
--- every hoisted key must be one the row's OWN builder still mounts, and every
--- hoisted name must be the string that builder labels it with. If either drifts,
--- the plate is showing a second setting that merely looks like the first.
---
--- What this can and cannot see: source only, like the rest of this file. That
--- the two widgets end up bound to one table is driven in
--- test_popout_page_tools.lua; that the plate lays them out is driven in
--- test_popout_row.lua.
+-- 5. THE CARDS TOGETHER, AND THE ROW FURNITURE GONE
 -- ============================================================
-
--- Every popout row this page declares, by the variable it is assigned to. Read
--- out of the source rather than listed, so a row added without a strip fails
--- here rather than shipping as the one row on the page with its cog somewhere
--- else.
-local function pageRows()
-    local out = {}
-    for var in framePage():gmatch("local ([%w_]+) = %w+:AddWidget%(GUI:CreatePopoutRow%(") do
-        out[#out + 1] = var
-    end
-    return out
-end
-
--- One row's `tools.RegisterHoistedToggle(<row>, { ... })` block, or nil.
-local function hoistBlock(rowVar)
-    local page = framePage()
-    local a = page:find("tools.RegisterHoistedToggle(" .. rowVar .. ", {", 1, true)
-    if not a then return nil end
-    local b = page:find("\n            })", a, true)
-    return page:sub(a, (b or a) + 16)
-end
-
--- The declarations inside one, as { name, kind, key, gated }. Newlines are
--- collapsed first so a declaration split over three lines reads as one, and each
--- chunk runs to the START OF THE NEXT -- the same reader shape the widget census
--- at the top of this file uses, and for the same reason: a nested brace would
--- defeat a balanced match.
-local function hoistEntries(block)
-    local out = {}
-    if not block then return out end
-    local flat = block:gsub("%s+", " ")
-    local starts, i = {}, 1
-    while true do
-        local s = flat:find("{ name = ", i, true)
-        if not s then break end
-        starts[#starts + 1] = s
-        i = s + 1
-    end
-    for n, s in ipairs(starts) do
-        local chunk = flat:sub(s, (starts[n + 1] and starts[n + 1] - 1) or #flat)
-        out[#out + 1] = {
-            name  = chunk:match('name = L%["([^"]+)"%]'),
-            kind  = chunk:match('kind = "(%a+)"'),
-            key   = chunk:match('key = "([%w_]+)"'),
-            gated = chunk:find("visible =", 1, true) ~= nil,
-        }
-    end
-    return out
-end
-
+print("-- Frame page: the cards together")
 do
-    local page = framePage()
-    local rows = pageRows()
-    check(#rows == 11, "strip: the page declares its eleven rows (" .. #rows .. ")")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "footerStrip", "inline = true",
+                            "_COUNT", "count =", "layoutBand", "permMoverBand", "chromeless",
+                            "INLINE_BOX", "layoutDirRow", "OpenPopout", "ApplyFrameSize",
+                            "ApplyGroupOrder", "ApplyLayoutDirection", "OnRaidModeToggle",
+                            "OnFrameFadeToggle", "OnPermMoverToggle" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
+    check(SRC:find("local layoutDirRow", 1, true) == nil,
+          "furniture: ...and so is the file-scope row handle the panel reopen needed")
 
-    -- ---- every row gets the strip -----------------------------------
-    -- The whole of "the way in is in the same place on every row". A row that
-    -- hoists nothing gets it too, with its cog and its count moved onto it.
-    for _, var in ipairs(rows) do
-        local a = page:find("local " .. var .. " = ", 1, true)
-        local b = page:find("}))", a or 1, true)
-        local opts = (a and b) and page:sub(a, b + 2) or ""
-        check(opts:find("footerStrip = true", 1, true) ~= nil,
-              "strip: " .. var .. " declares the footer strip")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Frame Size | Border | Border Shadow | Frame Fade | Layout Direction | Raid Layout Mode | Group Layout Settings | Group Visibility | Group Display Order | Flat Grid Settings | Permanent Mover",
+       "order: the cards open in the order they stack -- column 1's layout chain in classic's order")
+
+    -- The three category headers, each once, each opening its run.
+    for _, pair in ipairs({ { "Layout", "1", "Frame Size" }, { "Appearance", "2", "Border" }, { "Movement", "1", "Permanent Mover" } }) do
+        local n = 0
+        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
+        eq(n, 1, "headers: the " .. pair[1] .. " header, in column " .. pair[2] .. ", once")
+        local hAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["' .. pair[1] .. '"]), 40, ' .. pair[2] .. ')', 1, true)
+        local cAt = PAGE:find('OpenSection(L["' .. pair[3] .. '"]', 1, true)
+        check(hAt and cAt and hAt < cAt, "headers: ..." .. pair[1] .. " heads " .. pair[3])
     end
 
-    -- ---- ...AND SO DOES EVERY OTHER ROW IN THE ADDON ----------------
-    -- ☠ THIS USED TO READ "no other page has moved yet", AND THAT WAS THE BUG.
-    -- The strip and the inline pane are SEPARATE opt-ins. The sweep that put
-    -- panes on plates across every page passed only the second one, so for one
-    -- commit the addon shipped rows that mounted their settings inline while
-    -- still wearing the old top-right chevron and count. Half-converted read
-    -- WORSE than unconverted, because the pages then disagreed with each other.
-    --
-    -- So the claim here is now the opposite one, and it is total: every popout
-    -- row on every page carries the strip. A row without one is either a new row
-    -- that forgot it or a page a later sweep missed, and both should fail here
-    -- rather than ship a second mixed state.
-    --
-    -- ⚠ GUI/PopoutDemo.lua is deliberately NOT in this walk. It is the kit's
-    -- own fixture for the no-strip tether, whose source outline is a rounded
-    -- RING rather than a strip (test_round_demo.lua's R4 block), and that path
-    -- stays live for any host that never opts in.
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggles? = true,") do hoists = hoists + 1 end
+    eq(hoists, 4, "ticks: four mounts skip their in-body toggle -- Border, Border Shadow, Frame Fade, Permanent Mover")
+
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local layoutAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)', 1, true)
+    check(stripAt and layoutAt and stripAt < layoutAt, "bulk: ...above the first category header")
+
+    -- Classic's own columns, untouched.
+    local CLASSIC_COL = {
+        sizeGroup = "1", layoutGroup = "1", raidModeGroup = "1",
+        groupLayoutGroup = "1", groupVisGroup = "1", groupOrderGroup = "2",
+        flatGridGroup = "1", frameFadeGroup = "2", permMoverGroup = "2",
+    }
+    for name, col in pairs(CLASSIC_COL) do
+        check(PAGE:find("Add(" .. name .. ", nil, " .. col .. ")", 1, true) ~= nil,
+              "classic: " .. name .. " still goes to column " .. col)
+    end
+    local bare = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
+    eq(bare, 10, "classic: ten bare 280 boxes, all the classic branch's own")
+end
+
+-- ============================================================
+-- 6. TWO ADDON-WIDE ROLLS, AND THE SHARED VERBS THEY LEAN ON
+-- ============================================================
+print("-- Frame page: the addon-wide strip and inline rolls")
+do
+    -- ☠ EVERY POPOUT ROW ON EVERY PAGE CARRIES THE FOOTER STRIP. A row without
+    -- one is a new row that forgot it or a page a later sweep missed.
+    -- ⚠ GUI/PopoutDemo.lua is deliberately not in this walk: it is the kit's own
+    -- fixture for the no-strip tether.
     local TOC = options_file_source("DandersFrames_Options.toc")
     local naked = {}
-    for name in TOC:gmatch("GUI\(Pages\[%w_]+%.lua)") do
+    for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
         local path = "GUI/" .. name:gsub("\\", "/")
         local src = options_file_source(path)
         local rows, strips = 0, 0
@@ -1299,325 +655,35 @@ do
             naked[#naked + 1] = path .. " (" .. strips .. "/" .. rows .. ")"
         end
     end
-    eq(#naked, 0,
-       "strip: every popout row on every page carries it -- " .. table.concat(naked, ", "))
-    -- ...and inside THIS file, the Frame page's own slice. This counted the
-    -- WHOLE of Options.lua against eleven while the Frame page was the only one
-    -- swept; that file holds seventeen other pages and they all carry the strip
-    -- now, so a file-wide number stopped describing this page. Same repair, and
-    -- the same reason, as the inline count further down.
-    local total = 0
-    for _ in page:gmatch("footerStrip = true") do total = total + 1 end
-    eq(total, #rows, "strip: ...and every row named above declares it, and only those")
+    eq(#naked, 0, "strip: every popout row on every page carries it -- " .. table.concat(naked, ", "))
 
-    -- ---- which rows hoist, and what --------------------------------
-    -- ☠ EVERY NAME IS THE PANEL'S OWN L KEY AND EVERY KEY IS ONE THE PANE STILL
-    -- MOUNTS, checked against the census tables at the top of this file rather
-    -- than against a second list -- so a hoist that drifted from the control it
-    -- is meant to be a second view of fails here.
-    -- ☠ TWO ROWS, NOT FOUR. Frame Size and Layout Direction hoisted their
-    -- controls -- each one the pane's own setting declared a SECOND time, with
-    -- its own options map, gate and callback -- until their whole panes went ON
-    -- the plate (see the inline census below). A row drawing its group inline has
-    -- nothing to hoist: a hoisted twin there would be two widgets on one key for
-    -- no gain, which is the duplication the inline arm exists to end. What is
-    -- left is the two rows whose panes are too big to mount.
-    local HOISTS = {
-        { row = "moverRow", census = PERM_MOVER, want = {
-            { "Handle Width",  "slider", "permanentMoverWidth",  true },
-            { "Handle Height", "slider", "permanentMoverHeight", true },
-        } },
-    }
-
-    local hoistedRows = 0
-    for _, var in ipairs(rows) do
-        if hoistBlock(var) then hoistedRows = hoistedRows + 1 end
-    end
-    -- The Permanent Mover row from the table above plus the Border row, whose two
-    -- controls come from the shared border helper rather than from a builder
-    -- census here.
-    eq(hoistedRows, 2, "hoist: two of the eleven rows hoist anything at all")
-    for _, gone in ipairs({ "sizeRow", "dirRow" }) do
-        check(hoistBlock(gone) == nil,
-              "hoist: " .. gone .. " hoists nothing -- its pane is on the plate")
-    end
-
-    for _, spec in ipairs(HOISTS) do
-        local got = hoistEntries(hoistBlock(spec.row))
-        eq(#got, #spec.want, "hoist: " .. spec.row .. " hoists the declared number")
-        local seen = {}
-        for i, w in ipairs(spec.want) do
-            local g = got[i]
-            if not g then
-                check(false, "hoist: " .. spec.row .. " is missing " .. w[1])
-            else
-                eq(g.name, w[1], "hoist: " .. spec.row .. " control " .. i .. " is named")
-                eq(g.kind, w[2], "hoist: ..." .. w[1] .. " is the kind the panel draws")
-                eq(g.key,  w[3], "hoist: ..." .. w[1] .. " is bound to the panel's key")
-                eq(g.gated, w[4], "hoist: ..." .. w[1] .. "'s gate is as declared")
-
-                -- ONE WIDGET PER KEY ON THE PLATE. A key declared twice would be
-                -- two tracks writing the same setting, which is not "shown twice"
-                -- -- it is two of the same thing on one row.
-                check(not seen[g.key], "hoist: " .. spec.row .. " binds " .. tostring(g.key) .. " once")
-                seen[g.key] = true
-
-                -- ...and the KEY and the NAME both come from the row's own pane.
-                local found
-                for _, c in ipairs(spec.census) do
-                    if c[3] == w[3] then found = c end
-                end
-                check(found ~= nil,
-                      "hoist: " .. w[1] .. " is a control the pane still mounts")
-                if found then
-                    eq(w[1], found[2],
-                       "hoist: ...under the very L key the pane labels it with")
-                    eq(w[2], found[1], "hoist: ...and the same kind of control")
-                end
-            end
-        end
-    end
-
-    -- ---- the BORDER row, whose controls come from the shared helper --
-    -- Its pane is built by GUI:CreateBorderControls, so there is no census table
-    -- here to check against; the claim is made against the HELPER's own source
-    -- instead, which is the same claim one file along.
-    local bgot = hoistEntries(hoistBlock("borderRow"))
-    eq(#bgot, 2, "border: the row hoists two controls")
-    eq(bgot[1].name, "Border Thickness", "border: the thickness slider")
-    eq(bgot[1].key,  "frameBorderSize",  "border: ...on the prefixed size key")
-    eq(bgot[2].name, "Border Style",     "border: and the style dropdown")
-    eq(bgot[2].key,  "frameBorderStyle", "border: ...on the prefixed style key")
-    check(bgot[1].gated and bgot[2].gated,
-          "border: both gated -- a control for a border that is OFF is never hoisted")
-    local widgets = options_file_source("GUI/SettingsWidgets.lua")
-    check(widgets:find('L["Border Thickness"], sizeMin, sizeMax, sizeStep', 1, true) ~= nil,
-          "border: ...and the helper labels its own slider with that same key")
-    check(widgets:find('GUI:CreateDropdown(parent, L["Border Style"],', 1, true) ~= nil,
-          "border: ...and its dropdown with the other")
-
-    -- ☠ ONE OPTION MAP, ASKED FOR RATHER THAN RETYPED. The hoisted dropdown and
-    -- the pane's own dropdown read the SAME helper, so a fourth border style
-    -- appears in both or in neither -- the drift the two growth-direction maps
-    -- carry a ☠☠ about, one control along.
-    check(widgets:find("function GUI:BorderStyleOptions(includeGradient)", 1, true) ~= nil,
-          "border: the style map is a named helper")
-    check(widgets:find("local styleOptions = GUI:BorderStyleOptions(include.gradient)", 1, true) ~= nil,
-          "border: ...which the pane's own dropdown reads")
-    check(page:find("options = GUI:BorderStyleOptions(true)", 1, true) ~= nil,
-          "border: ...and so does the hoisted one, rather than a copy of it")
-    -- The same rule for the write: switching to Texture with no texture picked
-    -- seeds one, and it has to happen whichever of the two widgets was dragged.
-    check(widgets:find("function GUI:SeedBorderTexture(dbTable, prefix)", 1, true) ~= nil,
-          "border: the Texture seeding is a named helper too")
-    check(widgets:find("GUI:SeedBorderTexture(dbTable, prefix)", 1, true) ~= nil,
-          "border: ...run by the pane's own dropdown")
-    check(page:find('GUI:SeedBorderTexture(db, "frame")', 1, true) ~= nil,
-          "border: ...and by the hoisted one, so the two agree what Texture means")
-
-    -- ---- the counts did NOT move ------------------------------------
-    -- The strongest single statement of "shown twice, not moved": every declared
-    -- count is what the pane mounts, hoisting or no hoisting. Section 4 already
-    -- pins each number against its builder; this says the four hoisting rows are
-    -- among them rather than exceptions to them.
-    for _, name in ipairs({ "FRAME_SIZE_COUNT", "LAYOUT_DIR_COUNT", "PERM_MOVER_COUNT" }) do
-        check(SRC:match("local " .. name .. "%s*=%s*%d+") ~= nil,
-              "hoist: " .. name .. " is still declared in one place")
-    end
-    check(SRC:find("local BORDER_COUNT, SHADOW_COUNT = 13, 4", 1, true) ~= nil,
-          "hoist: ...and the border row still claims all thirteen behind it")
-
-    -- ---- what the strip says when there is nothing left behind it ----
-    -- ☠ A ROW CAN HOIST ITS WHOLE PANE, and Layout Direction now does: in
-    -- raid the pane draws nothing at all, in party one dropdown that is also on
-    -- the plate. The strip stops promising a count it cannot honour and offers
-    -- to pin instead, which needs a second phrase -- and the kit reads it
-    -- through host.hooks.L, so it has to ship beside the count phrase.
+    -- The strip's two phrases ship side by side, and the kit asks for the pin one.
     local ENUS = df_file_source("Locales/enUS.lua")
     local moreAt = ENUS:find('L["%d more settings"] = true', 1, true)
     local pinAt  = ENUS:find('L["Pin settings in popout"] = true', 1, true)
-    check(moreAt ~= nil, "locale: enUS still ships the count phrase")
-    check(pinAt ~= nil, "locale: ...and the pin phrase the empty pane paints instead")
-    -- BESIDE it, not filed alphabetically somewhere else: that block is
-    -- section-organised, and the two phrases are one corner of one strip.
-    check(moreAt and pinAt and pinAt > moreAt and (pinAt - moreAt) < 400,
-          "locale: ...directly beside it, where the strip's own comment is")
-    -- The kit is what paints it, so the kit is what has to ask for it.
-    local kit = ui_file_source("PopoutRow.lua")
-    check(kit:find('L["Pin settings in popout"]', 1, true) ~= nil,
-          "locale: ...and PopoutRow asks for it through the host's own L")
+    check(moreAt ~= nil and pinAt ~= nil and pinAt > moreAt and (pinAt - moreAt) < 400,
+          "locale: the strip's count and pin phrases ship side by side")
+    check(ui_file_source("PopoutRow.lua"):find('L["Pin settings in popout"]', 1, true) ~= nil,
+          "locale: ...and PopoutRow asks for the pin phrase through the host's own L")
 
-    -- ---- every summary takes the db, and nothing else -----------------
-    -- ☠ THE SUBTRACTION IS GONE, AND SO IS THE ARGUMENT IT NEEDED. For one pass
-    -- the four hoisting rows took a SECOND argument -- the set of keys currently
-    -- on the plate -- and left those keys out of the title line, because the
-    -- Frame Size row was printing "125x64 · Spacing 2" while 125 and 64 sat in
-    -- the two sliders directly beneath it. Then a strip row stopped painting a
-    -- summary AT ALL while it is on (test_popout_row.lua 24.11), which made every
-    -- one of those subtractions unreachable -- every hoisting row on this page has
-    -- a strip. The shown set found a better consumer: it is what HIDES the pane's
-    -- own copy of a hoisted control, so the setting is drawn once and the strip's
-    -- count and the panel behind it agree. The summaries went back to one
-    -- argument, the db.
-    --
-    -- Pinned on all six summaries the hoisting rows and their neighbours declare,
-    -- not just the four that changed, so reviving the contract anywhere on the
-    -- page is a red suite.
-    for _, fn in ipairs({ "FrameSizeSummary", "BorderSummary", "ShadowSummary",
-                          "FrameFadeSummary", "LayoutDirectionSummary",
-                          "PermMoverSummary" }) do
-        check(SRC:find("local function " .. fn .. "(d)", 1, true) ~= nil,
-              "summary: " .. fn .. " takes the db table and nothing else")
-        check(SRC:find("local function " .. fn .. "(d, shown)", 1, true) == nil,
-              "summary: ..." .. fn .. " has no second argument left behind")
-    end
-    -- ...and no BODY still reads one. The name could survive the signature as an
-    -- upvalue read -- `shown` would then be a global, nil, and every gate would
-    -- silently stop firing rather than erroring.
-    for _, fn in ipairs({ "FrameSizeSummary", "BorderSummary",
-                          "LayoutDirectionSummary", "PermMoverSummary" }) do
-        local body = SRC:match("local function " .. fn .. "%(d%)(.-)\n            end")
-        check(body ~= nil, "summary: " .. fn .. "'s body is readable")
-        check(body == nil or body:find("shown", 1, true) == nil,
-              "summary: ..." .. fn .. " never mentions the plate set")
-    end
-    check(SRC:find("not (shown and ", 1, true) == nil,
-          "summary: and no row anywhere on the page still subtracts a plate set")
-
-    -- ---- the general verb, not a sibling ----------------------------
-    -- One door for both kinds of hoist. A second exported name would be a second
-    -- place that has to remember the row's name, the section stamp and the
-    -- search rules -- and they are the same rules read from either end.
     local controls = options_file_source("GUI/Controls.lua")
-    check(controls:find("local function RegisterHoistedControls(row, list, dbFn)", 1, true) ~= nil,
-          "verb: the controls form is declared")
-    check(controls:find("if type(label) == \"table\" then", 1, true) ~= nil,
-          "verb: ...and reached by overloading RegisterHoistedToggle's second argument")
-    check(controls:find("RegisterHoistedControls = ", 1, true) == nil,
-          "verb: ...with no second name exported beside it")
-end
+    check(controls:find("local function RegisterHoistedControls(row, list, dbFn)", 1, true) ~= nil
+      and controls:find("if type(label) == \"table\" then", 1, true) ~= nil
+      and controls:find("RegisterHoistedControls = ", 1, true) == nil,
+          "verb: hoisted controls are reached through RegisterHoistedToggle, one exported name")
+    check(controls:find("local function PopoutContent(buildInto, innerColumns, opts)", 1, true) ~= nil
+      and controls:find("innerColumns = innerColumns }", 1, true) ~= nil,
+          "grid: a pane's track count is a per-row argument of the shared helper")
 
--- ============================================================
--- 6b. WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ROW BY ROW. Two thirds of the rows in the addon hide six
--- settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line and the strip offers to pin a second copy instead of
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); the threshold in Controls.lua
--- refuses one whose pane turns out to be big. Only the second can be measured
--- headlessly against a real group, so it is driven in test_popout_page_tools.lua
--- -- what is stated here is which rows asked, and that nothing else did.
---
--- The four are the rows whose real pane counts are 5, 3 (2 after the mode gates),
--- 4 and 2. The other seven hold 7, 7, 7, 9, 13, 15 and 7, and keep the strip they
--- have.
--- ============================================================
-do
-    local page = framePage()
-
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on the page, and
-    -- whether its call ends with the inline opt-in. Read as "this declaration up
-    -- to the next one", the same reader shape the hoist census uses and for the
-    -- same reason: a balanced-brace match would be defeated by the builder
-    -- closure inside the call.
-    local calls = {}
-    local pos = 1
-    while true do
-        local s, e, name = page:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-    check(#calls >= 10, "inline: the page's PopoutContent calls are readable (" .. #calls .. ")")
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #page
-        if page:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 4, "inline: four of the page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and wired to a different row
-    -- fails here instead of shipping.
-    local WANT = {
-        sizeRow       = "sizeMount",         -- Frame Size, 5
-        dirRow        = "dirMount",          -- Layout Direction, 3
-        shadowRow     = "shadowMount",       -- Border Shadow, 4
-        groupOrderRow = "groupOrderMount",   -- Group Display Order, 2
-    }
-    local rows = pageRows()
-    local sawInline = 0
-    for _, var in ipairs(rows) do
-        local a = page:find("local " .. var .. " = ", 1, true)
-        local b = page:find("}))", a or 1, true)
-        local opts = (a and b) and page:sub(a, b + 2) or ""
-        local mount = opts:match("build%s*=%s*([%w_]+)")
-        check(mount ~= nil, "inline: " .. var .. " names the mount it was built with")
-        if WANT[var] then
-            eq(mount, WANT[var], "inline: " .. var .. " is built from the mount it declares")
-            check(inlineMounts[mount] == true,
-                  "inline: ...and that mount asked for the plate")
-            sawInline = sawInline + 1
-        else
-            check(mount == nil or not inlineMounts[mount],
-                  "inline: " .. var .. " keeps its pane behind the strip")
-        end
-    end
-    eq(sawInline, 4, "inline: ...all four of the named rows were found on the page")
-
-    -- ---- and NOTHING ELSE ON THIS PAGE ------------------------------
-    -- ⚠ THE FRAME PAGE'S SLICE, NOT THE WHOLE FILE. This read `SRC` while the
-    -- Frame page was the only one that had moved -- phase 1 shipped alone so
-    -- Danders could judge the shape before the rest followed, and a file-wide
-    -- count was the cheapest way to say "and nothing else yet". It followed,
-    -- and Options.lua holds seventeen more pages' worth of opt-ins now, so a
-    -- file-wide number says nothing about THIS page. Scoped to `page`, the
-    -- claim is the one this section was always making: four rows on the Frame
-    -- page mount their pane, and the four are the ones named above. The
-    -- per-page censuses in the other pages' own test files carry their halves.
-    local total = 0
-    for _ in page:gmatch("inline = true") do total = total + 1 end
-    eq(total, 4, "inline: ...and only those four rows inside the Frame page")
-
-    -- ☠ A ROLL WITH NUMBERS ON IT, NOT A ZERO. This read "no other page has
-    -- moved yet" while the Frame page was the only one swept -- phase 1 shipped
-    -- alone so Danders could judge the shape before the rest followed. They have
-    -- all followed now, and the honest form of that claim is a NAMED list with
-    -- exact counts rather than a gate deleted the moment it fires: a page that
-    -- opts a row in without an argument having been made for it still fails
-    -- here, and a swept page that silently gains or loses one fails on the
-    -- NUMBER rather than passing an "at least one" test. The per-row half of
-    -- each page's claim lives in that page's own census file.
-    --
-    -- ⚠ Options.lua is 21, not 4: it holds seventeen pages besides the Frame
-    -- page, and they were swept in the same pass. The four above are the Frame
-    -- page's share of that number, which is why the count just above this one
-    -- is scoped to the page slice and this one is not.
+    -- ☠ WHICH PAGES STILL OPT A ROW ONTO THE PLATE, with exact counts. A page
+    -- that opts a row in without an argument having been made for it fails
+    -- here, and a page that silently gains or loses one fails on the NUMBER.
     local SWEPT = {
-        -- ⚠ 20, NOT 21, since Visibility became cards: its Solo Mode opt-in.
-        -- ⚠ 14, NOT 20, since Tooltips followed: its six. ⚠ 13, NOT 14, since
-        -- Fading followed: Health Threshold Fading. ⚠ 9, NOT 13, since Pet
-        -- Frames followed: Group Settings, Size, Appearance, Position. ⚠ 4, NOT
-        -- 9, since Settings followed: its five.
-        ["GUI/Pages/Options.lua"]    = 4,   -- the Frame page's four
-        -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
-        -- eleven popout rows became folds on the page, so the five it used to opt
-        -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)
-        -- went with them. ⚠ 21, NOT 26, since the Debuff Bar followed it onto
-        -- the same cards: its five plate opt-ins (Visibility, Order & Limits,
-        -- Appearance, Layout, Position) went the same way. ⚠ 18, NOT 21, since
-        -- Missing Buffs became cards: Settings, Appearance and Position. ⚠ 14,
-        -- NOT 18, since Defensive Icon followed: Settings, Layout, Appearance,
-        -- Position. ⚠ 4, NOT 14, since Targeted List followed: its ten. ⚠ 0
-        -- since Personal Targeted followed: every page in the file is cards now.
+        -- ⚠ 0: every page in Options.lua is cards now -- Visibility, Tooltips,
+        -- Fading, Pet Frames, Settings and, last, this Frame page (its four:
+        -- Frame Size, Layout Direction, Border Shadow, Group Display Order).
+        ["GUI/Pages/Options.lua"]    = 0,
+        -- ⚠ 0 since Personal Targeted followed the other aura pages onto cards.
         ["GUI/Pages/Indicators.lua"] = 0,
         -- ⚠ 4, NOT 7, since Highlights became cards: its three went. ⚠ 1,
         -- NOT 4, since the Dispel Overlay followed: its three went too. ⚠ 0
@@ -1630,7 +696,6 @@ do
         -- the whole file is cards now, so it opts nothing onto a plate.
         ["GUI/Pages/Auras.lua"]      = 0,
     }
-    local TOC = options_file_source("DandersFrames_Options.toc")
     local wrong = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
         local path = "GUI/" .. name:gsub("\\", "/")
@@ -1641,79 +706,34 @@ do
             wrong[#wrong + 1] = path .. " (" .. n .. ", want " .. want .. ")"
         end
     end
-    eq(#wrong, 0,
-       "inline: every page opts in exactly what the roll says -- " .. table.concat(wrong, ", "))
+    eq(#wrong, 0, "inline: every page opts in exactly what the roll says -- " .. table.concat(wrong, ", "))
 
-    -- ---- the threshold is the helper's, and it is stated -------------
-    local controls = options_file_source("GUI/Controls.lua")
-    check(controls:find("local INLINE_MAX = 6", 1, true) ~= nil,
-          "inline: the helper carries the threshold, not the page")
-    check(controls:find("eager.group:CountVisibleChildren() <= INLINE_MAX", 1, true) ~= nil,
-          "inline: ...measured off the PANE, so a row cannot declare its way onto the plate")
-
-    -- ---- the settings search does not open a panel over them ---------
-    -- ☠ A PANEL FOR A SETTING ALREADY ON SCREEN IS A WORSE ANSWER THAN NONE --
-    -- and for an inline row it is worse still, because a row with nothing behind
-    -- it PINS the panel it opens, so a search result would leave one floating
-    -- beside the page.
-    local search = options_file_source("Features/Search.lua")
-    check(search:find("row:IsShowingInlineContent() then return end", 1, true) ~= nil,
-          "inline: the search jump stops at the row when the row is showing the setting")
+    check(controls:find("local INLINE_MAX = 6", 1, true) ~= nil
+      and controls:find("eager.group:CountVisibleChildren() <= INLINE_MAX", 1, true) ~= nil,
+          "inline: the helper carries the threshold, measured off the PANE")
+    check(options_file_source("Features/Search.lua"):find("row:IsShowingInlineContent() then return end", 1, true) ~= nil,
+          "inline: the search jump stops at a row that is showing the setting")
 end
 
 -- ============================================================
--- THE LAYOUT DIRECTION PANEL SURVIVES ITS OWN REBUILD
+-- 7. GROWTH DIRECTION STILL REBUILDS THE PAGE -- AND NOTHING HAS TO COME BACK
 -- ------------------------------------------------------------
--- ☠ REPORTED AS "Changing Growth Direction to either option will close it's
--- settings option, but not with Frames Grow From (even if the widget is
--- pinned)". Growth Direction is the one control on this page whose own write
--- forces a page rebuild -- the seven downstream dropdowns bake their titles and
--- their values from the orientation at build time -- and every route into a page
--- builder closes every open row panel first, pinned ones included, because the
--- rebuild retires the rows those panels are about.
---
--- A rebuild is not the user asking for the panel to go away, so the panel comes
--- back on the other side of it. Remembered by the ROW rather than by a panel
--- object, because the rebuild mints new rows.
+-- Growth Direction bakes the WORDS and VALUES of seven dropdowns at build, so
+-- its write rebuilds the page, deferred a frame so the dropdown's own click
+-- handler unwinds first. With the row gone there is no panel to put back: the
+-- Layout Direction card is a page widget, and its fold is persisted on a stable
+-- key, so it is open again on the other side of the rebuild by itself.
 -- ============================================================
-print("-- Frame page: Growth Direction puts its own panel back")
+print("-- Frame page: Growth Direction rebuilds, and the card survives it")
 do
-    -- The handle lives at FILE scope, above SetupGUIPages: a page-scoped local
-    -- would still be the OLD build's row when the reopen runs.
-    local declAt = SRC:find("\nlocal layoutDirRow\n", 1, true)
-    local setupAt = SRC:find("function DF:SetupGUIPages", 1, true)
-    check(declAt ~= nil, "reopen: the row handle is declared")
-    check(declAt ~= nil and setupAt ~= nil and declAt < setupAt,
-          "reopen: ...at file scope, above the page builders")
-    check(SRC:find("            layoutDirRow = dirRow", 1, true) ~= nil,
-          "reopen: the popout arm takes the row it built")
-    check(SRC:find("        layoutDirRow = nil", 1, true) ~= nil,
-          "reopen: ...and every build drops the previous one first, classic included")
-
-    -- The body of the deferred rebuild: capture, rebuild, re-open, re-pin.
-    local body = SRC:match("local po      = layoutDirRow and layoutDirRow%.popout(.-)\n            end%)")
-    check(body ~= nil, "reopen: the deferred rebuild's body is readable")
-    body = body or ""
-    check(body:find("local wasOpen", 1, true) ~= nil,
-          "reopen: it asks whether a panel was up BEFORE the rebuild")
-    check(body:find("po.pinned", 1, true) ~= nil,
-          "reopen: ...and whether that panel was pinned")
-    local refreshAt = body:find("GUI:RefreshCurrentPage()", 1, true)
-    local openAt    = body:find("row:OpenPopout()", 1, true)
-    check(refreshAt ~= nil and openAt ~= nil and refreshAt < openAt,
-          "reopen: the re-open happens AFTER the rebuild, not before it")
-    check(body:find("up:Pin(true)", 1, true) ~= nil,
-          "reopen: ...and a panel that was pinned is pinned again, silently")
-    check(body:find("local row = layoutDirRow", 1, true) ~= nil,
-          "reopen: the row re-read is the NEW build's, not the captured one")
-
-    -- ⚠ AND THE PAGE STILL DOES NOT TOUCH THE SEARCH ROW MAP. The reopen could
-    -- have found the new row through page._popoutRowForKey; that map belongs to
-    -- the shared machinery and the page has never managed it.
-    check(SRC:find("_popoutRowForKey", 1, true) == nil,
-          "reopen: ...and it is found without reaching into the shared row map")
-
-    -- Frames Grow From is unchanged: no rebuild, so nothing to put back.
-    check(SRC:find('L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames', 1, true) ~= nil,
-          "reopen: Frames Grow From still needs no rebuild, and so keeps its panel by itself")
+    local fn = PAGE:match("local function OnGrowthDirectionChanged%(%)(.-)\n        end")
+    check(fn ~= nil, "growth: the growth-direction commit is a named function")
+    if fn then
+        check(fn:find("C_Timer.After(0, function()\n                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end\n            end)", 1, true) ~= nil,
+              "growth: the rebuild is deferred a frame")
+        check(fn:find("OpenPopout", 1, true) == nil and fn:find("Pin(true)", 1, true) == nil,
+              "growth: ...and there is no panel to reopen or re-pin")
+    end
+    check(PAGE:find('L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames', 1, true) ~= nil,
+          "growth: Frames Grow From still needs no rebuild")
 end

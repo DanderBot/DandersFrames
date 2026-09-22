@@ -664,136 +664,53 @@ if GUI.CreateBorderShadowControls then
         db.frameBorderShadowEnabled = true
     end
 
-    -- ---- and the numbers the ROWS declare ----
-    -- Read out of the page's source rather than retyped here: the count badge is
-    -- a CLAIM about how much is inside, the kit checks it against what a build
-    -- actually mounted, and this checks it against what the builders produce
-    -- before anyone gets in-game to see the mismatch reported.
-    local pageSrc = options_file_source("GUI/Pages/Options.lua")
-    local declaredBorder, declaredShadow =
-        pageSrc:match("BORDER_COUNT,%s*SHADOW_COUNT%s*=%s*(%d+)%s*,%s*(%d+)")
-    check(declaredBorder ~= nil, "counts: the Frame page declares both row counts in one place")
-    eq(tonumber(declaredBorder), #borderRec, "counts: the Border row's count is what its pane mounts")
-    eq(tonumber(declaredShadow), #shadowRec, "counts: the Border Shadow row's count is what its pane mounts")
-    eq(#borderRec, 13, "counts: which is 13 -- the golden 14 less the hoisted Show Border")
-    eq(#shadowRec, 4, "counts: and 4 -- the golden 5 less the hoisted Border Shadow")
+    -- ---- and what the two CARDS' bodies hold ----
+    -- The Frame page is collapsible cards now, and a card carries no count
+    -- badge -- so there is no declared number left to check. What stays true is
+    -- the arithmetic: under hoistToggles each body is its golden less the
+    -- toggle its card's HEADER carries instead.
+    local pageSrc = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
+    check(pageSrc:find("BORDER_COUNT", 1, true) == nil,
+          "counts: the Frame page declares no row counts any more -- a card has no badge")
+    eq(#borderRec, 13, "counts: the Border card's body is 13 -- the golden 14 less the header's Show Border")
+    eq(#shadowRec, 4, "counts: the Border Shadow card's body is 4 -- the golden 5 less the header's Border Shadow")
 
-    -- ---- and the two toggles the SEARCH registry would otherwise lose ----
-    -- Dropping the checkboxes drops what registered them: the checkbox FACTORY
-    -- is the only thing that ever put "Show Border" and "Border Shadow" into the
-    -- settings search. The page registers them by hand instead, and this pins
-    -- those calls to the golden rows they replace -- so renaming the label or
-    -- the key in CreateBorderControls fails here rather than silently leaving
-    -- the two layouts findable by different words.
-    -- Source-read for the same reason the counts above are: the page file is far
-    -- too tangled in the panel to build headlessly, but the call is still a
-    -- claim that can be checked against the inventory.
-    --
-    -- ⚠ The trailing arg is the row's own commit, and it is matched loosely on
-    -- purpose: the sweep hoists a toggle on other groups of this page too (each
-    -- with its own callback), so this pins THE BORDER PAIR -- the golden label
-    -- and key on each -- rather than being a census of every hoisted toggle on
-    -- the page.
-    --
-    -- ☠ MATCHED BY THE ROW EACH ONE IS WIRED TO, NOT BY POSITION IN THE FILE.
-    -- This used to take the FIRST TWO RegisterHoistedToggle calls in
-    -- Pages/Options.lua, on the assumption the border pair were the earliest
-    -- hoists in it. The DISPLAY sweep broke that assumption -- Display >
-    -- Visibility hoists Solo Mode and its builder sits ABOVE the Frame page in
-    -- the same file -- and the failure it produced said "entry 1 uses the golden
-    -- label (got Solo Mode)", which is a true statement about a check asking the
-    -- wrong question. Naming the two rows is what this was always about.
+    -- ---- and the two toggles, which live in the card HEADERS ----
+    -- Dropping the in-body checkboxes drops what registered them with search;
+    -- the header tick is the real checkbox factory built under the section's
+    -- title, so it registers under the SAME label and key. Pinned to the golden
+    -- rows it replaces, so renaming either in CreateBorderControls fails here.
     do
-        local got = {}
-        for row, label, key in pageSrc:gmatch('RegisterHoistedToggle%((%w+),%s*L%["([^"]+)"%],%s*"([^"]+)"') do
-            got[row] = { label, key }
-        end
-        check(got.borderRow ~= nil and got.shadowRow ~= nil,
-              "hoisted search: the page registers the two hoisted border toggles")
-        local want = { { "borderRow", GOLDEN[1] }, { "shadowRow", GOLDEN[15] } }
+        local want = { { "Border", GOLDEN[1] }, { "Border Shadow", GOLDEN[15] } }
         for i = 1, 2 do
-            local rowName, golden = want[i][1], want[i][2]
-            local e = got[rowName]
-            if e then
-                eq(e[1], golden[2],
-                   string.format("hoisted search: entry %d uses the golden label", i))
-                eq(e[2], golden[3],
-                   string.format("hoisted search: entry %d uses the golden db key", i))
-            else
-                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, golden[2]))
-            end
+            local card, golden = want[i][1], want[i][2]
+            local a = pageSrc:find('OpenSection(L["' .. card .. '"], "frame_', 1, true)
+            local b = a and pageSrc:find("CloseSection(", a, true)
+            local block = (a and b) and pageSrc:sub(a, b) or ""
+            check(block:find('key = "' .. golden[3] .. '", label = L["' .. golden[2] .. '"]', 1, true) ~= nil,
+                  string.format("header tick: entry %d uses the golden label and db key (%s / %s)", i, golden[2], golden[3]))
         end
     end
 
-    -- ---- and WHERE the two rows are mounted ----
-    -- The rows are the whole of the Appearance section in the popout layout, so
-    -- the container they go in is a layout decision, not a detail: a 280 box in
-    -- column 2 leaves a row ending ~300px inside the window with its popout's
-    -- beam crossing half the page. The band is that same container built at the
-    -- PAGE's usable width, chromeless, and laid out across both columns.
-    --
-    -- Source-read for the same reason the counts and the hoisted toggles above
-    -- are -- the page cannot be built headlessly -- and pinned as a pair, so a
-    -- future edit cannot widen the container without also freeing it from a
-    -- column, or vice versa.
+    -- ---- and WHERE the classic box is mounted ----
+    -- Classic keeps its one Appearance box -- 280, column 2, the border and the
+    -- shadow back to back -- and Modern builds no container at all: its three
+    -- Appearance groups are cards of their own.
     do
-        -- ⚠ SCOPED TO THE FRAME PAGE'S BLOCK, not to the whole file. `sizeGroup`
-        -- and `appearanceGroup` are the house names for those two boxes and other
-        -- pages in this same file use both, so a whole-file count answers about
-        -- the Pet page as readily as about this one.
-        -- ⚠ AND THE SEARCH STARTS AT THE FRAME PAGE, not at the top of the file.
-        -- `local classicLayout = DF:IsClassicSettingsLayout()` is the first line
-        -- of every converted page's builder, and General > Settings -- converted
-        -- in the same sweep -- sits ABOVE this one in Pages/Options.lua, so a
-        -- search from byte 1 would open the slice on that page instead.
         local frameAt = pageSrc:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
-        check(frameAt ~= nil, "band: the Frame page is locatable by its copy button")
+        check(frameAt ~= nil, "classic box: the Frame page is locatable by its copy button")
         local blockStart = pageSrc:find("local classicLayout = DF:IsClassicSettingsLayout()", frameAt or 1, true)
         local blockEnd   = pageSrc:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true)
-        check(blockStart ~= nil, "band: the Frame page decides the layout mode by name")
-        check(blockEnd ~= nil and blockStart and blockEnd > blockStart,
-              "band: ...and closes the Appearance block with the classic-only Add")
-        local pageSrc = pageSrc:sub(blockStart or 1, (blockEnd or 1) + 60)
-
-        local function pageHas(needle, msg)
-            check(pageSrc:find(needle, 1, true) ~= nil, "band: " .. msg)
-        end
-        pageHas("local classicLayout = DF:IsClassicSettingsLayout()",
-                "the layout mode is decided ONCE, before the container is built")
-        -- Classic: the box it has always been, in column 2, added in place.
-        pageHas("appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)",
-                "classic still builds the 280 box")
-        pageHas("if classicLayout then Add(appearanceGroup, nil, 2) end",
-                "...and still adds it to column 2, where it has always been")
-        -- Popout: the band. Width from the shared helper (never a literal) and no
-        -- box chrome. WHERE it is added is not decided in this block any more --
-        -- see the band-order block in test_frame_page_builders, which owns that
-        -- claim now that the page has more than one band.
-        --
-        -- ⚠ tools.BandWidth(), NOT A PAGE LOCAL. The page took
-        -- GUI:CreatePopoutPageTools, so the expression this used to read
-        -- (GUI.PageUsableWidth(GUI.PageChildWidth(...))) lives in Controls.lua and
-        -- is pinned by test_popout_page_tools. The claim here is unchanged: this
-        -- band asks for the width the layout pass will stretch it to rather than
-        -- naming a literal.
-        -- ⚠ BandWidth(2): the Appearance band is a COLUMN band now, so it asks the
-        -- helper for a column's width. The claim is unchanged -- it asks, rather than
-        -- naming a literal.
-        pageHas("GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })",
-                "the band is built at the width the layout pass will stretch it to, with no box chrome")
-        check(pageSrc:find("GUI:CreateSettingsGroup(self.child, 280, { chromeless", 1, true) == nil,
-              "band: ...and never at a literal")
-        -- The band's padding is DEFAULT (the popout PANE is the zero-padding
-        -- case, not this). That is what lands a row's right edge on the same
-        -- corridor as a slider's value box -- see test_page_parking.
-        check(pageSrc:find("tools.BandWidth(), { chromeless = true, padding", 1, true) == nil,
-              "band: the band keeps the standard box padding, so its rows end at the corridor")
-        -- Inside THIS block, the only Add is the classic box's: the popout one
-        -- moved to the foot of the builder. Two unconditional Adds would lay the
-        -- container out twice.
+        check(blockStart ~= nil and blockEnd ~= nil and blockEnd > blockStart,
+              "classic box: the Appearance block closes with the classic-only Add")
+        local block = pageSrc:sub(blockStart or 1, (blockEnd or 1) + 60)
+        check(block:find("if classicLayout then\n            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)\n        end", 1, true) ~= nil,
+              "classic box: the 280 box is built in classic only")
+        check(block:find("chromeless", 1, true) == nil,
+              "classic box: ...and there is no chromeless container left beside it")
         local adds = 0
-        for _ in pageSrc:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
-        eq(adds, 1, "band: the Appearance block adds the classic box and nothing else")
+        for _ in block:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
+        eq(adds, 1, "classic box: the Appearance block adds the classic box and nothing else")
     end
 end
 
