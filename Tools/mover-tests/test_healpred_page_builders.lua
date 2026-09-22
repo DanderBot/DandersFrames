@@ -3,49 +3,42 @@ local NS = ...
 -- ============================================================
 -- HEAL PREDICTION PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Bars > Heal Prediction turns its three 280 boxes into three feature rows in
--- ONE headerless band (the Fading page's shape -- three rows do not need
--- dividing, and a band header over the only band on a page repeats the page's
--- own name):
+-- Bars > Heal Prediction: three 280 boxes in classic, three of the Debuff Bar's
+-- collapsible CARDS in modern, in two page columns:
 --
---   Heal Prediction        (hoisted enable)
---   Floating Bar Position  (hidden unless the bar is floating)
---   Floating Bar Anchor    (hidden unless the bar is floating)
+--   column 1   Heal Prediction        (the page's master switch, in its body)
+--   column 2   Floating Bar Position  (hidden unless the bar is floating)
+--              Floating Bar Anchor    (hidden unless the bar is floating)
 --
 -- ☠ THREE THINGS THIS SUITE IS HERE TO PIN:
 --
---   1. THE COLOUR PICKERS ARE THE SWEEP'S FIRST LAYOUT-CONDITIONAL BUILDER
---      BRANCH. Classic decides the picker SET at build time from the db -- Split
---      builds two, every other mode builds one bound to that mode's key -- so
---      changing the source has to REBUILD THE PAGE, which inside a pane closes
---      the panel the dropdown was clicked in. The pane builds all three and
---      gates them with hideOn instead. Section 3 pins both arms and pins that
---      only the classic one still rebuilds.
---   2. THE TWO GROUP-LEVEL hideOns BECOME ROW-LEVEL ONES, off ONE named
---      predicate handed to both layouts. Section 6.
---   3. THE PAGE-WIDE GATE REACHES THE ROWS -- the Pet Frames rule -- with the
---      Settings row excepted because it carries the gate's own tick. Section 6.
+--   1. THE COLOUR PICKERS BRANCH ON LAYOUT. Classic decides the picker SET at
+--      build time from the db -- Split builds two, every other mode builds one
+--      bound to that mode's key -- so changing the source has to REBUILD THE
+--      PAGE. Modern builds all three and gates them with hideOn instead, so a
+--      pinned panel is never slammed shut by a rebuild. Section 3.
+--   2. THE FLOATING hideOn IS ONE NAMED PREDICATE handed to the classic boxes
+--      and to the cards alike. Section 6.
+--   3. ENABLE HEAL PREDICTION IS THE PAGE GATE and stays in the first card's
+--      body, as Show Debuffs does on the Debuff Bar -- no header tick, no
+--      hoistToggle. Section 5.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to the panel (a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db) -- so this file
--- does what every page-builder suite before it does: it reads the page's SOURCE
--- and asserts against it.
+-- reads the page's SOURCE and asserts against it.
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, BOTH arms of the
---     picker branch included.
---   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts.
---   ✓ that the display-mode dropdown routes through tools2.refreshStates and
---     that GUI:RefreshCurrentPage survives on the CLASSIC side only.
---   ✓ that every summary reads its words out of the dropdown table the control
---     itself offers, and that the page adds NO new locale string.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+--   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
+--     in order -- taken from the pre-card source, BOTH arms of the picker branch
+--     included, so classic renders what it always did.
+--   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
+--     classic hands it.
+--   ✓ each card's column, stable collapse key, summary, grey gate, hide gate and
+--     pin; the two opt-ins (two per row, quiet captions); Expand/Collapse All.
+--   ✗ nothing about runtime behaviour -- the folding, the two-per-row flow and
+--     the greying are read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Auras.lua")
+local SRC = options_file_source("GUI/Pages/Auras.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Health Bar page's, verbatim) ----
 local KIND = {
@@ -114,52 +107,68 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
+-- ONE CARD'S BLOCK: its OpenSection call, the builder mount under it and the
+-- CloseSection that puts its band in, flattened. `call` is just the OpenSection
+-- call -- where the pin (a builder argument) and a tick would be declared.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(band)", a, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, (b or a) + #"CloseSection(band)"):gsub("%s+", " ")
+    local m = block:find("({ group = band,", 1, true)
+    local call = m and block:sub(1, m) or block
+    call = call:gsub("Build[%w]+%($", "")
+    return block, call
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS ONE BAND IS HEADERLESS
+-- 1. THE PAGE TAKES THE SHARED CARD HELPER, AND THE POPOUT FURNITURE IS GONE
 -- ============================================================
-print("-- Heal Prediction page: the shared popout machinery and the band")
+print("-- Heal Prediction page: the shared card helper")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
-    end
     check(PAGE:find("_popoutHolders", 1, true) == nil,
           "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
 
-    check(PAGE:find("healPredBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: healPredBand is chromeless, at the width the layout pass will give it")
-    -- ☠ AND IT CARRIES NO HEADER. It is the only band on the page, so a header
-    -- would repeat the page's own name back at the reader. (The Fading page's
-    -- rule for its single band.)
-    check(PAGE:find("healPredBand:AddWidget(GUI:CreateHeader(", 1, true) == nil,
-          "band: ...and carries no header of its own")
-    check(PAGE:find('Add(healPredBand, nil, "both")', 1, true) ~= nil,
-          "band: ...and goes in full-width, after its last row")
+    -- ☠ NO ROWS LEFT, and none of their furniture: the band, the counts, the
+    -- claims, the footers, the hoisted-toggle repair, the named applies.
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "healPredBand", "_COUNT = ",
+                            "footerStrip", "inline = true", "popout = true,",
+                            "OnHealPredictionToggle", "ApplyHealPrediction" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
+
+    -- The Debuff Bar's forward, opt-ins and all.
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row with quiet captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    -- Expand All / Collapse All, once, at the top, spanning both columns.
+    local n = 0
+    for _ in PAGE:gmatch('Add%(tools%.SectionControls%(self%.child%), 24, "both"%)') do n = n + 1 end
+    eq(n, 1, "bulk: the page adds the Expand/Collapse pair once, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstCard = PAGE:find("OpenSection(L[", 1, true)
+    check(stripAt and firstCard and stripAt < firstCard, "bulk: ...above the first card")
+
+    -- No "N settings" count anywhere.
+    check(PAGE:find("count%s*=%s*[%w_]") == nil,
+          "counts: no card or row declares a settings count")
 end
 
 -- ============================================================
--- 2. THE DROPDOWN VOCABULARY MOVED TO PAGE SCOPE
--- The rows print the chosen value as their SUMMARY, and a summary is written
--- outside the group's builder -- so the word has to come out of the same table
--- the dropdown offers, or a row could say one thing while the control behind it
--- says another.
+-- 2. THE DROPDOWN VOCABULARY AT PAGE SCOPE
+-- A card prints the chosen value as its SUMMARY, written outside the builder --
+-- so the word has to come out of the same table the dropdown offers.
 -- ============================================================
 print("-- Heal Prediction page: the dropdown vocabulary at page scope")
 do
@@ -181,14 +190,9 @@ do
         check(decl ~= nil and decl:find(pair[2], 1, true) ~= nil,
               "vocab: ..." .. pair[1] .. " still offers " .. pair[2])
     end
-
-    -- ⚠ showModeOptions KEEPS ITS _order. The four sources read in a deliberate
-    -- order (all, mine, others, split) that an unordered table would scramble.
     local showDecl = PAGE:match("local showModeOptions = {(.-)\n        }")
     check(showDecl ~= nil and showDecl:find('_order = { "ALL", "MINE", "OTHERS", "SPLIT" }', 1, true) ~= nil,
           "vocab: ...and showModeOptions keeps the reading order of its four sources")
-
-    -- The blend table did not move: nothing outside its own builder reads it.
     local at = PAGE:find("local blendOptions = {", 1, true)
     local firstBuilder = PAGE:find("local function BuildHealPredictionSettingsGroup(tools2)", 1, true)
     check(at ~= nil and firstBuilder ~= nil and at > firstBuilder,
@@ -197,27 +201,26 @@ end
 
 -- ============================================================
 -- 3. THE LAYOUT-CONDITIONAL COLOUR PICKERS
--- ☠ THE SWEEP'S FIRST BUILDER BRANCH ON LAYOUT, and it is a structural refusal
--- rather than taste. Classic decides the picker SET at build time from the db,
--- so changing the source rebinds by REBUILDING THE PAGE -- fatal in a pane,
--- which the rebuild retires along with the panel it was clicked in. The pane
--- builds all three and gates them with hideOn: same write targets, no rebuild.
 -- ============================================================
 print("-- Heal Prediction page: the colour pickers, one set per layout")
 do
     local body = builderBody("BuildHealPredictionSettingsGroup")
 
-    check(body:find("if tools2.popout then", 1, true) ~= nil,
-          "pickers: the builder branches on the layout, once, and says so")
+    -- ☠ MODERN, NOT "A PANE": the card on the page and its pinned panel both
+    -- take the three-picker arm, so neither needs a rebuild.
+    check(body:find("if tools2.popout then", 1, true) == nil,
+          "pickers: the branch is no longer keyed on being a pane")
+    local arms = 0
+    for _ in body:gmatch("if not classicLayout then") do arms = arms + 1 end
+    eq(arms, 2, "pickers: the picker set and the source callback both branch on the layout")
 
-    -- ---- the popout arm: three pickers, three real keys, three hideOns ----
     for _, p in ipairs({
         { "My Heals Color",       "healPredictionMyColor" },
         { "Others' Heals Color",  "healPredictionOthersColor" },
         { "Heal Prediction Color","healPredictionAllColor" },
     }) do
         check(body:find('GUI:CreateColorPicker(parent, L["' .. p[1] .. '"], db, "' .. p[2] .. '"', 1, true) ~= nil,
-              "pickers: the pane builds " .. p[1] .. " bound to " .. p[2])
+              "pickers: modern builds " .. p[1] .. " bound to " .. p[2])
     end
     check(body:find('allColor.hideOn = function(d) return d.healPredictionShowMode ~= "ALL" end', 1, true) ~= nil,
           "pickers: ...and the All swatch shows only for All Incoming")
@@ -226,26 +229,16 @@ do
     check(body:find('return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "OTHERS"', 1, true) ~= nil,
           "pickers: ...and Others' Heals for Split and Others")
 
-    -- ---- the classic arm is untouched -----------------------------------
     check(body:find('if db.healPredictionShowMode == "SPLIT" then', 1, true) ~= nil,
           "pickers: classic still decides its picker set at build time, from the db")
     check(body:find('local showModeColorKey = (db.healPredictionShowMode == "ALL" and "healPredictionAllColor")', 1, true) ~= nil,
           "pickers: ...and still binds its single picker to the mode's own key")
 
-    -- ---- and only classic still rebuilds --------------------------------
-    -- ☠ THE REBUILD SURVIVES ON EXACTLY ONE SIDE. Left in the popout arm it
-    -- would slam the panel shut on every source change; removed from the classic
-    -- arm the single picker would go on writing the previous mode's key.
     local rebuilds = 0
     for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
     eq(rebuilds, 1, "pickers: exactly one page rebuild left on this page")
-    -- ⚠ THE SOURCE DROPDOWN'S OWN popout arm, matched at ITS indent -- sixteen
-    -- spaces, inside a callback inside the builder -- rather than the pickers'
-    -- branch twelve spaces out. The two both open with `if tools2.popout then`,
-    -- and the looser pattern ran from the first straight past the classic rebuild
-    -- that sits between them.
-    local sourceArm = body:match("if tools2%.popout then(.-)\n                else")
-    check(sourceArm ~= nil, "pickers: the source dropdown's popout arm is locatable")
+    local sourceArm = body:match("if not classicLayout then(.-)\n                else")
+    check(sourceArm ~= nil, "pickers: the source dropdown's modern arm is locatable")
     if sourceArm then
         check(sourceArm:find("RefreshCurrentPage", 1, true) == nil,
               "pickers: ...and the one rebuild left on this page is NOT in it")
@@ -255,7 +248,7 @@ do
 end
 
 -- ============================================================
--- 4. THE THREE ROWS -- census, counts, and the shared strip
+-- 4. THE THREE CARDS -- census, classic box, card
 -- ============================================================
 local HP_SETTINGS = {
     { "checkbox",        "Enable Heal Prediction", "healPredictionEnabled",       30 },
@@ -263,15 +256,13 @@ local HP_SETTINGS = {
     { "dropdown",        "Display Mode",           "healPredictionMode",          55 },
     { "dropdown",        "Show Heals From",        "healPredictionShowMode",      55 },
     { "texturedropdown", "Texture",                "healPredictionTexture",       55 },
-    -- the POPOUT arm's three
+    -- the MODERN arm's three
     { "colorpicker",     "My Heals Color",         "healPredictionMyColor",       35 },
     { "colorpicker",     "Others' Heals Color",    "healPredictionOthersColor",   35 },
     { "colorpicker",     "Heal Prediction Color",  "healPredictionAllColor",      35 },
     -- ...and the CLASSIC arm's, which are the same widgets built by the db
     { "colorpicker",     "My Heals Color",         "healPredictionMyColor",       35 },
     { "colorpicker",     "Others' Heals Color",    "healPredictionOthersColor",   35 },
-    -- ⚠ the single picker's key is a VARIABLE (showModeColorKey), which is the
-    -- whole reason the mode change had to rebuild the page in the first place.
     { "colorpicker",     "Heal Prediction Color",  "(none)",                      35 },
     { "dropdown",        "Blend Mode",             "healPredictionBlendMode",     55 },
 }
@@ -288,166 +279,92 @@ local HP_ANCHOR = {
     { "slider",      "Offset X",         "healPredictionX",               55 },
     { "slider",      "Offset Y",         "healPredictionY",               55 },
     { "colorpicker", "Background Color", "healPredictionBackgroundColor", 35 },
-    -- ⚠ the once-unreachable key keeps its control (see the note in the page).
     { "slider",      "Frame Level",      "healPredictionFrameLevel",      55 },
 }
 
-local ROWS = {
-    { builder = "BuildHealPredictionSettingsGroup", label = "Heal Prediction",
-      boxHeader = "Heal Prediction", box = "settingsGroup", column = "1",
-      golden = HP_SETTINGS, countVar = "HEAL_PREDICTION_COUNT", row = "settingsRow",
-      content = "settingsContent", summary = "HealPredictionSettingsSummary",
-      apply = "ApplyHealPredictionSettings", count = 8 },
-    { builder = "BuildHealPredictionFloatingGroup", label = "Floating Bar Position",
-      boxHeader = "Floating Bar Position", box = "floatingGroup", column = "1",
-      golden = HP_FLOATING, countVar = "HEAL_PREDICTION_FLOATING_COUNT", row = "floatingRow",
-      content = "floatingContent", summary = "HealPredictionFloatingSummary",
-      apply = "ApplyHealPredictionFloating", count = 4 },
-    { builder = "BuildHealPredictionAnchorGroup", label = "Floating Bar Anchor",
-      boxHeader = "Floating Bar Anchor", box = "anchorGroup", column = "2",
-      golden = HP_ANCHOR, countVar = "HEAL_PREDICTION_ANCHOR_COUNT", row = "anchorRow",
-      content = "anchorContent", summary = "HealPredictionAnchorSummary",
-      apply = "ApplyHealPredictionAnchor", count = 5 },
+-- label, stable collapse key, card column, classic box and column, summary;
+-- `dim` = header greys with the page gate, `hide` = the floating gate on both
+-- halves, `pin` = passes its builder (decides how the bar LOOKS).
+local CARDS = {
+    { label = "Heal Prediction",       key = "healpred_settings", col = 1, box = "settingsGroup", classicCol = "1",
+      builder = "BuildHealPredictionSettingsGroup", golden = HP_SETTINGS,
+      summary = "HealPredictionCardSummary", pin = true },
+    { label = "Floating Bar Position", key = "healpred_floating", col = 2, box = "floatingGroup", classicCol = "1",
+      builder = "BuildHealPredictionFloatingGroup", golden = HP_FLOATING,
+      summary = "HealPredictionFloatingSummary", dim = true, hide = true, pin = true },
+    { label = "Floating Bar Anchor",   key = "healpred_anchor",   col = 2, box = "anchorGroup",   classicCol = "2",
+      builder = "BuildHealPredictionAnchorGroup", golden = HP_ANCHOR,
+      summary = "HealPredictionAnchorSummary", dim = true, hide = true, pin = true },
 }
 
-for _, g in ipairs(ROWS) do
+for _, g in ipairs(CARDS) do
     print("-- Heal Prediction page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
+    -- ONE builder, BOTH layouts: the declaration, the classic box's mount and
+    -- the card's (the pin's panel copy is built by the shared helper).
     local calls = 0
     for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and popout pane")
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
 
-    -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
     check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
           g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.boxHeader .. '"]), 40)', 1, true) ~= nil,
-          g.label .. ": ...under the header it always had (" .. g.boxHeader .. ")")
-    check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.column .. ")", 1, true) ~= nil,
-          g.label .. ": ...and still goes to column " .. g.column)
+    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"]), 40)', 1, true) ~= nil,
+          g.label .. ": ...under the header it always had")
+    check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+          g.label .. ": ...and still goes to column " .. g.classicCol)
 
-    local opts = rowOpts(g.label)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          g.label .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          g.label .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          g.label .. ": ...and clipped by the page's own scroll frame, not the window")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": ...with the summary written for it")
-    check(PAGE:find("local " .. g.row .. " = healPredBand:AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the page's one band")
+    local block, call = sectionBlock(g.label)
+    check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing its summary")
+    eq(call:find("HealPredOffRow", 1, true) ~= nil, g.dim == true,
+       g.label .. (g.dim and ": its header greys with the page gate" or ": holds the page gate, so it never greys with it"))
+    eq(call:find("HealPredFloatingHiddenOn", 1, true) ~= nil, g.hide == true,
+       g.label .. (g.hide and ": hides, header and band together, unless the bar floats" or ": carries no hide gate"))
+    eq(call:find(g.builder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable, from its own builder" or ": grows no pin"))
+    check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
 
-    -- The strip. EVERY key on this page is a per-mode profile key living in
-    -- DF.PartyDefaults, so every row gets the amber tick and the Reset Group /
-    -- Hold: Defaults footer, and every footer is handed the group's own apply.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", " .. g.content .. ")", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-          g.label .. ": ...and its footer runs the group's own apply")
-
-    -- The count, declared in one place.
-    local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-    check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, g.count, g.label .. ": ...and it is what the PANE mounts")
-
-    -- ⚠ NO GatePaneFirstChild ANYWHERE ON THIS PAGE, unlike the Resource Bar's.
-    -- That repair exists for a group-level `disableChildrenOn`, which skips child
-    -- one; this page has never had one -- every widget carries its own disableOn.
-    check(body:find("disableChildrenOn", 1, true) == nil,
-          g.label .. ": no group gate -- every control carries its own")
-end
-
--- ...and the two counts that are NOT simply the census, spelled out.
-print("-- Heal Prediction page: the Settings row's arithmetic")
-do
-    -- Twelve in the census: five plain controls, SIX pickers (three per layout
-    -- arm) and the blend pick. The pane mounts three of the six and skips the
-    -- hoisted enable, which is 12 - 3 - 1.
-    eq(#HP_SETTINGS - 3 - 1, 8, "settings: the pane's eight is the census less the classic arm and the hoist")
-    eq(#HP_FLOATING, 4, "floating position: the pane mounts its whole census")
-    eq(#HP_ANCHOR, 5, "floating anchor: ...and so does the anchor pane")
+    local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
+    check(block:find(mount, 1, true) ~= nil, g.label .. ": mounts the builder exactly as classic does")
 end
 
 -- ============================================================
--- 5. THE HOISTED ENABLE
--- A plain checkbox in classic with every other control on the page carrying
--- `disableOn = not healPredictionEnabled`. The row takes the tick; the builder
--- skips the checkbox; the individual gates stay where they were.
+-- 5. THE MASTER SWITCH STAYS IN THE BODY
 -- ============================================================
-print("-- Heal Prediction page: the hoisted enable")
+print("-- Heal Prediction page: the page gate stays in the first card")
 do
     local body = builderBody("BuildHealPredictionSettingsGroup")
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          "hoist: the enable checkbox is skipped when the row has hoisted it")
+    check(body:find('GUI:CreateCheckbox(parent, L["Enable Heal Prediction"], db, "healPredictionEnabled"', 1, true) ~= nil,
+          "gate: the builder still builds Enable Heal Prediction")
     check(body:find(".keepEnabled = true", 1, true) ~= nil,
-          "hoist: ...and in classic it stays live whatever else greys")
-
-    local opts = rowOpts("Heal Prediction")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"healPredictionEnabled"%s*}') ~= nil,
-          "hoist: the row's tick is the page's own enable key")
-    check(opts:find("onToggle%s*=%s*OnHealPredictionToggle") ~= nil,
-          "hoist: ...and a commit that is not a page rebuild")
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD, and it DOES reflow the other panes:
-    -- the gate this tick is reaches every control in the two floating panes.
-    local commit = PAGE:match("local function OnHealPredictionToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "hoist: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "hoist: ...and never rebuilds the page")
-        check(commit:find("DF:UpdateAllFrames()", 1, true) ~= nil,
-              "hoist: ...it runs what the suppressed checkbox ran")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              "hoist: ...re-runs the state passes")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "hoist: ...and reflows the open panes, because the gate reaches them")
-    end
-
-    check(PAGE:find('tools.RegisterHoistedToggle(settingsRow, L["Enable Heal Prediction"], "healPredictionEnabled", OnHealPredictionToggle)', 1, true) ~= nil,
-          "hoist: the hoisted toggle keeps its search entry")
+          "gate: ...and it stays live whatever else greys")
+    check(PAGE:find("hoistToggle = true", 1, true) == nil,
+          "gate: no card asks its builder to skip the enable -- it is never hoisted")
+    -- Shut, the card says Off while the bar is off.
+    local s = PAGE:match("local function HealPredictionCardSummary%(d%)(.-)\n        end")
+    check(s ~= nil and s:find('if d and not d.healPredictionEnabled then return L["Off"] end', 1, true) ~= nil
+      and s:find("return HealPredictionSettingsSummary(d)", 1, true) ~= nil,
+          "gate: the first card's corner says Off while the bar is off, its summary otherwise")
 end
 
 -- ============================================================
--- 6. THE FLOATING ROWS' hideOn AND THE PAGE-WIDE GATE
+-- 6. WHAT HIDES AND WHAT GREYS
 -- ============================================================
 print("-- Heal Prediction page: what hides and what greys")
 do
-    -- ---- ONE predicate, both layouts -----------------------------------
     check(PAGE:find('local function HealPredFloatingHiddenOn(d) return d.healPredictionMode ~= "FLOATING" end', 1, true) ~= nil,
           "hide: the floating rule is named once, at page scope")
-    local uses = 0
-    for _ in PAGE:gmatch("HealPredFloatingHiddenOn") do uses = uses + 1 end
-    eq(uses, 5, "hide: ...declared once and used four times -- two boxes, two rows")
-
-    for _, w in ipairs({ "floatingGroup", "anchorGroup", "floatingRow", "anchorRow" }) do
+    for _, w in ipairs({ "floatingGroup", "anchorGroup" }) do
         check(PAGE:find(w .. ".hideOn = HealPredFloatingHiddenOn", 1, true) ~= nil,
-              "hide: " .. w .. " takes the shared rule, never its own copy")
+              "hide: classic's " .. w .. " takes the shared rule")
     end
-    -- ...and no inline copy of the predicate survives on either side.
     check(PAGE:find('hideOn = function(d) return d.healPredictionMode ~= "FLOATING" end', 1, true) == nil,
           "hide: ...no hand-written duplicate is left behind")
-
-    -- ---- the gate reaches the rows, with the Settings row excepted ------
     check(PAGE:find("local function HealPredOffRow(d) return not (d or db).healPredictionEnabled end", 1, true) ~= nil,
           "gate: the page-wide gate is named once")
-    for _, w in ipairs({ "floatingRow", "anchorRow" }) do
-        check(PAGE:find(w .. ".disableOn = HealPredOffRow", 1, true) ~= nil,
-              "gate: " .. w .. " greys with the feature, as its box's controls always did")
-    end
-    -- ⚠ THE SETTINGS ROW IS THE EXCEPTION: it carries the gate's own tick, so
-    -- greying it would leave no way to turn heal prediction back on.
-    check(PAGE:find("settingsRow.disableOn", 1, true) == nil,
-          "gate: ...and the row holding the tick is not greyed by it")
 
-    -- ---- the per-control gates stayed inside the builders ---------------
     local gates = 0
     for _ in PAGE:gmatch("disableOn = function%(d%) return not d%.healPredictionEnabled end") do
         gates = gates + 1
@@ -456,26 +373,22 @@ do
     -- layout arm), four in Floating Bar Position and five in Floating Bar Anchor.
     eq(gates, 20, "gate: every control on the page still carries the gate it always had")
 
-    -- ---- the display-mode pick routes through the tools -----------------
     local body = builderBody("BuildHealPredictionSettingsGroup")
     check(body:find("self:RefreshStates", 1, true) == nil,
-          "gate: the builder never calls the PAGE's RefreshStates from inside a pane")
+          "gate: the builder never calls the PAGE's RefreshStates -- a pinned panel's copy reflows itself")
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
     eq(routed, 3, "gate: the enable, the display mode and the source pick all route through the tools")
 
-    -- Every popout mount declares itself as one.
-    local popouts = 0
-    for _ in PAGE:gmatch("popout = true,") do popouts = popouts + 1 end
-    eq(popouts, 3, "gate: all three popout mounts declare themselves as panes")
+    -- The order, which is also the one-column fold's order.
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "), "Heal Prediction | Floating Bar Position | Floating Bar Anchor",
+       "order: the three cards open in the order the classic boxes read")
 end
 
 -- ============================================================
 -- 7. ZERO NEW LOCALE STRINGS
--- Every label and summary word already shipped -- the summaries reuse the
--- dropdowns' own vocabulary, which is why those tables moved to page scope, and
--- the popout's always-precise picker labels are ones classic already uses under
--- Split.
 -- ============================================================
 print("-- Heal Prediction page: every locale string the page asks for already ships")
 do
@@ -490,86 +403,4 @@ do
         end
     end
     eq(missing, 0, "locale: the page adds no new string")
-end
-
--- ============================================================
--- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
--- row holding four was charging the same click as a row holding thirty-one. So a
--- row whose whole group is small mounts THAT GROUP under its own title line, and
--- its strip stops promising settings that are already on screen and offers to
--- pin a second copy instead.
---
--- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
--- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
--- REFUSES a pane that turns out to be big, measured off the group rather than
--- read off the badge. Only the second can be exercised against a real group, and
--- that is test_popout_page_tools.lua's job -- what is pinned here is which of
--- this page's rows asked, and which deliberately did not.
---
--- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
--- pages and several of them name a mount the same thing (roleMount, classMount,
--- bgMount and sizeMount each appear twice), so a census that took the first
--- match in the file would cheerfully describe another page's row.
--- ============================================================
-print("-- Heal Prediction page: which rows mount their pane on the plate")
-do
-    local WANT = {
-        { "BuildHealPredictionSettingsGroup", false }, -- 8, over the line by two
-        { "BuildHealPredictionFloatingGroup", true }, -- 4, hidden unless the bar floats
-        { "BuildHealPredictionAnchorGroup",  true }, -- 5, hidden with it
-    }
-
-    -- Every PopoutContent call in the file, filed under the builder it feeds.
-    local CALLS = {}
-    do
-        local pos = 1
-        while true do
-            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
-            if not a then break end
-            -- The `end` closing the call sits at the page builder's own twelve
-            -- spaces; everything inside the closure is indented further, so this
-            -- is the first one that can be it. The tail read past it is long
-            -- enough to carry an opt-in and nothing else.
-            local b = SRC:find("\n            end", a, true)
-            local body = SRC:sub(a, (b or a) + 48)
-            local builder = body:match("(Build[%w_]+Group)%(")
-            if builder then CALLS[builder] = body end
-            pos = a + 1
-        end
-    end
-
-    for _, spec in ipairs(WANT) do
-        local builder, wantInline = spec[1], spec[2]
-        local body = CALLS[builder]
-        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
-        local gotInline = body ~= nil
-            and body:find("end, nil, { inline = true })", 1, true) ~= nil
-        if wantInline then
-            check(gotInline, "inline: " .. builder .. " asks for the plate")
-        else
-            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
-        end
-    end
-    -- How many times one hoist is declared, IN THIS PAGE'S SLICE. `settingsRow`
-    -- is a Resource Bar row and a Heal Prediction row both, so a count taken over
-    -- the whole file would answer two for either of them.
-    local function hoistCount(needle)
-        local n, pos = 0, 1
-        while true do
-            local a = PAGE:find(needle, pos, true)
-            if not a then break end
-            n, pos = n + 1, a + 1
-        end
-        return n
-    end
-
-    -- ⚠ THE SETTINGS ROW STAYS BEHIND ITS STRIP AT EIGHT, two over the line --
-    -- and its hoisted enable tick is untouched by that, because a row that keeps
-    -- its pane keeps every reason it ever had to hoist. The two that moved are
-    -- hidden together unless the bar is floating, so the height they add is only
-    -- ever on screen in the mode they describe.
-    eq(hoistCount("tools.RegisterHoistedToggle(settingsRow"), 1,
-       "inline: ...and the Settings row's own tick is still hoisted, exactly once")
 end

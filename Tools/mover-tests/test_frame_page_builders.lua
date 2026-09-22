@@ -1616,7 +1616,9 @@ do
         ["GUI/Pages/Indicators.lua"] = 0,
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
-        ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2
+        -- ⚠ Auras.lua's pages move onto the Debuff Bar's cards one by one, and a
+        -- card has no plate to opt onto: Heal Prediction's 2 went first.
+        ["GUI/Pages/Auras.lua"]      = 13,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5
     }
     local TOC = options_file_source("DandersFrames_Options.toc")
     local wrong = {}
