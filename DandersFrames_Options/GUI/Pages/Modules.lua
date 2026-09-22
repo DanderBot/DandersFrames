@@ -52,101 +52,74 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- DF:UpdateAllFramesStatusIcons, which is exactly the kind of difference
         -- a copy-paste pass flattens by accident.
         --
-        -- ☠ AND THE THIRTEEN COLLAPSIBLE SECTIONS ARE KEPT, IN BOTH LAYOUTS.
-        -- The Highlights page (this same file) dissolved its sections into bands
-        -- because each wrapped ONE group and a row is already a fold. These do
-        -- two things a band cannot: they carry the LIVE HEADER PREVIEW of the
-        -- icon they control (SetPreviewIcons, desaturated when the icon is off --
-        -- a popout row has no preview slot, which is what the Debuff Bar page's
-        -- Important Debuffs row flagged), and they fold 41 plates down to 14
-        -- headers on a page that would otherwise be the longest in the addon.
-        -- So the popout mounts a headerless chromeless BAND inside each section
-        -- and puts that section's rows in it -- the Health Bar precedent
-        -- (rows inside sections), at thirteen times the scale.
+        -- CLASSIC is exactly what it always was: fourteen collapsible sections in
+        -- column 1, each icon's section holding its Settings / Appearance /
+        -- Position boxes (and AFK's Timer Text), each with its live header
+        -- preview.
         --
-        -- ⚠ ICON TEXT SETTINGS IS THE ONE SECTION THAT DOES DISSOLVE. It has no
-        -- preview and wraps a single block of shared typography, so in the popout
-        -- it is one row in a headerless band at the top of the page; classic
-        -- keeps the section and its loose widgets exactly as they were.
+        -- MODERN is the Debuff Bar's collapsible-card design, with ONE CARD PER
+        -- ICON: the icon's Settings, Appearance and Position builders mounted one
+        -- after another into the same card, two per row when the card is wide
+        -- enough, captions dim. The icon's Enable is the card's HEADER TICK (the
+        -- Settings builder skips its in-body copy through hoistToggle), so an
+        -- icon is switched on or off without opening anything, and a shut card
+        -- says "Off" or its summary. Role has no single enable, so its card has
+        -- no tick. Icon Text Settings is a card of its own, and AFK's Timer Text
+        -- is too, right under the AFK card: it has its own Font, Offset X and
+        -- Offset Y, which inside the AFK card would sit beside the icon's own
+        -- Offset X and Offset Y under the same names, and it hides as a unit.
         --
-        -- ⚠ EVERY ROW'S PLATE READS "Settings" / "Appearance" / "Position", and
-        -- its TITLE reads "<Icon> -- <that>". The plate name is short because the
-        -- section header above it already says which icon it is; the title is not
-        -- decoration but a requirement -- ClaimKeys stamps the row's title as the
-        -- search breadcrumb AND as the anchor ScrollToSection finds the row by,
-        -- so thirteen rows called "Settings" would send every jump to the first
-        -- one. `title` is also what the open panel's header and the Reset Group
-        -- undo entry read, both of which want the long form.
+        -- ☠ NO HEADER PREVIEWS IN MODERN. The cards carry the tick and the
+        -- summary; the preview swatches stay classic-only.
+        --
+        --   column 1   Icon Text Settings, then Role, Leader, Target Marker,
+        --              Ready Check, Ping, Summon
+        --   column 2   BG Carrier, Combat, Resurrection, Phased, AFK (+ Timer
+        --              Text), Vehicle, Raid Role
+        --
+        -- ⚠ THE SPLIT IS FOR BALANCE, AND THE ORDER IS THE PAGE'S. Every card is
+        -- the same kind of thing (an icon's switch, its text and its looks), so
+        -- there is no behaviour/looks line to split along. The page's order is
+        -- kept, left column top to bottom and then the right -- which is also
+        -- the order the one-column fold reads -- and the break falls after
+        -- Summon, where the two columns come out closest in height (by slot
+        -- height, two per row).
+        --
+        -- Every card decides how its icon LOOKS (text or icon, scale, alpha,
+        -- where it sits), so every card pins.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
-        -- band width. nil in classic, which is what every `if classicLayout then`
-        -- arm below leans on.
+        -- The shared page-scope machinery. nil in classic, which is what every
+        -- `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
+
+        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
+        end
 
         -- The summary convention, once: at most four items, a fixed order,
         -- "\194\183" between them, WORDS localised and numbers raw, every read
         -- guarded because a profile mid-migration may be missing any of these keys.
         local function Join(parts) return table.concat(parts, " \194\183 ") end
 
-        -- The long form of a row's name -- see the essay above for why it is not
-        -- optional. Composed rather than added as thirty-nine locale strings:
-        -- both halves are already translated, and a translator asked for
-        -- "Role Icon -- Settings" thirty-nine times would be doing the join by hand.
+        -- The Timer Text card's title, "AFK Icon -- Timer Text": composed rather
+        -- than added as a locale string, because both halves are already
+        -- translated. The long form is what tells it apart from the AFK card
+        -- above it and what the pinned panel's title reads.
         local function RowTitle(section, part) return format("%s \226\128\148 %s", section, part) end
 
-        -- The section, in whichever shape the layout wants it. Classic keeps the
-        -- 280 header in column 1 it always had; the popout builds the same header
-        -- at the band's width and adds it "both", so the fold, its preview and the
-        -- plates under it share one left and one right edge.
+        -- The section, in classic: the 280 header in column 1 it always had.
+        -- Modern builds cards instead (MountIconCard).
         local function AddSection(label)
             if classicLayout then
                 return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)
             end
-            return Add(GUI:CreateCollapsibleSection(self.child, label, false, tools.BandWidth()), 36, "both")
-        end
-
-        -- A section's band: headerless, because the section's own header is the
-        -- name. Registered as a section CHILD, which is what makes the fold
-        -- collapse the plates with it (Panel.lua's RefreshStates hides a group
-        -- whose collapsibleSection is shut).
-        local function SectionBand(section)
-            local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            section:RegisterChild(band)
-            return band
-        end
-
-        -- ☠ THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
-        -- DandersUI Sections' RefreshChildStates greys every child a
-        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
-        -- first child is always the header, and wrong for a popout pane, which has
-        -- no header at all. The Resource Bar page's answer, verbatim: spelled onto
-        -- the widget itself, composed with whatever predicate it already carries,
-        -- and applied at the MOUNT rather than inside the builder. Never runs in
-        -- classic, where the box's own header is index 1.
-        --
-        -- ⚠ ONLY THE TICKLESS PANES NEED IT. A pane whose row carries a hoisted
-        -- toggle is greyed WHOLE by the kit's own syncGate (DandersUI/PopoutRow),
-        -- so those builders drop the group gate in the popout arm rather than
-        -- saying the same thing twice -- the Dispel Overlay page's rule.
-        local function GatePaneFirstChild(group, gate)
-            if not gate then return end
-            local entry = group and group.groupChildren and group.groupChildren[1]
-            local w = entry and entry.widget
-            if not w then return end
-            local prev = w.disableOn
-            w.disableOn = function(d) return gate(d) or (prev and prev(d)) or false end
-        end
-
-        -- What a write to any icon's keys costs. One apply for every row on the
-        -- page: a Reset Group can move an enable, a scale, a status string and a
-        -- colour in one press, and those are three different render paths -- the
-        -- full sweep, the status-icon pass and the test frames. Cheap enough for a
-        -- verb the user pressed on purpose, and wrong if it misses one.
-        local function ApplyIconGroup()
-            DF:UpdateAllFrames()
-            DF:UpdateAllFramesStatusIcons()
-            DF:RefreshTestFrames()
         end
 
         -- The two callback families this page has, named once. Eleven icons
@@ -163,12 +136,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ============================================
         -- ⚠ THIS SECTION'S WIDGETS ARE NOT IN A GROUP IN CLASSIC -- they are Add'd
         -- loose and registered to the section one at a time -- so its builder takes
-        -- an `add` rather than a group: classic hands it Add + RegisterChild, the
-        -- popout hands it the pane group's AddWidget. Every other builder on the
-        -- page takes a group, because every other block on the page already was one.
+        -- an `add`: classic hands it Add + RegisterChild. A card (and its pinned
+        -- panel) hands it a `group` like every other builder on the page, and the
+        -- builder adds into that group's AddWidget.
         local textSection
         local function BuildIconTextGroup(tools2)
             local parent, add = tools2.parent, tools2.add
+            if not add then
+                local group = tools2.group
+                add = function(widget, height) return group:AddWidget(widget, height) end
+            end
 
             add(GUI:CreateLabel(parent, L["Font settings for icons displayed as text (Summon, Res, AFK, etc.)"], 240), 30)
             add(GUI:CreateFontDropdown(parent, L["Font"], db, "statusIconFont", StatusIconsCB), 55)
@@ -206,40 +183,22 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end,
             })
         else
-            -- Six: the explanation, the font, the size, the outline, the shadow tick
-            -- and the shadow link.
-            local ICON_TEXT_COUNT = 6
-
-            local textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            -- ☠ SIX EXACTLY, WHICH IS THE CEILING, SO THE GROUP GOES ON THE
-            -- PLATE. The badge and the helper's measure agree here for once --
-            -- the explanation is a child like the rest of them -- and six is what
-            -- `inline` refuses ABOVE, not at. The row is this page's only shared
-            -- typography, sitting over thirteen icon sections that each carry
-            -- three more rows: the one block that is read while configuring any
-            -- of them is the one that should not cost a click.
-            local textMount, textContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildIconTextGroup({
-                    parent = holder,
-                    add = function(widget, height) return group:AddWidget(widget, height) end,
-                    popout = true,
-                    refreshStates = reflow,
-                })
-            end, nil, { inline = true })
-            local textRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Icon Text Settings"],
-                db      = tools.RowDB,
-                summary = IconTextSummary,
-                count   = ICON_TEXT_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = textMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(textRow, textContent)
-            tools.WireModifiedTick(textRow)
-            tools.WireFooter(textRow, ApplyIconGroup)
-            Add(textBand, nil, "both")
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns, and
+            -- "both" carries them through the one-column fold intact. With
+            -- fifteen cards on the page they matter more here than anywhere.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The page's shared typography, first. The sentence and the shadow
+            -- link are not settings, so each takes a row of its own; the four
+            -- controls between them lay out 2 x 2 when the card is wide enough.
+            -- It decides how status text LOOKS, so it pins.
+            local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,
+                nil, nil, BuildIconTextGroup)
+            BuildIconTextGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ★ PER-ICON TEXT COLOURS DO NOT LIVE HERE. Each sits in its OWN icon's Settings
@@ -266,12 +225,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ROLE ICON (Collapsible)
         -- ============================================
         -- ☠ THE ONE ICON WITH NO ENABLE. Role has three per-role Show toggles and
-        -- no master boolean, so its Settings row hoists NOTHING and its Appearance
-        -- and Position rows grey with nothing -- there is no page gate here and no
-        -- per-icon gate either. (The third distinct reason a row refuses a tick,
-        -- after Highlights' "the master is a MODE" and Personal Targeted's "not
-        -- everything in the group depends on it": here there is no single master
-        -- at all.)
+        -- no master boolean, so its card carries NO header tick and nothing on it
+        -- greys -- there is no page gate here and no per-icon gate either. (The
+        -- third distinct reason a card refuses a tick, after Highlights' "the
+        -- master is a MODE" and Personal Targeted's "not everything in the group
+        -- depends on it": here there is no single master at all.)
         local roleSection
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
@@ -427,27 +385,32 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- builders control by control AND pins every spec field, so the pair
         -- together pin all ~215 widgets against the census taken before the move.
         --
-        -- Spec fields, all optional except `key` and `section`:
-        --   key             db prefix ("summonIcon")
-        --   section         the collapsible section's name, and the rows' title prefix
+        -- Spec fields, all optional except `key`, `section` and `col`:
+        --   key             db prefix ("summonIcon"); also the card's fold key,
+        --                   "icons_<key>"
+        --   section         the collapsible section's / card's name
+        --   col             the Modern card's column (see the essay at the top)
         --   id              the lightweight render tag ("summon"); absent = this icon
         --                   repaints through the status-icon pass instead
         --   enableKey/enableLabel/enableTooltip/onEnable   the master switch
+        --                   (the card's header tick in Modern)
         --   note/noteHeight                                one explanatory label
         --   showTextKey/texts                              the Show as Text block
         --   before/after    per-icon widgets around that block, in classic's order
         --   hideInCombatLabel/onHideInCombat               the Appearance extra
-        --   controlRow      the Settings box holds ONE setting, so it is a plate
-        --   summaryExtra    what this icon's Settings row says beyond the shared part
-        --   preview         WireStatusPreview's opts
+        --   summary         replaces the shared Settings summary (Role)
+        --   summaryExtra    what this icon's Settings summary says beyond the shared part
+        --   extraGroup      a fourth box (AFK's Timer Text): a card of its own in Modern
+        --   preview         WireStatusPreview's opts (classic only)
         -- ============================================
         local function BuildIconSettingsGroup(tools2, spec)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is this icon's only on/off control -- and with it the box's
-            -- own gate, which the popout does not repeat because the kit's syncGate
-            -- already greys a pane whose row toggle is off.
+            -- Suppressed when the CARD's header carries this tick. Still built in
+            -- classic and in a pinned panel, where it is this icon's only on/off
+            -- control -- and with it the box's own gate. In a card the gate still
+            -- arrives: the Appearance and Position builders, mounted into the same
+            -- card after this one, set the same group gate.
             if spec.enableKey and not tools2.hoistToggle then
                 group.disableChildrenOn = spec.gate
                 local enableCb = group:AddWidget(GUI:CreateCheckbox(parent, spec.enableLabel, db, spec.enableKey, spec.onEnable), 30)
@@ -533,15 +496,88 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
 
+        -- A card's corner: the three summaries above, in the card's own order
+        -- (settings, looks, place), each only when it has something to say.
+        local function IconCardSummary(spec)
+            local fns = { spec.summary or IconSettingsSummary(spec),
+                          IconAppearanceSummary(spec), IconPositionSummary(spec) }
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                for _, fn in ipairs(fns) do
+                    local s = fn(d)
+                    if s ~= "" then parts[#parts + 1] = s end
+                end
+                return Join(parts)
+            end
+        end
+
         -- ============================================
-        -- ONE ICON'S PLATES, ALSO SAID ONCE
+        -- ONE ICON'S CARD (Modern)
         -- --------------------------------------------
-        -- Both layouts, driven off the same spec. Classic builds the boxes it
-        -- always built, in column 1, registered to the section; the popout builds
-        -- the section's band and hangs the same builders off rows in it.
+        -- The icon's three builders -- Settings (or the icon's own, Role's),
+        -- Appearance, Position -- mounted one after another into ONE card, in
+        -- the order classic's boxes stand. The same function is the pin's
+        -- builder, so a pinned panel holds exactly what the card does (plus the
+        -- enable checkbox, which a panel has no header to carry).
         --
-        -- ⚠ THE ROWS' ORDER IS THE BOXES' ORDER, including AFK's fourth box, which
-        -- has always sat between Settings and Appearance.
+        -- ☠ THE ENABLE IS THE HEADER'S TICK, and the Settings builder skips its
+        -- in-body copy (hoistToggle) -- one checkbox per setting. Its commit is
+        -- what the in-body checkbox ran (spec.onEnable), then the state pass that
+        -- re-greys the card and a repaint of a pinned panel -- never a rebuild.
+        --
+        -- ⚠ AFK'S TIMER TEXT IS A SECOND CARD, directly under the AFK card: its
+        -- Offset X / Offset Y / Font would otherwise sit in the AFK card beside
+        -- the icon's own under the same names. It keeps its box's gates -- it
+        -- hides, header and body together, unless Show Timer is on in icon mode,
+        -- and its header dims (and its body greys) while AFK is off.
+        -- ============================================
+        local function MountIconCard(spec)
+            local settingsBuild = spec.settings or BuildIconSettingsGroup
+            local function BuildIconCard(tools2)
+                settingsBuild(tools2, spec)
+                BuildIconAppearanceGroup(tools2, spec)
+                BuildIconPositionGroup(tools2, spec)
+            end
+            local toggle
+            if spec.enableKey then
+                toggle = {
+                    db = db, key = spec.enableKey, label = spec.enableLabel,
+                    tooltip = spec.enableTooltip,
+                    onChanged = function()
+                        if spec.onEnable then spec.onEnable() end
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
+                }
+            end
+            local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec),
+                nil, nil, BuildIconCard, toggle)
+            BuildIconCard({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = spec.enableKey ~= nil,
+            })
+            CloseSection(band)
+
+            local extra = spec.extraGroup
+            if extra then
+                local function BuildExtraCard(tools2) extra.build(tools2, spec) end
+                band = OpenSection(RowTitle(spec.section, extra.label), "icons_" .. spec.key .. "_extra", spec.col,
+                    extra.summary, spec.gate, extra.hideOn, BuildExtraCard)
+                BuildExtraCard({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
+            end
+        end
+
+        -- ============================================
+        -- ONE ICON, BOTH LAYOUTS
+        -- --------------------------------------------
+        -- Driven off the same spec. Classic builds the boxes it always built, in
+        -- column 1, registered to the section; Modern builds the icon's card.
         -- ============================================
         local function MountIcon(spec)
             spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil
@@ -551,6 +587,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 spec.cbFrameLevel = function() DF:LightweightUpdateFrameLevel(spec.id) end
             else
                 spec.cbPosition, spec.cbAlpha, spec.cbFrameLevel = StatusIconsCB, StatusIconsCB, StatusIconsCB
+            end
+
+            if not classicLayout then
+                MountIconCard(spec)
+                return
             end
 
             local section = AddSection(spec.section)
@@ -598,167 +639,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 if spec.afterMount then spec.afterMount() end
                 return
             end
-
-            local band = SectionBand(section)
-
-            -- What the suppressed Enable checkbox ran, minus any page rebuild: the
-            -- two rows that grey with it are repainted by the page's own state pass,
-            -- and the panes standing open by the reflow. The header preview follows
-            -- for free -- DF:UpdateAllFrames_Now is hooked to refresh it.
-            local function OnEnableToggle()
-                if spec.onEnable then spec.onEnable() end
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            if spec.controlRow then
-                -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. Four icons
-                -- (Leader, Target Marker, Ping, Combat) have nothing in their
-                -- Settings box but the switch, so a popout row here would be a panel
-                -- holding a single checkbox and the row's own tick column already IS
-                -- that checkbox. The trade is the group's two verbs -- no Reset Group
-                -- and no amber tick -- which for one boolean the modified dot on the
-                -- control itself already covers.
-                --
-                -- ⚠ COMBAT'S EXPLANATION BECOMES THE PLATE'S TOOLTIP. Its box holds
-                -- the tick and one sentence; the sentence is not a setting, so it
-                -- cannot keep a plate of its own, and a control row's tooltip is
-                -- where a sentence about the control belongs. Classic still draws it
-                -- as a label, exactly as before.
-                local enableRow = band:AddWidget(GUI:CreateControlRow(self.child, {
-                    label     = spec.enableLabel,
-                    kind      = "checkbox",
-                    -- The FUNCTION form: the table is re-resolved on each read, so a
-                    -- mode switch is followed rather than frozen at whichever table
-                    -- this build captured.
-                    db        = tools.RowDB,
-                    key       = spec.enableKey,
-                    tooltip   = spec.enableTooltip or spec.note,
-                    onChanged = OnEnableToggle,
-                }))
-                tools.RegisterControlRow(enableRow, "checkbox", spec.enableKey, false, OnEnableToggle)
-            else
-                -- ⚠ NO GatePaneFirstChild ON A SETTINGS PANE. Where the row carries
-                -- a hoisted tick the kit's syncGate greys the pane whole, so the
-                -- builder drops the group gate rather than saying it twice; and
-                -- Role, the one Settings row with no tick, has no gate to apply.
-                local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
-                    settingsBuild({ group = group, parent = holder, refreshStates = reflow,
-                                    popout = true, hoistToggle = spec.enableKey ~= nil }, spec)
-                end)
-                local settingsRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label    = L["Settings"],
-                    title    = RowTitle(spec.section, L["Settings"]),
-                    db       = tools.RowDB,
-                    toggle   = spec.enableKey and { key = spec.enableKey } or nil,
-                    summary  = spec.summary or IconSettingsSummary(spec),
-                    count    = spec.settingsCount,
-                    onToggle = spec.enableKey and OnEnableToggle or nil,
-                    window   = DF.GUIFrame,
-                    clipTo   = self,
-                    build    = settingsMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(settingsRow, settingsContent)
-                tools.WireModifiedTick(settingsRow)
-                tools.WireFooter(settingsRow, ApplyIconGroup)
-                if spec.enableKey then
-                    tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)
-                end
-                -- ⚠ AND NO disableOn ON THIS ONE. It carries this icon's own tick;
-                -- greying it would leave no way to switch the icon back on.
-            end
-
-            if spec.extraGroup then
-                local extraMount, extraContent = tools.PopoutContent(function(group, holder, reflow)
-                    spec.extraGroup.build({ group = group, parent = holder, refreshStates = reflow,
-                                            popout = true }, spec)
-                    GatePaneFirstChild(group, spec.gate)
-                end)
-                local extraRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = spec.extraGroup.label,
-                    title   = RowTitle(spec.section, spec.extraGroup.label),
-                    db      = tools.RowDB,
-                    summary = spec.extraGroup.summary,
-                    count   = spec.extraGroup.count,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = extraMount,
-                    footerStrip = true,
-                }))
-                -- The box's own gate becomes the ROW's, so the band collapses the slot
-                -- instead of drawing a plate for a timer that is not being drawn.
-                extraRow.hideOn = spec.extraGroup.hideOn
-                extraRow.disableOn = spec.gate
-                tools.ClaimKeys(extraRow, extraContent)
-                tools.WireModifiedTick(extraRow)
-                tools.WireFooter(extraRow, ApplyIconGroup)
-            end
-
-            -- ☠ NONE OF THIS ICON'S FOUR ROWS MOUNTS ITS PANE ON THE PLATE, and
-            -- the two that are small enough are the reason. Appearance holds
-            -- three or four and Position always three -- well inside the inline
-            -- ceiling -- but both carry `disableOn = spec.gate` and NO toggle of
-            -- their own, and the fold that folds an inline group away reads the
-            -- row's TOGGLE, not its disable. Most of the thirteen icons ship off,
-            -- so opting these in would leave six or seven permanently greyed
-            -- controls sitting on the plate of every section on the page: the
-            -- exact state the kit calls the worst use of the room, thirteen times
-            -- over. Settings and the AFK extra are refused for the plainer reason
-            -- -- both are per-spec (`spec.settingsCount`, `spec.extraGroup.count`,
-            -- and some icons swap the builder entirely), so no number a comment
-            -- here could state would be true of all thirteen, and Timer Text's
-            -- eight is over the ceiling regardless.
-            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildIconAppearanceGroup({ group = group, parent = holder, refreshStates = reflow,
-                                           popout = true }, spec)
-                GatePaneFirstChild(group, spec.gate)
-            end)
-            local appearanceRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Appearance"],
-                title   = RowTitle(spec.section, L["Appearance"]),
-                db      = tools.RowDB,
-                summary = IconAppearanceSummary(spec),
-                count   = spec.hideInCombatLabel and 4 or 3,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = appearanceMount,
-                footerStrip = true,
-            }))
-            -- ☠ THE ICON'S GATE REACHES THE ROW ITSELF, not only the pane. In
-            -- classic the whole section visibly dims while the icon is off; two
-            -- bright plates over two grey panes would be the popout layout saying
-            -- something classic does not. A dimmed row still OPENS -- the kit's grey
-            -- is alpha and a disabled toggle, not a dead frame -- so the settings
-            -- stay readable while they are switched off. The Resource Bar rule.
-            appearanceRow.disableOn = spec.gate
-            tools.ClaimKeys(appearanceRow, appearanceContent)
-            tools.WireModifiedTick(appearanceRow)
-            tools.WireFooter(appearanceRow, ApplyIconGroup)
-
-            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildIconPositionGroup({ group = group, parent = holder, refreshStates = reflow,
-                                         popout = true }, spec)
-                GatePaneFirstChild(group, spec.gate)
-            end)
-            local positionRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Position"],
-                title   = RowTitle(spec.section, L["Position"]),
-                db      = tools.RowDB,
-                summary = IconPositionSummary(spec),
-                count   = 3,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = positionMount,
-                footerStrip = true,
-            }))
-            positionRow.disableOn = spec.gate
-            tools.ClaimKeys(positionRow, positionContent)
-            tools.WireModifiedTick(positionRow)
-            tools.WireFooter(positionRow, ApplyIconGroup)
-
-            Add(band, nil, "both")
-            if spec.afterMount then spec.afterMount() end
         end
 
         -- The shared enable callback: eleven of the twelve switchable icons run
@@ -769,10 +649,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ROLE ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "roleIcon", id = "role", section = L["Role Icon"],
+            key = "roleIcon", id = "role", section = L["Role Icon"], col = 1,
             onSection = function(section) roleSection = section end,
             settings = BuildRoleSettingsGroup,
-            settingsCount = 8,
             summary = RoleSettingsSummary,
             hideInCombatLabel = L["Hide In Combat"],
             onHideInCombat = function() DF:UpdateAllRoleIcons() end,
@@ -784,9 +663,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- LEADER ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "leaderIcon", id = "leader", section = L["Leader Icon"],
+            key = "leaderIcon", id = "leader", section = L["Leader Icon"], col = 1,
             enableKey = "leaderIconEnabled", enableLabel = L["Enable Leader Icon"],
-            onEnable = OnIconEnabled, controlRow = true,
+            onEnable = OnIconEnabled,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } },
         })
@@ -795,9 +674,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- RAID TARGET ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "raidTargetIcon", id = "raidTarget", section = L["Target Marker Icon"],
+            key = "raidTargetIcon", id = "raidTarget", section = L["Target Marker Icon"], col = 1,
             enableKey = "raidTargetIconEnabled", enableLabel = L["Enable Target Marker Icon"],
-            onEnable = OnIconEnabled, controlRow = true,
+            onEnable = OnIconEnabled,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             -- Header preview: the four most-used markers (square / cross / triangle / circle),
             -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
@@ -813,13 +692,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- READY CHECK ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "readyCheckIcon", id = "readyCheck", section = L["Ready Check Icon"],
+            key = "readyCheckIcon", id = "readyCheck", section = L["Ready Check Icon"], col = 1,
             enableKey = "readyCheckIconEnabled", enableLabel = L["Enable Ready Check Icon"],
             onEnable = OnIconEnabled,
             after = function(group, parent)
                 group:AddWidget(GUI:CreateSlider(parent, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
             end,
-            settingsCount = 1,
             summaryExtra = function(d, parts)
                 local persist = tonumber(d.readyCheckIconPersist)
                 if persist then parts[#parts + 1] = format("%ds", math.floor(persist)) end
@@ -833,14 +711,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Mirrors Blizzard's 12.1 frame pings; see Features/PingMirror.lua.
         -- ============================================
         MountIcon({
-            key = "pingIcon", id = "ping", section = L["Ping Icon"],
+            key = "pingIcon", id = "ping", section = L["Ping Icon"], col = 1,
             enableKey = "pingIconEnabled", enableLabel = L["Enable Ping Icon"],
             enableTooltip = L["Shows a group member's ping on the frame of the unit they pinged."],
             onEnable = function()
                 if DF.OnPingIconToggled then DF:OnPingIconToggled() end
                 DF:UpdateAllFrames()
             end,
-            controlRow = true,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } },
         })
@@ -849,7 +726,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- SUMMON ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "summonIcon", id = "summon", section = L["Summon Icon"],
+            key = "summonIcon", id = "summon", section = L["Summon Icon"], col = 1,
             enableKey = "summonIconEnabled", enableLabel = L["Enable Summon Icon"],
             onEnable = OnIconEnabled,
             showTextKey = "summonIconShowText",
@@ -858,7 +735,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 { label = L["Accepted Text"], key = "summonIconTextAccepted" },
                 { label = L["Declined Text"], key = "summonIconTextDeclined" },
             },
-            settingsCount = 5,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "summonIconEnabled", showTextKey = "summonIconShowText", icons = { "RaidFrame-Icon-SummonPending" }, texts = { "summonIconTextPending" } },
         })
@@ -870,14 +746,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- works with Blizzard raid frames fully disabled.
         -- ============================================
         MountIcon({
-            key = "bgCarrierIcon", section = L["BG Carrier Icon"],
+            key = "bgCarrierIcon", section = L["BG Carrier Icon"], col = 2,
             enableKey = "bgCarrierIconEnabled", enableLabel = L["Enable BG Carrier Icon"],
             onEnable = OnIconEnabled,
             note = L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."],
             noteHeight = 44,
             showTextKey = "bgCarrierIconShowText",
             texts = { { label = L["Carrier Text"], key = "bgCarrierIconText" } },
-            settingsCount = 4,
             preview = { enableKey = "bgCarrierIconEnabled", showTextKey = "bgCarrierIconShowText", icons = { "Interface\\Icons\\inv_bannerpvp_02" }, texts = { "bgCarrierIconText" } },
         })
 
@@ -885,9 +760,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- COMBAT ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "combatIcon", section = L["Combat Icon"],
+            key = "combatIcon", section = L["Combat Icon"], col = 2,
             enableKey = "combatIconEnabled", enableLabel = L["Enable Combat Icon"],
-            onEnable = OnIconEnabled, controlRow = true,
+            onEnable = OnIconEnabled,
             note = L["Shows crossed swords on a party/raid member who is in combat."],
             noteHeight = 44,
             -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
@@ -899,7 +774,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- RESURRECTION ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "resurrectionIcon", id = "resurrection", section = L["Resurrection Icon"],
+            key = "resurrectionIcon", id = "resurrection", section = L["Resurrection Icon"], col = 2,
             enableKey = "resurrectionIconEnabled", enableLabel = L["Enable Resurrection Icon"],
             onEnable = OnIconEnabled,
             showTextKey = "resurrectionIconShowText",
@@ -907,7 +782,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ("Pending Text" removed: resurrectionIconTextPending was never read by
             -- any render path — live or test — since inception. The pending state
             -- renders as the yellow icon tint.)
-            settingsCount = 3,
             preview = { enableKey = "resurrectionIconEnabled", showTextKey = "resurrectionIconShowText", icons = { "RaidFrame-Icon-Rez" }, texts = { "resurrectionIconTextCasting" } },
         })
 
@@ -915,7 +789,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- PHASED ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "phasedIcon", id = "phased", section = L["Phased Icon"],
+            key = "phasedIcon", id = "phased", section = L["Phased Icon"], col = 2,
             enableKey = "phasedIconEnabled", enableLabel = L["Enable Phased Icon"],
             onEnable = OnIconEnabled,
             showTextKey = "phasedIconShowText",
@@ -923,7 +797,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             after = function(group, parent)
                 group:AddWidget(GUI:CreateCheckbox(parent, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", OnIconEnabled), 30)
             end,
-            settingsCount = 4,
             summaryExtra = function(d, parts)
                 if d.phasedIconShowLFGEye then parts[#parts + 1] = L["Show LFG Eye for Cross-Instance"] end
             end,
@@ -979,7 +852,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         MountIcon({
-            key = "afkIcon", id = "afk", section = L["AFK Icon"],
+            key = "afkIcon", id = "afk", section = L["AFK Icon"], col = 2,
             enableKey = "afkIconEnabled", enableLabel = L["Enable AFK Icon"],
             onEnable = OnIconEnabled,
             showTextKey = "afkIconShowText",
@@ -991,12 +864,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local afkTimerInheritNote = group:AddWidget(GUI:CreateLabel(parent, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
                 afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
             end,
-            settingsCount = 5,
             summaryExtra = function(d, parts)
                 if d.afkIconShowTimer then parts[#parts + 1] = L["Show Timer"] end
             end,
             extraGroup = {
-                label = L["Timer Text"], build = BuildAFKTimerGroup, count = 8,
+                label = L["Timer Text"], build = BuildAFKTimerGroup,
                 summary = AFKTimerSummary, hideOn = AFKTimerHidden,
             },
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
@@ -1007,12 +879,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- VEHICLE ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "vehicleIcon", id = "vehicle", section = L["Vehicle Icon"],
+            key = "vehicleIcon", id = "vehicle", section = L["Vehicle Icon"], col = 2,
             enableKey = "vehicleIconEnabled", enableLabel = L["Enable Vehicle Icon"],
             onEnable = OnIconEnabled,
             showTextKey = "vehicleIconShowText",
             texts = { { label = L["Status Text"], key = "vehicleIconText" } },
-            settingsCount = 3,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "vehicleIconEnabled", showTextKey = "vehicleIconShowText", icons = { "RaidFrame-Icon-Vehicle" }, texts = { "vehicleIconText" } },
         })
@@ -1021,7 +892,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- RAID ROLE ICON (Collapsible)
         -- ============================================
         MountIcon({
-            key = "raidRoleIcon", id = "raidRole", section = L["Raid Role Icon (MT/MA)"],
+            key = "raidRoleIcon", id = "raidRole", section = L["Raid Role Icon (MT/MA)"], col = 2,
             enableKey = "raidRoleIconEnabled", enableLabel = L["Enable Raid Role Icon"],
             onEnable = OnIconEnabled,
             before = function(group, parent)
@@ -1033,7 +904,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 { label = L["Tank Text"],   key = "raidRoleIconTextTank" },
                 { label = L["Assist Text"], key = "raidRoleIconTextAssist" },
             },
-            settingsCount = 6,
             summaryExtra = function(d, parts)
                 -- Both ship on, so the row is silent about them until one is off --
                 -- and then it names the one still showing. With both off the icon

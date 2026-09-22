@@ -3,30 +3,33 @@ local NS = ...
 -- ============================================================
 -- ICONS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Modules.lua
 -- ------------------------------------------------------------
--- Indicators > Icons is the biggest page in the addon and the LAST of the sweep:
--- one shared typography block plus THIRTEEN status icons, each carrying the same
--- Settings / Appearance / Position trio (AFK adds a fourth box for its timer).
--- Forty-one groups, 154 mounted controls, and every icon says the same three
--- things with a different prefix.
+-- Indicators > Icons is the biggest page in the addon: one shared typography
+-- block plus THIRTEEN status icons, each carrying the same Settings /
+-- Appearance / Position trio (AFK adds a fourth box for its timer).
 --
--- ☠ SO THE SHAPE IS WRITTEN ONCE AND PARAMETERISED, WHICH CHANGES WHAT A CENSUS
--- IS. Every other page in the sweep is pinned by reading its per-group builder
--- bodies control by control. Here there are only FIVE bodies for forty-one
--- groups: three shared ones whose labels and keys are `spec` fields, plus the two
--- genuinely bespoke blocks (Role's Settings and AFK's Timer Text). So this file
--- pins BOTH HALVES and they are only evidence together:
+-- ☠ THE SHAPE IS WRITTEN ONCE AND PARAMETERISED, WHICH CHANGES WHAT A CENSUS
+-- IS. Every other page is pinned by reading its per-group builder bodies control
+-- by control. Here there are only FIVE bodies for forty-one groups: three shared
+-- ones whose labels and keys are `spec` fields, plus the two genuinely bespoke
+-- blocks (Role's Settings and AFK's Timer Text). So this file pins BOTH HALVES
+-- and they are only evidence together:
 --   (a) the five builder bodies, control by control, in order -- the SHAPE;
 --   (b) all thirteen SPEC tables, field by field -- the VALUES the shape is
 --       given.
 -- Shape x specs is the whole page. A control dropped from a builder fails (a); a
 -- key or label typo'd in one icon fails (b).
 --
--- ☠ AND THE THIRTEEN COLLAPSIBLE SECTIONS ARE KEPT, IN BOTH LAYOUTS -- the one
--- page in the sweep where that is the verdict rather than the Highlights page's
--- "sections become bands". They do two things a band cannot: they carry the LIVE
--- HEADER PREVIEW of the icon they control (SetPreviewIcons, desaturated when the
--- icon is off), and they fold 41 plates down to 14 headers. Icon Text Settings is
--- the one section that DOES dissolve -- no preview, one block of controls.
+-- MODERN is the Debuff Bar's collapsible-card design with ONE CARD PER ICON:
+-- the icon's three builders mounted one after another into the same card, two
+-- per row when it is wide enough, captions dim, the icon's Enable as the card's
+-- header tick (Role has none), every card pinnable. Icon Text Settings is a card
+-- of its own at the top of column 1, and AFK's Timer Text is a card of its own
+-- under the AFK card. Header previews stay classic-only.
+--
+--   column 1   Icon Text Settings, Role, Leader, Target Marker, Ready Check,
+--              Ping, Summon
+--   column 2   BG Carrier, Combat, Resurrection, Phased, AFK (+ Timer Text),
+--              Vehicle, Raid Role
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -38,12 +41,11 @@ local NS = ...
 --     which together are the evidence that CLASSIC RENDERS AS IT DID, because
 --     the classic branch mounts the same builders into the same 280 boxes, in
 --     the same sections, in the same column.
---   ✓ the wiring every row must have: the shared machinery rather than a copy of
---     it, the declared counts, the claim/tick/footer trio, the composed titles
---     and the per-icon greys.
---   ✗ nothing about how any of it LOOKS or behaves in the client -- the panels,
---     the hides, the previews and the summaries are read by eye and by the
---     in-game checklist.
+--   ✓ each card's column, stable collapse key, summary, tick and pin; that
+--     there is one checkbox per setting; the two opt-ins; that no count,
+--     footer or plate survives.
+--   ✗ nothing about how any of it LOOKS or behaves in the client -- the folding,
+--     the two-per-row flow, the greys and the summaries are read in game.
 -- ============================================================
 
 -- ⚠ NORMALISED TO LF UP FRONT. This page file ships CRLF (the companion's files
@@ -122,8 +124,8 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Modules.lua holds five pages, and a bare
--- 280 box on one of the others is not this pass's business.
+-- The page, scoped by its own two ends: Modules.lua holds several pages, and a
+-- bare 280 box on one of the others is not this pass's business.
 local PAGE
 do
     local a = SRC:find("BuildPage(pageIcons, function(self, db, Add, AddSpace, AddSyncPoint)", 1, true)
@@ -132,99 +134,153 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
-local function esc(s) return (s:gsub("%p", "%%%0")) end
-
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND SAYS THE SHAPE ONCE
+-- 1. THE SHARED MACHINERY, THE SHAPE SAID ONCE, AND THE POPOUT FURNITURE GONE
 -- ============================================================
-print("-- Icons page: the shared popout machinery, and one builder for thirteen icons")
+print("-- Icons page: the shared machinery, and one builder for thirteen icons")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
                          "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
                          "RegisterControlRow", "RefreshAfterGroupWrite", "HoldReason" }) do
         check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
               "tools: the page does not re-declare " .. v)
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
 
-    -- ☠ THE WHOLE POINT OF THIS PAGE'S CONVERSION. Thirteen icons, and exactly
-    -- ONE declaration of each of the three shared builders and ONE of the mount
-    -- that drives both layouts. Thirteen copies would drift, and the first thing
-    -- to drift would be one of the callbacks.
+    -- ☠ THE ROW FURNITURE IS GONE ENTIRELY, not half-gone: rows, control rows,
+    -- panes on a plate, claims, counts, footers, hoisted search repairs, the
+    -- section bands, the index-1 repair and the per-row verdicts were all
+    -- PopoutRow furniture.
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "GUI:CreateControlRow(", "GatePaneFirstChild", "footerStrip",
+                            "inline = true", "popout = true,", "_COUNT = ", "count =",
+                            "settingsCount", "controlRow = ", "SectionBand", "ApplyIconGroup",
+                            "tools.BandWidth" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
+
+    -- ---- the section helpers: forwards to the shared ones, with both opt-ins
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    -- ☠ THE WHOLE POINT OF THIS PAGE'S SHAPE. Thirteen icons, and exactly ONE
+    -- declaration of each of the three shared builders, ONE of the mount that
+    -- drives both layouts, and ONE of the card it builds in Modern.
     for _, b in ipairs({ "BuildIconSettingsGroup", "BuildIconAppearanceGroup",
-                         "BuildIconPositionGroup", "MountIcon" }) do
+                         "BuildIconPositionGroup", "MountIcon", "MountIconCard" }) do
         local n = 0
         for _ in PAGE:gmatch("local function " .. b .. "%(") do n = n + 1 end
         eq(n, 1, "shape: " .. b .. " is declared exactly once")
     end
-
-    -- ...and MountIcon is what every icon goes through.
     local mounts = 0
     for _ in PAGE:gmatch("MountIcon%(%{") do mounts = mounts + 1 end
     eq(mounts, 13, "shape: all thirteen icons are mounted through the one function")
 
-    -- The classic arm's boxes are built in MountIcon too, so there are FOUR bare
-    -- 280 boxes in the source for forty groups on the page: Settings, the extra
-    -- (AFK's Timer Text), Appearance and Position.
+    -- ---- the classic half, untouched ---------------------------------
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "boxes: four bare 280 boxes in the source, and they are the classic branch's own")
-    check(PAGE:find("280, tools", 1, true) == nil,
-          "boxes: no stay-inline 280 box is left on the page")
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "boxes: the band skin is never restated as a literal (this page needs none)")
+    eq(bare, 4, "classic: four bare 280 boxes in the source, and they are the classic branch's own")
+    check(PAGE:find('return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)', 1, true) ~= nil,
+          "classic: keeps the 280 section header in column 1, at slot 36")
+    check(PAGE:find('textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)', 1, true) ~= nil,
+          "classic: keeps the Icon Text Settings section exactly as it was")
+    local sections = 0
+    for _ in PAGE:gmatch("GUI:CreateCollapsibleSection%(") do sections = sections + 1 end
+    eq(sections, 2, "classic: two direct section builds, both classic's (Modern builds cards through the helper)")
+    for _, g in ipairs({ "settingsGroup", "extraGroup", "appearanceGroup", "positionGroup" }) do
+        check(PAGE:find("section:RegisterChild(" .. g .. ")", 1, true) ~= nil,
+              "classic: the " .. g .. " is registered to its section")
+        check(PAGE:find("Add(" .. g .. ", nil, 1)", 1, true) ~= nil,
+              "classic: ...in column 1, where it always was")
+    end
+    for _, h in ipairs({ "Settings", "Appearance", "Position" }) do
+        check(PAGE:find('GUI:CreateHeader(self.child, L["' .. h .. '"]), GUI.RowHeight.sectionHeader', 1, true) ~= nil,
+              "classic: the box keeps its own " .. h .. " header")
+    end
+    check(PAGE:find("GUI:CreateHeader(self.child, spec.extraGroup.label), GUI.RowHeight.sectionHeader", 1, true) ~= nil,
+          "classic: ...and the extra box takes its header from the spec")
+
+    -- ☠ MODERN TAKES ITS OWN ROAD BEFORE classic's section is built, so the
+    -- classic arm is reached only in classic and no Modern card is ever a
+    -- classic section with a preview.
+    local mount = builderBody("MountIcon")
+    local early = mount:find("if not classicLayout then\n                MountIconCard(spec)\n                return\n            end", 1, true)
+    local sectionAt = mount:find("local section = AddSection(spec.section)", 1, true)
+    check(early and sectionAt and early < sectionAt,
+          "classic: Modern returns into MountIconCard before the classic section and preview are built")
 end
 
 -- ============================================================
--- 2. THE SECTIONS STAY, AND THE BANDS GO INSIDE THEM
+-- 2. THE CARDS
 -- ============================================================
-print("-- Icons page: the sections stay in both layouts, and the bands go inside them")
+print("-- Icons page: one card per icon")
 do
-    -- One helper, two spellings: classic keeps the 280 header in column 1; the
-    -- popout builds the same header at the band's width and adds it "both".
-    check(PAGE:find('return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)', 1, true) ~= nil,
-          "sections: classic keeps the 280 section header in column 1, at slot 36")
-    check(PAGE:find('return Add(GUI:CreateCollapsibleSection(self.child, label, false, tools.BandWidth()), 36, "both")', 1, true) ~= nil,
-          "sections: ...and the popout builds it at the band's width, spanning both columns")
+    local card = builderBody("MountIconCard"):gsub("%s+", " ")
 
-    -- The band is the section's CHILD, which is what makes the fold fold it.
-    check(PAGE:find("local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "bands: a section's band is chromeless, at the width the layout pass will give it")
-    check(PAGE:find("section:RegisterChild(band)", 1, true) ~= nil,
-          "bands: ...and registered to the section, so collapsing takes the plates with it")
-    check(PAGE:find('Add(band, nil, "both")', 1, true) ~= nil,
-          "bands: ...and added after its rows are mounted, spanning both columns")
+    -- ---- the card is the icon's three builders, in classic's box order ----
+    check(card:find("local settingsBuild = spec.settings or BuildIconSettingsGroup", 1, true) ~= nil,
+          "card: Role's own Settings builder still replaces the shared one")
+    check(card:find("local function BuildIconCard(tools2) settingsBuild(tools2, spec) BuildIconAppearanceGroup(tools2, spec) BuildIconPositionGroup(tools2, spec) end", 1, true) ~= nil,
+          "card: the three builders, reused with the icon's spec, in the order the boxes stand")
 
-    -- Icon Text Settings is the one that dissolves.
-    check(PAGE:find('textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)', 1, true) ~= nil,
-          "sections: classic keeps the Icon Text Settings section exactly as it was")
-    check(PAGE:find("local textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "sections: ...and the popout gives it a headerless band instead")
-    check(PAGE:find('Add(textBand, nil, "both")', 1, true) ~= nil,
-          "sections: ...added at the top of the page")
+    -- ---- key, column, summary, pin, tick ---------------------------------
+    check(card:find('local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec), nil, nil, BuildIconCard, toggle)', 1, true) ~= nil,
+          "card: titled for the icon, keyed icons_<db prefix>, in its spec's column, pinnable from its own builder, ticked where it has an enable")
+    check(card:find("BuildIconCard({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = spec.enableKey ~= nil, })", 1, true) ~= nil,
+          "card: mounts the builders as classic does, plus hoistToggle where the header carries the enable")
+    check(card:find("if spec.enableKey then toggle = { db = db, key = spec.enableKey, label = spec.enableLabel, tooltip = spec.enableTooltip,", 1, true) ~= nil,
+          "tick: the header tick is the icon's own enable, under its own label and tooltip -- none for Role")
+    check(card:find("onChanged = function() if spec.onEnable then spec.onEnable() end self:RefreshStates() tools.ReflowMounted() end,", 1, true) ~= nil,
+          "tick: ...committing what the in-body checkbox ran, a state pass and a panel repaint")
+    check(card:find("RefreshCurrentPage", 1, true) == nil and PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          "tick: ...never a page rebuild, anywhere on the page")
+    check(PAGE:find("if spec.enableKey and not tools2.hoistToggle then", 1, true) ~= nil,
+          "tick: the Settings builder skips its in-body enable when the header carries it -- one checkbox per setting")
 
-    -- Every group the classic arm builds is still a section child.
-    for _, g in ipairs({ "settingsGroup", "extraGroup", "appearanceGroup", "positionGroup" }) do
-        check(PAGE:find("section:RegisterChild(" .. g .. ")", 1, true) ~= nil,
-              "sections: the classic " .. g .. " is registered to its section")
-        check(PAGE:find("Add(" .. g .. ", nil, 1)", 1, true) ~= nil,
-              "sections: ...in column 1, where it always was")
-    end
-    -- ...with the header the box always drew.
-    for _, h in ipairs({ "Settings", "Appearance", "Position" }) do
-        check(PAGE:find('GUI:CreateHeader(self.child, L["' .. h .. '"]), GUI.RowHeight.sectionHeader', 1, true) ~= nil,
-              "sections: the classic box keeps its own " .. h .. " header")
-    end
-    check(PAGE:find("GUI:CreateHeader(self.child, spec.extraGroup.label), GUI.RowHeight.sectionHeader", 1, true) ~= nil,
-          "sections: ...and the extra box takes its header from the spec")
+    -- ---- the grey --------------------------------------------------------
+    check(PAGE:find('spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil', 1, true) ~= nil,
+          "grey: the icon's gate is derived from its own enable key, once")
+    local gates = 0
+    for _ in PAGE:gmatch("group%.disableChildrenOn = spec%.gate") do gates = gates + 1 end
+    eq(gates, 4, "grey: the group gate lives inside the builders (settings, appearance, position, timer), so a card greys as its boxes did")
+
+    -- ---- AFK's Timer Text, a card of its own -------------------------------
+    check(card:find("local function BuildExtraCard(tools2) extra.build(tools2, spec) end", 1, true) ~= nil,
+          "extra: the fourth box's own builder is reused, handed the icon's spec")
+    check(card:find('band = OpenSection(RowTitle(spec.section, extra.label), "icons_" .. spec.key .. "_extra", spec.col, extra.summary, spec.gate, extra.hideOn, BuildExtraCard)', 1, true) ~= nil,
+          "extra: titled <Icon> -- <box>, in the icon's column, printing its own summary, dimming with the icon, hiding on the box's own gate, pinnable")
+    check(PAGE:find('local function RowTitle(section, part) return format("%s \\226\\128\\148 %s", section, part) end', 1, true) ~= nil,
+          "extra: the long title is composed from two strings that are already translated")
+    local cardAt  = card:find("CloseSection(band) local extra", 1, true)
+    check(cardAt ~= nil, "extra: ...and it opens after the icon's own card is closed, so it sits right under it")
+
+    -- ---- Icon Text Settings ---------------------------------------------
+    check(PAGE:find('local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,\n                nil, nil, BuildIconTextGroup)', 1, true) ~= nil,
+          "text: Icon Text Settings is a card at the top of column 1, pinnable")
+    check(PAGE:find("BuildIconTextGroup({\n                group = band, parent = self.child,", 1, true) ~= nil,
+          "text: ...its builder is handed the card's group")
+    check(builderBody("BuildIconTextGroup"):find("add = function(widget, height) return group:AddWidget(widget, height) end", 1, true) ~= nil,
+          "text: ...and adds into a group when no loose `add` is given (classic still passes one)")
+
+    -- ---- the order and the columns ---------------------------------------
+    local stripAt = PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true)
+    local textAt  = PAGE:find('OpenSection(L["Icon Text Settings"]', 1, true)
+    local firstIcon = PAGE:find("MountIcon({", 1, true)
+    check(stripAt and textAt and firstIcon and stripAt < textAt and textAt < firstIcon,
+          "order: Expand All / Collapse All first, spanning both columns, then Icon Text, then the icons")
+
+    -- ☠ NO HEADER PREVIEWS ON A CARD. The preview wiring is classic's alone.
+    check(card:find("WireStatusPreview", 1, true) == nil and card:find("onSection", 1, true) == nil
+          and card:find("afterMount", 1, true) == nil,
+          "preview: a card never wires a header preview")
 end
 
 -- ============================================================
@@ -236,7 +292,7 @@ end
 print("-- Icons page: the shared builders")
 do
     checkCensus(census(builderBody("BuildIconSettingsGroup")), {
-        -- the enable tick, suppressed when the row carries it
+        -- the enable tick, suppressed when the card's header carries it
         { "checkbox", "(none)",       "(none)", 30 },
         -- the one explanatory label some icons carry
         { "label",    "(none)",       "(none)", nil },
@@ -246,13 +302,10 @@ do
         { "checkbox", "Show as Text", "(none)", 30 },
         { "editbox",  "(none)",       "(none)", 55 },
     }, "settings builder")
-    -- ⚠ THE SEVENTH CONTROL IS NOT A GUI:Create CALL. AddTextColor is the page's
-    -- own helper (one colour picker, hidden unless that icon is in text mode), so
-    -- the reader cannot see it and it is named here instead.
     check(PAGE:find('AddTextColor(group, parent, L["Text Color"], spec.key .. "TextColor", spec.showTextKey)', 1, true) ~= nil,
           "settings builder: the text colour is mounted through the page's own helper")
     check(PAGE:find("local function AddTextColor(group, parent, label, key, showKey)", 1, true) ~= nil,
-          "settings builder: ...which now takes its parent, because a pane's is not self.child")
+          "settings builder: ...which takes its parent, because a pinned panel's is not self.child")
     check(PAGE:find("w.hideOn = function(d) return not d[showKey] end", 1, true) ~= nil,
           "settings builder: ...and still hides while that icon is in icon mode")
 
@@ -307,66 +360,65 @@ end
 -- ============================================================
 -- 4. THE THIRTEEN SPECS -- THE VALUES
 -- Every field the shape reads, pinned against the census taken from the
--- pre-change source. This is where a mistyped key or a swapped label fails.
+-- pre-change source, plus the Modern card's column. This is where a mistyped
+-- key or a swapped label fails.
 -- ============================================================
 local ICONS = {
-    { section = "Role Icon", key = "roleIcon", id = "role", verdict = "row",
-      settingsBuilder = "BuildRoleSettingsGroup", count = 8,
-      summary = "RoleSettingsSummary", hideInCombat = "Hide In Combat",
-      hideInCombatApply = "function() DF:UpdateAllRoleIcons() end",
-      afterMount = "UpdateRolePreview" },
-    { section = "Leader Icon", key = "leaderIcon", id = "leader", verdict = "controlrow",
+    { section = "Role Icon", key = "roleIcon", id = "role", col = 1,
+      settingsBuilder = "BuildRoleSettingsGroup",
+      summary = "RoleSettingsSummary", hideInCombat = "Hide In Combat" },
+    { section = "Leader Icon", key = "leaderIcon", id = "leader", col = 1,
       enableKey = "leaderIconEnabled", enableLabel = "Enable Leader Icon",
       hideInCombat = "Hide in Combat" },
-    { section = "Target Marker Icon", key = "raidTargetIcon", id = "raidTarget", verdict = "controlrow",
+    { section = "Target Marker Icon", key = "raidTargetIcon", id = "raidTarget", col = 1,
       enableKey = "raidTargetIconEnabled", enableLabel = "Enable Target Marker Icon",
       hideInCombat = "Hide in Combat" },
-    { section = "Ready Check Icon", key = "readyCheckIcon", id = "readyCheck", verdict = "row",
+    { section = "Ready Check Icon", key = "readyCheckIcon", id = "readyCheck", col = 1,
       enableKey = "readyCheckIconEnabled", enableLabel = "Enable Ready Check Icon",
-      count = 1, hideInCombat = "Hide in Combat",
+      hideInCombat = "Hide in Combat",
       after = { { "slider", "Persist (seconds)", "readyCheckIconPersist", 55 } } },
-    { section = "Ping Icon", key = "pingIcon", id = "ping", verdict = "controlrow",
+    { section = "Ping Icon", key = "pingIcon", id = "ping", col = 1,
       enableKey = "pingIconEnabled", enableLabel = "Enable Ping Icon",
       tooltip = "Shows a group member's ping on the frame of the unit they pinged.",
       hideInCombat = "Hide in Combat" },
-    { section = "Summon Icon", key = "summonIcon", id = "summon", verdict = "row",
+    { section = "Summon Icon", key = "summonIcon", id = "summon", col = 1,
       enableKey = "summonIconEnabled", enableLabel = "Enable Summon Icon",
-      showTextKey = "summonIconShowText", count = 5, hideInCombat = "Hide in Combat",
+      showTextKey = "summonIconShowText", hideInCombat = "Hide in Combat",
       texts = { { "Pending Text", "summonIconTextPending" },
                 { "Accepted Text", "summonIconTextAccepted" },
                 { "Declined Text", "summonIconTextDeclined" } } },
-    { section = "BG Carrier Icon", key = "bgCarrierIcon", verdict = "row",
+    { section = "BG Carrier Icon", key = "bgCarrierIcon", col = 2,
       enableKey = "bgCarrierIconEnabled", enableLabel = "Enable BG Carrier Icon",
       note = "Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds.",
-      noteHeight = 44, showTextKey = "bgCarrierIconShowText", count = 4,
+      noteHeight = 44, showTextKey = "bgCarrierIconShowText",
       texts = { { "Carrier Text", "bgCarrierIconText" } } },
-    { section = "Combat Icon", key = "combatIcon", verdict = "controlrow",
+    { section = "Combat Icon", key = "combatIcon", col = 2,
       enableKey = "combatIconEnabled", enableLabel = "Enable Combat Icon",
       note = "Shows crossed swords on a party/raid member who is in combat.", noteHeight = 44 },
-    { section = "Resurrection Icon", key = "resurrectionIcon", id = "resurrection", verdict = "row",
+    { section = "Resurrection Icon", key = "resurrectionIcon", id = "resurrection", col = 2,
       enableKey = "resurrectionIconEnabled", enableLabel = "Enable Resurrection Icon",
-      showTextKey = "resurrectionIconShowText", count = 3,
+      showTextKey = "resurrectionIconShowText",
       texts = { { "Casting Text", "resurrectionIconTextCasting" } } },
-    { section = "Phased Icon", key = "phasedIcon", id = "phased", verdict = "row",
+    { section = "Phased Icon", key = "phasedIcon", id = "phased", col = 2,
       enableKey = "phasedIconEnabled", enableLabel = "Enable Phased Icon",
-      showTextKey = "phasedIconShowText", count = 4, hideInCombat = "Hide in Combat",
+      showTextKey = "phasedIconShowText", hideInCombat = "Hide in Combat",
       texts = { { "Status Text", "phasedIconText" } },
       after = { { "checkbox", "Show LFG Eye for Cross-Instance", "phasedIconShowLFGEye", 30 } } },
-    { section = "AFK Icon", key = "afkIcon", id = "afk", verdict = "row",
+    { section = "AFK Icon", key = "afkIcon", id = "afk", col = 2,
       enableKey = "afkIconEnabled", enableLabel = "Enable AFK Icon",
-      showTextKey = "afkIconShowText", count = 5, hideInCombat = "Hide in Combat",
+      showTextKey = "afkIconShowText", hideInCombat = "Hide in Combat",
       texts = { { "Status Text", "afkIconText" } },
       after = { { "checkbox", "Show Timer", "afkIconShowTimer", 30 },
                 { "label", "In Text mode the timer joins the status text and uses its font, colour and position.", "(none)", 40 } },
-      extra = { label = "Timer Text", count = 8, builder = "BuildAFKTimerGroup",
+      extra = { label = "Timer Text", builder = "BuildAFKTimerGroup",
                 summary = "AFKTimerSummary", hideOn = "AFKTimerHidden" } },
-    { section = "Vehicle Icon", key = "vehicleIcon", id = "vehicle", verdict = "row",
+    { section = "Vehicle Icon", key = "vehicleIcon", id = "vehicle", col = 2,
       enableKey = "vehicleIconEnabled", enableLabel = "Enable Vehicle Icon",
-      showTextKey = "vehicleIconShowText", count = 3, hideInCombat = "Hide in Combat",
+      showTextKey = "vehicleIconShowText", hideInCombat = "Hide in Combat",
       texts = { { "Status Text", "vehicleIconText" } } },
-    { section = "Raid Role Icon (MT/MA)", key = "raidRoleIcon", id = "raidRole", verdict = "row",
+    { section = "Raid Role Icon (MT/MA)", key = "raidRoleIcon", id = "raidRole", col = 2,
       enableKey = "raidRoleIconEnabled", enableLabel = "Enable Raid Role Icon",
-      showTextKey = "raidRoleIconShowText", count = 6, hideInCombat = "Hide in Combat",
+      showTextKey = "raidRoleIconShowText", hideInCombat = "Hide in Combat",
       before = { { "checkbox", "Show Main Tank", "raidRoleIconShowTank", 30 },
                  { "checkbox", "Show Main Assist", "raidRoleIconShowAssist", 30 } },
       texts = { { "Tank Text", "raidRoleIconTextTank" },
@@ -394,48 +446,39 @@ for i, want in ipairs(ICONS) do
     local tag = want.section
 
     -- ORDER MATTERS: the specs are read top to bottom and each one adds its
-    -- section where it stands, so this also pins the page's reading order.
-    check(spec:find('section = L["' .. want.section .. '"]', 1, true) ~= nil,
-          tag .. ": spec " .. i .. " is this icon's, in this position")
+    -- section or card where it stands, so this also pins the page's reading
+    -- order -- which is the one-column fold's order too.
+    check(spec:find('section = L["' .. want.section .. '"], col = ' .. want.col .. ",", 1, true) ~= nil,
+          tag .. ": spec " .. i .. " is this icon's, in this position, carded in column " .. want.col)
     check(spec:find('key = "' .. want.key .. '"', 1, true) ~= nil,
-          tag .. ": ...with its db prefix")
+          tag .. ": ...with its db prefix, which is also its card's fold key")
     if want.id then
         check(spec:find('id = "' .. want.id .. '"', 1, true) ~= nil,
               tag .. ": ...and the lightweight render tag its own callbacks want")
     else
         -- ☠ NO TAG MEANS NO LIGHTWEIGHT PATH. BG Carrier and Combat repaint
         -- through DF:UpdateAllFramesStatusIcons for scale, alpha, frame level and
-        -- position alike -- they always did, and a copy-paste conversion is
-        -- exactly how that difference gets flattened.
+        -- position alike.
         check(spec:find("id = ", 1, true) == nil,
               tag .. ": ...and NO render tag, so it repaints through the status-icon pass")
     end
 
     if want.enableKey then
         check(spec:find('enableKey = "' .. want.enableKey .. '"', 1, true) ~= nil,
-              tag .. ": the master switch is named")
+              tag .. ": the master switch -- the card's header tick -- is named")
         check(spec:find('enableLabel = L["' .. want.enableLabel .. '"]', 1, true) ~= nil,
               tag .. ": ...with the label the checkbox always drew")
     else
         -- ☠ ROLE IS THE ONE ICON WITH NO ENABLE. Three per-role Show toggles and
-        -- no master boolean, so its Settings row hoists nothing and its other two
-        -- rows grey with nothing. A fourth distinct reason a row refuses a tick,
-        -- after "the master is a MODE" (Highlights) and "not everything in the
-        -- group depends on it" (Personal Targeted): there is no single master.
+        -- no master boolean, so its card carries no tick and greys with nothing.
         check(spec:find("enableKey", 1, true) == nil,
-              tag .. ": has no master switch at all, so nothing is hoisted")
+              tag .. ": has no master switch at all, so its card has no tick")
     end
-
-    if want.verdict == "controlrow" then
-        check(spec:find("controlRow = true", 1, true) ~= nil,
-              tag .. ": one setting in the box, so the plate IS the setting")
-        check(spec:find("settingsCount", 1, true) == nil,
-              tag .. ": ...and a control row declares no count, because it opens nothing")
-    else
-        check(spec:find("controlRow", 1, true) == nil,
-              tag .. ": more than one setting in the box, so the plate is a way IN")
-        eq(tonumber(spec:match("settingsCount = (%d+)")), want.count,
-           tag .. ": the Settings row declares what its pane mounts, minus any hoisted tick")
+    if want.settingsBuilder then
+        check(spec:find("settings = " .. want.settingsBuilder, 1, true) ~= nil,
+              tag .. ": swaps in its own Settings builder")
+        check(spec:find("summary = " .. want.summary, 1, true) ~= nil,
+              tag .. ": ...and its own Settings summary")
     end
 
     if want.showTextKey then
@@ -467,7 +510,6 @@ for i, want in ipairs(ICONS) do
         check(spec:find('hideInCombatLabel = L["' .. want.hideInCombat .. '"]', 1, true) ~= nil,
               tag .. ": its Appearance box keeps Hide in Combat")
     else
-        -- BG Carrier and Combat never had one.
         check(spec:find("hideInCombatLabel", 1, true) == nil,
               tag .. ": its Appearance box never had a Hide in Combat and still does not")
     end
@@ -480,10 +522,8 @@ for i, want in ipairs(ICONS) do
     end
 
     if want.extra then
-        check(spec:find('label = L["' .. want.extra.label .. '"], build = ' .. want.extra.builder, 1, true) ~= nil,
+        check(spec:find('label = L["' .. want.extra.label .. '"], build = ' .. want.extra.builder .. ",", 1, true) ~= nil,
               tag .. ": its fourth box is asked for by name")
-        check(spec:find("count = " .. want.extra.count, 1, true) ~= nil,
-              tag .. ": ...declaring what its pane mounts")
         check(spec:find("summary = " .. want.extra.summary, 1, true) ~= nil,
               tag .. ": ...with a summary of its own")
         check(spec:find("hideOn = " .. want.extra.hideOn, 1, true) ~= nil,
@@ -492,123 +532,14 @@ for i, want in ipairs(ICONS) do
 end
 
 -- ============================================================
--- 5. THE WIRING EVERY ROW GETS -- ONCE, IN MountIcon
+-- 5. THE PREVIEWS, CLASSIC'S ALONE
 -- ============================================================
-print("-- Icons page: the rows, the greys and the footers")
-do
-    -- ---- the plate name is short, the title is long --------------------
-    -- ☠ AND THE TITLE IS NOT DECORATION. ClaimKeys stamps a row's title as the
-    -- search breadcrumb AND as the anchor Search:ScrollToSection finds the row
-    -- by, so thirteen rows called "Settings" would send every jump to the first
-    -- one. It is also the open panel's header and the Reset Group undo entry.
-    check(PAGE:find('local function RowTitle(section, part) return format("%s \\226\\128\\148 %s", section, part) end', 1, true) ~= nil,
-          "titles: the long form is composed once, from two strings that are already translated")
-    for _, part in ipairs({ "Settings", "Appearance", "Position" }) do
-        check(PAGE:find('label    = L["' .. part .. '"],', 1, true) ~= nil
-              or PAGE:find('label   = L["' .. part .. '"],', 1, true) ~= nil,
-              "titles: the " .. part .. " plate draws the short name")
-        check(PAGE:find('RowTitle(spec.section, L["' .. part .. '"])', 1, true) ~= nil,
-              "titles: ...and answers to the long one")
-    end
-    check(PAGE:find("RowTitle(spec.section, spec.extraGroup.label)", 1, true) ~= nil,
-          "titles: ...and the extra row takes the same treatment")
-
-    -- ---- the claim / tick / footer trio, on every row ------------------
-    for _, r in ipairs({ "textRow", "settingsRow", "extraRow", "appearanceRow", "positionRow" }) do
-        check(PAGE:find("tools.ClaimKeys(" .. r .. ", ", 1, true) ~= nil,
-              "wiring: " .. r .. " claims whatever its pane registered")
-        check(PAGE:find("tools.WireModifiedTick(" .. r .. ")", 1, true) ~= nil,
-              "wiring: ..." .. r .. "'s amber tick asks about exactly those keys")
-        -- ⚠ A FOOTER ON EVERY ROW, and that is a decision about the KEYS. Every
-        -- setting behind every plate on this page is a plain profile scalar
-        -- except the three text colours, whose swatches re-read their table on
-        -- the value sweep -- so a reset that REPLACES one is repainted rather
-        -- than detached (the Highlights precedent).
-        check(PAGE:find("tools.WireFooter(" .. r .. ", ApplyIconGroup)", 1, true) ~= nil,
-              "wiring: ..." .. r .. " takes Reset Group / Hold: Defaults")
-    end
-    check(PAGE:find("local function ApplyIconGroup()", 1, true) ~= nil,
-          "wiring: one apply for the page, because one reset can move three render paths")
-
-    -- ---- the hoisted tick, and the row that refuses one ----------------
-    check(PAGE:find("toggle   = spec.enableKey and { key = spec.enableKey } or nil", 1, true) ~= nil,
-          "hoist: a Settings row carries its icon's switch -- unless the icon has none")
-    check(PAGE:find("tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)", 1, true) ~= nil,
-          "hoist: ...and the suppressed checkbox's search entry moves onto the row")
-    check(PAGE:find("hoistToggle = spec.enableKey ~= nil", 1, true) ~= nil,
-          "hoist: ...which is what suppresses it inside the pane")
-    check(PAGE:find("if spec.enableKey and not tools2.hoistToggle then", 1, true) ~= nil,
-          "hoist: ...and the builder draws it in classic, where it is the only switch")
-
-    -- ---- the greys -----------------------------------------------------
-    -- ☠ THE ICON'S GATE REACHES THE ROWS THEMSELVES, not only the panes -- the
-    -- Resource Bar rule. In classic the whole section visibly dims while the icon
-    -- is off; bright plates over grey panes would be the popout saying something
-    -- classic does not.
-    check(PAGE:find('spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil', 1, true) ~= nil,
-          "grey: the icon's gate is derived from its own enable key, once")
-    for _, r in ipairs({ "extraRow", "appearanceRow", "positionRow" }) do
-        check(PAGE:find(r .. ".disableOn = spec.gate", 1, true) ~= nil,
-              "grey: " .. r .. " dims with the icon it belongs to")
-    end
-    check(PAGE:find("settingsRow.disableOn", 1, true) == nil,
-          "grey: ...and the Settings row does NOT, because it carries the switch")
-
-    -- ...and the panes behind them, which need the index-1 repair.
-    check(PAGE:find("local function GatePaneFirstChild(group, gate)", 1, true) ~= nil,
-          "grey: the pane's index-1 repair is on the page (a pane has no header to skip)")
-    local repairs = 0
-    for _ in PAGE:gmatch("GatePaneFirstChild%(group, spec%.gate%)") do repairs = repairs + 1 end
-    eq(repairs, 3, "grey: ...applied to the three TICKLESS panes and nowhere else")
-    -- ⚠ NOT ON A SETTINGS PANE. Where the row carries a hoisted tick the kit's
-    -- own syncGate greys the pane whole, so the builder drops the group gate
-    -- rather than saying the same thing twice -- the Dispel Overlay page's rule.
-    check(PAGE:find("group.disableChildrenOn = spec.gate", 1, true) ~= nil,
-          "grey: the group gate lives inside the builders, so a pane greys as its box did")
-
-    -- ---- the control rows ---------------------------------------------
-    check(PAGE:find("local enableRow = band:AddWidget(GUI:CreateControlRow(self.child, {", 1, true) ~= nil,
-          "control row: mounted into a band, never straight into a column")
-    check(PAGE:find("db        = tools.RowDB,", 1, true) ~= nil,
-          "control row: bound through the function form, so a mode switch is followed")
-    check(PAGE:find("tooltip   = spec.enableTooltip or spec.note,", 1, true) ~= nil,
-          "control row: Combat's sentence and Ping's tooltip both land on the plate")
-    check(PAGE:find('tools.RegisterControlRow(enableRow, "checkbox", spec.enableKey, false, OnEnableToggle)', 1, true) ~= nil,
-          "control row: ...and it registers with search under its own label")
-
-    -- ---- what the toggle actually runs ---------------------------------
-    -- ☠ NOT A PAGE REBUILD OF ANY KIND: a rebuild retires every widget on the
-    -- page including the row being clicked, and the row's write path calls
-    -- row.Refresh() after this returns -- on a dead frame.
-    check(PAGE:find("local function OnEnableToggle()", 1, true) ~= nil,
-          "toggle: what the suppressed checkbox ran is named once per icon")
-    check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "toggle: ...and there is no page rebuild left anywhere on this page")
-    check(PAGE:find("tools.ReflowMounted()", 1, true) ~= nil,
-          "toggle: ...the panes standing open are re-flowed instead")
-
-    -- ---- the counts the rows declare -----------------------------------
-    check(PAGE:find("count   = spec.hideInCombatLabel and 4 or 3,", 1, true) ~= nil,
-          "counts: the Appearance row counts its Hide in Combat only where the icon has one")
-    check(PAGE:find("count   = 3,", 1, true) ~= nil,
-          "counts: the Position row is always anchor plus two offsets")
-    check(PAGE:find("count    = spec.settingsCount,", 1, true) ~= nil,
-          "counts: the Settings row declares the spec's count, not a literal")
-    eq(tonumber(PAGE:match("local ICON_TEXT_COUNT = (%d+)")), 6,
-       "counts: Icon Text Settings declares its six")
-end
-
--- ============================================================
--- 6. THE PREVIEWS, WHICH ARE WHY THE SECTIONS SURVIVED
--- ============================================================
-print("-- Icons page: the header previews")
+print("-- Icons page: the header previews stay in classic")
 do
     check(PAGE:find("local function WireStatusPreview(section, opts)", 1, true) ~= nil,
           "preview: the status-icon preview wiring is still on the page")
     check(PAGE:find("if spec.preview then WireStatusPreview(section, spec.preview) end", 1, true) ~= nil,
           "preview: ...and every icon's opts come out of its own spec")
-    -- Twelve status icons take WireStatusPreview; Role has its own, because its
-    -- preview depends on three Show toggles rather than one enable.
     local previews = 0
     for _ in PAGE:gmatch("preview = {") do previews = previews + 1 end
     eq(previews, 12, "preview: twelve status icons declare one")
@@ -618,9 +549,6 @@ do
           "preview: ...reaching its section through the spec")
     check(PAGE:find("afterMount = UpdateRolePreview", 1, true) ~= nil,
           "preview: ...and painted once at build, as it always was")
-
-    -- The hook that keeps every preview live is untouched, and still hooks the
-    -- BODY rather than the arm-stub.
     check(PAGE:find('hooksecurefunc(DF, "UpdateAllFrames_Now", function() DF:RefreshIconPreviews() end)', 1, true) ~= nil,
           "preview: the sweep hook is on the real body, not the arm-stub")
     check(PAGE:find("if DF.iconPreviewRefreshers then wipe(DF.iconPreviewRefreshers) end", 1, true) ~= nil,
@@ -632,7 +560,7 @@ do
 end
 
 -- ============================================================
--- 7. THE SUMMARIES
+-- 6. THE SUMMARIES
 -- Read by eye in the client; what is asserted here is that each one exists, is
 -- written once, joins with the sweep's separator and answers an absent db.
 -- ============================================================
@@ -647,20 +575,23 @@ do
         check(body ~= nil and body:find('if not d then return "" end', 1, true) ~= nil,
               "summary: ..." .. s .. " answers an absent db rather than erroring on it")
     end
-    -- The three shared summaries are FACTORIES -- one body, thirteen prefixes.
-    for _, s in ipairs({ "IconSettingsSummary", "IconAppearanceSummary", "IconPositionSummary" }) do
+    for _, s in ipairs({ "IconSettingsSummary", "IconAppearanceSummary", "IconPositionSummary", "IconCardSummary" }) do
         check(PAGE:find("local function " .. s .. "(spec)", 1, true) ~= nil,
-              "summary: " .. s .. " is written once and given the icon's prefix")
+              "summary: " .. s .. " is written once and given the icon's spec")
     end
-    -- The anchor WORD comes out of the dropdown's own table, so a row cannot say
-    -- one thing while the control behind it says another.
+    -- A card's corner is its three summaries, in the card's order, each only
+    -- when it has something to say.
+    local cs = builderBody("IconCardSummary"):gsub("%s+", " ")
+    check(cs:find("local fns = { spec.summary or IconSettingsSummary(spec), IconAppearanceSummary(spec), IconPositionSummary(spec) }", 1, true) ~= nil,
+          "summary: a card prints settings, looks and place -- Role's own settings summary where it has one")
+    check(cs:find('if s ~= "" then parts[#parts + 1] = s end', 1, true) ~= nil
+      and cs:find('if not d then return "" end', 1, true) ~= nil
+      and cs:find("return Join(parts)", 1, true) ~= nil,
+          "summary: ...skipping the silent ones, joined with the shared separator, safe on an absent db")
     check(PAGE:find('local anchor = anchorOptions[d[spec.key .. "Anchor"]]', 1, true) ~= nil,
-          "summary: the position row names the anchor from the dropdown's own table")
+          "summary: the position names the anchor from the dropdown's own table")
     check(PAGE:find("local style = roleStyleOptions[d.roleIconStyle]", 1, true) ~= nil,
           "summary: ...and Role names the style from its own")
-    -- ⚠ SILENT ON A DEFAULT PROFILE. Thirteen icons on one page, so a summary
-    -- that recited its defaults would be thirteen lines of noise: scale and
-    -- alpha ship at 1 and are printed only once moved.
     check(PAGE:find("if scale and scale ~= 1 then", 1, true) ~= nil,
           "summary: a default scale is not printed back at the reader")
     check(PAGE:find("if alpha and alpha < 1 then", 1, true) ~= nil,
@@ -668,21 +599,18 @@ do
 end
 
 -- ============================================================
--- 8. THE PAGE'S OWN FURNITURE, AND THE EDIT BOX REPAIR
+-- 7. THE PAGE'S OWN FURNITURE, AND THE EDIT BOX REPAIR
 -- ============================================================
-print("-- Icons page: the furniture, and the value sweep an edit box now answers")
+print("-- Icons page: the furniture, and the value sweep an edit box answers")
 do
     check(PAGE:find('CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons")', 1, true) ~= nil,
           "page: the copy button keeps all sixteen prefixes it owns")
 
-    -- ☠ THE ONE WIDGET IN A PANE ON THIS PAGE THAT DID NOT REPAINT. A group
-    -- reset, a Hold: Defaults or the undo of either writes the db behind the
-    -- widgets' backs and repaints them through DandersUI Sections'
-    -- RefreshChildValues, which calls widget.refreshValue. GUI:CreateEditBox had
-    -- none -- it repainted on OnShow only -- so a reset left sixteen boxes on this
-    -- page showing the string the user had typed while the profile already held
-    -- the default. This page is the first to mount edit boxes inside a pane,
-    -- which is what surfaced it.
+    -- ☠ A reset, a Hold: Defaults or an undo writes the db behind the widgets'
+    -- backs and repaints them through DandersUI Sections' RefreshChildValues,
+    -- which calls widget.refreshValue -- and the sixteen edit boxes on this page
+    -- need one to follow it. It is also what lets an edit box share a row inside
+    -- a card: only bound controls (those with refreshValue) pair up.
     local WIDGETS = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n")
     local editbox = WIDGETS:match("function GUI:CreateEditBox%(.-\n(.-)\nend\n")
     check(editbox ~= nil, "editbox: the factory is locatable")
@@ -690,101 +618,4 @@ do
           "editbox: it answers to the group-wide value sweep")
     check(editbox ~= nil and editbox:find('frame:SetScript("OnShow", RefreshDisplay)', 1, true) ~= nil,
           "editbox: ...through the same body OnShow already used, rather than a second copy")
-end
-
--- ============================================================
--- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ROW BY ROW. A row whose whole group is small mounts THAT
--- GROUP under its title line rather than charging a click for it, and the strip
--- then offers to pin a second copy instead of promising settings already on
--- screen. The page opts a row in; the threshold in Controls.lua refuses one
--- whose pane turns out to be big, and that half is measured against a real group
--- in test_popout_page_tools.lua.
---
--- ☠ ONE ROW MOVES AND THE THIRTEEN ICONS' FORTY DO NOT, which is a decision
--- rather than an omission and is the reason this section exists. Icon Text is
--- the page's shared typography, read while configuring any icon, and it holds
--- six -- the ceiling exactly, which the helper refuses ABOVE rather than at.
---
--- The four rows MountIcon builds are refused for two different reasons, and both
--- survive a spec being added:
---   * Appearance (3 or 4) and Position (3) are small enough and still stay put.
---     They carry `disableOn = spec.gate` and NO toggle of their own, and the fold
---     that folds a mounted group away reads the row's TOGGLE, not its disable --
---     so on an icon that ships off, six or seven permanently greyed controls
---     would sit on the plate of every section on the page, thirteen times over.
---   * Settings and the AFK extra are per-spec (`spec.settingsCount`,
---     `spec.extraGroup.count`, and some icons swap the builder outright), so no
---     one number is true of all thirteen -- and Timer Text's eight is over the
---     ceiling regardless.
--- ============================================================
-print("-- Icons page: which rows mount their pane on the plate")
-do
-    local calls = {}
-    local pos = 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-    eq(#calls, 5, "inline: the page's five PopoutContent calls are readable")
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 1, "inline: one of the page's five mounts puts its pane on the plate")
-
-    -- ⚠ NAMED, NOT COUNTED. Four of the five belong to MountIcon and are built
-    -- once for each of the thirteen icons, so "one mount opted in" is a claim
-    -- about ~40 rows -- and which one it is has to be stated or a mount moved
-    -- from the shared path to the page would pass on the number alone.
-    local WANT = {
-        textMount       = true,   -- Icon Text Settings, 6 children
-        settingsMount   = false,  -- per-spec
-        extraMount      = false,  -- per-spec; AFK's Timer Text holds 8
-        appearanceMount = false,  -- 3 or 4, but greyed rather than folded when off
-        positionMount   = false,  -- 3, same
-    }
-    local seen = 0
-    for _, rec in ipairs(calls) do
-        local want = WANT[rec.name]
-        check(want ~= nil, "inline: " .. rec.name .. " is a mount this census knows about")
-        if want ~= nil then
-            eq(inlineMounts[rec.name] == true, want,
-               "inline: " .. rec.name .. (want and " asked for the plate"
-                                               or " keeps its pane behind the strip"))
-            seen = seen + 1
-        end
-    end
-    eq(seen, 5, "inline: ...all five of the page's mounts were accounted for")
-
-    -- The row the one opted-in mount belongs to, read off its own `build`.
-    local textRow = PAGE:match('label%s*=%s*L%["Icon Text Settings"%].-build%s*=%s*([%w_]+)')
-    eq(textRow, "textMount", "inline: Icon Text Settings is built from the mount that asked")
-
-    -- The counted reason it fits, taken off the builder rather than from a number
-    -- typed here -- a seventh control added to the shared typography would move
-    -- it over the ceiling, and this is what would notice before the helper
-    -- silently refused it.
-    local text = builderBody("BuildIconTextGroup")
-    local children = 0
-    for _ in text:gmatch("\n%s+add%(") do children = children + 1 end
-    eq(children, 6, "inline: the Icon Text group holds six children, the ceiling exactly")
-
-    -- ☠ AND THE ONE HOIST ON THE SHARED PATH IS STILL A TICK. MountIcon hoists
-    -- an icon's enable checkbox onto its Settings row, which is that row's own
-    -- toggle rather than one of the pane's settings -- so it is not the twin a
-    -- mounted pane would duplicate, and it survives whatever moves later.
-    local hoists = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
-    eq(hoists, 1, "inline: the page hoists exactly one thing, on the shared icon path")
-    check(PAGE:find("tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)", 1, true) ~= nil,
-          "inline: ...and it is the icon's own enable tick, in the four-argument form")
 end
