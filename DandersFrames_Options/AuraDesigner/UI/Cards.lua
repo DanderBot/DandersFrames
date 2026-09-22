@@ -8445,6 +8445,21 @@ S.ClassicAddEnabled = function()
         and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")) and true or false
 end
 
+-- ☠ WHY AN ADD CANNOT HAPPEN HERE, OR NIL. My Buffs stores effects and layout
+-- groups PER SPEC, and a character whose spec the designer has no buff list for
+-- (any non-healer, or a character with no spec yet) resolves to NO spec -- where
+-- GetSpecAuras / GetSpecLayoutGroups hand back a fresh empty table on every call.
+-- An add there wrote into a table nobody kept: no error, nothing saved, nothing
+-- in the list (reported 2026-09-22 on a level 10 mage). So the flow says why and
+-- refuses up front. Any Buff and Debuffs are spec-independent; the helper's pool
+-- has its own gate.
+S.ClassicAddBlockReason = function(kind)
+    if kind == "debuff" then return nil end
+    if IsOtherTab() or IsDebuffTab() or IsPIHelperTab() then return nil end
+    if ResolveSpec() then return nil end
+    return L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."]
+end
+
 -- The tab each flow runs in.
 S.ClassicAddFlowTab = function(kind)
     return (kind == "indicator") and "effects" or "layout"
@@ -8504,6 +8519,11 @@ end
 S.StartClassicAddFlow = function(kind, source)
     if not S.ClassicAddEnabled() then return false end
     if kind == "indicator" and IsPIHelperTab() then return false end
+    local blocked = S.ClassicAddBlockReason(kind)
+    if blocked then
+        DF:Say(blocked)
+        return false
+    end
     S.classicAddFlow = {
         kind = kind, source = source, ctx = S.ClassicAddContext(),
         listScroll = S.tabScrollFrame and S.tabScrollFrame:GetVerticalScroll() or nil,
@@ -8565,7 +8585,8 @@ end
 -- One tab's add buttons, at the top of its head area, side by side. Returns the y
 -- to continue at.
 S.BuildClassicAddButtons = function(parent, yPos, kind)
-    local enabled = S.ClassicAddEnabled()
+    local blocked = S.ClassicAddBlockReason(kind)
+    local enabled = S.ClassicAddEnabled() and not blocked
     local defs = S.ClassicAddButtonDefs(kind)
     -- The group buttons take the Layout Groups tab's amber, the colour their old
     -- blocks wore; the indicator buttons follow the mode theme.
@@ -8607,7 +8628,19 @@ S.BuildClassicAddButtons = function(parent, yPos, kind)
     end
     S.WatchClassicAddPage()
     local rows = btnW and 1 or n
-    return yPos - (rows * H + (rows - 1) * GAP + 10)
+    yPos = yPos - (rows * H + (rows - 1) * GAP + 10)
+    -- The reason the buttons are greyed, said where the eye already is.
+    if blocked then
+        local note = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        note:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
+        note:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        note:SetJustifyH("LEFT")
+        note:SetWordWrap(true)
+        note:SetText(blocked)
+        note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - (math.ceil(note:GetStringHeight() or 28) + 12)
+    end
+    return yPos
 end
 
 -- Draw the running flow into its tab, in place of the list. Returns true when it
