@@ -793,11 +793,12 @@ do
               "addgroup: ...and shuts itself before the rebuild that retires its row")
     end
 
-    -- The split panel keeps its block: it is the one surface with standing room.
-    check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) ~= nil,
-          "addgroup: the split panel still draws its card block")
-    check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) ~= nil,
-          "addgroup: ...on both pools")
+    -- ☠ THE SPLIT PANEL'S CARD BLOCKS ARE GONE (2026-09-22). It opens these same
+    -- two panes from a button now -- see test_designers_classic.lua.
+    check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) == nil,
+          "addgroup: the split panel no longer draws its Layout Groups card block")
+    check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) == nil,
+          "addgroup: ...nor the Debuffs one")
 
     -- The order the Effects tab already draws: add, then the list.
     local addAt  = BODY:find("local addBand = GUI:CreateSettingsGroup", 1, true)
@@ -2012,17 +2013,14 @@ do
           "narrow: ...reporting THAT height, not the constant, to whatever stacks it")
     check(SW:find("card.layoutHeight = CHOICE_CARD_H", 1, true) == nil,
           "narrow: ...and the constant is no longer what a caller advances by")
-    -- (X) THE TWO SITES SPELL IT DIFFERENTLY, AND THE TEST HAS TO. The add
-    -- block's table is aligned ("width    = COL_W") and the picker arm's card is
-    -- not ("width = COL_W"), so a search for the shorter string is satisfied by
-    -- the card and says nothing at all about the block. My first version passed
-    -- with the block's width deleted.
-    check(HEAD:find("width    = COL_W,", 1, true) ~= nil,
-          "narrow: the Effects tab's add block passes that width down")
-    check(HEAD:find("width = COL_W,", 1, true) ~= nil,
-          "narrow: ...and so does the picker arm's own card list")
-    check(EDIT:find("width    = COL_W", 1, true) ~= nil,
-          "narrow: ...and so do the two Layout Groups blocks")
+    -- ☠ NO CHOICE-CARD BLOCK IS LEFT IN EITHER DESIGNER HEAD AREA (2026-09-22):
+    -- the split panel's add blocks became one button each, opening the Modern
+    -- panes in a popout. The width rule above still holds for the kit's cards;
+    -- the head areas simply no longer build any.
+    check(HEAD:find("CreateChoiceCard", 1, true) == nil,
+          "narrow: the Effects head area builds no choice cards any more")
+    check(EDIT:find("GUI:CreateChoiceCardGroup(parent", 1, true) == nil,
+          "narrow: ...and neither do the two Layout Groups head areas")
 
     -- ---- class two: the preset bar --------------------------------------
     -- Caption + a fixed 150px dropdown + four action buttons, chained left to
@@ -2212,17 +2210,10 @@ do
     check(applyAt and readyAt and applyAt > readyAt,
           "add: the remembered height is applied AFTER the flag is armed")
 
-    -- ☠ TWO LISTS, EACH WITH ONE READER. The split panel still asks the scope
-    -- question, so AddFlowScopes stays and is ITS list; the panel's list is FLAT
-    -- and is the only thing the panel reads. Both are verbs, so neither freezes on
-    -- whatever locale was live at load.
-    check(CARDS:find("local function AddFlowScopes()", 1, true) ~= nil,
-          "add: the scopes and their type lists are declared once")
-    check(CARDS:find("local SCOPES = AddFlowScopes()", 1, true) ~= nil,
-          "add: ...and read as a verb, so the labels are not frozen on enUS")
-    local scopeReads = 0
-    for _ in CARDS:gmatch("AddFlowScopes%(%)") do scopeReads = scopeReads + 1 end
-    eq(scopeReads, 2, "add: ...by the split panel's block alone, now the panel is flat")
+    -- ☠ ONE LIST, ONE READER. The split panel asked the scope question until
+    -- 2026-09-22; it opens this panel now, so the scope lists went with the block.
+    check(CARDS:find("AddFlowScopes", 1, true) == nil,
+          "add: the three scope lists are gone with the split panel's block")
     check(CARDS:find("local function AddFlowEffects()", 1, true) ~= nil,
           "add: the panel's own list is flat and declared once")
     check(CARDS:find("local EFFECTS = AddFlowEffects()", 1, true) ~= nil,
@@ -2262,14 +2253,15 @@ do
     check(pane:find('DF:Say(L["Already added."])', 1, true) ~= nil,
           "add: a duplicate is refused out loud on the type card")
 
-    -- ...and the page it came off no longer draws the block at all.
-    check(CARDS:find("if S.effectsPicker and not skipAdd then", 1, true) ~= nil,
-          "add: the row layout never enters the split panel's picker column")
+    -- ...and neither designer draws the block at all: the split panel's picker
+    -- column is gone, and the row layout still asks the head area for no add UI.
+    check(CARDS:find("effectsPicker", 1, true) == nil,
+          "add: the split panel's picker column is gone")
     local headBody = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n")
     check(headBody ~= nil, "add: the head area's body can be read")
     headBody = headBody or ""
-    check(headBody:find("if not skipAdd then", 1, true) ~= nil,
-          "add: ...and the pinned block is behind that same switch")
+    check(headBody:find("elseif not skipAdd then", 1, true) ~= nil,
+          "add: ...and the classic add button is behind that same switch")
 end
 
 print("-- Aura Designer: Preview Scale is a glyph, not a row across the canvas")

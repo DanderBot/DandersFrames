@@ -219,3 +219,285 @@ do
     check(cards:find('{ key = "global",  label = L["Triggers"]', 1, true) ~= nil,
           "island: ...which the helper's pool labels Triggers")
 end
+
+-- ============================================================
+-- 5. THE CLASSIC ADD FLOWS ARE THE MODERN ONES (2026-09-22)
+-- ------------------------------------------------------------
+-- The split panel's three add areas -- the Effects tab's three scope cards
+-- (Placed on the Frame / Frame-Level Effect / From a Filter) and the Layout
+-- Groups / Debuffs choice-card blocks -- became one button per tab, each opening
+-- the Modern pane in a popout beside the window. What is RUN: the button, the
+-- popout opener, its enabled gate, its re-sync on open and its closes, against
+-- stub frames. What is READ: which head area mounts which button.
+-- ============================================================
+print("-- Aura Designer: the classic add buttons open the Modern panes")
+do
+    local CARDS = options_file_source("AuraDesigner/UI/Cards.lua"):gsub("\r\n", "\n")
+    local EDITN = EDIT:gsub("\r\n", "\n")
+
+    -- ---- read: the old three-option list and the card blocks are gone ----
+    check(CARDS:find("local function AddFlowScopes()", 1, true) == nil,
+          "classic add: the three-scope list is gone")
+    check(CARDS:find('L["Placed on the Frame"]', 1, true) == nil,
+          "classic add: ...no 'Placed on the Frame' option is drawn")
+    -- (The PI Helper's own tiles keep an ADD AN INDICATOR caption; that is theirs.)
+    check(CARDS:find('title    = L["ADD AN INDICATOR"]', 1, true) == nil,
+          "classic add: ...nor the ADD AN INDICATOR card block")
+    check(CARDS:find("effectsPicker", 1, true) == nil,
+          "classic add: ...nor the picker column it took over")
+    check(CARDS:find("local function OpenIndicatorPicker(", 1, true) == nil,
+          "classic add: ...nor the per-type spell picker only that column opened")
+    check(EDITN:find('L["ADD A LAYOUT GROUP"]', 1, true) == nil,
+          "classic add: the Layout Groups card block is gone")
+    check(EDITN:find('L["ADD A DEBUFF GROUP"]', 1, true) == nil,
+          "classic add: ...and the Debuffs one")
+
+    -- ---- read: each classic head area mounts its button ----
+    local head = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
+    check(head:find('yPos = S.BuildClassicAddButton(parent, yPos, "indicator")', 1, true) ~= nil,
+          "classic add: the Effects tab mounts the Add Indicator button")
+    local lg = EDITN:match("S%.BuildLayoutGroupsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
+    check(lg:find('    if not skipAdd then\n        yPos = S.BuildClassicAddButton(parent, yPos, "layout")', 1, true) ~= nil,
+          "classic add: the Layout Groups tab mounts Add Layout Group, unless the rows page asked it not to")
+    local dg = EDITN:match("S%.BuildDebuffGroupsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
+    check(dg:find('    if not skipAdd then\n        yPos = S.BuildClassicAddButton(parent, yPos, "debuff")', 1, true) ~= nil,
+          "classic add: the Debuffs pool's tab mounts Add Debuff Group, likewise")
+
+    -- ---- read: the PI Helper pool keeps its own add area, first ----
+    local piAt  = head:find("if not skipAdd and IsPIHelperTab() and S.BuildPIHelperAddArea then", 1, true)
+    local btnAt = head:find('    elseif not skipAdd then\n        yPos = S.BuildClassicAddButton(parent, yPos, "indicator")', 1, true)
+    check(piAt ~= nil and btnAt ~= nil and piAt < btnAt,
+          "classic add: the PI Helper pool takes its own tiles, never the Add Indicator button")
+    check(CARDS:find("S.BuildPIHelperAddArea = function(parent, yPos, Refresh)\n    yPos = pihBuildAddTiles(parent, yPos, Refresh)\n    return pihBuildSoundBox(parent, yPos, Refresh)\nend", 1, true) ~= nil,
+          "classic add: ...and S.BuildPIHelperAddArea itself is untouched")
+
+    -- ---- read: the island's refresh path re-checks open panels ----
+    local sw = CARDS:match("S%.SwitchTab = function%(tabKey%)(.-)\nend\n") or ""
+    check(sw:find("if S.SyncClassicAddPopouts then S.SyncClassicAddPopouts() end", 1, true) ~= nil,
+          "classic add: S.SwitchTab re-checks every open add panel")
+
+    -- ---- run: the block itself, against stubs ----
+    local s0 = CARDS:find("local CLASSIC_ADD_ICON = ", 1, true)
+    local s1 = CARDS:find("-- ☠ EXTRACTED, NOT COPIED. The popout layout's row page", s0 or 1, true)
+    check(s0 ~= nil and s1 ~= nil, "classic add: the add-button block can be cut out of Cards.lua")
+    local block = (s0 and s1) and CARDS:sub(s0, s1 - 1) or ""
+
+    local function Stub()
+        local f = { scripts = {}, hooks = {}, points = {}, shown = true, h = 0 }
+        function f:SetPoint(...) self.points[#self.points + 1] = { ... } end
+        function f:SetWidth(w) self.w = w end
+        function f:SetHeight(h) self.h = h end
+        function f:GetHeight() return self.h end
+        function f:SetScript(k, fn) self.scripts[k] = fn end
+        function f:HookScript(k, fn) self.hooks[k] = fn end
+        function f:SetDisabled(v) self.dfDisabled = v end
+        function f:IsVisible() return self.shown end
+        function f:IsShown() return self.shown end
+        return f
+    end
+
+    local function World(enabled)
+        local W = { enabled = enabled, built = {}, popouts = {}, syncs = 0, spec = 105, frames = {} }
+        local S = { activeBuffTab = "my" }
+        W.S = S
+        local function NewPopout(opts)
+            local po = { opts = opts, closed = false, shown = false, content = Stub() }
+            function po:Follow(region) self.source = region; self.shown = true; W.followed = region end
+            function po:IsShown() return self.shown end
+            function po:Close(reason) self.closed = true; self.shown = false; self.closeReason = reason end
+            return po
+        end
+        local GUI = {
+            SelectedMode = "party",
+            PopoutContentWidth = 260,
+            StyleButton = function(_, btn, o) btn.styled = o end,
+            -- The kit's pool: an unpinned instance is handed back, build untouched.
+            CreatePopout = function(_, opts)
+                local po = W.popouts[opts.key]
+                if po and not po.pinned then po.closed = false; return po end
+                po = NewPopout(opts)
+                W.popouts[opts.key] = po
+                opts.build(po, po.content)
+                return po
+            end,
+        }
+        S.BuildAddIndicatorPane = function(host, o)
+            W.built[#W.built + 1] = "indicator"
+            W.paneOpts = o
+            host:SetHeight(480); if o.SetHeight then o.SetHeight(480) end
+            return { Sync = function() W.syncs = W.syncs + 1 end }
+        end
+        S.BuildAddLayoutGroupPane = function(host, o)
+            W.built[#W.built + 1] = "layout"
+            host:SetHeight(120); if o.SetHeight then o.SetHeight(120) end
+        end
+        S.BuildAddDebuffGroupPane = function(host, o)
+            W.built[#W.built + 1] = "debuff"
+            host:SetHeight(90); if o.SetHeight then o.SetHeight(90) end
+        end
+        local env = {
+            L = setmetatable({}, { __index = function(_, k) return k end }),
+            S = S, GUI = GUI,
+            DF = {
+                GUIFrame = Stub(),
+                IsAuraDesignerEnabledForMode = function() return W.enabled end,
+            },
+            IsOtherTab = function() return S.activeBuffTab == "other" end,
+            IsDebuffTab = function() return S.activeBuffTab == "debuffs" end,
+            ResolveSpec = function() return W.spec end,
+            CreateFrame = function() local f = Stub(); W.frames[#W.frames + 1] = f; return f end,
+            C_Timer = { After = function(_, fn) W.deferred = fn end },
+            max = math.max,
+        }
+        setmetatable(env, { __index = _G })
+        local chunk = loadstring(block)
+        if chunk then setfenv(chunk, env); chunk() end
+        W.ok = chunk ~= nil and S.BuildClassicAddButton ~= nil and S.OpenClassicAddPopout ~= nil
+        -- One tab's button, built through the real builder; returns it.
+        W.Button = function(kind)
+            S.rightPanel = S.rightPanel or Stub()
+            S.tabScrollFrame = S.tabScrollFrame or Stub()
+            local n = #W.frames
+            local y = S.BuildClassicAddButton(Stub(), -10, kind)
+            return W.frames[n + 1], y
+        end
+        return W
+    end
+
+    -- ---- the enabled gate ----
+    local off = World(false)
+    check(off.ok, "classic add: the block loads headlessly")
+    if off.ok then
+        local btn, y = off.Button("indicator")
+        check(type(y) == "number" and y < -10, "classic add: the button reports the y below it")
+        eq(btn and btn.dfDisabled, true, "classic add: a disabled designer greys the button")
+        if btn and btn.scripts.OnClick then btn.scripts.OnClick(btn) end
+        eq(#off.built, 0, "classic add: ...and a click on it opens nothing")
+        off.S.OpenClassicAddPopout("indicator", Stub())
+        eq(#off.built, 0, "classic add: ...nor does the opener, asked directly")
+    end
+
+    -- ---- each kind hosts its own Modern pane, once, and re-syncs ----
+    local on = World(true)
+    if on.ok then
+        local btn = on.Button("indicator")
+        eq(btn and btn.dfDisabled, nil, "classic add: an enabled designer leaves the button live")
+        if btn and btn.scripts.OnClick then btn.scripts.OnClick(btn) end
+        eq(on.built[1], "indicator", "classic add: Add Indicator hosts S.BuildAddIndicatorPane")
+        eq(on.followed, btn, "classic add: ...docked beside its button")
+        eq(on.syncs, 1, "classic add: ...and Synced on open")
+        eq(on.paneOpts and on.paneOpts.width, 260, "classic add: ...at the popout's content width")
+        local po = on.popouts["df.adadd.indicator"]
+        eq(po and po.content.h, 480, "classic add: ...and the panel takes the height the pane reported")
+        btn.scripts.OnClick(btn)
+        eq(po and po.closed, true, "classic add: a second click shuts it")
+        btn.scripts.OnClick(btn)
+        eq(#on.built, 1, "classic add: reopening reuses the pooled pane")
+        eq(on.syncs, 2, "classic add: ...and re-syncs it, because a pooled pane is stale")
+        if on.paneOpts and on.paneOpts.Close then on.paneOpts.Close() end
+        eq(po and po.closed, true, "classic add: the pane's Close shuts the panel")
+
+        local lb = on.Button("layout")
+        eq(lb and lb.styled and lb.styled.text, "Add Layout Group", "classic add: the layout button says Add Layout Group")
+        lb.scripts.OnClick(lb)
+        eq(on.built[2], "layout", "classic add: ...and hosts S.BuildAddLayoutGroupPane")
+        local db = on.Button("debuff")
+        eq(db and db.styled and db.styled.text, "Add Debuff Group", "classic add: the debuff button says Add Debuff Group")
+        db.scripts.OnClick(db)
+        eq(on.built[3], "debuff", "classic add: ...and hosts S.BuildAddDebuffGroupPane")
+    end
+
+    -- ---- a tab rebuild re-docks an open panel onto the new button ----
+    local rb = World(true)
+    if rb.ok then
+        local b1 = rb.Button("indicator")
+        b1.scripts.OnClick(b1)
+        local before = rb.syncs
+        local b2 = rb.Button("indicator")
+        local po = rb.popouts["df.adadd.indicator"]
+        check(po and not po.closed and po.source == b2, "classic add: a tab rebuild re-docks the open panel")
+        eq(rb.syncs, before + 1, "classic add: ...and re-syncs it")
+        -- ...so the OLD button's hide, judged a frame later, leaves it alone.
+        b1.shown = false
+        if b1.hooks.OnHide then b1.hooks.OnHide(b1) end
+        if rb.deferred then rb.deferred() end
+        eq(po.closed, false, "classic add: ...and the retired button's hide does not close it")
+    end
+
+    -- ---- the button's hide ----
+    local hd = World(true)
+    if hd.ok then
+        local b = hd.Button("indicator")
+        b.scripts.OnClick(b)
+        local po = hd.popouts["df.adadd.indicator"]
+        -- The spell / filter overlay hides the tab's scroll frame: keep the panel.
+        hd.S.tabScrollFrame.shown = false
+        b.shown = false
+        b.hooks.OnHide(b); hd.deferred()
+        eq(po.closed, false, "classic add: the spell overlay covering the tab keeps the panel")
+        -- A tab switch (scroll frame up, button gone): an unpinned panel goes.
+        hd.S.tabScrollFrame.shown = true
+        b.hooks.OnHide(b); hd.deferred()
+        eq(po.closed, true, "classic add: a tab switch closes an unpinned panel")
+        -- ...a pinned one stays.
+        local b2 = hd.Button("indicator")
+        b2.scripts.OnClick(b2)
+        local po2 = hd.popouts["df.adadd.indicator"]
+        po2.pinned = true
+        b2.shown = false
+        b2.hooks.OnHide(b2); hd.deferred()
+        eq(po2.closed, false, "classic add: ...a pinned one survives the tab switch")
+        -- The designer page going away takes every add panel, pinned or not.
+        local rpHide = hd.S.rightPanel.hooks.OnHide
+        check(rpHide ~= nil, "classic add: the right panel's hide is watched")
+        if rpHide then rpHide() end
+        eq(po2.closed, true, "classic add: ...and the page going away closes it, pinned or not")
+    end
+
+    -- ---- stale context: pool, spec, the designer switched off ----
+    local st = World(true)
+    if st.ok then
+        local b = st.Button("indicator"); b.scripts.OnClick(b)
+        local po = st.popouts["df.adadd.indicator"]
+        po.pinned = true
+        st.S.SyncClassicAddPopouts()
+        eq(po.closed, false, "classic add: a matching context keeps the panel")
+        st.S.activeBuffTab = "other"
+        st.S.SyncClassicAddPopouts()
+        eq(po.closed, true, "classic add: a pool switch closes it, even pinned")
+    end
+    local st2 = World(true)
+    if st2.ok then
+        local b = st2.Button("layout"); b.scripts.OnClick(b)
+        local po = st2.popouts["df.adadd.layout"]
+        st2.enabled = false
+        st2.S.SyncClassicAddPopouts()
+        eq(po.closed, true, "classic add: switching the designer off closes it")
+    end
+    local st3 = World(true)
+    if st3.ok then
+        local b = st3.Button("indicator"); b.scripts.OnClick(b)
+        local po = st3.popouts["df.adadd.indicator"]
+        st3.spec = 262
+        st3.S.SyncClassicAddPopouts()
+        eq(po.closed, true, "classic add: a spec change on My Buffs closes it")
+    end
+    local st4 = World(true)
+    if st4.ok then
+        st4.S.activeBuffTab = "other"
+        local b = st4.Button("indicator"); b.scripts.OnClick(b)
+        local po = st4.popouts["df.adadd.indicator"]
+        st4.spec = 262
+        st4.S.SyncClassicAddPopouts()
+        eq(po.closed, false, "classic add: ...but not on Any Buff, which is shared across specs")
+    end
+    local st5 = World(true)
+    if st5.ok then
+        st5.S.activeBuffTab = "debuffs"
+        local b = st5.Button("debuff"); b.scripts.OnClick(b)
+        local po = st5.popouts["df.adadd.debuff"]
+        st5.spec = 262
+        st5.S.SyncClassicAddPopouts()
+        eq(po.closed, false, "classic add: ...nor on Debuffs")
+    end
+end

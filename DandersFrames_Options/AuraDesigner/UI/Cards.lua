@@ -4009,6 +4009,10 @@ S.SwitchTab = function(tabKey)
     S.adPickerDirty = false
     CloseADPicker()
     if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
+    -- ...and an add panel opened against another pool, spec or mode, or with the
+    -- designer since switched off, must not either (see THE CLASSIC DESIGNER'S ADD
+    -- BUTTONS). One that still matches is re-docked by the rebuild below.
+    if S.SyncClassicAddPopouts then S.SyncClassicAddPopouts() end
 
     for key, btn in pairs(tabButtons) do
         btn:SetActive(key == tabKey)  -- underline + accent/dim label (tab mode)
@@ -4400,59 +4404,6 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
     RefreshPlacedIndicators()    -- live preview updates behind the picker
     RefreshPreviewEffects()
     return true
-end
-
--- ── OPEN: ADD INDICATOR (placed + frame contexts) ──
--- typeKey: "icon"|"square"|"bar" (placed) or "border"|"healthbar"|etc.
--- (frame); mode: "placed" or "frame". Single-pick — choosing a spell
--- creates the indicator (or frame-level type config), closes the picker
--- and lands on its expanded effect card. My Buffs locks the picker to the
--- resolved spec's class (class dropdown hidden, records limited to the
--- class + "ALL"); Other Buffs offers the full database with both filters.
-local function OpenIndicatorPicker(typeKey, mode)
-    local isOther = IsOtherTab()
-    local spec = (not isOther) and ResolveSpec() or nil
-    local specInfo = spec and DF.AuraDesigner.SpecInfo[spec]
-    local badgeColor = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
-    local title
-    if mode == "frame" then
-        title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[typeKey] or typeKey)
-    else
-        title = L["Select a spell"]
-    end
-    OpenADPicker({
-        title = title,
-        subtitle = S.PLACED_TYPE_LABELS[typeKey] or S.FRAME_LEVEL_LABELS[typeKey] or typeKey,
-        subtitleColor = badgeColor,
-        records = function() return BuildADPickerRecords(false) end,
-        classLock = (not isOther) and specInfo and specInfo.class or nil,
-        isBlocked = function(rec)
-            local cross = ADCrossBlockText(rec)
-            if cross then return cross end
-            if mode == "placed" then
-                if IsAuraTypePlaced(rec.auraName, typeKey) then return L["Placed"] end
-            elseif HasFrameEffect(rec.auraName, typeKey) then
-                return L["Active"]
-            end
-            return nil
-        end,
-        rowActions = {
-            {
-                label = L["Add"], -- labels the ID-row button; rows are click-to-add
-                handler = function(rec, _, picker)
-                    AddPickedSpell(rec.auraName, typeKey, mode)
-                    picker:Close()
-                    S.SwitchTab("effects")
-                    RefreshPlacedIndicators()
-                    RefreshPreviewEffects()
-                end,
-            },
-        },
-        allowAddByID = true,
-        onAddByID = function(idNum, _, picker, idText)
-            return ADAddByID(idNum, idText, picker, mode, typeKey, nil)
-        end,
-    })
 end
 
 -- ── OPEN: ADD TO LAYOUT GROUP ──
@@ -5444,8 +5395,8 @@ end
 
 -- ── BUILD EFFECTS TAB ──
 -- ── THE EFFECTS TAB'S HEAD AREA ──
--- The add block (or, while one is open, the scope picker that takes the whole
--- column over), the ACTIVE INDICATORS heading, the type chips and the Other
+-- The Add Indicator button (the PI Helper's tiles on its pool), the ACTIVE
+-- INDICATORS heading, the type chips and the Other
 -- Buffs hint. Everything above the list of effects, and nothing of the list.
 --
 -- ============================================================
@@ -5493,50 +5444,9 @@ end
 -- with before it (spec section 23).
 -- ============================================================
 
--- The three scopes and the type lists behind them. A VERB rather than a file-scope
--- table because every label in here is an L[...] lookup, and a table built at file
--- scope freezes on whatever locale was loaded when the file parsed.
---
--- ⚠ STILL LIVE, FOR THE SPLIT PANEL ONLY. The island layout keeps its three
--- pinned scope cards and the picker column they open, in its own head area at
--- the foot of this file; the popout layout's panel is flat and does not read it.
-local function AddFlowScopes()
-    local PLACED_ITEMS = {
-        { label = L["Icon"],   type = "icon",   desc = L["The spell's own artwork"]          },
-        { label = L["Square"], type = "square", desc = L["A small coloured square"]          },
-        { label = L["Bar"],    type = "bar",    desc = L["A bar that drains as it expires"]  },
-    }
-    -- Sound is absent from the filter list by design: the native sound path
-    -- registers per spell ID, so a 600-spell filter would mean 600 registrations.
-    local FRAME_ITEMS = {
-        { label = L["Border"],            type = "border",     desc = L["Outlines the whole frame"]        },
-        { label = L["Health Bar Color"],  type = "healthbar",  desc = L["Recolours the health bar"]        },
-        { label = L["Background Color"],  type = "background", desc = L["Recolours the frame background"]  },
-        { label = L["Name Text Color"],   type = "nametext",   desc = L["Recolours the player's name"]     },
-        { label = L["Health Text Color"], type = "healthtext", desc = L["Recolours the health numbers"]    },
-        { label = L["Sound Alert"],       type = "sound",      desc = L["Plays a sound. Nothing changes on the frame."] },
-    }
-    local FRAME_FILTER_ITEMS = {
-        { label = L["Border"],            type = "border",     desc = L["Outlines the whole frame"]        },
-        { label = L["Health Bar Color"],  type = "healthbar",  desc = L["Recolours the health bar"]        },
-        { label = L["Background Color"],  type = "background", desc = L["Recolours the frame background"]  },
-        { label = L["Name Text Color"],   type = "nametext",   desc = L["Recolours the player's name"]     },
-        { label = L["Health Text Color"], type = "healthtext", desc = L["Recolours the health numbers"]    },
-    }
-    return {
-        placed = { items = PLACED_ITEMS,       title = L["Placed on the Frame"],
-                   desc = L["An icon, square or bar, wherever you put it"] },
-        frame  = { items = FRAME_ITEMS,        title = L["Frame-Level Effect"],
-                   desc = L["Recolours the frame itself"] },
-        filter = { items = FRAME_FILTER_ITEMS, title = L["From a Filter"],
-                   desc = L["The same frame changes, driven by a whole filter"] },
-    }
-end
-P.AddFlowScopes = AddFlowScopes
-
 -- ── THE FLAT EFFECT LIST ──
--- ☠ ONE LIST, NO CLASSIFICATION. The same nine effects the three scopes above
--- hold between them, with the taxonomy taken off: `mode` is still what the store
+-- ☠ ONE LIST, NO CLASSIFICATION. The same nine effects the old three scopes
+-- (Placed on the Frame / Frame-Level / From a Filter) held between them, with the taxonomy taken off: `mode` is still what the store
 -- needs (a placed indicator instance, or a frame-level type config) but it is
 -- carried BY the choice rather than asked before it.
 --
@@ -5569,7 +5479,8 @@ local function AddFlowEffects()
           desc = L["Recolours the player's name"],      filterable = true  },
         { type = "healthtext", mode = "frame",  label = L["Health Text Color"],
           desc = L["Recolours the health numbers"],     filterable = true  },
-        -- Sound is not filterable: see AddFlowScopes above for why.
+        -- Sound is not filterable: the native sound path registers per spell ID,
+        -- so a 600-spell filter would mean 600 registrations.
         { type = "sound",      mode = "frame",  label = L["Sound Alert"],
           desc = L["Plays a sound. Nothing changes on the frame."], filterable = false },
     }
@@ -8116,7 +8027,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
     -- ── THE HEADING, AND ON STEP 2 THE WAY BACK OUT ──
     -- ☠ AN ✕ ON THE HEADING ROW, NOT A "Back" BUTTON UNDER THE GRID. Krathe, 2026-09-10:
     -- "no back use X like we do on the other AD effects." The designer's OWN picker is
-    -- directly above this function (S.BuildEffectsHeadArea's S.effectsPicker arm): a head
+    -- the split panel's old scope-picker column (retired 2026-09-22) used: a head
     -- frame with the question on the left and GUI:CreateCloseButton on the right, captioned
     -- there as "the only way out that does not commit to anything". This is the same
     -- question in the same place, so it is the same control -- and a Back button was a
@@ -8427,21 +8338,214 @@ S.BuildPIHelperBody = function(parent, opts)
     return yPos
 end
 
+-- ============================================================
+-- THE CLASSIC DESIGNER'S ADD BUTTONS (2026-09-22)
+-- ------------------------------------------------------------
+-- The split panel's three add areas -- the Effects tab's three scope cards and the
+-- picker column they opened, and the Layout Groups / Debuffs tabs' choice-card
+-- blocks -- are gone. Each tab now carries ONE button, and the button opens the
+-- SAME panel the Modern rows page opened from its "+ Add" rows:
+--   indicator  S.BuildAddIndicatorPane    (this file)
+--   layout     S.BuildAddLayoutGroupPane  (Editor.lua)
+--   debuff     S.BuildAddDebuffGroupPane  (Editor.lua)
+-- One builder per flow, two hosts; nothing below re-implements a pane.
+--
+-- ⚠ A KEYED POPOUT, NOT A POPOUT ROW. GUI:CreatePopoutRow builds its pane once
+-- per ROW, and this island rebuilds its tab content -- button included -- on
+-- every S.SwitchTab. A row per rebuild would build a fresh nine-tile pane every
+-- time the panel was opened after any edit. GUI:CreatePopout keyed per flow builds
+-- the pane ONCE per instance and the pool hands the same one back, so the button
+-- is cheap to rebuild and the pane is not rebuilt at all. It is the same
+-- machinery the row sits on, docked the same way (outside the window, at the
+-- button's height), with the same pin.
+--
+-- ☠ A POOLED PANE IS STALE ON EVERY OPEN AFTER THE FIRST, so the indicator
+-- pane's Sync runs on every open and on every re-dock -- the rows page's
+-- OpenPopout wrapper did the same, for the same reason.
+--
+-- ⚠ WHAT CLOSES IT. The panel was opened against one mode, pool and spec, with
+-- the designer on. S.SwitchTab asks S.SyncClassicAddPopouts on every rebuild and
+-- anything opened against a context that is no longer on screen goes -- pinned
+-- or not, because its Add button would write into a pool the user has left. The
+-- button's own hide (a tab switch, the page going away) closes an unpinned one.
+-- ============================================================
+local CLASSIC_ADD_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add"
+
+-- What an add panel was opened against. The spec only counts on My Buffs: Any Buff
+-- and Debuffs are shared across specs, so a spec change there moves nothing the
+-- panel shows.
+S.ClassicAddContext = function()
+    local shared = IsOtherTab() or IsDebuffTab()
+    return tostring((GUI and GUI.SelectedMode) or "party") .. "|" .. tostring(S.activeBuffTab)
+        .. "|" .. (shared and "-" or tostring(ResolveSpec()))
+end
+
+-- The designer-enabled gate, read from the MODE (see DF:IsAuraDesignerEnabledForMode).
+S.ClassicAddEnabled = function()
+    return (DF.IsAuraDesignerEnabledForMode
+        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")) and true or false
+end
+
+-- Every add panel that no longer describes what is on screen goes. Called by
+-- S.SwitchTab's classic arm, which is the island's one refresh path.
+S.SyncClassicAddPopouts = function()
+    local live = S.classicAddLive
+    if not live then return end
+    local ctx, enabled = S.ClassicAddContext(), S.ClassicAddEnabled()
+    for pop in pairs(live) do
+        if pop.closed then
+            live[pop] = nil
+        elseif not enabled or pop.dfAddCtx ~= ctx then
+            live[pop] = nil
+            pop:Close("api")
+        end
+    end
+end
+
+local function DockClassicAddPopout(pop, btn)
+    pop:Follow(btn, { outsideOf = DF.GUIFrame, clipTo = S.tabScrollFrame })
+    local api = pop.dfAddApi
+    if api and api.Sync then api.Sync() end
+end
+
+-- Open (or, on a second click, shut) the panel behind one of the three buttons.
+S.OpenClassicAddPopout = function(kind, btn)
+    if not S.ClassicAddEnabled() then return end
+    S.classicAddOpen = S.classicAddOpen or {}
+    S.classicAddLive = S.classicAddLive or {}
+    local open = S.classicAddOpen[kind]
+    if open and not open.closed and open.source == btn and open:IsShown() then
+        open:Close("api")
+        return
+    end
+    local title = (kind == "indicator") and L["Add Indicator"]
+        or ((kind == "debuff") and L["Add Debuff Group"] or L["Add Layout Group"])
+    local width = GUI.PopoutContentWidth or 260
+    local pop = GUI:CreatePopout({
+        key   = "df.adadd." .. kind,
+        title = title,
+        icon  = CLASSIC_ADD_ICON,
+        width = width,
+        build = function(po, content)
+            local pane = CreateFrame("Frame", nil, content)
+            pane:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+            pane:SetWidth(width)
+            -- The builders report their height as they finish; the shell derives the
+            -- panel's height from its content strip, so that is where it goes.
+            local paneOpts = {
+                width     = width,
+                SetHeight = function(h) content:SetHeight(max(h or 1, 1)) end,
+                Close     = function() po:Close("api") end,
+            }
+            if kind == "indicator" then
+                po.dfAddApi = S.BuildAddIndicatorPane(pane, paneOpts)
+            elseif kind == "debuff" then
+                S.BuildAddDebuffGroupPane(pane, paneOpts)
+            else
+                S.BuildAddLayoutGroupPane(pane, paneOpts)
+            end
+            content:SetHeight(max(pane:GetHeight() or 1, 1))
+        end,
+    })
+    if not pop then return end
+    pop.dfAddCtx = S.ClassicAddContext()
+    S.classicAddOpen[kind] = pop
+    S.classicAddLive[pop] = true
+    DockClassicAddPopout(pop, btn)
+end
+
+-- One tab's add button, at the top of its head area. Returns the y to continue at.
+S.BuildClassicAddButton = function(parent, yPos, kind)
+    local enabled = S.ClassicAddEnabled()
+    local isGroup = (kind ~= "indicator")
+    local label = (kind == "indicator") and L["Add Indicator"]
+        or ((kind == "debuff") and L["Add Debuff Group"] or L["Add Layout Group"])
+
+    -- The same hero CTA the Text Designer's "+ Add Text Element" wears. The group
+    -- buttons take the Layout Groups tab's amber, the colour their old blocks wore.
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetHeight(32)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
+    btn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    GUI:StyleButton(btn, {
+        height = 32, primary = true,
+        accent = isGroup and { r = 0.91, g = 0.66, b = 0.25 } or nil,
+        icon = { texture = CLASSIC_ADD_ICON, size = 14 },
+        text = label, font = "DFFontHighlight",
+    })
+    -- ⚠ THE GATE, TWICE. The disabled overlay already covers the split panel, so
+    -- this is belt and braces -- and OpenClassicAddPopout re-checks it besides.
+    if not enabled and btn.SetDisabled then btn:SetDisabled(true) end
+    btn:SetScript("OnClick", function(self)
+        if self.dfDisabled then return end
+        S.OpenClassicAddPopout(kind, self)
+    end)
+
+    -- ☠ THE BUTTON IS REBUILT UNDER AN OPEN PANEL ALL THE TIME -- every S.SwitchTab
+    -- hides it and builds a new one. So its hide is judged a frame later: by then a
+    -- rebuild has re-docked the panel onto the new button (below) and there is
+    -- nothing to do. What is left is a real departure.
+    btn:HookScript("OnHide", function(self)
+        if not (C_Timer and C_Timer.After) then return end
+        C_Timer.After(0, function()
+            local pop = S.classicAddOpen and S.classicAddOpen[kind]
+            if not pop or pop.closed or pop.source ~= self then return end
+            if self:IsVisible() then return end
+            local rp, sf = S.rightPanel, S.tabScrollFrame
+            local panelUp = rp and rp:IsVisible()
+            -- The spell and filter overlays hide the tab's scroll frame while they are
+            -- up, and it is THIS panel that opened them: keep it.
+            if panelUp and sf and not sf:IsShown() then return end
+            -- A pinned panel outlives a tab switch, exactly as a pinned rows-page panel did.
+            if panelUp and pop.pinned then return end
+            pop:Close("source")
+        end)
+    end)
+
+    -- The designer page going away (another settings page, the window closing, the
+    -- other mode's build) takes every add panel with it, pinned or not: an open
+    -- spell overlay can have hidden the button already, and then the hook above
+    -- has nothing left to fire on.
+    local rp = S.rightPanel
+    if rp and not rp.dfAddHideHooked then
+        rp.dfAddHideHooked = true
+        rp:HookScript("OnHide", function()
+            local live = S.classicAddLive
+            if not live then return end
+            for pop in pairs(live) do
+                live[pop] = nil
+                if not pop.closed then pop:Close("source") end
+            end
+        end)
+    end
+
+    -- An open panel follows the rebuild onto this button, re-synced.
+    local pop = S.classicAddOpen and S.classicAddOpen[kind]
+    if pop and not pop.closed then
+        if enabled and pop.dfAddCtx == S.ClassicAddContext() then
+            DockClassicAddPopout(pop, btn)
+        else
+            pop:Close("api")
+        end
+    end
+
+    return yPos - (max(btn:GetHeight() or 32, 32) + 10)
+end
+
 -- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
 -- mounts exactly this furniture above its band of effect rows. The add flow is a
 -- later phase of the designer rework, and a second copy of it here would be a
 -- second place to change when that phase lands -- which is how the three
 -- duplicated FRAME_ITEMS lists below came about in the first place.
 --
--- Returns the y the caller should continue at, and `true` when the picker has
--- taken the column over, in which case the caller must add nothing below it.
+-- Returns the y the caller should continue at, and a second value that is always
+-- false now. It used to be `true` when the split panel's picker column had taken
+-- the column over; that column is gone, and the value stays so neither caller has
+-- to change shape.
 S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local tc = GetThemeColor()
-    -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS NO ADD BLOCK ON THE PAGE. Phase 5
-    -- moved the three scope cards and the picker column they open into the panel
-    -- behind one "+ Add Indicator" row (S.BuildAddIndicatorPane above). The split
-    -- panel still draws the block: it is the one surface with 230px to spend on
-    -- standing furniture.
+    -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS ITS OWN "+ Add Indicator" ROW, so it
+    -- asks for neither the classic add button nor the helper's tiles here.
     local skipAdd = opts and opts.skipAddBlock or false
     -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS NOT A CHIP FLOW. The eight
     -- chips live in a popout there, so in that layout this function draws only the
@@ -8465,113 +8569,17 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local COL_W = (hostW > 40) and (hostW - 16) or nil
 
     -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
-    -- NOT one flat list of the fourteen types: fourteen entries is a long column at
-    -- card height, and the "from a filter" ones repeat five labels from the section
-    -- above word for word -- only the heading told them apart.
+    -- ☠ ONE BUTTON, AND THE PANEL BEHIND IT IS THE MODERN ONE (2026-09-22). The
+    -- three pinned scope cards and the picker column they took over are gone: the
+    -- button opens S.BuildAddIndicatorPane -- which aura, how it should look, where
+    -- it goes -- in a popout beside the window. See THE CLASSIC DESIGNER'S ADD
+    -- BUTTONS above for the host.
     --
-    -- So the choice is split in two. Three pinned scope cards say what KIND of
-    -- change you want; picking one takes the column over with just that scope's
-    -- options, each with room for a description. No duplicate labels can appear,
-    -- because a scope is settled before any type is shown.
-    -- ONE definition, two layouts: the panel above and this block build their
-    -- cards from the same three lists, so a type added to one appears in both.
-    local SCOPES = AddFlowScopes()
-
-    -- The picker is a transient mode, so it must not outlive the thing it was
-    -- opened against. Anything that changes which pool or spec is on screen
-    -- rebuilds this tab, and the context check below drops a stale picker on
-    -- that rebuild rather than leaving the player staring at options for a pool
-    -- they have already left.
-    -- ⚠ THE POOL KEY, NOT IsOtherTab(). That predicate answers true for BOTH the Any Buff and
-    -- the Power Infusion Helper pools, so a picker opened on one survived a switch to the
-    -- other -- the designer's spell-picker column drawn over a pool that has no spell to pick.
-    -- The context has to change whenever the thing it was opened against changes, and the pool
-    -- key is that thing.
-    local pickerCtx = tostring(S.activeBuffTab) .. "|" .. tostring(ResolveSpec())
-    if S.effectsPicker and S.effectsPickerCtx ~= pickerCtx then
-        S.effectsPicker = nil
-    end
-
-    local function StartType(itemType, scope, anchor)
-        S.effectsPicker = nil
-        if scope == "filter" then
-            -- The effect hangs off the FILTER: its record is stored under the
-            -- "@preset:"/"@custom:" key, which DF:BuildADIdentityFilters resolves
-            -- to the filter's whole spell set. Nothing downstream changes.
-            OpenFilterPicker({
-                anchor = anchor,
-                isLinked = function(kind, key)
-                    local ref = DF:MakeADFilterRef(kind, key)
-                    return ref ~= nil and HasFrameEffect(ref, itemType) or false
-                end,
-                onPick = function(kind, key)
-                    local ref = DF:MakeADFilterRef(kind, key)
-                    if not ref then return end
-                    AddPickedSpell(ref, itemType, "frame")
-                    S.SwitchTab("effects")
-                    RefreshPlacedIndicators()
-                    RefreshPreviewEffects()
-                end,
-            })
-            return
-        end
-        OpenIndicatorPicker(itemType, scope)
-    end
-
-    -- ── PICKER MODE: the column belongs to one scope's options ──
-    -- ...and the row layout never enters it. Its scope cards live in a panel, so
-    -- nothing on that page can set S.effectsPicker; the guard is belt and braces
-    -- against the flag being left set by a visit to the split panel.
-    if S.effectsPicker and not skipAdd then
-        local scope = SCOPES[S.effectsPicker]
-        local scopeKey = S.effectsPicker
-
-        local head = CreateFrame("Frame", nil, parent)
-        head:SetHeight(22)
-        head:SetPoint("TOPLEFT", 8, yPos)
-        head:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-        local headText = head:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        headText:SetPoint("LEFT", 0, 0)
-        headText:SetText(scope.title)
-        headText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        -- The only way out that does not commit to anything.
-        local close = GUI:CreateCloseButton(head, { size = 18, iconSize = 11 })
-        close:SetPoint("RIGHT", 0, 0)
-        close:SetScript("OnClick", function()
-            S.effectsPicker = nil
-            S.SwitchTab("effects")
-        end)
-        yPos = yPos - 26
-
-        for _, item in ipairs(scope.items) do
-            local bc = BADGE_COLORS[item.type]
-            local capturedType = item.type
-            -- Sound changes nothing on the frame, so it gets the untouched mock
-            -- frame -- which is the honest picture of what it does.
-            local art = (item.type ~= "sound")
-                and { kind = item.type, color = { bc.r, bc.g, bc.b } } or nil
-            local card = GUI:CreateChoiceCard(parent, {
-                title = item.label, desc = item.desc, art = art, accent = bc,
-                width = COL_W,
-                onClick = function(self) StartType(capturedType, scopeKey, self) end,
-            })
-            card:SetPoint("TOPLEFT", 8, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-            yPos = yPos - (card.layoutHeight + 6)
-        end
-
-        parent:SetHeight(max(-yPos + 20, 200))
-        return yPos, true
-    end
-
-    -- ── THE HELPER'S POOL: TILES, NOT SCOPE CARDS ──
-    -- ☠ THE THREE SCOPE CARDS ANSWER A QUESTION THIS POOL HAS ALREADY ANSWERED. Placed /
-    -- Frame-Level / From a Filter all end in "now pick a spell", and the helper's spell is the
-    -- cooldown list its Triggers tab owns. Offering the picker here would let someone hang a
-    -- helper effect off a spell of their own, which is not a helper effect at all -- it is an
-    -- Any Buff effect that happens to have been created from the wrong tab.
+    -- ── THE HELPER'S POOL: TILES, NOT THE PANEL ──
+    -- ☠ THE PANEL ASKS A QUESTION THIS POOL HAS ALREADY ANSWERED. Its first step is
+    -- "which aura?", and the helper's aura is the cooldown list its Triggers tab owns.
+    -- Offering the picker here would let someone hang a helper effect off a spell of
+    -- their own, which is not a helper effect at all.
     -- ⚠ EVERYTHING BELOW THIS BRANCH IS SHARED, and that is the point. The ACTIVE INDICATORS
     -- caption, the type filter and the effect cards under it are the designer's own, so the
     -- helper's list looks and behaves exactly like the designer's list -- which is what Krathe
@@ -8580,65 +8588,7 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
         yPos = S.BuildPIHelperAddArea(parent, yPos, function() S.SwitchTab("effects") end)
         yPos = yPos - 4
     elseif not skipAdd then
-
-    -- ── NORMAL: three pinned scope cards ──
-    local addBlock = GUI:CreateChoiceCardGroup(parent, {
-        title    = L["ADD AN INDICATOR"],
-        accent   = tc,
-        width    = COL_W,
-        onToggle = function() S.SwitchTab("effects") end,
-        cards = {
-            {
-                title = SCOPES.placed.title, desc = SCOPES.placed.desc,
-                art   = { kind = "icon", color = { tc.r, tc.g, tc.b } },
-                onClick = function()
-                    S.effectsPicker, S.effectsPickerCtx = "placed", pickerCtx
-                    S.SwitchTab("effects")
-                end,
-            },
-            {
-                title = SCOPES.frame.title, desc = SCOPES.frame.desc,
-                art   = { kind = "border", color = { tc.r, tc.g, tc.b } },
-                onClick = function()
-                    S.effectsPicker, S.effectsPickerCtx = "frame", pickerCtx
-                    S.SwitchTab("effects")
-                end,
-            },
-            {
-                -- Filter green, the colour Aura Filters owns everywhere else: the
-                -- effects are identical to the card above, only the source differs.
-                title = SCOPES.filter.title, desc = SCOPES.filter.desc,
-                art   = { kind = "border", color = { 0.51, 0.86, 0.51 } },
-                onClick = function()
-                    S.effectsPicker, S.effectsPickerCtx = "filter", pickerCtx
-                    S.SwitchTab("effects")
-                end,
-                -- The ONLY card in this block about filters, which is why the route
-                -- to the library is here and not on the block header.
-                --
-                -- ⚠ The filter glyph, not the edit pencil, and no filter argument.
-                -- Nothing is chosen yet on this card -- it creates an effect and then
-                -- asks which filter -- so there is no "this filter" to open. The
-                -- pencils elsewhere target one named filter; this opens the library.
-                -- Same distinction the tooltip draws.
-                action = {
-                    -- ☠ Extension included: CreateChoiceCard concatenates this onto
-                    -- the Icons path verbatim, and a PNG needs it.
-                    icon    = "filter_list.png",
-                    tooltip = {
-                        title = L["Manage Filters"],
-                        lines = { L["Build and edit your buff filters in the Filter Designer."] },
-                    },
-                    onClick = function()
-                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
-                    end,
-                },
-            },
-        },
-    })
-    addBlock:SetPoint("TOPLEFT", 8, yPos)
-    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    yPos = yPos - (addBlock.layoutHeight + 10)
+        yPos = S.BuildClassicAddButton(parent, yPos, "indicator")
     end
 
     -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
@@ -8823,7 +8773,11 @@ S.BuildEffectsTab = function()
         if not IsOtherTab() and (not spec or not specAuras or #specAuras == 0) then
             empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
         elseif S.activeFilter == "all" then
-            empty:SetText(L["No effects configured yet.\nPick a style above to get started."])
+            -- The helper's pool has tiles above ("a style"); every other pool has the
+            -- Add Indicator button.
+            empty:SetText(IsPIHelperTab()
+                and L["No effects configured yet.\nPick a style above to get started."]
+                or  L["No effects configured yet.\nUse Add Indicator above to place your first one."])
         else
             empty:SetText(format(L["No %s effects configured."], (S.PLACED_TYPE_LABELS[S.activeFilter] or S.FRAME_LEVEL_LABELS[S.activeFilter] or S.activeFilter)))
         end
