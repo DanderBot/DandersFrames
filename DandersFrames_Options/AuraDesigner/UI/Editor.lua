@@ -2120,10 +2120,34 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     buffTabBar:SetHeight(BUFFTAB_H)
     buffTabBar:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
     buffTabBar:SetPoint("TOPRIGHT", S.mainFrame, "TOPRIGHT", 0, yPos)
-    -- The strip itself is shared with the popout layout's row page, which mounts
-    -- it as a band -- see S.BuildPoolStrip (AuraDesigner/UI/Rows.lua). Only the
-    -- host differs: a slice of S.mainFrame here, a band there.
-    S.BuildPoolStrip(buffTabBar)
+    -- ☠ THE SPEC PICKER IS BACK ON THE STRIP'S RIGHT END, WHERE IT WAS BEFORE THE
+    -- ROWS REWORK. dff68754 moved it onto a band of its own in the rows page and
+    -- took it out of S.BuildPoolStrip -- which was this strip's only copy -- so the
+    -- split panel was left with no way to pick a spec for My Buffs. It is the same
+    -- builder the rows page mounts (S.BuildSpecPicker), in a slice of this strip.
+    -- ⚠ The pool tabs divide what is LEFT of it (their own OnSizeChanged, on their
+    -- own host), and the slice shrinks with a narrow window so it never eats them.
+    local SPEC_W_MAX, SPEC_W_MIN, SPEC_GAP = 215, 150, 8
+    local function SpecSliceWidth(w)
+        return max(SPEC_W_MIN, min(SPEC_W_MAX, floor((w or 0) * 0.35)))
+    end
+    local specHost = CreateFrame("Frame", nil, buffTabBar)
+    specHost:SetPoint("TOPRIGHT", buffTabBar, "TOPRIGHT", -3, 0)
+    specHost:SetPoint("BOTTOMRIGHT", buffTabBar, "BOTTOMRIGHT", -3, 0)
+    specHost:SetWidth(SpecSliceWidth(buffTabBar:GetWidth()))
+    buffTabBar:SetScript("OnSizeChanged", function(_, w)
+        if w and w > 10 then specHost:SetWidth(SpecSliceWidth(w)) end
+    end)
+    local poolHost = CreateFrame("Frame", nil, buffTabBar)
+    poolHost:SetPoint("TOPLEFT", buffTabBar, "TOPLEFT", 0, 0)
+    poolHost:SetPoint("BOTTOMLEFT", buffTabBar, "BOTTOMLEFT", 0, 0)
+    poolHost:SetPoint("RIGHT", specHost, "LEFT", -SPEC_GAP, 0)
+    -- The pool tabs: My Buffs / Debuffs / Any Buff, plus PI Helper on a priest.
+    -- The builder is shared with nothing now; it lives beside the rows page's own
+    -- folder tabs (S.BuildPoolTabs, AuraDesigner/UI/Rows.lua) so the pool list
+    -- (PoolDefs) has one definition.
+    S.BuildPoolStrip(poolHost)
+    S.BuildSpecPicker(specHost)
 
     yPos = yPos - (BUFFTAB_H + SECTION_GAP)
 
@@ -2324,7 +2348,7 @@ end
 -- answers nil in classic and every row the other arm builds needs its table.
 -- ============================================================
 function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
-    if Add and P.BuildAuraDesignerRowsPage and not DF:IsClassicSettingsLayout() then
+    if Add and P.BuildAuraDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then
         -- A previous build's island is not in page.children -- it never went
         -- through Add -- so DoBuild's own retire loop cannot see it, and it would
         -- sit under the bands still showing the last mode's controls.

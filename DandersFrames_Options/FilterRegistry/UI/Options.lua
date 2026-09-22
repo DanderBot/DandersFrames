@@ -380,7 +380,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- the flag (reported 2026-09-18; every other page, having no such guard, switched
     -- fine). Now the reuse path only runs when the frames were built for the layout
     -- that is on now.
-    local classicNow = DF:IsClassicSettingsLayout() and true or false
+    local classicNow = (DF:IsClassicSettingsLayout() or not DF:DesignersUseRows()) and true or false
     if pageRef._filterDesignerBuilt and pageRef._fdBuiltClassic ~= classicNow then
         -- ☠ THE LAYOUT CHANGED, SO THE OLD FRAMES HAVE TO BE RETIRED BY HAND. DoBuild only
         -- retires what was Add()ed, and Classic's main panels (leftPanel, rightArea,
@@ -474,7 +474,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- test through 2,700 lines of one closure would fork every site it touched;
     -- re-anchoring five frames forks none of them, and the two layouts cannot
     -- drift apart because there is only one build.
-    local tools = (Add and GUI.CreatePopoutPageTools and not DF:IsClassicSettingsLayout())
+    local tools = (Add and GUI.CreatePopoutPageTools and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout())
                   and GUI:CreatePopoutPageTools(pageRef) or nil
     local rowsMode = (Add ~= nil) and (tools ~= nil)
     -- (FILTERROW_H is gone. It named DandersUI's plate-plus-gap so the page-height

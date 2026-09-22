@@ -3129,6 +3129,15 @@ function DF:IsClassicSettingsLayout()
     return DandersFramesDB_v2 ~= nil and DandersFramesDB_v2.classicSettings == true
 end
 
+-- The three designers (Aura, Text, Filter) build their CLASSIC version in both
+-- layouts (decided 2026-09-22: testers rated the classic designers the best part
+-- of the panel). Their Modern "rows" builds stay in the files, unused, until the
+-- settings rework is finished; flipping this back to the layout check restores
+-- them. One switch, so the three cannot disagree.
+function DF:DesignersUseRows()
+    return false
+end
+
 function DF:SetClassicSettingsLayout(value)
     -- Create the SV table if the write lands before it exists, mirroring the
     -- colour-picker store's __newindex guard.

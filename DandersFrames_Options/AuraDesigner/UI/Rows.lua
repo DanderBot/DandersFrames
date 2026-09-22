@@ -182,7 +182,9 @@ S.BuildPoolStrip = function(buffTabBar)
         btn:SetScript("OnClick", function() SetMainTab(capturedKey) end)
         -- HookScript, not SetScript: StyleButton owns OnEnter/OnLeave for the
         -- hover wash, and replacing them would leave the tab stuck lit.
-        local tipTitle, tipLines = def.label, def.tooltip
+        -- ⚠ tooltipTitle OVERRIDES label, as on the folder tabs: the PI Helper's tab
+        -- is an abbreviation and its tooltip carries the full name.
+        local tipTitle, tipLines = def.tooltipTitle or def.label, def.tooltip
         btn:HookScript("OnEnter", function(self)
             GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines })
         end)

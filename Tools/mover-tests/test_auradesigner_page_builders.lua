@@ -175,8 +175,14 @@ do
           "harness: the page registration passes Add and AddSpace through")
     check(EDIT:find("function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
-    check(EDIT:find("if Add and P.BuildAuraDesignerRowsPage and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
-          "harness: the popout arm needs Add AND a non-classic layout")
+    check(EDIT:find("if Add and P.BuildAuraDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
+          "harness: the popout arm needs Add, the designer switch AND a non-classic layout")
+    -- 2026-09-22: the designers build their CLASSIC version in both layouts.
+    local CFG = df_file_source("Core/Config.lua")
+    local s = CFG:find("function DF:DesignersUseRows()", 1, true)
+    local body = s and CFG:sub(s, (CFG:find("end", s, true) or s) + 2) or ""
+    check(s ~= nil and body:find("return false", 1, true) ~= nil,
+          "harness: the designer switch is off, so the classic designer builds in both layouts")
     check(EDIT:find("local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)", 1, true) ~= nil,
           "harness: ...and the split panel survives as classic's arm")
 
@@ -1432,7 +1438,9 @@ do
     -- The split panel's own strip survives, untouched, for its ONE host.
     check(ROWS:find("S.BuildPoolStrip = function(buffTabBar)", 1, true) ~= nil,
           "pool: the split panel's pool strip is declared once")
-    check(EDIT:find("S.BuildPoolStrip(buffTabBar)", 1, true) ~= nil,
+    -- (poolHost: the strip's left part -- the spec picker holds its right end,
+    -- see test_designers_classic.lua.)
+    check(EDIT:find("S.BuildPoolStrip(poolHost)", 1, true) ~= nil,
           "pool: ...and the split panel mounts it into its own slice")
     -- ☠ THE ABSENCE IS THE ASSERTION: the band layout has its own strip and must
     -- not also mount the split panel's, which is anchored inside S.mainFrame.

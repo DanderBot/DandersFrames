@@ -3585,7 +3585,7 @@ end
 -- classic and every row the other arm builds needs its table.
 -- ============================================================
 function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
-    if Add and P.BuildTextDesignerRowsPage and not DF:IsClassicSettingsLayout() then
+    if Add and P.BuildTextDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then
         -- ☠ A PREVIOUS BUILD'S ISLAND IS NOT IN page.children -- it never went
         -- through Add -- so DoBuild's own retire loop cannot see it, and it would
         -- sit under the bands still showing the last mode's controls. These five

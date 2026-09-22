@@ -152,8 +152,8 @@ do
           "harness: the page registration passes Add and AddSpace through")
     check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
-    check(TD:find("if Add and P.BuildTextDesignerRowsPage and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
-          "harness: the popout arm needs Add AND a non-classic layout")
+    check(TD:find("if Add and P.BuildTextDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
+          "harness: the popout arm needs Add, the designer switch AND a non-classic layout")
     check(TD:find("local function BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
           "harness: ...and the split panel survives as classic's arm")
 
