@@ -500,26 +500,32 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- colour-picker toggles, and those are account-wide now (see below), so
         -- there is nothing per-mode left to copy.
         --
-        -- ===== COLOR PICKER (a 280 box in classic, a one-row band) =========
+        -- ===== COLOR PICKER (a 280 box in classic, a card in modern) ======
         -- Bound to the ACCOUNT-WIDE db, not the page's per-mode `db`. These render
         -- on both the Party and Raid tabs, and when they were per-mode the Raid copy
         -- was write-only -- the hooks only ever read party, so ticking it on Raid
         -- looked enabled and did nothing. One setting, one value, both tabs.
         local pickerDB = DF:GetGlobalDB()
 
+        -- MODERN is the Debuff Bar's collapsible-card design: the one box is one
+        -- card in column 1 -- each tick over the line that explains it, since a
+        -- blurb takes a row of its own -- and Expand All / Collapse All at the top
+        -- like every card page.
+        -- No pin -- which picker opens is behaviour, not looks -- and no header
+        -- tick: the two ticks are independent (see the builder's note).
         local classicLayout = DF:IsClassicSettingsLayout()
         -- The shared page-scope machinery, taken unconditionally: nil in classic,
         -- which is what the `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- The page's one band: full-width and chromeless, because a feature row's
-        -- popout docks outside the WINDOW and runs a beam back to the row, so a
-        -- row that stopped 280px in would leave that beam crossing half the page.
-        -- No header on it -- one row whose own label already says "Color Picker",
-        -- which is the Sorting page's sortBand rule.
-        local colorPickerBand
-        if tools then
-            colorPickerBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE CARD: the Debuff Bar's helper and its two opt-ins.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- The group's four widgets, verbatim, taking the group and parent they
@@ -528,8 +534,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- ⚠ NO TOGGLE IS HOISTED. Neither tick means "am I doing anything": they
         -- are two INDEPENDENT overrides (this addon's pickers, and every other
-        -- addon's), and either can be on without the other. A row that hoisted
-        -- one would be claiming it speaks for the pair.
+        -- addon's), and either can be on without the other. A header tick for one
+        -- would be claiming it speaks for the pair.
         local function BuildColorPickerGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateCheckbox(parent, L["Use DF Color Picker"], pickerDB, "colorPickerOverride", function()
@@ -575,69 +581,29 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- OTHER addon's picker is the setting a user will want confirmed at a
             -- glance, and L["All"] says it in a word the locale already ships.
             -- The this-addon-only state gets nothing: there is no existing word
-            -- for it that is not either vague ("On", beside a row with no toggle)
-            -- or a brand name standing in for a sentence -- and a summary is not
-            -- worth inventing a string for. The kit still shows the label and the
-            -- count badge, which is what an empty summary is for.
-            local function ColorPickerSummary(d)
-                if not d then return "" end
-                if d.colorPickerGlobalOverride then return L["All"] end
+            -- for it that is not either vague or a brand name standing in for a
+            -- sentence -- and a summary is not worth inventing a string for.
+            --
+            -- ⚠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S `db`. The card's corner is
+            -- handed the per-mode table by the page pass; these two keys live in
+            -- the global db, so the summary reads that instead.
+            local function ColorPickerSummary()
+                local g = DF:GetGlobalDB()
+                if g and g.colorPickerGlobalOverride then return L["All"] end
                 return ""
             end
 
-            -- Two: the two ticks. The blurb under each is prose, not a setting.
-            local COLOR_PICKER_COUNT = 2
-
-            -- ☠ TWO TICKS, SO THE GROUP GOES ON THE PLATE. A click that opens a
-            -- panel holding two checkboxes is a click that buys nothing, which is
-            -- the whole argument for the hybrid page; the strip stops promising
-            -- what is already on screen and offers to pin a second copy instead.
-            -- The blurb under each tick rides along -- four children to the measure
-            -- in CreatePopoutPageTools, two settings to the badge, and INLINE_MAX
-            -- reads the first of those.
-            local pickerMount, pickerContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildColorPickerGroup({ group = group, parent = holder, refreshStates = reflow })
-            end, nil, { inline = true })
-            local pickerRow = colorPickerBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Color Picker"],
-                -- ⚠ THE GLOBAL TABLE, NOT tools.RowDB. Every other row on the
-                -- sweep hands the kit the per-mode table because that is where
-                -- its keys live; these two live in the account-wide db, and a row
-                -- pointed at the per-mode one would read nil for both and print a
-                -- summary about settings it is not showing.
-                db      = function() return DF:GetGlobalDB() end,
-                summary = ColorPickerSummary,
-                count   = COLOR_PICKER_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = pickerMount,
-                footerStrip = true,
-            }))
-            -- ☠ CLAIM THE KEYS, BUT NO MODIFIED TICK AND NO FOOTER -- and that is
-            -- not an oversight to be tidied up by the next sweep.
-            --
-            -- ClaimKeys does two jobs. The one wanted here is the SEARCH row map:
-            -- it records which row owns a setting, so a search hit on "Use DF
-            -- Color Picker" can open the panel the control is behind. Without it
-            -- the setting is findable in classic and unreachable in the popout
-            -- layout.
-            --
-            -- The other job is the amber tick's key list, and that half is inert
-            -- here on purpose. DF.Defaults (DandersFrames/Core/Defaults.lua)
-            -- answers for DF.db.party / DF.db.raid / the stored raid baseline and
-            -- nothing else, so:
-            --   * WireModifiedTick would ask "is colorPickerOverride modified" of
-            --     a table that has never held it -- the tick could never light.
-            --   * WireFooter is worse than useless: Reset Group and Hold both
-            --     write through that same engine, so they would stamp PER-MODE
-            --     defaults for these two keys into DF.db[mode] -- inventing
-            --     settings in the wrong table while the account-wide values the
-            --     row is actually showing sat untouched.
-            -- The correct home for a reset here is a global-db-aware engine that
-            -- does not exist yet; until it does, no strip is the honest answer.
-            tools.ClaimKeys(pickerRow, pickerContent)
-
-            Add(colorPickerBand, nil, "both")
+            -- ☠ THE PAGE'S TWO BULK VERBS, at col "both" -- the Debuff Bar's
+            -- placement, kept on a one-card page so every card page reads alike.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- ⚠ NO RESET STRIP, AS BEFORE. The defaults engine answers for the
+            -- per-mode tables only, and these two keys are account-wide.
+            local band = OpenSection(L["Color Picker"], "integrations_colorpicker", 1, ColorPickerSummary)
+            BuildColorPickerGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- (Masque Integration group removed on 12.1: Masque cannot skin the

@@ -3,25 +3,24 @@ local NS = ...
 -- ============================================================
 -- INTEGRATIONS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- General > Integrations is the sweep's fourth page and its smallest: one real
--- group, Color Picker, which becomes a single toggle-less feature row in a
--- one-row band. The See Also block and the two removed-group notes are not
--- settings groups and are untouched.
+-- General > Integrations is the smallest card page: one real group, Color
+-- Picker, which is one 280 box in classic and one of the Debuff Bar's
+-- collapsible CARDS in modern -- no header tick, no pin. The See Also block and
+-- the two removed-group notes are not settings groups and are untouched.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to the panel -- so this
 -- file does what the three page-builder suites before it do: it reads the page's
 -- SOURCE and asserts against it.
 --
 -- ☠ AND THIS PAGE HAS ONE RULE OF ITS OWN, which is most of why it has a test:
--- its two settings live in the ACCOUNT-WIDE db, not in DF.db.party/raid. The row
--- therefore claims its keys (for the search jump) but wires NEITHER the amber
--- modified tick NOR the Reset Group / Hold: Defaults footer -- both run through
--- DF.Defaults, which answers only for the per-mode tables. Section 3 below is
--- there so a later sweep "completing" the row breaks a test instead of writing
--- per-mode defaults into the wrong table.
+-- its two settings live in the ACCOUNT-WIDE db, not in DF.db.party/raid. So the
+-- card wires NEITHER an amber modified tick NOR a Reset Group / Hold: Defaults
+-- footer -- both run through the per-mode defaults engine -- and its summary
+-- reads the account-wide table rather than the per-mode one the page pass hands
+-- a card's corner.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Auras.lua")
+local SRC = options_file_source("GUI/Pages/Auras.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Frame page's) ----------------------------
 --
@@ -98,44 +97,37 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY
+-- 1. THE PAGE TAKES THE SHARED CARD HELPER, AND THE POPOUT FURNITURE IS GONE
 -- ============================================================
-print("-- Integrations page: the shared popout machinery")
+print("-- Integrations page: the shared card helper")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "colorPickerBand", "_COUNT",
+                            "footerStrip", "inline = true", "popout = true," }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    check(PAGE:find("count%s*=%s*[%w_]") == nil, "counts: no card declares a settings count")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: the card goes through the shared helper, two per row with quiet captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+    local n = 0
+    for _ in PAGE:gmatch('Add%(tools%.SectionControls%(self%.child%), 24, "both"%)') do n = n + 1 end
+    eq(n, 1, "bulk: the page adds the Expand/Collapse pair once, above its card")
 end
 
 -- ============================================================
 -- 2. COLOR PICKER -- four widgets, no toggle
 -- Neither tick is the group's "am I doing anything": they are two INDEPENDENT
 -- overrides -- this addon's colour pickers, and every other addon's -- and
--- either can be on without the other. So nothing is hoisted and the row is a
--- way in and nothing else.
+-- either can be on without the other. So nothing is hoisted into the header.
 -- ============================================================
 local COLOR_PICKER = {
     { "checkbox", "Use DF Color Picker",                 "colorPickerOverride",       30 },
@@ -152,7 +144,7 @@ do
     -- ONE builder, BOTH layouts: the declaration and the two mounts.
     local calls = 0
     for _ in PAGE:gmatch("BuildColorPickerGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "color picker: declared once, mounted twice -- classic box and popout pane")
+    eq(calls, 3, "color picker: declared once, mounted twice -- classic box and card")
 
     -- The classic branch builds the box it always did, with its own header, in
     -- the column it always had.
@@ -168,39 +160,21 @@ do
     check(PAGE:find("local pickerDB = DF:GetGlobalDB()", 1, true) ~= nil,
           "color picker: the account-wide table is resolved once, at page scope")
 
-    local opts = rowOpts("Color Picker")
-    check(opts:find("toggle", 1, true) == nil,
-          "color picker: the row declares no toggle -- two independent overrides have no shared on/off")
-    check(opts:find("summary%s*=%s*ColorPickerSummary") ~= nil,
-          "color picker: ...it does declare a summary")
-    check(opts:find("count%s*=%s*COLOR_PICKER_COUNT") ~= nil,
-          "color picker: ...and the declared count, not a literal")
-    check(opts:find("build", 1, true) ~= nil, "color picker: the row is handed a pre-built mount")
-    check(opts:find("window  = DF.GUIFrame", 1, true) ~= nil,
-          "color picker: ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          "color picker: ...and clipped by the page's own scroll frame")
+    local a = PAGE:find('OpenSection(L["Color Picker"]', 1, true)
+    local b = a and PAGE:find("CloseSection(band)", a, true)
+    local block = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
+    check(block:find('OpenSection(L["Color Picker"], "integrations_colorpicker", 1, ColorPickerSummary)', 1, true) ~= nil,
+          "color picker: a card keyed integrations_colorpicker in column 1 -- no gates, no pin, no tick")
+    check(block:find("BuildColorPickerGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          "color picker: ...mounting the builder exactly as classic does")
 
-    local declared = tonumber(PAGE:match("local COLOR_PICKER_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "color picker: the page declares the row's count in one place")
-    eq(declared, settingsIn(COLOR_PICKER), "color picker: ...every setting in the census, because nothing is hoisted")
-
-    -- ☠ THE ROW'S db IS THE GLOBAL TABLE, NOT tools.RowDB. Every other row on the
-    -- sweep hands the kit the per-mode table because that is where its keys live;
-    -- these two do not, and a row pointed at the per-mode table would read nil
-    -- for both and print a summary about settings it is not showing.
-    check(opts:find("db      = function() return DF:GetGlobalDB() end", 1, true) ~= nil,
-          "color picker: the row reads the account-wide table, not the per-mode one")
-    -- The FIELD, not the words: the note at the site names tools.RowDB in prose
-    -- to say what this row is deliberately not doing.
-    check(opts:find("db%s*=%s*tools%.RowDB") == nil,
-          "color picker: ...and never the per-mode one")
-
-    -- The summary uses a word the locale already ships, for the one state worth
-    -- a word, and says nothing otherwise rather than inventing a string.
-    local sum = PAGE:match("local function ColorPickerSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "color picker: the summary is a named function on the page")
+    -- ☠ THE SUMMARY READS THE ACCOUNT-WIDE TABLE. The page pass hands a card's
+    -- corner the per-mode table, which never holds these keys.
+    local sum = PAGE:match("local function ColorPickerSummary%(%)(.-)\n            end")
+    check(sum ~= nil, "color picker: the summary is a named function on the page, taking no table")
     if sum then
+        check(sum:find("local g = DF:GetGlobalDB()", 1, true) ~= nil,
+              "color picker: ...reading the account-wide table itself")
         check(sum:find('L%["All"%]') ~= nil,
               "color picker: ...naming the every-other-addon state from the locale")
         check(sum:find('return ""', 1, true) ~= nil,
@@ -209,41 +183,23 @@ do
 end
 
 -- ============================================================
--- 3. THE ACCOUNT-WIDE RULE -- claimed, but no tick and no footer
--- ☠ THIS SECTION IS THE POINT OF THE FILE. DF.Defaults answers for
--- DF.db.party / DF.db.raid / the stored raid baseline and nothing else, so on
--- this row the tick could never light and the footer would write PER-MODE
--- defaults for two keys that live in the account-wide table -- inventing
--- settings in the wrong place while the values the row is showing sat
--- untouched. A later sweep "completing" the row breaks these two checks.
+-- 3. THE ACCOUNT-WIDE RULE -- no tick and no footer
 -- ============================================================
 print("-- Integrations page: the account-wide rule")
 do
-    check(PAGE:find("tools.ClaimKeys(pickerRow, pickerContent)", 1, true) ~= nil,
-          "account-wide: the keys ARE claimed -- that is what feeds the search jump's row map")
-    check(PAGE:find("tools.WireModifiedTick(pickerRow)", 1, true) == nil,
+    check(PAGE:find("tools.WireModifiedTick(", 1, true) == nil,
           "account-wide: no amber tick -- the defaults engine cannot answer for these keys")
     check(PAGE:find("tools.WireFooter(", 1, true) == nil,
           "account-wide: no Reset Group / Hold strip -- it would write per-mode defaults")
-    -- ...and the reason is written down at the site, not just here.
-    check(PAGE:find("DF.Defaults", 1, true) ~= nil,
-          "account-wide: the row site names the engine that cannot answer for these keys")
+    check(PAGE:find("NO RESET STRIP, AS BEFORE", 1, true) ~= nil,
+          "account-wide: ...and the reason is written down at the card")
 end
 
 -- ============================================================
--- 4. THE BAND, THE ORDER, AND WHAT WAS LEFT ALONE
+-- 4. THE ORDER, AND WHAT WAS LEFT ALONE
 -- ============================================================
-print("-- Integrations page: the band, the order and what was left alone")
+print("-- Integrations page: the order and what was left alone")
 do
-    check(PAGE:find("colorPickerBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: the band is chromeless, at the width the layout pass will give it")
-    -- One row whose own label already says "Color Picker", so no header: the
-    -- Sorting page's sortBand rule.
-    check(PAGE:find("colorPickerBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "band: ...and carries no header, because its one row's label already names it")
-    check(PAGE:find('Add(colorPickerBand, nil, "both")', 1, true) ~= nil,
-          "band: it spans both columns, where the 280 box used to take column 1")
-
     -- Exactly one bare 280 box left on the page, and it is the classic branch's.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
