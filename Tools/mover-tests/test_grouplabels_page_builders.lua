@@ -3,41 +3,28 @@ local NS = ...
 -- ============================================================
 -- GROUP LABELS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Frames.lua
 -- ------------------------------------------------------------
--- General > Group Labels is the sweep's third page. Three of its four groups
--- become popout feature rows -- Raid Group Labels, Font Settings, Position --
--- and the one single-option group (Text Format) becomes a CONTROL ROW: a pane
--- holding one dropdown is a click that buys nothing, but a 280 box beside a
--- full-width band is the one shape a column of plates cannot absorb.
+-- General > Group Labels: four classic boxes, raid + group-based only. In
+-- Modern they are the Debuff Bar's collapsible CARDS -- two per row inside a
+-- card wide enough, dim captions, the value summary in a shut card's corner,
+-- Expand All / Collapse All at the top -- in classic's own columns:
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_frame_page_builders and test_sorting_page_builders do: it
--- reads the page's SOURCE and asserts against it.
+--   column 1   Raid Group Labels (the page's master switch, Enable Group
+--              Labels, in its body), Position
+--   column 2   Text Format (its lone dropdown, now a card), Font Settings
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that the declared row COUNT matches what the pane mounts, less the hoisted
---     toggle.
---   ✓ that the boxes' own gates moved onto the rows rather than being dropped.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- Every card hides outside raid + groups, header and band together; the three
+-- after the first grey with the enable. Pins on the three that decide how a
+-- label LOOKS.
+--
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the CENSUS of each builder (the pre-change goldens), and the Text Format
+--     box classic still builds inline.
+--   ✓ each card's column, stable key, summary, grey and hide gates, pin.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Frames.lua")
+local SRC = options_file_source("GUI/Pages/Frames.lua"):gsub("\r\n", "\n")
 
--- ---- the census reader (the Frame page's, with three kinds added) ----
---
--- ⚠ THE FONT TRIO IS IN THE MAP, unlike the two earlier copies of this reader.
--- CreateFontDropdown / CreateOutlineDropdown / CreateShadowCheckbox are three of
--- the five controls in the Font Settings group, and a reader that skipped them
--- would fold all five into two census rows -- a chunk runs to the start of the
--- next KNOWN call, so an unknown factory is invisible rather than merely
--- unnamed. Naming them is what makes this group's inventory actually pinned.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
@@ -46,9 +33,6 @@ local KIND = {
     CreateShadowCheckbox = "shadowcheckbox",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -98,10 +82,6 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The Group Labels page, scoped by its own two ends: Frames.lua holds several
--- pages, and a bare 280 box (or a `label = L["Position"]`) on one of the others
--- is not this pass's business. Everything below that is about THIS page reads
--- PAGE rather than SRC for exactly that reason.
 local PAGE
 do
     local a = SRC:find('Add(CreateCopyButton(self.child, {"groupLabel"}', 1, true)
@@ -110,134 +90,52 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header.
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. rowLabel:gsub("%p", "%%%0") .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window  = DF.GUIFrame", 1, true) ~= nil
-       or opts:find("window   = DF.GUIFrame", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
+local function sectionBlock(labelKey, mount)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find(mount, 1, true)
+    return block, m and block:sub(1, m - 1) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY
--- Same contract the Sorting page signed: the eight verbs come off
--- GUI:CreatePopoutPageTools rather than out of a third copy on the page.
+-- 1. THE SHARED MACHINERY, AND THE ROW FURNITURE GONE
 -- ============================================================
-print("-- Group Labels page: the shared popout machinery, not a third copy of it")
+print("-- Group Labels page: the shared machinery, and the row furniture gone")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "footerStrip", "inline = true", "_COUNT", "count =", "labelBand",
+                            "formatBand", "chromeless", "OnGroupLabelsToggle" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+    check(PAGE:find("local function HideGroupLabelOptions()", 1, true) ~= nil
+      and PAGE:find("local function DisableGroupLabelOptions(d)", 1, true) ~= nil,
+          "gates: the page's two gates are named once, at page scope")
 end
 
 -- ============================================================
--- 2. RAID GROUP LABELS -- the page's one hoisted toggle
--- Two controls, one of them the "am I doing anything" tick, which goes onto the
--- row. What is left in the pane is the blurb -- which is what decides that this
--- row carries no count, no footer and no tick.
+-- 2. THE BUILDERS AND THEIR CARDS
+-- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local LABEL_SETTINGS = {
     { "label",    "Display labels above or beside each raid group.", "(none)",            25 },
     { "checkbox", "Enable Group Labels",                             "groupLabelEnabled", 30 },
 }
-
-print("-- Group Labels page: Raid Group Labels")
-do
-    local body = builderBody("BuildLabelSettingsGroup")
-    checkCensus(census(body), LABEL_SETTINGS, "raid group labels")
-    checkShared("BuildLabelSettingsGroup", "Raid Group Labels")
-
-    -- The hoist: the checkbox is still IN the builder -- classic needs it --
-    -- behind the one flag the popout passes.
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          "raid group labels: the enable checkbox is skipped when the row has hoisted it")
-    check(body:find("groupLabelEnable.keepEnabled = true", 1, true) ~= nil,
-          "raid group labels: ...and in classic it stays live under the group's own grey")
-
-    local opts = rowOpts("Raid Group Labels")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"groupLabelEnabled"%s*}') ~= nil,
-          "raid group labels: the row's tick is the group's own enable key")
-    check(opts:find("onToggle%s*=%s*OnGroupLabelsToggle") ~= nil,
-          "raid group labels: ...and a commit that is not a page rebuild")
-
-    -- ☠ NO COUNT, NO FOOTER, NO TICK -- the Raid Layout Mode precedent. Once the
-    -- tick is hoisted the pane holds an explanation and nothing else: a badge
-    -- would claim controls that are not there, and a reset strip would be
-    -- offered over zero claimed keys.
-    check(opts:find("count", 1, true) == nil,
-          "raid group labels: no count badge -- the pane behind it holds no controls")
-    check(opts:find("summary", 1, true) == nil,
-          "raid group labels: ...and no summary, because the tick is the whole story")
-    check(PAGE:find("tools.WireFooter(labelsRow", 1, true) == nil,
-          "raid group labels: no footer -- a reset over zero claimed keys would lie")
-    check(PAGE:find("tools.WireModifiedTick(labelsRow", 1, true) == nil,
-          "raid group labels: ...and no amber tick, for the same reason")
-    check(PAGE:find("tools.ClaimKeys(labelsRow", 1, true) == nil,
-          "raid group labels: ...and nothing to claim")
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD. A rebuild retires the row being
-    -- clicked, and the row's write path calls row.Refresh() after onToggle
-    -- returns -- on a dead frame.
-    local commit = PAGE:match("local function OnGroupLabelsToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "raid group labels: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "raid group labels: ...and never rebuilds the page")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              "raid group labels: ...it re-runs the state passes instead")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "raid group labels: ...and reflows the open panes, which grey on this key")
-    end
-
-    -- The hoisted toggle is re-registered with search under the SAME label and
-    -- key the suppressed checkbox carried, or the setting becomes unfindable in
-    -- the popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(labelsRow, L["Enable Group Labels"], "groupLabelEnabled", OnGroupLabelsToggle)', 1, true) ~= nil,
-          "raid group labels: the hoisted toggle keeps its search entry")
-
-    -- The box's own gate, on the row.
-    check(PAGE:find("labelsRow.hideOn = HideGroupLabelOptions", 1, true) ~= nil,
-          "raid group labels: the row hides outside raid + group layout, as the box did")
-end
-
--- ============================================================
--- 3. FONT SETTINGS -- five controls, no toggle
--- ============================================================
 local FONT_SETTINGS = {
     { "fontdropdown",    "Font",        "groupLabelFont",     55 },
     { "slider",          "Font Size",   "groupLabelFontSize", 55 },
@@ -245,333 +143,104 @@ local FONT_SETTINGS = {
     { "shadowcheckbox",  "Shadow",      "groupLabelOutline",  30 },
     { "colorpicker",     "Label Color", "groupLabelColor",    35 },
 }
-
-print("-- Group Labels page: Font Settings")
-do
-    local body = builderBody("BuildFontGroup")
-    checkCensus(census(body), FONT_SETTINGS, "font settings")
-    checkShared("BuildFontGroup", "Font Settings")
-
-    -- ⚠ TWO CONTROLS, ONE KEY. The outline dropdown and the shadow tick are two
-    -- views of the same stored value, which is why the census above names
-    -- groupLabelOutline twice -- and why the row claims it twice. Harmless: the
-    -- tick asks "is any of these modified" and the reset writes defaults, and
-    -- neither answer is count-sensitive.
-    eq(FONT_SETTINGS[3][3], FONT_SETTINGS[4][3],
-       "font settings: the outline dropdown and the shadow tick share one stored key")
-
-    local declared = tonumber(PAGE:match("local FONT_SETTINGS_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "font settings: the page declares the row's count in one place")
-    eq(declared, #FONT_SETTINGS, "font settings: ...the whole census, because nothing is hoisted")
-
-    -- ☠ THE GROUP GATE MOVED INSIDE THE BUILDER. In classic it was a property of
-    -- the page-level box; left there, the pane would not grey while group labels
-    -- are off and the two layouts would disagree.
-    check(body:find("group.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "font settings: the group's grey-while-off gate is inside the builder")
-
-    local opts = rowOpts("Font Settings")
-    check(opts:find("toggle", 1, true) == nil,
-          "font settings: the row declares no toggle -- there is no on/off in here")
-    check(opts:find("summary%s*=%s*FontSettingsSummary") ~= nil,
-          "font settings: ...it does declare a summary")
-    check(opts:find("count%s*=%s*FONT_SETTINGS_COUNT") ~= nil,
-          "font settings: ...and the declared count, not a literal")
-
-    check(PAGE:find("tools.ClaimKeys(fontRow, fontContent)", 1, true) ~= nil,
-          "font settings: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(fontRow)", 1, true) ~= nil,
-          "font settings: ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(fontRow, UpdateLabels)", 1, true) ~= nil,
-          "font settings: ...and Reset Group / Hold: Defaults redraw the labels")
-
-    -- The box's two gates, on the row: HIDDEN outside raid + group layout,
-    -- GREYED while group labels are off.
-    check(PAGE:find("fontRow.hideOn = HideGroupLabelOptions", 1, true) ~= nil,
-          "font settings: the row hides where the box did")
-    check(PAGE:find("fontRow.disableOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "font settings: ...and greys on the key the box's children did")
-
-    -- The summary names the font the way the dropdown behind it does -- through
-    -- the addon's own resolver, not a second one -- and localises its one word.
-    local sum = PAGE:match("local function FontSettingsSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "font settings: the summary is a named function on the page")
-    if sum then
-        check(sum:find("DF:GetFontNameFromPath(d.groupLabelFont)", 1, true) ~= nil,
-              "font settings: ...taking the font name from the addon's own resolver")
-        check(sum:find("DF.GetFontNameFromPath and", 1, true) ~= nil,
-              "font settings: ...guarded, because the engine is in the resident addon")
-        check(sum:find('L%["Thick Outline"%]') ~= nil,
-              "font settings: ...and the outline word comes from the locale")
-        check(sum:find("\\194\\183", 1, true) ~= nil,
-              "font settings: ...separated by the convention's dot")
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 7, "font settings: at most four items reach the string at once")
-    end
-end
-
--- ============================================================
--- 4. POSITION -- four widgets, no toggle
--- ============================================================
 local POSITION = {
     { "dropdown", "Label Position", "groupLabelPosition", 55 },
     { "slider",   "Offset X",       "groupLabelOffsetX",  55 },
     { "slider",   "Offset Y",       "groupLabelOffsetY",  55 },
     { "label",    "Start: Above/left of groups.\\nCenter: Middle of the group.\\nEnd: Below/right of groups.", "(none)", 50 },
 }
+local TEXT_FORMAT = {
+    { "dropdown", "Label Format", "groupLabelFormat", 55 },
+}
 
-print("-- Group Labels page: Position")
+local CARDS = {
+    { label = "Raid Group Labels", key = "grouplabels_settings", col = 1, classicCol = 1,
+      builder = "BuildLabelSettingsGroup", golden = LABEL_SETTINGS,
+      call = 'OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, nil, nil, HideGroupLabelOptions)' },
+    { label = "Text Format", key = "grouplabels_format", col = 2, classicCol = 2,
+      builder = "BuildTextFormatGroup", golden = TEXT_FORMAT, pin = true, calls = 2,
+      call = 'OpenSection(L["Text Format"], "grouplabels_format", 2, nil, DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)' },
+    { label = "Font Settings", key = "grouplabels_font", col = 2, classicCol = 2,
+      builder = "BuildFontGroup", golden = FONT_SETTINGS, pin = true,
+      call = 'OpenSection(L["Font Settings"], "grouplabels_font", 2, FontSettingsSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildFontGroup)' },
+    { label = "Position", key = "grouplabels_position", col = 1, classicCol = 1,
+      builder = "BuildPositionGroup", golden = POSITION, pin = true,
+      call = 'OpenSection(L["Position"], "grouplabels_position", 1, PositionSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildPositionGroup)' },
+}
+
+for _, g in ipairs(CARDS) do
+    print("-- Group Labels page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+
+    -- Declared once and mounted by classic and the card -- except Text Format,
+    -- whose classic box still builds its dropdown inline, so only the card
+    -- mounts the builder.
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, g.calls or 3, g.label .. ": declared once, mounted " .. ((g.calls or 3) - 1) .. " time(s)")
+
+    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. g.label:gsub("%p", "%%%0") .. "\"%]%)")
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil
+      and PAGE:find(box .. ".hideOn = HideGroupLabelOptions", 1, true) ~= nil,
+          g.label .. ": the classic box keeps its header, its hide gate and column " .. g.classicCol)
+
+    local block, call = sectionBlock(g.label, g.builder .. "({")
+    check(call:find(g.call, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", hidden outside raid + groups"
+          .. (g.pin and ", greying with the enable, pinnable" or ", never greying -- it holds the switch"))
+    check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
+    check(block:find("({ group = ", 1, true) ~= nil and block:find("refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          g.label .. ": mounts the builder as classic does")
+end
+
+print("-- Group Labels page: the builders' own gates, and Text Format")
 do
-    local body = builderBody("BuildPositionGroup")
-    checkCensus(census(body), POSITION, "position")
-    checkShared("BuildPositionGroup", "Position")
-
-    -- The dropdown's option table moved into the builder with it, so the pane
-    -- and the classic box offer the same three placements.
-    for _, k in ipairs({ "Start of Group", "Center of Group", "End of Group" }) do
-        check(body:find('L%["' .. k .. '"%]') ~= nil,
-              "position: the " .. k .. " option rode along into the builder")
+    check(builderBody("BuildLabelSettingsGroup"):find(".keepEnabled = true", 1, true) ~= nil,
+          "settings: the enable stays live when the rest is off")
+    check((select(2, sectionBlock("Raid Group Labels", "BuildLabelSettingsGroup({"))):find("hoistToggle", 1, true) == nil,
+          "settings: the page's master switch stays in the first card's body")
+    for _, b in ipairs({ "BuildFontGroup", "BuildPositionGroup", "BuildTextFormatGroup" }) do
+        check(builderBody(b):find("group.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
+              b .. ": the body greys with the enable, from inside the builder")
     end
-
-    local declared = tonumber(PAGE:match("local POSITION_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "position: the page declares the row's count in one place")
-    eq(declared, #POSITION, "position: ...the whole census, explainer included")
-
-    check(body:find("group.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "position: the group's grey-while-off gate is inside the builder")
-
-    local opts = rowOpts("Position")
-    check(opts:find("toggle", 1, true) == nil, "position: the row declares no toggle")
-    check(opts:find("summary%s*=%s*PositionSummary") ~= nil, "position: ...it does declare a summary")
-    check(opts:find("count%s*=%s*POSITION_COUNT") ~= nil,
-          "position: ...and the declared count, not a literal")
-
-    check(PAGE:find("tools.ClaimKeys(positionRow, posContent)", 1, true) ~= nil,
-          "position: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(positionRow)", 1, true) ~= nil,
-          "position: ...and its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(positionRow, UpdateLabels)", 1, true) ~= nil,
-          "position: ...and the footer redraws the labels")
-    check(PAGE:find("positionRow.hideOn = HideGroupLabelOptions", 1, true) ~= nil,
-          "position: the row hides where the box did")
-    check(PAGE:find("positionRow.disableOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "position: ...and greys on the key the box's children did")
-
-    -- The summary prints the SHORT placement word plus the offset pair, which is
-    -- the Border Shadow row's own convention: the numbers only when they are not
-    -- both zero.
-    local sum = PAGE:match("local function PositionSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "position: the summary is a named function on the page")
-    if sum then
-        for _, k in ipairs({ "Start", "Center", "End" }) do
-            check(sum:find('L%["' .. k .. '"%]') ~= nil,
-                  "position: ..." .. k .. " comes from the locale, not a literal")
-        end
-        check(sum:find("if ox ~= 0 or oy ~= 0 then", 1, true) ~= nil,
-              "position: ...and the offsets print only when they are not both zero")
-        check(sum:find('format("%d, %d"', 1, true) ~= nil,
-              "position: ...as one pair, the way the shadow row spells it")
-    end
+    -- Text Format: classic still builds its box's dropdown inline, identically.
+    check(PAGE:find('formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil
+      and PAGE:find("formatGroup.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
+          "text format: classic's box builds the same dropdown with the same gate")
+    check(builderBody("BuildTextFormatGroup"):find('GUI:CreateDropdown(parent, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil,
+          "text format: ...and the card's builder builds that same call")
+    local fmtAt = PAGE:find("local formatOptions = {", 1, true)
+    local bAt = PAGE:find("local function BuildTextFormatGroup(tools2)", 1, true)
+    check(fmtAt and bAt and fmtAt < bAt, "text format: ...after the options it closes over")
 end
 
 -- ============================================================
--- 5. TEXT FORMAT'S CONTROL ROW, AND THE PAGE'S OWN ORDER
--- The one single-option group becomes a control row in a band of its own; the
--- two mode messages and the copy button are not settings groups at all and are
--- untouched.
+-- 3. THE CARDS TOGETHER, AND THE PAGE'S MESSAGES
 -- ============================================================
-print("-- Group Labels page: the Text Format control row, the band and the page's own order")
+print("-- Group Labels page: the cards together")
 do
-    -- ---- nothing is mounted at a column's 280 any more ---------------
-    local narrow = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
-    eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "inline: the band skin is never restated as a literal")
-
-    -- ---- Text Format is a CONTROL ROW --------------------------------
-    -- It is still NOT a popout row: a pane holding one dropdown buys nothing.
-    check(PAGE:find('label   = L["Label Format"]', 1, true) == nil,
-          "control row: no popout row is declared for one dropdown")
-    check(PAGE:find('label     = L["Label Format"],\n                kind      = "dropdown",', 1, true) ~= nil,
-          "control row: Text Format is a dropdown control row")
-    check(PAGE:find("formatBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at the width the layout pass will give it")
-    check(PAGE:find("formatBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into that band")
-    check(PAGE:find("formatBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "control row: ...and no band header, because the row's own label names it")
-    -- ⚠ THE CONTROL'S OWN NAME, NOT THE BOX'S TITLE. "Text Format" named a
-    -- SECTION; "Label Format" is what the dropdown has always been called, so the
-    -- entry the kit registers off this label is the SAME entry classic registers.
-    check(PAGE:find('label     = L["Text Format"]', 1, true) == nil,
-          "control row: ...named 'Label Format', not the box's section title")
-    -- The TABLE binding, which is what keeps the override markers and the search
-    -- index addressing the same (table, key) pair the classic dropdown gave them.
-    check(PAGE:find('options   = formatOptions,\n                db        = db,\n                key       = "groupLabelFormat",', 1, true) ~= nil,
-          "control row: the options and the TABLE binding ride the row")
-    check(PAGE:find("onChanged = UpdateLabels,", 1, true) ~= nil,
-          "control row: ...and the page's own apply, unchanged")
-    check(PAGE:find("hideOn    = HideGroupLabelOptions,", 1, true) ~= nil,
-          "control row: ...the box's hideOn becomes the ROW's, so the slot collapses")
-    check(PAGE:find("formatRow.disableOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "control row: ...and its disableChildrenOn becomes the row's own grey")
-    check(PAGE:find('tools.RegisterControlRow(formatRow, "dropdown", "groupLabelFormat")', 1, true) ~= nil,
-          "control row: ...and it reaches search through the shared verb")
-
-    -- ---- classic still builds the box it always built -----------------
-    check(PAGE:find("local formatGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "control row: classic keeps the bare 280 box")
-    check(PAGE:find('formatGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Format"]), 40)', 1, true) ~= nil,
-          "control row: ...under the header it always had")
-    check(PAGE:find('formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil,
-          "control row: ...with the dropdown call it always made")
-    check(PAGE:find("formatGroup.hideOn = HideGroupLabelOptions", 1, true) ~= nil
-      and PAGE:find("formatGroup.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "control row: ...and both of the box's own gates")
-    -- The option table is declared ONCE and read by both arms.
-    local opts = 0
-    for _ in PAGE:gmatch("local formatOptions = {") do opts = opts + 1 end
-    eq(opts, 1, "control row: the four format options are declared once, for both arms")
-
-    -- ---- the band ----------------------------------------------------
-    check(PAGE:find("labelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: the band is chromeless, at the width the layout pass will give it")
-    -- ☠ NO HEADER. The first row's own label already says "Raid Group Labels",
-    -- and a header repeating it says the page's one subject twice.
-    check(PAGE:find("labelBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "band: ...and carries no header, because its first row's label already names it")
-    -- All three rows go into it, in the page's own reading order.
     local order = {}
-    for name in PAGE:gmatch("labelBand:AddWidget%(GUI:CreatePopoutRow%(self%.child, {\n%s*label%s*=%s*L%[\"([^\"]+)\"%]") do
-        order[#order + 1] = name
-    end
-    eq(#order, 3, "band: three rows go into the band")
-    eq(order[1], "Raid Group Labels", "band: the enable row opens it")
-    eq(order[2], "Font Settings",     "band: ...then Font Settings")
-    eq(order[3], "Position",          "band: ...then Position, the page's old reading order")
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "), "Raid Group Labels | Text Format | Font Settings | Position",
+       "order: the four cards open in classic's order")
+    check(PAGE:find('local strip = Add(tools.SectionControls(self.child), 24, "both")\n            strip.hideOn = HideGroupLabelOptions', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, hidden with the cards outside raid + groups")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Raid Group Labels"]', 1, true)
+    check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    -- ---- the Add order ------------------------------------------------
-    local adds = {}
-    for name, col in PAGE:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
-        adds[#adds + 1] = { name = name, col = col }
-    end
-    local function indexOf(name, col)
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then return i end
-        end
-    end
-    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW, AND THE CONTROL ROW'S BAND AFTER
-    -- IT. `Add` resolves a widget's slot height on the spot, so a band added
-    -- before its rows would be measured empty. Both are "both", so what follows
-    -- is purely the page's reading order. The classic arm keeps the box's own Add
-    -- exactly where it always was.
-    check(indexOf("labelBand", '"both"') ~= nil, "order: the band spans both columns")
-    check(indexOf("formatBand", '"both"') ~= nil, "order: ...and so does the Text Format band")
-    check(indexOf("formatGroup", "2") ~= nil, "order: classic still puts Text Format in column 2")
-    check(PAGE:find('Add(labelBand, nil, "both")\n            Add(formatBand, nil, "both")', 1, true) ~= nil,
-          "order: in the popout layout the band is added first, then the control row's band")
-    check(PAGE:find("Add(formatGroup, nil, 2)", 1, true) ~= nil,
-          "order: ...and classic still adds Text Format at its own slot")
+    local sum = PAGE:match("local function FontSettingsSummary%(d%)(.-)\n            end")
+    check(sum ~= nil and sum:find("DF:GetFontNameFromPath(d.groupLabelFont)", 1, true) ~= nil,
+          "summary: Font Settings names its font through the dropdown's own resolver")
+    local psum = PAGE:match("local function PositionSummary%(d%)(.-)\n            end")
+    check(psum ~= nil and psum:find('L["Start"]', 1, true) ~= nil,
+          "summary: Position uses the short placement words")
 
-    -- The classic column assignments, unchanged -- the one thing this pass was
-    -- not allowed to move.
-    local CLASSIC_COL = {
-        settingsGroup = "1", fontGroup = "2", positionGroup = "1",
-    }
-    for name, col in pairs(CLASSIC_COL) do
-        check(indexOf(name, col) ~= nil,
-              "order: the classic " .. name .. " still goes to column " .. col)
-    end
-    -- Four bare 280 boxes are left, and every one is inside a classicLayout arm:
-    -- a fifth appearing outside one is the drift this counts.
+    check(PAGE:find('partyMsg.hideOn = function() return GUI.SelectedMode == "raid" end', 1, true) ~= nil
+      and PAGE:find('flatMsg.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end', 1, true) ~= nil,
+          "page: the party and flat messages are unchanged")
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "order: four bare 280 boxes left, and they are the classic branch's own")
-
-    -- ---- the copy button and the two mode messages are untouched -------
-    check(PAGE:find('Add(CreateCopyButton(self.child, {"groupLabel"}, L["Group Labels"], "general_labels"), 25, 2)', 1, true) ~= nil,
-          "page: the copy button is still the first thing on the page")
-    check(PAGE:find("partyMsg.hideOn = function() return GUI.SelectedMode == \"raid\" end", 1, true) ~= nil,
-          "page: the party-mode message keeps its own gate")
-    check(PAGE:find("flatMsg.hideOn = function() return GUI.SelectedMode ~= \"raid\" or db.raidUseGroups end", 1, true) ~= nil,
-          "page: ...and the flat-layout message keeps its own")
-end
-
--- ============================================================
--- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ROW BY ROW. Two thirds of the rows in the addon hide six
--- settings or fewer, and a row holding four was charging the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and the strip stops promising settings that are already
--- on screen and offers to pin a second copy instead.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); the threshold in Controls.lua
--- refuses one whose pane turns out to be big. Only the second can be measured
--- headlessly against a real group, so it is driven in test_popout_page_tools.lua
--- -- what is stated here is which of this page's rows asked, and that nothing
--- else did.
--- ============================================================
-print("-- Group Labels page: which rows mount their pane on the plate")
-do
-    -- Every `= tools.PopoutContent(` on the page and whether its call ends with
-    -- the opt-in, read as "this declaration up to the next one" -- a
-    -- balanced-brace match would be defeated by the builder closure inside the
-    -- call. The name pattern takes the one-return form as well as the pair,
-    -- because the enable row keeps no content handle.
-    local calls = {}
-    local pos = 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-    eq(#calls, 3, "inline: the page's three PopoutContent calls are readable")
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 2, "inline: two of the page's three rows mount their pane on the plate")
-
-    -- Which ROW each belongs to, read off the row's own `build` rather than from
-    -- a second list -- so a mount opted in and wired to a different row fails
-    -- here instead of shipping.
-    local WANT = {
-        ["Font Settings"] = { mount = "fontMount", inline = true },   -- 5 children
-        ["Position"]      = { mount = "posMount",  inline = true },   -- 4 children
-        -- ⚠ AND THE ENABLE ROW IS THE ONE THAT DOES NOT, which is not a size
-        -- answer. Its pane holds one sentence and no control at all -- the tick
-        -- is hoisted onto the row -- so mounting it would spend a plate on prose
-        -- under a label that already says the same thing.
-        ["Raid Group Labels"] = { mount = "labelsMount", inline = false },
-    }
-    local seen = 0
-    for label, want in pairs(WANT) do
-        local mount = rowOpts(label):match("build%s*=%s*([%w_]+)")
-        eq(mount, want.mount, "inline: " .. label .. " is built from the mount it declares")
-        eq(inlineMounts[mount] == true, want.inline,
-           "inline: ..." .. label .. (want.inline and " asked for the plate"
-                                                   or " keeps its pane behind the strip"))
-        seen = seen + 1
-    end
-    eq(seen, 3, "inline: ...all three of the page's rows were found")
-
-    -- ☠ AND THE TWO THAT MOVED HOIST NOTHING. A hoisted control is one of the
-    -- pane's own settings declared a second time on the plate, and the pane is
-    -- now ON the plate -- two widgets on one key for no gain. The enable row's
-    -- hoist stays, because a row's own toggle is not one of the pane's settings.
-    local hoists = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
-    eq(hoists, 1, "inline: the page hoists exactly one thing, and it is a row's own tick")
-    check(PAGE:find('tools.RegisterHoistedToggle(labelsRow, L["Enable Group Labels"], "groupLabelEnabled", OnGroupLabelsToggle)', 1, true) ~= nil,
-          "inline: ...the enable tick on the row that carries no pane settings at all")
+    eq(bare, 4, "classic: four bare 280 boxes, all the classic branch's own")
 end

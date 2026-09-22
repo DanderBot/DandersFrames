@@ -689,7 +689,7 @@ do
         -- NOT 4, since the Dispel Overlay followed: its three went too. ⚠ 0
         -- since Icons followed: every settings page in the file is cards now.
         ["GUI/Pages/Modules.lua"]    = 0,
-        ["GUI/Pages/Frames.lua"]     = 2,   -- Group Labels 2
+        ["GUI/Pages/Frames.lua"]     = 0,   -- every Frames.lua page is cards now
         -- ⚠ Auras.lua's pages move onto the Debuff Bar's cards one by one, and a
         -- card has no plate to opt onto: Heal Prediction's 2 went first, then Health Bar's 5
         -- and Resource Bar's 5, Colors' 1 (Role Colors), Sorting's 1 and Integrations' 1:
