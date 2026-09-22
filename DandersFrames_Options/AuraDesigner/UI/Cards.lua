@@ -8542,15 +8542,20 @@ S.WatchClassicAddPage = function()
     local cf = S.tabContentFrame
     if cf and not cf.dfAddFlowSizeHooked then
         cf.dfAddFlowSizeHooked = true
+        -- ☠ COMPARE LIKE WITH LIKE. flow.width is the PANE's width, which is the
+        -- column's less the pane inset on both sides; comparing the column's own
+        -- width against it never matched, so every size event (a height change
+        -- included) rebuilt the pane. flow.parentWidth is the column width the
+        -- pane was built for.
         cf:HookScript("OnSizeChanged", function(self, w)
             local flow = S.classicAddFlow
-            if not (flow and flow.width and w) or math.abs(w - flow.width) < 1 then return end
+            if not (flow and flow.parentWidth and w) or math.abs(w - flow.parentWidth) < 1 then return end
             if flow.relayoutPending or not (C_Timer and C_Timer.After) then return end
             flow.relayoutPending = true
             C_Timer.After(0.15, function()
                 flow.relayoutPending = nil
                 if S.classicAddFlow ~= flow or S.tabContentFrame ~= self then return end
-                if math.abs((self:GetWidth() or 0) - flow.width) < 1 then return end
+                if math.abs((self:GetWidth() or 0) - flow.parentWidth) < 1 then return end
                 S.SwitchTab(S.ClassicAddFlowTab(flow.kind))
             end)
         end)
@@ -8697,6 +8702,7 @@ S.BuildClassicAddFlow = function(parent, kind)
         end
         flow.host, flow.width = host, W
     end
+    flow.parentWidth = parent:GetWidth() or 0
     y = y - (host:GetHeight() or 0)
 
     parent:SetHeight(max(-y + 20, 200))
