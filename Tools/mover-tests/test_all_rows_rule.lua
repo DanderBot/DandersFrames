@@ -127,11 +127,20 @@ do
     -- Floors rather than exact counts: this file is a RULE, and a rule that had
     -- to be re-numbered on every page added would be edited into agreement with
     -- whatever was there. The exact inventory per page is the censuses' job.
+    --
+    -- ⚠ NO FLOOR ON THE FULL-WIDTH BOXES OR THE CONTROL ROWS ANY MORE. Both are
+    -- the row layout's furniture, and every page converted to the collapsible
+    -- cards drops them (a card is neither a skinned box nor a control row), so
+    -- their counts only ever fall now and zero is a legitimate end state. The
+    -- per-site rules above still police every one that is left; `groups` is
+    -- what proves the sweep read the pages.
     check(groups > 200, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
+<<<<<<< HEAD
     -- ⚠ 3, NOT 4: the card pages (Auras.lua's Health Bar gradient editors and
     -- Sorting's FrameSort box) became cards and wear no band skin any more; the
     -- Frame page's info box and the Settings page's two are what is left.
     check(skinned >= 3, "alignment: ...and found the full-width boxes (" .. skinned .. ")")
+=======
+>>>>>>> 4c5ea4e0 (Pet Frames: the Modern layout's rows become collapsible cards, two settings per row)
     check(chromeless >= 10, "alignment: ...and the bands (" .. chromeless .. ")")
-    check(rows >= 6, "alignment: ...and the control rows (" .. rows .. ")")
 end

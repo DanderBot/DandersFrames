@@ -974,17 +974,16 @@ if GUI.CreateBorderShadowControls then
         petPaneDB.petEnabled = true
     end
 
-    -- ---- and the number the ROW declares ----
-    -- Read out of the page's source rather than retyped: the count badge is a
-    -- CLAIM about how much is inside, and the kit checks it against what a build
-    -- actually mounted. This checks it against what the builder produces, before
-    -- anyone gets in-game to see the mismatch reported.
+    -- ---- and what the CARD's body holds ----
+    -- The Pet Frames page is collapsible cards now, and a card carries no count
+    -- badge -- so there is no declared number left to check. What stays true is
+    -- the arithmetic: under hoistToggle the body is the sixteen less Show Border,
+    -- which the card's header carries instead.
     do
         local pageSrc = options_file_source("GUI/Pages/Options.lua")
-        local declared = tonumber(pageSrc:match("local PET_BORDER_COUNT%s*=%s*(%d+)"))
-        check(declared ~= nil, "pet counts: the Pet Frames page declares the Border row's count in one place")
-        eq(declared, #petPaneRec, "pet counts: ...and it is what the pane mounts")
-        eq(#petPaneRec, 15, "pet counts: which is 15 -- the sixteen less the hoisted Show Border")
+        check(pageSrc:find("local PET_BORDER_COUNT", 1, true) == nil,
+              "pet counts: the Pet Frames page declares no count any more -- a card has no badge")
+        eq(#petPaneRec, 15, "pet counts: the card's body is 15 -- the sixteen less the header's Show Border")
     end
 end
 

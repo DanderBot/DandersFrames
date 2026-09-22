@@ -3,60 +3,31 @@ local NS = ...
 -- ============================================================
 -- PET FRAMES PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Pet Frames is TEN groups. Eight become feature rows in three bands;
--- two stay BOXES, wearing the band skin at the band's own full width:
+-- Display > Pet Frames: TEN groups. In Modern they are the Debuff Bar's
+-- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
+-- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
---   Pet Frame Settings      BOX -- the page-wide enable plus a blurb. Hoisting
---                           petEnabled would leave a pane holding nothing but the
---                           paragraph, and the key gates all eight rows, so no one
---                           row can speak for it. Two widgets, so it is not a
---                           control row either
---   Layout Mode             BOX -- one dropdown and a sentence, and the dropdown
---                           REBUILDS the page (it changes which groups exist),
---                           which a pane cannot host
---   Group Settings          ROW, grouped mode only, no tick
---   Size                    ROW, no tick
---   Position                ROW, attached mode only, no tick
---   Appearance              ROW, no tick
---   Border                  ROW, hoisted `petShowBorder` (CreateBorderControls'
---                           noShowToggle)
---   Health Bar              ROW, no tick
---   Name Text               ROW, no tick
---   Health Text             ROW, no tick
+--   column 1   Pet Frame Settings  the PAGE gate (Enable Pet Frames) in its body
+--              "Layout"            Layout Mode (rebuilds the page), Group
+--                                  Settings (grouped only), Size, Position
+--                                  (attached only)
+--              "Text"              Name Text, Health Text
+--   column 2   "Frame"             Appearance, Border (Show Border is the
+--                                  header's tick), Health Bar
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_fading_page_builders / test_tooltips_page_builders do: it reads
--- the page's SOURCE and asserts against it.
+-- Every card but the first greys with the page gate. Pins on the eight that
+-- decide how the pets LOOK.
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts -- in BOTH mode
---     variants, because three of these groups change shape with the layout mode
---     and one with party/raid.
---   ✓ that the five page-rebuilding callbacks now go through the layout-aware
---     gate, and that the ONE that still rebuilds unconditionally is the layout
---     dropdown, which is on the page in both layouts.
---   ✓ that every locale string the page asks for already ships in enUS.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist. The Border row's
---     count is pinned in test_border_builders.lua, which drives a pet-shaped
---     CreateBorderControls call and counts what comes out.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the CENSUS of each builder (the pre-change goldens -- classic renders as
+--     it did), in both mode variants where a group changes shape.
+--   ✓ each card's column, stable collapse key, summary, grey gate, tick, pin.
+--   ✓ the page-rebuild gate: only the layout dropdown rebuilds.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
--- ---- the census reader (the Fading page's, plus three kinds) -----------
--- ⚠ THE THREE FONT/MEDIA FACTORIES ARE IN THE MAP HERE. This is the first
--- converted page whose panes mount a texture dropdown, a font dropdown, an
--- outline dropdown and a shadow tick, and a reader that did not know them would
--- report a Name Text group of five controls rather than nine -- silently, and in
--- the direction that makes a wrong count look right.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
@@ -67,9 +38,6 @@ local KIND = {
     CreateShadowCheckbox = "shadowcheckbox",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -119,8 +87,6 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Options.lua holds a dozen pages, and a
--- bare 280 box on one of the others is not this pass's business.
 local PAGE
 do
     local a = SRC:find('Add(CreateCopyButton(self.child, {"pet"}, L["Pet Frames"], "display_pets"), 25, 2)', 1, true)
@@ -129,126 +95,80 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey:gsub("%p", "%%%0") .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common: one builder, two
--- mounts, the classic box unchanged, and the row wired to a real popout.
-local function checkShared(builder, rowLabel, column, band)
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    local esc = rowLabel:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. column .. ")", 1, true) ~= nil,
-              rowLabel .. ": ...and still goes to column " .. column)
-    end
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
-    check(PAGE:find(band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          rowLabel .. ": ...and mounted into " .. band)
+-- ONE CARD'S BLOCK: from its OpenSection call to the CloseSection that puts its
+-- band in, flattened; `call` is everything before the builder MOUNT.
+local function sectionBlock(labelKey, builder)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find(builder .. "({", 1, true)
+    return block, m and block:sub(1, m - 1) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS THREE BANDS ARE HEADED
+-- 1. THE SHARED MACHINERY, AND THE ROW FURNITURE GONE
 -- ============================================================
-print("-- Pet Frames page: the shared popout machinery and the page's three bands")
+print("-- Pet Frames page: the shared machinery, and the row furniture gone")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "footerStrip", "inline = true",
+                            "_COUNT", "count =", "petLayoutBand", "petFrameBand", "petTextBand",
+                            "chromeless", "INLINE_BOX", "GatePaneFirstChild", "OnPetBorderToggle",
+                            "ApplyPetSize", "ApplyPetAppearance", "ApplyPetHealthBar",
+                            "ApplyPetText", "ApplyPetPosition" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
 
-    -- ---- three bands, each headed --------------------------------------
-    -- ⚠ COUNTED BY THE CHROMELESS SKIN, not by the band width alone. The two boxes
-    -- that stay boxes are built at the SAME width now (see section 2), so a count
-    -- of BandWidth() call sites answers five rather than three.
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Layout and Text fill column 1, Frame column
-    -- 2 (Text is left for balance -- see the page). A band has to be BUILT at the
-    -- width the layout pass will give it, because a group sizes its rows off its
-    -- width at build time; BandWidth's argument says which width that is.
-    local BAND_COL = { petLayoutBand = 1, petFrameBand = 2, petTextBand = 1 }
-    local bands = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%([12]%), { chromeless = true }%)") do bands = bands + 1 end
-    eq(bands, 3, "band: three bands, which is how eight rows stop being one list")
-    for band, header in pairs({ petLayoutBand = "Layout", petFrameBand = "Frame", petTextBand = "Text" }) do
-        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
-              "band: " .. band .. " is chromeless, at its column's width")
-        check(PAGE:find(band .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. header .. '"]), 40)', 1, true) ~= nil,
-              "band: ...and is headed " .. header)
-    end
-    -- ⚠ NO HEADER REPEATS A ROW LABEL. "Appearance" is a ROW on this page, so
-    -- the band holding it is headed L["Frame"] -- a header names the section,
-    -- never one of the rows under it.
-    for _, rowLabel in ipairs({ "Appearance", "Border", "Size", "Position",
-                                "Group Settings", "Health Bar", "Name Text", "Health Text" }) do
-        for _, band in ipairs({ "petLayoutBand", "petFrameBand", "petTextBand" }) do
-            check(PAGE:find(band .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. rowLabel .. '"])', 1, true) == nil,
-                  "band: " .. band .. " is not headed with the name of a row it could hold")
-        end
-    end
-
-    -- ---- the page-scope helpers, above every builder -------------------
-    -- ☠ A closure captures the upvalue that exists when it is CREATED, so a
-    -- builder declared above one of these would see nil rather than the value.
-    -- The rows need them from outside the builders as well: a summary prints the
-    -- dropdown's own words, and a footer has to push the group's own work.
-    local BUILDERS = { "BuildPetGeneralGroup", "BuildPetLayoutModeGroup",
-                       "BuildPetGroupSettingsGroup", "BuildPetSizeGroup",
-                       "BuildPetAppearanceGroup", "BuildPetBorderGroup",
-                       "BuildPetHealthBarGroup", "BuildPetNameTextGroup",
-                       "BuildPetPositionGroup", "BuildPetHealthTextGroup" }
-    for _, h in ipairs({ "textAnchorValues", "groupModeValues", "groupAnchorValues",
-                         "growthValues", "anchorValues", "healthColorValues",
-                         "powerColorValues", "ApplyPetGroupLayout" }) do
-        local at = PAGE:find("local " .. h, 1, true)
-        check(at ~= nil, "helpers: " .. h .. " is declared at page scope")
-        local decls = 0
-        for _ in PAGE:gmatch("local " .. h .. "%f[%s]") do decls = decls + 1 end
-        eq(decls, 1, "helpers: ...and there is exactly one of it")
-        for _, b in ipairs(BUILDERS) do
-            local bAt = PAGE:find("local function " .. b .. "(tools2)", 1, true)
-            check(at ~= nil and bAt ~= nil and at < bAt,
-                  "helpers: ..." .. b .. " is declared after it, so it closes over the real value")
-        end
+    -- Three category headers, each opening its run of cards.
+    for _, pair in ipairs({ { "Layout", "1" }, { "Frame", "2" }, { "Text", "1" } }) do
+        local n = 0
+        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
+        eq(n, 1, "headers: the " .. pair[1] .. " category header, in column " .. pair[2] .. ", once")
     end
 end
 
 -- ============================================================
--- 2. THE TWO BOXES THAT STAY BOXES
--- Neither is a feature: one is the page's enable and a paragraph, the other is
--- one dropdown that rebuilds the page. Neither is a single control either, so
--- neither becomes a control row. Both keep their own header and both wear the
--- band skin in the popout layout, at the band's own width, so they do not read as
--- a second visual language beside the rows.
+-- 2. THE PAGE-REBUILD GATE AND THE PAGE GATE
+-- ============================================================
+print("-- Pet Frames page: the rebuild gate and the petEnabled gate")
+do
+    local gate = PAGE:match("local function GateRefresh%(tools2%)(.-)\n        end")
+    check(gate ~= nil and gate:find("tools2.refreshStates()", 1, true) ~= nil
+      and gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil
+      and gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
+          "gate: a pinned pane reflows itself, a page widget (box or card) re-lays the page, nothing rebuilds")
+    local uses = 0
+    for _ in PAGE:gmatch("GateRefresh%(tools2%)") do uses = uses + 1 end
+    eq(uses, 6, "gate: five callbacks go through it, plus its own declaration")
+    local rebuilds = 0
+    for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
+    eq(rebuilds, 1, "gate: one rebuild on the page -- the layout dropdown, which changes which cards exist")
+    check(builderBody("BuildPetLayoutModeGroup"):find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
+          "gate: ...and it is in the layout mode builder")
+
+    check(PAGE:find("local function PetsOffRow(d) return not (d or db).petEnabled end", 1, true) ~= nil,
+          "gate: the page-wide predicate is named once")
+    check(PAGE:find("disableWhen  = tools2.popout and PetsOffRow or nil", 1, true) ~= nil,
+          "gate: a pinned border panel takes the gate through the factory's consumer door")
+end
+
+-- ============================================================
+-- 3. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
+-- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local GENERAL = {
     { "checkbox", "Enable Pet Frames", "petEnabled", 30 },
@@ -256,156 +176,18 @@ local GENERAL = {
 }
 local LAYOUT_MODE = {
     { "dropdown", "Layout Mode", "petGroupMode", 55 },
-    -- Two labels, one branch each: attached explains the owner anchor, grouped
-    -- the separate container. The census reads SOURCE, so both are here; only
-    -- one is ever built.
     { "label", "Pet frames are positioned relative to their owner's frame.", "(none)", nil },
     { "label", "Pet frames are grouped together in a separate container.", "(none)", nil },
 }
-
-print("-- Pet Frames page: the two boxes that stay boxes")
-do
-    checkCensus(census(builderBody("BuildPetGeneralGroup")), GENERAL, "general")
-    checkCensus(census(builderBody("BuildPetLayoutModeGroup")), LAYOUT_MODE, "layout mode")
-
-    -- Neither is a row.
-    for _, label in ipairs({ "Pet Frame Settings", "Layout Mode" }) do
-        check(PAGE:find('label   = L["' .. label .. '"]', 1, true) == nil
-          and PAGE:find('label    = L["' .. label .. '"]', 1, true) == nil,
-              "inline: " .. label .. " is not a popout row")
-    end
-
-    -- Two boxes wearing the band skin, and the WIDTH they are built at. Both keep
-    -- their own chrome and their own header -- neither is a single control, so
-    -- neither can be a control row -- but both are constructed at the BAND's width
-    -- and added as sync points, so every top-level object on the page starts and
-    -- ends on the same two edges.
-    --
-    -- ☠ THE WIDTH AND THE "both" ARE ONE CHANGE, NOT TWO. LayoutPage only stretches
-    -- a "both" widget and never narrows a column one, so a box built at the band
-    -- width and added to a column would run over column 2 on a widened window.
-    local skinned = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%), tools%.INLINE_BOX%)") do skinned = skinned + 1 end
-    eq(skinned, 2, "inline: two boxes wear the band skin, at the band's own width")
-    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)", 1, true) == nil,
-          "inline: ...and neither is left mounted at a column's 280")
-    check(PAGE:find("Add(generalGroup, nil, 1)", 1, true) ~= nil,
-          "inline: classic keeps the general box in column 1")
-    check(PAGE:find("Add(layoutGroup, nil, 1)", 1, true) ~= nil,
-          "inline: ...and the layout box under it, in column 1")
-    check(PAGE:find('Add(generalGroup, nil, "both")', 1, true) ~= nil
-      and PAGE:find('Add(layoutGroup, nil, "both")', 1, true) ~= nil,
-          "inline: ...while the popout layout spans both columns with each of them")
-    check(PAGE:find("Add(layoutGroup, nil, 2)", 1, true) == nil,
-          "inline: ...so neither is left in a column of its own")
-
-    -- The enable is the page's, so its refresh has to reach the rows AND any
-    -- pane standing open behind one. Classic's hook is the page refresh alone,
-    -- exactly as it was.
-    check(PAGE:find("refreshStates = function() self:RefreshStates() tools.ReflowMounted() end", 1, true) ~= nil,
-          "inline: the enable's popout refresh reflows the open panes as well as the page")
-    local body = builderBody("BuildPetGeneralGroup")
-    check(body:find("tools2.refreshStates()", 1, true) ~= nil,
-          "inline: ...and the builder calls the hook rather than the page directly")
-    check(body:find("self:RefreshStates()", 1, true) == nil,
-          "inline: ...never the page alone, which a pane would not hear")
-    check(body:find("petEnable.keepEnabled = true", 1, true) ~= nil,
-          "inline: the enable stays live under its own group's grey")
-    check(body:find("group.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil,
-          "inline: ...and the blurb beside it greys with it")
-end
-
--- ============================================================
--- 3. THE ONE CALLBACK THAT STILL REBUILDS THE PAGE, AND THE FIVE THAT DO NOT
--- Five controls used to end in GUI:RefreshCurrentPage purely to re-run a
--- hideOn/disableOn pass over a sibling. In a pane that is fatal -- a rebuild
--- retires the row being clicked and the helper's prologue closes every open
--- panel -- so they go through the layout-aware gate instead (the Tooltips page's
--- AnchorGateRefresh, same rule). The layout dropdown keeps its rebuild, because
--- what it changes is WHICH GROUPS EXIST and no state pass produces widgets that
--- were never built.
--- ============================================================
-print("-- Pet Frames page: the page-rebuild gate")
-do
-    local gate = PAGE:match("local function GateRefresh%(tools2%)(.-)\n        end")
-    check(gate ~= nil, "gate: the layout-aware refresh is a named page-scope function")
-    if gate then
-        check(gate:find("if tools2.popout then", 1, true) ~= nil,
-              "gate: ...it branches on which layout mounted the builder")
-        check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
-              "gate: ...the pane re-runs its own state pass")
-        check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
-              "gate: ...and classic re-lays the page")
-        check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
-              "gate: ...without rebuilding it (the rebuild leaked the page)")
-    end
-
-    local uses = 0
-    for _ in PAGE:gmatch("GateRefresh%(tools2%)") do uses = uses + 1 end
-    eq(uses, 6, "gate: five callbacks go through it -- two Match Owner ticks and the three health-bar gates -- plus its own declaration")
-
-    -- Exactly one rebuild left on the page: the layout dropdown, which changes
-    -- WHICH GROUPS EXIST. Anything else would be a control that can be reached
-    -- from inside a pane and takes the page down with it.
-    local rebuilds = 0
-    for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
-    eq(rebuilds, 1, "gate: one rebuild on the page -- the layout dropdown")
-    local lm = builderBody("BuildPetLayoutModeGroup")
-    check(lm:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-          "gate: the layout dropdown rebuilds in BOTH layouts, because it changes which groups exist")
-    check(lm:find("GateRefresh", 1, true) == nil,
-          "gate: ...and never goes through the gate, which would leave the new groups unbuilt")
-end
-
--- ============================================================
--- 4. THE PAGE-WIDE GATE
--- Every group on this page greys behind petEnabled and always has. In the popout
--- layout that gate has to reach three places: the pane (the builders' own
--- disableChildrenOn, unchanged), the ROW (so eight bright rows do not sit over
--- eight grey panes), and the pane's FIRST child -- which the kit's group gate
--- skips, because in a page box index 1 is the header and in a pane it is a real
--- control.
--- ============================================================
-print("-- Pet Frames page: the petEnabled gate")
-do
-    check(PAGE:find("local function PetsOffRow(d) return not (d or db).petEnabled end", 1, true) ~= nil,
-          "gate: the page-wide predicate is named once")
-    local rows = 0
-    for _ in PAGE:gmatch("%w+Row%.disableOn = PetsOffRow") do rows = rows + 1 end
-    eq(rows, 8, "gate: all eight rows grey with it")
-
-    local first = PAGE:match("local function GatePaneFirstChild%(group%)(.-)\n        end")
-    check(first ~= nil, "gate: the pane's first-child repair is a named function")
-    if first then
-        check(first:find("group.groupChildren[1]", 1, true) ~= nil,
-              "gate: ...it is about index 1, which is the one the group gate skips")
-        check(first:find("PetsOffRow(d) or (prev and prev(d))", 1, true) ~= nil,
-              "gate: ...and composes with whatever predicate the widget already carries")
-    end
-    -- Seven mounts, not eight: the Border pane's group is owned by
-    -- CreateBorderControls, which takes the gate through its own disableWhen and
-    -- reaches all fifteen including the first.
-    local calls = 0
-    for _ in PAGE:gmatch("GatePaneFirstChild%(group%)") do calls = calls + 1 end
-    eq(calls, 8, "gate: seven pane mounts call it, plus its own declaration")
-    check(PAGE:find("disableWhen  = tools2.popout and PetsOffRow or nil", 1, true) ~= nil,
-          "gate: the border pane takes the gate through the factory's consumer door instead")
-end
-
--- ============================================================
--- 5. THE EIGHT ROWS
--- ============================================================
 local GROUP_SETTINGS = {
     { "dropdown", "Group Position",   "petGroupAnchor",    55 },
     { "dropdown", "Growth Direction", "petGroupGrowth",    55 },
     { "slider",   "Spacing",          "petGroupSpacing",   55 },
     { "slider",   "Group X Offset",   "petGroupOffsetX",   55 },
     { "slider",   "Group Y Offset",   "petGroupOffsetY",   55 },
-    -- Raid only: there are no groups to label in party.
     { "checkbox", "Show Group Label", "petGroupShowLabel", 30 },
 }
 local SIZE = {
-    -- Attached only: in grouped mode there is no owner to match.
     { "checkbox", "Match Owner Width",  "petMatchOwnerWidth",  30 },
     { "checkbox", "Match Owner Height", "petMatchOwnerHeight", 30 },
     { "slider",   "Width",              "petFrameWidth",       55 },
@@ -451,373 +233,140 @@ local HEALTH_TEXT = {
     { "slider",          "Health Y Offset",    "petHealthY",           55 },
 }
 
--- Every row on this page except Border: no hoisted toggle, so the declared count
--- IS the census (or the mode-dependent slice of it), and the row carries a
--- summary, the amber tick, a footer and the page gate.
-local ROWS = {
-    { builder = "BuildPetGroupSettingsGroup", label = "Group Settings", golden = GROUP_SETTINGS,
-      column = "1", band = "petLayoutBand", row = "petGroupRow", apply = "ApplyPetGroupLayout",
-      summary = "PetGroupSummary", countVar = "PET_GROUP_COUNT" },
-    { builder = "BuildPetSizeGroup", label = "Size", golden = SIZE,
-      column = "1", band = "petLayoutBand", row = "petSizeRow", apply = "ApplyPetSize",
-      summary = "PetSizeSummary", countVar = "PET_SIZE_COUNT" },
-    { builder = "BuildPetAppearanceGroup", label = "Appearance", golden = APPEARANCE,
-      column = "2", band = "petFrameBand", row = "petAppearanceRow", apply = "ApplyPetAppearance",
-      summary = "PetAppearanceSummary", countVar = "PET_APPEARANCE_COUNT", count = 2 },
-    { builder = "BuildPetHealthBarGroup", label = "Health Bar", golden = HEALTH_BAR,
-      column = "2", band = "petFrameBand", row = "petHealthBarRow", apply = "ApplyPetHealthBar",
-      summary = "PetHealthBarSummary", countVar = "PET_HEALTH_BAR_COUNT", count = 7 },
-    { builder = "BuildPetNameTextGroup", label = "Name Text", golden = NAME_TEXT,
-      column = "2", band = "petTextBand", row = "petNameTextRow", apply = "ApplyPetText",
-      countVar = "PET_NAME_TEXT_COUNT", count = 9 },
-    { builder = "BuildPetPositionGroup", label = "Position", golden = POSITION,
-      column = "1", band = "petLayoutBand", row = "petPositionRow", apply = "ApplyPetPosition",
-      summary = "PetPositionSummary", countVar = "PET_POSITION_COUNT", count = 3 },
-    { builder = "BuildPetHealthTextGroup", label = "Health Text", golden = HEALTH_TEXT,
-      column = "2", band = "petTextBand", row = "petHealthTextRow", apply = "ApplyPetText",
-      countVar = "PET_HEALTH_TEXT_COUNT", count = 8 },
+-- label, stable key, card column, classic box column, builder, golden, summary
+-- (the text as it appears in the call), dim = greys with the page gate, pin =
+-- passes its builder.
+local CARDS = {
+    { label = "Pet Frame Settings", key = "pets_settings", col = 1, classicCol = 1,
+      builder = "BuildPetGeneralGroup", golden = GENERAL, summary = "nil" },
+    { label = "Layout Mode", key = "pets_layoutmode", col = 1, classicCol = 1,
+      builder = "BuildPetLayoutModeGroup", golden = LAYOUT_MODE, summary = "nil", dim = true },
+    { label = "Group Settings", key = "pets_group", col = 1, classicCol = 1,
+      builder = "BuildPetGroupSettingsGroup", golden = GROUP_SETTINGS, summary = "PetGroupSummary", dim = true, pin = true },
+    { label = "Size", key = "pets_size", col = 1, classicCol = 1,
+      builder = "BuildPetSizeGroup", golden = SIZE, summary = "PetSizeSummary", dim = true, pin = true },
+    { label = "Appearance", key = "pets_appearance", col = 2, classicCol = 2,
+      builder = "BuildPetAppearanceGroup", golden = APPEARANCE, summary = "PetAppearanceSummary", dim = true, pin = true },
+    { label = "Health Bar", key = "pets_healthbar", col = 2, classicCol = 2,
+      builder = "BuildPetHealthBarGroup", golden = HEALTH_BAR, summary = "PetHealthBarSummary", dim = true, pin = true },
+    { label = "Name Text", key = "pets_nametext", col = 1, classicCol = 2,
+      builder = "BuildPetNameTextGroup", golden = NAME_TEXT,
+      summary = 'TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor")', dim = true, pin = true },
+    { label = "Position", key = "pets_position", col = 1, classicCol = 1,
+      builder = "BuildPetPositionGroup", golden = POSITION, summary = "PetPositionSummary", dim = true, pin = true },
+    { label = "Health Text", key = "pets_healthtext", col = 1, classicCol = 2,
+      builder = "BuildPetHealthTextGroup", golden = HEALTH_TEXT,
+      summary = 'TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor")', dim = true, pin = true },
 }
 
-for _, g in ipairs(ROWS) do
+for _, g in ipairs(CARDS) do
     print("-- Pet Frames page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.column, g.band)
-
-    -- No hoist anywhere but Border: none of these groups holds a boolean meaning
-    -- "am I doing anything at all". The page's own enable is the closest thing to
-    -- one and it belongs to the page, not to any row.
-    check(body:find("hoistToggle", 1, true) == nil,
-          g.label .. ": the builder has no hoist branch, because there is nothing to hoist")
-    -- ☠ THE GROUP GATE IS INSIDE THE BUILDER. Left on the page-level box, the
-    -- pane would not grey while pet frames are off and the two layouts would
-    -- disagree.
     check(body:find("group.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil,
-          g.label .. ": the group's grey-while-off gate is inside the builder")
+          g.label .. ": the body greys behind petEnabled, from inside the builder, in both layouts")
 
-    local opts = rowOpts(g.label)
-    check(opts:find("toggle", 1, true) == nil,
-          g.label .. ": the row declares no toggle")
-    check(opts:find("onToggle", 1, true) == nil,
-          g.label .. ": ...and so no commit either")
-    if g.summary then
-        check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-              g.label .. ": ...it does declare its own summary")
-    end
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
+    local esc = g.label:gsub("%p", "%%%0")
+    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
 
-    -- The strip. Every key behind these rows is a per-mode profile key the
-    -- defaults engine answers for, so every one gets the amber tick and a footer.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-          g.label .. ": ...and Reset Group / Hold: Defaults run the group's own apply")
-    check(PAGE:find(g.row .. ".disableOn = PetsOffRow", 1, true) ~= nil,
-          g.label .. ": ...and the row greys with the page's own enable")
-
-    if g.count then
-        local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-        check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-        eq(declared, g.count, g.label .. ": ...which is the whole census")
-        eq(g.count, #g.golden, g.label .. ": ...and the census is what the pane mounts")
-    end
+    local block, call = sectionBlock(g.label, g.builder)
+    local flatSummary = g.summary:gsub("%s+", " ")
+    check(call:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. flatSummary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col)
+    eq(call:find("PetsOffRow", 1, true) ~= nil, g.dim == true,
+       g.label .. (g.dim and ": greys with the page gate" or ": never greys -- it holds the switch"))
+    eq(call:find(g.builder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable, from its own builder" or ": behaviour, so no pin"))
+    check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
+    check(block:find(g.builder .. "({ group = ", 1, true) ~= nil and block:find("hoistToggle", 1, true) == nil,
+          g.label .. ": mounts the builder as classic does")
 end
 
--- ============================================================
--- 6. THE TWO COUNTS THAT FOLLOW A MODE
--- A count is a CLAIM about how much is behind the row, and the kit checks it
--- against what the pane actually mounted. Two of these groups mount a different
--- number in each mode, so naming the larger of the two would be a mismatch
--- reported on every profile in the other one.
--- ============================================================
-print("-- Pet Frames page: the mode-dependent counts")
+-- The two cards whose builders change shape with the layout mode.
+print("-- Pet Frames page: the mode-dependent cards")
 do
-    local raid, party = PAGE:match("local PET_GROUP_COUNT%s*=%s*isRaidMode and (%d+) or (%d+)")
-    check(raid ~= nil, "counts: Group Settings declares a count per mode")
-    eq(tonumber(raid), #GROUP_SETTINGS, "counts: ...raid mounts the whole census, group label included")
-    eq(tonumber(party), #GROUP_SETTINGS - 1, "counts: ...party mounts it less the group label tick")
-
-    local grouped, attached = PAGE:match("local PET_SIZE_COUNT%s*=%s*isGroupedMode and (%d+) or (%d+)")
-    check(grouped ~= nil, "counts: Size declares a count per mode")
-    eq(tonumber(attached), #SIZE, "counts: ...attached mounts the whole census, both Match Owner ticks")
-    eq(tonumber(grouped), #SIZE - 2, "counts: ...grouped mounts the two sliders alone")
+    local grouped = PAGE:find("if isGroupedMode then", 1, true)
+    local groupCard = PAGE:find('OpenSection(L["Group Settings"]', 1, true)
+    check(grouped and groupCard and grouped < groupCard, "mode: Group Settings is built in grouped mode only")
+    local attached = PAGE:find("if not isGroupedMode then\n            if classicLayout then", 1, true)
+    local posCard = PAGE:find('OpenSection(L["Position"]', 1, true)
+    check(attached and posCard and attached < posCard, "mode: Position is built in attached mode only")
+    check(builderBody("BuildPetGroupSettingsGroup"):find("if isRaidMode then", 1, true) ~= nil,
+          "mode: the group label tick exists only in raid")
+    check(builderBody("BuildPetSizeGroup"):find("if not isGroupedMode then", 1, true) ~= nil,
+          "mode: the two Match Owner ticks exist only when attached")
 end
 
 -- ============================================================
--- 7. THE BORDER ROW -- the page's one hoisted toggle
--- One CreateBorderControls call, not the Frame page's two: the whole pet border
--- is sixteen controls of which the shadow is five, and a row for five
--- sub-controls of another row's feature is a level of nesting this page does not
--- earn. include.shadow keeps the shadow block inside the factory's own
--- composition loop, which is what puts Show Border's grey on top of it.
---
--- The COUNT is pinned in test_border_builders.lua, which drives a pet-shaped
--- call and counts what comes out. What is checked here is the wiring.
+-- 4. BORDER -- the one card with a header tick
 -- ============================================================
 print("-- Pet Frames page: Border")
 do
     local body = builderBody("BuildPetBorderGroup")
-    check(body:find('GUI:CreateBorderControls(tools2.group, db, "pet", {', 1, true) ~= nil,
-          "border: one call, into the group the mount handed over")
-    check(body:find("include      = { alpha = true, inset = true, blendMode = true,", 1, true) ~= nil,
-          "border: the include set is exactly what it was")
-    check(body:find("gradient = true, shadow = true },", 1, true) ~= nil,
-          "border: ...both lines of it")
-    check(body:find("sizeMin = 1, sizeMax = 6, sizeStep = 1,", 1, true) ~= nil,
-          "border: ...and the thickness range is the page's, not the factory default")
+    check(body:find('GUI:CreateBorderControls(tools2.group, db, "pet", {', 1, true) ~= nil
+      and body:find("include      = { alpha = true, inset = true, blendMode = true,", 1, true) ~= nil
+      and body:find("gradient = true, shadow = true },", 1, true) ~= nil
+      and body:find("sizeMin = 1, sizeMax = 6, sizeStep = 1,", 1, true) ~= nil,
+          "border: one toolkit call, the include set and the thickness range exactly as they were")
     check(body:find("noShowToggle = tools2.hoistToggle or nil,", 1, true) ~= nil,
-          "border: the hoist is the factory's own noShowToggle, nil in classic")
-
-    checkShared("BuildPetBorderGroup", "Border", "2", "petFrameBand")
-
-    -- ⚠ THE CLASSIC BOX KEEPS ITS OWN disableChildrenOn. CreateBorderControls
-    -- owns the group and writes disableOn onto each of the sixteen, so this
-    -- builder is the one that does NOT set the group gate itself -- classic sets
-    -- it on the box exactly as it always did, and the pane takes it through
-    -- disableWhen.
-    -- The ASSIGNMENT, not the words: the note above disableWhen explains why this
-    -- builder is the exception, and a check on the bare name would fail on its
-    -- own explanation.
+          "border: the header tick is the toolkit's own noShowToggle")
     check(body:find("group.disableChildrenOn = function(d)", 1, true) == nil,
-          "border: the builder sets no group gate, because the factory owns the group")
-    check(PAGE:find("petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil,
-          "border: ...classic still gates the box, unchanged")
+          "border: the builder sets no group gate, because the toolkit owns the group")
+    check(PAGE:find("petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil
+      and PAGE:find("Add(petBorderGroup, nil, 2)", 1, true) ~= nil,
+          "border: classic still gates its box and keeps column 2")
 
-    local opts = rowOpts("Border")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"petShowBorder"%s*}') ~= nil,
-          "border: the row's tick is the border's own Show key")
-    check(opts:find("summary%s*=%s*PetBorderSummary") ~= nil,
-          "border: ...it declares its own summary")
-    check(opts:find("count%s*=%s*PET_BORDER_COUNT") ~= nil,
-          "border: ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*OnPetBorderToggle") ~= nil,
-          "border: ...and a commit that is not a page rebuild")
+    local calls = 0
+    for _ in PAGE:gmatch("BuildPetBorderGroup%(") do calls = calls + 1 end
+    eq(calls, 3, "border: declared once, mounted twice -- classic box and card")
 
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD: a rebuild retires every widget on the
-    -- page including the row being clicked, and the row's write path calls
-    -- row.Refresh() after this returns -- on a dead frame.
-    local commit = PAGE:match("local function OnPetBorderToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "border: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "border: ...and never rebuilds the page")
-        check(commit:find("ApplyPetBorder()", 1, true) ~= nil,
-              "border: ...it runs what the suppressed Show Border checkbox ran")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              "border: ...re-runs the state passes")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "border: ...and reflows the open panes")
-    end
-
-    -- The hoisted toggle keeps its search entry under the SAME label and key the
-    -- suppressed checkbox carried, or the setting becomes unfindable in the
-    -- popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(petBorderRow, L["Show Border"], "petShowBorder", OnPetBorderToggle)', 1, true) ~= nil,
-          "border: the hoisted toggle keeps its search entry")
-    check(PAGE:find("tools.ClaimKeys(petBorderRow, borderContent)", 1, true) ~= nil,
-          "border: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(petBorderRow)", 1, true) ~= nil,
-          "border: ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(petBorderRow, ApplyPetBorder)", 1, true) ~= nil,
-          "border: ...and its footer pushes the border back out")
-    check(PAGE:find("petBorderRow.disableOn = PetsOffRow", 1, true) ~= nil,
-          "border: ...and the row greys with the page's own enable")
+    local block, call = sectionBlock("Border", "BuildPetBorderGroup")
+    check(call:find('OpenSection(L["Border"], "pets_border", 2, PetBorderSummary, PetsOffRow, nil, BuildPetBorderGroup, {', 1, true) ~= nil,
+          "border: a card keyed pets_border in column 2, greying with the page gate, pinnable")
+    check(call:find('db = db, key = "petShowBorder", label = L["Show Border"]', 1, true) ~= nil,
+          "border: the header tick is bound to petShowBorder under the checkbox's own name")
+    check(call:find("disableOn = PetsOffRow", 1, true) ~= nil,
+          "border: ...greyed with the page gate")
+    check(call:find("ApplyPetBorder() self:RefreshStates() tools.ReflowMounted()", 1, true) ~= nil
+      and call:find("RefreshCurrentPage", 1, true) == nil,
+          "border: ...committing what the toolkit ran, a state pass and a pinned-panel repaint -- never a rebuild")
+    check(block:find("band.disableChildrenOn = function(d) return not d.petEnabled end BuildPetBorderGroup({", 1, true) ~= nil,
+          "border: the band carries the page gate, set before the build, as classic sets it on its box")
+    check(block:find("BuildPetBorderGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "border: mounts the builder as classic does, plus hoistToggle for its header tick")
 end
 
 -- ============================================================
--- 8. THE SUMMARIES
--- All follow the sweep's convention: at most four items, a fixed order,
--- "\194\183" between them, WORDS localised and numbers raw -- and every word is
--- a locale string the page already ships (section 10 proves that outright).
+-- 5. THE CARDS TOGETHER, THE CLASSIC BOXES AND THE LOCALE
 -- ============================================================
-print("-- Pet Frames page: the summaries")
+print("-- Pet Frames page: the cards together")
 do
-    local function summaryBody(name, indent)
-        return PAGE:match("local function " .. name .. "%(d%)(.-)\n" .. indent .. "end")
-    end
-    local function itemsUnderFour(sum, name)
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: " .. name .. " prints at most four items")
-    end
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Pet Frame Settings | Layout Mode | Group Settings | Size | Appearance | Border | Health Bar | Position | Name Text | Health Text",
+       "order: the cards open in the order they stack -- Name Text after Position, so the Text cards follow Layout in column 1")
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 1, "ticks: exactly one mount skips its in-body toggle (Border)")
+    check((select(1, sectionBlock("Pet Frame Settings", "BuildPetGeneralGroup"))):find("petEnabled", 1, true) == nil,
+          "ticks: Enable Pet Frames is not hoisted -- it is the page gate, in the first card's body")
 
-    -- Group Settings: where the block sits, which way it grows, and the nudge --
-    -- both words out of the dropdowns' own option tables, so the row cannot name
-    -- a side the control does not offer.
-    local grp = summaryBody("PetGroupSummary", "                ")
-    check(grp ~= nil, "summary: Group Settings has a named summary on the page")
-    if grp then
-        check(grp:find("groupAnchorValues[d.petGroupAnchor]", 1, true) ~= nil,
-              "summary: ...the side comes out of the dropdown's own table")
-        check(grp:find("growthValues[d.petGroupGrowth]", 1, true) ~= nil,
-              "summary: ...and so does the growth direction")
-        check(grp:find('format("%d, %d"', 1, true) ~= nil,
-              "summary: ...with the offsets as a pair, the Border Shadow row's convention")
-        itemsUnderFour(grp, "Group Settings")
-    end
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Pet Frame Settings"]', 1, true)
+    check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    -- ⚠ SIZE PRINTS A NUMBER ONLY WHERE IT IS THE NUMBER IN USE. In attached mode
-    -- either dimension can be handed to the owner's frame, and petMatchOwnerWidth
-    -- ships ON -- so an unconditional width would name a value nothing renders.
-    local size = summaryBody("PetSizeSummary", "            ")
-    check(size ~= nil, "summary: Size has a named summary on the page")
-    if size then
-        check(size:find("d.petMatchOwnerWidth", 1, true) ~= nil,
-              "summary: ...the width is skipped while it is matched to the owner")
-        check(size:find("d.petMatchOwnerHeight", 1, true) ~= nil,
-              "summary: ...and so is the height")
-        check(size:find('L%["Width"%]') ~= nil and size:find('L%["Height"%]') ~= nil,
-              "summary: ...both under the sliders' own labels")
-        itemsUnderFour(size, "Size")
-    end
-
-    -- Appearance: the texture's NAME, through the addon's own media resolver --
-    -- the one CreateTextureDropdown prints on its button, so the row and the
-    -- control behind it cannot disagree.
-    local app = summaryBody("PetAppearanceSummary", "            ")
-    check(app ~= nil, "summary: Appearance has a named summary on the page")
-    if app then
-        check(app:find("DF:GetTextureNameFromPath(d.petTexture)", 1, true) ~= nil,
-              "summary: ...it names the texture through the addon's own resolver")
-        itemsUnderFour(app, "Appearance")
-    end
-
-    -- Border: the Frame page's, less the colour source this one does not have.
-    local bd = summaryBody("PetBorderSummary", "            ")
-    check(bd ~= nil, "summary: Border has a named summary on the page")
-    if bd then
-        check(bd:find('format("%dpx"', 1, true) ~= nil,
-              "summary: ...the thickness wears its unit")
-        check(bd:find('L%["Gradient"%]') ~= nil and bd:find('L%["Solid"%]') ~= nil,
-              "summary: ...the style is a word, not a key")
-        check(bd:find("a < 1", 1, true) ~= nil,
-              "summary: ...and the alpha only when it is doing something")
-        itemsUnderFour(bd, "Border")
-    end
-
-    -- Health Bar: what colour the bar is, then whether there is a second bar
-    -- under it -- and the power bar only when it is on, because it ships off.
-    local hb = summaryBody("PetHealthBarSummary", "            ")
-    check(hb ~= nil, "summary: Health Bar has a named summary on the page")
-    if hb then
-        check(hb:find("healthColorValues[d.petHealthColorMode]", 1, true) ~= nil,
-              "summary: ...the colour mode comes out of the dropdown's own table")
-        check(hb:find('if d.petShowPowerBar then', 1, true) ~= nil,
-              "summary: ...and the power bar is named only when it is on")
-        itemsUnderFour(hb, "Health Bar")
-    end
-
-    -- Position: the owner's side, then the nudge.
-    local pos = summaryBody("PetPositionSummary", "                ")
-    check(pos ~= nil, "summary: Position has a named summary on the page")
-    if pos then
-        check(pos:find("anchorValues[d.petAnchor]", 1, true) ~= nil,
-              "summary: ...the side comes out of the dropdown's own table")
-        check(pos:find('format("%d, %d"', 1, true) ~= nil,
-              "summary: ...with the offsets as a pair")
-        itemsUnderFour(pos, "Position")
-    end
-
-    -- The two text rows share ONE summary factory: they differ only in their key
-    -- prefix, and two copies would be two places for the convention to drift.
-    local text = PAGE:match("local function TextRowSummary%(fontKey, sizeKey, anchorKey%)(.-)\n        end")
-    check(text ~= nil, "summary: the two text rows share one named summary factory")
-    if text then
-        check(text:find("DF:GetFontNameFromPath(d[fontKey])", 1, true) ~= nil,
-              "summary: ...the font is named through the addon's own resolver")
-        check(text:find("textAnchorValues[d[anchorKey]]", 1, true) ~= nil,
-              "summary: ...the anchor comes out of the dropdown's own table")
-        local items = 0
-        for _ in text:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: ...and it prints at most four items")
-    end
-    check(PAGE:find('summary = TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor")', 1, true) ~= nil,
-          "summary: Name Text takes the factory with its own keys")
-    check(PAGE:find('summary = TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor")', 1, true) ~= nil,
-          "summary: ...and Health Text with its own")
-
-    -- Every summary on this page separates with the convention's dot.
-    local dots = 0
-    for _ in PAGE:gmatch('table%.concat%(parts, " \\194\\183 "%)') do dots = dots + 1 end
-    eq(dots, 7, "summary: seven summaries, every one separated by the convention's dot")
-end
-
--- ============================================================
--- 9. THE PAGE'S OWN ORDER AND FURNITURE
--- ============================================================
-print("-- Pet Frames page: the boxes, the bands and the page's own order")
-do
-    -- ☠ THE COPY BUTTON'S PREFIX LIST IS UNTOUCHED. The same list drives Copy,
-    -- Sync AND Reset Page.
-    check(PAGE:find('Add(CreateCopyButton(self.child, {"pet"}, L["Pet Frames"], "display_pets"), 25, 2)', 1, true) ~= nil,
-          "page: the copy button's prefix list is exactly what it was")
-
-    -- ---- ten bare 280 boxes left, all inside a classicLayout arm -------
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 10, "boxes: ten bare 280 boxes left, which is every group the page ever had")
+    eq(bare, 10, "classic: ten bare 280 boxes, all the classic branch's own")
 
-    -- ---- the two conditional groups are still conditional --------------
-    -- Built only in the mode they belong to, exactly as the boxes were. The page
-    -- rebuilds when the layout mode changes, so a row that only exists in one
-    -- mode is the same statement the box made.
-    check(PAGE:find("if isGroupedMode then\n            if classicLayout then", 1, true) ~= nil,
-          "order: Group Settings is still grouped-mode only, in both layouts")
-    check(PAGE:find("if not isGroupedMode then\n            if classicLayout then", 1, true) ~= nil,
-          "order: ...and Position is still attached-mode only")
-
-    -- ---- the bands go in after their last row --------------------------
-    -- ☠ `Add` resolves a widget's slot height on the spot, so a band has to be
-    -- added AFTER the last row has been put into it.
-    -- Layout and Text in column 1, Frame in column 2 (the page's two-column split).
-    local BAND_COL = { petLayoutBand = 1, petFrameBand = 2, petTextBand = 1 }
-    for band, rows in pairs({ petLayoutBand = 3, petFrameBand = 3, petTextBand = 2 }) do
-        local bandAdd = PAGE:find("Add(" .. band .. ", nil, " .. BAND_COL[band] .. ")", 1, true)
-        check(bandAdd ~= nil, "order: " .. band .. " sits in column " .. BAND_COL[band])
-        -- ☠ AND FILLS IT. The layout pass only resizes an indented widget
-        -- otherwise, so a band placed in a column without this keeps the width it
-        -- was built at and overhangs its neighbour.
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
-        local lastRow, at = nil, 1
-        while true do
-            local s = PAGE:find(band .. ":AddWidget(GUI:CreatePopoutRow(", at, true)
-            if not s then break end
-            lastRow, at = s, s + 1
-        end
-        check(lastRow ~= nil and bandAdd ~= nil and lastRow < bandAdd,
-              "order: ...and goes in after its last row")
-        local n = 0
-        for _ in PAGE:gmatch(band .. ":AddWidget%(GUI:CreatePopoutRow%(") do n = n + 1 end
-        eq(n, rows, "order: " .. band .. " holds " .. rows .. " rows")
-    end
-
-    -- ...and the bands go in AFTER the two inline boxes, which is what keeps the
-    -- page's own enable the first thing on it.
-    local generalAdd = PAGE:find("Add(generalGroup, nil, 1)", 1, true)
-    local firstBand  = PAGE:find("Add(petLayoutBand, nil, 1)", 1, true)
-    check(generalAdd ~= nil and firstBand ~= nil and generalAdd < firstBand,
-          "order: the enable box is added before the first band")
-
-    -- Eight rows on the page, which is every group that is not one of the two
-    -- that stay inline.
-    local rows = 0
-    for _ in PAGE:gmatch("GUI:CreatePopoutRow%(") do rows = rows + 1 end
-    eq(rows, 8, "order: eight rows, which is ten groups less the two inline boxes")
-end
-
--- ============================================================
--- 10. ZERO NEW LOCALE STRINGS
--- Every L key this page asks for -- labels, tooltips, the three band headers and
--- the seven summaries' own words -- already ships in enUS. A sweep that invented
--- a string would have to add it there in the same commit, and this is the gate
--- that says so.
--- ============================================================
-print("-- Pet Frames page: no new locale strings")
-do
     local loc = df_file_source("Locales/enUS.lua")
     local have = {}
     for k in loc:gmatch('L%["([^"]+)"%]%s*=%s*true') do have[k] = true end
@@ -832,94 +381,4 @@ do
         end
     end
     eq(missing, 0, "locale: every string this page asks for already exists -- zero new keys")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
--- six settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and its strip offers to pin a second copy rather than
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the PANE rather than
--- off the declared count, so a row cannot claim its way onto the plate. Only the
--- refusal can be exercised against a real group, and that lives in
--- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
--- asked, and that nothing else did.
---
--- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
--- about SETTINGS; CountVisibleChildren answers for every entry a layout would
--- place, blurbs and separators included. Where the two differ below, the larger
--- is the one that has to fit.
---
--- Four of this page's eight. Group Settings holds five in party and SIX in
--- raid -- the opt-in is a claim about the larger branch, and six is
--- INLINE_MAX exactly -- Size four attached and two grouped, Position three
--- and Appearance two. The other four hold fifteen, seven, nine and eight and
--- keep the strip. Nothing on this page is hoisted, so nothing on a plate is
--- drawn twice.
--- ============================================================
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
-    -- whether its call carries the opt-in. Read as "this declaration up to the
-    -- next one": a balanced-brace match would be defeated by the builder closure
-    -- inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 4, "inline: 4 of this page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and then wired to a
-    -- different row fails here instead of shipping.
-    local function buildOf(var)
-        local a = PAGE:find("local " .. var .. " = ", 1, true)
-        local b = a and PAGE:find("}))", a, true)
-        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
-    end
-
-    for _, spec in ipairs({
-        { "petGroupRow", "groupMount" },             -- Group Settings, 5 party / 6 raid
-        { "petSizeRow", "sizeMount" },               -- Size, 4 attached / 2 grouped
-        { "petAppearanceRow", "appearMount" },       -- Appearance, 2
-        { "petPositionRow", "positionMount" },       -- Position, 3
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and inlineMounts[mount] == true,
-              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
-    end
-
-    -- ...and the rows whose panes are too big for a plate keep the strip they
-    -- have. Named rather than inferred from the count above: a row that lost its
-    -- opt-in and a row that never had one are the same number, and only one of
-    -- them is a regression.
-    for _, spec in ipairs({
-        { "petBorderRow", "borderMount" },           -- Border, 15
-        { "petHealthBarRow", "healthBarMount" },     -- Health Bar, 7
-        { "petNameTextRow", "nameMount" },           -- Name Text, 9
-        { "petHealthTextRow", "healthTextMount" },   -- Health Text, 8
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and not inlineMounts[mount],
-              "inline: ..." .. spec[1] .. " keeps its pane behind the strip")
-    end
 end

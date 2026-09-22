@@ -1844,128 +1844,67 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- only), Size and Position (attached only) down column 1; Appearance,
         -- Border, Health Bar, Name Text and Health Text down column 2.
         --
-        -- POPOUT turns EIGHT of those ten into feature rows and keeps two as
-        -- boxes. The two that stay are the page's SHAPE controls rather than
-        -- features:
+        -- MODERN is the Debuff Bar's collapsible-card design, one card per box:
+        -- two settings per row inside a card wide enough, dim captions, the value
+        -- summary in a shut card's corner, Expand All / Collapse All at the top.
         --
-        --   PET FRAME SETTINGS is the page-wide enable and a paragraph of prose.
-        --   A row hoisting petEnabled would leave a pane holding NOTHING BUT THE
-        --   BLURB -- a click that buys a sentence, which is the Visibility page's
-        --   "a pane holding one checkbox is a click that buys nothing" one step
-        --   worse. And petEnabled is not this row's own on/off: it gates all
-        --   eight rows below, so hoisting it onto one of them would say it spoke
-        --   for that row alone. It stays a box, wearing the band skin.
+        --   column 1   Pet Frame Settings (the PAGE gate, Enable Pet Frames, in
+        --              its body); "Layout": Layout Mode, Group Settings (grouped
+        --              only), Size, Position (attached only); "Text": Name Text,
+        --              Health Text
+        --   column 2   "Frame": Appearance, Border (Show Border is the header's
+        --              tick), Health Bar
         --
-        --   LAYOUT MODE is one dropdown and the sentence that explains the choice
-        --   -- a single option, which the Sorting page's FrameSort and Self
-        --   Position boxes settle on its own. It also REBUILDS THE PAGE: picking
-        --   a mode changes which groups exist at all, so the dropdown's callback
-        --   is GUI:RefreshCurrentPage in both layouts. That is a poor pane
-        --   citizen (the helper's prologue closes every open panel on a rebuild,
-        --   which would slam the panel shut under the hand that opened it) and a
-        --   perfectly good inline one, because a page widget expects to be
-        --   retired by a rebuild. See the note on the dropdown itself.
+        -- Every card but the first greys with the page gate. Border is the one
+        -- card with a header tick -- the Frame page's Border card's shape -- so
+        -- it now behaves like every other card rather than like a feature row.
+        -- Pins on the eight cards that decide how the pets LOOK; Pet Frame
+        -- Settings and Layout Mode are behaviour.
         --
-        -- ⚠ THE TWO BOXES ARE FULL WIDTH HERE, stacked above the bands rather than
-        -- side by side in the two columns classic keeps them in. They stay BOXES --
-        -- neither is a single control, so neither can be a control row -- but they
-        -- are built at the BAND's width and added as sync points, so every
-        -- top-level object on the page starts and ends on the same two edges.
-        --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
-        -- { group, parent, refreshStates } plus, where it matters, `popout` and
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
-        -- it always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_petframes_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move, in BOTH
-        -- mode variants.
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } plus, where it matters, `popout` (a
+        -- pinned panel's mount) and `hoistToggle`. The classic branch mounts the
+        -- SAME builder into the box it always built --
+        -- test_petframes_page_builders.lua pins the inventory of each one against
+        -- the census taken before the move, in BOTH mode variants.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== THE PAGE'S THREE BANDS =====================================
-        -- Full-width and chromeless, because a feature row's popout docks outside
-        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
-        -- in would leave that beam crossing half the page.
-        --
-        -- Three rather than one, because eight rows in a single stack is a list
-        -- rather than a page, and the three groupings are the ones the settings
-        -- themselves already make: WHERE the frames go and how big they are, what
-        -- the frame itself looks like, and the two blocks of text on it.
-        --
-        -- ⚠ NO HEADER REPEATS A ROW LABEL. "Appearance" is a row here (the
-        -- texture and the background colour), so the band that holds it is headed
-        -- L["Frame"] -- a header naming the section, not one of its rows. All
-        -- three words already ship in enUS; nothing is invented.
-        local petLayoutBand, petFrameBand, petTextBand
-        if tools then
-            petLayoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            petLayoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-            petFrameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            petFrameBand:AddWidget(GUI:CreateHeader(self.child, L["Frame"]), 40)
-            petTextBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            petTextBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ☠ THE PAGE-WIDE GATE REACHES THE ROWS THEMSELVES, not only the panes.
-        -- Every group on this page carries `disableChildrenOn = not petEnabled`
-        -- and always has; those gates stay INSIDE the builders, so a pane greys
-        -- exactly as its box did. But in classic the whole page visibly dims when
-        -- pet frames are off, and eight bright rows over eight grey panes would
-        -- be the popout layout saying something classic does not. A dimmed row
-        -- still OPENS -- the kit's grey is alpha and a disabled toggle, not a
-        -- dead frame -- so the settings stay readable while they are switched
-        -- off, which is what the greyed boxes have always allowed.
+        -- ☠ THE PAGE GATE, ON THE CARDS. Every group on this page carries
+        -- `disableChildrenOn = not petEnabled` and always has; those gates stay
+        -- INSIDE the builders, so a card's body greys exactly as its box did. This
+        -- greys the card HEADERS with it, as the whole classic page visibly dims.
+        -- A pinned Border panel takes it as its toolkit's consumer gate too.
+        --
+        -- ☠ NO INDEX-1 REPAIR ANY MORE: DandersUI Sections' RefreshChildStates
+        -- skips on the `isSectionHeader` mark now, not on the position, so a
+        -- band's (or a pinned pane's) first control greys like the rest.
         local function PetsOffRow(d) return not (d or db).petEnabled end
 
-        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
-        -- DandersUI Sections' RefreshChildStates greys every child a
-        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
-        -- first child is always the header, and wrong for a popout pane, which has
-        -- no header at all (PopoutContent builds a chromeless, padding-free group
-        -- and the builder's first control lands at index 1).
+        -- ☠ WHAT A GATING CONTROL'S CALLBACK COSTS. Five controls on this page
+        -- (the two Match Owner ticks, the health colour mode, Show Power Bar and
+        -- the power colour mode) re-gate a sibling. A classic box and a Modern
+        -- card are both page widgets, so both take the page's state pass; a
+        -- pinned panel (`popout`) reflows its own pane instead.
         --
-        -- Every other converted page got away with it because every one of its
-        -- gated panes carries a HOISTED TOGGLE, and a row's own off-gate greys the
-        -- whole pane from the outside. This page's gate is petEnabled -- a
-        -- PAGE-wide switch that no single row can hoist -- so seven of its eight
-        -- rows would have shown one bright control at the top of a grey pane.
-        --
-        -- Spelled onto the widget itself, composed with whatever predicate it
-        -- already carries, and applied at the MOUNT rather than inside the builder:
-        -- two of these groups change which control comes first with the layout
-        -- mode, and a builder should not have to know it is being read from the
-        -- top. Never runs in classic -- the box's own header is index 1 there, and
-        -- the gate reaches everything under it exactly as it always has.
-        local function GatePaneFirstChild(group)
-            local entry = group and group.groupChildren and group.groupChildren[1]
-            local w = entry and entry.widget
-            if not w then return end
-            local prev = w.disableOn
-            w.disableOn = function(d) return PetsOffRow(d) or (prev and prev(d)) or false end
-        end
-
-        -- ☠ WHAT A GATING CONTROL'S CALLBACK COSTS, AND WHY IT IS NOT THE SAME IN
-        -- BOTH LAYOUTS -- the Tooltips page's AnchorGateRefresh, same rule. Five
-        -- controls on this page (the two Match Owner ticks, the health colour
-        -- mode, Show Power Bar and the power colour mode) end in
-        -- GUI:RefreshCurrentPage today, and every one of them is buying the same
-        -- thing: the hideOn/disableOn passes over a sibling.
-        --
-        -- A pane must not pay for that with a rebuild. A rebuild retires every
-        -- widget on the page including the row the user is clicking through, and
-        -- the helper's own prologue closes every open panel on the way in. What
-        -- the pane's own refresh does instead is precisely the two passes:
-        -- ReflowPane re-runs the group's child states and re-sizes the panel
-        -- round it, then the page's RefreshStates runs. Classic used to keep
-        -- the rebuild (now a state pass -- see below).
-        --
-        -- ★ CLASSIC NO LONGER REBUILDS EITHER: every sibling these gate carries
-        -- its gate as hideOn/disableOn, so the page's state pass is all the
-        -- rebuild bought -- and the rebuild leaked the whole page per click.
+        -- ★ NEITHER REBUILDS: every sibling these gate carries its gate as
+        -- hideOn/disableOn, so the state pass is all a rebuild bought -- and the
+        -- rebuild leaked the whole page per click.
         local function GateRefresh(tools2)
             if tools2.popout then
                 tools2.refreshStates()
@@ -1979,9 +1918,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- that read them, which was fine while the page WAS straight-line code.
         -- The builders are CLOSURES now, and a closure captures the upvalue that
         -- exists when it is CREATED -- so a builder declared above one of these
-        -- would see nil rather than the table. The rows need them from outside
-        -- the builders as well: a summary prints the dropdown's own words, and a
-        -- footer's Reset Group has to push the same work the group's widgets do.
+        -- would see nil rather than the table. The cards need them from outside
+        -- the builders as well: a summary prints the dropdown's own words.
         local textAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
@@ -2021,20 +1959,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }
 
         -- The grouped block's `updateFunc`, under a name, at page scope: the five
-        -- controls in that group call it and so does the row's footer.
+        -- controls in that group call it.
         local ApplyPetGroupLayout = isRaidMode
             and function() if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end end
             or function() if DF.UpdatePetGroupLayout then DF:UpdatePetGroupLayout() end end
 
-        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, a full-width box
-        -- in the popout layout) =====
+        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, the first card
+        -- in Modern) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db keys, same callbacks, same slot heights.
         --
         -- ⚠ tools2.refreshStates, NOT self:RefreshStates. The enable gates every
-        -- other group on this page, so in the popout layout it has to re-grey the
-        -- eight ROWS and any pane standing open behind them. In classic the
-        -- tools2 hook IS self:RefreshStates, so nothing changed there.
+        -- other group on this page, so in Modern it has to re-grey the cards AND
+        -- any pinned panel standing open beside them. In classic the tools2 hook
+        -- IS self:RefreshStates, so nothing changed there.
         local function BuildPetGeneralGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2051,8 +1989,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
         end
 
-        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, a full-width
-        -- box in the popout layout) =====
+        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, the first
+        -- Layout card in Modern) =====
         local function BuildPetLayoutModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2108,45 +2046,43 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(layoutGroup, nil, 1)
         else
-            -- The two shape boxes, wearing the band skin so they do not read as a
-            -- second visual language beside the rows below them. The enable's
-            -- refresh carries the extra half the popout layout needs: the rows'
-            -- own grey, and any pane standing open behind one of them.
-            --
-            -- ☠ FULL WIDTH, AND THEREFORE "both". Neither of these is a single
-            -- control -- each is a control plus the sentence that explains it -- so
-            -- neither becomes a control row; they stay BOXES, with their own chrome
-            -- and their own header. What changes is the one thing that made them
-            -- read as a different language: they are constructed at the BAND's
-            -- width and added as sync points, so their left and right edges are the
-            -- bands' edges. A box built at the band width but added to a COLUMN
-            -- would be worse than what it replaced -- the layout pass only stretches
-            -- a "both" widget and never narrows a column one (GUI/Panel.lua's
-            -- PageRefreshStates), so on a widened two-column window it would run straight
-            -- over whatever sits in column 2.
-            local generalGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
-            generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+
+            -- ☠ ENABLE PET FRAMES STAYS IN THE BODY, as Show Buffs does on the
+            -- Buff Bar: it is the PAGE gate, a fold is not a switch, and a header
+            -- tick that greyed the whole page would surprise people. So the first
+            -- card holds it and its blurb, and never greys itself. Its commit also
+            -- repaints a pinned panel, whose own gate reads the same key.
+            local settingsBand = OpenSection(L["Pet Frame Settings"], "pets_settings", 1, nil)
             BuildPetGeneralGroup({
-                group = generalGroup,
-                parent = self.child,
+                group = settingsBand, parent = self.child,
                 refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
             })
-            Add(generalGroup, nil, "both")
+            CloseSection(settingsBand)
 
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
-            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
+            -- The category header the Layout cards sit under.
+            Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
+            -- ☠ LAYOUT MODE REBUILDS THE PAGE, in both layouts: picking a mode
+            -- changes which cards exist at all (Group Settings, Position, the two
+            -- Match Owner ticks). A card is a page widget and expects to be
+            -- retired by a rebuild; its fold survives it (a stable key). Which
+            -- layout the pets use is behaviour, so no pin -- and a pinned copy of
+            -- a control that rebuilds the page would close under the hand anyway.
+            local modeBand = OpenSection(L["Layout Mode"], "pets_layoutmode", 1, nil, PetsOffRow)
             BuildPetLayoutModeGroup({
-                group = layoutGroup,
-                parent = self.child,
+                group = modeBand, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
-            Add(layoutGroup, nil, "both")
+            CloseSection(modeBand)
         end
 
         -- ===== GROUP SETTINGS (grouped mode only: a 280 box in column 1 in
-        -- classic, the Layout band's first row) =====
+        -- classic, a Layout card in Modern) =====
         -- Built only in GROUPED mode, exactly as today. The page rebuilds when the
-        -- layout mode changes, so the row simply is not there in attached mode --
+        -- layout mode changes, so the card simply is not there in attached mode --
         -- which is what the box did, and what keeps the two layouts agreeing about
         -- what exists.
         local function BuildPetGroupSettingsGroup(tools2)
@@ -2181,21 +2117,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 })
                 Add(groupedSettingsGroup, nil, 1)
             else
-                -- The summary, per the sweep's convention: at most four items, a
-                -- fixed order, "\194\183" between them, WORDS localised and numbers
-                -- raw, and every read guarded because a profile mid-migration may
-                -- be missing any of these keys.
-                --
                 -- Where the block sits, which way it grows, and the nudge -- the
-                -- three facts that place it. Both words come out of the dropdowns'
-                -- own option tables, so the row cannot name a side the control does
-                -- not offer. The offsets are printed as a pair when either is set
-                -- (the Border Shadow row's convention) and they ship non-zero, so
-                -- on a default profile this row says all three.
-                --
-                -- ⚠ SPACING IS DELIBERATELY ABSENT. It is a bare number with no
-                -- word that fits beside two other bare numbers, and the offsets are
-                -- what people actually reach for when the block lands wrong.
+                -- three facts that place it. Both words come out of the
+                -- dropdowns' own option tables. Spacing is deliberately absent:
+                -- a bare number with no word that fits beside two others.
                 local function PetGroupSummary(d)
                     if not d then return "" end
                     local parts = {}
@@ -2211,49 +2136,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     return table.concat(parts, " \194\183 ")
                 end
 
-                -- Five in party, six in raid -- the group label tick exists only
-                -- where there are groups to label. A count is a CLAIM about what is
-                -- behind the row, so it follows the mode the same way the builder
-                -- does rather than naming the larger of the two.
-                local PET_GROUP_COUNT = isRaidMode and 6 or 5
-
-                -- Five in party, six in raid, and the opt-in is a claim about the
-                -- LARGER branch -- the group label tick exists only where there are
-                -- groups to label. Six is INLINE_MAX exactly, so the raid build is the
-                -- one that has to fit, and it does. Nothing is hoisted here, so
-                -- nothing on the plate is drawn twice.
-                local groupMount, groupContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildPetGroupSettingsGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                    GatePaneFirstChild(group)
-                end, nil, { inline = true })
-                local petGroupRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Group Settings"],
-                    db      = tools.RowDB,
-                    summary = PetGroupSummary,
-                    count   = PET_GROUP_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = groupMount,
-                    footerStrip = true,
-                }))
-                -- ⚠ A CONDITIONAL CLAIM, and it is the honest one. In party mode
-                -- the pane never mounts petGroupShowLabel, so the walk never sees
-                -- it and the row does not claim it -- which is exactly right: a
-                -- Reset Group that wrote a key with no control behind it would be
-                -- resetting something the user cannot see, and the amber tick would
-                -- light for it. The raid build claims six because it mounts six.
-                tools.ClaimKeys(petGroupRow, groupContent)
-                tools.WireModifiedTick(petGroupRow)
-                tools.WireFooter(petGroupRow, ApplyPetGroupLayout)
-                petGroupRow.disableOn = PetsOffRow
+                -- Grouped mode only, exactly as the box. Where the pet block sits
+                -- and how it is spaced is how it LOOKS, so it is pinnable; greys
+                -- with the page gate.
+                local band = OpenSection(L["Group Settings"], "pets_group", 1, PetGroupSummary, PetsOffRow, nil,
+                    BuildPetGroupSettingsGroup)
+                BuildPetGroupSettingsGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
         end
 
-        -- ===== SIZE (a 280 box in column 1 in classic, a row in the Layout band)
+        -- ===== SIZE (a 280 box in column 1 in classic, a Layout card in Modern)
         -- =====
         local function BuildPetSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -2288,15 +2184,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- The group's own apply, named once so the footer's Reset Group and Hold:
-        -- Defaults run exactly what the group's controls run between them: the
-        -- size back through the full pet build, and the lightweight pass the two
-        -- sliders drive on a drag.
-        local function ApplyPetSize()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end
-
         if classicLayout then
             -- SIZE GROUP (col1)
             local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2312,10 +2199,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- either dimension can be handed to the owner's frame, and
             -- petMatchOwnerWidth ships ON -- so printing "Width 130" on a default
             -- profile would name a value nothing renders. The matched half is
-            -- simply absent instead of being labelled: the row already says
-            -- "Size", the pane says which slider is greyed and why, and a summary
-            -- is not the place to re-explain a tick. In grouped mode neither tick
-            -- exists and both numbers are always the real ones.
+            -- simply absent. In grouped mode neither tick exists and both numbers
+            -- are always the real ones.
             local function PetSizeSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -2331,44 +2216,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Four attached (two Match Owner ticks and the two sliders), two
-            -- grouped (the sliders alone). Nothing is hoisted: there is no boolean
-            -- here meaning "am I doing anything at all" -- a pet frame has a size
-            -- either way, and a tick carrying Match Owner Width would claim to
-            -- speak for the height beside it.
-            local PET_SIZE_COUNT = isGroupedMode and 2 or 4
-
-            -- Four attached, two grouped -- computed, and small on both branches.
-            -- The two Match Owner ticks are why seeing it matters: each one greys
-            -- the slider beneath it, so a reader who opens this for a width finds
-            -- a dead track and no word for why. On the plate the tick above it
-            -- answers that before the click that is no longer needed.
-            local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetSizeGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local petSizeRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Size"],
-                db      = tools.RowDB,
-                summary = PetSizeSummary,
-                count   = PET_SIZE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = sizeMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(petSizeRow, sizeContent)
-            tools.WireModifiedTick(petSizeRow)
-            tools.WireFooter(petSizeRow, ApplyPetSize)
-            petSizeRow.disableOn = PetsOffRow
+            -- No tick: a pet frame has a size either way. How big the pet frame
+            -- is is how it LOOKS, so it is pinnable; greys with the page gate.
+            local band = OpenSection(L["Size"], "pets_size", 1, PetSizeSummary, PetsOffRow, nil,
+                BuildPetSizeGroup)
+            BuildPetSizeGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Frame band's
-        -- first row) =====
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the first Frame
+        -- card in Modern) =====
         local function BuildPetAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2380,11 +2240,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "petBackgroundColor", true, function()
                 if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        end
-
-        -- The group's own apply: the lightweight pass both controls already drive.
-        local function ApplyPetAppearance()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end
 
         if classicLayout then
@@ -2400,12 +2255,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             -- The texture's NAME, and nothing else: it is the one thing in this
             -- group that can be said in words, and a background colour cannot.
-            --
-            -- The name comes from DF:GetTextureNameFromPath -- the addon's own
-            -- media display-name resolver, and the one GUI:CreateTextureDropdown
-            -- itself prints on its button, so the row and the control behind it
-            -- cannot disagree. (The Font Settings row on the Frame page names its
-            -- font through this function's font sibling, for the same reason.)
+            -- The name comes from DF:GetTextureNameFromPath -- the resolver
+            -- GUI:CreateTextureDropdown itself prints on its button, so the
+            -- card and the control inside it cannot disagree.
             local function PetAppearanceSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -2414,39 +2266,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Two: the texture and the background colour. Nothing to hoist.
-            local PET_APPEARANCE_COUNT = 2
-
-            -- A texture and a colour. Two controls behind a click is the click the
-            -- hybrid page exists to refuse -- and half of what is back there cannot
-            -- be said in words at all: the summary names the texture and has
-            -- nothing for the swatch, so the swatch goes where it can be seen.
-            local appearMount, appearContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetAppearanceGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local petAppearanceRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Appearance"],
-                db      = tools.RowDB,
-                summary = PetAppearanceSummary,
-                count   = PET_APPEARANCE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = appearMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(petAppearanceRow, appearContent)
-            tools.WireModifiedTick(petAppearanceRow)
-            tools.WireFooter(petAppearanceRow, ApplyPetAppearance)
-            petAppearanceRow.disableOn = PetsOffRow
+            -- Column 2 opens here, with the category header its three cards sit
+            -- under. How the frame LOOKS, so it is pinnable; greys with the page
+            -- gate.
+            Add(GUI:CreateHeader(self.child, L["Frame"]), 40, 2)
+            local band = OpenSection(L["Appearance"], "pets_appearance", 2, PetAppearanceSummary, PetsOffRow, nil,
+                BuildPetAppearanceGroup)
+            BuildPetAppearanceGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ===== BORDER (a 280 box in column 2 in classic, the Frame band's second
-        -- row) =====
+        -- ===== BORDER (a 280 box in column 2 in classic, the second Frame card
+        -- in Modern) =====
         -- include set tailored for a mini unit frame's border. Skipped:
         -- animate (decoration, not alert), offset (Pet Frame has its own
         -- Offset X / Y in the Position group in column 1), class / role colour
@@ -2454,17 +2288,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- colour-by-time / colour-by-type (no aura-state context).
         --
         -- ONE call, not the Frame page's two. That page splits Border and Border
-        -- Shadow into two rows because between them they are nineteen controls;
-        -- here the whole border is sixteen, of which the shadow is five, and a row
-        -- for five sub-controls of another row's feature is a level of nesting the
-        -- page does not earn. include.shadow keeps the shadow block inside
-        -- CreateBorderControls' own composition loop, which is what puts Show
-        -- Border's grey on top of it -- so this row needs no shadowDisableWhen
-        -- plumbing at all, the thing the Frame page had to hand over by hand.
+        -- Shadow into two cards because between them they are nineteen controls;
+        -- here the whole border is sixteen, of which the shadow is five, and a
+        -- card for five sub-controls of another card's feature is a level of
+        -- nesting the page does not earn. include.shadow keeps the shadow block
+        -- inside CreateBorderControls' own composition loop, which is what puts
+        -- Show Border's grey on top of it -- so this card needs no
+        -- shadowDisableWhen plumbing at all.
         --
-        -- ⚠ noShowToggle IS THE HOIST. With it the built-in Show Border checkbox
-        -- is not built and the row carries that tick instead; showKey is still
-        -- read, so borderOff still greys the other fifteen exactly as before.
+        -- ⚠ noShowToggle IS THE HEADER TICK. With it the built-in Show Border
+        -- checkbox is not built and the card's header carries that tick instead;
+        -- showKey is still read, so borderOff still greys the other fifteen.
         local function BuildPetBorderGroup(tools2)
             GUI:CreateBorderControls(tools2.group, db, "pet", {
                 parent       = tools2.parent,
@@ -2482,14 +2316,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- CreateBorderControls owns the group and writes disableOn onto
                 -- each of the sixteen itself -- so the gate goes in as the
                 -- CONSUMER gate it is, which the factory composes on top of
-                -- borderOff and every widget's own predicate. nil in classic,
-                -- where the box's disableChildrenOn does the same job it always
-                -- has (and where the pane-first-child problem does not exist).
+                -- borderOff and every widget's own predicate. nil on the page --
+                -- the classic box and the Modern card both carry the gate as
+                -- their own disableChildrenOn, set before this runs -- so only a
+                -- pinned panel's mount (tools2.popout) takes it here.
                 disableWhen  = tools2.popout and PetsOffRow or nil,
             })
         end
 
-        -- The group's own apply: the lightweight pass every border control drives.
+        -- What the suppressed Show Border checkbox's toolkit ran: the lightweight
+        -- pass every border control drives. The header tick's commit calls it.
         local function ApplyPetBorder()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end
@@ -2508,8 +2344,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             -- The Frame page's Border summary, less the colour source it has and
             -- this one does not: thickness in pixels, the style word, and the
-            -- alpha only when it is doing something -- a row reading "Alpha 1.00"
-            -- on every default profile is noise (the Border row's own rule).
+            -- alpha only when it is doing something.
             local function PetBorderSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -2525,55 +2360,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Fifteen: the sixteen CreateBorderControls builds for this include
-            -- set, less the hoisted Show Border. Pinned by test_border_builders,
-            -- which drives a pet-shaped call and counts what comes out.
-            local PET_BORDER_COUNT = 15
-
-            -- What the suppressed Show Border checkbox ran: the state pass and the
-            -- full update. ☠ NOT GUI:RefreshCurrentPage -- a rebuild retires every
-            -- widget on the page including the row being clicked, and the row's
-            -- write path calls row.Refresh() after this returns, on a dead frame.
-            local function OnPetBorderToggle()
-                ApplyPetBorder()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetBorderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+            -- build its own (hoistToggle -> noShowToggle); showKey is still read,
+            -- so the other fifteen grey exactly as before. The commit is what the
+            -- in-body checkbox ran plus a state pass and a repaint of a pinned
+            -- panel -- never a page rebuild. The tick greys with the page gate.
+            --
+            -- ⚠ THE PAGE GATE ON THE BODY IS THE CLASSIC BOX'S OWN LINE. The
+            -- toolkit owns the group and writes disableOn onto each control, so
+            -- the builder takes the page gate as the consumer gate only when it
+            -- is mounted in a pinned panel (tools2.popout); on the page the band
+            -- carries the group gate, set before the build, exactly as classic
+            -- sets it on its box. How the border LOOKS, so it is pinnable.
+            local band = OpenSection(L["Border"], "pets_border", 2, PetBorderSummary, PetsOffRow, nil,
+                BuildPetBorderGroup, {
+                    db = db, key = "petShowBorder", label = L["Show Border"],
+                    disableOn = PetsOffRow,
+                    onChanged = function()
+                        ApplyPetBorder()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end)
-            local petBorderRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Border"],
-                db       = tools.RowDB,
-                toggle   = { key = "petShowBorder" },
-                summary  = PetBorderSummary,
-                count    = PET_BORDER_COUNT,
-                onToggle = OnPetBorderToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = borderMount,
-                footerStrip = true,
-            }))
-            -- ⚠ THE PANE'S GROUP HAS NO disableChildrenOn OF ITS OWN, unlike every
-            -- other builder on this page: CreateBorderControls owns the whole group
-            -- and its composition loop writes disableOn onto each widget it built,
-            -- so the page gate rides on the ROW instead (PetsOffRow below) and the
-            -- classic arm keeps setting it on the box, exactly as it always did.
-            tools.ClaimKeys(petBorderRow, borderContent)
-            tools.WireModifiedTick(petBorderRow)
-            tools.WireFooter(petBorderRow, ApplyPetBorder)
-            tools.RegisterHoistedToggle(petBorderRow, L["Show Border"], "petShowBorder", OnPetBorderToggle)
-            petBorderRow.disableOn = PetsOffRow
+            band.disableChildrenOn = function(d) return not d.petEnabled end
+            BuildPetBorderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ===== HEALTH BAR (a 280 box in column 2 in classic, the Frame band's
-        -- third row) =====
+        -- ===== HEALTH BAR (a 280 box in column 2 in classic, the third Frame
+        -- card in Modern) =====
         local function BuildPetHealthBarGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2619,13 +2438,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             customPowerColor.hideOn = function(d) return d.petPowerColorMode ~= "CUSTOM" end
         end
 
-        -- The group's own apply: the full pet build every control here commits
-        -- through, plus the lightweight pass the sliders and pickers drag on.
-        local function ApplyPetHealthBar()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end
-
         if classicLayout then
             -- HEALTH BAR GROUP (col2)
             local healthBarGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -2639,16 +2451,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             -- What colour the bar is, then whether there is a second bar under it.
             -- Both in the controls' own words: the colour mode out of the
-            -- dropdown's option table, the power bar out of its checkbox's label
-            -- (the Dead/Offline row's "Custom Dead Background", same convention),
-            -- and the power bar only when it is on -- it ships off, so a row
-            -- naming it on a default profile would be reporting an absence.
+            -- dropdown's option table, the power bar out of its checkbox's label,
+            -- and the power bar only when it is on.
             --
-            -- ⚠ NO HOIST ON THIS ROW. Show Power Bar is the only boolean in the
-            -- group and it governs three of the seven controls; hoisted, it would
+            -- ⚠ NO HEADER TICK. Show Power Bar is the only boolean in the group
+            -- and it governs three of the seven controls; in the header it would
             -- claim to speak for the four health-bar settings it has nothing to do
-            -- with (the Colour Picker row's precedent), and a row switched off
-            -- would grey a health bar that is always drawn.
+            -- with, and a card switched off would grey a health bar that is always
+            -- drawn.
             local function PetHealthBarSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -2658,37 +2468,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Seven: the colour mode and its custom colour, the health text tick,
-            -- the power bar tick, its height, its colour mode and its custom
-            -- colour.
-            local PET_HEALTH_BAR_COUNT = 7
-
-            local healthBarMount, healthBarContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetHealthBarGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local petHealthBarRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Health Bar"],
-                db      = tools.RowDB,
-                summary = PetHealthBarSummary,
-                count   = PET_HEALTH_BAR_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = healthBarMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(petHealthBarRow, healthBarContent)
-            tools.WireModifiedTick(petHealthBarRow)
-            tools.WireFooter(petHealthBarRow, ApplyPetHealthBar)
-            petHealthBarRow.disableOn = PetsOffRow
+            -- How the bar LOOKS, so it is pinnable; greys with the page gate.
+            local band = OpenSection(L["Health Bar"], "pets_healthbar", 2, PetHealthBarSummary, PetsOffRow, nil,
+                BuildPetHealthBarGroup)
+            BuildPetHealthBarGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ===== NAME TEXT (a 280 box in column 2 in classic, the Text band's first
-        -- row) =====
+        -- ===== NAME TEXT (a 280 box in column 2 in classic, the first Text card
+        -- in Modern -- opened after Position, see NAME TEXT, AS A CARD) =====
         local function BuildPetNameTextGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2721,14 +2512,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateSlider(parent, L["Name Y Offset"], -15, 15, 1, db, "petNameY", function()
                 if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        end
-
-        -- The two text groups' apply is the same pair: the max-length and the font
-        -- size commit through the full pet build, everything else through the
-        -- lightweight pass.
-        local function ApplyPetText()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end
 
         -- Both text rows print the same three facts in the same order: the font,
@@ -2764,45 +2547,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 refreshStates = function() self:RefreshStates() end,
             })
             Add(nameTextGroup, nil, 2)
-        else
-            -- Nine: the font, its size, the outline, the shadow tick, the length
-            -- cap, the anchor, the colour and the two offsets. Nothing to hoist --
-            -- a name is always drawn.
-            --
-            -- ⚠ THE OUTLINE KEY IS CLAIMED TWICE, and that is the walk working as
-            -- designed: the outline dropdown and the shadow tick are two views of
-            -- one stored value (petNameFontOutline), so both stamp it. A repeated
-            -- key costs the defaults engine one extra lookup and changes no answer.
-            local PET_NAME_TEXT_COUNT = 9
-
-            local nameMount, nameContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetNameTextGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local petNameTextRow = petTextBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Name Text"],
-                db      = tools.RowDB,
-                summary = TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor"),
-                count   = PET_NAME_TEXT_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = nameMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(petNameTextRow, nameContent)
-            tools.WireModifiedTick(petNameTextRow)
-            tools.WireFooter(petNameTextRow, ApplyPetText)
-            petNameTextRow.disableOn = PetsOffRow
         end
+        -- (Modern builds the Name Text card further down, after Position -- see
+        -- NAME TEXT, AS A CARD.)
 
         -- ===== POSITION (attached mode only: a 280 box in column 1 in classic,
-        -- the Layout band's last row) =====
+        -- the last Layout card in Modern) =====
         -- Built only in ATTACHED mode, exactly as today -- in grouped mode there
-        -- is no owner to sit beside and the Group Settings row above owns the
+        -- is no owner to sit beside and the Group Settings card owns the
         -- placement instead.
         local function BuildPetPositionGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -2826,11 +2578,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
         end
 
-        -- The group's own apply: the lightweight pass all three controls drive.
-        local function ApplyPetPosition()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end
-
         if not isGroupedMode then
             if classicLayout then
                 -- POSITION GROUP (col1, Attached mode only)
@@ -2844,10 +2591,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 Add(positionGroup, nil, 1)
             else
                 -- Which side of the owner, then the nudge -- the Group Settings
-                -- row's shape, in the owner's words rather than the raid's. The
-                -- offsets are printed as a pair when either is set (the Border
-                -- Shadow row's convention); petOffsetY ships at -1, so a default
-                -- profile shows both facts.
+                -- card's shape, in the owner's words rather than the raid's. The
+                -- offsets are printed as a pair when either is set; petOffsetY
+                -- ships at -1, so a default profile shows both facts.
                 local function PetPositionSummary(d)
                     if not d then return "" end
                     local parts = {}
@@ -2861,40 +2607,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     return table.concat(parts, " \194\183 ")
                 end
 
-                -- Three: the anchor and its two offsets.
-                local PET_POSITION_COUNT = 3
-
-                -- An anchor and its two offsets, so the group goes on the plate. The
-                -- three are ONE act -- pick a side, then nudge -- and a summary can
-                -- only report where they landed, never be the place the user lands
-                -- them.
-                local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildPetPositionGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                    GatePaneFirstChild(group)
-                end, nil, { inline = true })
-                local petPositionRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Position"],
-                    db      = tools.RowDB,
-                    summary = PetPositionSummary,
-                    count   = PET_POSITION_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = positionMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(petPositionRow, positionContent)
-                tools.WireModifiedTick(petPositionRow)
-                tools.WireFooter(petPositionRow, ApplyPetPosition)
-                petPositionRow.disableOn = PetsOffRow
+                -- The last Layout card. Where the pet sits is how it LOOKS, so it
+                -- is pinnable; greys with the page gate.
+                local band = OpenSection(L["Position"], "pets_position", 1, PetPositionSummary, PetsOffRow, nil,
+                    BuildPetPositionGroup)
+                BuildPetPositionGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
         end
 
-        -- ===== HEALTH TEXT (a 280 box in column 2 in classic, the Text band's
-        -- second row) =====
+        -- ===== NAME TEXT, AS A CARD (Modern only) ==========================
+        -- ☠ ADDED HERE, AFTER POSITION, NOT WHERE ITS BUILDER SITS. A card goes
+        -- into its column the moment CloseSection runs, so the order cards are
+        -- built in IS the order they stack in. Name Text heads the Text cards
+        -- in column 1, which has to be below the Layout cards -- Position
+        -- included -- so it is opened here rather than beside its classic box.
+        -- How the name LOOKS, so it is pinnable; greys with the page gate.
+        if not classicLayout then
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
+            local band = OpenSection(L["Name Text"], "pets_nametext", 1,
+                TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor"), PetsOffRow, nil,
+                BuildPetNameTextGroup)
+            BuildPetNameTextGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
+        end
+
+        -- ===== HEALTH TEXT (a 280 box in column 2 in classic, the second Text
+        -- card in Modern) =====
         local function BuildPetHealthTextGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2937,62 +2682,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(healthTextGroup, nil, 2)
         else
-            -- Eight: the font, its size, the outline, the shadow tick, the colour,
-            -- the anchor and the two offsets. One fewer than Name Text -- there is
-            -- no length cap on a number. The outline key is claimed twice here for
-            -- the same reason it is there.
-            local PET_HEALTH_TEXT_COUNT = 8
-
-            local healthTextMount, healthTextContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildPetHealthTextGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end)
-            local petHealthTextRow = petTextBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Health Text"],
-                db      = tools.RowDB,
-                summary = TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor"),
-                count   = PET_HEALTH_TEXT_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = healthTextMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(petHealthTextRow, healthTextContent)
-            tools.WireModifiedTick(petHealthTextRow)
-            tools.WireFooter(petHealthTextRow, ApplyPetText)
-            petHealthTextRow.disableOn = PetsOffRow
+            -- The second Text card, under Name Text in column 1. The font, its
+            -- size and where the text sits -- TextRowSummary's three facts. How
+            -- the text LOOKS, so it is pinnable; greys with the page gate.
+            local band = OpenSection(L["Health Text"], "pets_healthtext", 1,
+                TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor"), PetsOffRow, nil,
+                BuildPetHealthTextGroup)
+            BuildPetHealthTextGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ☠ THE BANDS ARE ADDED HERE, NOT WHERE THEY WERE BUILT. `Add` resolves a
-        -- widget's slot height on the spot, so a band has to go in after the last
-        -- row has been put into it -- and all three go in after the two full-width
-        -- boxes above, which is what keeps the page's own enable first.
-        -- TWO COLUMNS WHEN THERE IS ROOM, under those boxes: Layout and Text down
-        -- the left, Frame down the right. On a narrow window the page folds back to
-        -- one column in the order below.
-        -- ⚠ TEXT IS LEFT FOR BALANCE. The rule would put it with Frame, but Layout
-        -- is two rows in the default attached mode (Group Settings is grouped-only),
-        -- so that would leave two against five; with Text on the left it is four and
-        -- three (five and three when grouped). Its rows are mostly anchors and
-        -- offsets -- where the words sit -- which is what makes it the borderline one.
-        -- ⚠ The two boxes stay full width: each is a control plus the sentence
-        -- explaining it, and "both" is a sync point, so the columns start level
-        -- beneath them.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            petLayoutBand.layoutColFill = true
-            petFrameBand.layoutColFill = true
-            petTextBand.layoutColFill = true
-            Add(petLayoutBand, nil, 1)
-            Add(petFrameBand, nil, 2)
-            Add(petTextBand, nil, 1)
-        end
+        -- ===== NO BAND TAIL ================================================
+        -- A card's band holds one group and is Add'd by CloseSection the moment
+        -- that group is built, so nothing is deferred to here. Settings, Layout
+        -- and Text down the left, Frame down the right; on a narrow window the
+        -- page folds to one column in the order the cards were added.
+        --
+        -- ⚠ TEXT IS LEFT FOR BALANCE, as the bands had it. The rule would put it
+        -- with Frame, but Layout is two or three cards and Frame's Border alone is
+        -- fifteen controls.
     end)
     
     -- General > Settings (mode enable/disable, Blizzard frame toggles, profile-wide settings)
