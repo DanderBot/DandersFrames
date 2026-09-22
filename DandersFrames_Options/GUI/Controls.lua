@@ -5351,7 +5351,7 @@ function GUI:CreatePopoutPageTools(page)
     -- `Add` is the page builder's own Add: these tools are built before the
     -- page's columns exist, so it is handed in rather than captured.
     --
-    -- `extra` (nil for Buff Bar, which is what keeps it unchanged):
+    -- `extra` (every converted card page passes both; nil builds the plain card):
     --   twoTrack     the band flows its controls two per row when it is wide
     --                enough (see WireTwoTrack)
     --   quietLabels  a control's own caption draws dim, so a setting can never

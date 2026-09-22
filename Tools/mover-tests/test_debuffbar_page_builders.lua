@@ -16,9 +16,9 @@ local NS = ...
 --   column 2   "Icon"     Appearance, Layout, Position, Border, Important Debuffs.
 --              "Text"     Duration Text, Stack Count, Dispel Text.
 --
--- ...plus the two things the Buff Bar does NOT opt into, so the two can be
--- compared in game: controls TWO PER ROW inside a wide enough card, and captions
--- drawn dim so a setting never reads as a heading.
+-- ...plus the two opt-ins this page introduced (the Buff Bar now takes them
+-- too): controls TWO PER ROW inside a wide enough card, and captions drawn dim
+-- so a setting never reads as a heading.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db, the blacklist
@@ -35,7 +35,7 @@ local NS = ...
 --     classic hands it (plus hoistToggle where the tick moved to the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate,
 --     header tick and pin; that there is one checkbox per setting.
---   ✓ the two Debuff-Bar-only opt-ins, and that the Buff Bar asks for none.
+--   ✓ the two opt-ins, and that the Buff Bar now asks for them too.
 --   ✗ nothing about runtime behaviour -- the folding, the two-per-row flow, the
 --     dim captions and the greying are read in game.
 -- ============================================================
@@ -628,7 +628,7 @@ do
 end
 
 -- ============================================================
--- 3. THE TWO DEBUFF-BAR-ONLY OPT-INS, AND THE BUFF BAR TAKING NONE
+-- 3. THE TWO OPT-INS (THE DEBUFF BAR'S FIRST, NOW THE BUFF BAR'S TOO)
 -- ============================================================
 print("-- Debuff Bar page: two per row and quiet captions -- opt-in")
 do
@@ -636,11 +636,10 @@ do
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
     check(fwd:find("{ twoTrack = true, quietLabels = true })", 1, true) ~= nil,
           "opt-in: every Debuff Bar card asks for two tracks and quiet captions")
-    check(BUFFPAGE:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)\n", 1, true) ~= nil,
-          "opt-in: the Buff Bar forwards with NO extra argument")
-    for _, word in ipairs({ "twoTrack", "quietLabels" }) do
-        check(BUFFPAGE:find(word, 1, true) == nil, "opt-in: ...and never mentions " .. word)
-    end
+    -- The Buff Bar has since taken both too, so the twin pages match.
+    local bfwd = (BUFFPAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(bfwd:find("{ twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "opt-in: the Buff Bar asks for the same two")
     -- In the helper: each opt-in is read off `extra` and nothing else, so a
     -- caller that passes none builds exactly the Buff Bar's card.
     check(OPEN:find("if extra and extra.twoTrack then WireTwoTrack(band) end", 1, true) ~= nil,

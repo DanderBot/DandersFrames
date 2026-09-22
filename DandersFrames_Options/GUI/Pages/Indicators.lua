@@ -124,13 +124,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- controls live on the page, and a shut header keeps the row's old summary
         -- string in its right corner.
         --
-        -- ☠ THE DEBUFF BAR USES THESE SAME CARDS, PLUS TWO OPT-INS THIS PAGE DOES
-        -- NOT TAKE: controls two per row, and dim captions. The
-        -- whole point is to put the two side by side in game and pick, so this page
-        -- stays exactly as it was -- it passes the shared helper no `extra`.
+        -- ☠ THE DEBUFF BAR USES THESE SAME CARDS, AND BOTH PAGES NOW TAKE ITS TWO
+        -- OPT-INS: controls two per row inside a card that is wide enough, and dim
+        -- captions. The Debuff Bar's look was the one testers picked, so the twin
+        -- pages read the same.
         --
-        --   column 1    "Content"  Visibility, Buff Filters, Order & Limits and the
-        --                          Hide Duplicate Buffs control row -- whether the bar
+        --   column 1    "Content"  Visibility, Buff Filters (Hide Duplicate Buffs at
+        --                          its foot) and Order & Limits -- whether the bar
         --                          exists, which buffs reach it, how many and in what
         --                          order.
         --               ...then    Duration Bar and Pandemic, the two 12.1-factory
@@ -206,11 +206,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ THE BODY LIVES IN THE PAGE TOOLS NOW (tools.OpenSection /
         -- tools.CloseSection, Controls.lua), lifted there when the Debuff Bar was
         -- converted so the two pages build their cards through one function.
-        -- Same arguments, same order, and no `extra`: this page opts into none
-        -- of the Debuff Bar's additions (two tracks, quiet captions), so every
-        -- section here draws exactly as it did.
+        -- Same arguments, same order, and the Debuff Bar's two opt-ins: controls
+        -- two per row inside a card that is wide enough, and captions drawn dim
+        -- so a setting never reads as a heading -- so the twin pages match.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
-            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
         end
 
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header --
@@ -648,6 +649,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- filter, and it reads as one at the foot of this section.
             local dedupCb = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", DedupChanged), 30)
             dedupCb.tooltip = DEDUP_TIP
+            -- On a row of its own when the card lays out two per row, as on the
+            -- Debuff Bar: it is not one more entry in the filter list above it.
+            dedupCb.fullRow = true
             CloseSection(band)
         end
 
@@ -1439,9 +1443,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Debuffs crossing the column notes below argue for.
         --
         -- MODERN is the Buff Bar's collapsible-card design, section for section, so
-        -- the two pages can be compared in game -- plus the two things the Buff
-        -- Bar does NOT opt into: controls TWO PER ROW inside a card that is wide
-        -- enough, and captions drawn dim so a setting never reads as a heading.
+        -- the two pages can be compared in game -- plus the two opt-ins this page
+        -- introduced and the Buff Bar has since taken too: controls TWO PER ROW
+        -- inside a card that is wide enough, and captions drawn dim so a setting
+        -- never reads as a heading.
         -- Thirteen popout rows
         -- became thirteen cards; the one control row (Hide Duplicate Debuffs) moved
         -- into Debuff Filters, as Hide Duplicate Buffs did on the Buff Bar.

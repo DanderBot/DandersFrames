@@ -23,10 +23,10 @@ local NS = ...
 --   column 2   "Icon"     Appearance, Layout, Position, Border.
 --              "Text"     Duration Text, Stack Count.
 --
--- ☠ THE DEBUFF BAR NOW USES THE SAME CARDS (the section helper was lifted into
--- the page tools for it) PLUS THREE OPT-INS THIS PAGE DOES NOT TAKE -- two per
--- row and dim captions. Its own census file pins those; this
--- one pins that the Buff Bar forwards with no `extra` and draws as it did.
+-- ☠ THE DEBUFF BAR USES THE SAME CARDS (the section helper was lifted into the
+-- page tools for it), and this page now takes its two opt-ins as well -- two
+-- per row and dim captions -- so the twin pages match. The Debuff Bar's census
+-- file pins how the opt-ins work; this one pins that the Buff Bar asks for both.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db, the filter
@@ -236,11 +236,14 @@ do
           "sections: the page opens a section in one named place")
     check(PAGE:find("local function CloseSection(band)", 1, true) ~= nil,
           "sections: ...and closes one in another")
-    -- ...each a forward to the shared helper, passing nothing this page did not
-    -- pass before -- in particular no `extra`, so none of the Debuff Bar's
-    -- opt-ins (two tracks, quiet captions) reach this page.
-    check(PAGE:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle)\n", 1, true) ~= nil,
-          "sections: ...the page's OpenSection forwards to the shared one, with no extra")
+    -- ...each a forward to the shared helper, now with the Debuff Bar's two
+    -- opt-ins (two tracks, quiet captions), so the twin pages match.
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: ...the page's OpenSection forwards to the shared one, asking for two per row and dim captions")
+    -- The moved dedup takes a row of its own on a two-track card.
+    check(sectionBlock("Buff Filters"):find("dedupCb.fullRow = true", 1, true) ~= nil,
+          "sections: Hide Duplicate Buffs sits on a row of its own at the foot of Buff Filters")
     check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
           "sections: ...and so does its CloseSection")
     local open = OPEN
