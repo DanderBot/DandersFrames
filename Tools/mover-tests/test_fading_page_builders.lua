@@ -3,46 +3,33 @@ local NS = ...
 -- ============================================================
 -- FADING PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Fading is three groups and nothing else, so all three become
--- feature rows in ONE band and the page keeps no inline box at all:
+-- Display > Fading: three classic boxes. In Modern they are the Debuff Bar's
+-- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
+-- value summary in a shut card's corner, Expand All / Collapse All at the top --
+-- and the Out of Range box is split in two:
 --
---   Out of Range              a way in with NO tick -- oorEnabled is a sub-MODE
---                             (frame alpha vs twelve element alphas) and it
---                             HIDES the frame-level slider, so a hoisted tick
---                             would grey the one control the group is left with
---   Dead/Offline Fading       hoisted `fadeDeadFrames`   (keepEnabled + gate)
---   Health Threshold Fading   hoisted `healthFadeEnabled` (keepEnabled + gate)
+--   column 1   Out of Range            the range check: NO on/off (it fades
+--                                      either way), no pin
+--              Element-Specific Alpha  tick: oorEnabled, pinnable
+--   column 2   Dead/Offline Fading     tick: fadeDeadFrames, pinnable
+--              Health Threshold Fading tick: healthFadeEnabled, pinnable
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_frame_page_builders / test_tooltips_page_builders do: it reads
--- the page's SOURCE and asserts against it.
+-- ☠ THE SPLIT IS THE RISK THIS FILE COVERS. Classic still builds ONE Out of
+-- Range box by mounting the two halves back to back (BuildOutOfRangeGroup), so
+-- the census of the two halves, in order, must be the PRE-CHANGE census of the
+-- one builder -- or classic silently lost or reordered a control.
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts, less the
---     hoisted toggle.
---   ✓ that the page's two BUILD-TIME db seeds are still inside the builder, at
---     the point they always were -- a pane is built eagerly, so they land when
---     they always did, which is what the export byte-identity gate measures.
---   ✓ that every locale string the page asks for already ships in enUS.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the CENSUS of each builder (the pre-change goldens), classic's mounts.
+--   ✓ each card's column, stable collapse key, summary, tick and pin.
+--   ✓ the two BUILD-TIME db seeds still sit inside the range builder.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
--- ---- the census reader (the Tooltips page's, plus one kind) -----------
--- ⚠ CreateInput IS IN THE MAP HERE and is not in the sibling suites': the Out
--- of Range group is the first converted group to hold an edit box (the custom
--- range spell ID). It is not db-bound -- it writes rangeCheckSpellID through the
--- dropdown's own key -- so its census row carries no key, which is the honest
--- record of what it is.
+-- ⚠ CreateInput IS IN THE MAP: the custom range spell ID is an edit box. It is
+-- not db-bound, so its census row carries no key.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
@@ -50,9 +37,6 @@ local KIND = {
     CreateInput = "input",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -102,8 +86,6 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Options.lua holds a dozen pages, and a
--- bare 280 box on one of the others is not this pass's business.
 local PAGE
 do
     local a = SRC:find('Add(CreateCopyButton(self.child, {"rangeFade"', 1, true)
@@ -112,106 +94,64 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey:gsub("%p", "%%%0") .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel, column)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
-    local esc = rowLabel:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. column .. ")", 1, true) ~= nil,
-              rowLabel .. ": ...and still goes to column " .. column)
-    end
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
-    check(PAGE:find("local %w+ = fadeBand:AddWidget%(GUI:CreatePopoutRow%(") ~= nil,
-          rowLabel .. ": ...and mounted into the page's one band")
+-- ONE CARD'S BLOCK: its OpenSection call up to the CloseSection that puts its
+-- band in, flattened; `call` is everything before the builder MOUNT (the pin, a
+-- builder argument, sits inside the call).
+local function sectionBlock(labelKey, builder)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find(builder .. "({", 1, true)
+    return block, m and block:sub(1, m - 1) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS ONE BAND CARRIES NO HEADER
+-- 1. THE SHARED MACHINERY, THE HELPERS, AND THE ROW FURNITURE GONE
 -- ============================================================
-print("-- Fading page: the shared popout machinery and the page's one band")
+print("-- Fading page: the shared machinery and the page-scope helpers")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "footerStrip", "inline = true",
+                            "_COUNT", "count =", "fadeBand", "chromeless", "INLINE_BOX",
+                            "OnDeadFadeToggle", "OnHealthFadeToggle", "ApplyOutOfRange",
+                            "ApplyDeadFade", "ApplyHealthFade" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+    check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          "rebuild: nothing on the page rebuilds it")
 
-    -- ---- the one band -------------------------------------------------
-    check(PAGE:find("fadeBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: the page's one band is chromeless, at the width the layout pass will give it")
-    -- ⚠ NO HEADER, and that is the rule rather than an omission: a header names
-    -- the SECTION, and the section here is the whole page -- which the tab
-    -- already calls "Fading". (The Sorting page's sortBand, same reason.)
-    check(PAGE:find("fadeBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "band: ...and carries no header, because the tab already says Fading")
-    local bands = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%)") do bands = bands + 1 end
-    eq(bands, 1, "band: one band, not three -- all three rows share it")
-
-    -- ---- the three page-scope helpers, above every builder -------------
-    -- ☠ A closure captures the upvalue that exists when it is CREATED, so a
-    -- builder declared above one of these would see nil rather than the
-    -- function. The footers need them from outside the builders as well.
     for _, h in ipairs({ "RefreshRangeInfoLabel", "SetRangeSpellValue", "RefreshHealthFade" }) do
         local at = PAGE:find("local function " .. h .. "()", 1, true)
-        check(at ~= nil, "helpers: " .. h .. " is declared at page scope")
         local decls = 0
         for _ in PAGE:gmatch("local function " .. h .. "%(%)") do decls = decls + 1 end
-        eq(decls, 1, "helpers: ...and there is exactly one of it")
-        for _, b in ipairs({ "BuildOutOfRangeGroup", "BuildDeadFadeGroup", "BuildHealthFadeGroup" }) do
+        eq(decls, 1, "helpers: " .. h .. " is declared exactly once, at page scope")
+        for _, b in ipairs({ "BuildRangeCheckGroup", "BuildElementAlphaGroup", "BuildDeadFadeGroup", "BuildHealthFadeGroup" }) do
             local bAt = PAGE:find("local function " .. b .. "(tools2)", 1, true)
             check(at ~= nil and bAt ~= nil and at < bAt,
-                  "helpers: ..." .. b .. " is declared after it, so it closes over the real function")
+                  "helpers: " .. b .. " is declared after " .. h .. ", so it closes over the real function")
         end
     end
-    -- The two hideOn/disableOn predicates stayed where they were, at page scope.
-    check(PAGE:find("local function HideOOROptions(d)", 1, true) ~= nil,
-          "helpers: the element-specific grey predicate is still page scope")
-    check(PAGE:find("local function HideFrameLevelAlpha(d)", 1, true) ~= nil,
-          "helpers: ...and so is the frame-alpha hide predicate")
+    check(PAGE:find("local function HideOOROptions(d)", 1, true) ~= nil
+      and PAGE:find("local function HideFrameLevelAlpha(d)", 1, true) ~= nil,
+          "helpers: the element grey and the frame-alpha hide predicates are still page scope")
 end
 
 -- ============================================================
--- 2. OUT OF RANGE -- a row with no tick
--- oorEnabled is a sub-MODE, not an enable: out of range fades either way (one
--- frame-level alpha, or twelve per-element ones) and switching it off HIDES the
--- frame-level slider. A row tick carrying it would grey the one control the
--- group is left with -- the Frame Fade row's judgement, for the same reason.
+-- 2. OUT OF RANGE -- ONE CLASSIC BOX, TWO BUILDERS, TWO CARDS
 -- ============================================================
 local OUT_OF_RANGE = {
     { "dropdown", "Range Check Spell",            "rangeCheckSpellID",     55 },
@@ -234,97 +174,74 @@ local OUT_OF_RANGE = {
     { "slider",   "Aura Designer Alpha",          "oorAuraDesignerAlpha",  55 },
 }
 
-print("-- Fading page: Out of Range")
+print("-- Fading page: Out of Range and Element-Specific Alpha")
 do
-    local body = builderBody("BuildOutOfRangeGroup")
-    checkCensus(census(body), OUT_OF_RANGE, "out of range")
-    checkShared("BuildOutOfRangeGroup", "Out of Range", "1")
+    local range = builderBody("BuildRangeCheckGroup")
+    local element = builderBody("BuildElementAlphaGroup")
+    checkCensus(census(range .. "\n" .. element), OUT_OF_RANGE, "out of range (both halves, in order)")
+    eq(#census(range), 5, "out of range: the range half is the first five of the classic box's controls")
 
-    -- No hoist and no group gate: there is no boolean here that means "am I
-    -- doing anything at all".
-    check(body:find("hoistToggle", 1, true) == nil,
-          "out of range: the builder has no hoist branch, because there is nothing to hoist")
-    check(body:find("disableChildrenOn", 1, true) == nil,
-          "out of range: ...and no group gate -- oorEnabled greys twelve sliders, not the group")
+    -- ☠ CLASSIC STILL MOUNTS THE WHOLE BOX: both halves, back to back, once.
+    local whole = PAGE:match("local function BuildOutOfRangeGroup%(tools2%)(.-)\n        end\n") or ""
+    check(whole:find("BuildRangeCheckGroup(tools2)\n            BuildElementAlphaGroup(tools2)", 1, true) ~= nil,
+          "classic: BuildOutOfRangeGroup mounts the range half then the element half, into one box")
+    local rangeAt = PAGE:find("local function BuildRangeCheckGroup(tools2)", 1, true)
+    local elemAt  = PAGE:find("local function BuildElementAlphaGroup(tools2)", 1, true)
+    local wholeAt = PAGE:find("local function BuildOutOfRangeGroup(tools2)", 1, true)
+    check(rangeAt and elemAt and wholeAt and rangeAt < elemAt and elemAt < wholeAt,
+          "classic: ...declared after both halves, so it closes over the real functions")
+    local box = PAGE:match('local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%["Out of Range"%]%)')
+    check(box ~= nil and PAGE:find("BuildOutOfRangeGroup({\n                group = " .. box .. ",", 1, true) ~= nil
+      and PAGE:find("Add(" .. box .. ", nil, 1)", 1, true) ~= nil,
+          "classic: the Out of Range box still mounts the whole builder, in column 1")
 
-    local declared = tonumber(PAGE:match("local OUT_OF_RANGE_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "out of range: the page declares the row's count in one place")
-    eq(declared, settingsIn(OUT_OF_RANGE), "out of range: ...every setting in the census, nothing hoisted out of it")
-
-    local opts = rowOpts("Out of Range")
-    check(opts:find("toggle", 1, true) == nil,
-          "out of range: the row declares no toggle -- a mode switch is not an on/off")
-    check(opts:find("onToggle", 1, true) == nil,
-          "out of range: ...and so no commit either")
-    check(opts:find("summary%s*=%s*OutOfRangeSummary") ~= nil,
-          "out of range: ...it does declare a summary")
-    check(opts:find("count%s*=%s*OUT_OF_RANGE_COUNT") ~= nil,
-          "out of range: ...and the declared count, not a literal")
-
-    -- The tick and the footer still apply: every key here is an ordinary
-    -- per-mode profile key, which is what the defaults engine answers for.
-    check(PAGE:find("tools.ClaimKeys(oorRow, oorContent)", 1, true) ~= nil,
-          "out of range: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(oorRow)", 1, true) ~= nil,
-          "out of range: ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(oorRow, ApplyOutOfRange)", 1, true) ~= nil,
-          "out of range: ...and its footer pushes spell, interval and alphas back out")
-
-    -- The apply is the group's own half, named once: the range spell (which also
-    -- repaints the active-spell label and clears the custom box), the interval,
-    -- and a repaint for the alphas.
-    local apply = PAGE:match("local function ApplyOutOfRange%(%)(.-)\n            end")
-    check(apply ~= nil, "out of range: the group's apply is a named function")
-    if apply then
-        check(apply:find("SetRangeSpellValue()", 1, true) ~= nil,
-              "out of range: ...it pushes the range spell back into the checker")
-        check(apply:find("DF:SetRangeUpdateInterval(db.rangeUpdateInterval)", 1, true) ~= nil,
-              "out of range: ...and the interval back into the ticker")
-        check(apply:find("DF:RefreshAllVisibleFrames()", 1, true) ~= nil,
-              "out of range: ...and repaints, which is what the alpha sliders do")
-    end
-
-    -- ☠ THE ELEMENT-SPECIFIC TICK USES THE PANE'S OWN REFRESH. It drives a
-    -- hideOn inside this group, so the pane changes HEIGHT when it is clicked
-    -- and the panel around it has to be told; the page's own refresh never
-    -- reaches a group living in a popout holder. In classic the tools2 hook IS
-    -- self:RefreshStates, so nothing changed there.
-    local tick = body:match('CreateCheckbox%(parent, L%["Enable Element%-Specific Alpha"%].-\n            end%), 30%)')
-    check(tick ~= nil, "out of range: the element-specific tick is in the builder")
-    if tick then
-        check(tick:find("tools2.refreshStates()", 1, true) ~= nil,
-              "out of range: ...and it reflows the pane rather than only the page")
-        check(tick:find("self:RefreshStates()", 1, true) == nil,
-              "out of range: ...never the page alone, which a pane would not hear")
-    end
-
-    -- ☠ THE TWO BUILD-TIME db SEEDS STAY INSIDE THE BUILDER, ahead of the
-    -- control that reads them. A pane is built EAGERLY (page build, not first
-    -- open), so they still land at the moment they always did -- which is what
-    -- the export byte-identity gate measures.
-    check(body:find("if db.rangeCheckSpellID == nil then", 1, true) ~= nil,
-          "out of range: the spell-ID seed is still in the builder")
-    check(body:find("if db.rangeUpdateInterval == nil then", 1, true) ~= nil,
-          "out of range: ...and so is the interval seed")
+    -- The two build-time seeds, still ahead of the controls that read them.
+    check(range:find("if db.rangeCheckSpellID == nil then", 1, true) ~= nil
+      and range:find("if db.rangeUpdateInterval == nil then", 1, true) ~= nil,
+          "out of range: both db seeds are still in the range builder")
     local seeds = 0
     for _ in PAGE:gmatch("if db%.range%w+ == nil then") do seeds = seeds + 1 end
-    eq(seeds, 2, "out of range: ...two seeds on the page, not four -- neither was duplicated")
+    eq(seeds, 2, "out of range: ...two seeds on the page -- neither was duplicated")
+    check(range:find("self.rangeSpellInput = customSpellInput", 1, true) ~= nil
+      and range:find("self.rangeSpellInfoLabel = infoLabel", 1, true) ~= nil,
+          "out of range: the custom spell box and the active-spell label are still published on the page")
 
-    -- The bespoke plumbing: the input and the info label are reachable from the
-    -- page's own fields, which is what makes SetRangeSpellValue and
-    -- RefreshRangeInfoLabel work in BOTH layouts.
-    check(body:find("self.rangeSpellInput = customSpellInput", 1, true) ~= nil,
-          "out of range: the custom spell box is published on the page")
-    check(body:find("self.rangeSpellInfoLabel = infoLabel", 1, true) ~= nil,
-          "out of range: ...and so is the active-spell label")
-    check(body:find("local function ApplyCustomSpellID()", 1, true) ~= nil,
-          "out of range: the custom spell ID commit stays with the box it reads")
+    -- The element half: its switch skipped when the header carries it; the
+    -- tick's callback still reflows whatever it is built into.
+    check(element:find("if not tools2.hoistToggle then", 1, true) ~= nil,
+          "element alpha: the in-body switch is skipped when the header carries it")
+    local tick = element:match('CreateCheckbox%(parent, L%["Enable Element%-Specific Alpha"%].-end%), 30%)')
+    check(tick ~= nil and tick:find("tools2.refreshStates()", 1, true) ~= nil,
+          "element alpha: ...and in classic it still reflows through tools2")
+    check(range:find("hoistToggle", 1, true) == nil and range:find("disableChildrenOn", 1, true) == nil,
+          "out of range: the range half has no toggle and no group gate")
+
+    local block, call = sectionBlock("Out of Range", "BuildRangeCheckGroup")
+    check(call:find('OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)', 1, true) ~= nil,
+          "out of range: a card keyed fading_range in column 1 -- no tick, no pin")
+    check(block:find("BuildRangeCheckGroup({ group = rangeBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          "out of range: mounts the range half as classic does")
+
+    local block2, call2 = sectionBlock("Element-Specific Alpha", "BuildElementAlphaGroup")
+    check(call2:find('OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil, BuildElementAlphaGroup, {', 1, true) ~= nil,
+          "element alpha: a card keyed fading_elements in column 1, pinnable from its own builder")
+    check(call2:find('db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"]', 1, true) ~= nil,
+          "element alpha: the header tick is bound to oorEnabled under the checkbox's own name")
+    check(call2:find("self:RefreshStates()", 1, true) ~= nil and call2:find("RefreshCurrentPage", 1, true) == nil,
+          "element alpha: ...committing through a state pass (which swaps the frame-level slider), never a rebuild")
+    check(block2:find("BuildElementAlphaGroup({ group = elementBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          "element alpha: mounts the element half plus hoistToggle for its header tick")
+
+    local oor = PAGE:match("local function OutOfRangeSummary%(d%)(.-)\n            end")
+    check(oor ~= nil and oor:find("if d.oorEnabled then return \"\" end", 1, true) ~= nil and oor:find('L%["Alpha"%]') ~= nil,
+          "summary: Out of Range names the frame-level alpha, and only while it is the one in use")
+    local ele = PAGE:match("local function ElementAlphaSummary%(d%)(.-)\n            end")
+    check(ele ~= nil and ele:find('L%["Health Bar Alpha"%]') ~= nil,
+          "summary: Element-Specific Alpha names which alpha it prints")
 end
 
 -- ============================================================
--- 3. THE TWO HOISTED-TOGGLE ROWS
--- Each group's enable is the textbook hoist: keepEnabled + disableChildrenOn in
--- classic, which is the shape of "am I doing anything at all".
+-- 3. THE TWO FEATURE FADES
 -- ============================================================
 local DEAD_FADE = {
     { "checkbox",    "Enable Dead Fade",        "fadeDeadFrames",          30 },
@@ -345,228 +262,76 @@ local HEALTH_FADE = {
     { "slider",   "Frame Alpha (Above Threshold)",    "healthFadeAlpha",     55 },
 }
 
-local HOISTED = {
-    { builder = "BuildDeadFadeGroup", label = "Dead/Offline Fading",
-      golden = DEAD_FADE, countVar = "DEAD_FADE_COUNT", column = "2",
-      row = "deadRow", toggleKey = "fadeDeadFrames",
-      toggleLabel = "Enable Dead Fade", commit = "OnDeadFadeToggle",
-      summary = "DeadFadeSummary", apply = "ApplyDeadFade",
-      -- What the suppressed checkbox ran, which the commit has to run for it.
-      -- Dead/Offline's is exactly its group apply, so the commit calls that by
-      -- name rather than repeating its two lines.
-      commitRuns = "ApplyDeadFade()" },
-    { builder = "BuildHealthFadeGroup", label = "Health Threshold Fading",
-      golden = HEALTH_FADE, countVar = "HEALTH_FADE_COUNT", column = "2",
-      row = "hfRow", toggleKey = "healthFadeEnabled",
-      toggleLabel = "Enable Health Threshold Fade", commit = "OnHealthFadeToggle",
-      summary = "HealthFadeSummary", apply = "ApplyHealthFade",
-      -- ⚠ NOT ApplyHealthFade. The group's apply also invalidates the fade
-      -- curve, which is the ALPHA slider's half; the suppressed enable tick ran
-      -- a frame update and a repaint, and the commit runs exactly that.
-      commitRuns = "DF:UpdateAllFrames()" },
+local CARDS = {
+    { builder = "BuildDeadFadeGroup", label = "Dead/Offline Fading", key = "fading_dead",
+      golden = DEAD_FADE, summary = "DeadFadeSummary", toggleKey = "fadeDeadFrames",
+      toggleLabel = "Enable Dead Fade", runs = "DF:UpdateAllFrames()" },
+    { builder = "BuildHealthFadeGroup", label = "Health Threshold Fading", key = "fading_health",
+      golden = HEALTH_FADE, summary = "HealthFadeSummary", toggleKey = "healthFadeEnabled",
+      toggleLabel = "Enable Health Threshold Fade", runs = "DF:UpdateAllFrames()" },
 }
 
-for _, g in ipairs(HOISTED) do
+for _, g in ipairs(CARDS) do
     print("-- Fading page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.column)
 
-    -- The hoist, and the arithmetic it implies: the checkbox is still IN the
-    -- builder -- classic needs it -- behind the one flag the popout passes.
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          g.label .. ": the enable checkbox is skipped when the row has hoisted it")
-    check(body:find(".keepEnabled = true", 1, true) ~= nil,
-          g.label .. ": ...and in classic it stays live under the group's own grey")
-    local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-    check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, #g.golden - 1, g.label .. ": ...the census less the hoisted tick")
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    -- declaration, classic mount, card mount, and the card's pin argument
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
+    local esc = g.label:gsub("%p", "%%%0")
+    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, 2)", 1, true) ~= nil,
+          g.label .. ": the classic box keeps its header and column 2")
 
-    -- ☠ THE GROUP GATE IS INSIDE THE BUILDER. Left on the page-level box, the
-    -- pane would not grey while the group is off and the two layouts would
-    -- disagree.
+    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil and body:find(".keepEnabled = true", 1, true) ~= nil,
+          g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in classic")
     check(body:find("group.disableChildrenOn = function(d) return not d." .. g.toggleKey .. " end", 1, true) ~= nil,
-          g.label .. ": the group's grey-while-off gate is inside the builder")
+          g.label .. ": the body greys while the tick is off, from inside the builder")
 
-    local opts = rowOpts(g.label)
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"' .. g.toggleKey .. '"%s*}') ~= nil,
-          g.label .. ": the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": ...it declares its own summary")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*" .. g.commit) ~= nil,
-          g.label .. ": ...and a commit that is not a page rebuild")
-    check(opts:find("offText", 1, true) == nil,
-          g.label .. ": no offText -- off here really does mean no fading")
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD: a rebuild retires every widget on the
-    -- page including the row being clicked, and the row's write path calls
-    -- row.Refresh() after this returns -- on a dead frame.
-    local commit = PAGE:match("local function " .. g.commit .. "%(%)(.-)\n            end")
-    check(commit ~= nil, g.label .. ": the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              g.label .. ": ...and never rebuilds the page")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              g.label .. ": ...it re-runs the state passes instead")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              g.label .. ": ...and reflows the open panes")
-        check(commit:find(g.commitRuns, 1, true) ~= nil,
-              g.label .. ": ...having first run what the suppressed checkbox ran")
-    end
-
-    -- The hoisted toggle keeps its search entry under the SAME label and key the
-    -- suppressed checkbox carried, or the setting becomes unfindable in the
-    -- popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(' .. g.row .. ', L["' .. g.toggleLabel .. '"], "' .. g.toggleKey .. '", ' .. g.commit .. ')', 1, true) ~= nil,
-          g.label .. ": the hoisted toggle keeps its search entry")
-
-    -- The strip. Every key behind these rows is a per-mode profile key the
-    -- defaults engine answers for, so both get the amber tick and the footer.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-          g.label .. ": ...and Reset Group / Hold: Defaults run the group's own apply")
-end
-
--- The health-fade apply is the one that has to invalidate the cached curve: a
--- written alpha is not read again until it does.
-print("-- Fading page: the health fade apply")
-do
-    local apply = PAGE:match("local function ApplyHealthFade%(%)(.-)\n            end")
-    check(apply ~= nil, "health fade: the group's apply is a named function")
-    if apply then
-        check(apply:find("RefreshHealthFade()", 1, true) ~= nil,
-              "health fade: ...and it runs the alpha slider's own refresh, curve invalidation and all")
-        check(apply:find("DF:UpdateAllFrames()", 1, true) ~= nil,
-              "health fade: ...plus the frame update the threshold and dispel ticks run")
-    end
+    local block, call = sectionBlock(g.label, g.builder .. "({ group")
+    check(call:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", 2, ' .. g.summary .. ', nil, nil, ' .. g.builder .. ', {', 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column 2, its own summary, pinnable from its own builder")
+    check(call:find('db = db, key = "' .. g.toggleKey .. '", label = L["' .. g.toggleLabel .. '"]', 1, true) ~= nil,
+          g.label .. ": the header tick is bound to " .. g.toggleKey .. " under the checkbox's own name")
+    check(call:find(g.runs, 1, true) ~= nil and call:find("self:RefreshStates()", 1, true) ~= nil
+      and call:find("RefreshCurrentPage", 1, true) == nil,
+          g.label .. ": ...committing what the checkbox ran plus a state pass, never a rebuild")
+    check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
+          g.label .. ": mounts the builder as classic does, plus hoistToggle for its header tick")
 end
 
 -- ============================================================
--- 4. THE THREE SUMMARIES
--- All three follow the sweep's convention: at most four items, a fixed order,
--- "\194\183" between them, WORDS localised and numbers raw -- and every word is
--- a locale string the page already ships (section 6 proves that outright).
+-- 4. THE CARDS TOGETHER, THE CLASSIC BOXES AND THE LOCALE
 -- ============================================================
-print("-- Fading page: the summaries")
+print("-- Fading page: the cards together, the classic boxes, the locale")
 do
-    -- Out of Range has TWO SHAPES because the group has two: with
-    -- element-specific alpha off there is one number and it is the frame's;
-    -- with it on the frame slider is HIDDEN and twelve element alphas apply, so
-    -- the row names the health bar's -- the element that covers most of the
-    -- frame -- under that slider's own label.
-    local oor = PAGE:match("local function OutOfRangeSummary%(d%)(.-)\n            end")
-    check(oor ~= nil, "summary: Out of Range has a named summary on the page")
-    if oor then
-        check(oor:find("if d.oorEnabled then", 1, true) ~= nil,
-              "summary: ...it branches on the mode rather than printing one number for both")
-        check(oor:find('L%["Health Bar Alpha"%]') ~= nil,
-              "summary: ...the element-specific case names WHICH alpha it is")
-        check(oor:find('L%["Alpha"%]') ~= nil,
-              "summary: ...and the frame-level case uses the word the Frame Fade row prints")
-        check(oor:find("\\194\\183", 1, true) ~= nil,
-              "summary: ...separated by the convention's dot")
-        local items = 0
-        for _ in oor:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: at most four items, per the summary convention")
-    end
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading",
+       "order: the four cards open in reading order")
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 3, "ticks: three mounts skip their in-body toggle -- one checkbox per setting")
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Out of Range"]', 1, true)
+    check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    -- Dead/Offline reports only what is DOING something: six of its seven alphas
-    -- ship at 1, and a row reading "Health Bar Alpha 1.00" on every default
-    -- profile is noise (the Border row's rule).
-    local dead = PAGE:match("local function DeadFadeSummary%(d%)(.-)\n            end")
-    check(dead ~= nil, "summary: Dead/Offline has a named summary on the page")
-    if dead then
-        check(dead:find("hp < 1", 1, true) ~= nil,
-              "summary: ...the health bar alpha is named only when it actually fades")
-        check(dead:find('L%["Custom Dead Background"%]') ~= nil,
-              "summary: ...and the custom background in that checkbox's own words")
-        local items = 0
-        for _ in dead:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: at most four items here too")
-    end
-
-    -- Health Threshold prints the two numbers the feature IS, in control order.
-    local hf = PAGE:match("local function HealthFadeSummary%(d%)(.-)\n            end")
-    check(hf ~= nil, "summary: Health Threshold has a named summary on the page")
-    if hf then
-        check(hf:find('format("%d%%"', 1, true) ~= nil,
-              "summary: ...the threshold wears its percent sign")
-        check(hf:find('L%["Alpha"%]') ~= nil,
-              "summary: ...and the opacity the word every other row uses for one")
-        local items = 0
-        for _ in hf:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: at most four items here too")
-    end
-end
-
--- ============================================================
--- 5. THE PAGE'S OWN ORDER AND FURNITURE
--- ============================================================
-print("-- Fading page: the boxes, the spacer, the band and the page's own order")
-do
-    -- ☠ THE COPY BUTTON'S PREFIX LIST IS UNTOUCHED. The same list drives Copy,
-    -- Sync AND Reset Page, and the prefixes are real key prefixes rather than
-    -- the boxes' names -- which is the bug its own comment records.
     check(PAGE:find('Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
           "page: the copy button's prefix list is exactly what it was")
-
-    -- ---- three bare 280 boxes left, all inside a classicLayout arm -----
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 3, "boxes: three bare 280 boxes left, and they are the classic branch's own")
-    -- Nothing stays inline in the popout layout, so nothing wears the band skin.
-    check(PAGE:find("INLINE_BOX", 1, true) == nil,
-          "boxes: no stay-inline box on this page -- all three groups earned a row")
-
-    -- ---- the classic-only spacer --------------------------------------
-    -- A "both" widget takes the LOWER of the two columns and drops both to it,
-    -- so this spacer is column 2 in classic and does not exist in the popout
-    -- layout, which has no columns left to balance.
+    eq(bare, 3, "classic: three bare 280 boxes, all the classic branch's own")
     local spacer = 0
     for _ in PAGE:gmatch("AddSpace%(GUI%.Space%.block, 2%)") do spacer = spacer + 1 end
-    eq(spacer, 1, "order: the column-2 spacer is declared once")
-    local spacerAt = PAGE:find("AddSpace(GUI.Space.block, 2)", 1, true)
-    local hfBoxAt  = PAGE:find('hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"])', 1, true)
-    check(spacerAt ~= nil and hfBoxAt ~= nil and spacerAt < hfBoxAt,
-          "order: ...directly above the box it separates, inside the classic arm")
+    eq(spacer, 1, "classic: the column-2 spacer is declared once, inside the classic arm")
 
-    -- ---- the band goes in after its last row --------------------------
-    -- ☠ `Add` resolves a widget's slot height on the spot, so a band has to be
-    -- added AFTER the last row has been put into it.
-    local bandAdd = PAGE:find('Add(fadeBand, nil, "both")', 1, true)
-    local lastRow = nil
-    do
-        local at = 1
-        while true do
-            local s = PAGE:find("fadeBand:AddWidget(GUI:CreatePopoutRow(", at, true)
-            if not s then break end
-            lastRow, at = s, s + 1
-        end
-    end
-    check(bandAdd ~= nil and lastRow ~= nil and lastRow < bandAdd,
-          "order: the band spans both columns and goes in after its last row")
-    local rows = 0
-    for _ in PAGE:gmatch("fadeBand:AddWidget%(GUI:CreatePopoutRow%(") do rows = rows + 1 end
-    eq(rows, 3, "order: three rows in it, which is every group on the page")
-
-    -- ---- the page's own furniture is untouched -------------------------
-    check(PAGE:find('AddSpace(GUI.Space.block, "both")', 1, true) ~= nil,
-          "page: the block spacer before See Also survives")
-end
-
--- ============================================================
--- 6. ZERO NEW LOCALE STRINGS
--- Every L key this page asks for -- labels, tooltips and the three summaries'
--- own words -- already ships in enUS. A sweep that invented a string would have
--- to add it there in the same commit, and this is the gate that says so.
--- ============================================================
-print("-- Fading page: no new locale strings")
-do
+    -- Every string the page asks for ships in enUS. ONE is new with this
+    -- conversion: the second card's title, "Element-Specific Alpha".
     local loc = df_file_source("Locales/enUS.lua")
     local have = {}
     for k in loc:gmatch('L%["([^"]+)"%]%s*=%s*true') do have[k] = true end
@@ -580,88 +345,6 @@ do
             end
         end
     end
-    eq(missing, 0, "locale: every string this page asks for already exists -- zero new keys")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
--- six settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and its strip offers to pin a second copy rather than
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the PANE rather than
--- off the declared count, so a row cannot claim its way onto the plate. Only the
--- refusal can be exercised against a real group, and that lives in
--- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
--- asked, and that nothing else did.
---
--- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
--- about SETTINGS; CountVisibleChildren answers for every entry a layout would
--- place, blurbs and separators included. Where the two differ below, the larger
--- is the one that has to fit.
---
--- One of this page's three. Health Threshold Fading holds three settings
--- behind its own tick and folds away with it, which is where a default
--- profile leaves it. Out of Range holds seventeen and Dead Fade nine; both
--- are far past INLINE_MAX and keep the strip they have.
--- ============================================================
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
-    -- whether its call carries the opt-in. Read as "this declaration up to the
-    -- next one": a balanced-brace match would be defeated by the builder closure
-    -- inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 1, "inline: 1 of this page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and then wired to a
-    -- different row fails here instead of shipping.
-    local function buildOf(var)
-        local a = PAGE:find("local " .. var .. " = ", 1, true)
-        local b = a and PAGE:find("}))", a, true)
-        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
-    end
-
-    for _, spec in ipairs({
-        { "hfRow", "hfMount" },                      -- Health Threshold Fading, 3
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and inlineMounts[mount] == true,
-              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
-    end
-
-    -- ...and the rows whose panes are too big for a plate keep the strip they
-    -- have. Named rather than inferred from the count above: a row that lost its
-    -- opt-in and a row that never had one are the same number, and only one of
-    -- them is a regression.
-    for _, spec in ipairs({
-        { "oorRow", "oorMount" },                    -- Out of Range, 17
-        { "deadRow", "deadMount" },                  -- Dead Fade, 9
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and not inlineMounts[mount],
-              "inline: ..." .. spec[1] .. " keeps its pane behind the strip")
-    end
+    eq(missing, 0, "locale: every string this page asks for exists in enUS")
+    check(have["Element-Specific Alpha"] == true, "locale: ...including the one new title")
 end

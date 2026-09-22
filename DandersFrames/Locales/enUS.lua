@@ -898,6 +898,7 @@ L["Editing:"] = true
 L["Edits apply there too."] = true
 L["Also used by: %s"] = true
 L["Templates can be used by Party, Raid, Auto Layouts and Pinned Frames."] = true
+L["Element-Specific Alpha"] = true
 L["Ellipsis"] = true
 L["Enable AFK Icon"] = true
 L["Enable Binding Tooltips"] = true

@@ -1250,36 +1250,45 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- column 1, then Dead/Offline Fading and Health Threshold Fading stacked in
         -- column 2 with the block spacer between them.
         --
-        -- POPOUT turns all three into feature rows in ONE band. Nothing stays
-        -- inline: every group on this page is a multi-control group, and the
-        -- smallest of them still holds three settings.
+        -- MODERN is the Debuff Bar's collapsible-card design: two settings per row
+        -- inside a card wide enough, dim captions, the value summary in a shut
+        -- card's corner, Expand All / Collapse All at the top. FOUR cards, because
+        -- the Out of Range box is split in two (see its builder):
         --
-        -- ⚠ THE BAND CARRIES NO HEADER, which is the Sorting page's sortBand rule
-        -- rather than an omission. A header names the SECTION -- and the section
-        -- here is the whole page, which the tab already calls "Fading". Written
-        -- above three rows labelled "Out of Range", "Dead/Offline Fading" and
-        -- "Health Threshold Fading" it would say the word a fourth time and name
-        -- nothing the rows do not.
+        --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
+        --              oorEnabled)
+        --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
+        --              Threshold Fading (tick: healthFadeEnabled)
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
-        -- { group, parent, refreshStates } and, where a toggle is hoisted,
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
-        -- always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_fading_page_builders.lua pins the inventory
-        -- of each one against the census taken before the move.
+        -- Every feature that has an enable carries it as its header tick (one
+        -- checkbox per setting, the builder's own skipped through hoistToggle).
+        -- The three fades are how a frame LOOKS, so they are pinnable; the range
+        -- check is behaviour and is not.
+        --
+        -- ⚠ NO CATEGORY HEADERS. A header names a SECTION -- and the section here
+        -- is the whole page, which the tab already calls "Fading".
+        --
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where the toggle moved into the
+        -- header, `hoistToggle`. The classic branch mounts the SAME builders into
+        -- the boxes it always built -- test_fading_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which is
-        -- what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- The page's one band: full-width and chromeless, because a feature row's
-        -- popout docks outside the WINDOW and runs a beam back to the row, so a row
-        -- that stopped 280px in would leave that beam crossing half the page.
-        local fadeBand
-        if tools then
-            fadeBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- Element-specific alpha sliders grey out (disabled-in-place) when the
@@ -1300,16 +1309,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- them, which was fine while the page WAS straight-line code. The builders
         -- are CLOSURES now, and a closure captures the upvalue that exists when it
         -- is CREATED -- so a builder declared above one of these would see nil
-        -- rather than the function. The rows need them from outside the builder as
-        -- well: a footer's Reset Group and Hold: Defaults have to push the same
-        -- work the group's own widgets push.
+        -- rather than the function.
         --
         -- ⚠ THE RANGE PAIR READS THE PAGE'S OWN FIELDS (self.rangeSpellInput,
         -- self.rangeSpellInfoLabel) rather than locals, and that indirection is
-        -- what makes them work in BOTH layouts. In the popout layout the input and
-        -- the label live in a pane, and a pane is built EAGERLY at page-build time
-        -- -- so the fields are set by the time anything calls these, exactly as
-        -- they were when the controls sat on the page.
+        -- what makes them work in BOTH layouts: the builder stamps them wherever
+        -- it is mounted, the classic box or the Out of Range card. (Which is why
+        -- that card grows no pin: a second, pinned copy would re-point them.)
         local function RefreshRangeInfoLabel()
             if self.rangeSpellInfoLabel and self.rangeSpellInfoLabel.SetText and DF.GetCurrentRangeSpellInfo then
                 local info = DF:GetCurrentRangeSpellInfo()
@@ -1338,34 +1344,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
         end
 
-        -- ===== OUT OF RANGE (a 280 box in column 1 in classic, the band's first
-        -- row) =====
+        -- ===== OUT OF RANGE (a 280 box in column 1 in classic, TWO cards in
+        -- Modern) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db keys, same callbacks, same slot heights,
-        -- same hideOn/disableOn.
+        -- same hideOn/disableOn -- split into the two builders below, which the
+        -- classic box mounts back to back (BuildOutOfRangeGroup) and Modern mounts
+        -- as two cards.
         --
-        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
-        -- The two rows under it each have one boolean meaning "am I doing anything
-        -- at all"; this group has none. oorEnabled looks like the candidate and is
-        -- the wrong answer twice over: it is a sub-MODE rather than an enable (out
-        -- of range fades either way -- one frame-level alpha, or twelve
-        -- per-element ones), and it HIDES the frame-level slider, so a row tick
-        -- switched off would grey the one control the group is left with. Hoisting
-        -- it would also claim it speaks for the whole pane, which is the Colour
-        -- Picker row's precedent and the reason the Frame Fade row has no tick
-        -- either. So the row is a way in and nothing else -- the kit draws no tick,
-        -- reserves its column so the row still lines up with the two below it, and
-        -- the group reads as permanently on, which it is. It still gets the amber
-        -- tick and the footer: every key here is an ordinary per-mode profile key
-        -- the defaults engine answers for.
+        -- ☠ WHY TWO. The range check (spell, custom spell, interval, frame-level
+        -- alpha) has no on/off: out of range fades either way. The twelve
+        -- per-element alphas DO -- oorEnabled -- and as one card that switch could
+        -- not go in the header without claiming to speak for the range spell too,
+        -- and it HIDES the frame-level slider, so a tick over the whole group
+        -- would grey the one control the group is left with. Split, the second
+        -- card's header carries it honestly, the way the two fades beside it do.
         --
         -- ☠ THE TWO db SEEDS STAY EXACTLY WHERE THEY WERE, inside the builder and
         -- ahead of the control that reads them. They are the page's only build-time
-        -- writes, and a pane is built EAGERLY (page build, not first open), so they
-        -- still land at the moment they always did -- which is what the export
-        -- byte-identity gate measures. Moving them out, or down into the popout's
-        -- open path, would move WHEN a profile changes shape.
-        local function BuildOutOfRangeGroup(tools2)
+        -- writes, so they still land at the moment they always did -- which is
+        -- what the export byte-identity gate measures.
+        local function BuildRangeCheckGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
             -- Build dropdown options dynamically
@@ -1470,17 +1469,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Frame-level alpha (shown when element-specific is disabled)
             local frameLevelAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             frameLevelAlpha.hideOn = HideFrameLevelAlpha
+        end
+
+        -- ===== ELEMENT-SPECIFIC ALPHA (the second half of the classic Out of
+        -- Range box, a card of its own in Modern) =====
+        -- The switch and the twelve per-element alphas behind it. Verbatim, less
+        -- the switch when the card's HEADER carries it.
+        local function BuildElementAlphaGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
             -- Element-specific toggle.
             -- ⚠ tools2.refreshStates, NOT self:RefreshStates. This tick drives a
-            -- hideOn on the slider above it, so the pane changes HEIGHT when it is
-            -- clicked and the panel around it has to be told; the page's own
-            -- refresh alone never reaches a group living in a popout holder. In
-            -- classic the tools2 hook IS self:RefreshStates, so nothing changed
-            -- there. (The Frame Fade row's split checkbox, same reason.)
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
-                tools2.refreshStates()
-            end), 30)
+            -- hideOn on the frame-level slider, so a pinned panel holding it
+            -- changes HEIGHT when it is clicked and has to be told; the page's own
+            -- refresh alone never reaches a group living in a popout holder. On
+            -- the page the tools2 hook IS self:RefreshStates.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
+                    tools2.refreshStates()
+                end), 30)
+            end
 
             -- Element-specific sliders (shown when enabled)
             local oorHealth = group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0.0, 1.0, 0.05, db, "oorHealthBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
@@ -1523,6 +1531,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             oorAuraDesigner.disableOn = HideOOROptions
         end
 
+        -- The classic box's builder: both halves, back to back, into the ONE box,
+        -- in the order the seventeen controls always had.
+        local function BuildOutOfRangeGroup(tools2)
+            BuildRangeCheckGroup(tools2)
+            BuildElementAlphaGroup(tools2)
+        end
+
         if classicLayout then
             -- ===== OUT OF RANGE GROUP (Column 1) =====
             local oorGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1534,98 +1549,87 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(oorGroup, nil, 1)
         else
-            -- The summary, per the sweep's convention: at most four items, a fixed
-            -- order, "\194\183" between them, WORDS localised and numbers raw, and
-            -- every read guarded because a profile mid-migration may be missing any
-            -- of these keys.
+            -- The two summaries, per the sweep's convention: at most four items, a
+            -- fixed order, "\194\183" between them, WORDS localised and numbers
+            -- raw, every read guarded because a profile mid-migration may be
+            -- missing any of these keys.
             --
-            -- TWO SHAPES, because the group has two -- the same reason the Frame
-            -- Fade row's summary has two. With element-specific alpha OFF there is
-            -- one number and it is the frame's: L["Alpha"], the word that row
-            -- already prints beside an opacity. With it ON the frame-level slider
-            -- is HIDDEN and twelve element alphas apply, so a single number
-            -- labelled "Alpha" would be a lie -- it names the HEALTH BAR's instead,
-            -- which is the element that covers most of the frame and the one people
-            -- mean by "how faded is it". Its own slider's label says which alpha it
-            -- is, so the mode is legible from the summary alone: a per-element word
-            -- appears only in the per-element mode.
-            --
-            -- ⚠ NOTHING IS INVENTED. Both words are locale strings the page already
-            -- ships -- "Health Bar Alpha" is that slider's own label. The range
-            -- SPELL is deliberately absent: it is a spell name rather than a
-            -- setting value, it is 0 ("Auto") on nearly every profile, and the
-            -- group's own info label already says which one is live.
+            -- Out of Range reports the ONE frame-level alpha, and only while it
+            -- is the one in use: with element-specific alpha on, the frame-level
+            -- slider is hidden and a number labelled "Alpha" would be a lie. The
+            -- range SPELL is deliberately absent -- it is a spell name rather than
+            -- a setting value, and the card's own info label says which is live.
             local function OutOfRangeSummary(d)
                 if not d then return "" end
-                local parts = {}
-                if d.oorEnabled then
-                    local hp = tonumber(d.oorHealthBarAlpha)
-                    if hp then parts[#parts + 1] = format("%s %.2f", L["Health Bar Alpha"], hp) end
-                else
-                    local a = tonumber(d.rangeFadeAlpha)
-                    if a then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
-                end
-                return table.concat(parts, " \194\183 ")
+                if d.oorEnabled then return "" end
+                local a = tonumber(d.rangeFadeAlpha)
+                if not a then return "" end
+                return format("%s %.2f", L["Alpha"], a)
+            end
+            -- Element-Specific Alpha names the HEALTH BAR's alpha -- the element
+            -- that covers most of the frame and the one people mean by "how
+            -- faded is it". A shut card reads "Off" while its tick is off.
+            local function ElementAlphaSummary(d)
+                if not d then return "" end
+                local hp = tonumber(d.oorHealthBarAlpha)
+                if not hp then return "" end
+                return format("%s %.2f", L["Health Bar Alpha"], hp)
             end
 
-            -- Seventeen -- the spell dropdown, the custom spell box, the interval,
-            -- the frame alpha, the element-specific tick and its twelve sliders.
-            -- The active-spell label is prose, not a setting. Nothing is hoisted
-            -- onto the row, because there is no tick to hoist.
-            local OUT_OF_RANGE_COUNT = 17
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
 
-            -- The group's own apply, named once so the footer's Reset Group and
-            -- Hold: Defaults run exactly what the group's controls run between
-            -- them: the range spell back into the range checker (which also
-            -- repaints the active-spell label and clears the custom box), the
-            -- interval back into the ticker, and a repaint for the alphas.
-            local function ApplyOutOfRange()
-                SetRangeSpellValue()
-                if DF.SetRangeUpdateInterval then
-                    DF:SetRangeUpdateInterval(db.rangeUpdateInterval)
-                end
-                DF:RefreshAllVisibleFrames()
-            end
+            -- ☠ NO TICK, AND NO PIN. Out of range fading has no on/off: it fades
+            -- either way, through the one frame-level alpha or the per-element
+            -- ones below. The range spell and the check interval are behaviour,
+            -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
+            -- for the range helpers -- a pinned second copy would re-point them.
+            local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
+            BuildRangeCheckGroup({
+                group = rangeBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(rangeBand)
 
-            local oorMount, oorContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildOutOfRangeGroup({
-                    group = group, parent = holder,
-                    -- The pane's own reflow: the element-specific tick drives a
-                    -- hideOn inside this group, so the pane changes height when it
-                    -- is clicked. (The closure calls self:RefreshStates too, so the
-                    -- page half is not lost.)
-                    refreshStates = reflow,
+            -- ☠ THE CLASSIC BOX'S SECOND HALF, AS ITS OWN CARD. Twelve per-element
+            -- alphas behind one switch is a feature with an on/off, so the switch
+            -- is the header's tick (hoistToggle) -- the consistency the other two
+            -- fades on this page already have. The commit is the state pass the
+            -- in-body checkbox ran: it greys the twelve here and swaps the
+            -- frame-level slider in the card above in or out. How faded each
+            -- element is is how it LOOKS, so it is pinnable.
+            local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil,
+                BuildElementAlphaGroup, {
+                    db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
+                    onChanged = function()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end)
-            local oorRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Out of Range"],
-                db      = tools.RowDB,
-                summary = OutOfRangeSummary,
-                count   = OUT_OF_RANGE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = oorMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(oorRow, oorContent)
-            tools.WireModifiedTick(oorRow)
-            tools.WireFooter(oorRow, ApplyOutOfRange)
+            BuildElementAlphaGroup({
+                group = elementBand, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(elementBand)
         end
 
-        -- ===== DEAD/OFFLINE FADING (a 280 box in column 2 in classic, the band's
-        -- second row) =====
-        -- The textbook hoist: one enable with keepEnabled and a group gate that
-        -- greys everything behind it, which is the shape of "am I doing anything at
-        -- all".
+        -- ===== DEAD/OFFLINE FADING (a 280 box in column 2 in classic, the first
+        -- column-2 card in Modern) =====
+        -- The textbook header tick: one enable with keepEnabled and a group gate
+        -- that greys everything behind it, which is the shape of "am I doing
+        -- anything at all".
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while dead fading is off; the pane has to do the same, and
-        -- one builder serving both is what stops the two drifting. (The row's
-        -- hoisted tick greys the pane as well, from the outside.)
+        -- own children while dead fading is off; the card's body has to do the
+        -- same while its header tick is off, and one builder serving both is what
+        -- stops the two drifting.
         local function BuildDeadFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- Suppressed when the card's HEADER carries this tick. Still built in classic,
             -- where it is the group's only on/off control.
             if not tools2.hoistToggle then
                 local deadFadeEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dead Fade"], db, "fadeDeadFrames", function()
@@ -1673,14 +1677,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(deadGroup, nil, 2)
         else
-            -- The row's own tick already says whether dead fading is on, so the
-            -- summary is about what is BEHIND it -- and only where that is doing
-            -- something. Seven alphas cannot fit, so it names the one that covers
-            -- most of the frame, and only when it actually fades: every one of the
-            -- seven ships at 1 bar the power bar, and a row reading "Health Bar
-            -- Alpha 1.00" on every default profile is noise (the Border row's
-            -- rule). The custom background follows it, in that checkbox's own
-            -- words, because a red dead frame is the other thing people set here.
+            -- The header tick already says whether dead fading is on (a shut card
+            -- reads "Off" while it is not), so the summary is about what is BEHIND
+            -- it -- and only where that is doing something. Seven alphas cannot
+            -- fit, so it names the one that covers most of the frame, and only
+            -- when it actually fades; the custom background follows it, in that
+            -- checkbox's own words.
             local function DeadFadeSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -1690,53 +1692,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Nine: seven alphas, the custom-background tick and its colour. The
-            -- enable tick is HOISTED onto the row, so it is not one of them.
-            local DEAD_FADE_COUNT = 9
-
-            -- The group's own apply, named once so the footer's Reset Group and
-            -- Hold: Defaults run what the group's controls run between them.
-            local function ApplyDeadFade()
-                DF:UpdateAllFrames()
-                DF:RefreshAllVisibleFrames()
-            end
-
-            -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
-            -- page including the row being clicked, and the row's write path calls
-            -- row.Refresh() after this returns -- on a dead frame.
-            local function OnDeadFadeToggle()
-                ApplyDeadFade()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            local deadMount, deadContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDeadFadeGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    hoistToggle = true,
+            -- Column 2 opens here.
+            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+            -- build its own (hoistToggle). The commit is what the in-body checkbox
+            -- ran (its tools2.refreshStates is the state pass here) -- never a
+            -- page rebuild. How a dead frame is drawn is how it LOOKS, so it is
+            -- pinnable.
+            local band = OpenSection(L["Dead/Offline Fading"], "fading_dead", 2, DeadFadeSummary, nil, nil,
+                BuildDeadFadeGroup, {
+                    db = db, key = "fadeDeadFrames", label = L["Enable Dead Fade"],
+                    onChanged = function()
+                        self:RefreshStates()
+                        DF:UpdateAllFrames()
+                        DF:RefreshAllVisibleFrames()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end)
-            local deadRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Dead/Offline Fading"],
-                db       = tools.RowDB,
-                toggle   = { key = "fadeDeadFrames" },
-                summary  = DeadFadeSummary,
-                count    = DEAD_FADE_COUNT,
-                onToggle = OnDeadFadeToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = deadMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(deadRow, deadContent)
-            tools.WireModifiedTick(deadRow)
-            tools.WireFooter(deadRow, ApplyDeadFade)
-            tools.RegisterHoistedToggle(deadRow, L["Enable Dead Fade"], "fadeDeadFrames", OnDeadFadeToggle)
+            BuildDeadFadeGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ===== HEALTH THRESHOLD FADING (a 280 box in column 2 in classic, the
-        -- band's third row) =====
+        -- second column-2 card in Modern) =====
         -- The same textbook hoist as Dead/Offline: keepEnabled plus a group gate.
         local function BuildHealthFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -1795,11 +1776,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             -- Threshold first, then the opacity it applies: the two numbers the
             -- feature IS, in the order the controls are in. The threshold is a
-            -- percent and wears its sign; the opacity takes L["Alpha"], the word
-            -- the Frame Fade and Border rows already print beside one. Both are
-            -- shown unconditionally rather than only-when-changed: the row is off
-            -- on a default profile, so anyone reading this summary turned the
-            -- feature on and wants the numbers.
+            -- percent and wears its sign; the opacity takes L["Alpha"]. Both are
+            -- shown unconditionally: the feature is off on a default profile (a
+            -- shut card then reads "Off"), so anyone reading this turned it on and
+            -- wants the numbers.
             local function HealthFadeSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -1810,62 +1790,34 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three: the threshold, the dispel escape hatch and the alpha. The
-            -- enable tick is HOISTED onto the row, so it is not one of them.
-            local HEALTH_FADE_COUNT = 3
-
-            -- The group's own apply. RefreshHealthFade is the alpha slider's own
-            -- half (the fade curve is cached, so a written value is not read until
-            -- it is invalidated); the frame update is what the threshold and the
-            -- dispel tick run.
-            local function ApplyHealthFade()
-                DF:UpdateAllFrames()
-                RefreshHealthFade()
-            end
-
-            local function OnHealthFadeToggle()
-                DF:UpdateAllFrames()
-                DF:RefreshAllVisibleFrames()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Three behind the row's own tick, so the group goes on the plate --
-            -- and folds away while the tick is off, which is where a default
-            -- profile sits. The two numbers the feature IS are then readable
-            -- without a click, instead of only through the summary that reports
-            -- them. The tick stays HOISTED: it is the row's toggle.
-            local hfMount, hfContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHealthFadeGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    hoistToggle = true,
+            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+            -- build its own (hoistToggle). The commit is what the in-body checkbox
+            -- ran plus the state pass that greys the body -- never a page rebuild.
+            -- How faded a healthy frame is is how it LOOKS, so it is pinnable.
+            local band = OpenSection(L["Health Threshold Fading"], "fading_health", 2, HealthFadeSummary, nil, nil,
+                BuildHealthFadeGroup, {
+                    db = db, key = "healthFadeEnabled", label = L["Enable Health Threshold Fade"],
+                    tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."],
+                    onChanged = function()
+                        DF:UpdateAllFrames()
+                        DF:RefreshAllVisibleFrames()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end, nil, { inline = true })
-            local hfRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Health Threshold Fading"],
-                db       = tools.RowDB,
-                toggle   = { key = "healthFadeEnabled" },
-                summary  = HealthFadeSummary,
-                count    = HEALTH_FADE_COUNT,
-                onToggle = OnHealthFadeToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = hfMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(hfRow, hfContent)
-            tools.WireModifiedTick(hfRow)
-            tools.WireFooter(hfRow, ApplyHealthFade)
-            tools.RegisterHoistedToggle(hfRow, L["Enable Health Threshold Fade"], "healthFadeEnabled", OnHealthFadeToggle)
+            BuildHealthFadeGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ☠ THE BAND IS ADDED HERE, NOT WHERE IT WAS BUILT. `Add` resolves a
-        -- widget's slot height on the spot, so a band has to go in after the last
-        -- row has been put into it.
-        if not classicLayout then
-            Add(fadeBand, nil, "both")
-        end
+        -- ===== NO BAND TAIL ================================================
+        -- A card's band holds one group and is Add'd by CloseSection the moment
+        -- that group is built, so nothing is deferred to here. Out of Range down
+        -- the left, the two feature fades down the right; on a narrow window the
+        -- page folds to one column in the order above.
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")

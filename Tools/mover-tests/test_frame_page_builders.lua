@@ -1603,8 +1603,9 @@ do
     -- is scoped to the page slice and this one is not.
     local SWEPT = {
         -- ⚠ 20, NOT 21, since Visibility became cards: its Solo Mode opt-in.
-        -- ⚠ 14, NOT 20, since Tooltips followed: its six.
-        ["GUI/Pages/Options.lua"]    = 14,  -- Frame 4 + Pet/Settings/Fading 10
+        -- ⚠ 14, NOT 20, since Tooltips followed: its six. ⚠ 13, NOT 14, since
+        -- Fading followed: Health Threshold Fading.
+        ["GUI/Pages/Options.lua"]    = 13,  -- Frame 4 + Pet/Settings 9
         -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
         -- eleven popout rows became folds on the page, so the five it used to opt
         -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)
