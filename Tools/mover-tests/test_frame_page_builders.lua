@@ -1611,8 +1611,8 @@ do
         -- Appearance, Layout, Position) went the same way. ⚠ 18, NOT 21, since
         -- Missing Buffs became cards: Settings, Appearance and Position. ⚠ 14,
         -- NOT 18, since Defensive Icon followed: Settings, Layout, Appearance,
-        -- Position.
-        ["GUI/Pages/Indicators.lua"] = 14,  -- the two unswept Indicators pages
+        -- Position. ⚠ 4, NOT 14, since Targeted List followed: its ten.
+        ["GUI/Pages/Indicators.lua"] = 4,   -- Personal Targeted, the last unswept page
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
         ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2

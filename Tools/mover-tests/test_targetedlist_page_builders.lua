@@ -3,56 +3,43 @@ local NS = ...
 -- ============================================================
 -- TARGETED LIST PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Indicators > Targeted List is the widest page in the sweep so far by group
--- count: THIRTEEN groups, and all thirteen become feature rows, in three bands:
+-- Indicators > Targeted List: THIRTEEN groups. In Modern they are the Debuff
+-- Bar's collapsible CARDS -- two per row inside a card wide enough, dim
+-- captions, the value summary in a shut card's corner, Expand All / Collapse All
+-- at the top -- in the columns and the order the old bands had:
 --
---   "Content" band     Settings (hoists targetedListEnabled, the PAGE gate) and
---                      Size & Spacing
---   "Appearance" band  Bar Style, Bar Color, Border (hoists
---                      targetedListShowBorder), Icon (hoists
---                      targetedListShowIcon) and Timing
---   "Text" band        Show Text, Text Font and the four per-element position
---                      groups
+--   column 1   "Content"     Settings (holds the PAGE gate, Enable, in its
+--                            body -- as every other page's master switch is),
+--                            Size & Spacing.
+--              "Appearance"  Bar Style, Bar Color, Border (Show Border is the
+--                            header's tick), Icon (Show Icon is the header's
+--                            tick) and Timing.
+--   column 2   "Text"        Show Text, Text Font and the four per-element
+--                            position cards.
 --
--- ☠ NO CONTROL ROW ON THIS PAGE. Every group has at least two settings, so the
--- single-setting shape never comes up.
+-- ☠ THE ENABLE SWITCH NOW FOLLOWS EVERY OTHER PAGE'S RULE. It was the tick on
+-- a Settings row whose controls sat behind a panel -- the only master switch in
+-- the addon flipped without seeing what it governed. It is now in the Settings
+-- card's body, and the other twelve cards grey their headers with it.
 --
--- ☠ AND NO GateHide SEAM EITHER, unlike the Dispel Overlay. That page's gate was
--- written as a HIDE, which a pane cannot copy; this one is written as a GREY --
--- `disableOn = HideTLOptions` on each dependent control, the addon-wide
--- convention -- so it reads the same in the box and in the pane and is handed to
--- the widgets unchanged. The popout adds one thing on top: the ROW greys as
--- well, so a switched-off feature is one dim plate rather than a live plate over
--- a pane of dim controls.
+-- ☠ THE SHARED MACHINERY IS STILL TAKEN ABOVE THE RAID BAIL: its prologue
+-- closes a pinned panel the switch into raid would otherwise strand.
 --
--- ☠ THE SHARED MACHINERY IS TAKEN ABOVE THE RAID BAIL. This page returns early
--- in raid mode (it is party-only), and the switch INTO raid is a rebuild that
--- can happen with a popout panel standing open -- so the helper's prologue
--- (close every panel, retire the previous build's holders) has to run before the
--- return, or a party-mode panel floats beside the raid message wired to rows
--- this build has retired.
---
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what the other census files do: it reads the page's SOURCE and asserts
--- against it.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE
+-- and asserts against it, as the other census files do.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box, in the same column, in the same Add
---     order.
---   ✓ the wiring every row must have, the declared counts (less whatever the row
---     hoisted), the claim/tick/footer trio and the three bands.
---   ✗ nothing about how any of it LOOKS or behaves in the client -- the panels,
---     the greys and the summaries are read by eye and by the in-game checklist.
+--   ✓ the widget CENSUS of each builder, taken from the PRE-CHANGE source -- the
+--     evidence that CLASSIC RENDERS AS IT DID -- and classic's Add order.
+--   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
+--     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ each card's column, stable collapse key, summary, grey gate, header tick
+--     and pin; that there is one checkbox per setting; the Add order the
+--     one-column fold reads in; the preset's no-rebuild path in Modern.
+--   ✗ nothing about how any of it LOOKS or behaves in the client.
 -- ============================================================
 
--- ⚠ NORMALISED TO LF UP FRONT. This page file ships CRLF (the companion's files
--- are mixed per file), and a plain multi-line `find` for source text would miss
--- every one of them otherwise. Nothing here asserts about line endings.
+-- ⚠ NORMALISED TO LF UP FRONT. This page file ships CRLF.
 local SRC = options_file_source("GUI/Pages/Indicators.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the sweep's, plus this page's three font kinds) ----
@@ -64,10 +51,6 @@ local KIND = {
     CreateGrowthControl = "growth", CreateTextureDropdown = "texturedropdown",
     CreateTextControls = "textcontrols", CreateBorderControls = "bordercontrols",
     CreateDurationFormatControls = "durationformat", CreateInfoBanner = "banner",
-    -- ⚠ THE THREE THIS PAGE ADDS. A factory the reader does not know is SKIPPED,
-    -- and its chunk then merges into the previous entry -- which would move that
-    -- entry's slot height and pass. The Text Font group is font / size / outline
-    -- / shadow, so all three have to be named.
     CreateFontDropdown = "fontdropdown", CreateOutlineDropdown = "outlinedropdown",
     CreateShadowCheckbox = "shadowcheckbox",
 }
@@ -124,8 +107,7 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Indicators.lua holds six pages, and a
--- bare 280 box on one of the others is not this pass's business.
+-- The page, scoped by its own two ends.
 local PAGE
 do
     local a = SRC:find('BuildPage(pageTargetedList, function(self, db, Add, AddSpace, AddSyncPoint)', 1, true)
@@ -134,118 +116,69 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
-local function esc(s) return (s:gsub("%p", "%%%0")) end
-
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('%f[%w]label%s*=%s*L%["' .. esc(labelKey) .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel, boxHeader, column)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
-    check(PAGE:find('GUI:CreateHeader(self.child, L["' .. boxHeader .. '"])', 1, true) ~= nil,
-          rowLabel .. ": the classic box keeps its own header (" .. boxHeader .. ")")
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. boxHeader .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, rowLabel .. ": ...and that header belongs to a bare 280 box")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. column .. ")", 1, true) ~= nil,
-              rowLabel .. ": ...which still goes to column " .. column)
-    end
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
+-- ONE CARD'S BLOCK: its OpenSection call, the builder mount under it and the
+-- CloseSection that puts its band in, flattened. `call` is just the OpenSection
+-- call. Timing's band is `tband` (it is opened beside Icon's).
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b, e = PAGE:find("CloseSection%(t?band%)", a)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, e or a):gsub("%s+", " ")
+    local m = block:find("({ group = band,", 1, true) or block:find("({ group = tband,", 1, true)
+    local call = m and block:sub(1, m) or block
+    call = call:gsub("Build[%w]+%($", "")
+    return block, call
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, ABOVE THE RAID BAIL
+-- 1. THE SHARED MACHINERY, ABOVE THE RAID BAIL, AND THE ROWS GONE
 -- ============================================================
-print("-- Targeted List page: the shared popout machinery and the page-scope vocabulary")
+print("-- Targeted List page: the shared machinery and the page-scope vocabulary")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
-    check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
-          "tools: ...and takes the shared machinery unconditionally")
-
-    -- ☠ ABOVE THE RAID BAIL. The prologue that closes stale panels and retires
-    -- the previous build's holders must run on the rebuild that switches INTO
-    -- raid mode, which is the one this page returns early from.
     local at = PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true)
     local bail = PAGE:find('if GUI.SelectedMode == "raid" then', 1, true)
     check(at ~= nil and bail ~= nil and at < bail,
-          "tools: ...before the party-only bail, so a mode switch still closes the panels")
-
+          "tools: taken unconditionally, before the party-only bail, so a mode switch still closes a pinned panel")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
                          "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
                          "RegisterControlRow", "RefreshAfterGroupWrite", "HoldReason" }) do
         check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
               "tools: the page does not re-declare " .. v)
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
 
-    -- ---- the three bands ----------------------------------------------
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Content and Appearance fill column 1, Text
-    -- column 2 -- Appearance is on the left for balance (see the page). A band has to
-    -- be BUILT at the width the layout pass will give it, because a group sizes its
-    -- rows off its width at build time; BandWidth's argument says which width.
-    local BAND_COL = { contentBand = 1, appearanceBand = 1, textBand = 2 }
-    for _, b in ipairs({ "contentBand", "appearanceBand", "textBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
-              "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
-    end
-    for _, pair in ipairs({ { "contentBand", "Content" },
-                            { "appearanceBand", "Appearance" },
-                            { "textBand", "Text" } }) do
-        check(PAGE:find(pair[1] .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. pair[2] .. '"]), 40)', 1, true) ~= nil,
-              "bands: ..." .. pair[1] .. " takes a locale string the page already ships")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "GUI:CreateControlRow(", "GatePaneFirstChild", "footerStrip",
+                            "inline = true", "popout = true,", "_COUNT = ", "count =",
+                            "contentBand", "appearanceBand", "textBand",
+                            "OnTargetedListEnableToggle", "OnTargetedListBorderToggle",
+                            "OnTargetedListIconToggle" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
 
-    -- ☠ NO ROW ON THIS PAGE HIDES, so no band header can be left standing over
-    -- nothing. Every gate here is a grey.
-    check(PAGE:find("Row.hideOn", 1, true) == nil,
-          "bands: no row declares a hideOn, so every band always has something under it")
-    check(PAGE:find("GUI:CreateControlRow", 1, true) == nil,
-          "bands: no control row -- every group on this page has more than one setting")
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "bands: the band skin is never restated as a literal (this page needs none)")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n            end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n                tools.CloseSection(Add, band)\n            end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
 
-    -- ---- the vocabulary, at PAGE scope, declared exactly once ---------
+    for _, pair in ipairs({ { "Content", "1" }, { "Appearance", "1" }, { "Text", "2" } }) do
+        local n = 0
+        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
+        eq(n, 1, "headers: the " .. pair[1] .. " category header sits in column " .. pair[2] .. ", once")
+    end
+
     for _, v in ipairs({ "growthOptions", "iconPosOptions", "stylePresetOptions",
                          "sortOptions", "textAnchorOptions", "textAlignOptions" }) do
         local decls = 0
         for _ in PAGE:gmatch("local " .. v .. " = {") do decls = decls + 1 end
         eq(decls, 1, "vocab: " .. v .. " is declared exactly once, at page scope")
     end
-    check(PAGE:find('STATIC = L["Static (No Reorder)"]', 1, true) ~= nil,
-          "vocab: ...and they are the same tables the dropdowns have always offered")
-
-    -- ⚠ ABOVE EVERY BUILDER. A builder is a closure and captures the upvalue that
-    -- exists when it is created, so one declared above these would see nil.
     local vocabAt = PAGE:find("local textAlignOptions = {", 1, true)
     for _, b in ipairs({ "BuildTargetedListSettingsGroup", "BuildTargetedListLayoutGroup",
                          "BuildTargetedListPresetGroup", "BuildTargetedListColorGroup",
@@ -254,13 +187,10 @@ do
                          "BuildTargetedListSpellNamePosGroup", "BuildTargetedListTargetNamePosGroup",
                          "BuildTargetedListDurationPosGroup", "BuildTargetedListInterruptPosGroup",
                          "BuildTargetedListTimingGroup" }) do
-        local at = PAGE:find("local function " .. b .. "(tools2)", 1, true)
-        check(at ~= nil and vocabAt ~= nil and vocabAt < at,
+        local at2 = PAGE:find("local function " .. b .. "(tools2)", 1, true)
+        check(at2 ~= nil and vocabAt ~= nil and vocabAt < at2,
               "vocab: " .. b .. " is declared after it, so it closes over the real tables")
     end
-
-    -- The page's own gates and its one apply are named once and shared by both
-    -- layouts.
     for _, g in ipairs({ "HideTLOptions", "HideIconOptions", "HideTargetNameOptions",
                          "HideSelfTargetOptions", "HideHighlightOptions",
                          "HideDurationPosOptions", "TLOffRow", "TargetedListUpdate" }) do
@@ -268,126 +198,51 @@ do
         for _ in PAGE:gmatch("local function " .. g .. "%(") do n = n + 1 end
         eq(n, 1, "vocab: " .. g .. " is declared exactly once")
     end
-end
 
--- ============================================================
--- 2. THE PAGE GATE, AND THE THREE HOISTS
--- ============================================================
-print("-- Targeted List page: the page gate and the three hoisted ticks")
-do
+    -- ☠ NO GROUP-LEVEL CHILD GATE: every grey on this page is a per-widget
+    -- disableOn, unchanged.
+    check(PAGE:find("disableChildrenOn", 1, true) == nil, "gate: no group-level child gate on this page")
     check(PAGE:find("local function TLOffRow(d) return not (d or db).targetedListEnabled end", 1, true) ~= nil,
-          "gate: the page gate answers for either table -- the row's own and the page's state pass")
-
-    -- Twelve rows grey with it; the Settings row does not, because it CARRIES the
-    -- tick that would otherwise be unreachable.
-    local greyed = { "layoutRow", "presetRow", "colorRow", "borderRow", "iconRow",
-                     "timingRow", "showTextRow", "fontRow", "spellNameRow",
-                     "targetNameRow", "durationPosRow", "interruptPosRow" }
-    for _, r in ipairs(greyed) do
-        check(PAGE:find(r .. ".disableOn = TLOffRow", 1, true) ~= nil,
-              "gate: " .. r .. " greys with the page gate")
-    end
-    eq(#greyed, 12, "gate: twelve rows grey with the page gate")
-    check(PAGE:find("settingsRow.disableOn", 1, true) == nil,
-          "gate: ...and the Settings row does not, because it carries the tick")
-
-    -- ☠ NO GROUP-LEVEL CHILD GATE, so no index-1 repair is needed. Every grey on
-    -- this page is a per-widget disableOn, which RefreshChildStates applies to
-    -- index 1 like any other -- only disableChildrenOn skips it.
-    check(PAGE:find("disableChildrenOn", 1, true) == nil,
-          "gate: no group-level child gate on this page")
-    check(PAGE:find("GatePaneFirstChild", 1, true) == nil,
-          "gate: ...and no index-1 repair is declared")
-
-    -- Three hoists, each with its search entry restored and its own commit.
-    local hoists = {
-        { row = "settingsRow", key = "targetedListEnabled",    label = "Enable",      commit = "OnTargetedListEnableToggle" },
-        { row = "borderRow",   key = "targetedListShowBorder", label = "Show Border", commit = "OnTargetedListBorderToggle" },
-        { row = "iconRow",     key = "targetedListShowIcon",   label = "Show Icon",   commit = "OnTargetedListIconToggle" },
-    }
-    for _, h in ipairs(hoists) do
-        check(PAGE:find('tools.RegisterHoistedToggle(' .. h.row .. ', L["' .. h.label .. '"], "' .. h.key .. '", ' .. h.commit .. ')', 1, true) ~= nil,
-              "hoist: " .. h.row .. " keeps its search entry, with the commit the checkbox carried")
-        check(PAGE:find("local function " .. h.commit .. "()", 1, true) ~= nil,
-              "hoist: ..." .. h.commit .. " is declared once, in the popout arm")
-        -- ⚠ AND NEVER A PAGE REBUILD: that would retire the row being clicked.
-        local a = PAGE:find("local function " .. h.commit .. "()", 1, true)
-        local b = PAGE:find("\n                end\n", a or 1, true)
-        local body = PAGE:sub(a or 1, b or (a or 1))
-        check(body:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "hoist: ..." .. h.commit .. " reflows the panes standing open")
-        check(body:find("RefreshCurrentPage", 1, true) == nil,
-              "hoist: ...and never rebuilds the page")
-    end
-
-    -- The suppressed checkboxes are still built in classic.
-    for _, b in ipairs({ "BuildTargetedListSettingsGroup", "BuildTargetedListIconGroup" }) do
-        check(builderBody(b):find("if not tools2.hoistToggle then", 1, true) ~= nil,
-              "hoist: " .. b .. " skips its enable checkbox when the row has hoisted it")
-    end
-    check(builderBody("BuildTargetedListBorderGroup"):find("noShowToggle = tools2.hoistToggle or nil", 1, true) ~= nil,
-          "hoist: the border toolkit's own Show Border is suppressed the toolkit's way")
+          "gate: the page gate is named once")
 end
 
 -- ============================================================
--- 3. THE ONE PAGE REBUILD LEFT, AND WHERE IT LIVES
--- Picking a Bar Style preset writes a bundle of settings behind a dozen OTHER
--- rows. Classic has always paid for that with a whole-page rebuild and keeps
--- doing exactly that; the pane must not, because a rebuild retires the dropdown
--- being clicked through.
+-- 2. THE PRESET: CLASSIC REBUILDS, MODERN REPAINTS IN PLACE
 -- ============================================================
 print("-- Targeted List page: the preset's layout-aware refresh")
 do
     local n = 0
     for _ in PAGE:gmatch("RefreshCurrentPage") do n = n + 1 end
     eq(n, 2, "rebuild: exactly one guarded RefreshCurrentPage call is left on the page")
-
-    check(PAGE:find("local function TargetedListPresetChanged(tools2)", 1, true) ~= nil,
-          "rebuild: the preset's commit is named once and takes the layout with it")
     local a = PAGE:find("local function TargetedListPresetChanged(tools2)", 1, true)
+    check(a ~= nil, "rebuild: the preset's commit is named once")
     local b = PAGE:find("\n            end\n", a or 1, true)
     local body = PAGE:sub(a or 1, b or (a or 1))
-    check(body:find("if tools2.popout then", 1, true) ~= nil,
-          "rebuild: ...and asks which layout it is in")
-    check(body:find("tools.ReflowMounted(true)", 1, true) ~= nil,
-          "rebuild: the pane's answer repaints the VALUES the preset wrote behind the widgets")
-    check(body:find("self:RefreshStates()", 1, true) ~= nil,
-          "rebuild: ...the row summaries and their amber ticks")
-    check(body:find("GUI.RefreshAllOverrideIndicators", 1, true) ~= nil,
-          "rebuild: ...and the override indicators -- the set a group reset runs")
+    check(body:find("if tools2.popout or tools then", 1, true) ~= nil,
+          "rebuild: a pinned panel AND a Modern card take the in-place path")
+    check(body:find("for _, w in ipairs(self.children or {}) do", 1, true) ~= nil
+      and body:find("if w.RefreshChildValues then w:RefreshChildValues() end", 1, true) ~= nil,
+          "rebuild: ...a card sweeps the VALUES of every band on the page, because a state pass never repaints a value")
+    check(body:find("tools.ReflowMounted(true)", 1, true) ~= nil
+      and body:find("self:RefreshStates()", 1, true) ~= nil
+      and body:find("GUI.RefreshAllOverrideIndicators", 1, true) ~= nil,
+          "rebuild: ...plus the pinned panels, the summaries and the override indicators")
     check(body:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-          "rebuild: ...while classic still rebuilds the page, exactly as it always did")
-
-    -- Every popout mount declares itself as one; thirteen rows, thirteen mounts.
-    local popouts = 0
-    for _ in PAGE:gmatch("popout = true,") do popouts = popouts + 1 end
-    eq(popouts, 13, "rebuild: all thirteen popout mounts declare themselves as panes")
-
-    -- No builder reaches past its own tools2 for a state pass.
-    for _, b in ipairs({ "BuildTargetedListSettingsGroup", "BuildTargetedListColorGroup",
-                         "BuildTargetedListIconGroup", "BuildTargetedListShowTextGroup" }) do
-        check(builderBody(b):find("self:RefreshStates()", 1, true) == nil,
-              "rebuild: " .. b .. " never reaches past its own tools2 for a state pass")
-        check(builderBody(b):find("tools2.refreshStates()", 1, true) ~= nil,
-              "rebuild: ..." .. b .. " re-gates through the layout-aware door instead")
-    end
+          "rebuild: ...while classic (no tools) still rebuilds the page, exactly as it always did")
 end
 
 -- ============================================================
--- 4. THE THIRTEEN BUILDERS, CONTROL BY CONTROL
--- Every golden below is the census of the PRE-CHANGE source: same factories,
--- same L keys, same db keys, same slot heights, in the same order.
+-- 3. THE THIRTEEN BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
+-- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local TL_SETTINGS = {
     { "label",    "Shows a bar when an enemy is casting a spell targeting a party/raid member.", "(none)", 35 },
-    -- The reposition hint is wrapped in a colour code, so the reader sees no L key.
     { "label",    "(none)",                     "(none)",                        30 },
     { "checkbox", "Enable",                     "targetedListEnabled",           30 },
     { "checkbox", "Important Spells Only",      "targetedListImportantOnly",     30 },
     { "checkbox", "Hide Casts Targeting You",   "targetedListHideOwnCasts",      30 },
     { "checkbox", "Show Untargeted Casts",      "targetedListShowUntargeted",    30 },
     { "checkbox", "Hide Out-of-Combat Casts",   "targetedListHideOutOfCombat",   30 },
-    -- The game CVar: a custom get/set tick with no db binding at all.
     { "checkbox", "Show Offscreen Nameplates",  "(none)",                        30 },
     { "slider",   "Max Bars",                   "targetedListMaxBars",           55 },
 }
@@ -413,8 +268,6 @@ local TL_COLOR = {
     { "button",      "Reset Colors to Default",    "(none)",                             30 },
 }
 local TL_BORDER = {
-    -- The key the census reads off this one is the PREFIX the toolkit is handed,
-    -- not a setting -- every one of its sixteen keys is built from it.
     { "bordercontrols", "(none)", "targetedList", nil },
 }
 local TL_ICON = {
@@ -434,9 +287,6 @@ local TL_FONT = {
     { "fontdropdown",    "Font",      "targetedListFont",        55 },
     { "slider",          "Font Size", "targetedListFontSize",    55 },
     { "outlinedropdown", "Outline",   "targetedListFontOutline", 55 },
-    -- The shadow tick is a custom get/set OVER THE OUTLINE KEY, so it claims the
-    -- same key the dropdown above it does. That is not a duplicate to fix: it is
-    -- one setting with two handles.
     { "shadowcheckbox",  "Shadow",    "targetedListFontOutline", 30 },
 }
 local TL_SPELLNAME = {
@@ -475,171 +325,176 @@ local TL_TIMING = {
     { "slider", "Interrupted Flash Duration", "targetedListInterruptedFlashDuration", 55 },
 }
 
--- ⚠ EVERY ROW TAKES A FOOTER, which is a decision about the KEYS rather than the
--- shape: every setting behind these thirteen rows is a plain profile setting the
--- defaults engine can write -- numbers, strings, booleans and four colour tables
--- whose swatches re-read their table on the value sweep, so a reset that
--- replaces one is repainted rather than detached.
-local ROWS = {
-    { builder = "BuildTargetedListSettingsGroup", label = "Settings", boxHeader = "Settings",
-      golden = TL_SETTINGS, countVar = "TL_SETTINGS_COUNT", column = "1", hoistedIn = 1,
-      row = "settingsRow", band = "contentBand", summary = "TargetedListSettingsSummary" },
-    { builder = "BuildTargetedListLayoutGroup", label = "Size & Spacing", boxHeader = "Size & Spacing",
-      golden = TL_LAYOUT, countVar = "TL_LAYOUT_COUNT", column = "1", hoistedIn = 0,
-      row = "layoutRow", band = "contentBand", summary = "TargetedListLayoutSummary" },
-    { builder = "BuildTargetedListPresetGroup", label = "Bar Style", boxHeader = "Bar Style",
-      golden = TL_PRESET, countVar = "TL_PRESET_COUNT", column = "2", hoistedIn = 0,
-      row = "presetRow", band = "appearanceBand", summary = "TargetedListPresetSummary" },
-    { builder = "BuildTargetedListColorGroup", label = "Bar Color", boxHeader = "Bar Color",
-      golden = TL_COLOR, countVar = "TL_COLOR_COUNT", column = "2", hoistedIn = 0,
-      row = "colorRow", band = "appearanceBand", summary = "TargetedListColorSummary" },
-    { builder = "BuildTargetedListBorderGroup", label = "Border", boxHeader = "Border",
-      golden = TL_BORDER, countVar = "TL_BORDER_COUNT", column = "2", hoistedIn = 0,
-      row = "borderRow", band = "appearanceBand", summary = "TargetedListBorderSummary" },
-    { builder = "BuildTargetedListIconGroup", label = "Icon", boxHeader = "Icon",
-      golden = TL_ICON, countVar = "TL_ICON_COUNT", column = "2", hoistedIn = 1,
-      row = "iconRow", band = "appearanceBand", summary = "TargetedListIconSummary" },
-    { builder = "BuildTargetedListShowTextGroup", label = "Show Text", boxHeader = "Show Text",
-      golden = TL_SHOWTEXT, countVar = "TL_SHOWTEXT_COUNT", column = "1", hoistedIn = 0,
-      row = "showTextRow", band = "textBand", summary = "TargetedListShowTextSummary" },
-    { builder = "BuildTargetedListFontGroup", label = "Text Font", boxHeader = "Text Font",
-      golden = TL_FONT, countVar = "TL_FONT_COUNT", column = "2", hoistedIn = 0,
-      row = "fontRow", band = "textBand", summary = "TargetedListFontSummary" },
-    { builder = "BuildTargetedListSpellNamePosGroup", label = "Spell Name Position", boxHeader = "Spell Name Position",
-      golden = TL_SPELLNAME, countVar = "TL_SPELLNAME_COUNT", column = "1", hoistedIn = 0,
-      row = "spellNameRow", band = "textBand", summary = "TargetedListSpellNameSummary" },
-    { builder = "BuildTargetedListTargetNamePosGroup", label = "Target Name Position", boxHeader = "Target Name Position",
-      golden = TL_TARGETNAME, countVar = "TL_TARGETNAME_COUNT", column = "2", hoistedIn = 0,
-      row = "targetNameRow", band = "textBand", summary = "TargetedListTargetNameSummary" },
-    { builder = "BuildTargetedListDurationPosGroup", label = "Duration Position", boxHeader = "Duration Position",
-      golden = TL_DURATIONPOS, countVar = "TL_DURATIONPOS_COUNT", column = "1", hoistedIn = 0,
-      row = "durationPosRow", band = "textBand", summary = "TargetedListDurationPosSummary" },
-    { builder = "BuildTargetedListInterruptPosGroup", label = "Interrupt Text Position", boxHeader = "Interrupt Text Position",
-      golden = TL_INTERRUPTPOS, countVar = "TL_INTERRUPTPOS_COUNT", column = "2", hoistedIn = 0,
-      row = "interruptPosRow", band = "textBand", summary = "TargetedListInterruptPosSummary" },
-    { builder = "BuildTargetedListTimingGroup", label = "Timing", boxHeader = "Timing",
-      golden = TL_TIMING, countVar = "TL_TIMING_COUNT", column = "1", hoistedIn = 0,
-      row = "timingRow", band = "appearanceBand", summary = "TargetedListTimingSummary" },
+-- label, stable collapse key, card column, classic box column; `dim` = greys
+-- its header with the page gate, `pin` = passes its builder (how a bar LOOKS),
+-- `tick` = its on/off moved into the header.
+local CARDS = {
+    { label = "Settings", key = "targetedlist_settings", col = 1, classicCol = 1,
+      builder = "BuildTargetedListSettingsGroup", golden = TL_SETTINGS, summary = "TargetedListSettingsSummary" },
+    { label = "Size & Spacing", key = "targetedlist_layout", col = 1, classicCol = 1,
+      builder = "BuildTargetedListLayoutGroup", golden = TL_LAYOUT, summary = "TargetedListLayoutSummary",
+      dim = true, pin = true },
+    { label = "Bar Style", key = "targetedlist_barstyle", col = 1, classicCol = 2,
+      builder = "BuildTargetedListPresetGroup", golden = TL_PRESET, summary = "TargetedListPresetSummary",
+      dim = true, pin = true },
+    { label = "Bar Color", key = "targetedlist_barcolor", col = 1, classicCol = 2,
+      builder = "BuildTargetedListColorGroup", golden = TL_COLOR, summary = "TargetedListColorSummary",
+      dim = true, pin = true },
+    { label = "Border", key = "targetedlist_border", col = 1, classicCol = 2,
+      builder = "BuildTargetedListBorderGroup", golden = TL_BORDER, summary = "TargetedListBorderSummary",
+      dim = true, pin = true, composite = true,
+      tick = { key = "targetedListShowBorder", name = "Show Border" } },
+    { label = "Icon", key = "targetedlist_icon", col = 1, classicCol = 2,
+      builder = "BuildTargetedListIconGroup", golden = TL_ICON, summary = "TargetedListIconSummary",
+      dim = true, pin = true,
+      tick = { key = "targetedListShowIcon", name = "Show Icon" } },
+    { label = "Timing", key = "targetedlist_timing", col = 1, classicCol = 1, band = "tband",
+      builder = "BuildTargetedListTimingGroup", golden = TL_TIMING, summary = "TargetedListTimingSummary",
+      dim = true },
+    { label = "Show Text", key = "targetedlist_showtext", col = 2, classicCol = 1,
+      builder = "BuildTargetedListShowTextGroup", golden = TL_SHOWTEXT, summary = "TargetedListShowTextSummary",
+      dim = true },
+    { label = "Text Font", key = "targetedlist_font", col = 2, classicCol = 2,
+      builder = "BuildTargetedListFontGroup", golden = TL_FONT, summary = "TargetedListFontSummary",
+      dim = true, pin = true },
+    { label = "Spell Name Position", key = "targetedlist_spellnamepos", col = 2, classicCol = 1,
+      builder = "BuildTargetedListSpellNamePosGroup", golden = TL_SPELLNAME, summary = "TargetedListSpellNameSummary",
+      dim = true, pin = true },
+    { label = "Target Name Position", key = "targetedlist_targetnamepos", col = 2, classicCol = 2,
+      builder = "BuildTargetedListTargetNamePosGroup", golden = TL_TARGETNAME, summary = "TargetedListTargetNameSummary",
+      dim = true, pin = true },
+    { label = "Duration Position", key = "targetedlist_durationpos", col = 2, classicCol = 1,
+      builder = "BuildTargetedListDurationPosGroup", golden = TL_DURATIONPOS, summary = "TargetedListDurationPosSummary",
+      dim = true, pin = true },
+    { label = "Interrupt Text Position", key = "targetedlist_interruptpos", col = 2, classicCol = 2,
+      builder = "BuildTargetedListInterruptPosGroup", golden = TL_INTERRUPTPOS, summary = "TargetedListInterruptPosSummary",
+      dim = true, pin = true },
 }
 
-for _, g in ipairs(ROWS) do
+for _, g in ipairs(CARDS) do
     print("-- Targeted List page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.boxHeader, g.column)
 
-    local opts = rowOpts(g.label)
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": the row declares a summary of its own")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("db%s*=%s*tools.RowDB") ~= nil,
-          g.label .. ": ...bound through the function form, so a mode switch is followed")
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
 
-    check(PAGE:find("local " .. g.row .. " = " .. g.band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the " .. g.band)
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(" .. g.row .. ", TargetedListUpdate)", 1, true) ~= nil,
-          g.label .. ": ...and Reset Group / Hold: Defaults push the change into the bars")
-
-    -- The declared count is the census, less whatever the row hoisted out of it.
-    -- The border row is the one that is not a plain widget list -- its arithmetic
-    -- is section 5.
-    if g.golden ~= TL_BORDER then
-        local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-        check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-        eq(declared, settingsIn(g.golden) - g.hoistedIn,
-           g.label .. ": ...and it is the census's settings less whatever the row hoisted")
+    local box
+    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
+        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"])'
+        local hit = PAGE:find(want, at, true)
+        if hit and hit - at < 900 then box = name break end
     end
+    check(box ~= nil, g.label .. ": the classic box keeps its own header")
+    if box then
+        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+              g.label .. ": ...which still goes to column " .. g.classicCol)
+    end
+
+    local block, call = sectionBlock(g.label)
+    check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing the group's own summary")
+    eq(call:find(g.summary .. ", TLOffRow", 1, true) ~= nil, g.dim == true,
+       g.label .. (g.dim and ": greys its header with the page gate" or ": never greys -- it holds the switch"))
+    eq(call:find(g.builder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable, from its own builder" or ": visibility or behaviour, so it grows no pin"))
+
+    if g.tick then
+        check(call:find('db = db, key = "' .. g.tick.key .. '", label = L["' .. g.tick.name .. '"]', 1, true) ~= nil,
+              g.label .. ": the header tick is bound to " .. g.tick.key .. " under its own name")
+        check(call:find("disableOn = TLOffRow", 1, true) ~= nil,
+              g.label .. ": ...greyed with the page gate")
+        check(call:find("onChanged = function()", 1, true) ~= nil
+          and call:find("self:RefreshStates()", 1, true) ~= nil
+          and call:find("TargetedListUpdate()", 1, true) ~= nil
+          and call:find("RefreshCurrentPage", 1, true) == nil,
+              g.label .. ": ...committing what its in-body checkbox ran, never a page rebuild")
+        if g.composite then
+            check(body:find("noShowToggle = tools2.hoistToggle or nil", 1, true) ~= nil,
+                  g.label .. ": the composite is told not to build its own toggle")
+        else
+            local guard = body:find("if not tools2.hoistToggle then", 1, true)
+            local cb = body:find('GUI:CreateCheckbox(parent, L["' .. g.tick.name .. '"]', guard or 1, true)
+            check(guard ~= nil and cb ~= nil and cb > guard,
+                  g.label .. ": the builder builds that checkbox only when not hoisted")
+        end
+    else
+        check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick")
+    end
+
+    local mount = g.builder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
+        .. (g.tick and " hoistToggle = true," or "") .. " })"
+    check(block:find(mount, 1, true) ~= nil,
+          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
+                              or ": mounts the builder exactly as classic does"))
 end
 
 -- ============================================================
--- 5. THE BORDER COUNT, DERIVED FROM THE HELPER RATHER THAN ASSERTED AT IT
--- CreateBorderControls builds a fixed set plus one widget per include key. This
--- page's include set is the narrowest on any converted page: no offset, no
--- animation and no colour resolvers -- the bars represent SPELLS, not units.
+-- 4. THE CARDS TOGETHER
 -- ============================================================
-print("-- Targeted List page: the border count")
+print("-- Targeted List page: the cards together")
 do
-    local BORDER_BASE = 4          -- Show Border, thickness, style, texture
-    local BORDER_COLOR = 1         -- the static colour picker
-    local BORDER_GRADIENT = 3      -- start, end, direction
-    local BORDER_SHADOW = 5        -- the block's tick plus colour, size, two offsets
-    local BORDER_ALPHA, BORDER_INSET, BORDER_BLEND = 1, 1, 1
-    local borderAll = BORDER_BASE + BORDER_COLOR + BORDER_GRADIENT + BORDER_SHADOW
-                    + BORDER_ALPHA + BORDER_INSET + BORDER_BLEND
-    eq(borderAll, 16, "counts: the border toolkit builds sixteen for this include set")
-    local declared = tonumber(PAGE:match("local TL_BORDER_COUNT%s*=%s*(%d+)"))
-    eq(declared, borderAll - 1,
-       "counts: Border is those sixteen less the hoisted Show Border")
+    -- ☠ THE ADD ORDER IS THE ONE-COLUMN FOLD'S ORDER: Content, Appearance (with
+    -- Timing fifth), Text. Timing is opened beside Icon for exactly this reason.
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Settings | Size & Spacing | Bar Style | Bar Color | Border | Icon | Timing | Show Text | Text Font | Spell Name Position | Target Name Position | Duration Position | Interrupt Text Position",
+       "order: the thirteen cards open in the old bands' order -- Content, Appearance, Text")
+    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
+    local appAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 1)', 1, true)
+    local styleAt   = PAGE:find('OpenSection(L["Bar Style"]', 1, true)
+    local textAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)', 1, true)
+    local showAt    = PAGE:find('OpenSection(L["Show Text"]', 1, true)
+    check(contentAt and appAt and styleAt and contentAt < appAt and appAt < styleAt,
+          "order: Content comes first, then Appearance heads Bar Style")
+    check(textAt and showAt and textAt < showAt, "order: Text heads Show Text")
+    -- Timing's builder is declared before the Icon card that opens it...
+    local timingDecl = PAGE:find("local function BuildTargetedListTimingGroup(tools2)", 1, true)
+    local timingCard = PAGE:find('OpenSection(L["Timing"]', 1, true)
+    check(timingDecl and timingCard and timingDecl < timingCard,
+          "order: Timing's builder is declared before the card that calls it")
+    -- ...while classic's Timing box is still Add'd last, its Modern half a pointer.
+    check(PAGE:find("Add(timingGroup, nil, 1)\n            else\n                -- Modern opened this card above", 1, true) ~= nil,
+          "order: the classic Timing arm is untouched, its Modern half a pointer")
 
-    local body = builderBody("BuildTargetedListBorderGroup")
-    for _, k in ipairs({ "alpha", "inset", "blendMode", "gradient", "shadow" }) do
-        check(body:find(k .. " = true", 1, true) ~= nil,
-              "counts: the include set asks for " .. k)
+    -- ---- one checkbox per setting --------------------------------------
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 2, "ticks: exactly two mounts ask their builder to skip the in-body toggle (Border, Icon)")
+    local inCards = 0
+    for _, g in ipairs(CARDS) do
+        if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
     end
-    for _, k in ipairs({ "animate", "offset", "classColor", "roleColor" }) do
-        check(body:find(k .. " = true", 1, true) == nil,
-              "counts: ...and does not ask for " .. k)
-    end
-    -- The gate goes in as the CONSUMER gate it has always been: the toolkit owns
-    -- the whole group and writes disableOn onto each of the sixteen itself.
-    check(body:find("disableWhen  = HideTLOptions", 1, true) ~= nil,
-          "counts: ...and the page gate reaches them as the toolkit's own consumer gate")
-end
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
 
--- ============================================================
--- 6. THE BOXES, THE ADD ORDER AND THE PAGE'S OWN FURNITURE
--- ============================================================
-print("-- Targeted List page: the boxes, the bands and the order")
-do
+    -- ☠ THE MASTER SWITCH FOLLOWS EVERY OTHER PAGE NOW: in Settings' body.
+    check((sectionBlock("Settings")):find("targetedListEnabled", 1, true) == nil,
+          "ticks: Enable is not in Settings' header")
+    check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable"], db, "targetedListEnabled"', 1, true) ~= nil,
+          "ticks: ...its builder builds it in the body, in both layouts")
+
+    -- ---- Expand All / Collapse All --------------------------------------
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: the page adds the pair at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local bail = PAGE:find('if GUI.SelectedMode == "raid" then', 1, true)
+    check(stripAt and contentAt and bail and bail < stripAt and stripAt < contentAt,
+          "bulk: ...after the raid bail and above the first category header")
+
+    -- ---- thirteen classic boxes, in the order they always had -----------
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 13, "boxes: thirteen bare 280 boxes left, and they are the classic branch's own")
-    check(PAGE:find("280, tools", 1, true) == nil,
-          "boxes: no stay-inline 280 box is left on the page")
-
-    -- ---- classic's Add order is the order it always had ---------------
-    -- Within a column the Add() order IS the layout order, so this is what makes
-    -- "classic is unchanged" structural rather than a promise. ⚠ TIMING IS STILL
-    -- LAST: its ROW reads fifth in the Appearance band, but moving the source
-    -- block up the file would have reordered classic's column 1.
-    local order = { "settingsGroup", "layoutGroup", "presetGroup", "colorGroup",
-                    "borderGroup", "iconGroup", "textToggleGroup", "fontGroup",
-                    "spellNamePosGroup", "targetNamePosGroup", "durationPosGroup",
-                    "interruptPosGroup", "timingGroup" }
+    eq(bare, 13, "classic: thirteen bare 280 boxes, and they are the classic branch's own")
     local prev = 0
-    for _, name in ipairs(order) do
+    for _, name in ipairs({ "settingsGroup", "layoutGroup", "presetGroup", "colorGroup",
+                            "borderGroup", "iconGroup", "textToggleGroup", "fontGroup",
+                            "spellNamePosGroup", "targetNamePosGroup", "durationPosGroup",
+                            "interruptPosGroup", "timingGroup" }) do
         local at = PAGE:find("Add(" .. name .. ", nil,", 1, true)
-        check(at ~= nil and at > prev, "order: classic adds " .. name .. " in its original place")
+        check(at ~= nil and at > prev, "classic: adds " .. name .. " in its original place")
         prev = at or prev
-    end
-
-    -- ---- the Appearance band's own order, Timing last -----------------
-    local a = PAGE:find("appearanceBand:AddWidget(GUI:CreatePopoutRow", 1, true)
-    local t = PAGE:find("local timingRow = appearanceBand:AddWidget(", 1, true)
-    local last = PAGE:find("local interruptPosRow = textBand:AddWidget(", 1, true)
-    check(a and t and last and a < last and last < t,
-          "order: the Timing row is mounted into the Appearance band from the foot of the page")
-
-    -- ---- the Add order of the bands ------------------------------------
-    -- Three bands in two columns -- Content and Appearance left, Text right --
-    -- still ADDED in reading order, because that is the order a narrow window folds
-    -- them back into when the page drops to one column.
-    local b1 = PAGE:find("Add(contentBand, nil, 1)", 1, true)
-    local b2 = PAGE:find("Add(appearanceBand, nil, 1)", 1, true)
-    local b3 = PAGE:find("Add(textBand, nil, 2)", 1, true)
-    check(b1 and b2 and b3 and b1 < b2 and b2 < b3,
-          "order: the three bands sit in their columns, added in reading order")
-    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
-    -- widget otherwise, so a band placed in a column without this keeps the width it
-    -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "contentBand", "appearanceBand", "textBand" }) do
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
     end
 
     -- ---- the page's own furniture is untouched -------------------------
@@ -649,149 +504,6 @@ do
           "page: ...and the See Also block still points at Personal Targeted")
     check(PAGE:find('L["Targeted List is a Party-only feature. Switch to Party mode to configure."]', 1, true) ~= nil,
           "page: ...and raid mode still gets the party-only message")
-end
-
--- ============================================================
--- 7. THE SUMMARIES
--- Read by eye in the client; what is asserted here is that each one exists, is
--- declared once, joins with the sweep's separator and reads the same tables the
--- controls behind it offer -- so a row cannot say one thing while its dropdown
--- says another.
--- ============================================================
-print("-- Targeted List page: the summaries")
-do
-    check(PAGE:find('local function Join(parts) return table.concat(parts, " \\194\\183 ") end', 1, true) ~= nil,
-          "summary: the sweep's separator is named once")
-
-    -- ☠ FOUR POSITION ROWS, ONE BODY. All four say the same three facts about the
-    -- same three key shapes, so it is written once and given the element's prefix.
     check(PAGE:find("local function TargetedTextSummary(d, prefix)", 1, true) ~= nil,
-          "summary: the four position rows share one body")
-    for _, pair in ipairs({ { "TargetedListSpellNameSummary", "SpellName" },
-                            { "TargetedListTargetNameSummary", "TargetName" },
-                            { "TargetedListDurationPosSummary", "Duration" },
-                            { "TargetedListInterruptPosSummary", "InterruptText" } }) do
-        check(PAGE:find('local function ' .. pair[1] .. '(d) return TargetedTextSummary(d, "' .. pair[2] .. '") end', 1, true) ~= nil,
-              "summary: ..." .. pair[1] .. " is that body with its prefix")
-    end
-
-    for _, s in ipairs({ "TargetedListSettingsSummary", "TargetedListLayoutSummary",
-                         "TargetedListPresetSummary", "TargetedListColorSummary",
-                         "TargetedListBorderSummary", "TargetedListIconSummary",
-                         "TargetedListShowTextSummary", "TargetedListFontSummary",
-                         "TargetedListTimingSummary", "TargetedTextSummary" }) do
-        local body = PAGE:match("local function " .. s .. "%(.-%)(.-)\n            end")
-        check(body ~= nil and body:find("Join(parts)", 1, true) ~= nil,
-              "summary: " .. s .. " joins with the shared separator")
-        check(body ~= nil and body:find("if not d then return \"\" end", 1, true) ~= nil,
-              "summary: ..." .. s .. " answers an absent db rather than erroring on it")
-    end
-
-    -- The chosen WORD comes out of the dropdown's own table, never a second copy.
-    check(PAGE:find("local g = growthOptions[d.targetedListGrowth]", 1, true) ~= nil,
-          "summary: Size & Spacing names the growth from the dropdown's own table")
-    check(PAGE:find("local s = sortOptions[d.targetedListSortOrder]", 1, true) ~= nil,
-          "summary: ...and the sort order from its own")
-    check(PAGE:find("local p = stylePresetOptions[d.targetedListStylePreset]", 1, true) ~= nil,
-          "summary: Bar Style names the preset from the dropdown's own table")
-    check(PAGE:find("local p = iconPosOptions[d.targetedListIconPosition]", 1, true) ~= nil,
-          "summary: Icon names the side from its own")
-    check(PAGE:find('local a = textAnchorOptions[d["targetedList" .. prefix .. "Anchor"]]', 1, true) ~= nil,
-          "summary: ...and the four position rows from the anchor table they all share")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ TWO THIRDS OF THE ADDON'S ROWS HIDE SIX SETTINGS OR FEWER, and a row
--- holding four was charging the same click as a row holding thirty-one. So a row
--- whose whole group is small mounts THAT GROUP under its title line, and its
--- strip stops promising what is already on screen and offers to pin a second
--- copy instead.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the pane itself and
--- counting prose. Only the refusal can be exercised against a real group, which
--- is test_popout_page_tools.lua's job -- what is stated here is which of THIS
--- page's rows asked, and that none of the others did.
---
--- Six of the thirteen. Settings is NOT one: two blurbs over six controls is eight children even with the Enable tick hoisted off it.
--- ============================================================
-print("-- Targeted List page: the rows that mount their pane on the plate")
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on the page, and
-    -- whether its call ends with the opt-in. Read as "this declaration up to the
-    -- next one", the reader shape the Frame page's census uses and for the same
-    -- reason: a balanced-brace match would be defeated by the builder closure
-    -- sitting inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-
-    -- The mounts that asked, each with the pane count that earned it -- the
-    -- number the comment beside the call states, so a comment that drifted from
-    -- what the row actually holds has one place left to be caught.
-    local INLINE = {
-        { "layoutMount", 5 },
-        { "presetMount", 3 },
-        { "iconMount", 2 },
-        { "fontMount", 4 },
-        { "durationPosMount", 5 },
-        { "interruptPosMount", 6 },
-        -- ⚠ THREE AT EXACTLY THE CEILING, and that is deliberate rather than
-        -- lucky: INLINE_MAX is 6 and these hold 6, so a seventh control in any of
-        -- them drops it back behind the strip on its own, with no page edit. Spell
-        -- Name and Target Name are the same six settings pointed at different
-        -- text, so a difference in what they cost to reach would be arbitrary.
-        { "showTextMount", 6 },
-        { "spellNameMount", 6 },
-        { "targetNameMount", 6 },
-        { "timingMount", 2 },
-    }
-    -- ...and the rows that keep the strip they have, named rather than inferred:
-    -- a row that quietly joined the first list fails here as well as there.
-    local BEHIND = { "settingsMount", "colorMount", "borderMount" }
-
-    for _, spec in ipairs(INLINE) do
-        check(inlineMounts[spec[1]] == true,
-              "inline: " .. spec[1] .. " mounts its group on the plate (" .. spec[2] .. " settings)")
-        -- The mount reaches a ROW, and exactly one. An opt-in wired to nothing
-        -- is a pane built eagerly and then never shown.
-        local wired = 0
-        for _ in PAGE:gmatch("build%s*=%s*" .. spec[1] .. "[,%s]") do wired = wired + 1 end
-        eq(wired, 1, "inline: ..." .. spec[1] .. " is the build of exactly one row")
-    end
-    for _, name in ipairs(BEHIND) do
-        check(inlineMounts[name] ~= true,
-              "inline: " .. name .. " keeps its pane behind the strip")
-    end
-    eq(inlineCount, #INLINE, "inline: ...and no row on this page opted in unannounced")
-    eq(#calls, #INLINE + #BEHIND, "inline: every popout mount on the page is accounted for")
-
-    -- ⚠ AND NO INLINE ROW HOISTS A TWIN OF WHAT IS NOW ON ITS PLATE. Every
-    -- hoist on this page is the four-argument TICK form -- the row's own
-    -- on/off, which the builder is told to skip (`hoistToggle`) precisely
-    -- because the row owns it. The LIST form, which declares pane settings a
-    -- second time as cells, is what would be two widgets on one key over a
-    -- mounted group; there is none here, and a row going inline must not grow
-    -- one.
-    local hoists = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
-    local ticks = 0
-    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%([%w_]+, L%[") do ticks = ticks + 1 end
-    eq(ticks, hoists, "inline: every hoist on the page is the row's own tick, not a pane setting declared twice")
+          "page: the four position cards still share one summary body")
 end

@@ -4362,44 +4362,46 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- CLASSIC is exactly what it always was: thirteen 280 boxes in two
             -- columns, in the columns and the order they have always had.
             --
-            -- POPOUT turns all thirteen into feature rows, in three bands:
+            -- MODERN is the Debuff Bar's collapsible-card design, section for
+            -- section: one card per group, two settings per row inside a card wide
+            -- enough, dim captions, the value summary in a shut card's corner,
+            -- Expand All / Collapse All at the top. The columns and the order are
+            -- the old bands':
             --
-            --   "Content"      Settings -- whether the display exists at all, what
-            --                  reaches it and how many bars it may draw -- and
-            --                  Size & Spacing, which is how those bars are laid out.
-            --   "Appearance"   Bar Style, Bar Color, Border, Icon and Timing: the
-            --                  five things that decide what one bar looks like and
-            --                  how long it lives.
-            --   "Text"         Show Text, Text Font and the four per-element
-            --                  position boxes.
+            --   column 1   "Content"     Settings -- whether the display exists at
+            --                            all, what reaches it and how many bars it
+            --                            may draw -- and Size & Spacing.
+            --              "Appearance"  Bar Style, Bar Color, Border, Icon and
+            --                            Timing: what one bar looks like and how
+            --                            long it lives.
+            --   column 2   "Text"        Show Text, Text Font and the four
+            --                            per-element position cards.
             --
-            -- All three band headers are locale strings the page already ships, and
-            -- none can strand: no row on this page hides, so every band always has
-            -- something under it.
+            -- ☠ THE ENABLE SWITCH NOW FOLLOWS EVERY OTHER PAGE'S RULE. It is the
+            -- page's master switch, so it lives in the Settings card's BODY -- as
+            -- Show Buffs, Show Debuffs, Enable Missing Buff Icon and Enable
+            -- Defensive Icon do -- not on a header, and the other twelve cards grey
+            -- their headers with it (dimOn = TLOffRow). Before, it was the tick on
+            -- a Settings row whose controls sat behind a panel, so the one switch
+            -- that decides whether the display exists was the only master switch in
+            -- the addon you could flip without seeing what it governed.
             --
-            -- ☠ THE PAGE'S GATE IS A GREY IN BOTH LAYOUTS, which is why this page
-            -- needs no GateHide seam. Every dependent control already carries
-            -- `disableOn = HideTLOptions` -- the addon-wide convention for a boolean
-            -- master -- so it greys in the box and greys in the pane, unchanged. The
-            -- popout adds one thing on top: the ROW greys too (row.disableOn =
-            -- TLOffRow), so a switched-off feature reads as one dim plate rather
-            -- than as a live plate over a pane of dim controls.
+            -- The bodies grey as they always did: every dependent control carries
+            -- `disableOn = HideTLOptions` itself, so it greys in the box and in
+            -- the card, unchanged.
             --
-            -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Dispel Overlay's reason:
-            -- it carries the gate's own tick, so greying it would leave no way to
-            -- switch the display back on.
-            --
-            -- Every converted group's widgets live in a `Build<X>Group(tools2)`
-            -- taking { group, parent, refreshStates } and, where a toggle is
-            -- hoisted, `hoistToggle`. The classic branch mounts the SAME builder
-            -- into the box it always built -- test_targetedlist_page_builders.lua
-            -- pins the inventory of each one against the census taken before the
-            -- move.
+            -- Every group's widgets live in a `Build<X>Group(tools2)` taking
+            -- { group, parent, refreshStates } and, where a toggle moved into a
+            -- card's header, `hoistToggle`. The classic branch mounts the SAME
+            -- builder into the box it always built --
+            -- test_targetedlist_page_builders.lua pins the inventory of each one
+            -- against the census taken before the move.
             local classicLayout = DF:IsClassicSettingsLayout()
-            -- The shared page-scope machinery: eager holders, pane reflow, the key
-            -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-            -- hoisted-toggle search repair and the band width. nil in classic, which
-            -- is what every `if classicLayout then` arm below leans on.
+            -- The shared page-scope machinery. Its PROLOGUE closes any panel a
+            -- previous build left standing and retires that build's holders, and
+            -- it carries the section helper the card pages build with. nil in
+            -- classic, which is what every `if classicLayout then` arm below
+            -- leans on.
             --
             -- ☠ ABOVE THE RAID BAIL, DELIBERATELY. A mode switch is a rebuild, and
             -- the switch INTO raid is the one rebuild this page could reach with a
@@ -4421,14 +4423,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Copy button at top
             Add(CreateCopyButton(self.child, {"targetedList"}, L["Targeted List"], "indicators_targetedlist"), 25, 2)
 
-            local contentBand, appearanceBand, textBand
-            if tools then
-                contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-                contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-                appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-                appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-                textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-                textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+            -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+            -- opt-ins, which every card here takes.
+            local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+                return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                    { twoTrack = true, quietLabels = true })
+            end
+            -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+            local function CloseSection(band)
+                tools.CloseSection(Add, band)
             end
 
             -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -4464,9 +4467,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local function HideHighlightOptions(d) return not d.targetedListEnabled or not d.targetedListHighlightImportant end
             local function HideDurationPosOptions(d) return not d.targetedListEnabled or not d.targetedListShowDuration end
 
-            -- ☠ THE PAGE GATE, ON THE ROWS. Reads `d or db` because a row's own
-            -- predicate is asked with the row's resolved table, and the page's
-            -- state pass with the page's -- one predicate has to answer both.
+            -- ☠ THE PAGE GATE, ON THE CARDS' HEADERS. Reads `d or db` because the
+            -- page's state pass hands it the page's table, and a caller with none
+            -- still has to get an answer.
             local function TLOffRow(d) return not (d or db).targetedListEnabled end
 
             local function TargetedListUpdate()
@@ -4479,13 +4482,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- keys.
             local function Join(parts) return table.concat(parts, " \194\183 ") end
 
-            -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
-            -- first row) =====
-            -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
-            -- rather than a stack of control rows: a control row carries a SETTING
-            -- rather than a group, so it can offer neither the group's Reset Group
-            -- nor the tick that says the group has been touched -- and the page gate
-            -- would then belong to no row at all.
+            -- ===== SETTINGS (a 280 box in column 1 in classic, the first Content
+            -- card in Modern) =====
+            -- ☠ THE PAGE'S MASTER SWITCH LIVES IN THIS GROUP'S BODY in both
+            -- layouts. The hoistToggle seam below is kept for the builder's shape,
+            -- but no mount passes it any more.
             local function BuildTargetedListSettingsGroup(tools2)
                 local group, parent = tools2.group, tools2.parent
 
@@ -4558,45 +4559,20 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(settingsGroup, nil, 1)
             else
-                -- Six: the three filters, the untargeted tick, the offscreen CVar
-                -- tick and the bar cap. The two blurbs are prose, and the badge
-                -- counts settings. The Enable tick is HOISTED onto the row.
-                local TL_SETTINGS_COUNT = 6
-
-                -- What the suppressed Enable checkbox ran, plus a repaint of every
-                -- pane standing open -- twelve rows grey with it. Never a page
-                -- rebuild: that would retire the row being clicked through.
-                local function OnTargetedListEnableToggle()
-                    self:RefreshStates()
-                    if DF.ToggleTargetedList then DF:ToggleTargetedList(db.targetedListEnabled) end
-                    if DF.UpdateAllTestTargetedList then DF:UpdateAllTestTargetedList() end
-                    tools.ReflowMounted()
-                end
-
-                local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListSettingsGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                        hoistToggle = true,
-                    })
-                end)
-                local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label    = L["Settings"],
-                    db       = tools.RowDB,
-                    toggle   = { key = "targetedListEnabled" },
-                    summary  = TargetedListSettingsSummary,
-                    count    = TL_SETTINGS_COUNT,
-                    onToggle = OnTargetedListEnableToggle,
-                    window   = DF.GUIFrame,
-                    clipTo   = self,
-                    build    = settingsMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(settingsRow, settingsContent)
-                tools.WireModifiedTick(settingsRow)
-                tools.WireFooter(settingsRow, TargetedListUpdate)
-                tools.RegisterHoistedToggle(settingsRow, L["Enable"], "targetedListEnabled", OnTargetedListEnableToggle)
+                -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" --
+                -- the Buff Bar's placement and its reasons.
+                Add(tools.SectionControls(self.child), 24, "both")
+                -- The category header the two Content cards sit under.
+                Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+                -- ☠ ENABLE STAYS IN THE BODY -- the page gate, as on every other
+                -- page (see the page's header). No toggle, no hoistToggle, and no
+                -- pin: this decides whether the display exists.
+                local band = OpenSection(L["Settings"], "targetedlist_settings", 1, TargetedListSettingsSummary)
+                BuildTargetedListSettingsGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== SIZE & SPACING (a 280 box in column 1 in classic, the Content
@@ -4643,36 +4619,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(layoutGroup, nil, 1)
             else
-                -- Five: width, height, spacing, growth and sort order.
-                local TL_LAYOUT_COUNT = 5
-
-                -- ☠ FIVE SETTINGS, SO THE GROUP GOES ON THE PLATE. Width, height and spacing
-                -- are the numbers people open this page to change, and a click that opens a
-                -- panel holding five sliders is a click that bought nothing. The strip stops
-                -- promising them and offers to pin a second copy instead. As everywhere else
-                -- here, the count below is the opt-in and INLINE_MAX -- measured off the pane,
-                -- prose included -- is what would refuse it.
-                local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListLayoutGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local layoutRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Size & Spacing"],
-                    db      = tools.RowDB,
-                    summary = TargetedListLayoutSummary,
-                    count   = TL_LAYOUT_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = layoutMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(layoutRow, layoutContent)
-                tools.WireModifiedTick(layoutRow)
-                tools.WireFooter(layoutRow, TargetedListUpdate)
-                layoutRow.disableOn = TLOffRow
+                -- How the bars are laid out is how the list LOOKS: pinnable.
+                local band = OpenSection(L["Size & Spacing"], "targetedlist_layout", 1, TargetedListLayoutSummary, TLOffRow, nil,
+                    BuildTargetedListLayoutGroup)
+                BuildTargetedListLayoutGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== BAR STYLE (a 280 box in column 2 in classic, the Appearance
@@ -4687,19 +4641,29 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ AND THAT BUNDLE IS WHY THIS ONE CANNOT BE THE SAME CALL IN BOTH
             -- LAYOUTS. Classic has always paid for a preset with a whole page
             -- REBUILD, because the values it writes sit behind a dozen OTHER boxes;
-            -- it keeps doing exactly that. A pane must not: a rebuild retires every
+            -- it keeps doing exactly that. Modern must not: a rebuild retires every
             -- widget on the page including the dropdown the user is clicking
             -- through, and the helper's own prologue closes every open panel on the
             -- way in. What the rebuild was buying is a repaint of controls that were
             -- written behind their backs, and that is the group-wide VALUE sweep --
-            -- ReflowMounted(true) for the panes standing open, the page's state pass
-            -- for the twelve row summaries and their amber ticks, and the override
-            -- indicators, which is the set RefreshAfterGroupWrite runs for a reset.
+            -- ReflowMounted(true) for a pinned panel, the page's state pass for the
+            -- card summaries and header ticks, and the override indicators, which
+            -- is the set RefreshAfterGroupWrite runs for a reset.
+            --
+            -- ⚠ A CARD IS NOT A PANE, so on the page it also sweeps every band: a
+            -- card's controls are page widgets, and RefreshStates alone never
+            -- repaints a value (DandersUI Sections' RefreshChildValues note).
+            -- `tools` is nil in classic, which is what keeps classic on its rebuild.
             local function TargetedListPresetChanged(tools2)
                 if DF.ApplyTargetedListPreset then
                     DF:ApplyTargetedListPreset(db.targetedListStylePreset)
                 end
-                if tools2.popout then
+                if tools2.popout or tools then
+                    if not tools2.popout then
+                        for _, w in ipairs(self.children or {}) do
+                            if w.RefreshChildValues then w:RefreshChildValues() end
+                        end
+                    end
                     tools.ReflowMounted(true)
                     self:RefreshStates()
                     if GUI.RefreshAllOverrideIndicators then
@@ -4752,32 +4716,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(presetGroup, nil, 2)
             else
-                -- Three: the preset, the texture and the background alpha.
-                local TL_PRESET_COUNT = 3
-
-                -- Three, so the group goes on the plate. The preset drives the other two, which
-                -- is an argument for seeing all three at once rather than one click away.
-                local presetMount, presetContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListPresetGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local presetRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Bar Style"],
-                    db      = tools.RowDB,
-                    summary = TargetedListPresetSummary,
-                    count   = TL_PRESET_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = presetMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(presetRow, presetContent)
-                tools.WireModifiedTick(presetRow)
-                tools.WireFooter(presetRow, TargetedListUpdate)
-                presetRow.disableOn = TLOffRow
+                -- Column 1 continues under the category header its five cards sit
+                -- under. How a bar LOOKS, so it is pinnable.
+                Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 1)
+                local band = OpenSection(L["Bar Style"], "targetedlist_barstyle", 1, TargetedListPresetSummary, TLOffRow, nil,
+                    BuildTargetedListPresetGroup)
+                BuildTargetedListPresetGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== BAR COLOR (a 280 box in column 2 in classic, the Appearance
@@ -4848,37 +4796,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(colorGroup, nil, 2)
             else
-                -- Seven: the four swatches, the two toggles that gate two of them and
-                -- the colours-only reset button.
-                local TL_COLOR_COUNT = 7
-
-                local colorMount, colorContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListColorGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end)
-                local colorRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Bar Color"],
-                    db      = tools.RowDB,
-                    summary = TargetedListColorSummary,
-                    count   = TL_COLOR_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = colorMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(colorRow, colorContent)
-                tools.WireModifiedTick(colorRow)
-                -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS
-                -- rather than about the button already in the pane. Four colour
-                -- tables and two booleans, all plain profile settings the defaults
-                -- engine can write; a colour picker's refreshValue is UpdateSwatch,
-                -- which re-reads dbTable[dbKey], so a reset that REPLACES a table is
-                -- repainted rather than detached.
-                tools.WireFooter(colorRow, TargetedListUpdate)
-                colorRow.disableOn = TLOffRow
+                -- ☠ NO HEADER TICK. Self-Target Color and Highlight Important
+                -- Spells each gate ONE swatch; neither switches the card off. The
+                -- colours are how a bar LOOKS, so it is pinnable.
+                local band = OpenSection(L["Bar Color"], "targetedlist_barcolor", 1, TargetedListColorSummary, TLOffRow, nil,
+                    BuildTargetedListColorGroup)
+                BuildTargetedListColorGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== BORDER (a 280 box in column 2 in classic, the Appearance band's
@@ -4941,48 +4868,63 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(borderGroup, nil, 2)
             else
-                -- Fifteen: the sixteen CreateBorderControls builds for this include
-                -- set, less the hoisted Show Border.
-                local TL_BORDER_COUNT = 15
-
-                -- What the suppressed Show Border checkbox ran, and never a page
-                -- rebuild: that would retire every widget on the page including the
-                -- row being clicked through.
-                local function OnTargetedListBorderToggle()
-                    self:RefreshStates()
-                    TargetedListUpdate()
-                    tools.ReflowMounted()
-                end
-
-                local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListBorderGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                        hoistToggle = true,
+                -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not
+                -- to build its own (hoistToggle -> noShowToggle). The key is still
+                -- read inside, so the rest of the toolkit greys exactly as before.
+                -- The commit is what the row's tick ran -- never a page rebuild. It
+                -- greys with the page gate, as the toolkit's disableWhen greyed the
+                -- in-body one.
+                local band = OpenSection(L["Border"], "targetedlist_border", 1, TargetedListBorderSummary, TLOffRow, nil,
+                    BuildTargetedListBorderGroup, {
+                        db = db, key = "targetedListShowBorder", label = L["Show Border"],
+                        isOn = function(d) return d.targetedListShowBorder ~= false end,
+                        disableOn = TLOffRow,
+                        onChanged = function()
+                            self:RefreshStates()
+                            TargetedListUpdate()
+                            tools.ReflowMounted()
+                        end,
                     })
-                end)
-                local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label    = L["Border"],
-                    db       = tools.RowDB,
-                    toggle   = { key = "targetedListShowBorder" },
-                    summary  = TargetedListBorderSummary,
-                    count    = TL_BORDER_COUNT,
-                    onToggle = OnTargetedListBorderToggle,
-                    window   = DF.GUIFrame,
-                    clipTo   = self,
-                    build    = borderMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(borderRow, borderContent)
-                tools.WireModifiedTick(borderRow)
-                tools.WireFooter(borderRow, TargetedListUpdate)
-                tools.RegisterHoistedToggle(borderRow, L["Show Border"], "targetedListShowBorder", OnTargetedListBorderToggle)
-                borderRow.disableOn = TLOffRow
+                BuildTargetedListBorderGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(band)
             end
 
-            -- ===== ICON (a 280 box in column 2 in classic, the Appearance band's
-            -- fourth row) =====
+            -- ===== TIMING (a 280 box in column 1 in classic, the fifth Appearance
+            -- card in Modern) =====
+            -- ☠ DECLARED HERE, ABOVE THE ICON CARD, and mounted from two places.
+            -- In classic it is the last box on the page because the columns had to
+            -- balance, and its box is still Add'd last, at the foot. In Modern
+            -- "how long does a bar linger" belongs with the four cards that decide
+            -- what a bar looks like -- and the Add order is also the one-column
+            -- fold's order, so the card is opened straight after Icon. A builder is
+            -- a local, so it has to exist before the first line that calls it.
+            local function BuildTargetedListTimingGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlFadeOut = group:AddWidget(GUI:CreateSlider(parent, L["Fade Out Duration"], 0, 1, 0.05, db, "targetedListFadeOutDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlFadeOut.disableOn = HideTLOptions
+                local tlFlashDur = group:AddWidget(GUI:CreateSlider(parent, L["Interrupted Flash Duration"], 0, 2, 0.1, db, "targetedListInterruptedFlashDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlFlashDur.disableOn = HideTLOptions
+            end
+
+            -- Two durations in seconds, in the order the bar meets them: the flash
+            -- when a cast is interrupted, then the fade as the bar leaves.
+            local function TargetedListTimingSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local flash = tonumber(d.targetedListInterruptedFlashDuration)
+                if flash then parts[#parts + 1] = format("%.1fs", flash) end
+                local fade = tonumber(d.targetedListFadeOutDuration)
+                if fade then parts[#parts + 1] = format("%.2fs", fade) end
+                return Join(parts)
+            end
+
+            -- ===== ICON (a 280 box in column 2 in classic, the fourth Appearance
+            -- card in Modern) =====
             local function BuildTargetedListIconGroup(tools2)
                 local group, parent = tools2.group, tools2.parent
 
@@ -5021,44 +4963,36 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(iconGroup, nil, 2)
             else
-                -- Two: the position and the zoom. The Show Icon tick is HOISTED onto
-                -- the row.
-                local TL_ICON_COUNT = 2
-
-                local function OnTargetedListIconToggle()
-                    self:RefreshStates()
-                    TargetedListUpdate()
-                    tools.ReflowMounted()
-                end
-
-                -- Two settings behind the row's own tick, so the group goes on the plate and
-                -- folds away when the tick is off. The Show Icon tick stays hoisted: it is the
-                -- row's toggle, not one of the two (the builder skips it under `hoistToggle`).
-                local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListIconGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                        hoistToggle = true,
+                -- ☠ SHOW ICON IS THE HEADER'S TICK; the builder skips its own
+                -- (hoistToggle). Same commit, and the same gate the in-body
+                -- checkbox carried as its disableOn. How a bar LOOKS: pinnable.
+                local band = OpenSection(L["Icon"], "targetedlist_icon", 1, TargetedListIconSummary, TLOffRow, nil,
+                    BuildTargetedListIconGroup, {
+                        db = db, key = "targetedListShowIcon", label = L["Show Icon"],
+                        disableOn = TLOffRow,
+                        onChanged = function()
+                            self:RefreshStates()
+                            TargetedListUpdate()
+                            tools.ReflowMounted()
+                        end,
                     })
-                end, nil, { inline = true })
-                local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label    = L["Icon"],
-                    db       = tools.RowDB,
-                    toggle   = { key = "targetedListShowIcon" },
-                    summary  = TargetedListIconSummary,
-                    count    = TL_ICON_COUNT,
-                    onToggle = OnTargetedListIconToggle,
-                    window   = DF.GUIFrame,
-                    clipTo   = self,
-                    build    = iconMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(iconRow, iconContent)
-                tools.WireModifiedTick(iconRow)
-                tools.WireFooter(iconRow, TargetedListUpdate)
-                tools.RegisterHoistedToggle(iconRow, L["Show Icon"], "targetedListShowIcon", OnTargetedListIconToggle)
-                iconRow.disableOn = TLOffRow
+                BuildTargetedListIconGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(band)
+
+                -- ☠ TIMING OPENS HERE, NOT IN ITS OWN ARM AT THE FOOT (see its
+                -- builder's note): the fifth Appearance card, before column 2
+                -- opens, so the one-column fold reads Content, Appearance, Text.
+                -- How long a bar lingers is BEHAVIOUR, so no pin.
+                local tband = OpenSection(L["Timing"], "targetedlist_timing", 1, TargetedListTimingSummary, TLOffRow)
+                BuildTargetedListTimingGroup({
+                    group = tband, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(tband)
             end
 
             -- ===== SHOW TEXT (a 280 box in column 1 in classic, the Text band's
@@ -5105,32 +5039,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(textToggleGroup, nil, 1)
             else
-                -- Six: the three elements and the three target-name extras.
-                local TL_SHOWTEXT_COUNT = 6
-
-                -- Six ticks choosing what a line of the list says. At the ceiling exactly, so a
-                -- seventh drops it back behind the strip on its own -- see INLINE_MAX.
-                local showTextMount, showTextContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListShowTextGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local showTextRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Show Text"],
-                    db      = tools.RowDB,
-                    summary = TargetedListShowTextSummary,
-                    count   = TL_SHOWTEXT_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = showTextMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(showTextRow, showTextContent)
-                tools.WireModifiedTick(showTextRow)
-                tools.WireFooter(showTextRow, TargetedListUpdate)
-                showTextRow.disableOn = TLOffRow
+                -- Column 2 opens here, with the category header its six cards sit
+                -- under. WHICH text a bar draws -- what shows, not how it looks --
+                -- so no pin, and no single on/off to put in the header.
+                Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)
+                local band = OpenSection(L["Show Text"], "targetedlist_showtext", 2, TargetedListShowTextSummary, TLOffRow)
+                BuildTargetedListShowTextGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== TEXT FONT (a 280 box in column 2 in classic, the Text band's
@@ -5171,32 +5089,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(fontGroup, nil, 2)
             else
-                -- Four: the font, the size, the outline and its shadow.
-                local TL_FONT_COUNT = 4
-
-                -- Four, so the group goes on the plate. Font, size, outline and shadow are read
-                -- together or not at all -- picking one of them behind a click is guesswork.
-                local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListFontGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local fontRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Text Font"],
-                    db      = tools.RowDB,
-                    summary = TargetedListFontSummary,
-                    count   = TL_FONT_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = fontMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(fontRow, fontContent)
-                tools.WireModifiedTick(fontRow)
-                tools.WireFooter(fontRow, TargetedListUpdate)
-                fontRow.disableOn = TLOffRow
+                local band = OpenSection(L["Text Font"], "targetedlist_font", 2, TargetedListFontSummary, TLOffRow, nil,
+                    BuildTargetedListFontGroup)
+                BuildTargetedListFontGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             -- ===== THE FOUR PER-ELEMENT POSITION BOXES (280 boxes in classic, the
@@ -5251,32 +5150,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(spellNamePosGroup, nil, 1)
             else
-                -- Six: the size, the width cap, anchor, alignment and the two offsets.
-                local TL_SPELLNAME_COUNT = 6
-
-                -- Six: size, width, anchor, alignment and the two offsets. At the ceiling
-                -- exactly, and the twin of the Target Name row below it.
-                local spellNameMount, spellNameContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListSpellNamePosGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local spellNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Spell Name Position"],
-                    db      = tools.RowDB,
-                    summary = TargetedListSpellNameSummary,
-                    count   = TL_SPELLNAME_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = spellNameMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(spellNameRow, spellNameContent)
-                tools.WireModifiedTick(spellNameRow)
-                tools.WireFooter(spellNameRow, TargetedListUpdate)
-                spellNameRow.disableOn = TLOffRow
+                local band = OpenSection(L["Spell Name Position"], "targetedlist_spellnamepos", 2, TargetedListSpellNameSummary, TLOffRow, nil,
+                    BuildTargetedListSpellNamePosGroup)
+                BuildTargetedListSpellNamePosGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             local function BuildTargetedListTargetNamePosGroup(tools2)
@@ -5306,36 +5186,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(targetNamePosGroup, nil, 2)
             else
-                -- Six: the same set the Spell Name row carries.
-                local TL_TARGETNAME_COUNT = 6
-
-                -- Six, the same six as Spell Name above. Two rows that differ only in which
-                -- text they position should not differ in how many clicks they cost.
-                local targetNameMount, targetNameContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListTargetNamePosGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local targetNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Target Name Position"],
-                    db      = tools.RowDB,
-                    summary = TargetedListTargetNameSummary,
-                    count   = TL_TARGETNAME_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = targetNameMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(targetNameRow, targetNameContent)
-                tools.WireModifiedTick(targetNameRow)
-                tools.WireFooter(targetNameRow, TargetedListUpdate)
-                -- ⚠ THE ROW GREYS ON THE PAGE GATE ONLY, not on Show Target Name.
-                -- The six controls behind it carry that second gate themselves --
-                -- exactly as they did in the box -- so the row stays reachable and
-                -- the pane says which of the two switches is holding it.
-                targetNameRow.disableOn = TLOffRow
+                -- ⚠ THE HEADER GREYS ON THE PAGE GATE ONLY, not on Show Target
+                -- Name, which lives in Show Text. The six controls carry that second
+                -- gate themselves -- exactly as they did in the box.
+                local band = OpenSection(L["Target Name Position"], "targetedlist_targetnamepos", 2, TargetedListTargetNameSummary, TLOffRow, nil,
+                    BuildTargetedListTargetNamePosGroup)
+                BuildTargetedListTargetNamePosGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             local function BuildTargetedListDurationPosGroup(tools2)
@@ -5363,33 +5223,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(durationPosGroup, nil, 1)
             else
-                -- Five: the same set less the width cap, which the duration text has
-                -- never had.
-                local TL_DURATIONPOS_COUNT = 5
-
-                -- Five, so the group goes on the plate. Anchor, alignment and two offsets only
-                -- mean anything against each other, which is an argument for one screen.
-                local durationPosMount, durationPosContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListDurationPosGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local durationPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Duration Position"],
-                    db      = tools.RowDB,
-                    summary = TargetedListDurationPosSummary,
-                    count   = TL_DURATIONPOS_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = durationPosMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(durationPosRow, durationPosContent)
-                tools.WireModifiedTick(durationPosRow)
-                tools.WireFooter(durationPosRow, TargetedListUpdate)
-                durationPosRow.disableOn = TLOffRow
+                local band = OpenSection(L["Duration Position"], "targetedlist_durationpos", 2, TargetedListDurationPosSummary, TLOffRow, nil,
+                    BuildTargetedListDurationPosGroup)
+                BuildTargetedListDurationPosGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
             local function BuildTargetedListInterruptPosGroup(tools2)
@@ -5419,67 +5259,19 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(interruptPosGroup, nil, 2)
             else
-                -- Six: the same set the Spell Name row carries.
-                local TL_INTERRUPTPOS_COUNT = 6
-
-                -- Six -- the Spell Name row's set -- so the group goes on the plate. Exactly at
-                -- INLINE_MAX's budget, and there is no prose in this pane to spend it on.
-                local interruptPosMount, interruptPosContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListInterruptPosGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local interruptPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Interrupt Text Position"],
-                    db      = tools.RowDB,
-                    summary = TargetedListInterruptPosSummary,
-                    count   = TL_INTERRUPTPOS_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = interruptPosMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(interruptPosRow, interruptPosContent)
-                tools.WireModifiedTick(interruptPosRow)
-                tools.WireFooter(interruptPosRow, TargetedListUpdate)
-                interruptPosRow.disableOn = TLOffRow
+                local band = OpenSection(L["Interrupt Text Position"], "targetedlist_interruptpos", 2, TargetedListInterruptPosSummary, TLOffRow, nil,
+                    BuildTargetedListInterruptPosGroup)
+                BuildTargetedListInterruptPosGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
             end
 
-            -- ===== TIMING (a 280 box in column 1 in classic, the Appearance band's
-            -- fifth row) =====
-            -- ☠ IT READS FIFTH, NOT THIRTEENTH -- AND THE SOURCE STILL COMES LAST.
-            -- In classic it is the last box on the page because the columns had to
-            -- balance; in a band there is nothing to balance, and "how long does a
-            -- bar linger" belongs with the four boxes that decide what a bar looks
-            -- like, not after six boxes about text. So the row is mounted into the
-            -- APPEARANCE band from here, at the foot of the page: within a column
-            -- the Add() order IS the layout order, so moving this block up the file
-            -- would have reordered classic's column 1 -- and the bands are Add()ed
-            -- after every row is mounted, so a row registered last still lands where
-            -- its band puts it.
-            local function BuildTargetedListTimingGroup(tools2)
-                local group, parent = tools2.group, tools2.parent
-
-                local tlFadeOut = group:AddWidget(GUI:CreateSlider(parent, L["Fade Out Duration"], 0, 1, 0.05, db, "targetedListFadeOutDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
-                tlFadeOut.disableOn = HideTLOptions
-                local tlFlashDur = group:AddWidget(GUI:CreateSlider(parent, L["Interrupted Flash Duration"], 0, 2, 0.1, db, "targetedListInterruptedFlashDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
-                tlFlashDur.disableOn = HideTLOptions
-            end
-
-            -- Two durations in seconds, in the order the bar meets them: the flash
-            -- when a cast is interrupted, then the fade as the bar leaves.
-            local function TargetedListTimingSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local flash = tonumber(d.targetedListInterruptedFlashDuration)
-                if flash then parts[#parts + 1] = format("%.1fs", flash) end
-                local fade = tonumber(d.targetedListFadeOutDuration)
-                if fade then parts[#parts + 1] = format("%.2fs", fade) end
-                return Join(parts)
-            end
-
+            -- ===== TIMING, CLASSIC'S LAST BOX =====
+            -- Its builder is declared above the Icon card, where Modern opens it;
+            -- within a column the Add() order IS the layout order, so classic's box
+            -- stays down here, last in its column, exactly where it always was.
             if classicLayout then
                 local timingGroup = GUI:CreateSettingsGroup(self.child, 280)
                 timingGroup:AddWidget(GUI:CreateHeader(self.child, L["Timing"]), 40)
@@ -5490,52 +5282,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(timingGroup, nil, 1)
             else
-                -- Two: the fade-out and the interrupted flash.
-                local TL_TIMING_COUNT = 2
-
-                -- Two sliders. A click for two sliders is the plainest case the
-                -- hybrid exists to remove.
-                local timingMount, timingContent = tools.PopoutContent(function(group, holder, reflow)
-                    BuildTargetedListTimingGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        popout = true,
-                    })
-                end, nil, { inline = true })
-                local timingRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                    label   = L["Timing"],
-                    db      = tools.RowDB,
-                    summary = TargetedListTimingSummary,
-                    count   = TL_TIMING_COUNT,
-                    window  = DF.GUIFrame,
-                    clipTo  = self,
-                    build   = timingMount,
-                    footerStrip = true,
-                }))
-                tools.ClaimKeys(timingRow, timingContent)
-                tools.WireModifiedTick(timingRow)
-                tools.WireFooter(timingRow, TargetedListUpdate)
-                timingRow.disableOn = TLOffRow
+                -- Modern opened this card above, after Icon -- see the Icon arm.
             end
 
-            -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM =============
-            -- Content and Appearance down the left, Text down the right. On a narrow
-            -- window the page folds back to one column in the order below.
-            -- ⚠ APPEARANCE IS LEFT FOR BALANCE. By the rule it belongs on the right, but
-            -- there it would leave Content alone at two rows against eleven; on the left
-            -- the columns hold seven and six. Of the two visual bands it is the one that
-            -- also carries a behaviour row (Timing), so it is the one that moves.
-            -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-            -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-            -- width it was built at and it overhangs its neighbour.
-            if not classicLayout then
-                contentBand.layoutColFill = true
-                appearanceBand.layoutColFill = true
-                textBand.layoutColFill = true
-                Add(contentBand, nil, 1)
-                Add(appearanceBand, nil, 1)
-                Add(textBand, nil, 2)
-            end
+            -- ===== NO BAND TAIL ================================================
+            -- Each card's band is Add'd by CloseSection the moment its group is
+            -- built. Content and Appearance down the left, Text down the right --
+            -- the old bands' split: Appearance sits left for balance, or Content
+            -- would stand alone at two cards against eleven -- and on a narrow
+            -- window the page folds to one column in the order above.
 
             -- See Also links
             AddSpace(GUI.Space.block, "both")
