@@ -5280,15 +5280,21 @@ function GUI:CreatePopoutPageTools(page)
         -- Ghost, because these act on the PAGE rather than on a setting: a solid
         -- button at the top of a settings page reads as the page's primary
         -- action, and neither of these is. Same skin the "+ Add set" strip uses.
-        local function mk(text, want)
+        -- The corner-bracket pair (Tools/generate_expand_collapse_icons.py):
+        -- boxes being pulled apart and pushed together, which is what the two
+        -- verbs do to the page. Wider by the glyph and its gap.
+        local function mk(text, want, icon)
             local b = CreateFrame("Button", nil, strip, "BackdropTemplate")
-            b:SetSize(84, 20)
-            GUI:StyleButton(b, { ghost = true, text = text, font = "DFFontHighlightSmall" })
+            b:SetSize(102, 20)
+            GUI:StyleButton(b, {
+                ghost = true, text = text, font = "DFFontHighlightSmall",
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. icon, size = 12 },
+            })
             b:SetScript("OnClick", function() ApplyAll(want) end)
             return b
         end
-        local expandBtn   = mk(L["Expand All"], true)
-        local collapseBtn = mk(L["Collapse All"], false)
+        local expandBtn   = mk(L["Expand All"], true, "expand_content")
+        local collapseBtn = mk(L["Collapse All"], false, "collapse_content")
         -- LEFT-ALIGNED, and deliberately not stretched across the page. The strip
         -- is Add'd at col "both" so it spans whatever width the window gives it,
         -- and two buttons pinned to opposite ends of THAT would sit a page apart
