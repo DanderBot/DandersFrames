@@ -1614,8 +1614,9 @@ do
         -- Position. ⚠ 4, NOT 14, since Targeted List followed: its ten. ⚠ 0
         -- since Personal Targeted followed: every page in the file is cards now.
         ["GUI/Pages/Indicators.lua"] = 0,
-        -- ⚠ 4, NOT 7, since Highlights became cards: its three went.
-        ["GUI/Pages/Modules.lua"]    = 4,   -- Icon Text 1, Dispel 3
+        -- ⚠ 4, NOT 7, since Highlights became cards: its three went. ⚠ 1,
+        -- NOT 4, since the Dispel Overlay followed: its three went too.
+        ["GUI/Pages/Modules.lua"]    = 1,   -- Icon Text 1
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
         -- ⚠ Auras.lua's pages move onto the Debuff Bar's cards one by one, and a
         -- card has no plate to opt onto: Heal Prediction's 2 went first, then Health Bar's 5

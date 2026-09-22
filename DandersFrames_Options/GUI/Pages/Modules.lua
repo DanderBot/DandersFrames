@@ -1501,41 +1501,62 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- CLASSIC is exactly what it always was: five 280 boxes in two columns,
         -- in the columns and the order they have always had.
         --
-        -- POPOUT turns four of them into feature rows and the fifth — Display,
-        -- which holds one checkbox — into a CONTROL ROW, in two bands:
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
+        -- controls TWO PER ROW inside a card wide enough, captions drawn dim, the
+        -- value summary in a shut card's corner, Expand All / Collapse All at the
+        -- top. Four cards:
         --
-        --   "Content"      Settings — whether the overlay exists at all, which
-        --                  dispels light it up, and where its colours come from.
-        --   "Appearance"   Pulse Overlay (the control row), Dispel Symbol,
-        --                  Border, Gradient — the four things drawn.
+        --   column 1   Settings -- whether the overlay exists at all (the PAGE
+        --              gate, which stays in its body), which dispels light it
+        --              up, where its colours come from, and Pulse Overlay.
+        --              Gradient -- the overlay's own wash.
+        --   column 2   Dispel Symbol, Border -- the two things drawn ON it.
         --
-        -- ⚠ THE CONTROL ROW IS NAMED FOR ITS SETTING, NOT FOR ITS BOX. A control
-        -- row draws ONE name and that name is the setting's, so the plate reads
-        -- "Pulse Overlay" and the box's own "Display" header is freed to become
-        -- the band it always described.
+        -- ⚠ GRADIENT SITS IN COLUMN 1, where classic always had it. As cards the
+        -- page was one behaviour card against three looks cards -- a short left
+        -- column beside a tall right one -- and the Gradient is the tallest card
+        -- on the page. Classic's own reasoning puts it there too: it is the
+        -- OVERLAY's wash, so it goes with the overlay's settings rather than
+        -- with the symbol and ring drawn over it.
         --
-        -- Both band headers are locale strings the page already ships, and
-        -- neither can strand: the Content band's row carries the page's own gate
-        -- and is never hidden, and nothing in the Appearance band can hide.
+        -- ⚠ PULSE OVERLAY MOVED INTO SETTINGS. Its classic box ("Display") holds
+        -- that one checkbox, and as a lone control row it was the one element on
+        -- the page with its own width and height. It pulses the whole overlay --
+        -- the wash, the ring and the symbol together -- so it goes in the card
+        -- that is about the whole overlay.
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- Show Dispel Symbol, Show Border and Show Gradient are the three cards'
+        -- header ticks (their builders skip their in-body copy through
+        -- hoistToggle). Those three cards also PIN; Settings decides what shows,
+        -- so it does not.
+        --
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where a toggle is hoisted,
         -- `hoistToggle`. The classic branch mounts the SAME builder into the box
         -- it always built — test_dispel_page_builders.lua pins the inventory of
         -- each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which is
-        -- what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. nil in classic, which is what every
+        -- `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        local contentBand, appearanceBand
-        if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
+        end
+        -- What each of the three header ticks commits: what its in-body checkbox
+        -- ran (the apply and a state pass, which re-greys the card's controls)
+        -- plus a repaint of any pinned panel -- never a page rebuild. Modern only.
+        local function OnDispelCardTick()
+            ApplyDispelSettings()
+            self:RefreshStates()
+            tools.ReflowMounted()
         end
 
         -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
@@ -1571,28 +1592,36 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- — a hideOn on each widget and on four of the five boxes — and that is
         -- left exactly as it was.
         --
-        -- A pane cannot do that. Hiding a row's whole contents leaves a live row
-        -- over an EMPTY panel, and hiding the rows themselves leaves the band
-        -- header standing over nothing — which is the header the Defensive Icon
-        -- page refused to build for exactly that reason. So the popout layout
-        -- says the gate ONCE, where every other converted page says it: as a
-        -- GREY, on the row (row.disableOn = DispelOffRow) — plus, on the Settings
-        -- row, the kit's own toggle gate, which greys that pane and its footer
-        -- whenever the row's tick is off.
+        -- A card cannot do that. Hiding a card's controls leaves its header over
+        -- an EMPTY body, and a header tick on it that nothing under it answers.
+        -- So Modern says the gate where every other converted page says it: as
+        -- a GREY -- the three looks cards' headers dim (dimOn) and their ticks
+        -- grey, and every card body, and every pinned panel, greys whole
+        -- (GreyWithPage below).
         --
         -- ⚠ AND IT IS THE CONVENTION THIS PAGE'S OWN SOURCE STATES four lines up:
         -- a boolean toggle greys in place. Classic's whole-group hide is the odd
         -- one out, and it is not disturbed.
         --
-        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Buff Bar's reason: it
-        -- holds the gate's own tick, so greying it would leave no way to switch
-        -- the overlay back on.
+        -- ⚠ THE SETTINGS CARD'S OWN SWITCH IS THE EXCEPTION, for the Buff Bar's
+        -- reason: it IS the gate, so greying it would leave no way to switch the
+        -- overlay back on (keepEnabled, in its builder).
         local function DispelOffRow(d) return not (d or db).dispelOverlayEnabled end
 
+        -- The grey half of the page gate: a card body (`card`) or a pinned panel
+        -- (`popout`) greys whole while the overlay is off. Never in classic,
+        -- which hides instead (GateHide).
+        local function GreyWithPage(tools2)
+            if tools2.popout or tools2.card then
+                tools2.group.disableChildrenOn = DispelOffRow
+            end
+        end
+
         -- `also` is a widget's OWN variant gate, which survives in both layouts;
-        -- only the page gate is dropped from the pane.
+        -- only the page gate is dropped from a card or a pinned panel, which grey
+        -- instead (GreyWithPage).
         local function GateHide(tools2, w, also)
-            if tools2.popout then
+            if tools2.popout or tools2.card then
                 if also then w.hideOn = also end
             elseif also then
                 w.hideOn = function(d) return HideIfDisabled(d) or also(d) end
@@ -1609,36 +1638,32 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function Join(parts) return table.concat(parts, " \194\183 ") end
 
         -- ===== ENABLE + SHARED SETTINGS (a 280 box in column 1 in classic, the
-        -- Content band's only row) =====
+        -- Modern's first card) =====
         -- 12.1 unified overlay: ONE container-slot-driven system (Features/
         -- Dispel.lua factory path) covering normal AND private-aura dispels
         -- natively. The old Off / DandersFrames / Blizzard / Hybrid source selector
         -- is now this single toggle (settings migrate: any non-Off source = enabled).
         --
-        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
-        -- rather than two control rows: a control row carries a SETTING rather
-        -- than a group, so it can offer neither the group's Reset Group nor the
-        -- tick that says the group has been touched — and the page gate would
-        -- then belong to no row at all.
+        -- ☠ ENABLE DISPEL OVERLAY STAYS IN THE BODY, in both layouts, as Show
+        -- Buffs does on the Buff Bar: it is the PAGE gate, a fold is not a switch,
+        -- and a header tick that greyed the whole page would surprise people.
         local function BuildDispelSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the page's only on/off control.
-            --
             -- ⚠ CLASSIC USED TO PAY FOR THE GATE WITH A WHOLE-PAGE REBUILD (after
-            -- the state pass it already ran). It is the state pass alone now, like
-            -- the popout's commit (OnDispelEnableToggle): a rebuild retires the row
-            -- being clicked and leaks the page.
-            if not tools2.hoistToggle then
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
-                    ApplyDispelSettings()
-                    -- The state pass is all the gate needs: every control under it
-                    -- hides through HideDispelOptions. The page rebuild that used
-                    -- to follow it leaked the whole page per click.
-                    tools2.refreshStates()
-                end), 30)
-            end
+            -- the state pass it already ran). It is the state pass alone now: a
+            -- rebuild retires the control being clicked and leaks the page.
+            local enableCb = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
+                ApplyDispelSettings()
+                -- The state pass is all the gate needs: every control under it
+                -- hides (classic) or greys (a card) on it. The page rebuild that
+                -- used to follow it leaked the whole page per click.
+                tools2.refreshStates()
+            end), 30)
+            -- The gate's own switch stays live under the card's grey. Inert in
+            -- classic, whose box carries no group gate.
+            enableCb.keepEnabled = true
+            GreyWithPage(tools2)
             local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
                 OnDispelTypeChanged()
             end), 55)
@@ -1674,72 +1699,33 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Two: the Show Overlay For dropdown and the Colors-page link. The
-            -- Enable tick is HOISTED onto the row.
-            local DISPEL_SETTINGS_COUNT = 2
-
-            -- What the suppressed Enable checkbox ran, minus the page rebuild:
-            -- that would retire every widget on the page including the row being
-            -- clicked through. The four rows that grey with it are repainted by
-            -- the page's own state pass, and the panes standing open by the
-            -- reflow.
-            local function OnDispelEnableToggle()
-                ApplyDispelSettings()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- ☠ TWO BEHIND THE ROW'S OWN TICK, SO THE GROUP GOES ON THE PLATE --
-            -- and folds away whole when the tick is off, which is the one state
-            -- where a dropdown and a link greyed out on the row would be the
-            -- worst use of the space. The tick STAYS HOISTED: it is the row's
-            -- toggle rather than one of the two, so it is not a second widget on
-            -- a key the plate already draws. Border Shadow on the Frame page is
-            -- the same pairing for the same reason.
-            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDispelSettingsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-            end, nil, { inline = true })
-            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Settings"],
-                db       = tools.RowDB,
-                toggle   = { key = "dispelOverlayEnabled" },
-                summary  = DispelSettingsSummary,
-                count    = DISPEL_SETTINGS_COUNT,
-                onToggle = OnDispelEnableToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = settingsMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(settingsRow, settingsContent)
-            tools.WireModifiedTick(settingsRow)
-            tools.WireFooter(settingsRow, InvalidateCurves)
-            tools.RegisterHoistedToggle(settingsRow, L["Enable Dispel Overlay"], "dispelOverlayEnabled", OnDispelEnableToggle)
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns, and
+            -- "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- Holds the page gate, so it never greys and never dims; decides
+            -- what SHOWS, so no pin.
+            local band = OpenSection(L["Settings"], "dispel_settings", 1, DispelSettingsSummary)
+            BuildDispelSettingsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                card = true,
+            })
+            -- ⚠ PULSE OVERLAY LIVES HERE IN MODERN (classic keeps its Display box,
+            -- below). It pulses the whole overlay, so it goes in the card about
+            -- the whole overlay; the card's grey covers it (GreyWithPage).
+            local pulse = band:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", ApplyDispelSettings), 30)
+            pulse.fullRow = true
+            CloseSection(band)
         end
 
         -- The four boxes below sit under NO "Appearance" collapsible header: a header
         -- means "here is another one of these", which is why Icons and Highlights keep
         -- theirs and this page has none. Every box declares the same hideOn for itself,
         -- so the whole block still disappears when the overlay is off.
-        --
-        -- ⚠ AND THE POPOUT LAYOUT'S "Appearance" BAND IS NOT THAT HEADER COMING
-        -- BACK. A band is the page's own top-level grouping — the shape "Content
-        -- / Icon / Text" takes on every converted page — not a collapsible
-        -- section the user has to open to reach a box that was already visible.
 
-        -- ===== DISPLAY (a 280 box in column 1 in classic, the Appearance band's
-        -- first plate) =====
-        -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. There is nothing
-        -- behind this plate to open: a popout row here would be a panel holding a
-        -- single checkbox, and the row's own tick column already IS that
-        -- checkbox. The trade is the group's two verbs — a control row offers no
-        -- Reset Group and no amber tick — which for one boolean the modified dot
-        -- on the control itself already covers.
+        -- ===== DISPLAY (a 280 box in column 1 in classic; in Modern its one
+        -- checkbox sits at the foot of the Settings card, above) =====
         if classicLayout then
             local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
             displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
@@ -1756,34 +1742,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- real version needs an occlusion-safe name tint on the slot overlay.)
             displayGroup.hideOn = HideDispelOptions
             Add(displayGroup, nil, 1)
-        else
-            local animateRow = appearanceBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label     = L["Pulse Overlay"],
-                kind      = "checkbox",
-                -- The FUNCTION form: the table is re-resolved on each read, so a
-                -- mode switch is followed rather than frozen at whichever table
-                -- this build captured.
-                db        = tools.RowDB,
-                key       = "dispelAnimate",
-                onChanged = ApplyDispelSettings,
-            }))
-            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
-            -- are the popout row's own slot), which is what makes a control row and
-            -- a feature row share one rhythm in a band.
-            --
-            -- The page gate, as a GREY rather than the box's hide -- see the essay
-            -- at DispelOffRow.
-            animateRow.disableOn = DispelOffRow
-            tools.RegisterControlRow(animateRow, "checkbox", "dispelAnimate", false, ApplyDispelSettings)
         end
 
-        -- ===== ICON GROUP (a 280 box in column 2 in classic, the Appearance
-        -- band's second row) =====
+        -- ===== ICON GROUP (a 280 box in column 2 in classic, a card in column 2
+        -- in Modern) =====
         local function BuildDispelIconGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            GreyWithPage(tools2)
 
-            -- Suppressed when the ROW carries this tick; still the group's own
-            -- head in classic.
+            -- Suppressed when the CARD's header carries this tick; still the
+            -- group's own head in classic and in a pinned panel.
             if not tools2.hoistToggle then
                 local showIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
                     ApplyDispelSettings()
@@ -1847,55 +1815,30 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             iconGroup.hideOn = HideDispelOptions
             Add(iconGroup, nil, 2)
         else
-            -- Five: size, opacity, position and the two offsets. The Show Dispel
-            -- Symbol tick is HOISTED onto the row.
-            local DISPEL_ICON_COUNT = 5
-
-            -- What the suppressed Show Dispel Symbol checkbox ran, and never a
-            -- page rebuild.
-            local function OnDispelIconToggle()
-                ApplyDispelSettings()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Five behind the row's own tick, so the group goes on the plate and
-            -- folds with the tick -- the Settings row's pairing one band down.
-            -- The tick stays hoisted for the same reason it does there. Size and
-            -- position are what a symbol row is opened for and the summary can
-            -- carry them, but the pair of offsets cannot be nudged from a
-            -- sentence.
-            local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDispelIconGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW DISPEL SYMBOL IS THE HEADER'S TICK; the builder skips its
+            -- own (hoistToggle). The key keeps its classic reading (off only when
+            -- explicitly false), and the tick greys with the page gate, as the
+            -- header dims. A pin: it decides how the symbol LOOKS.
+            local band = OpenSection(L["Dispel Symbol"], "dispel_symbol", 2, DispelIconSummary, DispelOffRow, nil,
+                BuildDispelIconGroup, {
+                    db = db, key = "dispelShowIcon", label = L["Show Dispel Symbol"],
+                    isOn = function(d) return d.dispelShowIcon ~= false end,
+                    disableOn = DispelOffRow,
+                    onChanged = OnDispelCardTick,
                 })
-            end, nil, { inline = true })
-            local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Dispel Symbol"],
-                db       = tools.RowDB,
-                toggle   = { key = "dispelShowIcon" },
-                summary  = DispelIconSummary,
-                count    = DISPEL_ICON_COUNT,
-                onToggle = OnDispelIconToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = iconMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(iconRow, iconContent)
-            tools.WireModifiedTick(iconRow)
-            tools.WireFooter(iconRow, InvalidateCurves)
-            tools.RegisterHoistedToggle(iconRow, L["Show Dispel Symbol"], "dispelShowIcon", OnDispelIconToggle)
-            iconRow.disableOn = DispelOffRow
+            BuildDispelIconGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                card = true, hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ===== BORDER GROUP (a 280 box in column 2 in classic, the Appearance
-        -- band's third row) =====
+        -- ===== BORDER GROUP (a 280 box in column 2 in classic, a card in column 2
+        -- in Modern) =====
         local function BuildDispelBorderGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            GreyWithPage(tools2)
 
             if not tools2.hoistToggle then
                 local showBorder = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "dispelShowBorder", function()
@@ -1949,59 +1892,33 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
             Add(borderGroup, nil, 2)
         else
-            -- Three: thickness, inset and opacity. The Show Border tick is
-            -- HOISTED onto the row.
-            local DISPEL_BORDER_COUNT = 3
-
-            local function OnDispelBorderToggle()
-                ApplyDispelSettings()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Three behind the row's own tick, so the group goes on the plate and
-            -- folds with the tick, as the two rows above it do. Its tick stays
-            -- hoisted for the reason theirs do. The Gradient row beside it keeps
-            -- its strip at eight, which is what the ceiling is for: the band
-            -- holds both shapes and the difference between them is real.
-            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDispelBorderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, Dispel Symbol's pattern: the
+            -- builder skips its own, the tick greys with the page gate. A pin.
+            local band = OpenSection(L["Border"], "dispel_border", 2, DispelBorderSummary, DispelOffRow, nil,
+                BuildDispelBorderGroup, {
+                    db = db, key = "dispelShowBorder", label = L["Show Border"],
+                    isOn = function(d) return d.dispelShowBorder ~= false end,
+                    disableOn = DispelOffRow,
+                    onChanged = OnDispelCardTick,
                 })
-            end, nil, { inline = true })
-            local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Border"],
-                db       = tools.RowDB,
-                toggle   = { key = "dispelShowBorder" },
-                summary  = DispelBorderSummary,
-                count    = DISPEL_BORDER_COUNT,
-                onToggle = OnDispelBorderToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = borderMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(borderRow, borderContent)
-            tools.WireModifiedTick(borderRow)
-            tools.WireFooter(borderRow, InvalidateCurves)
-            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "dispelShowBorder", OnDispelBorderToggle)
-            borderRow.disableOn = DispelOffRow
+            BuildDispelBorderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                card = true, hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ===== GRADIENT GROUP (a 280 box in column 1 in classic, the Appearance
-        -- band's fourth row) =====
+        -- ===== GRADIENT GROUP (a 280 box in column 1 in classic, a card in
+        -- column 1 in Modern) =====
         -- Column 1 with Display, not column 2 with Border: this is the OVERLAY's
         -- own gradient (Full Frame / Top Edge / Edge Glow), so it belongs with
         -- the overlay's display mode rather than with the border drawn over it.
-        --
-        -- ⚠ CLASSIC ONLY, now. In the popout layout the gradient is the last row
-        -- of the Appearance band (column 2 when there is room), and sits last
-        -- because it is the widest of the four things drawn.
+        -- Modern keeps it there too, under Settings -- which is also what
+        -- balances the page (see the essay at the top).
         local function BuildDispelGradientGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            GreyWithPage(tools2)
 
             if not tools2.hoistToggle then
                 local showGradient = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Gradient"], db, "dispelShowGradient", function()
@@ -2099,62 +2016,23 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             gradientGroup.hideOn = HideDispelOptions
             Add(gradientGroup, nil, 1)
         else
-            -- Eight: the position, the current-health variant, size, opacity, the
-            -- frame level, the blend mode and the darken pair. The Show Gradient
-            -- tick is HOISTED onto the row.
-            local DISPEL_GRADIENT_COUNT = 8
-
-            local function OnDispelGradientToggle()
-                ApplyDispelSettings()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            local gradientMount, gradientContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDispelGradientGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW GRADIENT IS THE HEADER'S TICK, Dispel Symbol's pattern. A
+            -- pin. Column 1, under Settings: see the essay at the top. It is
+            -- added last, so the one-column fold reads Settings, Dispel Symbol,
+            -- Border, Gradient -- the order the page always had.
+            local band = OpenSection(L["Gradient"], "dispel_gradient", 1, DispelGradientSummary, DispelOffRow, nil,
+                BuildDispelGradientGroup, {
+                    db = db, key = "dispelShowGradient", label = L["Show Gradient"],
+                    isOn = function(d) return d.dispelShowGradient ~= false end,
+                    disableOn = DispelOffRow,
+                    onChanged = OnDispelCardTick,
                 })
-            end)
-            local gradientRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Gradient"],
-                db       = tools.RowDB,
-                toggle   = { key = "dispelShowGradient" },
-                summary  = DispelGradientSummary,
-                count    = DISPEL_GRADIENT_COUNT,
-                onToggle = OnDispelGradientToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = gradientMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(gradientRow, gradientContent)
-            tools.WireModifiedTick(gradientRow)
-            tools.WireFooter(gradientRow, InvalidateCurves)
-            tools.RegisterHoistedToggle(gradientRow, L["Show Gradient"], "dispelShowGradient", OnDispelGradientToggle)
-            gradientRow.disableOn = DispelOffRow
-        end
-
-        -- ===== THE TWO BANDS: TWO COLUMNS WHEN THERE IS ROOM ================
-        -- Added at the foot rather than in place, because `Add` resolves a band's
-        -- slot height on the spot and a band has to go in after its last row.
-        -- The Frame page's rule: what the page DOES down the left, how it LOOKS
-        -- down the right -- Content on the left, Appearance on the right. On a
-        -- narrow window the page folds back to one column and reads in exactly
-        -- the order below, which is the order it always had.
-        -- ⚠ NOT BALANCED: one row against four, and no band choice can fix it --
-        -- there are only the two bands, and Appearance is looks through and
-        -- through, so there is no behaviour/looks line to split it along.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            contentBand.layoutColFill = true
-            appearanceBand.layoutColFill = true
-            Add(contentBand, nil, 1)
-            Add(appearanceBand, nil, 2)
+            BuildDispelGradientGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                card = true, hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- See Also links
