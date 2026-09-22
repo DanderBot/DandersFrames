@@ -680,6 +680,41 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     local pagePinnedFrames = CreateSubTab("general", "general_pinnedframes", L["Pinned Frames"])
     BuildPage(pagePinnedFrames, function(self, db, Add, AddSpace, AddSyncPoint)
         Add(CreateCopyButton(self.child, {"pinnedFrames"}, L["Pinned Frames"], "general_pinnedframes"), 25, 2)
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: the header box, the set tabs,
+        -- the Setup / Appearance / Members sub-tabs and the boxes under them.
+        --
+        -- MODERN keeps that STRUCTURE -- the per-set tab strip (add, remove,
+        -- rename, the on/off pip), the sub-tabs and the Members roster work
+        -- exactly as before -- and brings the page's look in line with the
+        -- other General pages: the intro is a banner, and each box is a
+        -- collapsible CARD in its column (Settings / Frame Type on Setup, Frame
+        -- Style / Layout on Appearance, Auto-Populate on Members), with Expand
+        -- All / Collapse All under the sub-tabs. A card keeps its box's own
+        -- sub-tab gate, so a sub-tab still shows exactly its two groups.
+        --
+        -- ⚠ WHAT IS NOT CONVERTED, and why. The controls are this page's own
+        -- hand-built widgets (they read the ACTIVE SET, not a db key), so the
+        -- kit cannot lay them two per row or dim their captions, and there are
+        -- no builders a pinned panel could re-mount -- so no card here is
+        -- pinnable. The Unit Selection header and the roster stay as they are:
+        -- they ARE the set's member list. No card has a header tick: the set's
+        -- Enable stays in the Settings card's body, as a master switch does.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- ⚠ MODERN ONLY. Every other page takes the tools unconditionally; this
+        -- page never did, and its classic build is kept exactly as it was.
+        local tools = (not classicLayout) and GUI:CreatePopoutPageTools(self) or nil
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
+        end
         -- Constants — mirror the runtime cap so the editor builds exactly as many
         -- tab buttons as the backend allows (sets beyond the current count are hidden).
         local HIGHLIGHT_MAX_SETS = (DF.PinnedFrames and DF.PinnedFrames.MAX_SETS) or 4
@@ -945,60 +980,71 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
         
-        -- ===== HEADER GROUP (full width) =====
-        local headerGroup = GUI:CreateSettingsGroup(self.child, 560)
-        headerGroup:AddWidget(GUI:CreateHeader(self.child, L["Pinned Frames"]), 40)
-        -- Auto-size the description's slot to the actual wrapped text height so the
-        -- box hugs the text at every width (no fixed bottom padding, no truncation).
-        -- GetStringHeight returns a stale single-line value right after a width
-        -- change, so we measure on a DEFERRED frame (OnSizeChanged -> C_Timer) once
-        -- the FontString has re-wrapped, then update the group's slot height and
-        -- bubble a relayout up to the page. Mirrors GUI:CreateInfoBanner.
-        local pinnedDescLabel = GUI:CreateLabel(self.child, L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."], 530)
-        do
-            local descFS
-            for _, r in ipairs({ pinnedDescLabel:GetRegions() }) do
-                if r.GetStringHeight then descFS = r break end
-            end
-            local applying, lastW = false, nil
-            local function ApplyDescHeight()
-                if applying or not descFS or not pinnedDescLabel:IsVisible() then return end
-                local g = pinnedDescLabel.settingsGroup
-                if not g then return end
-                local desired = math.ceil(descFS:GetStringHeight() or 18) + 6
-                for _, entry in ipairs(g.groupChildren) do
-                    if entry.widget == pinnedDescLabel then
-                        if entry.height ~= desired then
-                            applying = true
-                            entry.height = desired
-                            g:LayoutChildren()
-                            local p = g:GetParent()  -- bubble so the page's column layout sees the new height
-                            while p do
-                                if type(p.RefreshStates) == "function" and p.children then p:RefreshStates() break end
-                                p = p:GetParent()
+        -- ===== HEADER GROUP (full width in classic; an info banner in Modern) =====
+        if classicLayout then
+            local headerGroup = GUI:CreateSettingsGroup(self.child, 560)
+            headerGroup:AddWidget(GUI:CreateHeader(self.child, L["Pinned Frames"]), 40)
+            -- Auto-size the description's slot to the actual wrapped text height so the
+            -- box hugs the text at every width (no fixed bottom padding, no truncation).
+            -- GetStringHeight returns a stale single-line value right after a width
+            -- change, so we measure on a DEFERRED frame (OnSizeChanged -> C_Timer) once
+            -- the FontString has re-wrapped, then update the group's slot height and
+            -- bubble a relayout up to the page. Mirrors GUI:CreateInfoBanner.
+            local pinnedDescLabel = GUI:CreateLabel(self.child, L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."], 530)
+            do
+                local descFS
+                for _, r in ipairs({ pinnedDescLabel:GetRegions() }) do
+                    if r.GetStringHeight then descFS = r break end
+                end
+                local applying, lastW = false, nil
+                local function ApplyDescHeight()
+                    if applying or not descFS or not pinnedDescLabel:IsVisible() then return end
+                    local g = pinnedDescLabel.settingsGroup
+                    if not g then return end
+                    local desired = math.ceil(descFS:GetStringHeight() or 18) + 6
+                    for _, entry in ipairs(g.groupChildren) do
+                        if entry.widget == pinnedDescLabel then
+                            if entry.height ~= desired then
+                                applying = true
+                                entry.height = desired
+                                g:LayoutChildren()
+                                local p = g:GetParent()  -- bubble so the page's column layout sees the new height
+                                while p do
+                                    if type(p.RefreshStates) == "function" and p.children then p:RefreshStates() break end
+                                    p = p:GetParent()
+                                end
+                                applying = false
                             end
-                            applying = false
+                            break
                         end
-                        break
                     end
                 end
-            end
-            local function ScheduleApply()
-                if C_Timer and C_Timer.After then C_Timer.After(0, ApplyDescHeight) else ApplyDescHeight() end
-            end
-            pinnedDescLabel:SetScript("OnSizeChanged", function(_, w)
-                if w == lastW then return end  -- only width changes affect wrap height
-                lastW = w
+                local function ScheduleApply()
+                    if C_Timer and C_Timer.After then C_Timer.After(0, ApplyDescHeight) else ApplyDescHeight() end
+                end
+                pinnedDescLabel:SetScript("OnSizeChanged", function(_, w)
+                    if w == lastW then return end  -- only width changes affect wrap height
+                    lastW = w
+                    ScheduleApply()
+                end)
+                -- Re-measure when the page surfaces (GetStringHeight is unreliable while
+                -- hidden) and once on build in case the width never changes.
+                pinnedDescLabel:SetScript("OnShow", function() lastW = nil ScheduleApply() end)
                 ScheduleApply()
-            end)
-            -- Re-measure when the page surfaces (GetStringHeight is unreliable while
-            -- hidden) and once on build in case the width never changes.
-            pinnedDescLabel:SetScript("OnShow", function() lastW = nil ScheduleApply() end)
-            ScheduleApply()
+            end
+            -- Initial slot fits 2 lines; the deferred measure grows/shrinks it to fit.
+            headerGroup:AddWidget(pinnedDescLabel, 34)
+            Add(headerGroup, nil, "both")
+        else
+            -- ☠ THE PAGE'S INTRO IS A BANNER IN MODERN, as General > Settings'
+            -- is: the same sentence, without a box titled with the tab's own name.
+            -- The classic box (and its deferred height-measuring) is untouched above.
+            local pinnedIntro = GUI:CreateInfoBanner(self.child, {
+                tone = "info",
+                text = L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."],
+            })
+            Add(pinnedIntro, pinnedIntro.layoutHeight, "both")
         end
-        -- Initial slot fits 2 lines; the deferred measure grows/shrinks it to fit.
-        headerGroup:AddWidget(pinnedDescLabel, 34)
-        Add(headerGroup, nil, "both")
         
         -- Tab container
         tabContainer = CreateFrame("Frame", nil, self.child)
@@ -1160,6 +1206,12 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(subTabContainer, 26, "both")
 
         AddSpace(GUI.Space.section, "both")
+
+        -- ☠ THE PAGE'S TWO BULK VERBS, under the sub-tabs they fold with, at col
+        -- "both". They act on whichever cards the sub-tab is showing.
+        if not classicLayout then
+            Add(tools.SectionControls(self.child), 24, "both")
+        end
 
         -- Helper to get the pinned override key for the current active tab
         local function GetPinnedKey(dbKey)
@@ -1714,8 +1766,17 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
         
         -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        -- A card in Modern, on the Setup sub-tab. It holds the set's Enable, the
+        -- master switch, so the card never greys itself; its body greys through
+        -- the box's own disableChildrenOn below.
+        local settingsGroup
+        if classicLayout then
+            settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        else
+            settingsGroup = OpenSection(L["Settings"], "pinned_settings", 1, nil, nil,
+                function() return activeSubTab ~= "setup" end)
+        end
 
         -- While editing a raid auto layout, make the decouple explicit via an info
         -- banner: only the per-set Enable flag can differ per layout; everything
@@ -1962,7 +2023,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         table.insert(controlsToRefresh, nameInputContainer)
         settingsGroup:AddWidget(nameInputContainer, 48)
 
-        Add(settingsGroup, nil, 1)
+        if classicLayout then
+            Add(settingsGroup, nil, 1)
+        else
+            CloseSection(settingsGroup)
+        end
         settingsGroup.hideOn = function() return activeSubTab ~= "setup" end  -- Setup tab
 
         -- Disabled set → grey (disabled-in-place) every OTHER Setup control while the
@@ -1972,13 +2037,23 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         settingsGroup.disableChildrenOn = function() return PinnedSetDisabled() end
 
         -- ===== FRAME TYPE GROUP (Column 2) =====
-        local frameTypeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        local frameTypeHeader = GUI:CreateHeader(self.child, L["Frame Type"])
-        -- Gold "New" badge next to the header (the Friendly Boss NPCs option was
-        -- introduced in 4.3.2). Clears when the user navigates away from the
-        -- Pinned Frames tab and stays cleared across sessions.
-        GUI:AddSectionNewBadge(frameTypeHeader, "general_pinnedframes", "frameType")
-        frameTypeGroup:AddWidget(frameTypeHeader, 40)
+        local frameTypeGroup
+        if classicLayout then
+            frameTypeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            local frameTypeHeader = GUI:CreateHeader(self.child, L["Frame Type"])
+            -- Gold "New" badge next to the header (the Friendly Boss NPCs option was
+            -- introduced in 4.3.2). Clears when the user navigates away from the
+            -- Pinned Frames tab and stays cleared across sessions.
+            GUI:AddSectionNewBadge(frameTypeHeader, "general_pinnedframes", "frameType")
+            frameTypeGroup:AddWidget(frameTypeHeader, 40)
+        else
+            -- A card on the Setup sub-tab, greying (header and body) while the
+            -- set is disabled, as the box's body does. (The New badge's section
+            -- is long out of GUI.NewSections, so there is no badge to carry.)
+            frameTypeGroup = OpenSection(L["Frame Type"], "pinned_frametype", 2, nil,
+                function() return PinnedSetDisabled() end,
+                function() return activeSubTab ~= "setup" end)
+        end
 
         local frameTypeOptions = {
             player = L["Player Frames"],
@@ -2018,17 +2093,31 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             55
         )
 
-        Add(frameTypeGroup, nil, 2)
+        if classicLayout then
+            Add(frameTypeGroup, nil, 2)
+        else
+            CloseSection(frameTypeGroup)
+        end
         frameTypeGroup.hideOn = function() return activeSubTab ~= "setup" end  -- Setup tab
         frameTypeGroup.disableChildrenOn = function() return PinnedSetDisabled() end  -- greyed while the set is disabled
         -- GUI.Space.section IS 10; this was the same value written out by hand. The
         -- other stray AddSpace literals (5, 6, 8, 18) match no constant, so converting
         -- those would MOVE things rather than tidy them — left alone deliberately.
-        AddSpace(GUI.Space.section, "both")
+        -- ⚠ CLASSIC ONLY: Modern's cards carry their own gap to the next card.
+        if classicLayout then
+            AddSpace(GUI.Space.section, "both")
+        end
 
         -- ===== FRAME STYLE GROUP (Column 1) — inherited from your frames, overridable =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Style"]), 40)
+        local layoutGroup
+        if classicLayout then
+            layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Style"]), 40)
+        else
+            -- A card on the Appearance sub-tab.
+            layoutGroup = OpenSection(L["Frame Style"], "pinned_framestyle", 1, nil, nil,
+                function() return activeSubTab ~= "appearance" end)
+        end
 
         -- Up-front explainer for the Match inheritance + per-setting override model.
         local matchInfoBanner = GUI:CreateInfoBanner(self.child, {
@@ -2162,7 +2251,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             sizeMin = 1, sizeMax = 16, sizeStep = 1,
         })
 
-        Add(layoutGroup, nil, 1)
+        if classicLayout then
+            Add(layoutGroup, nil, 1)
+        else
+            CloseSection(layoutGroup)
+        end
         layoutGroup.hideOn = function() return activeSubTab ~= "appearance" end  -- Appearance tab
 
         -- ===== LAYOUT GROUP (Column 2) — pinned arrangement. Direction / growth /
@@ -2170,8 +2263,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Match override: it inherits the Based-on mode's frameSpacing (grouped) /
         -- raidFlat*Spacing (flat) so a pinned set stays aligned with the frames it
         -- mirrors, overridable per set. =====
-        local arrangeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        arrangeGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+        local arrangeGroup
+        if classicLayout then
+            arrangeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            arrangeGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+        else
+            -- A card on the Appearance sub-tab.
+            arrangeGroup = OpenSection(L["Layout"], "pinned_layout", 2, nil, nil,
+                function() return activeSubTab ~= "appearance" end)
+        end
 
         -- ☠ SAME TWO PERPENDICULAR AXES AS THE RAID PAGE, read off THIS SET'S OWN
         -- growDirection -- pinned direction is per-set and NOT inherited (the main frames'
@@ -2236,7 +2336,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         arrangeGroup:AddWidget(pinnedHSpacingSlider, 55)
         pinnedVSpacingSlider = CreateMatchOverrideSlider(self.child, L["Vertical Spacing"], -5, 50, 1, "verticalSpacing", SpacingBaseline("raidFlatVerticalSpacing"), UpdateHighlightLayout)
         arrangeGroup:AddWidget(pinnedVSpacingSlider, 55)
-        Add(arrangeGroup, nil, 2)
+        if classicLayout then
+            Add(arrangeGroup, nil, 2)
+        else
+            CloseSection(arrangeGroup)
+        end
         arrangeGroup.hideOn = function() return activeSubTab ~= "appearance" end  -- Appearance tab
 
         if not IsCurrentBossMode() then
@@ -2339,8 +2443,14 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         rosterWidget.hideOn = membersHideOn
 
         -- ===== AUTO-POPULATE GROUP (full width, under the roster) =====
-        local autoPopGroup = GUI:CreateSettingsGroup(self.child, 560)
-        autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
+        local autoPopGroup
+        if classicLayout then
+            autoPopGroup = GUI:CreateSettingsGroup(self.child, 560)
+            autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
+        else
+            -- A full-width card on the Members sub-tab, under the roster.
+            autoPopGroup = OpenSection(L["Auto-Populate"], "pinned_autopopulate", "both", nil, nil, membersHideOn)
+        end
         autoPopGroup:AddWidget(GUI:CreateLabel(self.child, L["Automatically add players by role when they join your group."], 510), 20)
 
         -- ☠ ALL FOUR AUTO-POPULATE HANDLERS NEED IsEditingActiveMode.
@@ -2392,7 +2502,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Keep when offline/left"], "keepOfflinePlayers", function() end, L["Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."]), 28)
 
-        Add(autoPopGroup, nil, "both")
+        if classicLayout then
+            Add(autoPopGroup, nil, "both")
+        else
+            CloseSection(autoPopGroup)
+        end
         autoPopGroup.hideOn = membersHideOn
         end -- not IsCurrentBossMode
 
