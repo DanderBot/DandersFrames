@@ -1761,72 +1761,63 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- box (col 1) and its own gradient editor (col 1) under "Missing Health";
         -- and one settings box (col 1) under "Reduced Max Health".
         --
-        -- POPOUT turns FIVE of those boxes into feature rows -- one headerless
-        -- band per section -- and leaves the two gradient editors inline wearing
-        -- the band skin:
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
+        -- the two gradient editors included, two settings per row, dim captions,
+        -- Expand All / Collapse All at the top and TWO page columns when the
+        -- window is wide -- what the bar is drawn IN on the left, what it is drawn
+        -- ON and the overlay on the right:
         --
-        --   "Health Bar"          Color, Texture, Background
-        --   "Missing Health"      Missing Health
-        --   "Reduced Max Health"  Reduced Max Health (hoisted enable)
+        --   column 1   Color, Gradient (health colour mode Health Gradient only),
+        --              Missing Health, Gradient (missing health's, same rule)
+        --   column 2   Texture, Background, Reduced Max Health (header tick)
         --
-        -- ☠ THE COLLAPSIBLE SECTIONS STAY, IN BOTH LAYOUTS, and that is a
-        -- departure from every page converted before this one -- none of them had
-        -- a second level to keep. Three reasons, any one of them enough:
+        -- The cards are ADDED in classic's reading order (Color, Texture, Gradient,
+        -- Background, ...), which is also the order the one-column fold reads.
         --
-        --   1. A SECTION IS NOT A BAND. It COLLAPSES, and the fold is persisted
-        --      per title in SavedVariables (GUI:GetCollapsedGroups). Replaced by
-        --      a plain band header, a fold the user set in the other layout would
-        --      silently do nothing here.
-        --   2. THE TWO GRADIENT EDITORS ARE SECTION CHILDREN. They stay inline
-        --      (see their own note), and it is the section that folds them away
-        --      with the feature they belong to. A band would have to re-implement
-        --      that, for nothing.
-        --   3. Panel.lua's own layout note calls a section the page's second
-        --      level for PARALLEL SUB-FEATURES and names this page as its
-        --      example. The bar, the missing-health fill and the reduced-max
-        --      overlay are exactly that.
+        -- ☠ THE THREE FULL-WIDTH SECTIONS ARE CLASSIC'S ONLY, and so are the
+        -- spacers between them. In modern each card IS a section -- it folds and
+        -- persists its fold under its own stable key -- and a full-width section
+        -- or spacer is a "both" widget, a SYNC POINT that would end both columns
+        -- and stack the page back into one. Built through expressions rather than
+        -- arms, the gradient box's idiom below, so classic's arms stay what they
+        -- were.
         --
-        -- ⚠ SO THE BANDS CARRY NO HEADER -- the Sorting page's sortBand rule. The
-        -- section bar directly above each band already names the section, and a
-        -- header under it would say the same word twice.
+        -- ⚠ THE TWO GRADIENT EDITORS ARE CARDS WITHOUT A PIN. Adding, removing or
+        -- moving a stop REBUILDS THE PAGE (see GradRebuild), and a pinned copy
+        -- would be closed by the rebuild it caused. Their cards hide with their
+        -- colour mode, header and band together.
         --
-        -- ⚠ AND THE TWO ONE-ROW SECTIONS REPEAT THEIR NAME ON THE ROW, which is
-        -- the lesser of two evils rather than an oversight. Both of those boxes
-        -- are headed "Settings" in classic, and two rows both called "Settings"
-        -- would break the breadcrumb jump: a search hit finds its row BY LABEL
-        -- (ClaimKeys' own anchor, 85a7e047), so labels must be distinct per page.
+        -- ⚠ REDUCED MAX HEALTH'S ENABLE IS THE CARD'S HEADER TICK (hoistToggle),
+        -- one checkbox per setting; the group gate inside the builder still greys
+        -- the four controls under it.
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
-        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
-        -- it always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_healthbar_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move.
+        -- Every box's widgets live in a `Build<X>Group(tools2)` taking { group,
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
+        -- The classic branch mounts the SAME builder into the box it always
+        -- built, which is what makes "classic is unchanged" structural rather
+        -- than a promise -- test_healthbar_page_builders.lua pins the inventory
+        -- of each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery, which carries the card helper. nil in
+        -- classic, which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- One band per section: full-width and chromeless, because a feature
-        -- row's popout docks outside the WINDOW and runs a beam back to the row,
-        -- so a row that stopped 280px in would leave that beam crossing half the
-        -- page. Each is added INTO its section (AddToSection), so folding the
-        -- section hides the band and the rows in it -- and a panel left open on a
-        -- row that has just been hidden closes itself, which is the popout
-        -- shell's own source-death rule rather than anything this page wires.
-        local healthBand, missingBand, reducedBand
-        if tools then
-            healthBand  = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            missingBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            reducedBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
+        -- here takes. ⚠ Declared ABOVE BuildGradientStopBox, which opens its card
+        -- through it -- a closure captures the upvalue that exists when it is made.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
-        -- The rows print the chosen value as their SUMMARY, and a summary is
+        -- The cards print the chosen value as their SUMMARY, and a summary is
         -- written OUTSIDE the group's builder -- so the word has to come out of
-        -- the same table the dropdown offers, or a row could say one thing while
+        -- the same table the dropdown offers, or a card could say one thing while
         -- the control behind it says another. (The Tooltips page hoisted its five
         -- Anchor To tables for exactly this reason.)
         local colorModes = { CLASS= L["Class Color"], CUSTOM= L["Custom Color"], PERCENT= L["Health Gradient"] }
@@ -1840,7 +1831,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local reducedBlendOpts = { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"] }
 
         -- The texture's display NAME, from the addon's own media resolver -- the
-        -- one GUI:CreateTextureDropdown prints on its own button, so a row and
+        -- one GUI:CreateTextureDropdown prints on its own button, so a card and
         -- the control behind it cannot disagree. (Pet Frames' Appearance row
         -- names its texture through this same function, for the same reason.)
         local function TextureName(path)
@@ -1856,19 +1847,22 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- GUI:RefreshCurrentPage -- so there is no rebuild to unpick here, which
         -- is why this page needs no AnchorGateRefresh-style branch.
         --
-        -- tools2.refreshStates IS that same call in classic (the arm hands it
-        -- `function() self:RefreshStates() end`) and, in a pane, ReflowPane
-        -- followed by the page's own RefreshStates -- which re-runs the group's
-        -- child states, re-sizes the panel round them, and then re-runs the page
-        -- pass the inline gradient boxes' hideOn rides on. One call, both jobs,
-        -- in both layouts.
+        -- tools2.refreshStates IS that same call in classic and on a card (both
+        -- hand it `function() self:RefreshStates() end`, and the page pass is what
+        -- the gradient cards' hideOn rides on) and, in a pinned panel, ReflowPane
+        -- followed by the page's own RefreshStates. One call, every job.
 
         -- ===== HEALTH BAR SECTION =====
-        local healthBarSection = Add(GUI:CreateCollapsibleSection(self.child, L["Health Bar"], true), 36, "both")
+        -- ☠ CLASSIC'S ONLY -- in modern each card is its own section (see the
+        -- page note). An expression rather than an arm, so classic's arms stay
+        -- exactly what they were.
+        local healthBarSection = classicLayout
+            and Add(GUI:CreateCollapsibleSection(self.child, L["Health Bar"], true), 36, "both")
+            or nil
         currentSection = healthBarSection
 
-        -- ===== COLOR (a 280 box in column 1 in classic, the Health Bar band's
-        -- first row) =====
+        -- ===== COLOR (a 280 box in column 1 in classic, the first card in
+        -- column 1 in modern) =====
         local function BuildHealthColorGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1886,16 +1880,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
         end
 
-        -- The group's own apply, named once so the footer's Reset Group and
-        -- Hold: Defaults run exactly what the three controls run between them.
-        local function ApplyHealthColor()
-            DF:UpdateColorCurve()
-            DF:LightweightUpdateHealthColor()
-            DF:RefreshAllVisibleFrames()
-        end
-
         -- The mode in the dropdown's own words, and the alpha ONLY when it is
-        -- doing something -- a row reading "Alpha 1.00" on every default profile
+        -- doing something -- a card reading "Alpha 1.00" on every default profile
         -- is noise (the Border row's rule). The alpha is absent under Custom
         -- Color for a second reason: its slider is hidden there.
         local function HealthColorSummary(d)
@@ -1910,20 +1896,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== TEXTURE (a 280 box in column 2 in classic, the Health Bar band's
-        -- second row) =====
+        -- ===== TEXTURE (a 280 box in column 2 in classic, the first card in
+        -- column 2 in modern) =====
         local function BuildHealthTextureGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
             group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
-        end
-
-        -- The group's own apply. ⚠ The texture dropdown carries no callback of
-        -- its own -- it never did -- so the full update is the whole of it.
-        local function ApplyHealthTexture()
-            DF:UpdateAllFrames()
         end
 
         -- The texture's name, and the fill direction only when it is NOT the
@@ -1976,48 +1956,32 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- hand-rolling one here means reimplementing the page builder's widget
         -- retire loop inside a settings page.
         --
-        -- ⚠ IT DOES WEAR THE BAND SKIN in the popout layout, unlike Color by
-        -- Time, and the difference is what each of them IS rather than a change
-        -- of mind: Color by Time is a CollapsibleSection, which the skin does not
-        -- apply to at all, while this is an ordinary settings box with a header
-        -- -- exactly the shape tools.INLINE_BOX exists for. Left bare it would be
-        -- a title inside a faint rectangle sitting under a band of fat row
-        -- plates, which is the two-visual-languages problem the skin settles.
+        -- ☠ IN MODERN IT IS A CARD OF ITS OWN, in column 1 under the card it
+        -- belongs to, and its band IS the group every row below goes into -- so
+        -- it takes no header (the card's title says "Gradient") and no pin (a
+        -- pinned copy would be closed by the very rebuild its + button causes).
+        -- Every row, the bar and the footer are prose-shaped (no bound value), so
+        -- the card's two-per-row flow gives each a row of its own; and the band
+        -- re-sizes its children on every layout pass, so a stop row follows the
+        -- card's width when the window folds or a resize drags it.
         --
-        -- ☠ AND IN THE POPOUT LAYOUT IT IS FULL WIDTH, ADDED AS A SYNC POINT. The
-        -- skin alone was never enough: a 280 box under a full-width band is still
-        -- a narrower rectangle with its own left edge, in a list whose whole
-        -- argument is that every top-level object starts and ends on the same two
-        -- edges. It cannot become a control row -- it is a preview strip, a
-        -- variable number of stop rows and an add/reset footer -- so it takes the
-        -- pet-frame boxes' answer instead (Pages/Options.lua): built at the BAND's
-        -- width and added "both". A box built at the band width but added to a
-        -- COLUMN would be worse than what it replaced -- the layout pass only
-        -- stretches a "both" widget and never narrows a column one (GUI/Panel.lua's
-        -- LayoutPage), so on a widened two-column window it would run straight
-        -- over whatever sits in column 2.
-        --
-        -- ⚠ NOTHING INSIDE NEEDS A SECOND NUMBER FOR THAT. Every width-dependent
-        -- child here -- the gradient bar and each stop row -- is already sized off
-        -- `gradInner`, which is GroupInnerWidth OF THIS GROUP, so it follows the
-        -- box's own width. And nothing here wraps: these are fixed-height rows,
-        -- not measured paragraphs, so no pinned slot goes stale when it widens.
-        --
-        -- ⚠ A REBUILD FROM HERE CLOSES ANY OPEN ROW PANEL, and that is accepted
-        -- rather than fixed: the panel's contents are the colour/texture rows,
-        -- not the ramp, and the Colors page's palettes made the same trade.
+        -- ⚠ A REBUILD FROM HERE CLOSES ANY PINNED PANEL, and that is accepted
+        -- rather than fixed, as it was for the popout rows before the cards: the
+        -- panels hold the colour/texture cards, not the ramp.
         local function BuildGradientStopBox(prefix, hideOn)
         local listKey = prefix .. "Stops"
-        -- ⚠ THE TWO WIDTHS AS AN EXPRESSION, NOT AN `if classicLayout then` ARM.
-        -- This builder is declared ABOVE the section's own layout arms and inside
-        -- the page builder's indent, so a second `if classicLayout then ... else`
-        -- at that indent here is one the section's own arm-locators would find
-        -- first. One expression, one construction, and nothing else in the body
-        -- has to know which layout it is in.
+        -- ⚠ THE TWO CONSTRUCTIONS AS AN EXPRESSION, NOT AN `if classicLayout then`
+        -- ARM. This builder is declared ABOVE the section's own layout arms and
+        -- inside the page builder's indent, so a second `if classicLayout then ...
+        -- else` at that indent here is one the section's own arm-locators would
+        -- find first. Classic builds its 280 box; modern opens a card in column 1
+        -- under a stable key of its own, hidden with its colour mode.
         local gradGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
-            or GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
-        gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
+            or OpenSection(L["Gradient"], (prefix == "healthColor") and "health_gradient" or "health_missinggradient",
+                1, nil, nil, hideOn)
+        -- The card's title already says Gradient; only classic's box needs one.
+        if classicLayout then gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40) end
         local gradInner = GUI:GroupInnerWidth(gradGroup)
         -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
         -- so it is not in scope here. Reaching for it would resolve to a nil global.
@@ -2292,13 +2256,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         gradGroup.hideOn = hideOn
-        -- Column 1 in classic, exactly where it always was; a sync point in the
-        -- popout layout, which is the whole of "it lines up with the bands".
-        AddToSection(gradGroup, nil, classicLayout and 1 or "both")
+        -- Column 1 in classic, exactly where it always was; in modern the card
+        -- puts its band in after its last row, in its own column.
+        if classicLayout then AddToSection(gradGroup, nil, 1) else CloseSection(gradGroup) end
         end
 
-        -- ===== BACKGROUND (a 280 box in column 2 in classic, the Health Bar
-        -- band's third row) =====
+        -- ===== BACKGROUND (a 280 box in column 2 in classic, the second card
+        -- in column 2 in modern) =====
         local function BuildHealthBackgroundGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2319,13 +2283,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             bgClassAlpha.hideOn = function(d) return d.backgroundColorMode ~= "CLASS" end
         end
 
-        -- The group's own apply: the lightweight pass all four controls drive.
-        local function ApplyHealthBackground()
-            DF:LightweightUpdateBackgroundColor()
-        end
-
         -- The colour source in the dropdown's own words, then the texture's name
-        -- through the same resolver the Texture row uses.
+        -- through the same resolver the Texture card uses.
         local function HealthBackgroundSummary(d)
             if not d then return "" end
             local parts = {}
@@ -2338,19 +2297,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== THE HEALTH BAR SECTION'S MOUNT ==============================
         -- ☠ ONE if/else FOR THE WHOLE SECTION, rather than the per-group arm
-        -- every other converted page uses, and the classic Add ORDER is why. The
-        -- page has always added Color (1), Texture (2), the gradient editor (1),
-        -- Background (2) -- the gradient sits BETWEEN the two column-2 boxes. The
-        -- popout layout cannot interleave like that: the band is a "both" widget,
-        -- which is a SYNC POINT, so it has to go in before the column-1 gradient
-        -- box or that box would be stranded at the top with an empty column
-        -- beside it and the band pushed under both.
-        --
-        -- Splitting the Background group's arm in two would have kept the rhythm
-        -- and hidden the reason; one block per LAYOUT says it instead. Nothing
-        -- about the classic branch moves: same builders, same headers, same
-        -- columns, same order, and the same call into BuildGradientStopBox at the
-        -- same point in the sequence.
+        -- most pages use, because both layouts add in the same interleaved
+        -- order -- Color (1), Texture (2), the gradient editor (1), Background
+        -- (2) -- and classic's arm has always read as one block. The cards follow
+        -- the same order, which is the order the one-column fold reads.
         --
         -- ★ COLUMN 2, under Texture. Column 1 carries Color and then the Gradient editor,
         -- which is ~280 lines of widgets and expands further as stops are added — so with
@@ -2362,10 +2312,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- way — column 2 then holds two groups against column 1's one. That is the lesser
         -- imbalance, and the pending "gradient editor as a single-column box" rework
         -- changes the same balance, so the two want checking together.
-        -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY. The popout layout has no
-        -- columns left to balance in this section at all: the three boxes are rows
-        -- in one full-width band, and the gradient editor is a full-width box under
-        -- it.
+        -- ⚠ MODERN KEEPS THE SAME SPLIT for the same reason, and balances it
+        -- against the rest of the page: Missing Health (and its gradient) join
+        -- column 1, Reduced Max Health joins column 2.
         local function HealthGradientHiddenOn(d) return d.healthColorMode ~= "PERCENT" end
 
         if classicLayout then
@@ -2398,116 +2347,52 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             AddToSection(bgGroup, nil, 2)
         else
-            -- Three: the mode pick, the alpha and the custom swatch. One of the
-            -- latter two is always hidden -- the group's own hideOn doing its
-            -- job -- because the count is what the group HOLDS, not what happens
-            -- to be on show for the mode currently picked.
-            local HEALTH_COLOR_COUNT = 3
-            -- Three: the texture, the fill direction and the smoothing tick.
-            local HEALTH_TEXTURE_COUNT = 3
-            -- Four: the colour source, the texture, the swatch and the alpha.
-            local HEALTH_BACKGROUND_COUNT = 4
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns.
+            Add(tools.SectionControls(self.child), 24, "both")
 
-            -- ☠ ALL THREE OF THESE ROWS MOUNT THEIR GROUP ON THE PLATE, at 3, 3
-            -- and 4 with no prose between them to pad the measure. They are the
-            -- three smallest panes on the page and the three opened most, because
-            -- between them they are what the bar is drawn IN and what it is drawn
-            -- ON -- and each was charging the same click as a row holding thirty.
-            -- The strip on each now offers to pin a second instance instead of
-            -- promising settings that are already on screen; INLINE_MAX in
-            -- CreatePopoutPageTools is the size that would refuse one.
-            --
-            -- ⚠ TWO OF COLOR'S THREE ARE ALWAYS HIDDEN AT ONCE -- the swatch and
-            -- the alpha belong to different modes -- so this plate usually draws
-            -- two lines. That is the group's own hideOn doing its job rather than a
-            -- count that was wrong, and the measure reads it the same way, which is
-            -- what stops a gated group being refused for controls nobody can see.
-            local colorMount, colorContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHealthColorGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local colorRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Color"],
-                db      = tools.RowDB,
-                summary = HealthColorSummary,
-                count   = HEALTH_COLOR_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = colorMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(colorRow, colorContent)
-            tools.WireModifiedTick(colorRow)
-            tools.WireFooter(colorRow, ApplyHealthColor)
+            -- Pins on all three: they are what the bar is drawn IN and ON.
+            local band = OpenSection(L["Color"], "health_color", 1, HealthColorSummary, nil, nil,
+                BuildHealthColorGroup)
+            BuildHealthColorGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
 
-            -- Three, and on the plate for the reason the Color row above gives.
-            local textureMount, textureContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHealthTextureGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local textureRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Texture"],
-                db      = tools.RowDB,
-                summary = HealthTextureSummary,
-                count   = HEALTH_TEXTURE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = textureMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(textureRow, textureContent)
-            tools.WireModifiedTick(textureRow)
-            tools.WireFooter(textureRow, ApplyHealthTexture)
+            local band = OpenSection(L["Texture"], "health_texture", 2, HealthTextureSummary, nil, nil,
+                BuildHealthTextureGroup)
+            BuildHealthTextureGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
 
-            -- Four, the last of the three, and the widest of them by a line. Same
-            -- reason: two of its four are mode-gated, so the plate is rarely even
-            -- that tall.
-            local bgMount, bgContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHealthBackgroundGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local bgRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Background"],
-                db      = tools.RowDB,
-                summary = HealthBackgroundSummary,
-                count   = HEALTH_BACKGROUND_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = bgMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(bgRow, bgContent)
-            tools.WireModifiedTick(bgRow)
-            tools.WireFooter(bgRow, ApplyHealthBackground)
-
-            -- ☠ THE BAND GOES IN AFTER ITS LAST ROW, AND BEFORE THE GRADIENT BOX.
-            -- `Add` resolves a widget's slot height on the spot, so a band has to
-            -- be added once it is full. The gradient box follows it because that is
-            -- the READING order -- with the editor full width too, there is no
-            -- column flow left for a sync point to strand.
-            AddToSection(healthBand, nil, "both")
-
+            -- The Gradient card, column 1 under Color (see BuildGradientStopBox).
             BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
+
+            local band = OpenSection(L["Background"], "health_background", 2, HealthBackgroundSummary, nil, nil,
+                BuildHealthBackgroundGroup)
+            BuildHealthBackgroundGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
+        -- ☠ CLASSIC'S ONLY: a "both" spacer would end both card columns.
+        if classicLayout then AddSpace(GUI.Space.section, "both") end
+
         -- ===== MISSING HEALTH SECTION =====
-        local missingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Missing Health"], true), 36, "both")
+        -- ☠ CLASSIC'S ONLY, as the Health Bar section above.
+        local missingSection = classicLayout
+            and Add(GUI:CreateCollapsibleSection(self.child, L["Missing Health"], true), 36, "both")
+            or nil
         currentSection = missingSection
         
-        -- ===== MISSING HEALTH (a 280 box in column 1 in classic, the Missing
-        -- Health band's only row) =====
+        -- ===== MISSING HEALTH (a 280 box in column 1 in classic, a card in
+        -- column 1 in modern) =====
         local function BuildMissingHealthGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2540,18 +2425,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             missingHealthGradientAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
         end
 
-        -- The group's own apply: the union of what its six controls run -- the
-        -- curve rebuild the colour-mode pick drives, the full update five of them
-        -- drive, and the visible-frame repaint the gradient alpha drives.
-        local function ApplyMissingHealth()
-            DF:UpdateColorCurve()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end
-
         -- The fill mode, then the colour source -- and the second only when the
         -- fill is not Background Only, because everything below that pick is
-        -- HIDDEN there and a summary must not describe controls the pane is not
+        -- HIDDEN there and a summary must not describe controls the card is not
         -- showing.
         local function MissingHealthSummary(d)
             if not d then return "" end
@@ -2577,8 +2453,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- One if/else for the section, for the reason the Health Bar section has
-        -- one: the two arms build different things, and the band has to be added
-        -- once it is full and before the gradient box that reads after it.
+        -- one: the settings and the gradient editor go in as a pair, in order.
         if classicLayout then
             local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
             missingGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
@@ -2591,71 +2466,42 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
         else
-            -- Six: the fill pick, the texture, the colour-mode pick, the swatch
-            -- and the two alphas. Nothing is hoisted -- backgroundMode is a
-            -- three-way pick, not a boolean, so there is no tick that means "am I
-            -- doing anything at all".
-            local MISSING_HEALTH_COUNT = 6
+            -- Column 1, pinnable. No tick: backgroundMode is a three-way pick,
+            -- not a boolean, so nothing means "am I doing anything at all".
+            local band = OpenSection(L["Missing Health"], "health_missing", 1, MissingHealthSummary, nil, nil,
+                BuildMissingHealthGroup)
+            BuildMissingHealthGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
 
-            -- ☠ SIX, WHICH IS EXACTLY THE THRESHOLD, so the group goes on the
-            -- plate with nothing to spare. What leaves room for all six is that
-            -- there is no blurb above them and no Reset beside them -- INLINE_MAX
-            -- in CreatePopoutPageTools counts what a layout would PLACE, not what
-            -- the badge calls a setting. A seventh control added to this builder
-            -- would break nothing: the measure would refuse the mount and the row
-            -- would go back to the strip it had. Worth knowing before adding one.
-            --
-            -- ⚠ AND FIVE OF THE SIX FOLD AWAY UNDER Background Only, where the
-            -- plate is a single dropdown -- which is the honest shape for that
-            -- mode, because the fill pick is the only setting that does anything
-            -- in it.
-            local missingMount, missingContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingHealthGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local missingRow = missingBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Missing Health"],
-                db      = tools.RowDB,
-                summary = MissingHealthSummary,
-                count   = MISSING_HEALTH_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = missingMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(missingRow, missingContent)
-            tools.WireModifiedTick(missingRow)
-            tools.WireFooter(missingRow, ApplyMissingHealth)
-
-            AddToSection(missingBand, nil, "both")
-
+            -- Its Gradient card, column 1 directly under it.
             BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
         end
 
         currentSection = nil
 
-        AddSpace(GUI.Space.section, "both")
+        -- ☠ CLASSIC'S ONLY, as the spacer and the sections above.
+        if classicLayout then AddSpace(GUI.Space.section, "both") end
 
         -- ===== REDUCED MAX HEALTH SECTION =====
-        local reducedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
+        local reducedSection = classicLayout
+            and Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
+            or nil
         currentSection = reducedSection
 
-        -- ===== REDUCED MAX HEALTH (a 280 box in column 1 in classic, the
-        -- Reduced Max Health band's only row) =====
+        -- ===== REDUCED MAX HEALTH (a 280 box in column 1 in classic, a card in
+        -- column 2 in modern) =====
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while the overlay is off; the pane has to do the same, and
-        -- one builder serving both is what stops the two drifting. (The row's
-        -- hoisted tick greys the pane as well, from the outside -- both, exactly
-        -- as the Sorting page's first row does it.)
+        -- own children while the overlay is off; the card has to do the same, and
+        -- one builder serving both is what stops the two drifting.
         local function BuildReducedMaxHealthGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the group's only on/off control.
+            -- Suppressed when the CARD's header carries this tick. Still built in
+            -- classic, where it is the group's only on/off control.
             if not tools2.hoistToggle then
                 local reducedEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], db, "reducedMaxHealthEnabled", function() tools2.refreshStates() DF:UpdateAllFrames() end), 30)
                 reducedEnable.keepEnabled = true
@@ -2668,16 +2514,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
         end
 
-        -- The group's own apply: the full update the clip tick, the texture and
-        -- the blend pick drive (and the enable tick with them in classic), plus
-        -- the lightweight colour pass the swatch drives.
-        local function ApplyReducedMaxHealth()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdateReducedMaxHealthColor()
-        end
-
         -- The overlay's texture, and the blend only when it is NOT the plain
-        -- Blend -- the Texture row's own rule for a value that is the default on
+        -- Blend -- the Texture card's own rule for a value that is the default on
         -- every profile.
         local function ReducedMaxHealthSummary(d)
             if not d then return "" end
@@ -2701,53 +2539,26 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             AddToSection(reducedGroup, nil, 1)
         else
-            -- Four: the clip tick, the texture, the swatch and the blend pick.
-            -- The enable tick is HOISTED onto the row, so it is not one of them.
-            local REDUCED_MAX_HEALTH_COUNT = 4
-
-            -- ☠ NOT GUI:RefreshCurrentPage, and not a page rebuild of any kind: a
-            -- rebuild retires every widget on the page including the row being
-            -- clicked, and the row's write path calls row.Refresh() after this
-            -- returns -- on a dead frame. This is what the suppressed checkbox
-            -- ran, plus the reflow that repaints the pane behind the tick.
-            local function OnReducedMaxToggle()
-                DF:UpdateAllFrames()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Four behind the row's own tick, so the group goes on the plate --
-            -- and folds away with the tick, which is the one state where four
-            -- greyed controls occupying the band would be the worst use of the
-            -- space. The tick stays hoisted below: it is the row's toggle rather
-            -- than one of the four, which is exactly why the builder suppresses its
-            -- own copy instead of the plate drawing two of it.
-            local reducedMount, reducedContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildReducedMaxHealthGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ ENABLE IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle). Same key and label, and the commit is what the
+            -- suppressed checkbox ran plus the state pass that re-greys the four
+            -- controls under it -- never a page rebuild. A pin: the overlay's
+            -- texture, colour and blend are how it LOOKS.
+            local band = OpenSection(L["Reduced Max Health"], "health_reduced", 2, ReducedMaxHealthSummary, nil, nil,
+                BuildReducedMaxHealthGroup, {
+                    db = db, key = "reducedMaxHealthEnabled", label = L["Enable"],
+                    onChanged = function()
+                        DF:UpdateAllFrames()
+                        self:RefreshStates()
+                        tools.ReflowMounted()
+                    end,
                 })
-            end, nil, { inline = true })
-            local reducedRow = reducedBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Reduced Max Health"],
-                db       = tools.RowDB,
-                toggle   = { key = "reducedMaxHealthEnabled" },
-                summary  = ReducedMaxHealthSummary,
-                count    = REDUCED_MAX_HEALTH_COUNT,
-                onToggle = OnReducedMaxToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = reducedMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(reducedRow, reducedContent)
-            tools.WireModifiedTick(reducedRow)
-            tools.WireFooter(reducedRow, ApplyReducedMaxHealth)
-            tools.RegisterHoistedToggle(reducedRow, L["Enable"], "reducedMaxHealthEnabled", OnReducedMaxToggle)
-
-            AddToSection(reducedBand, nil, "both")
+            BuildReducedMaxHealthGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         currentSection = nil
