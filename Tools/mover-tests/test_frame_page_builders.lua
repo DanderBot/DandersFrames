@@ -1609,8 +1609,10 @@ do
         -- went with them. ⚠ 21, NOT 26, since the Debuff Bar followed it onto
         -- the same cards: its five plate opt-ins (Visibility, Order & Limits,
         -- Appearance, Layout, Position) went the same way. ⚠ 18, NOT 21, since
-        -- Missing Buffs became cards: Settings, Appearance and Position.
-        ["GUI/Pages/Indicators.lua"] = 18,  -- the three unswept aura pages
+        -- Missing Buffs became cards: Settings, Appearance and Position. ⚠ 14,
+        -- NOT 18, since Defensive Icon followed: Settings, Layout, Appearance,
+        -- Position.
+        ["GUI/Pages/Indicators.lua"] = 14,  -- the two unswept Indicators pages
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
         ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2
