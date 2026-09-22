@@ -8872,6 +8872,16 @@ end
 -- column, a 40px picture (Editor.lua's P.GroupTileMetrics), so the three tabs read
 -- as one control.
 S.BuildClassicAddTiles = function(parent, yPos, kind)
+    -- The section's own title above its tiles, in the helper pool's style (the
+    -- small dim caps line its add area has always carried).
+    local headText = (kind == "indicator") and L["ADD AN INDICATOR"]
+        or ((kind == "debuff") and L["ADD A DEBUFF GROUP"] or L["ADD A LAYOUT GROUP"])
+    local head = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    if GUI.SetSettingsFont then GUI:SetSettingsFont(head, 9, "") end
+    head:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
+    head:SetText(headText)
+    head:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 18
     local blocked = S.ClassicAddBlockReason(kind)
     local enabled = S.ClassicAddEnabled() and not blocked
     local colW = floor((parent:GetWidth() or 0) - 16)
