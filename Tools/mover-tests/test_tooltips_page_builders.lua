@@ -3,38 +3,29 @@ local NS = ...
 -- ============================================================
 -- TOOLTIPS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Tooltips is the widest page in the sweep so far: SEVEN groups, six
--- of which become feature rows in two bands and one of which -- a lone checkbox
--- -- becomes a CONTROL ROW in a third band, the same plate carrying the setting
--- itself instead of a way in to fifteen of them.
+-- Display > Tooltips: SEVEN groups. In Modern they are the Debuff Bar's
+-- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
+-- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
---   "Unit Frame" band   Frame Tooltips, Binding Tooltips (hoisted enables)
---   "Auras" band        Buff, Debuff, Defensive Icon (hoisted enables) and
---                       Aura Designer Tooltips (NO tick -- three independent
---                       surfaces, so there is no single boolean to hoist)
---   headerless band     Resurrection Icon Tooltips, as a control row
+--   column 1   "Unit Frame"  Frame Tooltips, Binding Tooltips (enables in the
+--                            header), Resurrection Icon Tooltips (its one
+--                            checkbox in the body)
+--   column 2   "Auras"       Buff, Debuff, Defensive Icon (enables in the
+--                            header) and Aura Designer Tooltips (NO tick --
+--                            three independent surfaces)
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_frame_page_builders / test_sorting_page_builders do: it reads
--- the page's SOURCE and asserts against it.
+-- When and where a tooltip appears is behaviour, so no card is pinnable.
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts, less the
---     hoisted toggle.
---   ✓ that the Anchor To dropdowns stopped rebuilding the page FROM INSIDE A
---     PANE, while classic still does exactly what it always did.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the widget CENSUS of each builder -- taken from the PRE-CHANGE source, so
+--     it is also the evidence that CLASSIC RENDERS AS IT DID.
+--   ✓ that ONE builder serves both layouts, and the card hands it exactly what
+--     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ each card's column, stable collapse key, summary, tick and (absent) pin.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Frame page's, verbatim) ------------------
 local KIND = {
@@ -43,9 +34,6 @@ local KIND = {
     CreateHeader = "header", CreateLabel = "label",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -95,8 +83,6 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The page, scoped by its own two ends: Options.lua holds a dozen pages, and a
--- bare 280 box on one of the others is not this pass's business.
 local PAGE
 do
     local a = SRC:find('Add(CreateCopyButton(self.child, {"tooltip"}, L["Tooltips"], "display_tooltips")', 1, true)
@@ -105,207 +91,114 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel, column)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
-    local esc = rowLabel:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. column .. ")", 1, true) ~= nil,
-              rowLabel .. ": ...and still goes to column " .. column)
-    end
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
+-- ONE CARD'S BLOCK: its OpenSection call up to the CloseSection that puts its
+-- band in, flattened; `call` is everything before the builder mount.
+local function sectionBlock(labelKey, builder)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(band)", a, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, (b or a) + #"CloseSection(band)"):gsub("%s+", " ")
+    local m = builder and block:find(builder .. "({", 1, true)
+        or block:find("band:AddWidget(", 1, true)
+    return block, m and block:sub(1, m - 1) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS SHARED VOCABULARY MOVED UP
+-- 1. THE SHARED MACHINERY, THE VOCABULARY, AND THE ROW FURNITURE GONE
 -- ============================================================
-print("-- Tooltips page: the shared popout machinery and the page-scope vocabulary")
+print("-- Tooltips page: the shared machinery and the page-scope vocabulary")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
                          "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
                          "RefreshAfterGroupWrite", "HoldReason" }) do
         check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
               "tools: the page does not re-declare " .. v)
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "footerStrip", "inline = true", "popout = true,", "_COUNT", "count =",
+                            "frameBand", "auraBand", "resBand", "chromeless",
+                            "OnFrameTipToggle", "OnBindTipToggle", "OnBuffTipToggle",
+                            "OnDebuffTipToggle", "OnDefTipToggle" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
 
-    -- ---- the two bands -----------------------------------------------
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Unit Frame fills column 1, Auras column 2.
-    -- A band has to be BUILT at the width the layout pass will give it, because a
-    -- group sizes its rows off its width at build time; BandWidth's argument says
-    -- which width that is.
-    check(PAGE:find("frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
-          "bands: the Unit Frame band is chromeless, at column 1's width")
-    check(PAGE:find("auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })", 1, true) ~= nil,
-          "bands: ...and the Auras band at column 2's")
-    -- Both hold more than one row, so both name their SECTION. Neither header is
-    -- a new locale string.
-    check(PAGE:find('frameBand:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame"]), 40)', 1, true) ~= nil,
-          "bands: the hover band names itself with the word its own Anchor To dropdowns use")
-    check(PAGE:find('auraBand:AddWidget(GUI:CreateHeader(self.child, L["Auras"]), 40)', 1, true) ~= nil,
-          "bands: ...and the icon band with the one the locale already ships")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
 
-    -- ---- the five Anchor To value lists, at PAGE scope ----------------
-    -- The rows print the chosen anchor as their summary, and the summary is
-    -- built outside the group's builder -- so the word for FRAME has to come out
-    -- of the same table the dropdown offers, or a row could say "Unit Frame"
-    -- while the control under it says "Buff Icon".
+    for _, pair in ipairs({ { "Unit Frame", "1" }, { "Auras", "2" } }) do
+        local n = 0
+        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
+        eq(n, 1, "headers: the " .. pair[1] .. " category header opens column " .. pair[2] .. ", once")
+    end
+
+    -- The five Anchor To value lists, at page scope, once each: the summaries
+    -- print the chosen anchor out of the same table the dropdown offers.
     for _, pair in ipairs({
-        { "frameAnchorValues",  "Unit Frame" },
-        { "bindAnchorValues",   "Unit Frame" },
-        { "buffAnchorValues",   "Buff Icon" },
-        { "debuffAnchorValues", "Debuff Icon" },
+        { "frameAnchorValues",  "Unit Frame" }, { "bindAnchorValues",   "Unit Frame" },
+        { "buffAnchorValues",   "Buff Icon" },  { "debuffAnchorValues", "Debuff Icon" },
         { "defAnchorValues",    "Defensive Icon" },
     }) do
         local decl = PAGE:match("local " .. pair[1] .. " = {(.-)}")
-        check(decl ~= nil, "vocab: " .. pair[1] .. " is declared at page scope")
-        if decl then
-            check(decl:find('FRAME = L["' .. pair[2] .. '"]', 1, true) ~= nil,
-                  "vocab: ..." .. pair[1] .. " names the frame case " .. pair[2])
-            check(decl:find('DEFAULT = L["Game Default"]', 1, true) ~= nil
-              and decl:find('CURSOR = L["Cursor"]', 1, true) ~= nil,
-                  "vocab: ...with the two shared cases unchanged")
-        end
-        -- ...and NOT re-declared inside a builder, which is where they used to be.
+        check(decl ~= nil and decl:find('FRAME = L["' .. pair[2] .. '"]', 1, true) ~= nil,
+              "vocab: " .. pair[1] .. " is declared at page scope and names the frame case " .. pair[2])
         local decls = 0
         for _ in PAGE:gmatch("local " .. pair[1] .. " = {") do decls = decls + 1 end
         eq(decls, 1, "vocab: " .. pair[1] .. " is declared exactly once")
     end
-
-    -- ---- RefreshAuraTooltips, above every builder that closes over it --
-    -- ☠ A closure captures the upvalue that exists when it is CREATED, so a
-    -- builder declared above this line would see nil instead of the function.
     local refreshAt = PAGE:find("local RefreshAuraTooltips = function()", 1, true)
-    check(refreshAt ~= nil, "vocab: RefreshAuraTooltips is declared at page scope")
     for _, b in ipairs({ "BuildBuffTooltipGroup", "BuildDebuffTooltipGroup",
                          "BuildDefTooltipGroup", "BuildADTooltipGroup" }) do
         local at = PAGE:find("local function " .. b .. "(tools2)", 1, true)
         check(at ~= nil and refreshAt ~= nil and refreshAt < at,
-              "vocab: ..." .. b .. " is declared after it, so it closes over the real function")
+              "vocab: " .. b .. " is declared after RefreshAuraTooltips, so it closes over the real function")
     end
-    local refreshDecls = 0
-    for _ in PAGE:gmatch("local RefreshAuraTooltips = function%(%)") do refreshDecls = refreshDecls + 1 end
-    eq(refreshDecls, 1, "vocab: ...and there is exactly one of it")
 end
 
 -- ============================================================
--- 2. THE ANCHOR GATE -- a state pass in both layouts
--- Picking an Anchor To re-gates the three controls under it. Classic used to pay
--- for that with a page REBUILD, which leaked the page per pick; it re-lays the
--- page now. A rebuild inside a pane
--- retires the row the user is clicking through and the helper's prologue closes
--- the panel on the way in, so the pane runs the state passes instead -- which is
--- what the rebuild was buying.
+-- 2. THE ANCHOR GATE -- a state pass, never a rebuild
 -- ============================================================
 print("-- Tooltips page: the Anchor To gate")
 do
     local gate = PAGE:match("local function AnchorGateRefresh%(tools2%)(.-)\n        end")
     check(gate ~= nil, "anchor gate: the page decides this once, in a named function")
     if gate then
-        check(gate:find("if tools2.popout then", 1, true) ~= nil,
-              "anchor gate: ...branching on which layout the group was built for")
-        check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
-              "anchor gate: ...the pane re-runs the state passes")
-        check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
-              "anchor gate: ...and classic re-lays the page")
+        check(gate:find("tools2.refreshStates()", 1, true) ~= nil and gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
+              "anchor gate: a pinned pane reflows itself, a page widget (box or card) re-lays the page")
         check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
               "anchor gate: ...without rebuilding it (the rebuild leaked the page)")
     end
-
-    -- No builder rebuilds the page directly any more, and every popout mount
-    -- declares itself as one.
-    for _, b in ipairs({ "BuildFrameTooltipGroup", "BuildBindTooltipGroup",
-                         "BuildBuffTooltipGroup", "BuildDebuffTooltipGroup",
-                         "BuildDefTooltipGroup", "BuildADTooltipGroup" }) do
-        local body = builderBody(b)
-        check(body:find("GUI:RefreshCurrentPage", 1, true) == nil,
-              "anchor gate: " .. b .. " never rebuilds the page from inside itself")
-    end
-    local popouts = 0
-    for _ in PAGE:gmatch("popout = true,") do popouts = popouts + 1 end
-    eq(popouts, 6, "anchor gate: all six popout mounts declare themselves as panes")
+    check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          "rebuild: nothing on the page rebuilds it")
 end
 
 -- ============================================================
 -- 3. THE TWO SUMMARY SHAPES
--- Both reuse words the locale already ships -- the anchor words come out of the
--- dropdowns' own tables, "Combat" is the word the Frame Fade row already prints,
--- and the visibility words are the five-way vocabulary those dropdowns offer.
--- ZERO new locale strings on this page.
 -- ============================================================
 print("-- Tooltips page: the summaries")
 do
     local hover = PAGE:match("local function HoverTipSummary%(anchorValues, anchorKey, combatKey%)(.-)\n        end")
-    check(hover ~= nil, "summary: the hover shape is a named factory on the page")
-    if hover then
-        check(hover:find("anchorValues[d[anchorKey]]", 1, true) ~= nil,
-              "summary: ...the anchor word comes from the dropdown's own table")
-        check(hover:find('combat ~= "SHOW"', 1, true) ~= nil,
-              "summary: ...the in-combat pick is named only when it is not the plain Always")
-        check(hover:find('L%["Combat"%]') ~= nil,
-              "summary: ...labelled with the word the Frame Fade row already uses")
-        check(hover:find("VIS_VALUES[combat]", 1, true) ~= nil,
-              "summary: ...and spelled with the dropdown's own five-way vocabulary")
-        check(hover:find("\\194\\183", 1, true) ~= nil,
-              "summary: ...separated by the convention's dot")
-        local items = 0
-        for _ in hover:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: at most four items, per the summary convention")
-    end
-
+    check(hover ~= nil and hover:find("anchorValues[d[anchorKey]]", 1, true) ~= nil
+      and hover:find('combat ~= "SHOW"', 1, true) ~= nil and hover:find("VIS_VALUES[combat]", 1, true) ~= nil,
+          "summary: the hover shape names the anchor, and the in-combat pick only when it is not Always")
     local aura = PAGE:match("local function AuraTipSummary%(anchorValues, anchorKey, combatKey%)(.-)\n        end")
-    check(aura ~= nil, "summary: the aura shape is a named factory on the page")
-    if aura then
-        check(aura:find("anchorValues[d[anchorKey]]", 1, true) ~= nil,
-              "summary: ...the anchor word comes from the dropdown's own table here too")
-        -- The aura groups gate combat with a CHECKBOX rather than a five-way
-        -- pick, and it reports through the same words the hover rows use for the
-        -- same meaning.
-        check(aura:find('L%["Combat"%]') ~= nil and aura:find('L%["Never"%]') ~= nil,
-              "summary: ...and Disable in Combat says what the hover rows say for it")
-        local items = 0
-        for _ in aura:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "summary: at most four items here too")
-    end
+    check(aura ~= nil and aura:find('L%["Combat"%]') ~= nil and aura:find('L%["Never"%]') ~= nil,
+          "summary: the aura shape says Disable in Combat in the hover cards' words")
 end
 
 -- ============================================================
--- 4. THE FIVE HOISTED-TOGGLE ROWS
--- Each group's enable is the textbook hoist: keepEnabled + disableChildrenOn in
--- classic, which is the shape of "am I doing anything at all".
+-- 4. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
+-- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local FRAME_TOOLTIP = {
     { "checkbox", "Enable Frame Tooltips", "tooltipFrameEnabled",       30 },
@@ -349,326 +242,121 @@ local DEF_TOOLTIP = {
     { "slider",   "Offset X",                       "tooltipDefensiveX",               55 },
     { "slider",   "Offset Y",                       "tooltipDefensiveY",               55 },
 }
-
-local HOISTED = {
-    { builder = "BuildFrameTooltipGroup",  label = "Frame Tooltips",
-      golden = FRAME_TOOLTIP,  countVar = "FRAME_TOOLTIP_COUNT",  column = "1",
-      row = "frameRow",  toggleKey = "tooltipFrameEnabled",
-      toggleLabel = "Enable Frame Tooltips",  commit = "OnFrameTipToggle",
-      band = "frameBand", summary = "HoverTipSummary", apply = nil },
-    { builder = "BuildBindTooltipGroup",   label = "Binding Tooltips",
-      golden = BIND_TOOLTIP,   countVar = "BIND_TOOLTIP_COUNT",   column = "2",
-      row = "bindRow",   toggleKey = "tooltipBindingEnabled",
-      toggleLabel = "Enable Binding Tooltips", commit = "OnBindTipToggle",
-      band = "frameBand", summary = "HoverTipSummary", apply = nil },
-    { builder = "BuildBuffTooltipGroup",   label = "Buff Tooltips",
-      golden = BUFF_TOOLTIP,   countVar = "BUFF_TOOLTIP_COUNT",   column = "1",
-      row = "buffRow",   toggleKey = "tooltipBuffEnabled",
-      toggleLabel = "Enable Buff Tooltips",  commit = "OnBuffTipToggle",
-      band = "auraBand",  summary = "AuraTipSummary", apply = "RefreshAuraTooltips" },
-    { builder = "BuildDebuffTooltipGroup", label = "Debuff Tooltips",
-      golden = DEBUFF_TOOLTIP, countVar = "DEBUFF_TOOLTIP_COUNT", column = "2",
-      row = "debuffRow", toggleKey = "tooltipDebuffEnabled",
-      toggleLabel = "Enable Debuff Tooltips", commit = "OnDebuffTipToggle",
-      band = "auraBand",  summary = "AuraTipSummary", apply = "RefreshAuraTooltips" },
-    { builder = "BuildDefTooltipGroup",    label = "Defensive Icon Tooltips",
-      golden = DEF_TOOLTIP,    countVar = "DEF_TOOLTIP_COUNT",    column = "1",
-      row = "defRow",    toggleKey = "tooltipDefensiveEnabled",
-      toggleLabel = "Enable Defensive Icon Tooltips", commit = "OnDefTipToggle",
-      band = "auraBand",  summary = "AuraTipSummary", apply = "RefreshAuraTooltips" },
-}
-
-for _, g in ipairs(HOISTED) do
-    print("-- Tooltips page: " .. g.label)
-    local body = builderBody(g.builder)
-    checkCensus(census(body), g.golden, g.label:lower())
-    checkShared(g.builder, g.label, g.column)
-
-    -- The hoist, and the arithmetic it implies: the checkbox is still IN the
-    -- builder -- classic needs it -- behind the one flag the popout passes.
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          g.label .. ": the enable checkbox is skipped when the row has hoisted it")
-    check(body:find(".keepEnabled = true", 1, true) ~= nil,
-          g.label .. ": ...and in classic it stays live under the group's own grey")
-    local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-    check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, #g.golden - 1, g.label .. ": ...the census less the hoisted tick")
-
-    -- ☠ THE GROUP GATE MOVED INSIDE THE BUILDER. In classic it was a property of
-    -- the page-level box; left there, the pane would not grey while the group is
-    -- off and the two layouts would disagree.
-    check(body:find("group.disableChildrenOn = function(d) return not d." .. g.toggleKey .. " end", 1, true) ~= nil,
-          g.label .. ": the group's grey-while-off gate is inside the builder")
-
-    local opts = rowOpts(g.label)
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"' .. g.toggleKey .. '"%s*}') ~= nil,
-          g.label .. ": the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*" .. g.summary .. "%(") ~= nil,
-          g.label .. ": ...it declares a summary of the right shape")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*" .. g.commit) ~= nil,
-          g.label .. ": ...and a commit that is not a page rebuild")
-    check(opts:find("offText", 1, true) == nil,
-          g.label .. ": no offText -- off here really does mean no tooltip")
-
-    -- ...into the right band.
-    check(PAGE:find("local " .. g.row .. " = " .. g.band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the " .. g.band)
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD, for the reason the anchor gate is not.
-    local commit = PAGE:match("local function " .. g.commit .. "%(%)(.-)\n            end")
-    check(commit ~= nil, g.label .. ": the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              g.label .. ": ...and never rebuilds the page")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              g.label .. ": ...it re-runs the state passes instead")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              g.label .. ": ...and reflows the open panes")
-        if g.apply then
-            check(commit:find(g.apply .. "()", 1, true) ~= nil,
-                  g.label .. ": ...having first run what the suppressed checkbox ran")
-        end
-    end
-
-    -- The hoisted toggle keeps its search entry under the SAME label and key the
-    -- suppressed checkbox carried, or the setting becomes unfindable in the
-    -- popout layout while staying findable in classic.
-    check(PAGE:find('tools.RegisterHoistedToggle(' .. g.row .. ', L["' .. g.toggleLabel .. '"], "' .. g.toggleKey .. '", ' .. g.commit .. ')', 1, true) ~= nil,
-          g.label .. ": the hoisted toggle keeps its search entry")
-
-    -- The strip. Every key here is a per-mode profile key the defaults engine
-    -- answers for, so all five rows get the amber tick and the footer.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", ", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    if g.apply then
-        check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-              g.label .. ": ...and Reset Group / Hold: Defaults push the change into the aura buttons")
-    else
-        -- ⚠ A FOOTER WITH NO APPLY, and it is the honest answer rather than a
-        -- gap: every control in these two groups is read at HOVER time, which is
-        -- why all six of their own callbacks are empty.
-        check(PAGE:find("tools.WireFooter(" .. g.row .. ")", 1, true) ~= nil,
-              g.label .. ": ...and a footer with no apply, because nothing needs pushing")
-    end
-end
-
--- ============================================================
--- 5. AURA DESIGNER TOOLTIPS -- a row with no tick
--- Three INDEPENDENT surfaces. Hoisting one would claim it speaks for all three
--- (the Color Picker row's precedent), and inventing a fourth key to gate them is
--- a migration for a row's ornament -- so the row is a way in and nothing else.
--- ============================================================
 local AD_TOOLTIP = {
     { "checkbox", "Groups",     "tooltipADGroupsEnabled",     30 },
     { "checkbox", "Indicators", "tooltipADIndicatorsEnabled", 30 },
     { "checkbox", "Bars",       "tooltipADBarsEnabled",       30 },
 }
 
-print("-- Tooltips page: Aura Designer Tooltips")
-do
-    local body = builderBody("BuildADTooltipGroup")
-    checkCensus(census(body), AD_TOOLTIP, "aura designer tooltips")
-    checkShared("BuildADTooltipGroup", "Aura Designer Tooltips", "2")
+local CARDS = {
+    { label = "Frame Tooltips", key = "tooltips_frame", col = 1, classicCol = 1,
+      builder = "BuildFrameTooltipGroup", golden = FRAME_TOOLTIP,
+      summary = 'HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat")',
+      tick = { key = "tooltipFrameEnabled", name = "Enable Frame Tooltips" } },
+    { label = "Binding Tooltips", key = "tooltips_binding", col = 1, classicCol = 2,
+      builder = "BuildBindTooltipGroup", golden = BIND_TOOLTIP,
+      summary = 'HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat")',
+      tick = { key = "tooltipBindingEnabled", name = "Enable Binding Tooltips" } },
+    { label = "Buff Tooltips", key = "tooltips_buff", col = 2, classicCol = 1,
+      builder = "BuildBuffTooltipGroup", golden = BUFF_TOOLTIP,
+      summary = 'AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat")',
+      tick = { key = "tooltipBuffEnabled", name = "Enable Buff Tooltips", aura = true } },
+    { label = "Debuff Tooltips", key = "tooltips_debuff", col = 2, classicCol = 2,
+      builder = "BuildDebuffTooltipGroup", golden = DEBUFF_TOOLTIP,
+      summary = 'AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat")',
+      tick = { key = "tooltipDebuffEnabled", name = "Enable Debuff Tooltips", aura = true } },
+    { label = "Defensive Icon Tooltips", key = "tooltips_defensive", col = 2, classicCol = 1,
+      builder = "BuildDefTooltipGroup", golden = DEF_TOOLTIP,
+      summary = 'AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat")',
+      tick = { key = "tooltipDefensiveEnabled", name = "Enable Defensive Icon Tooltips", aura = true } },
+    { label = "Aura Designer Tooltips", key = "tooltips_auradesigner", col = 2, classicCol = 2,
+      builder = "BuildADTooltipGroup", golden = AD_TOOLTIP, summary = "ADTooltipSummary" },
+}
 
-    -- No hoist and no group gate: there is no boolean here that means "am I
-    -- doing anything at all".
-    check(body:find("hoistToggle", 1, true) == nil,
-          "aura designer tooltips: the builder has no hoist branch, because there is nothing to hoist")
-    check(body:find("disableChildrenOn", 1, true) == nil,
-          "aura designer tooltips: ...and no group gate, because no key gates the other two")
+for _, g in ipairs(CARDS) do
+    print("-- Tooltips page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+    check(body:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          g.label .. ": the builder never rebuilds the page from inside itself")
 
-    local declared = tonumber(PAGE:match("local AD_TOOLTIP_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "aura designer tooltips: the page declares the row's count in one place")
-    eq(declared, #AD_TOOLTIP, "aura designer tooltips: ...the whole census, nothing hoisted out of it")
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
 
-    local opts = rowOpts("Aura Designer Tooltips")
-    check(opts:find("toggle", 1, true) == nil,
-          "aura designer tooltips: the row declares no toggle -- three independent ticks have no single on/off")
-    check(opts:find("onToggle", 1, true) == nil,
-          "aura designer tooltips: ...and so no commit either")
-    check(opts:find("summary%s*=%s*ADTooltipSummary") ~= nil,
-          "aura designer tooltips: ...it does declare a summary")
-    check(opts:find("count%s*=%s*AD_TOOLTIP_COUNT") ~= nil,
-          "aura designer tooltips: ...and the declared count, not a literal")
-    check(PAGE:find("local adRow = auraBand:AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          "aura designer tooltips: the row is mounted into the Auras band")
-
-    -- The tick and the footer still apply: all three keys are ordinary per-mode
-    -- profile keys, which is what the defaults engine answers for.
-    check(PAGE:find("tools.ClaimKeys(adRow, adContent)", 1, true) ~= nil,
-          "aura designer tooltips: the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(adRow)", 1, true) ~= nil,
-          "aura designer tooltips: ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(adRow, RefreshAuraTooltips)", 1, true) ~= nil,
-          "aura designer tooltips: ...and its footer pushes the change into the aura buttons")
-
-    -- The summary names the surfaces that are on, in the checkboxes' own words.
-    local sum = PAGE:match("local function ADTooltipSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "aura designer tooltips: the summary is a named function on the page")
-    if sum then
-        for _, k in ipairs({ "Groups", "Indicators", "Bars" }) do
-            check(sum:find('L%["' .. k .. '"%]') ~= nil,
-                  "aura designer tooltips: ..." .. k .. " comes from the locale, not a literal")
-        end
-        check(sum:find("\\194\\183", 1, true) ~= nil,
-              "aura designer tooltips: ...separated by the convention's dot")
+    local esc = g.label:gsub("%p", "%%%0")
+    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
+    check(box ~= nil, g.label .. ": the classic 280 box is built with its own header")
+    if box then
+        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+              g.label .. ": ...and still goes to column " .. g.classicCol)
     end
+
+    local block, call = sectionBlock(g.label, g.builder)
+    local flatSummary = g.summary:gsub("%s+", " ")
+    check(call:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. flatSummary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing the group's own summary")
+    check(call:find("Build", 1, true) == nil,
+          g.label .. ": no pin -- when a tooltip appears is behaviour, not looks")
+
+    if g.tick then
+        check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
+          and body:find(".keepEnabled = true", 1, true) ~= nil,
+              g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in classic")
+        check(body:find("group.disableChildrenOn = function(d) return not d." .. g.tick.key .. " end", 1, true) ~= nil,
+              g.label .. ": the body greys while the tick is off, from inside the builder")
+        check(call:find('db = db, key = "' .. g.tick.key .. '", label = L["' .. g.tick.name .. '"]', 1, true) ~= nil,
+              g.label .. ": the header tick is bound to " .. g.tick.key .. " under the checkbox's own name")
+        check(call:find("self:RefreshStates()", 1, true) ~= nil and call:find("RefreshCurrentPage", 1, true) == nil,
+              g.label .. ": ...committing through a state pass, never a page rebuild")
+        eq(call:find("RefreshAuraTooltips()", 1, true) ~= nil, g.tick.aura == true,
+           g.label .. (g.tick.aura and ": ...after pushing the flag into the game's aura buttons"
+                                     or ": ...with nothing to push: it is read at hover time"))
+    else
+        check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick -- three independent switches")
+    end
+
+    local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
+        .. (g.tick and " hoistToggle = true," or "") .. " })"
+    check(block:find(mount, 1, true) ~= nil,
+          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
+                              or ": mounts the builder exactly as classic does"))
 end
 
 -- ============================================================
--- 6. THE CONTROL ROW, THE BANDS AND THE PAGE'S OWN ORDER
+-- 5. RESURRECTION ICON TOOLTIPS, AND THE CARDS TOGETHER
 -- ============================================================
-print("-- Tooltips page: the control row, the bands and the order")
+print("-- Tooltips page: Resurrection Icon Tooltips, and the cards together")
 do
-    -- ---- the one single-option group: a CONTROL ROW in a band of its own ----
-    -- Still not a popout row -- a pane holding one checkbox is a click that buys
-    -- nothing -- but no longer a 280 box beside two full-width bands either. The
-    -- checkbox wears the row plate, in a chromeless band at the same width.
-    check(PAGE:find('label%s*=%s*L%["Resurrection Icon Tooltips"%],\n%s*kind%s*=%s*"checkbox"') ~= nil,
-          "control row: Resurrection Icon Tooltips is a checkbox control row")
-    -- Column 1, under the Unit Frame band, for balance (see the page).
-    check(PAGE:find("resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at column 1's width")
-    check(PAGE:find("resBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into that band")
-    -- ⚠ NO HEIGHT PASSED. The factory owns the slot (fixedRowHeight plus the
-    -- popout row's own preferredHeight), which is what makes a control row and a
-    -- feature row share one rhythm.
-    check(PAGE:find("})), 30)", 1, true) == nil,
-          "control row: ...with no call-site slot height, because the factory owns it")
-    -- ONE label, and it is the group's own title -- the tick beside it already
-    -- says "enable", and this is the vocabulary the rows above are named in.
-    check(PAGE:find('GUI:CreateControlRow(self.child, {\n                label = L["Resurrection Icon Tooltips"]', 1, true) ~= nil,
-          "control row: ...named with the box's own title, not the tick's caption")
-    check(PAGE:find('tools.RegisterControlRow(resRow, "checkbox", "tooltipResurrectionEnabled")', 1, true) ~= nil,
-          "control row: ...and registered with search through the shared verb")
-    -- The classic arm still builds the box it always built, tick caption and all.
-    check(PAGE:find('local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)\n            resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)', 1, true) ~= nil,
-          "control row: classic still builds the bare 280 box with its own header")
-    check(PAGE:find('GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil)', 1, true) ~= nil,
-          "control row: ...and the tick it always had, unchanged")
-    -- ⚠ NOTHING IS LEFT MOUNTED AT A COLUMN'S 280 BESIDE THE BANDS.
-    check(PAGE:find("280, tools and tools.INLINE_BOX or nil", 1, true) == nil,
-          "control row: no stay-inline 280 box is left on the page")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL, wherever the skin is still used.
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "inline: the skin is taken from the tools, never restated as a literal")
+    local CHECK = 'GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)'
+    check(PAGE:find('resTooltipGroup:AddWidget(' .. CHECK, 1, true) ~= nil
+      and PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
+          "resurrection: classic keeps its box, its checkbox and column 2")
+    local block, call = sectionBlock("Resurrection Icon Tooltips")
+    check(call:find('OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, nil)', 1, true) ~= nil,
+          "resurrection: a card keyed tooltips_resurrection in column 1, no tick, no pin")
+    check(block:find('band:AddWidget(' .. CHECK, 1, true) ~= nil,
+          "resurrection: its one checkbox is the same call classic makes, in the card's body")
 
-    -- ---- seven bare 280 boxes left, all inside a classicLayout arm -----
-    -- Seven rather than six: the Resurrection box moved out of the shared
-    -- construction and into the classic arm, where it is bare like the rest.
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Frame Tooltips | Binding Tooltips | Buff Tooltips | Debuff Tooltips | Defensive Icon Tooltips | Aura Designer Tooltips | Resurrection Icon Tooltips",
+       "order: the seven cards open in classic's source order")
+
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 5, "ticks: exactly five mounts skip their in-body toggle -- one checkbox per setting")
+
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Unit Frame"]), 40, 1)', 1, true)
+    check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first category header")
+
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 7, "boxes: seven bare 280 boxes left, and they are the classic branch's own")
-
-    -- ---- the Add order ------------------------------------------------
-    -- Three bands in two columns -- Unit Frame and the Resurrection row left, Auras
-    -- right -- still ADDED in reading order, because that is the order a narrow
-    -- window folds them back into when the page drops to one column.
-    local a = PAGE:find("Add(frameBand, nil, 1)", 1, true)
-    local b = PAGE:find("Add(auraBand, nil, 2)", 1, true)
-    local c = PAGE:find("Add(resBand, nil, 1)", 1, true)
-    check(a ~= nil and b ~= nil and a < b,
-          "order: the two bands sit in their columns, hover band first")
-    check(c ~= nil and b ~= nil and b < c,
-          "order: ...and the Resurrection band goes in column 1, last of the three")
-    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
-    -- widget otherwise, so a band placed in a column without this keeps the width it
-    -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "frameBand", "auraBand", "resBand" }) do
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
-    end
-    -- Classic still adds its box at its own slot, in column 2.
-    check(PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
-          "order: classic adds the Resurrection box at its own slot, column 2")
-    local col2 = 0
-    for _ in PAGE:gmatch("Add%(resTooltipGroup, nil, 2%)") do col2 = col2 + 1 end
-    eq(col2, 1, "order: ...exactly once, because only classic builds it")
-
-    -- ---- the page's own furniture is untouched -------------------------
-    check(PAGE:find("AddSyncPoint()", 1, true) ~= nil,
-          "page: the sync point before See Also survives")
-    check(PAGE:find('{pageId = "auras_buffs", label = L["Buff Bar"]}', 1, true) ~= nil,
-          "page: ...and the See Also block is unchanged")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
--- six settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and its strip offers to pin a second copy rather than
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the PANE rather than
--- off the declared count, so a row cannot claim its way onto the plate. Only the
--- refusal can be exercised against a real group, and that lives in
--- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
--- asked, and that nothing else did.
---
--- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
--- about SETTINGS; CountVisibleChildren answers for every entry a layout would
--- place, blurbs and separators included. Where the two differ below, the larger
--- is the one that has to fit.
---
--- All six popout rows on this page. Their panes hold 6, 6, 5, 5, 5 and 3 --
--- the two hover rows are INLINE_MAX exactly, and they earn it: not one of
--- those six means anything alone, because Anchor is inert until Anchor To
--- leaves DEFAULT and the offsets until it reaches FRAME. Five of the six keep
--- a hoisted tick, which is the ROW'S TOGGLE rather than one of its settings --
--- it is what folds the pane away -- so nothing on a plate is drawn twice.
--- ============================================================
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
-    -- whether its call carries the opt-in. Read as "this declaration up to the
-    -- next one": a balanced-brace match would be defeated by the builder closure
-    -- inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 6, "inline: 6 of this page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and then wired to a
-    -- different row fails here instead of shipping.
-    local function buildOf(var)
-        local a = PAGE:find("local " .. var .. " = ", 1, true)
-        local b = a and PAGE:find("}))", a, true)
-        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
-    end
-
-    for _, spec in ipairs({
-        { "frameRow", "frameMount" },                -- Frame Tooltips, 6
-        { "bindRow", "bindMount" },                  -- Binding Tooltips, 6
-        { "buffRow", "buffMount" },                  -- Buff Tooltips, 5
-        { "debuffRow", "debuffMount" },              -- Debuff Tooltips, 5
-        { "defRow", "defMount" },                    -- Defensive Icon Tooltips, 5
-        { "adRow", "adMount" },                      -- Aura Designer Tooltips, 3
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and inlineMounts[mount] == true,
-              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
-    end
+    eq(bare, 7, "classic: seven bare 280 boxes, all the classic branch's own")
+    check(PAGE:find('Add(CreateCopyButton(self.child, {"tooltip"}, L["Tooltips"], "display_tooltips"), 25, 2)', 1, true) ~= nil,
+          "page: the copy button keeps its prefix and its slot")
 end

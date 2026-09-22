@@ -627,10 +627,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local TIP_VIS_OOC = L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."]
         local TIP_VIS_COMBAT = L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."]
 
-        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. The popout rows print
+        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. The Modern cards print
         -- the CHOSEN anchor as their summary, and the summary is built outside the
         -- group's builder -- so the word for FRAME has to come from the same table
-        -- the dropdown offers, or a row could say "Unit Frame" while the control
+        -- the dropdown offers, or a card could say "Unit Frame" while the control
         -- under it says "Buff Icon". They sit beside anchorPositionValues, which is
         -- shared by all five dropdowns for exactly this reason.
         --
@@ -685,64 +685,55 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- CLASSIC is exactly what it always was: seven 280 boxes in two columns,
         -- in the columns and the order they have always had.
         --
-        -- POPOUT turns SIX of them into feature rows in two bands, and leaves the
-        -- one single-option group inline wearing the band skin:
+        -- MODERN is the Debuff Bar's collapsible-card design, one card per box:
+        -- two settings per row inside a card wide enough, dim captions, the value
+        -- summary in a shut card's corner, Expand All / Collapse All at the top.
         --
-        --   "Unit Frame"  Frame Tooltips, Binding Tooltips -- the two boxes that
-        --                 describe the SAME hover, both anchored to the frame
-        --                 under the mouse.
-        --   "Auras"       Buff, Debuff, Defensive Icon and Aura Designer
-        --                 Tooltips -- the four that describe hovering an ICON the
-        --                 addon draws, rather than the frame it sits on.
-        --   inline        Resurrection Icon Tooltips: one checkbox, which is not
-        --                 a click's worth of contents.
+        --   column 1   "Unit Frame"  Frame Tooltips, Binding Tooltips -- the two
+        --                            boxes that describe the SAME hover -- and
+        --                            Resurrection Icon Tooltips, for balance.
+        --   column 2   "Auras"       Buff, Debuff, Defensive Icon and Aura
+        --                            Designer Tooltips -- hovering an ICON the
+        --                            addon draws rather than the frame under it.
         --
-        -- Both band headers are locale strings the page already ships -- the
-        -- "Unit Frame" one is the very word the first two boxes' Anchor To
-        -- dropdowns use for the thing they attach to.
+        -- Every enable is its card's header tick (one checkbox per setting, the
+        -- builder's own skipped through hoistToggle); Aura Designer Tooltips has
+        -- three independent switches and no enable, and Resurrection's one
+        -- checkbox IS the group. When and where a tooltip appears is behaviour,
+        -- so no card is pinnable.
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
-        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
-        -- it always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_tooltips_page_builders.lua pins the
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where the toggle moved into the
+        -- header, `hoistToggle`. The classic branch mounts the SAME builder into
+        -- the box it always built -- test_tooltips_page_builders.lua pins the
         -- inventory of each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== THE PAGE'S TWO BANDS =======================================
-        -- Full-width chromeless containers: a feature row's popout docks outside
-        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
-        -- in would leave that beam crossing half the page. Both carry a header,
-        -- because both hold more than one row and a header names the SECTION
-        -- rather than any of the rows under it.
-        local frameBand, auraBand
-        if tools then
-            frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            frameBand:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame"]), 40)
-            auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            auraBand:AddWidget(GUI:CreateHeader(self.child, L["Auras"]), 40)
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ☠ WHAT AN "ANCHOR TO" CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
-        -- LAYOUTS. Picking an anchor re-gates the three controls under it (the
-        -- Anchor position greys under Game Default; the two offsets grey unless
-        -- the tooltip is pinned to the frame or icon). Classic used to pay for
-        -- that with a whole page REBUILD (now a state pass -- see below).
+        -- ☠ WHAT AN "ANCHOR TO" CHANGE COSTS. Picking an anchor re-gates the three
+        -- controls under it (the Anchor position greys under Game Default; the two
+        -- offsets grey unless the tooltip is pinned to the frame or icon). A classic
+        -- box and a Modern card are both page widgets, so both take the page's
+        -- state pass; `popout` is only ever set by a pinned-panel mount, which has
+        -- a pane of its own to reflow (no card on this page is pinnable today, so
+        -- that arm is kept for the builder's shape rather than exercised).
         --
-        -- The pane must not. A rebuild retires every widget on the page including
-        -- the row the user is clicking through, and the helper's own prologue
-        -- closes every open panel on the way in -- so the dropdown they just used
-        -- would slam shut under their hand. What the rebuild was actually buying
-        -- is the hideOn/disableOn passes, and that is precisely what the pane's
-        -- own refresh does: ReflowPane re-runs the group's child states and
-        -- re-sizes the panel round it, then the page's own RefreshStates runs.
-        --
-        -- ★ CLASSIC NO LONGER REBUILDS EITHER. What the rebuild bought there is the
+        -- ★ NEITHER LAYOUT REBUILDS. What the rebuild used to buy is the
         -- same state pass, over a page whose three controls carry their gates as
         -- disableOn -- and the rebuild leaked the whole page on every pick (see
         -- RelayoutCurrentPage in GUI/Panel.lua).
@@ -764,17 +755,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --   allowed in combat, taken straight from the five-way vocabulary those
         --   two boxes use. The out-of-combat pick is deliberately absent: it is
         --   "Always" on a default profile and on nearly every real one, so it
-        --   would spend the row's width saying nothing. The in-combat pick is the
+        --   would spend the card's width saying nothing. The in-combat pick is the
         --   one people go looking for, and it is named only when it is not the
         --   plain Always -- "Combat Never", "Combat Hold Shift".
         --
         --   AURA (Buff, Debuff, Defensive) -- the same two facts, except the
         --   combat half is a checkbox rather than a five-way pick. It reports
         --   through the SAME words: Disable in Combat on says "Combat Never",
-        --   which is what it means and what the hover rows say for it.
+        --   which is what it means and what the hover cards say for it.
         --
         -- ⚠ NO NEW LOCALE STRING for either. "Combat" is the word the Frame Fade
-        -- row already prints beside its in-combat value, and the anchor and
+        -- card already prints beside its in-combat value, and the anchor and
         -- visibility words come out of the very tables the dropdowns offer.
         local function HoverTipSummary(anchorValues, anchorKey, combatKey)
             return function(d)
@@ -803,22 +794,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== ROW 1: Frame Tooltips + Buff Tooltips =====
+        -- ===== Frame Tooltips + Buff Tooltips (classic row 1) =====
 
-        -- Frame Tooltips (a 280 box in column 1 in classic, the Unit Frame band's
-        -- first row). Verbatim, taking the group and parent it should build into:
-        -- same factories, same L keys, same db keys, same slot heights, same
+        -- Frame Tooltips (a 280 box in column 1 in classic, the first Unit Frame
+        -- card in Modern). Verbatim, taking the group and parent it should build
+        -- into: same factories, same L keys, same db keys, same slot heights, same
         -- disableOn.
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while frame tooltips are off; the pane has to do the same,
-        -- and one builder serving both is what stops the two drifting. (The row's
-        -- hoisted tick greys the pane as well, from the outside -- both, exactly
-        -- as the Sorting page's first row does it.)
+        -- own children while frame tooltips are off; the card's body has to do the
+        -- same while its header tick is off, and one builder serving both is what
+        -- stops the two drifting.
         local function BuildFrameTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- Suppressed when the card's HEADER carries this tick. Still built in classic,
             -- where it is the group's only on/off control.
             if not tools2.hoistToggle then
                 local frameTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Tooltips"], db, "tooltipFrameEnabled", nil), 30)
@@ -858,62 +848,38 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(frameTooltipGroup, nil, 1)
         else
-            -- Six: two visibility picks, two anchor picks and two offsets. The
-            -- enable tick is HOISTED onto the row, so it is not one of them.
-            local FRAME_TOOLTIP_COUNT = 6
-
-            -- ☠ NOT GUI:RefreshCurrentPage, which is what the classic Anchor To
-            -- dropdown ends with. A rebuild retires every widget on the page
-            -- including the row being clicked, and the row's write path calls
-            -- row.Refresh() after this returns -- on a dead frame.
-            local function OnFrameTipToggle()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Six, which is INLINE_MAX exactly -- and still the right side of the
-            -- line, because not one of them means anything alone. Anchor is inert
-            -- until Anchor To leaves DEFAULT and the two offsets until it reaches
-            -- FRAME, so the pane greys itself into a chain the reader has to see
-            -- whole; behind a click, the click is the only way to find out which
-            -- half of it is live. The enable tick stays HOISTED as the row's
-            -- toggle, and folds all six away when frame tooltips are off.
-            local frameMount, frameContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildFrameTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The category header the three Unit Frame cards sit under -- the very
+            -- word the first two cards' Anchor To dropdowns use for the thing
+            -- they attach to.
+            Add(GUI:CreateHeader(self.child, L["Unit Frame"]), 40, 1)
+            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+            -- build its own (hoistToggle). Every control here is read at HOVER
+            -- time, so the commit is only the state pass that greys the body --
+            -- never a page rebuild. When a tooltip appears is behaviour, not
+            -- looks, so no pin.
+            local band = OpenSection(L["Frame Tooltips"], "tooltips_frame", 1,
+                HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat"),
+                nil, nil, nil, {
+                    db = db, key = "tooltipFrameEnabled", label = L["Enable Frame Tooltips"],
+                    onChanged = function() self:RefreshStates() end,
                 })
-            end, nil, { inline = true })
-            local frameRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Frame Tooltips"],
-                db       = tools.RowDB,
-                toggle   = { key = "tooltipFrameEnabled" },
-                summary  = HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat"),
-                count    = FRAME_TOOLTIP_COUNT,
-                onToggle = OnFrameTipToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = frameMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(frameRow, frameContent)
-            tools.WireModifiedTick(frameRow)
-            -- ⚠ A FOOTER WITH NO APPLY, and that is the honest answer rather than
-            -- a gap. Every control in this group is read at HOVER time -- which
-            -- is why all six of their own callbacks are empty -- so there is
-            -- nothing for a reset to re-apply beyond the repaint the helper does
-            -- for every row anyway.
-            tools.WireFooter(frameRow)
-            tools.RegisterHoistedToggle(frameRow, L["Enable Frame Tooltips"], "tooltipFrameEnabled", OnFrameTipToggle)
+            BuildFrameTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- Binding Tooltips (a 280 box in column 2 in classic, the Unit Frame
-        -- band's second row) — pairs with Frame Tooltips: both anchor to
-        -- the Unit Frame, so they are the two boxes describing the SAME hover.
-        -- That pairing is what the band is: in classic it was two boxes side by
-        -- side and the reader had to notice; the band says it.
+        -- Binding Tooltips (a 280 box in column 2 in classic, the second Unit
+        -- Frame card in Modern) — pairs with Frame Tooltips: both anchor to the
+        -- Unit Frame, so they are the two boxes describing the SAME hover. In
+        -- classic they sat side by side and the reader had to notice; in Modern
+        -- the "Unit Frame" header over both says it.
         local function BuildBindTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -955,44 +921,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(bindTooltipGroup, nil, 2)
         else
-            local BIND_TOOLTIP_COUNT = 6
-
-            local function OnBindTipToggle()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Six again, and the row above's reasoning verbatim: the same gated
-            -- chain of picks over the same hover. The tick stays HOISTED.
-            local bindMount, bindContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildBindTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- The Frame Tooltips card's shape and reasoning: the same gated chain
+            -- of picks over the same hover, the enable in the header.
+            local band = OpenSection(L["Binding Tooltips"], "tooltips_binding", 1,
+                HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
+                nil, nil, nil, {
+                    db = db, key = "tooltipBindingEnabled", label = L["Enable Binding Tooltips"],
+                    onChanged = function() self:RefreshStates() end,
                 })
-            end, nil, { inline = true })
-            local bindRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Binding Tooltips"],
-                db       = tools.RowDB,
-                toggle   = { key = "tooltipBindingEnabled" },
-                summary  = HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
-                count    = BIND_TOOLTIP_COUNT,
-                onToggle = OnBindTipToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = bindMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(bindRow, bindContent)
-            tools.WireModifiedTick(bindRow)
-            -- No apply, for the reason the Frame Tooltips row has none.
-            tools.WireFooter(bindRow)
-            tools.RegisterHoistedToggle(bindRow, L["Enable Binding Tooltips"], "tooltipBindingEnabled", OnBindTipToggle)
+            BuildBindTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- Buff Tooltips (a 280 box in column 1 in classic, the Auras band's first
-        -- row).
+        -- Buff Tooltips (a 280 box in column 1 in classic, the first Auras card
+        -- in Modern).
         local function BuildBuffTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1027,47 +973,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(buffTooltipGroup, nil, 1)
         else
-            -- Five: the combat tick, two anchor picks and two offsets. The enable
-            -- tick is HOISTED onto the row, so it is not one of them.
-            local BUFF_TOOLTIP_COUNT = 5
-
-            local function OnBuffTipToggle()
-                RefreshAuraTooltips()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Five, the hover rows' argument one control shorter -- the combat
-            -- half is a tick here rather than a five-way pick. The anchor chain
-            -- below it still greys from the inside, so it is the same case for
-            -- seeing the whole group at once. The tick stays HOISTED.
-            local buffMount, buffContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildBuffTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- Column 2 opens here, with the category header the four aura cards
+            -- sit under.
+            Add(GUI:CreateHeader(self.child, L["Auras"]), 40, 2)
+            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+            -- build its own (hoistToggle). The commit is what the in-body
+            -- checkbox ran (the aura buttons are the game's own, so a changed flag
+            -- has to be pushed into them) plus the state pass that greys the
+            -- body -- never a page rebuild. When a tooltip appears is behaviour,
+            -- not looks, so no pin.
+            local band = OpenSection(L["Buff Tooltips"], "tooltips_buff", 2,
+                AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat"),
+                nil, nil, nil, {
+                    db = db, key = "tooltipBuffEnabled", label = L["Enable Buff Tooltips"],
+                    onChanged = function()
+                        RefreshAuraTooltips()
+                        self:RefreshStates()
+                    end,
                 })
-            end, nil, { inline = true })
-            local buffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Buff Tooltips"],
-                db       = tools.RowDB,
-                toggle   = { key = "tooltipBuffEnabled" },
-                summary  = AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat"),
-                count    = BUFF_TOOLTIP_COUNT,
-                onToggle = OnBuffTipToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = buffMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(buffRow, buffContent)
-            tools.WireModifiedTick(buffRow)
-            -- ⚠ THIS FAMILY *DOES* HAVE AN APPLY, unlike the two hover rows: the
-            -- aura buttons are the game's own, and a changed anchor or enable
-            -- flag has to be pushed into them.
-            tools.WireFooter(buffRow, RefreshAuraTooltips)
-            tools.RegisterHoistedToggle(buffRow, L["Enable Buff Tooltips"], "tooltipBuffEnabled", OnBuffTipToggle)
+            BuildBuffTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
         -- ⚠ NO sync points between these boxes. Every tooltip box bar Resurrection
@@ -1083,12 +1012,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- gap reads as the end of a column rather than as a mistake.
         --
         -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY, and it still holds
-        -- there. The popout layout has no columns left to balance bar the one
-        -- Resurrection box: six of the seven groups are rows in two full-width
-        -- bands.
+        -- there. Modern's cards are column-filling and two per row inside, so
+        -- none of these heights apply; its columns are split by subject instead
+        -- (Unit Frame left, Auras right).
 
-        -- Debuff Tooltips (a 280 box in column 2 in classic, the Auras band's
-        -- second row).
+        -- Debuff Tooltips (a 280 box in column 2 in classic, the second Auras
+        -- card in Modern).
         local function BuildDebuffTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1123,44 +1052,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(debuffTooltipGroup, nil, 2)
         else
-            local DEBUFF_TOOLTIP_COUNT = 5
-
-            local function OnDebuffTipToggle()
-                RefreshAuraTooltips()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Five, and the Buff Tooltips row's reasoning verbatim: one group,
-            -- two auras. The tick stays HOISTED.
-            local debuffMount, debuffContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDebuffTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- The Buff Tooltips card's shape: one group, two auras.
+            local band = OpenSection(L["Debuff Tooltips"], "tooltips_debuff", 2,
+                AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat"),
+                nil, nil, nil, {
+                    db = db, key = "tooltipDebuffEnabled", label = L["Enable Debuff Tooltips"],
+                    onChanged = function()
+                        RefreshAuraTooltips()
+                        self:RefreshStates()
+                    end,
                 })
-            end, nil, { inline = true })
-            local debuffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Debuff Tooltips"],
-                db       = tools.RowDB,
-                toggle   = { key = "tooltipDebuffEnabled" },
-                summary  = AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat"),
-                count    = DEBUFF_TOOLTIP_COUNT,
-                onToggle = OnDebuffTipToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = debuffMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(debuffRow, debuffContent)
-            tools.WireModifiedTick(debuffRow)
-            tools.WireFooter(debuffRow, RefreshAuraTooltips)
-            tools.RegisterHoistedToggle(debuffRow, L["Enable Debuff Tooltips"], "tooltipDebuffEnabled", OnDebuffTipToggle)
+            BuildDebuffTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- Defensive Icon Tooltips (a 280 box in column 1 in classic, the Auras
-        -- band's third row).
+        -- Defensive Icon Tooltips (a 280 box in column 1 in classic, the third
+        -- Auras card in Modern).
         local function BuildDefTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1195,44 +1106,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
             Add(defTooltipGroup, nil, 1)
         else
-            local DEF_TOOLTIP_COUNT = 5
-
-            local function OnDefTipToggle()
-                RefreshAuraTooltips()
-                self:RefreshStates()
-                tools.ReflowMounted()
-            end
-
-            -- Five, the third of the aura trio and the same case as the two above
-            -- it. The tick stays HOISTED.
-            local defMount, defContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildDefTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- The third of the aura trio, and the Buff Tooltips card's shape:
+            -- the enable is the header's tick (the builder skips its own).
+            local band = OpenSection(L["Defensive Icon Tooltips"], "tooltips_defensive", 2,
+                AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat"),
+                nil, nil, nil, {
+                    db = db, key = "tooltipDefensiveEnabled", label = L["Enable Defensive Icon Tooltips"],
+                    onChanged = function()
+                        RefreshAuraTooltips()
+                        self:RefreshStates()
+                    end,
                 })
-            end, nil, { inline = true })
-            local defRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Defensive Icon Tooltips"],
-                db       = tools.RowDB,
-                toggle   = { key = "tooltipDefensiveEnabled" },
-                summary  = AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat"),
-                count    = DEF_TOOLTIP_COUNT,
-                onToggle = OnDefTipToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = defMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(defRow, defContent)
-            tools.WireModifiedTick(defRow)
-            tools.WireFooter(defRow, RefreshAuraTooltips)
-            tools.RegisterHoistedToggle(defRow, L["Enable Defensive Icon Tooltips"], "tooltipDefensiveEnabled", OnDefTipToggle)
+            BuildDefTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- Aura Designer Tooltips (a 280 box in column 2 in classic, the Auras
-        -- band's fourth row). Lives HERE rather than on the Aura
+        -- Aura Designer Tooltips (a 280 box in column 2 in classic, the last
+        -- Auras card in Modern). Lives HERE rather than on the Aura
         -- Designer page: this setting only ever gets touched by someone who
         -- wants a tooltip and hasn't got one, or has one and doesn't want it —
         -- and both of those people go looking for "tooltip". The AD page links
@@ -1244,17 +1138,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- are spells you placed and named yourself, so they gain little, but
         -- there's no harm in offering them.
         --
-        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
-        -- The other four aura groups each have one boolean meaning "am I doing
-        -- anything at all"; this one has THREE, and they are INDEPENDENT -- any
-        -- of the three surfaces can have a tooltip without the others. Hoisting
-        -- one would claim it speaks for all three (the Color Picker row's
-        -- precedent), and inventing a fourth key to gate them is a migration for
-        -- a row's ornament. So the row is a way in and nothing else -- the kit
-        -- draws no tick, reserves its column so the row still lines up with the
-        -- three above it, and the group reads as permanently on, which it is.
-        -- It still gets the amber tick and the footer: all three keys are
-        -- ordinary per-mode profile keys the defaults engine answers for.
+        -- ☠ A CARD WITH NO HEADER TICK, and that is a judgement rather than an
+        -- omission. The other four aura groups each have one boolean meaning "am
+        -- I doing anything at all"; this one has THREE, and they are INDEPENDENT
+        -- -- any of the three surfaces can have a tooltip without the others.
+        -- Hoisting one would claim it speaks for all three, and inventing a
+        -- fourth key to gate them is a migration for a header's ornament. So the
+        -- three stay in the body and the group reads as permanently on, which it
+        -- is.
         local function BuildADTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             local adGroupsTip = group:AddWidget(GUI:CreateCheckbox(parent, L["Groups"], db, "tooltipADGroupsEnabled", RefreshAuraTooltips), 30)
@@ -1278,8 +1169,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Which of the three surfaces are on, in the order the checkboxes
             -- are in. Three items at most, all of them single words the locale
             -- already ships as those checkboxes' own labels -- and with none of
-            -- them on it says nothing, which is the honest answer for a row whose
-            -- whole group is off.
+            -- them on it says nothing, which is the honest answer for a card
+            -- whose whole group is off.
             local function ADTooltipSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -1289,105 +1180,41 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three, which is the whole group: nothing is hoisted onto the row,
-            -- because there is no single tick to hoist.
-            local AD_TOOLTIP_COUNT = 3
-
-            -- Three ticks and nothing else -- and NOTHING is hoisted here, because
-            -- there is no boolean meaning "am I doing anything". So this row was a
-            -- click that opened a panel holding three checkboxes, which is exactly
-            -- the click the hybrid page refuses: the three go on the plate and the
-            -- strip offers to pin a second copy beside another page.
-            local adMount, adContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildADTooltipGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local adRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Aura Designer Tooltips"],
-                db      = tools.RowDB,
-                summary = ADTooltipSummary,
-                count   = AD_TOOLTIP_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = adMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(adRow, adContent)
-            tools.WireModifiedTick(adRow)
-            tools.WireFooter(adRow, RefreshAuraTooltips)
+            -- ☠ NO HEADER TICK: three INDEPENDENT switches and no one of them is
+            -- the group's on/off (see the builder's note). Behaviour, so no pin.
+            local band = OpenSection(L["Aura Designer Tooltips"], "tooltips_auradesigner", 2, ADTooltipSummary)
+            BuildADTooltipGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- Resurrection Icon Tooltips (Column 2 in classic; a row of its own here)
-        -- — the one short box, kept last so the leftover space lands at the foot
-        -- of a column.
+        -- Resurrection Icon Tooltips (Column 2 in classic; the last Unit Frame
+        -- card in Modern) — the one short box, kept last so the leftover space
+        -- lands at the foot of a column.
         --
-        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT.
-        -- A pane holding one checkbox is a click that buys nothing, so this never
-        -- earned a feature row. But a 280 box standing beside two full-width bands
-        -- is the one thing a column of plates cannot absorb: a narrower rectangle
-        -- with its own border and its own left edge, in a list whose whole argument
-        -- is that every row starts at the same x. So the checkbox wears the SAME
-        -- plate the rows above it do (DandersUI/ControlRow.lua) and sits in a band
-        -- that is chromeless and full width exactly like the other two. And it is
-        -- not an aura, so it would not have belonged in the Auras band even then.
-        --
-        -- ⚠ ONE NAME, AND IT IS THE GROUP'S. The box put "Resurrection Icon
-        -- Tooltips" over a tick reading "Enable Resurrection Icon Tooltips"; a row
-        -- draws ONE label, and the tick beside it already says "enable" -- so the
-        -- shorter of the two is what is left. It is also the vocabulary the rows
-        -- above are named in ("Frame Tooltips", "Aura Designer Tooltips") and the
-        -- section name a search breadcrumb has always printed for this setting.
-        -- Both strings already ship; nothing is invented and nothing is added.
-        --
-        -- ⚠ CONSTRUCTED HERE, ADDED WITH THE BANDS. `Add` resolves a widget's slot
-        -- height on the spot, so a band has to go in AFTER the last row is put into
-        -- it -- which is why the trio is added together at the foot rather than in
-        -- place.
-        local resBand
+        -- ☠ ONE SETTING, SO ITS CARD HOLDS THE CHECKBOX AND NO HEADER TICK. The
+        -- enable is the whole group: hoisted, it would leave a card with an empty
+        -- body under a tick. The same call classic makes, on the same key, so the
+        -- search entry is the one classic registers. Its column is the Unit Frame
+        -- side for balance (three cards against four), as the old row's was.
         if classicLayout then
             local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
             resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)
             resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
             Add(resTooltipGroup, nil, 2)
         else
-            resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            local resRow = resBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label = L["Resurrection Icon Tooltips"],
-                kind  = "checkbox",
-                -- The FUNCTION form, like every row on this page: the table is
-                -- re-resolved on each read, so a mode switch is followed rather
-                -- than frozen at whichever table this build captured.
-                db    = tools.RowDB,
-                key   = "tooltipResurrectionEnabled",
-            }))
-            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
-            -- are the popout row's own slot), which is what makes a control row and
-            -- a feature row share one rhythm in a band.
-            tools.RegisterControlRow(resRow, "checkbox", "tooltipResurrectionEnabled")
+            local band = OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, nil)
+            band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
+            CloseSection(band)
         end
 
-        -- The three bands. See the Resurrection note above for why the trio is
-        -- added here rather than in place.
-        -- TWO COLUMNS WHEN THERE IS ROOM: Unit Frame and the Resurrection row down
-        -- the left, Auras down the right. On a narrow window the page folds back to
-        -- one column in the order below, which is the order it always had.
-        -- ⚠ THE RESURRECTION ROW IS LEFT FOR BALANCE. It is a frame icon's tooltip,
-        -- so it could sit either side, and on the right it would leave Unit Frame
-        -- alone at two rows against five; on the left the columns hold three and four.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            frameBand.layoutColFill = true
-            auraBand.layoutColFill = true
-            resBand.layoutColFill = true
-            Add(frameBand, nil, 1)
-            Add(auraBand, nil, 2)
-            Add(resBand, nil, 1)
-        end
+        -- ===== NO BAND TAIL ================================================
+        -- A card's band holds one group and is Add'd by CloseSection the moment
+        -- that group is built, so nothing is deferred to here. Unit Frame down the
+        -- left, Auras down the right; on a narrow window the page folds to one
+        -- column in the order above.
 
         -- Sync point before See Also
         AddSyncPoint()
