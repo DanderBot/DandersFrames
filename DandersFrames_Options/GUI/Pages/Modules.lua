@@ -1094,54 +1094,58 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- CLASSIC is exactly what it always was: three collapsible sections, one
         -- per highlight, wrapping four 280 boxes in the columns they always had.
         --
-        -- POPOUT turns all four boxes into feature rows, and the three SECTIONS
-        -- into the three bands over them:
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
+        -- controls TWO PER ROW inside a card wide enough, captions drawn dim, the
+        -- value summary in a shut card's corner, Expand All / Collapse All at the
+        -- top. Four cards, named for the highlight they draw:
         --
-        --   "Selection Highlight"  Selection Settings
-        --   "Hover Highlight"      Hover Settings
-        --   "Aggro Highlight"      Aggro Settings and Threat Colors
+        --   column 1   Aggro Highlight, Threat Colors -- the one highlight with
+        --              behaviour of its own (Only Show When Tanking, Hide on
+        --              Tanks) and the palette it paints with.
+        --   column 2   Selection Highlight, Hover Highlight -- a mode plus the
+        --              border's looks, and nothing else.
         --
-        -- ☠ THE SECTIONS BECOME BANDS RATHER THAN SURVIVING AS SECTIONS. A
-        -- collapsible section is kept where it holds several boxes that are worth
-        -- folding away together (the Health Bar page's precedent, and the Icons
-        -- page's, whose section headers also draw a live preview). Here each one
-        -- wraps a single group -- and a row IS a fold, so keeping the section
-        -- would put a fold inside a fold with one thing in it. The band header is
-        -- the section header, minus the disclosure triangle; every name is the
-        -- locale string the section already used.
+        -- ⚠ THE CARDS ARE THE HIGHLIGHTS, NOT THE OLD BOXES' NAMES. Classic's box
+        -- headers ("Selection Settings" and so on) sat under a section that
+        -- already named the highlight; a card has only one title, and the
+        -- highlight's name is the one that says what it is. Every name is a
+        -- locale string the page already ships.
         --
-        -- ☠ AND NOTHING ON THIS PAGE HOISTS A TICK. Each highlight's master
+        -- Aggro used to be the one row on the page that did not mount on its
+        -- plate (seven controls, one over the old ceiling), which is what left it
+        -- a strip over empty space beside two filled plates. As a card it lays
+        -- out like the other three.
+        --
+        -- ☠ NOTHING ON THIS PAGE TAKES A HEADER TICK. Each highlight's master
         -- control is its MODE -- a dropdown whose "Hidden" entry is the off
-        -- switch -- not a boolean, so there is nothing a row's tick column could
-        -- carry. Threat Colors' "Use Custom Colors" looks like a candidate and is
-        -- not one: with it off the group still does something (the game's own
-        -- threat palette), so it is a MODE rather than an enable, and hoisting it
-        -- would have printed "Off" over a group that was still colouring frames.
-        -- Left in the pane it also rides that row's Reset Group, which a hoisted
-        -- tick never does.
+        -- switch -- not a boolean, so there is nothing a tick could carry. Threat
+        -- Colors' "Use Custom Colors" looks like a candidate and is not one: with
+        -- it off the card still does something (the game's own threat palette),
+        -- so it is a MODE rather than an enable, and a tick would have printed
+        -- "Off" over a card that was still colouring frames.
         --
         -- There is no page-wide gate here at all: the three highlights are three
-        -- independent features, so no row greys another.
+        -- independent features, so no card greys another. All four decide how a
+        -- highlight LOOKS, so all four take a pin.
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The classic branch mounts the SAME
         -- builder into the box it always built -- test_highlights_page_builders.lua
         -- pins the inventory of each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
-        -- band width. nil in classic, which is what every `if classicLayout then`
-        -- arm below leans on.
+        -- The shared page-scope machinery. nil in classic, which is what every
+        -- `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        local selectionBand, hoverBand, aggroBand
-        if tools then
-            selectionBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            selectionBand:AddWidget(GUI:CreateHeader(self.child, L["Selection Highlight"]), 40)
-            hoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            hoverBand:AddWidget(GUI:CreateHeader(self.child, L["Hover Highlight"]), 40)
-            aggroBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            aggroBand:AddWidget(GUI:CreateHeader(self.child, L["Aggro Highlight"]), 40)
+        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- ===== THE PAGE'S GATES AND APPLIES, AT PAGE SCOPE ================
@@ -1159,20 +1163,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function HideAggroModeNone(d) return d.aggroHighlightMode == "NONE" end
         local function HideCustomColorOptions(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors end
         local function HideNonTankingColors(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors or d.aggroOnlyTanking end
-
-        -- What a write to each family costs, named once so a row's footer applies
-        -- exactly what that row's own controls apply.
-        local function ApplySelectionHighlight()
-            DF:LightweightUpdateHighlight("selection")
-            DF:LightweightUpdateSelectionHighlightColor()
-        end
-        local function ApplyHoverHighlight()
-            DF:LightweightUpdateHighlight("hover")
-        end
-        local function ApplyAggroHighlight()
-            DF:LightweightUpdateHighlight("aggro")
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end
 
         -- The summary convention, once: at most four items, a fixed order,
         -- "\194\183" between them, WORDS localised and numbers raw, every read
@@ -1284,36 +1274,21 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             currentSection = nil
             AddSpace(GUI.Space.section, "both")
         else
-            -- Six: the mode, thickness, inset, frame level, alpha and the colour.
-            local SELECTION_COUNT = 6
-
-            -- ☠ SIX, THE CEILING EXACTLY, SO THE GROUP GOES ON THE PLATE -- and
-            -- five of the six answer to the mode dropdown's hideOn, so the plate
-            -- is one dropdown wide until someone picks a mode and the full set
-            -- only afterwards. That is the whole argument for mounting it: the
-            -- settings a highlight actually has depend on the mode chosen, and
-            -- behind a strip the user had to open a panel to find out that
-            -- picking None empties it.
-            local selectionMount, selectionContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildSelectionHighlightGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local selectionRow = selectionBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Selection Settings"],
-                db      = tools.RowDB,
-                summary = SelectionSettingsSummary,
-                count   = SELECTION_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = selectionMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(selectionRow, selectionContent)
-            tools.WireModifiedTick(selectionRow)
-            tools.WireFooter(selectionRow, ApplySelectionHighlight)
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns, and
+            -- "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- Five of the six answer to the mode dropdown's hideOn, so the card
+            -- is one dropdown tall until a mode is picked. Column 2, and the
+            -- first card added, so the one-column fold still reads in the order
+            -- the three sections had.
+            local band = OpenSection(L["Selection Highlight"], "highlights_selection", 2, SelectionSettingsSummary,
+                nil, nil, BuildSelectionHighlightGroup)
+            BuildSelectionHighlightGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ========================================
@@ -1354,32 +1329,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             currentSection = nil
             AddSpace(GUI.Space.section, "both")
         else
-            -- Six: the same set the Selection row carries.
-            local HOVER_COUNT = 6
-
-            -- Six, the same set and the same mode gate, so the same answer: on
-            -- the plate. Two rows that are the same shape reading differently
-            -- would be the page saying the highlights differ where they do not.
-            local hoverMount, hoverContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHoverHighlightGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local hoverRow = hoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Hover Settings"],
-                db      = tools.RowDB,
-                summary = HoverSettingsSummary,
-                count   = HOVER_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = hoverMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(hoverRow, hoverContent)
-            tools.WireModifiedTick(hoverRow)
-            tools.WireFooter(hoverRow, ApplyHoverHighlight)
+            -- The same six and the same mode gate as Selection, under it.
+            local band = OpenSection(L["Hover Highlight"], "highlights_hover", 2, HoverSettingsSummary,
+                nil, nil, BuildHoverHighlightGroup)
+            BuildHoverHighlightGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ========================================
@@ -1472,93 +1429,29 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             currentSection = nil
         else
-            -- Seven: the mode, the two tanking questions, thickness, inset, frame
-            -- level and alpha.
-            local AGGRO_COUNT = 7
-            -- Four: the custom-colours tick and the three swatches. The legend
-            -- under them is prose, not a setting.
-            local THREAT_COUNT = 4
+            -- ☠ COLUMN 1, what the page DOES down the left: Aggro is the only
+            -- highlight with behaviour of its own (Only Show When Tanking, Hide on
+            -- Tanks). With Threat Colors under it that is also the balanced
+            -- split -- two cards against Selection and Hover's two.
+            local band = OpenSection(L["Aggro Highlight"], "highlights_aggro", 1, AggroSettingsSummary,
+                nil, nil, BuildAggroHighlightGroup)
+            BuildAggroHighlightGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
 
-            local aggroMount, aggroContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildAggroHighlightGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end)
-            local aggroRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Aggro Settings"],
-                db      = tools.RowDB,
-                summary = AggroSettingsSummary,
-                count   = AGGRO_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = aggroMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(aggroRow, aggroContent)
-            tools.WireModifiedTick(aggroRow)
-            tools.WireFooter(aggroRow, ApplyAggroHighlight)
-
-            -- ☠ FOUR SETTINGS AND A LEGEND, SO THE GROUP GOES ON THE PLATE --
-            -- and the legend is why this row wants it more than its neighbours.
-            -- "Yellow=high, Orange=highest, Red=tanking" is what makes three
-            -- unlabelled swatches mean anything, and a summary has no room for
-            -- it; behind a strip the key to the palette was itself behind a
-            -- click. Aggro Settings above stays put at seven, one over the
-            -- ceiling, so the band still has a way in on it.
-            local threatMount, threatContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildThreatColorsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end, nil, { inline = true })
-            local threatRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Threat Colors"],
-                db      = tools.RowDB,
-                summary = ThreatColorsSummary,
-                count   = THREAT_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = threatMount,
-                footerStrip = true,
-            }))
-            -- The box's own gate becomes the ROW's, so the band collapses the slot
-            -- instead of drawing a plate for a palette no highlight will use.
-            -- ⚠ The band header stays over something either way: Aggro Settings
-            -- carries the mode that hides this one, and never hides itself.
-            threatRow.hideOn = HideAggroModeNone
-            tools.ClaimKeys(threatRow, threatContent)
-            tools.WireModifiedTick(threatRow)
-            -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS
-            -- rather than the shape. Three colour tables and a boolean, all of
-            -- them plain profile settings the defaults engine can write; the
-            -- swatches re-read their table on every value sweep, so a reset that
-            -- replaces one is repainted rather than detached.
-            tools.WireFooter(threatRow, ApplyAggroHighlight)
-        end
-
-        -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
-        -- Added at the foot rather than in place, because `Add` resolves a band's
-        -- slot height on the spot and a band has to go in after its last row.
-        -- The Frame page's rule: what the page DOES down the left, how it LOOKS
-        -- down the right -- here Aggro on the left, Selection and Hover on the
-        -- right. Aggro is the only highlight with behaviour of its own (Only Show
-        -- When Tanking, Hide on Tanks); Selection and Hover are a mode plus the
-        -- border's looks. That is also the balanced split, two rows against two.
-        -- On a narrow window the page folds back to one column and reads in
-        -- exactly the order below, which is the order the three sections had.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            selectionBand.layoutColFill = true
-            hoverBand.layoutColFill = true
-            aggroBand.layoutColFill = true
-            Add(selectionBand, nil, 2)
-            Add(hoverBand, nil, 2)
-            Add(aggroBand, nil, 1)
+            -- The box's own gate, on both halves of the card: with the aggro mode
+            -- on Hidden no highlight uses this palette, so the whole card goes,
+            -- header and body together, exactly as the classic box did. The
+            -- legend under the swatches is prose, so it takes a row of its own.
+            band = OpenSection(L["Threat Colors"], "highlights_threat", 1, ThreatColorsSummary,
+                nil, HideAggroModeNone, BuildThreatColorsGroup)
+            BuildThreatColorsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- See Also links
