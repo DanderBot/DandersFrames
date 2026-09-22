@@ -3946,62 +3946,54 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- straight onto the page under "Absorb Shield" and fifteen under "Heal
         -- Absorb", each with its own slot height and its own column.
         --
-        -- POPOUT turns each section's pile into ONE feature row, in one
-        -- headerless band per section:
+        -- MODERN is the Debuff Bar's collapsible-card design: each section's pile
+        -- is ONE card, and the two cards sit SIDE BY SIDE, one per page column,
+        -- when the window is wide enough (testers compared the two bars and did
+        -- not want to scroll between them). Everything is on the card -- nothing
+        -- is behind a popout any more -- two settings per row, dim captions, and
+        -- Expand All / Collapse All at the top:
         --
-        --   "Absorb Shield"   Absorb Shield
-        --   "Heal Absorb"     Heal Absorb
+        --   column 1   Absorb Shield
+        --   column 2   Heal Absorb
         --
-        -- ☠ THIS IS THE SWEEP'S FIRST LOOSE-WIDGET PAGE, and it is why the
-        -- builders here take an `add` rather than a `group`. Every page converted
-        -- before this one built BOXES in classic, so a builder could be handed the
-        -- box and call `group:AddWidget(w, h)` in both layouts. There is no box
-        -- here: classic calls `AddToSection(w, h, col)` and the COLUMN is part of
-        -- what it always did. So the one thing that differs between the layouts is
-        -- named and handed in -- classic passes AddToSection, a pane passes a
-        -- closure that drops the column and mounts into its group -- and every
-        -- other line of the builder is the page's own source, unmoved. The classic
-        -- Add order, the heights and the columns are therefore structurally
-        -- unchanged rather than promised to be; test_absorbs_page_builders.lua
-        -- pins all three against the census taken before the move.
+        -- ☠ THE BUILDERS TAKE AN `add` OR A `group`. This was the sweep's first
+        -- loose-widget page: classic has no box, it calls `AddToSection(w, h, col)`
+        -- and the COLUMN is part of what it always did, so classic hands its own
+        -- `add` in and every other line of the builder is the page's own source,
+        -- unmoved. A card (and its pinned panel) hands a `group` instead, exactly
+        -- like every other page's builder, and the builder adds into it with the
+        -- column dropped -- a card is one flow. test_absorbs_page_builders.lua
+        -- pins the classic Add order, heights and columns against the census
+        -- taken before the move.
         --
-        -- ☠ THE COLLAPSIBLE SECTIONS STAY, IN BOTH LAYOUTS -- the Health Bar
-        -- page's rule, for two of its three reasons: a section COLLAPSES and
-        -- persists that fold per title in SavedVariables (a band does neither), and
-        -- Panel.lua's layout note calls a section the page's second level for
-        -- PARALLEL SUB-FEATURES, which the shield and the heal absorb are. So each
-        -- band goes in THROUGH its section and carries no header of its own -- the
-        -- section bar above it already names it.
+        -- ☠ THE FULL-WIDTH SECTIONS ARE CLASSIC'S ONLY. Classic keeps its two
+        -- collapsible sections over loose widgets, and the spacer between them;
+        -- in modern the card IS the section, and a full-width section or spacer
+        -- between the two cards would push Heal Absorb under Absorb Shield.
         --
-        -- ⚠ AND EACH ROW REPEATS ITS SECTION'S NAME, which is the Health Bar
-        -- page's lesser of two evils again: a search hit finds its row BY LABEL, so
-        -- the label has to be the one word that describes the whole pane, and for
-        -- these two piles that word is the section's.
-        --
-        -- ⚠ NEITHER ROW CARRIES A TICK. There is no enable key for either bar --
+        -- ⚠ NEITHER CARD CARRIES A TICK. There is no enable key for either bar --
         -- the Display Mode dropdown IS the master, and neither list of modes has an
-        -- off -- so each row is a way in and nothing else. Both still get the amber
-        -- tick and the footer: every key here is an ordinary per-mode profile key.
+        -- off. Both are pinnable: every control in them decides how a bar looks.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery, which carries the card helper. nil in
+        -- classic, which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- One band per section: full-width and chromeless, because a feature row's
-        -- popout docks outside the WINDOW and runs a beam back to the row, so a row
-        -- that stopped 280px in would leave that beam crossing half the page.
-        local absorbBand, healAbsorbBand
-        if tools then
-            absorbBand     = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            healAbsorbBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
+        -- here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
-        -- The rows print the chosen mode as their SUMMARY, and a summary is written
+        -- The cards print the chosen mode as their SUMMARY, and a summary is written
         -- OUTSIDE the group's builder -- so the word has to come out of the same table
-        -- the dropdown offers, or a row could say one thing while the control behind
+        -- the dropdown offers, or a card could say one thing while the control behind
         -- it says another. (The Health Bar page hoisted its six dropdown tables for
         -- exactly this reason.)
         --
@@ -4026,7 +4018,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         }
 
         -- The texture's display NAME, from the addon's own media resolver -- the
-        -- one GUI:CreateTextureDropdown prints on its own button, so a row and the
+        -- one GUI:CreateTextureDropdown prints on its own button, so a card and the
         -- control behind it cannot disagree. Its own copy: the Health Bar and
         -- Resource Bar helpers of the same name are locals inside THEIR closures.
         local function TextureName(path)
@@ -4036,11 +4028,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== ABSORB SHIELD SECTION =====
-        local absorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Absorb Shield"], true), 36, "both")
+        -- ☠ CLASSIC'S ONLY -- in modern the card is the section (see the page note).
+        -- An expression rather than an arm, the Health Bar gradient box's idiom:
+        -- classic's two arms below stay exactly what they were.
+        local absorbSection = classicLayout
+            and Add(GUI:CreateCollapsibleSection(self.child, L["Absorb Shield"], true), 36, "both")
+            or nil
         currentSection = absorbSection
 
-        -- ===== ABSORB SHIELD (twenty-one loose widgets in classic, the Absorb
-        -- Shield band's only row) =====
+        -- ===== ABSORB SHIELD (twenty-one loose widgets in classic, the first
+        -- card, column 1, in modern) =====
         --
         -- ⚠ THE STRIPE MERGE STAYS INSIDE THE BUILDER. It augments the option table
         -- the dropdown is about to be handed, which is the builder's own business;
@@ -4048,7 +4045,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- have always had one each.
         --
         -- ⚠ AND SO DOES THE "Floating Bar Position" HEADER -- the sweep's first
-        -- header INSIDE a pane. Classic needs it built (it is a widget on the page
+        -- header INSIDE a pane, and now inside a card, on a row of its own. Classic needs it built (it is a widget on the page
         -- like any other), and one builder serving both is what stops the layouts
         -- drifting; in a pane it earns its place a second time, because FLOATING
         -- mode shows fourteen controls in one stack and the header is what says
@@ -4056,6 +4053,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- with them in every other mode.
         local function BuildAbsorbShieldGroup(tools2)
             local add, parent = tools2.add, tools2.parent
+            -- A card or a pinned panel hands a group: add into it, column dropped.
+            if not add then
+                local group = tools2.group
+                add = function(w, h) return group:AddWidget(w, h) end
+            end
 
             add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
                 tools2.refreshStates()
@@ -4156,23 +4158,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
         end
 
-        -- The group's own apply, named once so the footer's Reset Group and
-        -- Hold: Defaults run exactly what the twenty controls run between them:
-        -- the full update most of them drive, the two lightweight absorb passes
-        -- (geometry and colour) and the frame-level ladder pass.
-        --
-        -- ⚠ ONE KEY THE ENGINE CANNOT ANSWER FOR: absorbBarOvershieldColor ships
-        -- as nil, so it is absent from PartyDefaults. The claim still names it --
-        -- the map is what lets a search hit on "Glow Color" open this panel -- and
-        -- the tick and the footer pass over it in silence, exactly as the Resource
-        -- Colors row's ten power swatches are passed over.
-        local function ApplyAbsorbShield()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdateAbsorbBar()
-            DF:LightweightUpdateAbsorbBarColor()
-            DF:LightweightUpdateFrameLevel("absorb")
-        end
-
         -- The display mode in the dropdown's own words, then the texture's name
         -- through the addon's own resolver -- the Health Bar Background row's
         -- shape. The mode goes first because it is the one pick that changes what
@@ -4197,59 +4182,44 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 refreshStates = function() self:RefreshStates() end,
             })
         else
-            -- Twenty: the mode pick, the texture, the swatch, the blend pick, the
-            -- overlay reverse, the clamp pick, the overshield tick and its four
-            -- detail controls, and the nine floating controls. Most of them are
-            -- hidden for most modes -- the count is what the pane HOLDS, not what
-            -- happens to be on show (the Health Bar Color row's rule) -- and the
-            -- floating HEADER is not among them, because the badge counts settings
-            -- rather than everything mounted (the Resource Colors row's rule).
-            local ABSORB_SHIELD_COUNT = 20
-
-            local absorbMount, absorbContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildAbsorbShieldGroup({
-                    -- The column is DROPPED, not ignored by accident: a pane is one
-                    -- track, and the second column only ever existed to keep this
-                    -- pile off the page's left edge.
-                    add = function(w, h) return group:AddWidget(w, h) end,
-                    parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end)
-            local absorbRow = absorbBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Absorb Shield"],
-                db      = tools.RowDB,
-                summary = AbsorbShieldSummary,
-                count   = ABSORB_SHIELD_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = absorbMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(absorbRow, absorbContent)
-            tools.WireModifiedTick(absorbRow)
-            tools.WireFooter(absorbRow, ApplyAbsorbShield)
-
-            AddToSection(absorbBand, nil, "both")
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Debuff Bar's placement: they act on cards in both columns.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- Column 1, pinnable. No tick: the Display Mode pick is the master.
+            local band = OpenSection(L["Absorb Shield"], "absorbs_shield", 1, AbsorbShieldSummary, nil, nil,
+                BuildAbsorbShieldGroup)
+            BuildAbsorbShieldGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         currentSection = nil
-        AddSpace(GUI.Space.section, "both")
+        -- ☠ CLASSIC'S ONLY: a "both" spacer between the two cards would end
+        -- column 1 and push Heal Absorb under Absorb Shield.
+        if classicLayout then AddSpace(GUI.Space.section, "both") end
 
         -- ===== HEAL ABSORB SECTION =====
-        local healAbsorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
+        -- ☠ CLASSIC'S ONLY, as the Absorb Shield section above.
+        local healAbsorbSection = classicLayout
+            and Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
+            or nil
         currentSection = healAbsorbSection
 
-        -- ===== HEAL ABSORB (fifteen loose widgets in classic, the Heal Absorb
-        -- band's only row) =====
+        -- ===== HEAL ABSORB (fifteen loose widgets in classic, the second card,
+        -- column 2, in modern) =====
         --
         -- ⚠ THE BLURB TRAVELS WITH THE CONTROLS. It says what a heal absorb IS,
-        -- which is the one thing a user opening this pane may not know, so it rides
-        -- into the pane as the group's first widget rather than being stranded on
-        -- the page under the row (the Class Colors row's blurb, same move).
+        -- which is the one thing a user opening this card may not know, so it is
+        -- the group's first widget in every layout, on a row of its own in a card.
         local function BuildHealAbsorbGroup(tools2)
             local add, parent = tools2.add, tools2.parent
+            -- A card or a pinned panel hands a group: add into it, column dropped.
+            if not add then
+                local group = tools2.group
+                add = function(w, h) return group:AddWidget(w, h) end
+            end
 
             add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
 
@@ -4312,18 +4282,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             healBgColorPicker.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
         end
 
-        -- The group's own apply: the full update most of its controls drive, plus
-        -- the two lightweight heal-absorb passes its sliders and swatches drive.
-        -- There is no frame-level pass here because this bar has no frame-level
-        -- slider -- it never had one.
-        local function ApplyHealAbsorb()
-            DF:UpdateAllFrames()
-            DF:LightweightUpdateHealAbsorbBar()
-            DF:LightweightUpdateHealAbsorbBarColor()
-        end
-
-        -- The same two words the shield's row prints, out of this bar's own mode
-        -- table: two rows in one page reading the same shape is the point.
+        -- The same two words the shield's card prints, out of this bar's own mode
+        -- table: two cards side by side reading the same shape is the point.
         local function HealAbsorbSummary(d)
             if not d then return "" end
             local parts = {}
@@ -4341,34 +4301,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 refreshStates = function() self:RefreshStates() end,
             })
         else
-            -- Thirteen: the mode pick, the texture, the swatch, the blend pick, the
-            -- overlay reverse and the eight floating controls. The blurb and the
-            -- floating header are prose, and prose is not a setting.
-            local HEAL_ABSORB_COUNT = 13
-
-            local healMount, healContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildHealAbsorbGroup({
-                    add = function(w, h) return group:AddWidget(w, h) end,
-                    parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end)
-            local healAbsorbRow = healAbsorbBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Heal Absorb"],
-                db      = tools.RowDB,
-                summary = HealAbsorbSummary,
-                count   = HEAL_ABSORB_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = healMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(healAbsorbRow, healContent)
-            tools.WireModifiedTick(healAbsorbRow)
-            tools.WireFooter(healAbsorbRow, ApplyHealAbsorb)
-
-            AddToSection(healAbsorbBand, nil, "both")
+            -- Column 2, beside Absorb Shield when the window is wide. Pinnable.
+            local band = OpenSection(L["Heal Absorb"], "absorbs_healabsorb", 2, HealAbsorbSummary, nil, nil,
+                BuildHealAbsorbGroup)
+            BuildHealAbsorbGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         currentSection = nil

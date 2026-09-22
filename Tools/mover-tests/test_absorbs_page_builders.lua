@@ -9,26 +9,23 @@ local NS = ...
 -- collapsible sections hold thirty-six widgets added STRAIGHT onto the page,
 -- each with its own slot height and its own COLUMN.
 --
--- So the one thing that differs between the layouts is named and handed in --
--- classic passes AddToSection, a pane passes a closure that drops the column and
--- mounts into its group -- and each section's pile becomes ONE feature row:
+-- So classic hands its builders its own `add` (AddToSection, column and all),
+-- and a modern CARD -- the Debuff Bar's collapsible card -- hands them a `group`
+-- like every other page's builder. The two cards sit side by side:
 --
---   "Absorb Shield"   Absorb Shield   (21 widgets, no tick)
---   "Heal Absorb"     Heal Absorb     (15 widgets, no tick)
+--   column 1   Absorb Shield   (21 widgets, no tick, pinnable)
+--   column 2   Heal Absorb     (15 widgets, no tick, pinnable)
 --
 -- ☠ THREE THINGS THIS SUITE IS HERE TO PIN:
 --
---   1. THE `add` SEAM. Section 4 asserts each builder takes tools2.add, that the
---      classic arm hands it AddToSection, and that the popout arm hands it a
---      closure onto the pane's group -- so "classic renders as it did" is
---      structural rather than a promise.
+--   1. THE `add` SEAM. Each builder takes tools2.add when classic hands it
+--      AddToSection, and falls back to its tools2.group when a card or a pinned
+--      panel hands it one -- so "classic renders as it did" is structural.
 --   2. THE COLUMNS SURVIVE. The census below records the COLUMN of every widget
---      as well as its height, taken from the pre-change source. A builder that
---      quietly moved the floating header out of column 2 fails here.
---   3. THE COLLAPSIBLE SECTIONS SURVIVE IN BOTH LAYOUTS, and the bands go in
---      THROUGH them -- the Health Bar page's rule, for two of its three reasons
---      (a section persists its fold per title; Panel.lua calls a section the
---      page's second level for parallel sub-features).
+--      as well as its height, taken from the pre-change source.
+--   3. THE FULL-WIDTH SECTIONS AND THEIR SPACER ARE CLASSIC'S ONLY. In modern a
+--      "both" section or spacer between the two cards would end column 1 and
+--      push Heal Absorb under Absorb Shield.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to the panel (a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db) -- so this file
@@ -39,16 +36,17 @@ local NS = ...
 --   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key, slot
 --     height and column, in order -- taken from the PRE-CHANGE source.
 --   ✓ that ONE builder serves both layouts.
---   ✓ that each declared row COUNT matches what its pane mounts.
---   ✓ that the two mode dropdowns stopped calling the PAGE's RefreshStates from
---     inside a pane and route through tools2.refreshStates instead.
+--   ✓ each card's column, stable collapse key, summary and pin; Expand/Collapse
+--     All; and that no popout furniture or settings count is left.
+--   ✓ that the two mode dropdowns route through tools2.refreshStates, so a
+--     pinned panel's copy re-flows itself.
 --   ✓ that both summaries read their words out of the mode table the control
 --     itself offers, and that the page adds NO new locale string.
 --   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
 --     summaries are read by eye and by the in-game checklist.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Auras.lua")
+local SRC = options_file_source("GUI/Pages/Auras.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Health Bar page's, plus the COLUMN) ----
 local KIND = {
@@ -128,55 +126,55 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
+-- ONE CARD'S BLOCK: its OpenSection call, the builder mount under it and the
+-- CloseSection that puts its band in, flattened. `call` is just the OpenSection
+-- call -- where the pin (a builder argument) and a tick would be declared.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(band)", a, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, (b or a) + #"CloseSection(band)"):gsub("%s+", " ")
+    local m = block:find("({ group = band,", 1, true)
+    local call = m and block:sub(1, m) or block
+    call = call:gsub("Build[%w]+%($", "")
+    return block, call
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY, AND ITS TWO BANDS ARE HEADERLESS
+-- 1. THE PAGE TAKES THE SHARED CARD HELPER, AND THE POPOUT FURNITURE IS GONE
 -- ============================================================
-print("-- Absorbs page: the shared popout machinery and the two bands")
+print("-- Absorbs page: the shared card helper")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
-    end
     check(PAGE:find("_popoutHolders", 1, true) == nil,
           "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
 
-    -- ---- two bands, one per section, both chromeless -------------------
-    for _, b in ipairs({ "absorbBand", "healAbsorbBand" }) do
-        check(PAGE:find(b .. "     = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil
-           or PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-              "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
-        -- ☠ AND NEITHER CARRIES A HEADER. The collapsible section bar directly
-        -- above each band already names it; a header under it would say the same
-        -- word twice. (The Fading page's sortBand rule, kept by the Health Bar
-        -- page for the same reason.)
-        check(PAGE:find(b .. ":AddWidget(GUI:CreateHeader(", 1, true) == nil,
-              "bands: ..." .. b .. " carries no header of its own")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "absorbBand", "healAbsorbBand",
+                            "_COUNT = ", "footerStrip", "popout = true,",
+                            "ApplyAbsorbShield", "ApplyHealAbsorb" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
+    check(PAGE:find("count%s*=%s*[%w_]") == nil, "counts: no card declares a settings count")
 
-    -- ...and neither band exists in classic, where `tools` is nil.
-    check(PAGE:find("local absorbBand, healAbsorbBand", 1, true) ~= nil,
-          "bands: both are declared before the layout branch and built only under tools")
-    check(PAGE:find("if tools then", 1, true) ~= nil,
-          "bands: ...so classic builds neither")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row with quiet captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    local n = 0
+    for _ in PAGE:gmatch('Add%(tools%.SectionControls%(self%.child%), 24, "both"%)') do n = n + 1 end
+    eq(n, 1, "bulk: the page adds the Expand/Collapse pair once, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstCard = PAGE:find("OpenSection(L[", 1, true)
+    check(stripAt and firstCard and stripAt < firstCard, "bulk: ...above the first card")
 end
 
 -- ============================================================
@@ -256,18 +254,12 @@ do
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
     eq(routed, 2, "gate: exactly two callbacks route their state pass through the tools")
-
-    -- Every popout mount declares itself as one.
-    local popouts = 0
-    for _ in PAGE:gmatch("popout = true,") do popouts = popouts + 1 end
-    eq(popouts, 2, "gate: both popout mounts declare themselves as panes")
 end
 
 -- ============================================================
--- 4. THE TWO ROWS -- census, the `add` seam, and no tick on either
+-- 4. THE TWO CARDS -- census, the `add` seam, and no tick on either
 -- ☠ NEITHER BAR HAS AN ENABLE KEY. The Display Mode dropdown IS the master and
--- neither list of modes has an off, so each row is a way in and nothing else --
--- the Out of Range row's judgement, reached by a different route.
+-- neither list of modes has an off, so neither card carries a header tick.
 -- ============================================================
 local ABSORB_SHIELD = {
     { "dropdown",        "Display Mode",         "absorbBarMode",              55, 1 },
@@ -313,18 +305,14 @@ local HEAL_ABSORB = {
     { "colorpicker",     "Background Color",     "healAbsorbBarBackgroundColor", 35, 2 },
 }
 
-local ROWS = {
+local CARDS = {
     { builder = "BuildAbsorbShieldGroup", label = "Absorb Shield", golden = ABSORB_SHIELD,
-      countVar = "ABSORB_SHIELD_COUNT", row = "absorbRow", band = "absorbBand",
-      summary = "AbsorbShieldSummary", apply = "ApplyAbsorbShield",
-      mount = "absorbMount", content = "absorbContent" },
+      key = "absorbs_shield", col = 1, summary = "AbsorbShieldSummary" },
     { builder = "BuildHealAbsorbGroup", label = "Heal Absorb", golden = HEAL_ABSORB,
-      countVar = "HEAL_ABSORB_COUNT", row = "healAbsorbRow", band = "healAbsorbBand",
-      summary = "HealAbsorbSummary", apply = "ApplyHealAbsorb",
-      mount = "healMount", content = "healContent" },
+      key = "absorbs_healabsorb", col = 2, summary = "HealAbsorbSummary" },
 }
 
-for _, g in ipairs(ROWS) do
+for _, g in ipairs(CARDS) do
     print("-- Absorbs page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
@@ -332,66 +320,30 @@ for _, g in ipairs(ROWS) do
     -- ---- ONE builder, BOTH layouts: the declaration and the two mounts ----
     local calls = 0
     for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic page and popout pane")
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic page and card")
 
     -- ---- THE `add` SEAM -------------------------------------------------
-    -- ☠ THE ONE THING THAT DIFFERS BETWEEN THE LAYOUTS, named and handed in.
-    -- Classic gets AddToSection, which is what the page always called; the pane
-    -- gets a closure that DROPS the column and mounts into its own group.
     check(body:find("local add, parent = tools2.add, tools2.parent", 1, true) ~= nil,
-          g.label .. ": the builder takes its add from the tools, not a group")
-    check(body:find("group:AddWidget", 1, true) == nil,
-          g.label .. ": ...and never reaches for a group of its own")
+          g.label .. ": the builder takes classic's add from the tools")
+    check(body:find("if not add then\n                local group = tools2.group\n                add = function(w, h) return group:AddWidget(w, h) end\n            end", 1, true) ~= nil,
+          g.label .. ": ...and adds into a card's or a pinned panel's group, column dropped, when handed one")
     check(PAGE:find("add = AddToSection,", 1, true) ~= nil,
           g.label .. ": classic hands it the page's own AddToSection")
-    check(PAGE:find("add = function(w, h) return group:AddWidget(w, h) end,", 1, true) ~= nil,
-          g.label .. ": ...and a pane hands it a closure that drops the column")
 
-    -- ---- the row --------------------------------------------------------
-    local opts = rowOpts(g.label)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          g.label .. ": the row is handed a pre-built mount")
-    check(opts:find("window", 1, true) ~= nil,
-          g.label .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          g.label .. ": ...and clipped by the page's own scroll frame, not the window")
-    check(opts:find("count%s*=%s*" .. g.countVar) ~= nil,
-          g.label .. ": ...and the declared count, not a literal")
-    check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,
-          g.label .. ": ...with the summary written for it")
-    check(PAGE:find("local " .. g.row .. " = " .. g.band .. ":AddWidget(GUI:CreatePopoutRow(", 1, true) ~= nil,
-          g.label .. ": the row is mounted into the " .. g.band)
-
-    -- ---- the strip ------------------------------------------------------
-    -- Every key on this page is a per-mode profile key living in
-    -- DF.PartyDefaults, so both rows get the amber tick and the Reset Group /
-    -- Hold: Defaults footer, and each footer is handed the group's own apply.
-    check(PAGE:find("tools.ClaimKeys(" .. g.row .. ", " .. g.content .. ")", 1, true) ~= nil,
-          g.label .. ": the row claims whatever the pane registered")
-    check(PAGE:find("tools.WireModifiedTick(" .. g.row .. ")", 1, true) ~= nil,
-          g.label .. ": ...its amber tick asks about exactly those keys")
-    check(PAGE:find("tools.WireFooter(" .. g.row .. ", " .. g.apply .. ")", 1, true) ~= nil,
-          g.label .. ": ...and its footer runs the group's own apply")
-
-    -- ---- no tick, and nothing hoisted -----------------------------------
-    check(body:find("hoistToggle", 1, true) == nil,
-          g.label .. ": the builder has no hoist branch, because there is no enable to hoist")
-    check(opts:find("toggle", 1, true) == nil,
-          g.label .. ": the row declares no toggle")
-    check(opts:find("onToggle", 1, true) == nil,
-          g.label .. ": ...and so no commit either")
-
-    -- ---- the count is the census's SETTINGS ------------------------------
-    -- settingsIn, not #: a census lists what the builder mounts and the badge is
-    -- a promise about settings, so the headers and blurbs come out first. See the
-    -- helper in shim.lua.
-    local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
-    check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, settingsIn(g.golden), g.label .. ": ...every setting in the census, nothing hoisted out of it")
+    -- ---- the card -------------------------------------------------------
+    local block, call = sectionBlock(g.label)
+    check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary .. ', nil, nil,', 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing its summary, no grey or hide gate")
+    check(call:find(g.builder, 1, true) ~= nil,
+          g.label .. ": pinnable, from its own builder -- every control decides how the bar looks")
+    check(call:find('key = "', 1, true) == nil and body:find("hoistToggle", 1, true) == nil,
+          g.label .. ": no header tick, because there is no enable to hoist")
+    local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
+    check(block:find(mount, 1, true) ~= nil, g.label .. ": the card hands the builder its band as the group")
 end
 
 -- ============================================================
--- 5. THE SECTIONS SURVIVE, AND THE BANDS GO IN THROUGH THEM
+-- 5. THE FULL-WIDTH SECTIONS AND THE SPACER ARE CLASSIC'S ONLY
 -- ============================================================
 print("-- Absorbs page: the collapsible sections and the page's own order")
 do
@@ -399,24 +351,28 @@ do
         { "absorbSection",     "Absorb Shield" },
         { "healAbsorbSection", "Heal Absorb" },
     }) do
-        check(PAGE:find("local " .. s[1] .. ' = Add(GUI:CreateCollapsibleSection(self.child, L["' .. s[2] .. '"], true), 36, "both")', 1, true) ~= nil,
-              "sections: " .. s[2] .. " is still a collapsible section, in both layouts")
+        check(PAGE:find("local " .. s[1] .. ' = classicLayout\n            and Add(GUI:CreateCollapsibleSection(self.child, L["' .. s[2] .. '"], true), 36, "both")\n            or nil', 1, true) ~= nil,
+              "sections: " .. s[2] .. " is still classic's collapsible section, and modern's card instead")
     end
-
-    -- ---- the bands go in THROUGH the section, so a fold hides them ------
-    for _, b in ipairs({ "absorbBand", "healAbsorbBand" }) do
-        check(PAGE:find('AddToSection(' .. b .. ', nil, "both")', 1, true) ~= nil,
-              "sections: " .. b .. " is registered to its section, so folding hides its row")
-        check(PAGE:find('Add(' .. b .. ', nil, "both")', 1, true) == nil,
-              "sections: ..." .. b .. " never bypasses the section with a bare Add")
-    end
-
-    -- ---- the section helper and the between-sections spacer survive -----
     check(PAGE:find("local function AddToSection(widget, height, col)", 1, true) ~= nil,
-          "sections: the page keeps its own section-registering Add")
+          "sections: the page keeps its own section-registering Add for classic")
     local spacers = 0
-    for _ in PAGE:gmatch('AddSpace%(GUI%.Space%.section, "both"%)') do spacers = spacers + 1 end
-    eq(spacers, 1, "page: the one between-section spacer survives")
+    for _ in PAGE:gmatch('if classicLayout then AddSpace%(GUI%.Space%.section, "both"%) end') do spacers = spacers + 1 end
+    eq(spacers, 1, "page: the between-section spacer survives, in classic only")
+    local bare = 0
+    for _ in PAGE:gmatch('AddSpace%(GUI%.Space%.section, "both"%)') do bare = bare + 1 end
+    eq(bare, 1, "page: ...and there is no other copy of it")
+
+    -- ☠ SIDE BY SIDE: nothing "both" between the two cards once the pair of
+    -- bulk verbs is in.
+    local a = PAGE:find('OpenSection(L["Absorb Shield"]', 1, true)
+    local b = PAGE:find('OpenSection(L["Heal Absorb"]', 1, true)
+    local between = (a and b) and PAGE:sub(a, b) or ""
+    check(a and b and a < b, "order: Absorb Shield opens before Heal Absorb")
+    local stray = between:gsub("%-%-[^\n]*", ""):gsub("if classicLayout then AddSpace%(GUI%.Space%.section, \"both\"%) end", "")
+                         :gsub('classicLayout\n%s*and Add%(GUI:CreateCollapsibleSection%(self%.child, L%["Heal Absorb"%], true%), 36, "both"%)', "")
+    check(stray:find('"both"', 1, true) == nil,
+          "order: ...and nothing spanning both columns sits between the two cards in modern")
 
     -- ---- the copy button is untouched -----------------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, L["Absorbs"], "bars_absorb")', 1, true) ~= nil,
