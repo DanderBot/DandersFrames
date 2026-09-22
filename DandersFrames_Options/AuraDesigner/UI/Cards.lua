@@ -4009,10 +4009,10 @@ S.SwitchTab = function(tabKey)
     S.adPickerDirty = false
     CloseADPicker()
     if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
-    -- ...and an add panel opened against another pool, spec or mode, or with the
-    -- designer since switched off, must not either (see THE CLASSIC DESIGNER'S ADD
-    -- BUTTONS). One that still matches is re-docked by the rebuild below.
-    if S.SyncClassicAddPopouts then S.SyncClassicAddPopouts() end
+    -- ...and an add flow started for another tab, pool, spec or mode, or with the
+    -- designer since switched off, must not either: it ends here and the rebuild
+    -- below draws the list (see THE CLASSIC DESIGNER'S INLINE ADD FLOWS).
+    if S.SyncClassicAddFlow then S.SyncClassicAddFlow(tabKey) end
 
     for key, btn in pairs(tabButtons) do
         btn:SetActive(key == tabKey)  -- underline + accent/dim label (tab mode)
@@ -5395,7 +5395,7 @@ end
 
 -- ── BUILD EFFECTS TAB ──
 -- ── THE EFFECTS TAB'S HEAD AREA ──
--- The Add Indicator button (the PI Helper's tiles on its pool), the ACTIVE
+-- The Add from a Spell / Add from a Filter buttons (the PI Helper's tiles on its pool), the ACTIVE
 -- INDICATORS heading, the type chips and the Other
 -- Buffs hint. Everything above the list of effects, and nothing of the list.
 --
@@ -6019,12 +6019,26 @@ end
 --   opts.SetHeight(h)  report the pane's height, normally GUI:RelayoutHost
 --   opts.Close()       shut the panel once something has been added
 --
+-- ⚠ THREE OPT-INS FOR THE CLASSIC DESIGNER, WHICH RUNS THIS FLOW INSIDE ITS
+-- EFFECTS TAB (see THE CLASSIC DESIGNER'S INLINE ADD FLOWS). Absent, the panel
+-- is exactly what the rows page has always built.
+--   opts.source    "spell" or "filter": the route was already chosen by the button
+--                  that opened the flow, so section 1 draws that ONE route, full
+--                  width, and the two-way toggle is not built at all
+--   opts.fitWidth  the host is a tab column of whatever width the window gives it,
+--                  not a fixed popout: the picture tiles take as many columns as
+--                  that width fits (rows kept even) and grow their pictures with it
+--   opts.restore   a Snapshot() taken from an earlier build of the same flow, whose
+--                  answers this build starts from -- the tab re-lays the flow at a
+--                  new width by building it again
+--
 -- Returns the panel's own verbs: Sync (call on every open -- see the header),
--- and the four state transitions, which are the real entry points its own
--- controls use.
+-- the four state transitions, which are the real entry points its own
+-- controls use, and Snapshot.
 S.BuildAddIndicatorPane = function(host, opts)
     opts = opts or {}
     local W = opts.width or 260
+    local srcOnly = (opts.source == "spell" or opts.source == "filter") and opts.source or nil
     -- ☠ TWO WIDTHS, AND EVERY CONTROL BELOW USES THE SECOND ONE. G is the left
     -- edge of everything the user can see or click; CW is what is left for it.
     -- The RINGS are the one exception -- they keep W and start at 0, because the
@@ -6244,24 +6258,33 @@ S.BuildAddIndicatorPane = function(host, opts)
     local SRC_GAP = 7
     local SRC_W = floor((CW - SRC_GAP) / 2)
 
-    spellBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    spellBtn:SetPoint("TOPLEFT", G, y)
-    GUI:StyleButton(spellBtn, {
-        width = SRC_W, height = 30, primary = true, align = "left", fitText = false,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
-        text = L["Select a spell"], font = "DFFontHighlight",
-    })
-    spellBtn:SetScript("OnClick", OpenSpellStep)
+    -- ⚠ opts.source: ONE ROUTE, THE WHOLE ROW. The classic designer's two add
+    -- buttons already asked "from a spell or from a filter?", so asking again here
+    -- would be the question twice. The route that was not chosen is not built --
+    -- Sync treats a missing button as nothing to light.
+    if srcOnly ~= "filter" then
+        spellBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+        spellBtn:SetPoint("TOPLEFT", G, y)
+        GUI:StyleButton(spellBtn, {
+            width = srcOnly and CW or SRC_W, height = 30, primary = true, align = "left",
+            fitText = false,
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
+            text = L["Select a spell"], font = "DFFontHighlight",
+        })
+        spellBtn:SetScript("OnClick", OpenSpellStep)
+    end
 
-    filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    filterBtn:SetPoint("TOPLEFT", G + SRC_W + SRC_GAP, y)
-    GUI:StyleButton(filterBtn, {
-        width = CW - SRC_W - SRC_GAP, height = 30, primary = true, align = "left",
-        fitText = false,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list", size = 14 },
-        text = L["Select a filter"], font = "DFFontHighlight",
-    })
-    filterBtn:SetScript("OnClick", OpenFilterStep)
+    if srcOnly ~= "spell" then
+        filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+        filterBtn:SetPoint("TOPLEFT", srcOnly and G or (G + SRC_W + SRC_GAP), y)
+        GUI:StyleButton(filterBtn, {
+            width = srcOnly and CW or (CW - SRC_W - SRC_GAP), height = 30, primary = true,
+            align = "left", fitText = false,
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list", size = 14 },
+            text = L["Select a filter"], font = "DFFontHighlight",
+        })
+        filterBtn:SetScript("OnClick", OpenFilterStep)
+    end
     y = y - 34
 
     -- ⚠ INSIDE A FRAME, not a bare FontString on the pane. PopoutContent builds
@@ -6285,13 +6308,35 @@ S.BuildAddIndicatorPane = function(host, opts)
     y = y - (SECTION_HEAD_H + 4)
 
     local TILE_COLS, TILE_GAP = 3, 7
+    local TILE_PIC_FIT
+    if opts.fitWidth then
+        -- ⚠ AS MANY COLUMNS AS FIT AT THE POPOUT'S OWN TILE SIZE, THEN EVENED OUT.
+        -- Nine tiles at four a row is 4 + 4 + 1, a lone tile on a row of its own
+        -- that reads as left over; so the row count comes first and the columns
+        -- are what spreads the nine evenly across it (3x3, 5+4, or one row of 9).
+        -- Never fewer than the popout's three.
+        local fits = floor((CW + TILE_GAP) / (78 + TILE_GAP))
+        local n = #EFFECTS
+        if fits >= n then
+            TILE_COLS = n
+        elseif fits > 3 then
+            local rows = math.ceil(n / fits)
+            TILE_COLS = math.ceil(n / rows)
+        end
+    end
     local TILE_W = floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
+    if opts.fitWidth then
+        -- The picture keeps the popout tile's proportions (a 72x44 box) as the
+        -- tile widens, capped so a very wide window does not turn nine thumbnails
+        -- into nine posters.
+        TILE_PIC_FIT = max(TILE_PIC_H, min(floor((TILE_W - TILE_PAD * 2) * 44 / 72), 64))
+    end
     local rowTop, rowH = y, 0
     for i, eff in ipairs(EFFECTS) do
         local col = (i - 1) % TILE_COLS
         local capturedType = eff.type
         local tile = CreateFrameTile(host, {
-            width = TILE_W,
+            width = TILE_W, picHeight = TILE_PIC_FIT,
             label = eff.label,
             accent = BADGE_COLORS[eff.type] or tc,
             tooltip = { title = eff.label, lines = { eff.desc } },
@@ -6440,8 +6485,8 @@ S.BuildAddIndicatorPane = function(host, opts)
             sourceText:SetText(L["Choose an aura first."])
             sourceText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
-        spellBtn:SetActive(source ~= nil and source.kind == "spell")
-        filterBtn:SetActive(source ~= nil and source.kind == "filter")
+        if spellBtn then spellBtn:SetActive(source ~= nil and source.kind == "spell") end
+        if filterBtn then filterBtn:SetActive(source ~= nil and source.kind == "filter") end
         -- The spell's own artwork, on the tile that is about the spell's own
         -- artwork. Filters have no single icon; the shared filter glyph stands in.
         local iconTile = tiles.icon
@@ -6536,6 +6581,16 @@ S.BuildAddIndicatorPane = function(host, opts)
         if ready then pointer:Show() else pointer:Hide() end
     end
 
+    -- ── opts.restore: START FROM AN EARLIER BUILD'S ANSWERS ──
+    -- Taken as given and then judged by Sync like any other state, so a type the
+    -- world has since made unavailable or already-added drops out exactly as it
+    -- would under an open panel. A source of the route this build does not draw is
+    -- not carried: its answer line would name a route with no button.
+    local r = opts.restore
+    if type(r) == "table" and r.source and (not srcOnly or r.source.kind == srcOnly) then
+        source, selected, anchor = r.source, r.selected, r.anchor
+    end
+
     Sync()
     host:SetHeight(paneH)
     if opts.SetHeight then opts.SetHeight(paneH) end
@@ -6543,6 +6598,11 @@ S.BuildAddIndicatorPane = function(host, opts)
     return {
         Sync = Sync, PickSpell = PickSpell, PickFilter = PickFilter,
         SelectType = SelectType, Commit = Commit,
+        -- The answers so far, for opts.restore. A fresh table each call; the
+        -- source record is shared, and nothing writes into it after it is made.
+        Snapshot = function()
+            return { source = source, selected = selected, anchor = anchor }
+        end,
     }
 end
 
@@ -8339,41 +8399,40 @@ S.BuildPIHelperBody = function(parent, opts)
 end
 
 -- ============================================================
--- THE CLASSIC DESIGNER'S ADD BUTTONS (2026-09-22)
+-- THE CLASSIC DESIGNER'S INLINE ADD FLOWS (2026-09-22)
 -- ------------------------------------------------------------
 -- The split panel's three add areas -- the Effects tab's three scope cards and the
 -- picker column they opened, and the Layout Groups / Debuffs tabs' choice-card
--- blocks -- are gone. Each tab now carries ONE button, and the button opens the
--- SAME panel the Modern rows page opened from its "+ Add" rows:
---   indicator  S.BuildAddIndicatorPane    (this file)
---   layout     S.BuildAddLayoutGroupPane  (Editor.lua)
---   debuff     S.BuildAddDebuffGroupPane  (Editor.lua)
--- One builder per flow, two hosts; nothing below re-implements a pane.
+-- blocks -- are gone. Each tab now carries one button PER SOURCE, and a button
+-- runs the SAME pane the Modern rows page opens from its "+ Add" rows, INSIDE the
+-- tab, in place of the tab's list:
+--   Effects        Add from a Spell / Add from a Filter   S.BuildAddIndicatorPane
+--   Layout Groups  Spell Group / Filter Group             S.BuildAddLayoutGroupPane
+--   Debuffs pool   Add Debuff Group                       S.BuildAddDebuffGroupPane
+-- One builder per flow, two hosts; nothing below re-implements a pane. The source
+-- the button named is handed to the pane (opts.source / opts.kind), so the pane
+-- never asks it again.
 --
--- ⚠ A KEYED POPOUT, NOT A POPOUT ROW. GUI:CreatePopoutRow builds its pane once
--- per ROW, and this island rebuilds its tab content -- button included -- on
--- every S.SwitchTab. A row per rebuild would build a fresh nine-tile pane every
--- time the panel was opened after any edit. GUI:CreatePopout keyed per flow builds
--- the pane ONCE per instance and the pool hands the same one back, so the button
--- is cheap to rebuild and the pane is not rebuilt at all. It is the same
--- machinery the row sits on, docked the same way (outside the window, at the
--- button's height), with the same pin.
+-- ☠ NOT A POPOUT. The first version of this (ffd4031c) docked the panes in a
+-- keyed popout beside the window; the author asked for the flow in the tab. The
+-- popout, its dock, its pin and its close rules are gone with it.
 --
--- ☠ A POOLED PANE IS STALE ON EVERY OPEN AFTER THE FIRST, so the indicator
--- pane's Sync runs on every open and on every re-dock -- the rows page's
--- OpenPopout wrapper did the same, for the same reason.
+-- ⚠ THE FLOW IS STATE, AND THE TAB REBUILD DRAWS IT. S.classicAddFlow says which
+-- flow is running; S.SwitchTab -- the island's one refresh path -- asks
+-- S.SyncClassicAddFlow first, and the tab builders ask S.BuildClassicAddFlow
+-- before drawing their list. Entering, leaving and finishing are all a tab rebuild,
+-- never a page rebuild (ONE RETAINED BUILD PER MODE, GUI/Panel.lua).
 --
--- ⚠ WHAT CLOSES IT. The panel was opened against one mode, pool and spec, with
--- the designer on. S.SwitchTab asks S.SyncClassicAddPopouts on every rebuild and
--- anything opened against a context that is no longer on screen goes -- pinned
--- or not, because its Add button would write into a pool the user has left. The
--- button's own hide (a tab switch, the page going away) closes an unpinned one.
+-- ⚠ WHAT ENDS IT. The flow was started against one mode, pool and spec (the spec
+-- on My Buffs only), with the designer on. Any rebuild for another tab, or against
+-- a context that no longer matches, or with the designer off, ends it -- the pane's
+-- Add button would otherwise write into a pool the user has left. The page going
+-- away ends it too, and the next showing draws the list.
 -- ============================================================
-local CLASSIC_ADD_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add"
 
--- What an add panel was opened against. The spec only counts on My Buffs: Any Buff
+-- What a flow was started against. The spec only counts on My Buffs: Any Buff
 -- and Debuffs are shared across specs, so a spec change there moves nothing the
--- panel shows.
+-- flow shows.
 S.ClassicAddContext = function()
     local shared = IsOtherTab() or IsDebuffTab()
     return tostring((GUI and GUI.SelectedMode) or "party") .. "|" .. tostring(S.activeBuffTab)
@@ -8386,150 +8445,262 @@ S.ClassicAddEnabled = function()
         and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")) and true or false
 end
 
--- Every add panel that no longer describes what is on screen goes. Called by
--- S.SwitchTab's classic arm, which is the island's one refresh path.
-S.SyncClassicAddPopouts = function()
-    local live = S.classicAddLive
-    if not live then return end
-    local ctx, enabled = S.ClassicAddContext(), S.ClassicAddEnabled()
-    for pop in pairs(live) do
-        if pop.closed then
-            live[pop] = nil
-        elseif not enabled or pop.dfAddCtx ~= ctx then
-            live[pop] = nil
-            pop:Close("api")
-        end
+-- The tab each flow runs in.
+S.ClassicAddFlowTab = function(kind)
+    return (kind == "indicator") and "effects" or "layout"
+end
+
+-- One button per source, per flow. A VERB, not a file-scope table: every label is
+-- an L[...] lookup, and a table built at load freezes on the locale live then.
+-- The label is also the flow's heading once it is running.
+S.ClassicAddButtonDefs = function(kind)
+    if kind == "indicator" then
+        return {
+            { source = "spell",  label = L["Add from a Spell"],  icon = "search"      },
+            { source = "filter", label = L["Add from a Filter"], icon = "filter_list" },
+        }
+    elseif kind == "layout" then
+        return {
+            { source = "spell",  label = L["Spell Group"],  icon = "add" },
+            { source = "filter", label = L["Filter Group"], icon = "add" },
+        }
+    end
+    return { { source = "debuff", label = L["Add Debuff Group"], icon = "add" } }
+end
+
+-- Asked by S.SwitchTab's classic arm BEFORE it rebuilds: a flow that does not
+-- describe what is about to be drawn ends here, so the rebuild draws the list.
+S.SyncClassicAddFlow = function(tabKey)
+    -- Any classic rebuild is a fresh draw, so a "draw the list on the next showing"
+    -- left by the page's hide is spent (see S.WatchClassicAddPage).
+    S.classicAddFlowStale = nil
+    local flow = S.classicAddFlow
+    if not flow then return end
+    if tabKey ~= S.ClassicAddFlowTab(flow.kind)
+        or flow.ctx ~= S.ClassicAddContext()
+        or not S.ClassicAddEnabled() then
+        S.classicAddFlow = nil
     end
 end
 
-local function DockClassicAddPopout(pop, btn)
-    pop:Follow(btn, { outsideOf = DF.GUIFrame, clipTo = S.tabScrollFrame })
-    local api = pop.dfAddApi
-    if api and api.Sync then api.Sync() end
-end
-
--- Open (or, on a second click, shut) the panel behind one of the three buttons.
-S.OpenClassicAddPopout = function(kind, btn)
-    if not S.ClassicAddEnabled() then return end
-    S.classicAddOpen = S.classicAddOpen or {}
-    S.classicAddLive = S.classicAddLive or {}
-    local open = S.classicAddOpen[kind]
-    if open and not open.closed and open.source == btn and open:IsShown() then
-        open:Close("api")
-        return
+-- Leave the flow for the list it came from, at the scroll the list was left at
+-- (S.SwitchTab clamps it). `rebuild` false: the caller rebuilds -- the panes' own
+-- Close runs this and their add verbs switch the tab straight after.
+-- ⚠ `kind` IS FOR THE BACK BUTTON: it rebuilds even when the flow has already
+-- ended under it -- a group add whose create refused has closed the flow without
+-- switching the tab, and Back must still get the user to the list.
+S.EndClassicAddFlow = function(rebuild, kind)
+    local flow = S.classicAddFlow
+    S.classicAddFlow = nil
+    if flow and S.tabScrollFrame and flow.listScroll then
+        S.tabScrollFrame:SetVerticalScroll(flow.listScroll)
     end
-    local title = (kind == "indicator") and L["Add Indicator"]
-        or ((kind == "debuff") and L["Add Debuff Group"] or L["Add Layout Group"])
-    local width = GUI.PopoutContentWidth or 260
-    local pop = GUI:CreatePopout({
-        key   = "df.adadd." .. kind,
-        title = title,
-        icon  = CLASSIC_ADD_ICON,
-        width = width,
-        build = function(po, content)
-            local pane = CreateFrame("Frame", nil, content)
-            pane:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-            pane:SetWidth(width)
-            -- The builders report their height as they finish; the shell derives the
-            -- panel's height from its content strip, so that is where it goes.
-            local paneOpts = {
-                width     = width,
-                SetHeight = function(h) content:SetHeight(max(h or 1, 1)) end,
-                Close     = function() po:Close("api") end,
-            }
-            if kind == "indicator" then
-                po.dfAddApi = S.BuildAddIndicatorPane(pane, paneOpts)
-            elseif kind == "debuff" then
-                S.BuildAddDebuffGroupPane(pane, paneOpts)
-            else
-                S.BuildAddLayoutGroupPane(pane, paneOpts)
-            end
-            content:SetHeight(max(pane:GetHeight() or 1, 1))
-        end,
-    })
-    if not pop then return end
-    pop.dfAddCtx = S.ClassicAddContext()
-    S.classicAddOpen[kind] = pop
-    S.classicAddLive[pop] = true
-    DockClassicAddPopout(pop, btn)
+    kind = (flow and flow.kind) or kind
+    if rebuild and kind and S.SwitchTab then S.SwitchTab(S.ClassicAddFlowTab(kind)) end
 end
 
--- One tab's add button, at the top of its head area. Returns the y to continue at.
-S.BuildClassicAddButton = function(parent, yPos, kind)
-    local enabled = S.ClassicAddEnabled()
-    local isGroup = (kind ~= "indicator")
-    local label = (kind == "indicator") and L["Add Indicator"]
-        or ((kind == "debuff") and L["Add Debuff Group"] or L["Add Layout Group"])
+-- One button's click. Refuses with the designer off, and on the helper's pool,
+-- whose Effects tab keeps its own tiles.
+S.StartClassicAddFlow = function(kind, source)
+    if not S.ClassicAddEnabled() then return false end
+    if kind == "indicator" and IsPIHelperTab() then return false end
+    S.classicAddFlow = {
+        kind = kind, source = source, ctx = S.ClassicAddContext(),
+        listScroll = S.tabScrollFrame and S.tabScrollFrame:GetVerticalScroll() or nil,
+    }
+    S.SwitchTab(S.ClassicAddFlowTab(kind))
+    -- The flow starts at its top, wherever the list was scrolled to.
+    if S.tabScrollFrame then S.tabScrollFrame:SetVerticalScroll(0) end
+    return true
+end
 
-    -- The same hero CTA the Text Designer's "+ Add Text Element" wears. The group
-    -- buttons take the Layout Groups tab's amber, the colour their old blocks wore.
-    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetHeight(32)
-    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
-    btn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    GUI:StyleButton(btn, {
-        height = 32, primary = true,
-        accent = isGroup and { r = 0.91, g = 0.66, b = 0.25 } or nil,
-        icon = { texture = CLASSIC_ADD_ICON, size = 14 },
-        text = label, font = "DFFontHighlight",
-    })
-    -- ⚠ THE GATE, TWICE. The disabled overlay already covers the split panel, so
-    -- this is belt and braces -- and OpenClassicAddPopout re-checks it besides.
-    if not enabled and btn.SetDisabled then btn:SetDisabled(true) end
-    btn:SetScript("OnClick", function(self)
-        if self.dfDisabled then return end
-        S.OpenClassicAddPopout(kind, self)
-    end)
-
-    -- ☠ THE BUTTON IS REBUILT UNDER AN OPEN PANEL ALL THE TIME -- every S.SwitchTab
-    -- hides it and builds a new one. So its hide is judged a frame later: by then a
-    -- rebuild has re-docked the panel onto the new button (below) and there is
-    -- nothing to do. What is left is a real departure.
-    btn:HookScript("OnHide", function(self)
-        if not (C_Timer and C_Timer.After) then return end
-        C_Timer.After(0, function()
-            local pop = S.classicAddOpen and S.classicAddOpen[kind]
-            if not pop or pop.closed or pop.source ~= self then return end
-            if self:IsVisible() then return end
-            local rp, sf = S.rightPanel, S.tabScrollFrame
-            local panelUp = rp and rp:IsVisible()
-            -- The spell and filter overlays hide the tab's scroll frame while they are
-            -- up, and it is THIS panel that opened them: keep it.
-            if panelUp and sf and not sf:IsShown() then return end
-            -- A pinned panel outlives a tab switch, exactly as a pinned rows-page panel did.
-            if panelUp and pop.pinned then return end
-            pop:Close("source")
-        end)
-    end)
-
-    -- The designer page going away (another settings page, the window closing, the
-    -- other mode's build) takes every add panel with it, pinned or not: an open
-    -- spell overlay can have hidden the button already, and then the hook above
-    -- has nothing left to fire on.
+-- The two things outside S.SwitchTab that must still move a flow, watched once
+-- per frame:
+--   * THE PAGE GOING AWAY (another settings page, the window closing, a mode
+--     switch's rebuild). The flow ends, and the next showing draws the list.
+--   * THE COLUMN CHANGING WIDTH (a window resize). The pane was laid out for one
+--     width, so it is built again for the new one, from its own answers
+--     (opts.restore). Coalesced: a drag re-lays at most once per 0.15s.
+S.WatchClassicAddPage = function()
     local rp = S.rightPanel
-    if rp and not rp.dfAddHideHooked then
-        rp.dfAddHideHooked = true
+    if rp and not rp.dfAddFlowHooked then
+        rp.dfAddFlowHooked = true
         rp:HookScript("OnHide", function()
-            local live = S.classicAddLive
-            if not live then return end
-            for pop in pairs(live) do
-                live[pop] = nil
-                if not pop.closed then pop:Close("source") end
+            if S.classicAddFlow then
+                S.classicAddFlow = nil
+                S.classicAddFlowStale = true
+            end
+        end)
+        rp:HookScript("OnShow", function()
+            if not S.classicAddFlowStale then return end
+            S.classicAddFlowStale = nil
+            if S.rightPanel == rp and not S.rowsMode and S.SwitchTab then
+                S.SwitchTab(S.activeTab or "effects")
             end
         end)
     end
-
-    -- An open panel follows the rebuild onto this button, re-synced.
-    local pop = S.classicAddOpen and S.classicAddOpen[kind]
-    if pop and not pop.closed then
-        if enabled and pop.dfAddCtx == S.ClassicAddContext() then
-            DockClassicAddPopout(pop, btn)
-        else
-            pop:Close("api")
-        end
+    local cf = S.tabContentFrame
+    if cf and not cf.dfAddFlowSizeHooked then
+        cf.dfAddFlowSizeHooked = true
+        cf:HookScript("OnSizeChanged", function(self, w)
+            local flow = S.classicAddFlow
+            if not (flow and flow.width and w) or math.abs(w - flow.width) < 1 then return end
+            if flow.relayoutPending or not (C_Timer and C_Timer.After) then return end
+            flow.relayoutPending = true
+            C_Timer.After(0.15, function()
+                flow.relayoutPending = nil
+                if S.classicAddFlow ~= flow or S.tabContentFrame ~= self then return end
+                if math.abs((self:GetWidth() or 0) - flow.width) < 1 then return end
+                S.SwitchTab(S.ClassicAddFlowTab(flow.kind))
+            end)
+        end)
     end
+end
 
-    return yPos - (max(btn:GetHeight() or 32, 32) + 10)
+-- One tab's add buttons, at the top of its head area, side by side. Returns the y
+-- to continue at.
+S.BuildClassicAddButtons = function(parent, yPos, kind)
+    local enabled = S.ClassicAddEnabled()
+    local defs = S.ClassicAddButtonDefs(kind)
+    -- The group buttons take the Layout Groups tab's amber, the colour their old
+    -- blocks wore; the indicator buttons follow the mode theme.
+    local accent = (kind ~= "indicator") and { r = 0.91, g = 0.66, b = 0.25 } or nil
+    local GAP, H = 6, 32
+    local colW = (parent:GetWidth() or 0) - 16
+    local n = #defs
+    -- ☠ fitText = false WHEN THEY SHARE A ROW, for the reason the pane's own two
+    -- source buttons give: a declared width is a minimum to StyleButton, and a long
+    -- translation growing the left button would push it under the right one.
+    local btnW = (n > 1 and colW > 40) and floor((colW - GAP * (n - 1)) / n) or nil
+    for i, def in ipairs(defs) do
+        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+        btn:SetHeight(H)
+        if btnW then
+            btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8 + (i - 1) * (btnW + GAP), yPos)
+        else
+            -- One button, or a column too narrow to know: full width, stacked.
+            btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos - (i - 1) * (H + GAP))
+            btn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        end
+        -- (Spelled out: `btnW and false or nil` is nil either way in Lua.)
+        local fitText = nil
+        if btnW then fitText = false end
+        GUI:StyleButton(btn, {
+            width = btnW, height = H, primary = true, accent = accent,
+            fitText = fitText,
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. def.icon, size = 14 },
+            text = def.label, font = "DFFontHighlight",
+        })
+        -- ⚠ THE GATE, TWICE. The disabled overlay already covers the split panel, so
+        -- this is belt and braces -- and S.StartClassicAddFlow re-checks it besides.
+        if not enabled and btn.SetDisabled then btn:SetDisabled(true) end
+        local source = def.source
+        btn:SetScript("OnClick", function(self)
+            if self.dfDisabled then return end
+            S.StartClassicAddFlow(kind, source)
+        end)
+    end
+    S.WatchClassicAddPage()
+    local rows = btnW and 1 or n
+    return yPos - (rows * H + (rows - 1) * GAP + 10)
+end
+
+-- Draw the running flow into its tab, in place of the list. Returns true when it
+-- did, and the tab builder then draws nothing else.
+--
+-- ⚠ THE PANE IS BUILT ONCE PER FLOW AND KEPT. ClearTabContent hides and unanchors
+-- it on every rebuild; a rebuild at the same width re-anchors and re-shows the SAME
+-- pane, re-synced (a kept pane is stale the moment the world moves under it), so an
+-- aura already picked survives. A new width, or a new page build, builds it again
+-- from the old pane's answers.
+S.BuildClassicAddFlow = function(parent, kind)
+    local flow = S.classicAddFlow
+    if not (flow and parent and flow.kind == kind) then return false end
+    S.WatchClassicAddPage()
+    local tc = GetThemeColor()
+    local isGroup = (kind ~= "indicator")
+    local accent = isGroup and { r = 0.91, g = 0.66, b = 0.25 } or tc
+    local y = -10
+
+    -- ── < BACK TO ... ──
+    -- The only way out that commits nothing. A ghost button, not a close glyph: it
+    -- says where it goes, which a bare X over a whole tab would not.
+    local backLabel = (kind == "indicator") and L["Back to Effects"]
+        or ((kind == "debuff") and L["Back to Debuff Groups"] or L["Back to Layout Groups"])
+    local back = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    back:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    GUI:StyleButton(back, {
+        width = 170, height = 24, ghost = true, align = "left",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left", size = 14 },
+        text = backLabel,
+    })
+    back:SetScript("OnClick", function() S.EndClassicAddFlow(true, kind) end)
+    y = y - 30
+
+    -- ── THE CHOSEN SOURCE, AS THE FLOW'S HEADING ──
+    -- The label of the button that started it, so the words the user clicked are
+    -- the words they land on.
+    local heading
+    for _, def in ipairs(S.ClassicAddButtonDefs(kind)) do
+        if def.source == flow.source then heading = def.label end
+    end
+    local title = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    title:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+    title:SetText(heading or "")
+    title:SetTextColor(accent.r, accent.g, accent.b)
+    y = y - 24
+
+    -- ── THE PANE ──
+    -- ☠ TWO LEFT EDGES THAT LAND ON ONE. The indicator pane insets its controls by
+    -- its own 6px gutter (the room its section outline is drawn in), so its host
+    -- starts 2px in; the group panes have no gutter, so theirs starts at the tab's
+    -- own 8. Either way every control lines up with the Back button above.
+    local inset = isGroup and 8 or 2
+    local W = floor((parent:GetWidth() or 0) - inset * 2)
+    if W < 200 then W = GUI.PopoutContentWidth or 260 end
+
+    local host = flow.host
+    local restore
+    if host and (host:GetParent() ~= parent or flow.width ~= W) then
+        restore = flow.api and flow.api.Snapshot and flow.api.Snapshot() or nil
+        host:Hide()
+        host = nil
+    end
+    if host then
+        host:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, y)
+        host:Show()
+        if flow.api and flow.api.Sync then flow.api.Sync() end
+    else
+        host = CreateFrame("Frame", nil, parent)
+        host:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, y)
+        host:SetWidth(W)
+        local paneOpts = {
+            width = W,
+            -- The panes close themselves before their add verb switches the tab.
+            Close = function()
+                if S.classicAddFlow == flow then S.EndClassicAddFlow(false) end
+            end,
+        }
+        flow.api = nil
+        if kind == "indicator" then
+            paneOpts.source, paneOpts.fitWidth, paneOpts.restore = flow.source, true, restore
+            flow.api = S.BuildAddIndicatorPane(host, paneOpts)
+        elseif kind == "debuff" then
+            paneOpts.kind = "debuff"
+            S.BuildAddDebuffGroupPane(host, paneOpts)
+        else
+            paneOpts.kind = flow.source
+            S.BuildAddLayoutGroupPane(host, paneOpts)
+        end
+        flow.host, flow.width = host, W
+    end
+    y = y - (host:GetHeight() or 0)
+
+    parent:SetHeight(max(-y + 20, 200))
+    return true
 end
 
 -- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
@@ -8545,7 +8716,7 @@ end
 S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local tc = GetThemeColor()
     -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS ITS OWN "+ Add Indicator" ROW, so it
-    -- asks for neither the classic add button nor the helper's tiles here.
+    -- asks for neither the classic add buttons nor the helper's tiles here.
     local skipAdd = opts and opts.skipAddBlock or false
     -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS NOT A CHIP FLOW. The eight
     -- chips live in a popout there, so in that layout this function draws only the
@@ -8569,11 +8740,12 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local COL_W = (hostW > 40) and (hostW - 16) or nil
 
     -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
-    -- ☠ ONE BUTTON, AND THE PANEL BEHIND IT IS THE MODERN ONE (2026-09-22). The
-    -- three pinned scope cards and the picker column they took over are gone: the
-    -- button opens S.BuildAddIndicatorPane -- which aura, how it should look, where
-    -- it goes -- in a popout beside the window. See THE CLASSIC DESIGNER'S ADD
-    -- BUTTONS above for the host.
+    -- ☠ TWO BUTTONS, AND THE FLOW BEHIND THEM IS THE MODERN ONE (2026-09-22). The
+    -- three pinned scope cards and the picker column they took over are gone: Add
+    -- from a Spell / Add from a Filter run S.BuildAddIndicatorPane -- which aura,
+    -- how it should look, where it goes -- INSIDE this tab, in place of the list,
+    -- with the route already chosen. See THE CLASSIC DESIGNER'S INLINE ADD FLOWS
+    -- above.
     --
     -- ── THE HELPER'S POOL: TILES, NOT THE PANEL ──
     -- ☠ THE PANEL ASKS A QUESTION THIS POOL HAS ALREADY ANSWERED. Its first step is
@@ -8588,7 +8760,7 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
         yPos = S.BuildPIHelperAddArea(parent, yPos, function() S.SwitchTab("effects") end)
         yPos = yPos - 4
     elseif not skipAdd then
-        yPos = S.BuildClassicAddButton(parent, yPos, "indicator")
+        yPos = S.BuildClassicAddButtons(parent, yPos, "indicator")
     end
 
     -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
@@ -8723,6 +8895,10 @@ end
 S.BuildEffectsTab = function()
     if not S.tabContentFrame then return end
     local parent = S.tabContentFrame
+    -- A running add flow takes the tab over in place of the list (THE CLASSIC
+    -- DESIGNER'S INLINE ADD FLOWS). Never on the helper's pool: S.StartClassicAddFlow
+    -- refuses there, and a pool switch ends any flow before this runs.
+    if S.BuildClassicAddFlow and S.BuildClassicAddFlow(parent, "indicator") then return end
     local yPos, pickerOpen = S.BuildEffectsHeadArea(parent, -10)
     -- The picker sized the column itself and owns the whole of it.
     if pickerOpen then return end
@@ -8774,10 +8950,10 @@ S.BuildEffectsTab = function()
             empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
         elseif S.activeFilter == "all" then
             -- The helper's pool has tiles above ("a style"); every other pool has the
-            -- Add Indicator button.
+            -- Add from a Spell / Add from a Filter buttons.
             empty:SetText(IsPIHelperTab()
                 and L["No effects configured yet.\nPick a style above to get started."]
-                or  L["No effects configured yet.\nUse Add Indicator above to place your first one."])
+                or  L["No effects configured yet.\nAdd one from a spell or a filter above."])
         else
             empty:SetText(format(L["No %s effects configured."], (S.PLACED_TYPE_LABELS[S.activeFilter] or S.FRAME_LEVEL_LABELS[S.activeFilter] or S.activeFilter)))
         end
