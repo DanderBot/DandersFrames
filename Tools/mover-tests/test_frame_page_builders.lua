@@ -1605,8 +1605,9 @@ do
         -- ⚠ 20, NOT 21, since Visibility became cards: its Solo Mode opt-in.
         -- ⚠ 14, NOT 20, since Tooltips followed: its six. ⚠ 13, NOT 14, since
         -- Fading followed: Health Threshold Fading. ⚠ 9, NOT 13, since Pet
-        -- Frames followed: Group Settings, Size, Appearance, Position.
-        ["GUI/Pages/Options.lua"]    = 9,   -- Frame 4 + Settings 5
+        -- Frames followed: Group Settings, Size, Appearance, Position. ⚠ 4, NOT
+        -- 9, since Settings followed: its five.
+        ["GUI/Pages/Options.lua"]    = 4,   -- the Frame page's four
         -- ⚠ 26, NOT 31. The Buff Bar page is the collapsible-section TEST: its
         -- eleven popout rows became folds on the page, so the five it used to opt
         -- onto a plate (Visibility, Order & Limits, Appearance, Layout, Position)

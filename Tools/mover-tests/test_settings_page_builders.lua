@@ -3,58 +3,38 @@ local NS = ...
 -- ============================================================
 -- SETTINGS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- General > Settings is the sweep's sixth page. Five of its seven groups become
--- popout feature rows -- Frame Modes, Blizzard Frames, Rendering, Settings Panel
--- Appearance, Notifications -- and the two single-control groups (Minimap,
--- Language) stay inline wearing the band skin, because a pane holding one
--- checkbox is a click that buys nothing. The info banner at the top is untouched.
+-- General > Settings: seven classic boxes under an info banner. In Modern they
+-- are the Debuff Bar's collapsible CARDS -- two per row inside a card wide
+-- enough, dim captions, the value summary in a shut card's corner, Expand All /
+-- Collapse All at the top -- keeping the page's two-band split as its columns:
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what the five page-builder suites before it do: it reads the page's
--- SOURCE and asserts against it.
+--   column 1   Frame Modes, Blizzard Frames, Notifications   (what it DOES)
+--   column 2   Rendering, Settings Panel Appearance           (how it LOOKS)
+--              Minimap, Language -- each classic box's one control as a card
 --
--- ☠☠ AND THIS PAGE'S RULE IS THE HARDEST ONE ON THE SWEEP, which is most of why
--- it has a test. NOT ONE ROW HERE CARRIES A MODIFIED TICK OR A RESET STRIP.
--- DF.Defaults answers for DF.db.party / DF.db.raid / the stored raid baseline and
--- nothing else, and this page owns no plain per-mode profile key: the mode
--- enables and the two settings-font keys are at the DF.db ROOT, the Blizzard /
--- minimap / pixel-perfect toggles are read party-canonical and written to BOTH
--- mode tables by one setter, the update rate and the notification ticks are
--- account-wide, the language override is per-character, and the classic-layout
--- flag has no db table at all. So every row is a WAY IN: ClaimKeys for the search
--- jump, and neither WireModifiedTick nor WireFooter.
+-- No header ticks (every group is independent switches). Pins on Rendering and
+-- Settings Panel Appearance.
 --
--- On Integrations and Global Fonts that footer would merely have been INERT.
--- Here it would be DESTRUCTIVE -- Reset Group writes ONE mode's table, which is
--- exactly the desync makeBlizSet exists to prevent, and two of these groups need
--- a UI reload to take effect. Section 7 is there so a later sweep "completing"
--- these rows breaks a test instead of a user's frames.
+-- ☠☠ THIS PAGE OWNS NO PLAIN PER-MODE PROFILE KEY: the mode enables and the
+-- settings-font keys are at the DF.db ROOT, the Blizzard / minimap /
+-- pixel-perfect toggles are read party-canonical and written to BOTH mode
+-- tables, the update rate and the notification ticks are account-wide, the
+-- language override is per-character, and the classic-layout flag has no table.
+-- So a card's summary must read ITS OWN store (the page's state pass hands it
+-- the per-mode table), and no reset may ever be wired here -- section 6.
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, qualified db
---     key and slot height, in order -- taken from the PRE-CHANGE source, so a
---     builder that quietly dropped a control or renamed a key fails here. This is
---     also the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts
---     the same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that the declared row COUNT matches what the pane mounts.
---   ✓ the classic-layout ESCAPE HATCH's decision (section 6): the rebuild stays
---     synchronous, and the panels come down first.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--   ✓ the CENSUS of each builder (the pre-change goldens -- classic renders as
+--     it did), with the store each control binds to.
+--   ✓ each card's column, stable collapse key, summary store, tick and pin.
+--   ✓ the classic-layout escape hatch's decision (section 5).
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Options.lua")
+local SRC = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
 
--- ---- the census reader (the Global Fonts page's, with two kinds added) ----
---
--- ⚠ CreateSeparator AND CreateInfoBanner ARE IN THE MAP. A chunk runs to the
--- start of the next KNOWN call, so an unknown factory is invisible rather than
--- merely unnamed -- and the divider between the third and fourth Blizzard ticks
--- is a real widget in the group's roster (the count badge counts it), so a reader
--- that skipped it would fold two of that group's five controls into one census
--- row and quietly agree with a wrong count.
+-- ⚠ CreateSeparator AND CreateInfoBanner ARE IN THE MAP: the divider between
+-- the third and fourth Blizzard ticks is a real widget in the group's roster.
 local KIND = {
     CreateCheckbox = "checkbox", CreateSlider = "slider",
     CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
@@ -64,11 +44,6 @@ local KIND = {
     CreateSeparator = "separator", CreateInfoBanner = "banner",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own indent.
--- Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further -- the Rendering
--- builder's `do ... end` block for the scale hint included, which is why its
--- close at twelve spaces cannot end this search early.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -79,24 +54,10 @@ local function builderBody(name)
     return SRC:sub(a, b or a)
 end
 
--- ⚠ THE KEY COLUMN IS QUALIFIED -- "<table>.<key>", not the bare key -- for the
--- reason the Global Fonts reader introduced it and this page makes unavoidable:
--- these controls bind to FIVE different stores (DF.db, DF.db.party,
--- DF:GetGlobalDB(), DandersFramesCharDB, and nothing at all), and WHICH table a
--- control writes is the entire argument of section 7. A reader printing only the
--- key would call two of them "notifyOutdated" and "partyEnabled" and say nothing
--- about where either lives.
---
--- ⚠ THE SECOND PATTERN IS NOT BELT-AND-BRACES. `DF:GetGlobalDB(), "key"` puts a
--- `)` immediately before the comma, and a table name is word characters and dots
--- -- so the first pattern cannot see the account-wide binding at all. Spelled as
--- its own literal rather than by widening the character class, because widening
--- it to include brackets makes `makeBlizSet("k"), "k"` match with a table name of
--- ")".
---
--- A control the reader cannot bind -- the custom get/set checkboxes, which pass
--- `nil, nil` and name their key at the END of the argument list -- comes back as
--- "(none)" and has its overrideKey pinned by source pattern in its own section.
+-- ⚠ THE KEY COLUMN IS QUALIFIED -- "<table>.<key>" -- because WHICH store a
+-- control writes is this page's whole argument. A control the reader cannot
+-- bind (custom get/set, `nil, nil`) comes back "(none)" and is pinned by source
+-- pattern in its own section.
 local function census(body)
     local flat = body:gsub("%s+", " ")
     local starts = {}
@@ -140,10 +101,6 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The Settings page, scoped by its own two ends: Pages/Options.lua holds a dozen
--- pages, and a bare 280 box (or a `local classicLayout`) on the Frame page below
--- is not this pass's business. Everything about THIS page reads PAGE rather than
--- SRC for exactly that reason.
 local PAGE
 do
     local a = SRC:find('local pageGeneral = CreateSubTab("general", "general_settings"', 1, true)
@@ -152,182 +109,59 @@ do
     PAGE = SRC:sub(a or 1, b or 1)
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = PAGE:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = PAGE:find("}))", a, true)
-    return PAGE:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header.
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. rowLabel:gsub("%p", "%%%0") .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window  = DF.GUIFrame", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
-    -- ☠ AND ITS db IS NAMED, NOT tools.RowDB. Every row on the five pages before
-    -- this one reads the per-mode table because that is where its keys live; not
-    -- one key on this page does, so each row names its own store instead.
-    check(opts:find("db      = function()", 1, true) ~= nil,
-          rowLabel .. ": ...reading the table its own keys actually live in")
-    -- ⚠ THE CALL SHAPE, not the bare name: the row site's own comment says the
-    -- words "NOT tools.RowDB", and a plain search would read the explanation as
-    -- the thing it is explaining away.
-    check(opts:find("= tools.RowDB", 1, true) == nil,
-          rowLabel .. ": ...never the per-mode resolver, which holds none of them")
+local function sectionBlock(labelKey, mount)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(", a, true)
+    local c = b and PAGE:find(")", b, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, c or a):gsub("%s+", " ")
+    local m = block:find(mount, 1, true)
+    return block, m and block:sub(1, m - 1) or block
 end
 
 -- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY
--- Same contract the four pages before it signed: the verbs come off
--- GUI:CreatePopoutPageTools rather than out of a sixth copy on the page.
--- ⚠ The Frame page, further down this SAME FILE, still compiles its own copy --
--- that is test_popout_page_tools' claim, and it scopes itself to that page for
--- exactly the reason this suite scopes itself to this one.
+-- 1. THE SHARED MACHINERY, AND THE ROW FURNITURE GONE
 -- ============================================================
-print("-- Settings page: the shared popout machinery, not a sixth copy of it")
+print("-- Settings page: the shared machinery, and the row furniture gone")
 do
     check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
           "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
-
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason", "RowDB" }) do
-        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
+                            "tools.ClaimKeys(", "tools.RegisterControlRow(", "footerStrip",
+                            "inline = true", "_COUNT", "count =", "settingsBand", "looksBand",
+                            "minimapBand", "languageBand", "chromeless", "INLINE_BOX",
+                            "WriteMinimapButton", "openerTooltip" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
     end
-    check(PAGE:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(PAGE:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
 
-    -- ⚠ tools.RowDB IS NEVER USED ON THIS PAGE, and that is the same fact as the
-    -- header essay: it resolves DF.db[GUI.SelectedMode], and no row here reads a
-    -- per-mode table.
-    -- ⚠ BOUND SHAPES, not the bare name: two comments on the page say the words
-    -- "tools.RowDB" while explaining why it is absent.
-    check(PAGE:find("= tools.RowDB", 1, true) == nil,
-          "tools: the per-mode resolver is never handed to a row")
-    check(PAGE:find("tools.RowDB()", 1, true) == nil,
-          "tools: ...nor called for a table -- this page owns no per-mode key")
-
-    -- ---- the page-scope locals both layouts share --------------------
-    -- The two write-both setters, the two reload prompts and the pixel-perfect
-    -- refresh stay OUTSIDE the builders: the classic box and every pane instance
-    -- have to drive the same work, and none of them closes over anything
-    -- group-specific.
-    local firstBuilder = PAGE:find("local function BuildFrameModesGroup(tools2)", 1, true)
-    check(firstBuilder ~= nil, "helpers: the first builder is locatable")
-    for _, v in ipairs({ "makeBlizGet", "makeBlizSet",
-                         "PromptReloadAfterModeToggle", "PromptReloadBlizzard" }) do
-        local at = PAGE:find("local function " .. v .. "(", 1, true)
-        check(at ~= nil and firstBuilder ~= nil and at < firstBuilder,
-              "helpers: " .. v .. " is a page-scope local, ahead of the builders")
-    end
-    local ppAt = PAGE:find("local function refreshPixelPerfect()", 1, true)
-    local renderAt = PAGE:find("local function BuildRenderingGroup(tools2)", 1, true)
-    check(ppAt ~= nil and renderAt ~= nil and ppAt < renderAt,
-          "helpers: refreshPixelPerfect is a page-scope local, ahead of the Rendering builder")
-
-    -- ...and the write-both contract itself, which is half of why this page has
-    -- no reset strip. One read (party), two writes.
-    check(PAGE:find("return function() return DF.db.party and DF.db.party[key] end", 1, true) ~= nil,
-          "helpers: makeBlizGet still reads the party copy, canonically")
-    check(PAGE:find("if DF.db.party then DF.db.party[key] = val end", 1, true) ~= nil,
-          "helpers: makeBlizSet still writes party...")
-    check(PAGE:find("if DF.db.raid  then DF.db.raid[key]  = val end", 1, true) ~= nil,
-          "helpers: ...and raid, in the same call")
+    -- The info banner is untouched and still first; the bulk verbs go under it.
+    local bannerAt = PAGE:find("local banner = GUI:CreateInfoBanner(self.child, {", 1, true)
+    local stripAt  = PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true)
+    local firstAt  = PAGE:find('OpenSection(L["Frame Modes"]', 1, true)
+    check(bannerAt and stripAt and firstAt and bannerAt < stripAt and stripAt < firstAt,
+          "bulk: the banner, then Expand All / Collapse All spanning both columns, then the first card")
+    check(PAGE:find("if not classicLayout then\n            Add(tools.SectionControls(self.child), 24, \"both\")\n        end", 1, true) ~= nil,
+          "bulk: ...and only in Modern")
 end
 
 -- ============================================================
--- 2. FRAME MODES -- two ticks and an explainer, on the profile ROOT
+-- 2. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
+-- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local FRAME_MODES = {
     { "checkbox", "Enable Party Frames", "DF.db.partyEnabled", 30 },
     { "checkbox", "Enable Raid Frames",  "DF.db.raidEnabled",  30 },
     { "label", "Completely enable or disable the Party or Raid frame system. Disabled modes are never created, consuming zero performance in the background. Requires a UI reload to apply.", "(none)", 80 },
 }
-
-print("-- Settings page: Frame Modes")
-do
-    local body = builderBody("BuildFrameModesGroup")
-    checkCensus(census(body), FRAME_MODES, "frame modes")
-    checkShared("BuildFrameModesGroup", "Frame Modes")
-
-    -- The two callbacks are the reload prompt and nothing else -- the popup is
-    -- the whole point of these ticks, and this pass is not allowed to touch it.
-    check(body:find('function() PromptReloadAfterModeToggle("party") end', 1, true) ~= nil,
-          "frame modes: the party tick still raises the contextual reload prompt")
-    check(body:find('function() PromptReloadAfterModeToggle("raid") end', 1, true) ~= nil,
-          "frame modes: ...and so does the raid tick")
-
-    local declared = tonumber(PAGE:match("local FRAME_MODES_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "frame modes: the page declares the row's count in one place")
-    eq(declared, settingsIn(FRAME_MODES), "frame modes: ...every setting in the census, because nothing is hoisted")
-
-    local opts = rowOpts("Frame Modes")
-    -- ⚠ NO TOGGLE, and there are two candidates. Neither tick means "am I doing
-    -- anything" -- they are two independent modes -- so a row hoisting one would
-    -- be claiming it speaks for the pair (the Integrations row's rule).
-    check(opts:find("toggle", 1, true) == nil,
-          "frame modes: the row hoists neither mode tick -- they are independent")
-    check(opts:find("count%s*=%s*FRAME_MODES_COUNT") ~= nil,
-          "frame modes: ...it does declare the count, and not as a literal")
-    check(opts:find("summary%s*=%s*FrameModesSummary") ~= nil,
-          "frame modes: ...and a summary")
-    check(opts:find("db      = function() return DF.db end", 1, true) ~= nil,
-          "frame modes: the row reads the profile ROOT, where these two keys live")
-
-    -- The summary says which mode is OFF and nothing else. Both on is the shipped
-    -- state and prints nothing.
-    local sum = PAGE:match("local function FrameModesSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "frame modes: the summary is a named function on the page")
-    if sum then
-        -- ☠ `== false`, NOT `not d.partyEnabled`: ABSENT MEANS ENABLED for these
-        -- two keys, so a profile that has not been seeded would otherwise be
-        -- reported as having both modes off.
-        check(sum:find("d.partyEnabled == false", 1, true) ~= nil,
-              "frame modes: ...tested by presence, the way the reload prompt tests them")
-        check(sum:find("d.raidEnabled  == false", 1, true) ~= nil,
-              "frame modes: ...both of them")
-        check(sum:find("not d.partyEnabled", 1, true) == nil,
-              "frame modes: ...never by truthiness, which reads an unseeded profile as off")
-        -- The words are the locale's own, paired label-then-value the way every
-        -- other summary on the sweep pairs one. No string is invented here.
-        check(sum:find('format("%s %s", L["Party"], L["Off"])', 1, true) ~= nil,
-              "frame modes: ...printed with the locale's own words")
-        check(sum:find("\\194\\183", 1, true) ~= nil,
-              "frame modes: ...joined by the convention's dot")
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 4, "frame modes: at most four items reach the string at once")
-    end
-end
-
--- ============================================================
--- 3. BLIZZARD FRAMES -- four write-both ticks and the divider between them
--- ⚠ THE THIRD TICK BINDS NOTHING THE READER CAN SEE. It passes `nil, nil` and
--- names its key at the END of the argument list (the overrideKey slot), so the
--- census reports "(none)" and the three spellings of "hideDefaultPlayerFrame" are
--- pinned by source pattern below instead.
--- ============================================================
 local BLIZZARD_FRAMES = {
     { "checkbox",  "Disable Blizzard Party Frames", "DF.db.party.hideBlizzardPartyFrames", 30 },
     { "checkbox",  "Disable Blizzard Raid Frames",  "DF.db.party.hideBlizzardRaidFrames",  30 },
@@ -335,65 +169,6 @@ local BLIZZARD_FRAMES = {
     { "separator", "(none)",                        "(none)",                              14 },
     { "checkbox",  "Show Party/Raid Side Menu",     "DF.db.party.showBlizzardSideMenu",    30 },
 }
-
-print("-- Settings page: Blizzard Frames")
-do
-    local body = builderBody("BuildBlizzardFramesGroup")
-    checkCensus(census(body), BLIZZARD_FRAMES, "blizzard frames")
-    checkShared("BuildBlizzardFramesGroup", "Blizzard Frames")
-
-    -- The custom get/set pairs, spelled out: one read of the party copy, one
-    -- write to both, and -- for the keyless tick -- the overrideKey that carries
-    -- the auto-profile indicator.
-    check(body:find('makeBlizGet("hideBlizzardPartyFrames"),', 1, true) ~= nil,
-          "blizzard frames: the party tick still reads party-canonical")
-    check(body:find('makeBlizSet("hideBlizzardPartyFrames", function() DF:UpdateBlizzardFrameVisibility() end)', 1, true) ~= nil,
-          "blizzard frames: ...and writes both tables, refreshing the frames")
-    local playerKeys = 0
-    for _ in body:gmatch('"hideDefaultPlayerFrame"') do playerKeys = playerKeys + 1 end
-    eq(playerKeys, 3, "blizzard frames: the player tick still names its key three times -- get, set, overrideKey")
-    check(body:find('makeBlizSet("hideDefaultPlayerFrame", function() DF:UpdateDefaultPlayerFrame() end),\n                "hideDefaultPlayerFrame"', 1, true) ~= nil,
-          "blizzard frames: ...with the overrideKey last, where the factory expects it")
-
-    -- The group's own gate stays INSIDE the builder: in classic the box greys the
-    -- side-menu tick, and the pane has to do the same.
-    check(body:find("sideMenuCheck.disableOn = function()", 1, true) ~= nil,
-          "blizzard frames: the side-menu gate moved into the builder with its control")
-    check(body:find("return not (p and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames))", 1, true) ~= nil,
-          "blizzard frames: ...unchanged -- it is live only once a Blizzard frame is hidden")
-
-    -- The three tooltips came across with their controls.
-    local tips = 0
-    for _ in body:gmatch("%.tooltip = L%[") do tips = tips + 1 end
-    eq(tips, 4, "blizzard frames: all four tooltips came across with their controls")
-
-    local declared = tonumber(PAGE:match("local BLIZZARD_FRAMES_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "blizzard frames: the page declares the row's count in one place")
-    eq(declared, settingsIn(BLIZZARD_FRAMES),
-       "blizzard frames: ...the four ticks, and NOT the separator between them -- the badge counts settings")
-
-    local opts = rowOpts("Blizzard Frames")
-    check(opts:find("toggle", 1, true) == nil,
-          "blizzard frames: the row hoists none of the four -- they are independent switches")
-    check(opts:find("count%s*=%s*BLIZZARD_FRAMES_COUNT") ~= nil,
-          "blizzard frames: ...it does declare the count, and not as a literal")
-    -- ☠ NO SUMMARY, and it is a judgement rather than a gap: every honest phrasing
-    -- needs a word for the DIRECTION (these ticks HIDE things), and the only words
-    -- the locale has for the frames are L["Party"] and L["Raid"] -- which is what
-    -- the Frame Modes row directly above prints about the OPPOSITE state.
-    check(opts:find("summary", 1, true) == nil,
-          "blizzard frames: ...and NO summary -- the only available words say the inverse")
-    check(opts:find("db      = function() return DF.db and DF.db.party end", 1, true) ~= nil,
-          "blizzard frames: the row reads the party copy its own getters read")
-end
-
--- ============================================================
--- 4. RENDERING -- one write-both tick, one account-wide dropdown, a live hint
--- ⚠ THE SCALE HINT'S CENSUS ROW IS ITS WRAP WIDTH, NOT ITS SLOT HEIGHT. The label
--- is built into a local and added on a LATER line (`group:AddWidget(scaleHint,
--- 72)`), so the only `), <n>)` the reader can see in that chunk is the 250 the
--- factory was given. The real slot height is pinned by its own check below.
--- ============================================================
 local RENDERING = {
     { "checkbox", "Pixel-Perfect Scaling",     "(none)", 30 },
     { "label",    "Snaps sizes and borders to exact pixels for crisp rendering.", "(none)", 42 },
@@ -401,488 +176,183 @@ local RENDERING = {
     { "dropdown", "Aura Duration Update Rate", "DF:GetGlobalDB().auraDurationUpdateInterval", 55 },
     { "label",    "How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate.", "(none)", 52 },
 }
-
-print("-- Settings page: Rendering")
-do
-    local body = builderBody("BuildRenderingGroup")
-    checkCensus(census(body), RENDERING, "rendering")
-    checkShared("BuildRenderingGroup", "Rendering")
-
-    check(body:find('makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"', 1, true) ~= nil,
-          "rendering: the pixel-perfect tick keeps its get / set / overrideKey trio")
-    check(body:find("nil, nil, refreshPixelPerfect,", 1, true) ~= nil,
-          "rendering: ...and the page-scope refresh, which both layouts drive")
-
-    -- ---- the live scale hint -------------------------------------------
-    -- ☠ IT KEEPS ITS refreshContent, AND THAT IS WHAT MAKES IT WORK IN A PANE.
-    -- The pane's reflow calls the group's RefreshChildStates, which walks
-    -- groupChildren calling refreshContent on every shown child (DandersUI
-    -- Sections.lua), so the hint re-computes inside an open panel exactly as it
-    -- did inline on the page.
-    check(body:find("local function computeScaleHint()", 1, true) ~= nil,
-          "rendering: the hint's own compute moved into the builder with it")
-    check(body:find("scaleHint.refreshContent = function()", 1, true) ~= nil,
-          "rendering: ...and its refreshContent, which the pane's reflow reaches")
-    check(body:find("if t ~= scaleHint._dfLastHint then", 1, true) ~= nil,
-          "rendering: ...still idempotent, so a repaint cannot loop the layout")
-    check(body:find("group:AddWidget(scaleHint, 72)", 1, true) ~= nil,
-          "rendering: ...added at the slot height it always had (72, not the 250 wrap width)")
-
-    -- The dropdown's option table came across whole, with its explicit order.
-    check(body:find('SMOOTH = L["Smooth"], NORMAL = L["Normal"], PERFORMANCE = L["Performance"],', 1, true) ~= nil,
-          "rendering: the update-rate options are unchanged")
-    check(body:find('_order = { "SMOOTH", "NORMAL", "PERFORMANCE" },', 1, true) ~= nil,
-          "rendering: ...and still carry _order, or the menu sorts alphabetically by display text")
-
-    local declared = tonumber(PAGE:match("local RENDERING_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "rendering: the page declares the row's count in one place")
-    eq(declared, settingsIn(RENDERING), "rendering: ...every setting in the census, because nothing is hoisted")
-
-    local opts = rowOpts("Rendering")
-    check(opts:find("toggle", 1, true) == nil,
-          "rendering: the row hoists no tick -- pixel-perfect is one of two settings, not the gate")
-    check(opts:find("count%s*=%s*RENDERING_COUNT") ~= nil,
-          "rendering: ...it does declare the count, and not as a literal")
-    check(opts:find("db      = function() return DF:GetGlobalDB() end", 1, true) ~= nil,
-          "rendering: the row reads the account-wide table -- the one its summary reports on")
-
-    -- The summary is the update-rate word, and only when it is not the default.
-    local sum = PAGE:match("local function RenderingSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "rendering: the summary is a named function on the page")
-    if sum then
-        check(sum:find('rate == "SMOOTH"', 1, true) ~= nil and sum:find('rate == "PERFORMANCE"', 1, true) ~= nil,
-              "rendering: ...it names the two rates that are not the default")
-        check(sum:find('"NORMAL"', 1, true) == nil,
-              "rendering: ...and says nothing for NORMAL, which every default profile is on")
-        -- pixelPerfect is not even IN the row's table (see db above), so a summary
-        -- claiming it would be reaching behind the kit for a second store.
-        check(sum:find("pixelPerfect", 1, true) == nil,
-              "rendering: ...and nothing about pixel-perfect, which lives in the other table")
-    end
-end
-
--- ============================================================
--- 5. SETTINGS PANEL APPEARANCE -- two dropdowns, a blurb, and the escape hatch
--- ============================================================
 local PANEL_APPEARANCE = {
     { "fontdropdown",    "Settings Font",         "DF.db.settingsFont",        55 },
     { "outlinedropdown", "Settings Font Outline", "DF.db.settingsFontOutline", 55 },
     { "label", "Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those.", "(none)", 60 },
     { "checkbox",        "Use classic settings layout", "(none)",              30 },
 }
+local NOTIFICATIONS = {
+    { "checkbox", "Notify me when a newer version is available", "DF:GetGlobalDB().notifyOutdated",  30 },
+    { "checkbox", "Show the login message",                      "DF:GetGlobalDB().showLoginMessage", 30 },
+}
 
-print("-- Settings page: Settings Panel Appearance")
+-- summary = the argument as it appears in the call; `store` = the table the
+-- summary is made to read instead of the per-mode one it is handed.
+local CARDS = {
+    { label = "Frame Modes", key = "general_framemodes", col = 1, classicCol = 1,
+      builder = "BuildFrameModesGroup", golden = FRAME_MODES,
+      summary = "function() return FrameModesSummary(DF.db) end" },
+    { label = "Blizzard Frames", key = "general_blizzard", col = 1, classicCol = 1,
+      builder = "BuildBlizzardFramesGroup", golden = BLIZZARD_FRAMES, summary = "nil" },
+    { label = "Rendering", key = "general_rendering", col = 2, classicCol = 1,
+      builder = "BuildRenderingGroup", golden = RENDERING,
+      summary = "function() return RenderingSummary(DF:GetGlobalDB()) end", pin = true },
+    { label = "Settings Panel Appearance", key = "general_panelappearance", col = 2, classicCol = 2,
+      builder = "BuildPanelAppearanceGroup", golden = PANEL_APPEARANCE,
+      summary = "function() return PanelAppearanceSummary(DF.db) end", pin = true },
+    { label = "Notifications", key = "general_notifications", col = 1, classicCol = 2,
+      builder = "BuildNotificationsGroup", golden = NOTIFICATIONS, summary = "nil" },
+}
+
+for _, g in ipairs(CARDS) do
+    print("-- Settings page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
+    local esc = g.label:gsub("%p", "%%%0")
+    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
+    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
+          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
+
+    local block, call = sectionBlock(g.label, g.builder .. "({")
+    check(call:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", its summary reading its own store")
+    eq(call:find(", " .. g.builder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable, from its own builder" or ": behaviour, so no pin"))
+    check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick -- independent switches")
+    check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          g.label .. ": mounts the builder exactly as classic does")
+end
+
+print("-- Settings page: what each builder binds, and the summaries")
 do
-    local body = builderBody("BuildPanelAppearanceGroup")
-    checkCensus(census(body), PANEL_APPEARANCE, "panel appearance")
-    checkShared("BuildPanelAppearanceGroup", "Settings Panel Appearance")
+    local modes = builderBody("BuildFrameModesGroup")
+    check(modes:find('function() PromptReloadAfterModeToggle("party") end', 1, true) ~= nil
+      and modes:find('function() PromptReloadAfterModeToggle("raid") end', 1, true) ~= nil,
+          "frame modes: both ticks still raise the contextual reload prompt")
+    local sum = PAGE:match("local function FrameModesSummary%(d%)(.-)\n            end")
+    check(sum ~= nil and sum:find("d.partyEnabled == false", 1, true) ~= nil
+      and sum:find("d.raidEnabled  == false", 1, true) ~= nil and sum:find("not d.partyEnabled", 1, true) == nil,
+          "frame modes: the summary tests presence, never truthiness -- absent means enabled")
 
-    local declared = tonumber(PAGE:match("local PANEL_APPEARANCE_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "panel appearance: the page declares the row's count in one place")
-    eq(declared, settingsIn(PANEL_APPEARANCE), "panel appearance: ...every setting in the census, because nothing is hoisted")
+    local bliz = builderBody("BuildBlizzardFramesGroup")
+    local playerKeys = 0
+    for _ in bliz:gmatch('"hideDefaultPlayerFrame"') do playerKeys = playerKeys + 1 end
+    eq(playerKeys, 3, "blizzard frames: the player tick still names its key three times -- get, set, overrideKey")
+    check(bliz:find('makeBlizSet("hideBlizzardPartyFrames", function() DF:UpdateBlizzardFrameVisibility() end)', 1, true) ~= nil,
+          "blizzard frames: ...and the party tick still writes both tables")
+    check(bliz:find("return not (p and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames))", 1, true) ~= nil,
+          "blizzard frames: the side-menu gate is unchanged, inside the builder")
 
-    local opts = rowOpts("Settings Panel Appearance")
-    check(opts:find("toggle", 1, true) == nil,
-          "panel appearance: the row hoists no tick -- the classic switch is not this group's gate")
-    check(opts:find("count%s*=%s*PANEL_APPEARANCE_COUNT") ~= nil,
-          "panel appearance: ...it does declare the count, and not as a literal")
-    check(opts:find("db      = function() return DF.db end", 1, true) ~= nil,
-          "panel appearance: the row reads the profile ROOT, where the two font keys live")
+    local render = builderBody("BuildRenderingGroup")
+    check(render:find('makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"', 1, true) ~= nil,
+          "rendering: the pixel-perfect tick keeps its get / set / overrideKey trio")
+    check(render:find("scaleHint.refreshContent = function()", 1, true) ~= nil
+      and render:find("group:AddWidget(scaleHint, 72)", 1, true) ~= nil,
+          "rendering: the live scale hint keeps its refreshContent and its slot height")
+    local rsum = PAGE:match("local function RenderingSummary%(d%)(.-)\n            end")
+    check(rsum ~= nil and rsum:find('rate == "SMOOTH"', 1, true) ~= nil and rsum:find("pixelPerfect", 1, true) == nil,
+          "rendering: the summary names a non-default rate and nothing about the other store")
 
-    -- The summary is the font NAME, unconditionally, through the addon's own
-    -- resolver -- the same one CreateFontDropdown prints on its button, so the row
-    -- and the control behind it cannot disagree (the Group Labels precedent).
-    local sum = PAGE:match("local function PanelAppearanceSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "panel appearance: the summary is a named function on the page")
-    if sum then
-        check(sum:find("DF.GetFontNameFromPath and DF:GetFontNameFromPath(d.settingsFont)", 1, true) ~= nil,
-              "panel appearance: ...it resolves the font name the way the dropdown does")
-        check(sum:find("settingsFontOutline", 1, true) == nil,
-              "panel appearance: ...and spends no width on the outline beside it")
-    end
+    local psum = PAGE:match("local function PanelAppearanceSummary%(d%)(.-)\n            end")
+    check(psum ~= nil and psum:find("DF:GetFontNameFromPath(d.settingsFont)", 1, true) ~= nil,
+          "panel appearance: the summary is the font's name, through the dropdown's own resolver")
 end
 
 -- ============================================================
--- 6. THE CLASSIC-LAYOUT ESCAPE HATCH -- the one decision this pass had to make
---
--- ☠ IN THE POPOUT LAYOUT THIS TICK LIVES INSIDE A PANE, so the click that turns
--- classic ON happens with a panel standing open, and a row popout is pinnable so
--- the shell's own source-death tick leaves it alone.
---
--- ⚠ THE HELPER CLOSES PANELS ON A CLASSIC BUILD TOO -- its prologue runs above
--- the classic early return -- so this close is no longer the only one. It is kept
--- because it is the only one at the right MOMENT: DoBuild retires a page's
--- children before it calls the builder, so the helper's close lands after the row
--- the panel is wired to is already in the trash. The ORDER assertion below is
--- therefore the load-bearing one.
---
--- ⚠ AND THE REBUILD STAYS SYNCHRONOUS, unlike the Frame page's Raid Layout Mode
--- toggle. That one defers because the tick is ON THE ROW and the kit calls
--- row.Refresh() after the write -- on a frame the rebuild has just retired. This
--- is an ordinary checkbox INSIDE the pane: the factory's OnClick does the write,
--- this callback, then `parent.RefreshStates` (a popout holder has none) and
--- DF:UpdateAll, so there is no row refresh to land on a dead frame.
+-- 3. MINIMAP AND LANGUAGE -- one control each, as a card
+-- ============================================================
+print("-- Settings page: Minimap and Language")
+do
+    local MINIMAP = 'GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function() DF:UpdateMinimapButton() end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)'
+    local LANGUAGE = 'GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)'
+    local flat = PAGE:gsub("%s+", " ")
+    check(flat:find("minimapGroup:AddWidget(" .. MINIMAP, 1, true) ~= nil
+      and PAGE:find("Add(minimapGroup, nil, 1)", 1, true) ~= nil,
+          "minimap: classic keeps its box, its tick and column 1")
+    check(flat:find("languageGroup:AddWidget(" .. LANGUAGE, 1, true) ~= nil
+      and PAGE:find("Add(languageGroup, nil, 2)", 1, true) ~= nil,
+          "language: classic keeps its box, its dropdown and column 2")
+
+    local mblock, mcall = sectionBlock("Minimap", "minimapCard:AddWidget(")
+    check(mcall:find('OpenSection(L["Minimap"], "general_minimap", 2, nil)', 1, true) ~= nil,
+          "minimap: a card keyed general_minimap in column 2 -- no tick, no pin")
+    check(mblock:find("minimapCard:AddWidget(" .. MINIMAP, 1, true) ~= nil,
+          "minimap: ...holding the SAME call classic makes -- party-canonical read, write to both")
+
+    local lblock, lcall = sectionBlock("Language", "languageCard:AddWidget(")
+    check(lcall:find('OpenSection(L["Language"], "general_language", 2, nil)', 1, true) ~= nil,
+          "language: a card keyed general_language in column 2 -- no tick, no pin")
+    check(lblock:find("languageCard:AddWidget(" .. LANGUAGE, 1, true) ~= nil,
+          "language: ...holding the SAME dropdown classic builds, on the per-character store")
+    check(lblock:find("Translations are community-contributed and may be incomplete.\"], GUI:GroupInnerWidth(languageCard)))", 1, true) ~= nil,
+          "language: ...and its blurb, measured at the card's own width")
+
+    -- ☠ BUILT AT THE FOOT, so they stack after Rendering and Panel Appearance.
+    local panelAt = PAGE:find('OpenSection(L["Settings Panel Appearance"]', 1, true)
+    local notifyAt = PAGE:find('OpenSection(L["Notifications"]', 1, true)
+    local miniAt = PAGE:find('OpenSection(L["Minimap"]', 1, true)
+    local langAt = PAGE:find('OpenSection(L["Language"]', 1, true)
+    check(panelAt and notifyAt and miniAt and langAt and panelAt < miniAt and notifyAt < miniAt and miniAt < langAt,
+          "order: Minimap and Language are the last two cards built")
+end
+
+-- ============================================================
+-- 4. THE CARDS TOGETHER AND THE CLASSIC BOXES
+-- ============================================================
+print("-- Settings page: the cards together")
+do
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Frame Modes | Blizzard Frames | Rendering | Settings Panel Appearance | Notifications | Minimap | Language",
+       "order: the seven cards open in the order they stack")
+    check(PAGE:find("hoistToggle", 1, true) == nil, "ticks: nothing on this page has a header tick")
+    local bare = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
+    eq(bare, 7, "classic: seven bare 280 boxes, all the classic branch's own")
+end
+
+-- ============================================================
+-- 5. THE CLASSIC-LAYOUT ESCAPE HATCH
 -- ============================================================
 print("-- Settings page: the classic-layout escape hatch")
 do
     local body = builderBody("BuildPanelAppearanceGroup")
-
-    -- ⚠ THE SEQUENCE MOVED. The checkbox and the title-bar glyph each carried a
-    -- copy of the flip list and the copies could drift; both now route through
-    -- the ONE shared function, GUI:FlipSettingsLayout (GUI/Panel.lua). The
-    -- body's half of the contract is the routing; the function's half is the
-    -- old sequence, in the old order, with the old guard.
     check(body:find("GUI:FlipSettingsLayout(", 1, true) ~= nil,
           "escape hatch: the flip routes through the one shared function")
-
     local panelSrc = options_file_source("GUI/Panel.lua")
     local fa = panelSrc:find("function GUI:FlipSettingsLayout", 1, true)
     local flipBody = fa and panelSrc:sub(fa, panelSrc:find("\nend\n", fa, true) or #panelSrc) or ""
     local closeAt  = flipBody:find('GUI:CloseAllPopoutRows("layoutFlip")', 1, true)
     local invalAt  = flipBody:find("GUI:InvalidateAllPages()", 1, true)
     local rebuildAt = flipBody:find("GUI:RefreshCurrentPage()", 1, true)
-    check(closeAt ~= nil, "escape hatch: ...which closes the open panels itself")
-    check(invalAt ~= nil, "escape hatch: ...drops every page's build cache")
-    check(rebuildAt ~= nil, "escape hatch: ...and rebuilds the one on screen")
-    check(closeAt and invalAt and rebuildAt and closeAt < invalAt and invalAt < rebuildAt
-          and flipBody:find("if GUI.CloseAllPopoutRows then", 1, true) ~= nil,
-          "escape hatch: ...in that order, panels first, and guarded on the verb so classic is a plain no-op")
-
-    -- ☠ NOT DEFERRED. A C_Timer.After here would be cargo-cult: see the section
-    -- header for why the Raid Layout Mode precedent does not transfer.
+    check(closeAt and invalAt and rebuildAt and closeAt < invalAt and invalAt < rebuildAt,
+          "escape hatch: ...which closes the open panels (a pinned copy's included), drops every build, then rebuilds")
     check(body:find("C_Timer.After", 1, true) == nil,
-          "escape hatch: the rebuild is synchronous -- this tick is not on the row")
-
-    -- The storage is unchanged: account-level, get/set, and no overrideKey (it is
-    -- not a profile setting, so it has no auto-profile override to indicate).
-    check(body:find("function() return DF:IsClassicSettingsLayout() end", 1, true) ~= nil,
-          "escape hatch: still read from the account-level flag")
-    check(body:find("function(val) DF:SetClassicSettingsLayout(val) end", 1, true) ~= nil,
-          "escape hatch: ...and written straight back to it")
-    check(body:find("classicCheck.tooltip = L[", 1, true) ~= nil,
-          "escape hatch: ...and it keeps the tooltip that says it is temporary")
+          "escape hatch: the rebuild is synchronous")
+    check(body:find("function() return DF:IsClassicSettingsLayout() end", 1, true) ~= nil
+      and body:find("function(val) DF:SetClassicSettingsLayout(val) end", 1, true) ~= nil,
+          "escape hatch: still read from and written to the account-level flag")
 end
 
 -- ============================================================
--- 7. THE PAGE'S RULE -- claimed, but no tick and no footer, on EVERY row
--- ☠ THIS SECTION IS HALF THE POINT OF THE FILE. See the header essay: the
--- per-mode defaults engine can answer for none of these keys, and for the
--- write-both ones a Reset Group would actively desync the pair.
+-- 6. THE PAGE'S RULE -- no reset of any kind, anywhere on the page
+-- ☠ The per-mode defaults engine can answer for none of these keys, and for the
+-- write-both ones a per-mode write would desync the pair.
 -- ============================================================
-print("-- Settings page: every row is a way in, and nothing else")
+print("-- Settings page: no reset of any kind")
 do
-    local ROWS = {
-        { "modesRow",      "modesContent",      "Frame Modes" },
-        { "blizRow",       "blizContent",       "Blizzard Frames" },
-        { "renderRow",     "renderContent",     "Rendering" },
-        { "appearanceRow", "appearanceContent", "Settings Panel Appearance" },
-        { "notifyRow",     "notifyContent",     "Notifications" },
-    }
-    for _, r in ipairs(ROWS) do
-        check(PAGE:find("tools.ClaimKeys(" .. r[1] .. ", " .. r[2] .. ")", 1, true) ~= nil,
-              r[3] .. ": the keys ARE claimed -- that is what feeds the search jump's row map")
-        check(PAGE:find("tools.WireModifiedTick(" .. r[1] .. ")", 1, true) == nil,
-              r[3] .. ": ...no amber tick -- the defaults engine cannot answer for these keys")
-        check(PAGE:find("tools.WireFooter(" .. r[1], 1, true) == nil,
-              r[3] .. ": ...and no Reset Group / Hold strip")
-    end
-    -- Belt and braces: neither verb appears anywhere on the page under any name.
-    -- The CALL shape again: the page's own essay names both verbs while saying
-    -- why neither is wired.
     check(PAGE:find("tools.WireModifiedTick(", 1, true) == nil,
-          "page rule: WireModifiedTick is not called on this page at all")
+          "page rule: WireModifiedTick is not called on this page")
     check(PAGE:find("tools.WireFooter(", 1, true) == nil,
           "page rule: ...nor WireFooter")
-    -- Nothing is hoisted off any row here, so nothing needs re-registering with
-    -- search either -- the five claims are the whole search repair.
     check(PAGE:find("RegisterHoistedToggle", 1, true) == nil,
-          "page rule: no toggle is hoisted on this page, so none is re-registered")
-
-    -- ...and the reason is written down at the site, not just in this file.
-    check(PAGE:find("DF.Defaults", 1, true) ~= nil,
-          "page rule: the page names the engine that cannot answer for these keys")
-    check(PAGE:find("makeBlizSet", 1, true) ~= nil,
-          "page rule: ...and the setter whose pair a reset would desync")
-end
-
--- ============================================================
--- 8. NOTIFICATIONS -- two account-wide ticks, and nothing to say about them
--- ============================================================
-local NOTIFICATIONS = {
-    { "checkbox", "Notify me when a newer version is available", "DF:GetGlobalDB().notifyOutdated",  30 },
-    { "checkbox", "Show the login message",                      "DF:GetGlobalDB().showLoginMessage", 30 },
-}
-
-print("-- Settings page: Notifications")
-do
-    local body = builderBody("BuildNotificationsGroup")
-    checkCensus(census(body), NOTIFICATIONS, "notifications")
-    checkShared("BuildNotificationsGroup", "Notifications")
-
-    -- The two empty-bodied callbacks came across WITH their comments: neither
-    -- setting has anything to re-render now, and the comments are the reason
-    -- nobody adds a refresh call to them.
-    check(body:find("-- Setting applies immediately; no extra callback needed.", 1, true) ~= nil,
-          "notifications: the version tick's callback is still deliberately empty")
-    check(body:find("-- Read once at login; nothing to re-render now.", 1, true) ~= nil,
-          "notifications: ...and so is the login message's")
-    check(body:find("loginMsgCheck.tooltip = L[", 1, true) ~= nil,
-          "notifications: the login message keeps its tooltip")
-
-    local declared = tonumber(PAGE:match("local NOTIFICATIONS_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "notifications: the page declares the row's count in one place")
-    eq(declared, settingsIn(NOTIFICATIONS), "notifications: ...every setting in the census, because nothing is hoisted")
-
-    local opts = rowOpts("Notifications")
-    check(opts:find("toggle", 1, true) == nil, "notifications: the row declares no toggle")
-    -- ☠ NO SUMMARY. Two yes/nos with no word between them: both ship ON, so the
-    -- only state worth reporting is one the user turned OFF -- which a summary
-    -- cannot say without naming the setting it is about.
-    check(opts:find("summary", 1, true) == nil,
-          "notifications: ...and no summary -- two yes/nos have no word to spend")
-    check(opts:find("db      = function() return DF:GetGlobalDB() end", 1, true) ~= nil,
-          "notifications: the row reads the account-wide table, where both ticks live")
-end
-
--- ============================================================
--- 9. WHAT STAYED INLINE, THE BAND, THE BANNER AND THE PAGE'S OWN ORDER
--- ============================================================
-print("-- Settings page: the stay-inline boxes, the band, the banner and the order")
-do
-    -- ---- the two single-control boxes are CONTROL ROWS now -----------
-    -- Each was one control under a title, standing at 280 beside a full-width
-    -- band. Each is now that control on the row plate, in a headerless band of
-    -- its own: the tick on the left where every popout row's tick is, the
-    -- dropdown right-aligned where every chevron ends.
-    check(PAGE:find("280, tools and tools.INLINE_BOX or nil", 1, true) == nil,
-          "control rows: no stay-inline 280 box is left on the page")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL, wherever the skin is still used.
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "control rows: the skin is taken from the tools, never restated as a literal")
-
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. The DOES band fills column 1, the looks band
-    -- and the Minimap and Language bands column 2 -- the page's two-column split. A
-    -- band has to be BUILT at the width the layout pass will give it, because a group
-    -- sizes its rows off its width at build time; BandWidth's argument says which.
-    local BAND_COL = { settingsBand = 1, looksBand = 2, minimapBand = 2, languageBand = 2 }
-    for _, band in ipairs({ "minimapBand", "languageBand" }) do
-        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
-              "control rows: " .. band .. " is chromeless, at the width the layout pass will give it")
-        check(PAGE:find(band .. ":AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-              "control rows: ...carrying its one control row")
-        -- ⚠ NO HEADER ON EITHER BAND. Both row labels already say the word the
-        -- box's title said, and a header repeating it above one row is the page
-        -- saying it twice.
-        check(PAGE:find(band .. ":AddWidget(GUI:CreateHeader", 1, true) == nil,
-              "control rows: ...and no header, because the row's own label says it")
-    end
-
-    -- The label each row is drawn with, and the kind.
-    check(PAGE:find('label = L["Show Minimap Button"],\n                kind  = "checkbox"', 1, true) ~= nil,
-          "control rows: the minimap row is a checkbox named by the tick's own caption")
-    check(PAGE:find('label     = L["Addon Language"],\n                kind      = "dropdown"', 1, true) ~= nil,
-          "control rows: the language row is a dropdown named by the control, not the box")
-
-    -- ☠ THE MINIMAP WRITE KEEPS THE HOST BRACKET. ControlRow brackets a {db,key}
-    -- write itself and forwards a consumer's own set() verbatim -- and this value
-    -- cannot use {db,key}, because makeBlizSet keeps one copy in each mode's
-    -- table. So the two hooks the classic checkbox fires are fired at the call
-    -- site, with the same nil table and the same override key.
-    check(PAGE:find('if GUI:Call("interceptWrite", nil, MINIMAP_KEY, v) then return end', 1, true) ~= nil,
-          "control rows: the minimap write still asks the runtime-write redirect first")
-    check(PAGE:find('GUI:Call("onSettingWritten", nil, MINIMAP_KEY, v, L["Show Minimap Button"], ApplyMinimapButton)', 1, true) ~= nil,
-          "control rows: ...and still announces the write, apply and all")
-
-    -- Both controls keep their binding, unchanged, in BOTH arms.
-    check(PAGE:find('makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"', 1, true) ~= nil,
-          "control rows: classic's minimap tick keeps its get / set / overrideKey trio")
-    check(PAGE:find('GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride"', 1, true) ~= nil,
-          "control rows: classic's language dropdown still writes the per-character SavedVariable")
-    check(PAGE:find('db        = DandersFramesCharDB,\n                key       = "languageOverride"', 1, true) ~= nil,
-          "control rows: ...and so does the row's, through the same table and key")
-    -- The blurb the box carried is not dropped: an inline dropdown's own label is
-    -- hidden, so `.openerTooltip` is where a paragraph can still be read.
-    check(PAGE:find("languageRow.control.openerTooltip", 1, true) ~= nil,
-          "control rows: the language blurb survives on the opener")
-
-    -- Both rows reach search through the ONE shared verb.
-    check(PAGE:find('tools.RegisterControlRow(minimapRow, "checkbox", nil, true, ApplyMinimapButton)', 1, true) ~= nil,
-          "control rows: the minimap tick registers as a custom get/set checkbox")
-    check(PAGE:find('tools.RegisterControlRow(languageRow, "dropdown", "languageOverride")', 1, true) ~= nil,
-          "control rows: ...and the language row adopts the entry its dropdown registered")
-
-    -- ---- the two feature-row bands ------------------------------------
-    -- ⚠ TWO BANDS, SPLIT FOR THE TWO COLUMNS: what the page DOES (settingsBand,
-    -- column 1) and how things LOOK (looksBand, column 2). One band stood at five
-    -- rows against the right column's two; split, the columns hold three and four.
-    for _, band in ipairs({ "settingsBand", "looksBand" }) do
-        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
-              "band: " .. band .. " is chromeless, at the width the layout pass will give it")
-        -- ☠ NO HEADER ON EITHER. The split is by column, not by section, so a
-        -- header would mean inventing a section name the classic page never had.
-        check(PAGE:find(band .. ":AddWidget(GUI:CreateHeader", 1, true) == nil,
-              "band: ..." .. band .. " carries no header, because its rows share no word")
-    end
-    local function rowsOf(band)
-        local order = {}
-        for name in PAGE:gmatch(band .. ":AddWidget%(GUI:CreatePopoutRow%(self%.child, {\n%s*label%s*=%s*L%[\"([^\"]+)\"%]") do
-            order[#order + 1] = name
-        end
-        return order
-    end
-    local order = rowsOf("settingsBand")
-    eq(#order, 3, "band: three rows go into the left band")
-    eq(order[1], "Frame Modes",               "band: the mode enables open it")
-    eq(order[2], "Blizzard Frames",           "band: ...then Blizzard Frames")
-    eq(order[3], "Notifications",             "band: ...and Notifications last, as in classic")
-    local looks = rowsOf("looksBand")
-    eq(#looks, 2, "band: two rows go into the looks band")
-    eq(looks[1], "Rendering",                 "band: the looks band opens with Rendering, closing classic's column 1")
-    eq(looks[2], "Settings Panel Appearance", "band: ...then column 2's first box")
-
-    -- ---- the banner --------------------------------------------------
-    -- Untouched, and still the first thing on the page: it is the sentence that
-    -- explains why none of this has a party/raid split.
-    local bannerAt = PAGE:find("local banner = GUI:CreateInfoBanner(self.child, {", 1, true)
-    local bandAt   = PAGE:find("settingsBand = GUI:CreateSettingsGroup", 1, true)
-    check(bannerAt ~= nil and bandAt ~= nil and bannerAt < bandAt,
-          "banner: the info banner is still built ahead of everything the sweep touched")
-    check(PAGE:find('Add(banner, banner.layoutHeight, "both")', 1, true) ~= nil,
-          "banner: ...and still added full width at its own measured height")
-    check(PAGE:find('tone = "info",', 1, true) ~= nil, "banner: ...with its tone unchanged")
-
-    -- ---- the Add order ------------------------------------------------
-    local adds = {}
-    for name, col in PAGE:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
-        adds[#adds + 1] = { name = name, col = col }
-    end
-    local function indexOf(name, col)
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then return i end
-        end
-    end
-    -- ☠ EVERY BAND IS ADDED AFTER ITS LAST ROW. `Add` resolves a widget's slot
-    -- height on the spot, so a band added before its rows would be measured empty
-    -- -- which is why all four go in together here rather than in place.
-    -- Four bands in two columns -- the DOES rows left; the looks rows, Minimap and
-    -- Language right -- still ADDED in reading order, because that is the order a
-    -- narrow window folds them back into when the page drops to one column: every
-    -- feature row together, the plain controls last.
-    check(PAGE:find("if not classicLayout then\n            settingsBand.layoutColFill = true\n            looksBand.layoutColFill = true\n            minimapBand.layoutColFill = true\n            languageBand.layoutColFill = true\n            Add(settingsBand, nil, 1)\n            Add(looksBand, nil, 2)\n            Add(minimapBand, nil, 2)\n            Add(languageBand, nil, 2)\n        end", 1, true) ~= nil,
-          "order: the popout arm adds the four bands to their columns, in reading order")
-    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
-    -- widget otherwise, so a band placed in a column without this keeps the width it
-    -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "settingsBand", "looksBand", "minimapBand", "languageBand" }) do
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
-    end
-
-    -- ...and the CLASSIC order and columns are exactly what they were: modes,
-    -- Blizzard and Minimap and Rendering in column 1; Appearance, Language and
-    -- Notifications in column 2, in that reading order. This is the one thing the
-    -- pass was not allowed to move.
-    local CLASSIC = {
-        { "modesGroup", "1" }, { "blizzardGroup", "1" }, { "minimapGroup", "1" },
-        { "renderingGroup", "1" }, { "panelAppearanceGroup", "2" },
-        { "languageGroup", "2" }, { "notificationsGroup", "2" },
-    }
-    local last = 0
-    for _, e in ipairs(CLASSIC) do
-        local at = indexOf(e[1], e[2])
-        check(at ~= nil, "order: the classic " .. e[1] .. " still goes to column " .. e[2])
-        check(at ~= nil and at > last, "order: ...and still in its original place in the flow")
-        last = at or last
-    end
-
-    -- Seven bare 280 boxes are left, and every one is inside a classicLayout arm:
-    -- an eighth appearing outside one is the drift this counts. Seven rather than
-    -- five because Minimap and Language moved out of the shared construction and
-    -- into the classic arm, where they are bare like the rest.
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 7, "order: seven bare 280 boxes left, and they are the classic branch's own")
-
-    -- The page never had a copy button -- there is nothing per-mode on it to copy
-    -- -- and this pass did not give it one.
-    check(PAGE:find("CreateCopyButton", 1, true) == nil,
-          "page: still no copy button, because nothing here is per-mode")
-end
-
--- ============================================================
--- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
--- six settings or fewer, and a row holding four charges the same click as a row
--- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
--- under its title line, and its strip offers to pin a second copy rather than
--- promising settings that are already on screen.
---
--- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
--- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
--- refuses one whose pane turns out to be big, measured off the PANE rather than
--- off the declared count, so a row cannot claim its way onto the plate. Only the
--- refusal can be exercised against a real group, and that lives in
--- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
--- asked, and that nothing else did.
---
--- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
--- about SETTINGS; CountVisibleChildren answers for every entry a layout would
--- place, blurbs and separators included. Where the two differ below, the larger
--- is the one that has to fit.
---
--- EVERY popout row on this page, which is the whole of it -- two, four, two,
--- three and two settings, and three, five, five, four and two children once
--- the blurbs and the Blizzard separator are counted. So this page has no
--- click left that buys nothing, which matters more here than anywhere: not
--- one row carries a modified tick or a reset strip (section 7), so the pane
--- was the only thing behind the click, and two of these rows have no summary
--- at all because no honest one could be written.
--- ============================================================
-do
-    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
-    -- whether its call carries the opt-in. Read as "this declaration up to the
-    -- next one": a balanced-brace match would be defeated by the builder closure
-    -- inside the call.
-    local calls, pos = {}, 1
-    while true do
-        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
-        if not s then break end
-        calls[#calls + 1] = { name = name, at = e }
-        pos = e + 1
-    end
-
-    local inlineMounts, inlineCount = {}, 0
-    for i, rec in ipairs(calls) do
-        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
-        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
-            inlineMounts[rec.name] = true
-            inlineCount = inlineCount + 1
-        end
-    end
-    eq(inlineCount, 5, "inline: 5 of this page's rows mount their pane on the plate")
-
-    -- Which ROW each of them belongs to, read off the row's own `build` rather
-    -- than from a second list -- so a mount opted in and then wired to a
-    -- different row fails here instead of shipping.
-    local function buildOf(var)
-        local a = PAGE:find("local " .. var .. " = ", 1, true)
-        local b = a and PAGE:find("}))", a, true)
-        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
-    end
-
-    for _, spec in ipairs({
-        { "modesRow", "modesMount" },                -- Frame Modes, 2 settings / 3 children
-        { "blizRow", "blizMount" },                  -- Blizzard Frames, 4 / 5
-        { "renderRow", "renderMount" },              -- Rendering, 2 / 5
-        { "appearanceRow", "appearanceMount" },      -- Settings Panel Appearance, 3 / 4
-        { "notifyRow", "notifyMount" },              -- Notifications, 2 / 2
-    }) do
-        local mount = buildOf(spec[1])
-        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
-        check(mount ~= nil and inlineMounts[mount] == true,
-              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
-    end
+          "page rule: nothing is hoisted, so nothing is re-registered")
+    check(PAGE:find("DF.Defaults", 1, true) ~= nil and PAGE:find("makeBlizSet", 1, true) ~= nil,
+          "page rule: the page names the engine that cannot answer, and the setter a reset would desync")
 end
