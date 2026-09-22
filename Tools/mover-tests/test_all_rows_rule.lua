@@ -128,7 +128,10 @@ do
     -- to be re-numbered on every page added would be edited into agreement with
     -- whatever was there. The exact inventory per page is the censuses' job.
     check(groups > 200, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
-    check(skinned >= 4, "alignment: ...and found the full-width boxes (" .. skinned .. ")")
+    -- ⚠ 3, NOT 4: the card pages (Auras.lua's Health Bar gradient editors and
+    -- Sorting's FrameSort box) became cards and wear no band skin any more; the
+    -- Frame page's info box and the Settings page's two are what is left.
+    check(skinned >= 3, "alignment: ...and found the full-width boxes (" .. skinned .. ")")
     check(chromeless >= 10, "alignment: ...and the bands (" .. chromeless .. ")")
     check(rows >= 6, "alignment: ...and the control rows (" .. rows .. ")")
 end

@@ -3,33 +3,28 @@ local NS = ...
 -- ============================================================
 -- SORTING PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- General > Sorting is the sweep's second page. Three of its five groups become
--- popout feature rows -- Unit Frame Sorting, Role Priority, Class Priority --
--- because a pane holding one dropdown is a click that buys nothing. The other
--- two take the shape that fits what they ARE: Self Position is one control and
--- becomes a CONTROL ROW, FrameSort Integration is a control plus the paragraph
--- that explains it and stays a BOX -- built at the band's width and added as a
--- sync point, so every top-level object on the page shares two edges.
+-- General > Sorting: five 280 boxes in classic; in modern, the Debuff Bar's
+-- collapsible CARDS in the two columns classic has always drawn:
 --
--- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
--- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
--- does what test_frame_page_builders does: it reads the page's SOURCE and
--- asserts against it.
+--   column 1   Unit Frame Sorting (+ Self Position), FrameSort Integration
+--              (only with the FrameSort addon; header tick)
+--   column 2   "Priority"  Role Priority, Class Priority
 --
--- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts.
---   ✓ that the declared row COUNT matches what the pane mounts, less the hoisted
---     toggle.
---   ✗ nothing about runtime behaviour -- the callbacks, the greying and the
---     summaries are read by eye and by the in-game checklist.
+-- ☠ WHAT THIS SUITE PINS:
+--   * each builder's census (pre-card source) -- classic renders as it did;
+--   * ONE builder per box, and the card hands it exactly what classic does
+--     (plus hoistToggle where the tick moved into the header);
+--   * Enable Custom Sorting stays in the first card's body -- it is the PAGE
+--     gate -- and that card says Off while sorting is off;
+--   * Use FrameSort Addon is the FrameSort card's header tick;
+--   * Self Position, the page's lone control, is in Unit Frame Sorting;
+--   * no pins: every card decides ORDER, which is behaviour;
+--   * the priority cards' hide and grey gates, and the Priority header hiding
+--     with them.
+--   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
-local SRC = options_file_source("GUI/Pages/Auras.lua")
+local SRC = options_file_source("GUI/Pages/Auras.lua"):gsub("\r\n", "\n")
 
 -- ---- the census reader (the Frame page's, verbatim) ------------------
 local KIND = {
@@ -38,9 +33,6 @@ local KIND = {
     CreateHeader = "header", CreateLabel = "label",
 }
 
--- The body of a `local function <name>(tools2)` at the page builder's own
--- indent. Terminated on a newline + EIGHT spaces + `end`, which is that indent:
--- everything inside one of these bodies is indented further.
 local function builderBody(name)
     local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
@@ -90,70 +82,71 @@ local function checkCensus(got, want, tag)
     end
 end
 
--- The block a row is declared in, from its label to the closing brace of the
--- CreatePopoutRow opts.
-local function rowOpts(labelKey)
-    local a = SRC:find('label%s*=%s*L%["' .. labelKey .. '"%]')
-    check(a ~= nil, "source: a popout row is declared for " .. labelKey)
-    if not a then return "" end
-    local b = SRC:find("}))", a, true)
-    return SRC:sub(a, (b or a) + 2)
-end
-
--- What every converted group on this page has in common.
-local function checkShared(builder, rowLabel)
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in SRC:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
-
-    -- The classic branch builds the box it always did, with its own header.
-    local box = SRC:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. rowLabel:gsub("%p", "%%%0") .. "\"%]%)")
-    check(box ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
-
-    local opts = rowOpts(rowLabel)
-    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
-          rowLabel .. ": the row is handed a pre-built mount")
-    check(opts:find("window  = DF.GUIFrame", 1, true) ~= nil
-       or opts:find("window   = DF.GUIFrame", 1, true) ~= nil,
-          rowLabel .. ": ...docked outside the settings window")
-    check(opts:find("clipTo", 1, true) ~= nil,
-          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
-end
-
--- ============================================================
--- 1. THE PAGE TAKES THE SHARED MACHINERY
--- The Frame page built its own copy inline; this page is the first to take
--- GUI:CreatePopoutPageTools, and every verb it uses comes off that table rather
--- than out of a second copy on the page.
--- ============================================================
-print("-- Sorting page: the shared popout machinery, not a second copy of it")
+-- The Sorting page, scoped by its own two ends.
+local PAGE
 do
-    check(SRC:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
-    check(SRC:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
-          "tools: ...and takes the shared machinery unconditionally")
+    local a = SRC:find('Add(CreateCopyButton(self.child, {"sort", "useFrameSort"', 1, true)
+    local b = SRC:find('{pageId = "general_labels", label = L["Group Labels"]}', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "the Sorting page builder is locatable by its own ends")
+    PAGE = SRC:sub(a or 1, b or 1)
+end
 
-    -- ☠ NOT ITS OWN COPY. The whole point of the helper is that five pages do
-    -- not carry five drifting copies of the eager holders and the footer verbs.
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason" }) do
-        check(SRC:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the page does not re-declare " .. v)
-    end
-    -- ...and it never touches the holders or the row map by hand: the prologue
-    -- inside the helper owns both.
-    check(SRC:find("_popoutHolders", 1, true) == nil,
-          "tools: the page never manages the popout holders itself")
-    check(SRC:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
+-- ONE CARD'S BLOCK, flattened; `call` is just its OpenSection call.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b = PAGE:find("CloseSection(band)", a, true)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, (b or a) + #"CloseSection(band)"):gsub("%s+", " ")
+    local m = block:find("({ group = band,", 1, true)
+    local call = m and block:sub(1, m) or block
+    call = call:gsub("Build[%w]+%($", "")
+    return block, call
 end
 
 -- ============================================================
--- 2. UNIT FRAME SORTING -- the page's one hoisted toggle
--- Six controls, one of them the "am I doing anything" tick, which goes onto the
--- row. The two blurbs stay in the pane, raid note and all.
+-- 1. THE SHARED CARD HELPER, AND THE POPOUT FURNITURE GONE
+-- ============================================================
+print("-- Sorting page: the shared card helper")
+do
+    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
+          "tools: the page asks which layout it is building")
+    check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
+          "tools: ...and takes the shared machinery unconditionally")
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "GUI:CreateControlRow(", "tools.INLINE_BOX", "sortBand", "priorityBand",
+                            "selfPosBand", "_COUNT", "footerStrip", "inline = true", "popout = true,",
+                            "OnSortEnabledToggle", "ApplySortOptions" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
+    check(PAGE:find("count%s*=%s*[%w_]") == nil, "counts: no card declares a settings count")
+
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row with quiet captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    local n = 0
+    for _ in PAGE:gmatch('Add%(tools%.SectionControls%(self%.child%), 24, "both"%)') do n = n + 1 end
+    eq(n, 1, "bulk: the page adds the Expand/Collapse pair once, spanning both columns")
+    local bannerAt = PAGE:find('Add(combatBanner, combatBanner.layoutHeight, "both")', 1, true)
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    local firstCard = PAGE:find("OpenSection(L[", 1, true)
+    check(bannerAt and stripAt and firstCard and bannerAt < stripAt and stripAt < firstCard,
+          "bulk: ...under the combat banner and above the first card")
+
+    -- ☠ NO PINS: no OpenSection call on this page passes a builder.
+    for name, call in PAGE:gmatch('OpenSection%(L%["([^"]+)"%](.-)\n') do
+        check(call:find("Build", 1, true) == nil, "pins: " .. name .. " grows no pin -- sort order is behaviour")
+    end
+end
+
+-- ============================================================
+-- 2. UNIT FRAME SORTING -- the page gate stays in the body, Self Position joins
 -- ============================================================
 local SORT_OPTIONS = {
     { "label",    "Sort party members by role, class, and name.\\n\\nSort order: Self Position > Role > Class > Name", "(none)", 60 },
@@ -168,100 +161,46 @@ print("-- Sorting page: Unit Frame Sorting")
 do
     local body = builderBody("BuildSortOptionsGroup")
     checkCensus(census(body), SORT_OPTIONS, "unit frame sorting")
-    checkShared("BuildSortOptionsGroup", "Unit Frame Sorting")
+    local calls = 0
+    for _ in PAGE:gmatch("BuildSortOptionsGroup%(") do calls = calls + 1 end
+    eq(calls, 3, "unit frame sorting: declared once, mounted twice -- classic box and card")
+    check(PAGE:find("local sortOptionsGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
+      and PAGE:find('sortOptionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame Sorting"]), 40)', 1, true) ~= nil
+      and PAGE:find("Add(sortOptionsGroup, nil, 1)", 1, true) ~= nil,
+          "unit frame sorting: classic's box, header and column are unchanged")
 
-    -- The hoist, and the arithmetic it implies: the checkbox is still IN the
-    -- builder -- classic needs it -- behind the one flag the popout passes.
-    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
-          "unit frame sorting: the enable checkbox is skipped when the row has hoisted it")
-    check(body:find("sortEnable.keepEnabled = true", 1, true) ~= nil,
-          "unit frame sorting: ...and in classic it stays live under the group's own grey")
-    local declared = tonumber(SRC:match("local SORT_OPTIONS_COUNT%s*=%s*(%d+)"))
-    check(declared ~= nil, "unit frame sorting: the page declares the row's count in one place")
-    eq(declared, settingsIn(SORT_OPTIONS) - 1, "unit frame sorting: ...the census's settings less the hoisted tick")
+    local block, call = sectionBlock("Unit Frame Sorting")
+    check(block:find('OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)', 1, true) ~= nil,
+          "unit frame sorting: a card keyed sorting_unitframes in column 1, no tick, no gates, no pin")
+    check(block:find("BuildSortOptionsGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          "unit frame sorting: mounts the builder exactly as classic does -- the enable stays in the body")
+    check(body:find(".keepEnabled = true", 1, true) ~= nil
+      and body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
+          "unit frame sorting: the enable stays live under the group gate that greys the rest")
+    local summary = PAGE:match("local function SortOptionsSummary%(d%)(.-)\n            end")
+    check(summary and summary:find('if not d.sortEnabled then return L["Off"] end', 1, true) ~= nil,
+          "unit frame sorting: shut, the corner says Off while sorting is off")
 
-    -- ☠ THE GROUP GATE MOVED INSIDE THE BUILDER. In classic it was a property of
-    -- the page-level box; left there, the pane would not grey while custom
-    -- sorting is off and the two layouts would disagree.
-    check(body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
-          "unit frame sorting: the group's grey-while-off gate is inside the builder")
-    -- The three variant gates ride along unchanged: under a FrameSort takeover
-    -- the options vanish while the enable tick stays.
-    local hides = 0
-    for _ in body:gmatch("%.hideOn = HideSortOptions") do hides = hides + 1 end
-    eq(hides, 3, "unit frame sorting: the three FrameSort-takeover gates survived the move")
-
-    local opts = rowOpts("Unit Frame Sorting")
-    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"sortEnabled"%s*}') ~= nil,
-          "unit frame sorting: the row's tick is the group's own enable key")
-    check(opts:find("summary%s*=%s*SortOptionsSummary") ~= nil,
-          "unit frame sorting: ...it declares a summary")
-    check(opts:find("count%s*=%s*SORT_OPTIONS_COUNT") ~= nil,
-          "unit frame sorting: ...and the declared count, not a literal")
-    check(opts:find("onToggle%s*=%s*OnSortEnabledToggle") ~= nil,
-          "unit frame sorting: ...and a commit that is not a page rebuild")
-    -- ⚠ NO offText. Both raid layout modes are a layout, so that row spells its
-    -- off state; sorting off genuinely means not sorting, and the kit's own off
-    -- state says it.
-    check(opts:find("offText", 1, true) == nil,
-          "unit frame sorting: no offText -- off here really does mean not sorting")
-
-    -- ☠ THE COMMIT IS NOT A PAGE REBUILD. A rebuild retires the row being
-    -- clicked, and the row's write path calls row.Refresh() after onToggle
-    -- returns -- on a dead frame.
-    local commit = SRC:match("local function OnSortEnabledToggle%(%)(.-)\n            end")
-    check(commit ~= nil, "unit frame sorting: the popout commit is a named function")
-    if commit then
-        check(commit:find("RefreshCurrentPage", 1, true) == nil,
-              "unit frame sorting: ...and never rebuilds the page")
-        check(commit:find("self:RefreshStates()", 1, true) ~= nil,
-              "unit frame sorting: ...it re-runs the state passes instead")
-        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
-              "unit frame sorting: ...and reflows the open panes")
-    end
-
-    -- The hoisted toggle is re-registered with search under the SAME label and
-    -- key the suppressed checkbox carried, or the setting becomes unfindable in
-    -- the popout layout while staying findable in classic.
-    check(SRC:find('tools.RegisterHoistedToggle(sortRow, L["Enable Custom Sorting"], "sortEnabled", OnSortEnabledToggle)', 1, true) ~= nil,
-          "unit frame sorting: the hoisted toggle keeps its search entry")
-
-    -- ⚠ NO hideOn ON THE ROW, mirroring classic: the box had none either, only
-    -- its children did. Under a FrameSort takeover the enable control stayed on
-    -- screen while the options round it vanished.
-    check(SRC:find("sortRow.hideOn", 1, true) == nil,
-          "unit frame sorting: the row is always visible, exactly as the box was")
-
-    -- The summary reuses words the locale already ships and separates them with
-    -- the convention's dot. No Greek, no typographic glyphs.
-    local sum = SRC:match("local function SortOptionsSummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "unit frame sorting: the summary is a named function on the page")
-    if sum then
-        check(sum:find('L%["Role"%]') ~= nil, "unit frame sorting: ...naming the always-true level")
-        check(sum:find('L%["Class"%]') ~= nil, "unit frame sorting: ...the optional one")
-        check(sum:find('L%["A to Z"%]') ~= nil and sum:find('L%["Z to A"%]') ~= nil,
-              "unit frame sorting: ...and the alphabetical state")
-        check(sum:find("\\194\\183", 1, true) ~= nil, "unit frame sorting: ...separated by the convention's dot")
-        local items = 0
-        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
-        check(items <= 3, "unit frame sorting: at most four items, per the summary convention")
-    end
+    -- ☠ SELF POSITION, the lone control, at the foot of this card.
+    check(block:find('local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil,
+          "self position: the dropdown is the card's last control -- same key, options and commit as classic")
+    check(block:find("selfPos.hideOn = HideSortOptions", 1, true) ~= nil,
+          "self position: ...hidden under a FrameSort takeover, as classic's box was")
+    local declAt = PAGE:find("local selfPosValues = {", 1, true)
+    local cardAt = PAGE:find('OpenSection(L["Unit Frame Sorting"]', 1, true)
+    check(declAt and cardAt and declAt < cardAt, "self position: its vocabulary is declared above the card that uses it")
+    local decls = 0
+    for _ in PAGE:gmatch("local selfPosValues = {") do decls = decls + 1 end
+    eq(decls, 1, "self position: ...exactly once")
+    check(PAGE:find("local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
+      and PAGE:find('selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil
+      and PAGE:find("Add(selfPosGroup, nil, 1)", 1, true) ~= nil,
+          "self position: classic keeps its own box")
 end
 
 -- ============================================================
 -- 3. ROLE PRIORITY and CLASS PRIORITY -- the two drag lists
--- Toggle-less rows: there is no boolean here meaning "am I doing anything", only
--- an order. Both carry the box's own two gates -- hidden under a FrameSort
--- takeover, greyed while custom sorting is off.
 -- ============================================================
---
--- ⚠ THE BLURB REPORTS THE LIST'S DB KEY, and that is the census reader working
--- as designed rather than a bug in the page. A call's chunk runs to the START OF
--- THE NEXT shared-factory call, and there is no next one in these two builders
--- -- the drag list is CreateRoleOrderList / CreateClassOrderList, which the
--- reader does not know -- so the chunk runs to the end of the body and the key
--- it finds is the list's. Written down rather than papered over: it is still the
--- inventory these groups had inline, and the list itself is checked by name.
 local ROLE_PRIORITY = {
     { "label", "Drag to reorder. Top = first.", "sortRoleOrder", 25 },
 }
@@ -269,125 +208,43 @@ local CLASS_PRIORITY = {
     { "label", "Drag to reorder. Top = first.", "sortClassOrder", 25 },
 }
 
-print("-- Sorting page: Role Priority")
-do
-    local body = builderBody("BuildRolePriorityGroup")
-    -- ⚠ ONE CENSUS ENTRY FOR TWO WIDGETS: the drag list is CreateRoleOrderList,
-    -- which the census reader does not know, so it is checked by name below.
-    checkCensus(census(body), ROLE_PRIORITY, "role priority")
-    checkShared("BuildRolePriorityGroup", "Role Priority")
-    check(body:find('GUI:CreateRoleOrderList(parent, db, "sortRoleOrder"', 1, true) ~= nil,
-          "role priority: the drag list is mounted into the pane's own parent")
-    check(body:find('end, "sortSeparateMeleeRanged")', 1, true) ~= nil,
-          "role priority: ...still told which key decides its shape")
-
-    local declared = tonumber(SRC:match("local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = (%d+)"))
-    check(declared ~= nil, "role priority: the page declares the row's count in one place")
-    eq(declared, settingsIn(ROLE_PRIORITY) + 1, "role priority: ...the drag list the census cannot see, and not the blurb")
-
-    -- ☠ THE WIDGET REFERENCE IS REBOUND INSIDE THE BUILDER. The Separate Melee &
-    -- Ranged callback repaints whichever list the user can see, and the popout
-    -- shell builds one list PER INSTANCE -- so a captured single upvalue would
-    -- name whichever one happened to be built first.
-    check(body:find("roleOrderWidget = GUI:CreateRoleOrderList(", 1, true) ~= nil,
-          "role priority: the shared reference is assigned by the builder, per instance")
-    -- ...and the older instances are covered by the value sweep, which is what
-    -- the drag lists' refreshValue opt-in was added for.
-    local sortBody = builderBody("BuildSortOptionsGroup")
-    check(sortBody:find("if tools2.reflowValues then tools2.reflowValues() end", 1, true) ~= nil,
-          "role priority: ...with the pane sweep covering any pinned second one")
-
+for _, g in ipairs({
+    { label = "Role Priority", builder = "BuildRolePriorityGroup", golden = ROLE_PRIORITY, key = "sorting_rolepriority",
+      box = "rolePriorityGroup", summary = "RolePrioritySummary", hide = "HideSortOptions)" },
+    { label = "Class Priority", builder = "BuildClassPriorityGroup", golden = CLASS_PRIORITY, key = "sorting_classpriority",
+      box = "classPriorityGroup", summary = "ClassPrioritySummary",
+      hide = "function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end)" },
+}) do
+    print("-- Sorting page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+    local calls = 0
+    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
+    check(PAGE:find("Add(" .. g.box .. ", nil, 2)", 1, true) ~= nil, g.label .. ": classic's box still goes to column 2")
     check(body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
-          "role priority: the pane greys while custom sorting is off, as the box did")
-    check(SRC:find("roleRow.hideOn = HideSortOptions", 1, true) ~= nil,
-          "role priority: the row hides under a FrameSort takeover, as the box did")
-    check(SRC:find("roleRow.disableOn = DisableSortOptions", 1, true) ~= nil,
-          "role priority: ...and greys on the same key the box's children did")
-
-    local opts = rowOpts("Role Priority")
-    check(opts:find("toggle", 1, true) == nil,
-          "role priority: the row declares no toggle -- an order has no on/off")
-    check(opts:find("summary%s*=%s*RolePrioritySummary") ~= nil,
-          "role priority: ...it does declare a summary")
-    check(opts:find("count%s*=%s*ROLE_PRIORITY_COUNT") ~= nil,
-          "role priority: ...and the declared count, not a literal")
-
-    -- The summary names the top of the list in the locale's own words, and
-    -- follows the melee/ranged split -- with it off the list folds MELEE and
-    -- RANGED into one DPS entry, so the raw token would name a role the user
-    -- cannot see below it.
-    local word = SRC:match("local function RoleWord%(role, separate%)(.-)\n            end")
-    check(word ~= nil, "role priority: the role word is a named function")
-    if word then
-        for _, k in ipairs({ "Tank", "Healer", "Melee DPS", "Ranged DPS", "DPS" }) do
-            check(word:find('L%["' .. k .. '"%]') ~= nil,
-                  "role priority: ..." .. k .. " comes from the locale, not a literal")
-        end
-        check(word:find("if not separate then return L[\"DPS\"] end", 1, true) ~= nil,
-              "role priority: ...and folds to one DPS entry when the split is off")
-    end
-
-    -- The footer's apply is the resort the list's own callback runs.
-    check(SRC:find("tools.WireFooter(roleRow, TriggerSortForCurrentMode)", 1, true) ~= nil,
-          "role priority: Reset Group and Hold: Defaults resort the frames")
-    check(SRC:find("tools.ClaimKeys(roleRow, roleContent)", 1, true) ~= nil,
-          "role priority: the row claims whatever the pane registered")
-    check(SRC:find("tools.WireModifiedTick(roleRow)", 1, true) ~= nil,
-          "role priority: ...and its amber tick asks about exactly those keys")
+          g.label .. ": the list greys through the builder's group gate")
+    local block = sectionBlock(g.label)
+    check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", 2, ' .. g.summary .. ', DisableSortOptions, ' .. g.hide, 1, true) ~= nil,
+          g.label .. ": a card in column 2 -- header greyed while sorting is off, hidden by classic's own gate, no pin")
+    check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
+          g.label .. ": mounts the builder exactly as classic does")
 end
 
-print("-- Sorting page: Class Priority")
+print("-- Sorting page: the Priority header")
 do
-    local body = builderBody("BuildClassPriorityGroup")
-    checkCensus(census(body), CLASS_PRIORITY, "class priority")
-    checkShared("BuildClassPriorityGroup", "Class Priority")
-    check(body:find('GUI:CreateClassOrderList(parent, db, "sortClassOrder"', 1, true) ~= nil,
-          "class priority: the drag list is mounted into the pane's own parent")
-
-    local declared = tonumber(SRC:match("local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = %d+, (%d+)"))
-    check(declared ~= nil, "class priority: the page declares the row's count in one place")
-    eq(declared, settingsIn(CLASS_PRIORITY) + 1, "class priority: ...the drag list the census cannot see, and not the blurb")
-
-    check(body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
-          "class priority: the pane greys while custom sorting is off, as the box did")
-    -- The box's compound predicate, unchanged: hidden under a FrameSort takeover
-    -- OR while nothing is sorting by class.
-    check(SRC:find('classRow.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end', 1, true) ~= nil,
-          "class priority: the row carries the box's own compound gate")
-    check(SRC:find("classRow.disableOn = DisableSortOptions", 1, true) ~= nil,
-          "class priority: ...and greys on the enable key like everything else here")
-
-    local opts = rowOpts("Class Priority")
-    check(opts:find("toggle", 1, true) == nil, "class priority: the row declares no toggle")
-    check(opts:find("count%s*=%s*CLASS_PRIORITY_COUNT") ~= nil,
-          "class priority: ...and the declared count, not a literal")
-
-    -- The summary names the top class in the CLIENT's own words, so no locale
-    -- key is invented for thirteen names the game already spells.
-    local sum = SRC:match("local function ClassPrioritySummary%(d%)(.-)\n            end")
-    check(sum ~= nil, "class priority: the summary is a named function on the page")
-    if sum then
-        check(sum:find("LOCALIZED_CLASS_NAMES_MALE", 1, true) ~= nil,
-              "class priority: ...taking the class names from the client")
-        check(sum:find('return (names and names[top]) or ""', 1, true) ~= nil,
-              "class priority: ...guarded, so an unreadable order says nothing rather than erroring")
-    end
-
-    check(SRC:find("tools.WireFooter(classRow, TriggerSortForCurrentMode)", 1, true) ~= nil,
-          "class priority: Reset Group and Hold: Defaults resort the frames")
+    check(PAGE:find('local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])\n            priorityHeader.hideOn = HideSortOptions\n            Add(priorityHeader, 40, 2)', 1, true) ~= nil,
+          "priority: the category header opens column 2 and hides with both cards under a FrameSort takeover")
+    local hAt = PAGE:find("Add(priorityHeader, 40, 2)", 1, true)
+    local rAt = PAGE:find('OpenSection(L["Role Priority"]', 1, true)
+    check(hAt and rAt and hAt < rAt, "priority: ...above the cards it names")
+    -- The Separate Melee & Ranged tick still repaints the newest role list.
+    check(builderBody("BuildRolePriorityGroup"):find("roleOrderWidget = GUI:CreateRoleOrderList(", 1, true) ~= nil,
+          "priority: the role list rebinds the page's reference on every build")
 end
 
 -- ============================================================
--- 4. FRAMESORT INTEGRATION -- the box that stayed a box
--- Its widgets moved out into a Build<X>Group so the two arms cannot drift, the
--- way every converted group on this page already works. Nothing about WHAT it
--- builds changed: the census below is the pre-change inventory.
---
--- ⚠ THE BLURB READS AS "(none)" AND 250 HERE, and that is the census reader
--- being literal rather than a control going missing. Its text is wrapped in
--- `format(...)` so the L key is not the factory's second argument, and the first
--- `), <n>)` the reader finds in that chunk is the label's WRAP WIDTH. Written
--- down rather than papered over -- the value still pins the call.
+-- 4. FRAMESORT INTEGRATION -- the tick moves into the header
 -- ============================================================
 local FRAMESORT = {
     { "label",    "(none)",               "(none)",       250 },
@@ -396,275 +253,71 @@ local FRAMESORT = {
 
 print("-- Sorting page: FrameSort Integration")
 do
-    checkCensus(census(builderBody("BuildFrameSortGroup")), FRAMESORT, "framesort")
-
     local body = builderBody("BuildFrameSortGroup")
-    -- The callback is the box's own, verbatim -- it writes the key into BOTH
-    -- mode tables, tells the FrameSort module, resorts, and re-runs the page's
-    -- state passes so the sort rows hide under the takeover.
-    check(body:find("if partyDB then partyDB.useFrameSort = db.useFrameSort end", 1, true) ~= nil
-      and body:find("if raidDB then raidDB.useFrameSort = db.useFrameSort end", 1, true) ~= nil,
-          "framesort: the tick still writes both mode tables")
-    check(body:find("DF.FrameSort:OnSettingChanged()", 1, true) ~= nil,
-          "framesort: ...still tells the FrameSort module")
-    check(body:find("TriggerSortForCurrentMode()", 1, true) ~= nil,
-          "framesort: ...still resorts immediately")
-    check(body:find("self:RefreshStates()", 1, true) ~= nil,
-          "framesort: ...and still re-runs the page's state passes")
-    -- ⚠ THE PARAGRAPH KEEPS ITS 250 IN BOTH ARMS. Widening the BOX does not widen
-    -- the sentence inside it, and the pinned slot is only honest while the wrap
-    -- width it was measured at is unchanged.
-    check(body:find('"|c" .. GUI:ToneHex("caution")', 1, true) ~= nil,
-          "framesort: the experimental warning keeps its tone colour")
+    checkCensus(census(body), FRAMESORT, "framesort")
+    local guard = body:find("if not tools2.hoistToggle then", 1, true)
+    local cb = body:find('GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged)', guard or 1, true)
+    check(guard and cb and cb > guard, "framesort: the builder builds the tick only when not hoisted")
+
+    local commit = PAGE:match("local function UseFrameSortChanged%(%)(.-)\n        end")
+    check(commit ~= nil and commit:find("partyDB.useFrameSort = db.useFrameSort", 1, true) ~= nil
+      and commit:find("raidDB.useFrameSort = db.useFrameSort", 1, true) ~= nil
+      and commit:find("DF.FrameSort:OnSettingChanged()", 1, true) ~= nil
+      and commit:find("TriggerSortForCurrentMode()", 1, true) ~= nil
+      and commit:find("self:RefreshStates()", 1, true) ~= nil
+      and commit:find("RefreshCurrentPage", 1, true) == nil,
+          "framesort: one named commit -- both modes, the module, a re-sort and a state pass, never a rebuild")
+
+    check(PAGE:find("if FrameSortApi then\n            if classicLayout then", 1, true) ~= nil,
+          "framesort: only built with the FrameSort addon, in either layout")
+    check(PAGE:find("BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })", 1, true) ~= nil
+      and PAGE:find("Add(frameSortGroup, nil, 1)", 1, true) ~= nil,
+          "framesort: classic's box and column are unchanged")
+    local a = PAGE:find('OpenSection(L["FrameSort Integration"]', 1, true)
+    local b = a and PAGE:find("CloseSection(band)", a, true)
+    local block = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
+    check(block:find('OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, { db = db, key = "useFrameSort", label = L["Use FrameSort Addon"], onChanged = UseFrameSortChanged, })', 1, true) ~= nil,
+          "framesort: a card in column 1 whose header tick is Use FrameSort Addon, same commit, no pin")
+    check(block:find("BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })", 1, true) ~= nil,
+          "framesort: ...mounting the builder with hoistToggle, so there is one checkbox")
 end
 
 -- ============================================================
--- 5. WHAT IS LEFT INLINE, AND WHAT THE PAGE ADDS
--- One box that stays a box and goes full width, one control row, and the combat
--- banner -- which is not a settings group at all and is untouched.
+-- 5. THE ORDER, AND THE PAGE'S OWN FURNITURE
 -- ============================================================
-print("-- Sorting page: the stay-inline groups and the page's own order")
+print("-- Sorting page: the order and the page's own furniture")
 do
-    -- Scoped to the Sorting page by its own two ends: Auras.lua holds several
-    -- pages, and a bare 280 box on one of the others is not this pass's business.
-    local a = SRC:find('Add(CreateCopyButton(self.child, {"sort", "useFrameSort"', 1, true)
-    local b = SRC:find('{pageId = "general_labels", label = L["Group Labels"]}', 1, true)
-    check(a ~= nil and b ~= nil and b > a, "the Sorting page builder is locatable by its own ends")
-    local PAGE = SRC:sub(a or 1, b or 1)
-
-    -- ---- the box that is left is BAND WIDTH -------------------------
-    -- FrameSort Integration is a tick plus its paragraph, so it cannot be a
-    -- control row -- but it stops being a 280 box, which is the alignment rule:
-    -- it fills its column like the bands beside it. One site, one skin, and the
-    -- width comes from the tools.
-    local narrow = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
-    eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
-    -- ⚠ BandWidth(1): the box sits in column 1 now, so it asks the helper for that
-    -- column's width. The claim is unchanged -- it asks, rather than naming a literal.
-    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), tools.INLINE_BOX)", 1, true) ~= nil,
-          "inline: FrameSort Integration is built at the band's width, wearing the band skin")
-    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "inline: ...and classic still builds the bare 280 box it always built")
-    check(PAGE:find('frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)', 1, true) ~= nil,
-          "inline: ...with the header it always had, in both arms")
-    local mounts = 0
-    for _ in PAGE:gmatch("BuildFrameSortGroup%(") do mounts = mounts + 1 end
-    eq(mounts, 3, "inline: declared once, mounted twice -- the classic box and the wide one")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL ON THIS PAGE. One shared table off
-    -- the tools, and only in the arm where the tools exist.
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "inline: the skin is taken from the tools, never restated as a literal")
-
-    -- ---- Self Position is a CONTROL ROW -----------------------------
-    -- It is still NOT a popout row: a pane holding one dropdown is a click that
-    -- buys nothing.
-    check(PAGE:find('label   = L["Self Position"]', 1, true) == nil,
-          "control row: no popout row -- a pane holding one dropdown buys nothing")
-    check(PAGE:find('label     = L["Self Position"],\n                kind      = "dropdown",', 1, true) ~= nil,
-          "control row: Self Position is a dropdown control row")
-    check(PAGE:find("local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at column 1's width")
-    check(PAGE:find("selfPosBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
-          "control row: ...mounted into that band")
-    check(PAGE:find("selfPosBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "control row: ...and no band header, because the row's own label names it")
-    -- ⚠ THE GROUP'S TITLE, NOT THE DROPDOWN'S CAPTION. "Position" alone does not
-    -- say whose; "Self Position" is also the section a search breadcrumb has
-    -- always printed for this key, so the words a user searches on do not move.
-    check(PAGE:find('label     = L["Position"]', 1, true) == nil,
-          "control row: ...named 'Self Position', not the bare 'Position'")
-    -- The TABLE binding, which is what keeps the override markers and the search
-    -- index addressing the same (table, key) pair the classic dropdown gave them.
-    check(PAGE:find('options   = selfPosValues,\n                db        = db,\n                key       = "sortSelfPosition",', 1, true) ~= nil,
-          "control row: the options and the TABLE binding ride the row")
-    check(PAGE:find("onChanged = ApplySelfPosition,", 1, true) ~= nil,
-          "control row: ...and the callback both layouts now share")
-    check(PAGE:find("hideOn    = HideSortOptions,", 1, true) ~= nil,
-          "control row: ...the box's hideOn becomes the ROW's, so the slot collapses")
-    check(PAGE:find("selfPosRow.disableOn = DisableSortOptions", 1, true) ~= nil,
-          "control row: ...and its disableChildrenOn becomes the row's own grey")
-    check(PAGE:find('tools.RegisterControlRow(selfPosRow, "dropdown", "sortSelfPosition")', 1, true) ~= nil,
-          "control row: ...and it reaches search through the shared verb")
-    -- ☠ ONE COPY OF THE CALLBACK, NAMED, because both layouts drive it.
-    local apply = PAGE:match("local function ApplySelfPosition%(%)(.-)\n        end")
-    check(apply ~= nil, "control row: the dropdown's callback is a named function at page scope")
-    if apply then
-        check(apply:find("TriggerSortForCurrentMode()", 1, true) ~= nil
-          and apply:find("UpdateCombatBanner()", 1, true) ~= nil,
-              "control row: ...running exactly what the inline dropdown ran")
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "), "Unit Frame Sorting | FrameSort Integration | Role Priority | Class Priority",
+       "order: the cards open in classic's order, which is the one-column fold's")
+    local prev = 0
+    for _, a in ipairs({ "Add(sortOptionsGroup, nil, 1)", "Add(frameSortGroup, nil, 1)", "Add(selfPosGroup, nil, 1)",
+                         "Add(rolePriorityGroup, nil, 2)", "Add(classPriorityGroup, nil, 2)" }) do
+        local at = PAGE:find(a, prev + 1, true)
+        check(at ~= nil and at > prev, "classic: still calls " .. a .. " in sequence")
+        prev = at or prev
     end
-    -- Classic still builds the box, with the caption it always had.
-    check(PAGE:find('selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil,
-          "control row: classic keeps the box's own dropdown, captioned 'Position'")
-    check(PAGE:find('selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)', 1, true) ~= nil,
-          "control row: ...under the header it always had")
-    check(PAGE:find("selfPosGroup.hideOn = HideSortOptions", 1, true) ~= nil
-      and PAGE:find("selfPosGroup.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
-          "control row: ...and both of the box's own gates")
-
-    -- ---- the two bands ----------------------------------------------
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH: sorting in column 1, Priority in column 2.
-    check(SRC:find("sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
-          "bands: the sorting band is chromeless, at column 1's width")
-    check(SRC:find("priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })", 1, true) ~= nil,
-          "bands: ...and the priority band at column 2's")
-    -- A header names a SECTION. One row that already says its own name gets
-    -- none; two rows that share a word get that word.
-    check(SRC:find('priorityBand:AddWidget(GUI:CreateHeader(self.child, L["Priority"]), 40)', 1, true) ~= nil,
-          "bands: the two-row band names itself above its rows")
-    check(SRC:find("sortBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "bands: ...and the one-row band does not, because its row's label already does")
-
-    -- ---- the Add order ----------------------------------------------
-    local adds = {}
-    for name, col in PAGE:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
-        adds[#adds + 1] = { name = name, col = col }
-    end
-    local function indexOf(name, col)
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then return i end
-        end
-    end
-    -- ⚠ THE LAST MATCH, FOR A NAME THE PAGE ADDS TWICE. frameSortGroup is added at
-    -- column 1 by BOTH layouts now, and the classic arm comes first in source order,
-    -- so a first-match lookup would find the classic Add and measure against it.
-    local function indexOfLast(name, col)
-        local found
-        for i, e in ipairs(adds) do
-            if e.name == name and (col == nil or e.col == col) then found = i end
-        end
-        return found
-    end
-    -- ★ TWO COLUMNS WHEN THERE IS ROOM, in the split classic has always drawn:
-    -- sorting, FrameSort and Self Position down column 1, Priority down column 2.
-    -- They were all "both" until the page gained two columns. Still ADDED in the
-    -- page's reading order, because that is the order a narrow window folds them
-    -- back into.
-    local sortAt  = indexOfLast("sortBand", "1")
-    local fsAt    = indexOfLast("frameSortGroup", "1")
-    local selfAt  = indexOfLast("selfPosBand", "1")
-    local prioAt  = indexOfLast("priorityBand", "2")
-    check(sortAt ~= nil, "order: the sorting band fills column 1")
-    check(prioAt ~= nil, "order: ...the priority band column 2")
-    check(fsAt ~= nil, "order: ...the FrameSort box column 1")
-    check(selfAt ~= nil, "order: ...and the Self Position band column 1")
-    check(indexOf("frameSortGroup", "1") ~= nil and fsAt ~= nil and indexOf("frameSortGroup", "1") < fsAt,
-          "order: classic still puts the FrameSort box in column 1, in its own Add")
-    check(indexOf("selfPosGroup", "1") ~= nil, "order: ...and the Self Position box too")
-    check(sortAt and fsAt and sortAt < fsAt,
-          "order: the sorting band reads first")
-    check(fsAt and selfAt and fsAt < selfAt,
-          "order: ...then FrameSort, then Self Position")
-    check(selfAt and prioAt and selfAt < prioAt,
-          "order: ...with the priority band last, which is the page's old reading order")
-    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
-    -- widget otherwise, so a band placed in a column without this keeps the width it
-    -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "sortBand", "frameSortGroup", "selfPosBand", "priorityBand" }) do
-        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
-              "order: " .. band .. " fills its column rather than keeping its build width")
-    end
-
-    -- The classic column assignments, unchanged -- the one thing this pass was
-    -- not allowed to move.
-    local CLASSIC_COL = {
-        sortOptionsGroup = "1", rolePriorityGroup = "2", classPriorityGroup = "2",
-    }
-    for name, col in pairs(CLASSIC_COL) do
-        check(indexOf(name, col) ~= nil,
-              "order: the classic " .. name .. " still goes to column " .. col)
-    end
-    -- Five bare 280 boxes are left, and every one of them is inside a
-    -- classicLayout arm: a sixth appearing outside one is the drift this counts.
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 5, "order: five bare 280 boxes left, and they are the classic branch's own")
-
-    -- ---- the combat banner is untouched ------------------------------
-    -- Not a settings group, so not a candidate: it is the page's own full-width
-    -- status line, and its hideOn and refreshContent are what keep it honest.
-    check(SRC:find('Add(combatBanner, combatBanner.layoutHeight, "both")', 1, true) ~= nil,
-          "banner: the combat banner is still added full width, ahead of everything")
-    check(SRC:find("combatBanner.refreshContent = UpdateCombatBanner", 1, true) ~= nil,
-          "banner: ...with the refresh hook that re-tones it on every page refresh")
-    check(SRC:find("combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end", 1, true) ~= nil,
-          "banner: ...and its own two-condition gate")
+    check(PAGE:find('combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end', 1, true) ~= nil,
+          "page: the combat banner keeps its own gate")
+    check(PAGE:find('{pageId = "general_frame", label = L["Frame"]}', 1, true) ~= nil,
+          "page: the See Also block is unchanged")
 end
 
 -- ============================================================
--- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
---
--- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
--- row holding four was charging the same click as a row holding thirty-one. So a
--- row whose whole group is small mounts THAT GROUP under its own title line, and
--- its strip stops promising settings that are already on screen and offers to
--- pin a second copy instead.
---
--- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
--- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
--- REFUSES a pane that turns out to be big, measured off the group rather than
--- read off the badge. Only the second can be exercised against a real group, and
--- that is test_popout_page_tools.lua's job -- what is pinned here is which of
--- this page's rows asked, and which deliberately did not.
---
--- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
--- pages and several of them name a mount the same thing (roleMount, classMount,
--- bgMount and sizeMount each appear twice), so a census that took the first
--- match in the file would cheerfully describe another page's row.
+-- 6. ZERO NEW LOCALE STRINGS
 -- ============================================================
-print("-- Sorting page: which rows mount their pane on the plate")
+print("-- Sorting page: every locale string the page asks for already ships")
 do
-    local WANT = {
-        { "BuildSortOptionsGroup",           true }, -- 3, with the enable tick hoisted beside them
-        { "BuildRolePriorityGroup",          false }, -- 1 -- but it is a 135px drag list
-        { "BuildClassPriorityGroup",         false }, -- 1 -- and this one is 320px of it
-    }
-
-    -- Every PopoutContent call in the file, filed under the builder it feeds.
-    local CALLS = {}
-    do
-        local pos = 1
-        while true do
-            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
-            if not a then break end
-            -- The `end` closing the call sits at the page builder's own twelve
-            -- spaces; everything inside the closure is indented further, so this
-            -- is the first one that can be it. The tail read past it is long
-            -- enough to carry an opt-in and nothing else.
-            local b = SRC:find("\n            end", a, true)
-            local body = SRC:sub(a, (b or a) + 48)
-            local builder = body:match("(Build[%w_]+Group)%(")
-            if builder then CALLS[builder] = body end
-            pos = a + 1
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    local seen = {}
+    for key in PAGE:gmatch('L%["([^"]+)"%]') do seen[key] = true end
+    local missing = 0
+    for key in pairs(seen) do
+        if not ENUS:find('L["' .. key .. '"] = true', 1, true) then
+            missing = missing + 1
+            check(false, "locale: enUS ships L[\"" .. key .. "\"]")
         end
     end
-
-    for _, spec in ipairs(WANT) do
-        local builder, wantInline = spec[1], spec[2]
-        local body = CALLS[builder]
-        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
-        local gotInline = body ~= nil
-            and body:find("end, nil, { inline = true })", 1, true) ~= nil
-        if wantInline then
-            check(gotInline, "inline: " .. builder .. " asks for the plate")
-        else
-            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
-        end
-    end
-
-    -- ⚠ THE TWO PRIORITY ROWS ARE THE EXCEPTION A COUNT CANNOT CATCH, and they
-    -- are left behind their strips on purpose. Each declares ONE setting, which is
-    -- as small as a row gets -- but the setting is a DRAG LIST, 135px of it for the
-    -- roles and 320px for the classes, so the pair mounted inline would put most
-    -- of a screen of reorderable rows into a band that holds three lines today. A
-    -- count is a proxy for how much room a group needs, and a list is where the
-    -- proxy stops being true.
-
-    -- ...and the hoisted tick SURVIVES the move. It is the ROW's own on/off rather
-    -- than one of the three settings now on the plate -- which is why the builder
-    -- skips its own copy (hoistToggle) and why a plate showing all three is still
-    -- showing each of them exactly once.
-    check(SRC:find('tools.RegisterHoistedToggle(sortRow, L["Enable Custom Sorting"]', 1, true) ~= nil,
-          "inline: ...and the row's own tick is still hoisted beside the plate")
+    eq(missing, 0, "locale: the page adds no new string")
 end

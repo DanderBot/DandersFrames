@@ -102,50 +102,78 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: five 280 boxes in two columns.
-        -- POPOUT turns the three MULTI-CONTROL groups into feature rows -- Unit
-        -- Frame Sorting, Role Priority, Class Priority. Neither of the other two
-        -- earns a row -- a pane holding one dropdown is a click that buys nothing
-        -- -- so each takes the shape that fits what it IS: Self Position is one
-        -- control and becomes a CONTROL ROW, and FrameSort Integration is a
-        -- control plus the paragraph that explains it, so it stays a BOX and goes
-        -- FULL WIDTH. Every top-level object on the page then starts and ends on
-        -- the same two edges.
+        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
+        -- two settings per row, dim captions, Expand All / Collapse All at the
+        -- top, and the two page columns classic has always drawn -- sorting itself
+        -- down the left, the drag orders down the right:
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
-        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
-        -- it always built, which is what makes "classic is unchanged" structural
-        -- rather than a promise -- test_sorting_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move.
+        --   column 1   Unit Frame Sorting (+ Self Position), FrameSort Integration
+        --              (only with the FrameSort addon; header tick)
+        --   column 2   "Priority"  Role Priority, Class Priority
+        --
+        -- ⚠ SELF POSITION MOVES INTO UNIT FRAME SORTING. It was the page's one lone
+        -- control -- a one-dropdown box in classic, a control row after the popout
+        -- sweep -- and it is the first level of the very order that card
+        -- describes ("Self Position > Role > Class > Name"). Classic keeps its box.
+        --
+        -- ☠ ENABLE CUSTOM SORTING STAYS IN THE BODY of the first card, as Show
+        -- Debuffs does on the Debuff Bar: it is the PAGE gate. Shut, that card's
+        -- corner says Off while sorting is off; the two priority cards grey their
+        -- headers with it. Use FrameSort Addon is its own card's on/off, so it moves
+        -- into that card's header.
+        --
+        -- ⚠ NO PINS ON THIS PAGE. Every card decides what ORDER frames sort in,
+        -- which is behaviour, not looks.
+        --
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
+        -- The classic branch mounts the SAME builder into the box it always built,
+        -- which is what makes "classic is unchanged" structural rather than a
+        -- promise -- test_sorting_page_builders.lua pins the inventory of each one
+        -- against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery, which carries the card helper. nil in
+        -- classic, which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== THE PAGE'S TWO BANDS =======================================
-        -- Full-width chromeless containers: a feature row's popout docks outside
-        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
-        -- in would leave that beam crossing half the page.
-        --
-        -- The sorting band is ONE row whose own label already says "Unit Frame
-        -- Sorting", so it carries no header. The priority band is TWO rows and
-        -- gets one: a header names the SECTION, and "Priority" is the word both
-        -- rows share.
-        local sortBand, priorityBand
-        if tools then
-            sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            priorityBand:AddWidget(GUI:CreateHeader(self.child, L["Priority"]), 40)
+        -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
+        -- here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ===== UNIT FRAME SORTING (a 280 box in classic, the sorting band's row)
+        -- ===== SELF POSITION'S VOCABULARY AND COMMIT, AT PAGE SCOPE ========
+        -- Declared above the Unit Frame Sorting card, which carries the dropdown
+        -- in modern; classic's own Self Position box, further down, reads the
+        -- same two.
+        local selfPosValues = {
+            ["FIRST"] = L["Always First"],
+            ["LAST"] = L["Always Last"],
+            ["SORTED"] = L["Sorted with Group"],
+            ["NORMAL"] = L["Sorted with Group"],
+            _order = {"FIRST", "LAST", "SORTED"},
+        }
+
+        -- The dropdown's callback, under a name at page scope: both layouts drive
+        -- it, and two copies of a body that repaints the combat banner is the
+        -- kind of duplication that drifts one of them.
+        local function ApplySelfPosition()
+            TriggerSortForCurrentMode()
+            UpdateCombatBanner()
+        end
+
+        -- ===== UNIT FRAME SORTING (a 280 box in classic, the first card in
+        -- column 1 in modern) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db keys, same slot heights, same hideOns.
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while custom sorting is off; the pane has to do the same,
+        -- own children while custom sorting is off; the card has to do the same,
         -- and one builder serving both is what stops the two drifting.
         local function BuildSortOptionsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -154,8 +182,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local raidSortNote = group:AddWidget(GUI:CreateLabel(parent, L["Raid: Group layout sorts within each group.\nFlat grid layout sorts all players together."], 250), 35)
             raidSortNote.hideOn = function() return GUI.SelectedMode ~= "raid" end
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the group's only on/off control.
+            -- Built in both layouts: it is the PAGE gate, so no card hoists it
+            -- (see the page note). The seam stays for any future caller.
             if not tools2.hoistToggle then
                 local sortEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Custom Sorting"], db, "sortEnabled", function()
                     TriggerSortForCurrentMode()
@@ -171,8 +199,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- The role list's SHAPE depends on this key -- four roles or
                 -- three -- so it has to be told. `roleOrderWidget` is whichever
                 -- instance the Role Priority builder made last (see its note);
-                -- `reflowValues` is the popout layout's own belt, repainting the
-                -- list in every mounted pane including a pinned second one.
+                -- `reflowValues` is a belt for a caller that mounts more than one
+                -- list (none does now: the priority cards have no pin).
                 if roleOrderWidget and roleOrderWidget.Refresh then roleOrderWidget.Refresh() end
                 if tools2.reflowValues then tools2.reflowValues() end
                 UpdateCombatBanner()
@@ -220,6 +248,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Class > Name" -- with the levels that are actually switched on.
             -- L["Role"] is unconditional because role order is what this sorts by
             -- whatever else is off, so a default profile still says something.
+            -- Shut while sorting is off, the corner says Off instead.
             --
             -- ⚠ THE MELEE/RANGED SPLIT IS DELIBERATELY NOT HERE. It refines the
             -- Role entry rather than adding a level to the list, and there is no
@@ -227,6 +256,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- sentence. A summary is not worth inventing a string for.
             local function SortOptionsSummary(d)
                 if not d then return "" end
+                if not d.sortEnabled then return L["Off"] end
                 local parts = { L["Role"] }
                 if d.sortByClass then parts[#parts + 1] = L["Class"] end
                 local alpha = d.sortAlphabetical
@@ -235,144 +265,63 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three, and the two blurbs beside them are not among them: the badge
-            -- counts SETTINGS, not everything the pane mounts. The enable tick is
-            -- HOISTED onto the row, so it is not one of them either.
-            local SORT_OPTIONS_COUNT = 3
-
-            -- The group's own apply, named once so the footer's Reset and Hold do
-            -- exactly what the controls' own callbacks do.
-            local function ApplySortOptions()
-                TriggerSortForCurrentMode()
-                UpdateCombatBanner()
-            end
-
-            -- ☠ NOT GUI:RefreshCurrentPage, which is what the classic checkbox
-            -- ends with. A rebuild retires every widget on the page including the
-            -- row being clicked, and the row's write path calls row.Refresh()
-            -- after this returns -- on a dead frame. The rebuild was only ever
-            -- re-running the hideOn and disableOn passes, and RefreshStates does
-            -- both without destroying anything.
-            local function OnSortEnabledToggle()
-                ApplySortOptions()
-                -- The rows: this one's summary and off-state, and the two
-                -- priority rows, which grey on the same key.
-                self:RefreshStates()
-                -- ...and the panes, because the group gate greys the sort
-                -- controls from inside the pane too.
-                tools.ReflowMounted()
-            end
-
-            -- ☠ THREE SETTINGS, SO THE GROUP GOES ON THE PLATE. A row holding
-            -- three was charging the same click as a row holding thirty-one, and
-            -- the click bought nothing: `inline` mounts the pane's own group under
-            -- the title line instead, and the strip then offers to PIN a second
-            -- instance beside another page rather than promising settings that are
-            -- already on screen. See CreatePopoutPageTools' INLINE_MAX for what
-            -- would refuse it -- that number is measured off the PANE, where the
-            -- two blurbs are children like any other even though the badge above
-            -- does not count them as settings.
-            --
-            -- ⚠ AND THE TICK BELOW STAYS HOISTED. It is not one of the three: it
-            -- is the ROW's own on/off, which is why the builder skips its copy and
-            -- why the count never included it. It is also what folds the plate away
-            -- when sorting is off -- the one state where three greyed controls
-            -- sitting in the band would be the worst use of the space.
-            local sortMount, sortContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildSortOptionsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    reflowValues = function() tools.ReflowMounted(true) end,
-                    hoistToggle = true,
-                })
-            end, nil, { inline = true })
-            local sortRow = sortBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Unit Frame Sorting"],
-                db       = tools.RowDB,
-                toggle   = { key = "sortEnabled" },
-                summary  = SortOptionsSummary,
-                count    = SORT_OPTIONS_COUNT,
-                onToggle = OnSortEnabledToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = sortMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(sortRow, sortContent)
-            tools.WireModifiedTick(sortRow)
-            tools.WireFooter(sortRow, ApplySortOptions)
-            tools.RegisterHoistedToggle(sortRow, L["Enable Custom Sorting"], "sortEnabled", OnSortEnabledToggle)
-
-            -- ⚠ NO hideOn ON THIS ROW, and that mirrors classic exactly: the box
-            -- had none either, only its children did (HideSortOptions). Under a
-            -- FrameSort takeover the enable checkbox stayed visible while the
-            -- options around it vanished, and the row keeps that -- its pane's
-            -- own hideOns empty it out, and the row itself stays where the user
-            -- last saw it.
-            --
-            -- ★ TWO COLUMNS WHEN THERE IS ROOM, and the split classic has always
-            -- drawn: sorting itself, FrameSort and Self Position down the left, the
-            -- Priority band down the right. Every band is still added in place and
-            -- in reading order, which is the order a narrow window folds them back
-            -- into. That is also the balanced split: two rows against the Priority
-            -- band's two and its header, the FrameSort box joining the left when the
-            -- addon is installed. Sorting and Priority together on the left would
-            -- have left Self Position alone on the right, three rows against one.
-            -- ⚠ layoutColFill is what makes each band track its column (see the
-            -- Frame page and GUI.ColumnWidth). Without it the layout pass leaves a
-            -- band at the width it was built at and it overhangs its neighbour.
-            sortBand.layoutColFill = true
-            Add(sortBand, nil, 1)
+            -- ☠ THE PAGE'S TWO BULK VERBS, at col "both", under the combat banner
+            -- and above every card -- the Debuff Bar's placement.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- ☠ NO TICK: Enable Custom Sorting is the page gate and stays in the
+            -- body, built by the builder exactly as classic builds it. No pin.
+            local band = OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)
+            BuildSortOptionsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- ☠ SELF POSITION, THE PAGE'S LONE CONTROL, MOVED IN HERE (see the page
+            -- note), at the foot of the order it heads. Classic's dropdown call,
+            -- captioned with the box's own name -- "Position" alone, on a page
+            -- about sorting, does not say WHOSE -- with the box's two gates: hidden
+            -- under a FrameSort takeover, and greyed with the rest of this card by
+            -- the builder's group gate while custom sorting is off.
+            local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
+            selfPos.hideOn = HideSortOptions
+            CloseSection(band)
         end
 
         -- ===== FRAMESORT INTEGRATION GROUP (a 280 box in column 1 in classic, a
-        -- full-width box here) =====
+        -- card in column 1 in modern) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db key, same callback, same slot heights.
+        --
+        -- The tick's commit, named so the in-body checkbox and the card's header
+        -- tick run the same body.
+        local function UseFrameSortChanged()
+            -- Set both modes simultaneously
+            local partyDB = DF:GetDB("party")
+            local raidDB = DF:GetDB("raid")
+            if partyDB then partyDB.useFrameSort = db.useFrameSort end
+            if raidDB then raidDB.useFrameSort = db.useFrameSort end
+            -- Notify the FrameSort module
+            if DF.FrameSort and DF.FrameSort.OnSettingChanged then
+                DF.FrameSort:OnSettingChanged()
+            end
+            -- Trigger a re-sort so the change takes effect immediately
+            TriggerSortForCurrentMode()
+            -- Refresh options visibility
+            self:RefreshStates()
+        end
+
         local function BuildFrameSortGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
             group:AddWidget(GUI:CreateLabel(parent, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
-            group:AddWidget(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", function()
-                -- Set both modes simultaneously
-                local partyDB = DF:GetDB("party")
-                local raidDB = DF:GetDB("raid")
-                if partyDB then partyDB.useFrameSort = db.useFrameSort end
-                if raidDB then raidDB.useFrameSort = db.useFrameSort end
-                -- Notify the FrameSort module
-                if DF.FrameSort and DF.FrameSort.OnSettingChanged then
-                    DF.FrameSort:OnSettingChanged()
-                end
-                -- Trigger a re-sort so the change takes effect immediately
-                TriggerSortForCurrentMode()
-                -- Refresh options visibility
-                self:RefreshStates()
-            end), 30)
+            -- Suppressed when the CARD's header carries this tick.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", UseFrameSortChanged), 30)
+            end
         end
 
-        -- ☠ IT STAYS A BOX, AND IT GOES FULL WIDTH. It is not a single control --
-        -- it is a tick plus the paragraph that explains it, which is the pet-frame
-        -- boxes' shape (Pages/Options.lua) and the reason they stayed boxes too.
-        -- A control row draws ONE name and has nowhere to put a paragraph but a
-        -- hover, and the paragraph here carries an EXPERIMENTAL warning -- the one
-        -- sentence on this page that must not be behind a hover.
-        --
-        -- What changes is the single thing that made it read as a second visual
-        -- language: it is constructed at the width of the column it sits in and
-        -- FILLS that column, so its left and right edges are the bands' edges.
-        -- ⚠ layoutColFill IS WHAT MAKES A COLUMN SAFE FOR IT. Without the flag the
-        -- layout pass never resizes a column widget (GUI/Panel.lua's LayoutPage),
-        -- so a box built wide and dropped in a column would run straight over
-        -- column 2. It was full width -- a sync point -- until the page gained two
-        -- columns; left there it would strand the sorting band with a hole beside
-        -- it.
-        --
-        -- ⚠ THE BLURB KEEPS ITS 250 AND ITS PINNED SLOT. Widening the BOX does not
-        -- widen the paragraph inside it: at the band's width a sentence would run
-        -- to a measure nobody reads comfortably, and the pinned height is only
-        -- honest while the wrap width it was measured at is unchanged. The pet
-        -- boxes hold their blurbs at 250 inside a full-width box for the same
-        -- reason.
+        -- ⚠ THE EXPERIMENTAL PARAGRAPH STAYS IN THE CARD'S BODY, at its 250 and
+        -- its pinned slot: it is the one sentence on this page that must not be
+        -- behind a hover, and a card flows it on a row of its own.
         if FrameSortApi then
             if classicLayout then
                 local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -380,61 +329,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
                 Add(frameSortGroup, nil, 1)
             else
-                local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), tools.INLINE_BOX)
-                frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
-                BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
-                frameSortGroup.layoutColFill = true
-                Add(frameSortGroup, nil, 1)
+                -- ☠ USE FRAMESORT ADDON IS THE HEADER'S TICK; the builder skips
+                -- its own (hoistToggle). Same key, label and commit. No pin.
+                local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
+                    db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
+                    onChanged = UseFrameSortChanged,
+                })
+                BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })
+                CloseSection(band)
             end
         end
 
-        -- ===== SELF POSITION (a 280 box in column 1 in classic, a control row
-        -- here) =====
-        local selfPosValues = {
-            ["FIRST"] = L["Always First"],
-            ["LAST"] = L["Always Last"],
-            ["SORTED"] = L["Sorted with Group"],
-            ["NORMAL"] = L["Sorted with Group"],
-            _order = {"FIRST", "LAST", "SORTED"},
-        }
-
-        -- The dropdown's callback, under a name at page scope: both layouts drive
-        -- it now, and two copies of a body that repaints the combat banner is the
-        -- kind of duplication that drifts one of them.
-        local function ApplySelfPosition()
-            TriggerSortForCurrentMode()
-            UpdateCombatBanner()
-        end
-
-        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT. A
-        -- pane holding one dropdown is a click that buys nothing, so this never
-        -- earned a feature row; but a 280 box beside a full-width band is the one
-        -- shape a column of plates cannot absorb -- a narrower rectangle with its
-        -- own border and its own left edge, in a list whose whole argument is that
-        -- every row starts at the same x. So the dropdown wears the same plate the
-        -- rows above it do (DandersUI/ControlRow.lua), in a band of its own.
-        --
-        -- ⚠ ONE NAME, AND IT IS THE GROUP'S. The box put "Self Position" over a
-        -- dropdown captioned "Position"; a row draws ONE label, and of the two only
-        -- "Self Position" survives standing alone -- "Position" on a page about
-        -- sorting does not say WHOSE. It is also the section name a search
-        -- breadcrumb has always printed for this setting, so the words a user
-        -- searches on do not move. Both strings already ship; nothing is invented.
-        --
-        -- ⚠ THE db IS THE TABLE, NOT tools.RowDB. A dropdown reaches the override
-        -- markers and the search index through the dbRef the kit derives from a
-        -- TABLE binding, and a FUNCTION binding has none by contract -- so the
-        -- Language row's rule applies here: the entry the kit registers off this
-        -- row is the same (table, key) pair the classic dropdown gives them. The
-        -- page is rebuilt on a mode switch (GUI:RefreshCurrentPage), which is what
-        -- makes capturing the table safe -- and it is what every classic control on
-        -- this page already does.
-        --
-        -- ⚠ THE BOX'S TWO GATES, ON THE ROW: hidden under a FrameSort takeover,
-        -- greyed while custom sorting is off. hideOn is the ROW's, so the band's
-        -- own layout collapses the slot instead of drawing an empty box; the grey
-        -- was the group's disableChildrenOn over one child, which on a row IS the
-        -- row's own disableOn (the two priority rows below say it the same way).
+        -- ===== SELF POSITION (a 280 box in column 1 in classic; in modern the
+        -- last control of the Unit Frame Sorting card, above) =====
         if classicLayout then
             local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)
             selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)
@@ -443,31 +350,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             selfPosGroup.disableChildrenOn = DisableSortOptions
             Add(selfPosGroup, nil, 1)
         else
-            local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            local selfPosRow = selfPosBand:AddWidget(GUI:CreateControlRow(self.child, {
-                label     = L["Self Position"],
-                kind      = "dropdown",
-                options   = selfPosValues,
-                db        = db,
-                key       = "sortSelfPosition",
-                onChanged = ApplySelfPosition,
-                hideOn    = HideSortOptions,
-            }))
-            selfPosRow.disableOn = DisableSortOptions
-            tools.RegisterControlRow(selfPosRow, "dropdown", "sortSelfPosition")
-            selfPosBand.layoutColFill = true
-            Add(selfPosBand, nil, 1)
+            -- Modern: Self Position is the last control of Unit Frame Sorting.
         end
-        
-        -- ===== ROLE PRIORITY (a 280 box in classic, a priority-band row) =====
+
+        -- ===== ROLE PRIORITY (a 280 box in classic, a card under "Priority" in
+        -- column 2 in modern) =====
         -- ☠ THE WIDGET REFERENCE IS REBOUND ON EVERY BUILD, NOT CAPTURED ONCE.
         -- `roleOrderWidget` is read by the Separate Melee & Ranged callback,
-        -- which has to repaint whichever role list the user can actually see --
-        -- and the popout shell runs a row's build ONCE PER INSTANCE, so pinning
-        -- one panel and reopening the row makes a second list. The upvalue is
-        -- assigned INSIDE the builder so it always names the newest instance;
-        -- the callback's `reflowValues` half then covers the older ones, which is
-        -- what the drag lists' refreshValue opt-in was added for.
+        -- which has to repaint whichever role list the user can actually see.
+        -- The upvalue is assigned INSIDE the builder so it always names the
+        -- newest instance.
         local function BuildRolePriorityGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder. Top = first."], 250), 25)
@@ -479,7 +371,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = DisableSortOptions
         end
 
-        -- ===== CLASS PRIORITY (a 280 box in classic, a priority-band row) =====
+        -- ===== CLASS PRIORITY (a 280 box in classic, a card under "Priority" in
+        -- column 2 in modern) =====
         local function BuildClassPriorityGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder. Top = first."], 250), 25)
@@ -518,7 +411,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- order says in a line. Guarded reads, and NO invented words -- the
             -- role names are the locale's own and the class names are the
             -- client's, exactly as the two lists draw them. An order the page
-            -- cannot read yields "", and the kit still shows label and count.
+            -- cannot read yields "", and a shut card is then just its title.
             --
             -- ⚠ THE ROLE WORD FOLLOWS THE SPLIT. With Separate Melee & Ranged
             -- off, the list folds MELEE and RANGED back into one DPS entry, so a
@@ -550,58 +443,33 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return (names and names[top]) or ""
             end
 
-            -- One apiece: the drag list. The blurb above it is prose, not a
-            -- setting, and the badge counts settings.
-            local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = 1, 1
+            -- The category header the two priority cards sit under, in column 2.
+            -- It hides with them under a FrameSort takeover, so it is never a
+            -- title left standing over nothing.
+            local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])
+            priorityHeader.hideOn = HideSortOptions
+            Add(priorityHeader, 40, 2)
 
-            -- Both lists write one TABLE key, and both rows carry Reset Group and
-            -- Hold: Defaults -- which is exactly the write the list itself did not
-            -- make. The lists answer the group-wide value sweep now
-            -- (Controls.lua, container.refreshValue), so the reset repaints them.
-            local roleMount, roleContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildRolePriorityGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
-            local roleRow = priorityBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Role Priority"],
-                db      = tools.RowDB,
-                summary = RolePrioritySummary,
-                count   = ROLE_PRIORITY_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = roleMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(roleRow, roleContent)
-            tools.WireModifiedTick(roleRow)
-            tools.WireFooter(roleRow, TriggerSortForCurrentMode)
-            -- The box's own two gates, on the row: HIDDEN under a FrameSort
-            -- takeover, GREYED while custom sorting is off. The pane keeps the
-            -- grey as well (the builder's disableChildrenOn), so an open panel
-            -- looks the way the row does.
-            roleRow.hideOn = HideSortOptions
-            roleRow.disableOn = DisableSortOptions
+            -- The box's own two gates, on the card: HIDDEN under a FrameSort
+            -- takeover (header and band), the header GREYED while custom sorting
+            -- is off -- the list itself greys through the builder's group gate.
+            -- No pin: a drag order is behaviour.
+            local band = OpenSection(L["Role Priority"], "sorting_rolepriority", 2, RolePrioritySummary,
+                DisableSortOptions, HideSortOptions)
+            BuildRolePriorityGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
 
-            local classMount, classContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildClassPriorityGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
-            local classRow = priorityBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Class Priority"],
-                db      = tools.RowDB,
-                summary = ClassPrioritySummary,
-                count   = CLASS_PRIORITY_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = classMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(classRow, classContent)
-            tools.WireModifiedTick(classRow)
-            tools.WireFooter(classRow, TriggerSortForCurrentMode)
-            classRow.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
-            classRow.disableOn = DisableSortOptions
-
-            priorityBand.layoutColFill = true
-            Add(priorityBand, nil, 2)
+            -- Also hidden while Sort by Class is off -- classic's variant gate.
+            local band = OpenSection(L["Class Priority"], "sorting_classpriority", 2, ClassPrioritySummary,
+                DisableSortOptions, function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end)
+            BuildClassPriorityGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- See Also links
