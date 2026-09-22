@@ -2993,14 +2993,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
         end
 
-        -- What the Settings group's two remaining ticks cost between them: the
-        -- strip's own drive, and the buff row's, because Hide Raid Buffs from Buff
-        -- Bar is a candidate filter on the OTHER row.
-        local function ApplyMissingSettings()
-            refreshMissing()
-            DF:UpdateAllAuras()
-        end
-
         local anchorOptions = {
             ["TOPLEFT"]= L["Top Left"], ["TOP"]= L["Top"], ["TOPRIGHT"]= L["Top Right"],
             ["LEFT"]= L["Left"], ["CENTER"]= L["Center"], ["RIGHT"]= L["Right"],
@@ -3011,76 +3003,63 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- CLASSIC is exactly what it always was: five 280 boxes in two columns, in
         -- the columns and the order they have always had.
         --
-        -- POPOUT turns all five into feature rows in two bands:
+        -- MODERN is the Debuff Bar's collapsible-card design, section for section:
+        -- one card per group, two settings per row inside a card wide enough, dim
+        -- captions, the value summary in a shut card's corner, Expand All /
+        -- Collapse All at the top.
         --
-        --   "Content"   Settings and Buffs to Check (Manual Mode) -- whether the
-        --               icon exists at all, and which raid buffs it is watching.
-        --   "Icon"      Appearance, Position, Border -- how big the icon is, where
-        --               it sits and what rings it.
+        --   column 1   "Content"   Settings and Buffs to Check (Manual Mode) --
+        --                          whether the icon exists at all, and which raid
+        --                          buffs it is watching.
+        --   column 2   "Icon"      Appearance, Position, Border -- how big the icon
+        --                          is, where it sits and what rings it.
         --
-        -- Both band headers are locale strings the page already ships, and neither
-        -- can strand: the Content band's first row carries the page's own gate and
-        -- is never hidden, and none of the Icon band's three can hide either.
-        --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
-        -- { group, parent, refreshStates } and, where a toggle is hoisted,
-        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
-        -- always built -- test_missingbuffs_page_builders.lua pins the inventory of
-        -- each one against the census taken before the move.
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle moved into a card's
+        -- header, `hoistToggle`. The classic branch mounts the SAME builder into the
+        -- box it always built -- test_missingbuffs_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which is
-        -- what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        local contentBand, iconBand
-        if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
-            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
-            iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
-        -- ☠ THE PAGE GATE, ON THE ROWS. Enable Missing Buff Icon greys every group
-        -- it greyed in classic -- all four of the others, which is every box on the
-        -- page bar the one carrying the tick itself.
+        -- ☠ THE PAGE GATE, ON THE CARDS. Enable Missing Buff Icon greys the header
+        -- of every card it greyed in classic -- all four of the others, which is
+        -- every box on the page bar the one carrying the switch itself. The bodies
+        -- grey through each builder's own group.disableChildrenOn.
         --
-        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Buff Bar's reason: it holds
-        -- the gate's own tick, so greying it would leave no way to switch the icon
-        -- back on.
+        -- ⚠ THE SETTINGS CARD IS THE EXCEPTION: it holds the switch, so greying it
+        -- would leave no way to turn the icon back on.
+        --
+        -- ☠ NO INDEX-1 REPAIR ON THIS PAGE ANY MORE (the Buff Bar's note): DandersUI
+        -- Sections' RefreshChildStates skips on the `isSectionHeader` mark now, not
+        -- on the position, so every child of a band greys on its own.
         local function MissingOffRow(d) return not (d or db).missingBuffIconEnabled end
-
-        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
-        -- DandersUI Sections' RefreshChildStates greys every child a
-        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
-        -- first child is always the header, and wrong for a popout pane, which has
-        -- no header at all. The Pet Frames / Resource Bar / Buff Bar answer,
-        -- verbatim: composed with whatever predicate the widget already carries and
-        -- applied at the MOUNT rather than inside the builder.
-        --
-        -- Only the three panes that OPEN ON A GATED CONTROL need it. Settings and
-        -- Buffs to Check both open on a label, which has nothing to grey.
-        local function GatePaneFirstChild(group)
-            local entry = group and group.groupChildren and group.groupChildren[1]
-            local w = entry and entry.widget
-            if not w then return end
-            local prev = w.disableOn
-            w.disableOn = function(d) return MissingOffRow(d) or (prev and prev(d)) or false end
-        end
 
         -- The summary convention, once: at most four items, a fixed order,
         -- "\194\183" between them, WORDS localised and numbers raw, every read
         -- guarded because a profile mid-migration may be missing any of these keys.
         local function Join(parts) return table.concat(parts, " \194\183 ") end
 
-        -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
-        -- first row) =====
-        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
-        -- rather than three control rows: a control row carries a SETTING rather
-        -- than a group, so it can offer neither the group's Reset Group nor the
-        -- tick that says the group has been touched -- and the page gate would then
-        -- belong to no row at all.
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the first Content card
+        -- in Modern) =====
+        -- ☠ THE PAGE'S MASTER SWITCH LIVES IN THIS GROUP'S BODY in both layouts,
+        -- as Show Buffs does on the Buff Bar. The hoistToggle seam below is kept
+        -- for the builder's shape, but no mount passes it any more.
         local function BuildMissingSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -3146,53 +3125,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Two: Auto-detect and Hide Raid Buffs from Buff Bar. The blurb and the
-            -- client-capability banner are prose, and the badge counts settings.
-            -- The Enable tick is HOISTED onto the row.
-            local MISSING_SETTINGS_COUNT = 2
-
-            -- What the suppressed Enable checkbox ran, plus a repaint of every pane
-            -- standing open -- four of which grey with it. Never a page rebuild:
-            -- that would retire the row being clicked through.
-            local function OnMissingEnableToggle()
-                self:RefreshStates()
-                refreshMissing()
-                tools.ReflowMounted()
-            end
-
-            -- ☠ TWO SETTINGS AND TWO LINES OF PROSE BEHIND THE ROW'S OWN TICK, so the
-            -- group goes on the plate -- and folds away entirely when the tick is off, which
-            -- is the one state where greyed controls holding the row open would be the worst
-            -- use of the space. This is the page's gate, so the plate is also the first
-            -- thing a reader meets on it.
-            --
-            -- ⚠ THE ENABLE TICK STAYS HOISTED. It is the ROW's toggle, not one of the two
-            -- -- the builder skips it under `hoistToggle` -- so nothing here is declared
-            -- twice and there is no twin to delete.
-            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingSettingsGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
-                })
-            end, nil, { inline = true })
-            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Settings"],
-                db       = tools.RowDB,
-                toggle   = { key = "missingBuffIconEnabled" },
-                summary  = MissingSettingsSummary,
-                count    = MISSING_SETTINGS_COUNT,
-                onToggle = OnMissingEnableToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = settingsMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(settingsRow, settingsContent)
-            tools.WireModifiedTick(settingsRow)
-            tools.WireFooter(settingsRow, ApplyMissingSettings)
-            tools.RegisterHoistedToggle(settingsRow, L["Enable Missing Buff Icon"], "missingBuffIconEnabled", OnMissingEnableToggle)
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
+            -- The category header the two Content cards sit under.
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+            -- ☠ ENABLE MISSING BUFF ICON STAYS IN THE BODY, as Show Buffs and Show
+            -- Debuffs do: it is the PAGE gate, a fold is not a switch, and a header
+            -- tick that greyed the whole page would surprise people. So no toggle
+            -- and no hoistToggle -- the builder builds it inside, exactly as
+            -- classic does. Decides whether the icon exists, so no pin.
+            local band = OpenSection(L["Settings"], "missingbuffs_settings", 1, MissingSettingsSummary)
+            BuildMissingSettingsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== BUFFS TO CHECK (MANUAL MODE) (a 280 box in column 1 in classic, the
@@ -3264,39 +3213,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             buffsGroup.hideOn = HideManualBuffVariant
             Add(buffsGroup, nil, 1)
         else
-            -- Six: the six raid buffs. The caption above them is prose.
-            local MISSING_BUFFS_COUNT = 6
-
-            local buffsMount, buffsContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingBuffsToCheckGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-            end)
-            local buffsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Buffs to Check (Manual Mode)"],
-                db      = tools.RowDB,
-                summary = MissingBuffsToCheckSummary,
-                count   = MISSING_BUFFS_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = buffsMount,
-                footerStrip = true,
-            }))
-            -- The box's own variant gate becomes the ROW's, so the band collapses
-            -- the slot instead of drawing a plate for a list auto-detect has taken
-            -- over.
-            buffsRow.hideOn = HideManualBuffVariant
-            tools.ClaimKeys(buffsRow, buffsContent)
-            tools.WireModifiedTick(buffsRow)
-            -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS rather
-            -- than the shape. All six are plain booleans in the profile, so Reset
-            -- Group writes VALUES -- there is no table for it to replace and nothing
-            -- downstream holding a reference to one. (The Buff Bar's filter row
-            -- refused a footer for exactly the opposite reason.)
-            tools.WireFooter(buffsRow, refreshMissing)
-            buffsRow.disableOn = MissingOffRow
+            -- ☠ THE VARIANT GATE GOES ON BOTH HALVES (OpenSection's hideFn): with
+            -- auto-detect on there is nothing to pick by hand, so the header and its
+            -- band go together, exactly as the box collapsed out of the column.
+            -- Greys with the page gate, as the row did. Decides which buffs are
+            -- WATCHED -- what shows, not how it looks -- so no pin.
+            local band = OpenSection(L["Buffs to Check (Manual Mode)"], "missingbuffs_buffs", 1, MissingBuffsToCheckSummary,
+                MissingOffRow, HideManualBuffVariant)
+            BuildMissingBuffsToCheckGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
@@ -3340,33 +3268,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(appearanceGroup, nil, 2)
         else
-            -- Three: size, scale and the frame level.
-            local MISSING_APPEARANCE_COUNT = 3
-
-            -- Three sliders, so the group goes on the plate. Size and scale are what an icon
-            -- row is opened for; the frame level rides along rather than costing a click.
-            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingAppearanceGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Appearance"],
-                db      = tools.RowDB,
-                summary = MissingAppearanceSummary,
-                count   = MISSING_APPEARANCE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = appearanceMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(appearanceRow, appearanceContent)
-            tools.WireModifiedTick(appearanceRow)
-            tools.WireFooter(appearanceRow, refreshMissing)
-            appearanceRow.disableOn = MissingOffRow
+            -- Column 2 opens here, with the category header its three cards sit
+            -- under. How the icon LOOKS, so it is pinnable.
+            Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)
+            local band = OpenSection(L["Appearance"], "missingbuffs_appearance", 2, MissingAppearanceSummary, MissingOffRow, nil,
+                BuildMissingAppearanceGroup)
+            BuildMissingAppearanceGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== POSITION (a 280 box in column 1 in classic, the Icon band's second
@@ -3406,33 +3317,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(positionGroup, nil, 1)
         else
-            -- Three: the anchor and the two offsets.
-            local MISSING_POSITION_COUNT = 3
-
-            -- Three -- the anchor and the two offsets -- so the group goes on the plate,
-            -- where the anchor can be read against the frame it is aiming at.
-            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingPositionGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                })
-                GatePaneFirstChild(group)
-            end, nil, { inline = true })
-            local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Position"],
-                db      = tools.RowDB,
-                summary = MissingPositionSummary,
-                count   = MISSING_POSITION_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = positionMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(positionRow, positionContent)
-            tools.WireModifiedTick(positionRow)
-            tools.WireFooter(positionRow, refreshMissing)
-            positionRow.disableOn = MissingOffRow
+            -- Where the icon sits is how it LOOKS, so it is pinnable. Column 2, as
+            -- its row was in the Icon band.
+            local band = OpenSection(L["Position"], "missingbuffs_position", 2, MissingPositionSummary, MissingOffRow, nil,
+                BuildMissingPositionGroup)
+            BuildMissingPositionGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
         -- ===== BORDER (a 280 box in column 2 in classic, the Icon band's third
@@ -3494,61 +3387,36 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(borderGroup, nil, 2)
         else
-            -- Thirty-one: the thirty-two CreateBorderControls builds for this
-            -- include set -- the widest one in the addon, animation and a colour
-            -- source included -- less the hoisted Show Border.
-            local MISSING_BORDER_COUNT = 31
-
-            -- What the suppressed Show Border checkbox ran, and never a page
-            -- rebuild: that would retire every widget on the page including the row
-            -- being clicked through.
-            local function OnMissingBorderToggle()
-                self:RefreshStates()
-                refreshMissing()
-                tools.ReflowMounted()
-            end
-
-            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildMissingBorderGroup({
-                    group = group, parent = holder,
-                    refreshStates = reflow,
-                    popout = true,
-                    hoistToggle = true,
+            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+            -- build its own (hoistToggle -> noShowToggle). The key is still read
+            -- inside, so the rest of the toolkit greys exactly as before. The
+            -- commit is what the row's tick ran -- the state pass, the icon's own
+            -- refresh and a repaint of a pinned panel -- never a page rebuild. It
+            -- greys with the page gate, as the in-body box did via the group gate.
+            local band = OpenSection(L["Border"], "missingbuffs_border", 2, MissingBorderSummary, MissingOffRow, nil,
+                BuildMissingBorderGroup, {
+                    db = db, key = "missingBuffIconShowBorder", label = L["Show Border"],
+                    isOn = function(d) return d.missingBuffIconShowBorder ~= false end,
+                    disableOn = MissingOffRow,
+                    onChanged = function()
+                        self:RefreshStates()
+                        refreshMissing()
+                        tools.ReflowMounted()
+                    end,
                 })
-                GatePaneFirstChild(group)
-            end)
-            local borderRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label    = L["Border"],
-                db       = tools.RowDB,
-                toggle   = { key = "missingBuffIconShowBorder" },
-                summary  = MissingBorderSummary,
-                count    = MISSING_BORDER_COUNT,
-                onToggle = OnMissingBorderToggle,
-                window   = DF.GUIFrame,
-                clipTo   = self,
-                build    = borderMount,
-                footerStrip = true,
-            }))
-            tools.ClaimKeys(borderRow, borderContent)
-            tools.WireModifiedTick(borderRow)
-            tools.WireFooter(borderRow, refreshMissing)
-            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "missingBuffIconShowBorder", OnMissingBorderToggle)
-            borderRow.disableOn = MissingOffRow
+            BuildMissingBorderGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
         end
 
-        -- ===== THE TWO BANDS: TWO COLUMNS WHEN THERE IS ROOM ===============
-        -- The Frame page's rule: what the page DOES down the left, how it LOOKS down
-        -- the right -- Content left, Icon right, two rows against three. On a narrow
-        -- window the page folds back to one column in the order below.
-        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
-        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
-        -- width it was built at and it overhangs its neighbour.
-        if not classicLayout then
-            contentBand.layoutColFill = true
-            iconBand.layoutColFill = true
-            Add(contentBand, nil, 1)
-            Add(iconBand, nil, 2)
-        end
+        -- ===== NO BAND TAIL ================================================
+        -- A card's band holds one group and is Add'd by CloseSection the moment
+        -- that group is built, so nothing is deferred to here. Content down the
+        -- left, Icon down the right; on a narrow window the page folds to one
+        -- column in the order above.
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
