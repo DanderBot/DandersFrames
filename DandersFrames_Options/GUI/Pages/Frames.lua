@@ -29,61 +29,48 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: three 280 boxes, two in column
-        -- one and the reference list in column two. POPOUT turns the two REAL
-        -- groups into feature rows -- Global Font Settings, Shadow Settings --
-        -- and keeps Affected Elements as a FULL-WIDTH box wearing the band skin.
+        -- one and the reference list in column two.
         --
-        -- ⚠ AFFECTED ELEMENTS STAYS A BOX ON A JUDGEMENT, not on the
-        -- single-option rule the other pages leaned on: it holds a header, a
-        -- twelve-line list and a caution note, and ZERO controls. A row buys a
-        -- page space by folding controls away behind a click; folding away pure
-        -- reference text -- the list a user reads WHILE deciding whether to press
-        -- Apply to All -- buys nothing and hides the one thing on the page that
-        -- is there to be read. And with no control in it there is nothing a
-        -- CONTROL ROW could carry either, so a box is what it stays.
+        -- MODERN is the Debuff Bar's collapsible-card design, one card per box:
+        -- two settings per row inside a card wide enough, dim captions, the value
+        -- summary in a shut card's corner, Expand All / Collapse All at the top --
+        -- and TWO COLUMNS when the window is wide (the rows were one column at
+        -- every width):
         --
-        -- ☠ WHAT IT DOES NOT STAY IS 280 WIDE. A narrower rectangle with its own
-        -- border and its own left edge, standing beside a full-width band, is the
-        -- one thing a column of plates cannot absorb -- so it is built at the
-        -- BAND's width and added as a sync point, and the page's two top-level
-        -- objects then start and end on the same two edges. That is the pet-frame
-        -- boxes' answer (Pages/Options.lua), and it comes with their warning: a
-        -- box built at the band width but added to a COLUMN would be worse than
-        -- what it replaced, because the layout pass only stretches a "both" widget
-        -- and never narrows a column one (GUI/Panel.lua's LayoutPage).
+        --   column 1   Global Font Settings -- the scratch pad and its Apply to
+        --              All button, working exactly as before (see its builder)
+        --   column 2   Shadow Settings (how a text shadow LOOKS, pinnable), then
+        --              Affected Elements, the reference list for Apply to All
         --
-        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- No header ticks: nothing here is one feature's on/off. No category
+        -- headers: the tab already says "Global Fonts".
+        --
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The classic branch mounts the SAME
-        -- builder into the box it always built, which is what makes "classic is
-        -- unchanged" structural rather than a promise --
+        -- builder into the box it always built --
         -- test_globalfonts_page_builders.lua pins the inventory of each one
         -- against the census taken before the move.
         local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery: eager holders, pane reflow, the key
-        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
-        -- hoisted-toggle search repair and the band width. nil in classic, which
-        -- is what every `if classicLayout then` arm below leans on.
+        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
+        -- build left standing and retires that build's holders, and it carries the
+        -- section helper the card pages build with. nil in classic, which is what
+        -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== THE PAGE'S ONE BAND ========================================
-        -- Full-width and chromeless: a feature row's popout docks outside the
-        -- WINDOW and runs a beam back to the row, so a row that stopped 280px in
-        -- would leave that beam crossing half the page.
-        --
-        -- ⚠ NO HEADER ON IT. A header names a SECTION, and the two rows' own
-        -- labels -- "Global Font Settings" and "Shadow Settings" -- already carry
-        -- the page's one subject between them; a "Global Fonts" header above them
-        -- would only repeat the tab the user just clicked. That is the Frame
-        -- page's band rule: a band earns a header only when its rows share a word
-        -- none of them says alone.
-        local fontBand
-        if tools then
-            fontBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- opt-ins, which every card here takes.
+        local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
+            return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
+                { twoTrack = true, quietLabels = true })
+        end
+        -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
+        local function CloseSection(band)
+            tools.CloseSection(Add, band)
         end
 
         -- The shadow group's two applies, at PAGE scope rather than inside the
         -- builder: they close over nothing group-specific, and the classic box and
-        -- every pane instance must drive the same work.
+        -- the card (and a pinned copy of it) must drive the same work.
         local function UpdateShadowSettings()
             -- Full update on release
             if DF.ClearFontCache then DF:ClearFontCache() end
@@ -103,7 +90,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.LightweightUpdateFontShadows then DF:LightweightUpdateFontShadows() end
         end
 
-        -- ===== FONT SELECTION (a 280 box in classic, the band's first row) =
+        -- ===== FONT SELECTION (a 280 box in classic, a card in Modern) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db tables and keys, same slot heights.
         --
@@ -293,7 +280,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateLabel(parent, L["Renders text with signed-distance-field smoothing for sharper edges at any size. Applies to None and Outline styles only (not Monochrome, Thick, or Shadow)."], 250), 50)
         end
 
-        -- ===== SHADOW SETTINGS (a 280 box in classic, the band's second row) =
+        -- ===== SHADOW SETTINGS (a 280 box in classic, a card in Modern) =====
         local function BuildShadowSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."], 250), 40)
@@ -324,84 +311,36 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(shadowGroup, nil, 1)
         else
-            -- ---- the font selection row ----------------------------------
-            -- Five: the three selectors, the Apply button and the SDF tick. The
-            -- two blurbs are prose, and the badge counts settings.
-            local FONT_SELECTION_COUNT = 5
+            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+            -- Buff Bar's placement and its reasons: they act on cards in both
+            -- columns, and "both" carries them through the one-column fold intact.
+            Add(tools.SectionControls(self.child), 24, "both")
 
-            -- ⚠ AND IT KEEPS ITS STRIP, WHICH THE FIVE ABOVE DOES NOT SAY. The
-            -- badge counts SETTINGS; the inline threshold counts CHILDREN, and
-            -- the two blurbs this group carries are children -- seven against a
-            -- ceiling of six. Opting it in would be refused by the helper and
-            -- change nothing, so the ask is not made rather than made and
-            -- silently dropped. Losing a blurb to buy the plate is not a trade
-            -- worth making: the first one is the only place the Apply button's
-            -- "then click Apply" contract is written down.
-            local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildFontSelectionGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
-            local fontRow = fontBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Global Font Settings"],
-                db      = tools.RowDB,
-                count   = FONT_SELECTION_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = fontMount,
-                footerStrip = true,
-            }))
+            -- ---- Global Font Settings: the scratch pad, as a card ----------
             -- ☠ NO SUMMARY, AND THAT IS THE HONEST ANSWER RATHER THAN A GAP.
-            -- Nothing behind this row is applied state. The font and outline the
-            -- two dropdowns show live in DF.GlobalFontTemp -- a SESSION SCRATCH
-            -- table, seeded once from nameFont and then only ever read by the
-            -- Apply button -- so a row printing them would announce a selection
-            -- the user may never have pressed Apply on, over a page whose real
-            -- fonts are per-element and set on a dozen other pages. The one key
-            -- here that IS applied state, fontSlug, is a yes/no with no word
-            -- worth spending. A one-liner would lie; the kit still shows the
-            -- label and the count badge, which is what no summary is for.
+            -- Nothing here is applied state: the font and outline the dropdowns
+            -- show live in DF.GlobalFontTemp, a SESSION SCRATCH table seeded once
+            -- from nameFont and then only ever read by the Apply button -- so a
+            -- summary printing them would announce a selection the user may never
+            -- have applied. The one applied key, fontSlug, has no word to spend.
             --
-            -- ☠ CLAIM THE KEYS, BUT NO MODIFIED TICK AND NO FOOTER -- the
-            -- Integrations row's rule, reached by the same road.
-            --
-            -- ClaimKeys does two jobs and the one wanted here is the SEARCH row
-            -- map: it records which row owns a setting, so a hit on "Font",
-            -- "Outline" or "Crisp Font Rendering (SDF)" can open the panel the
-            -- control is behind. Without it those are findable in classic and
-            -- unreachable in the popout layout.
-            --
-            -- The other job is the amber tick's key list, and that half is inert
-            -- here on purpose. DF.Defaults (DandersFrames/Core/Defaults.lua)
-            -- answers for DF.db.party / DF.db.raid / the stored raid baseline and
-            -- nothing else, and NOT ONE of this row's keys lives there: "font" and
-            -- "outline" are fields of the session scratch table, and fontSlug is
-            -- at the DF.db ROOT, account-wide. So:
-            --   * WireModifiedTick would ask "is fontSlug modified" of a per-mode
-            --     table that has never held it -- the tick could never light.
-            --   * WireFooter is worse than useless: Reset Group and Hold both
-            --     write through that same engine, so they would stamp PER-MODE
-            --     defaults for three keys that live elsewhere -- inventing
-            --     settings in the wrong table while the values the row is
-            --     actually showing sat untouched.
-            tools.ClaimKeys(fontRow, fontContent)
+            -- ⚠ NO PIN: this is a tool, not a live look -- the dropdowns change
+            -- nothing until Apply to All writes ~30 per-element fonts in one press,
+            -- and a second, pinned scratch pad bound to the same scratch table
+            -- would only be a second copy of the same button. Column 1.
+            local fontCard = OpenSection(L["Global Font Settings"], "fonts_global", 1, nil)
+            BuildFontSelectionGroup({
+                group = fontCard, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(fontCard)
 
-            -- ---- the shadow settings row ---------------------------------
-            -- The summary, per the page convention: at most four items, a fixed
-            -- order, " \194\183 " between them, WORDS localised and numbers raw,
-            -- every read guarded because a profile mid-migration may be missing
-            -- any of these keys.
+            -- ---- Shadow Settings -----------------------------------------
+            -- The offset pair and nothing else, and only when it is not 0,0. The
+            -- colour has no word.
             --
-            -- The offset pair and nothing else, and only when it is not 0,0 --
-            -- the Border Shadow row's own convention for a pair of offsets. The
-            -- colour is deliberately not in here: there is no word for a colour,
-            -- and the row's modified tick already says when one has been changed.
-            -- On a default profile this row prints nothing, which is correct.
-            --
-            -- ⚠ %g, NOT the Border Shadow row's %d. These two sliders step in
-            -- HALVES (0.5) where the border's own step is a whole pixel, so
-            -- flooring would print "0, 0" for a real half-pixel offset -- a
-            -- summary saying the opposite of the state it is reporting. %g
-            -- prints 1 as "1" and 0.5 as "0.5", which is the same "numbers raw"
-            -- the convention asks for, at this page's resolution.
+            -- ⚠ %g, NOT %d. These sliders step in HALVES (0.5), so flooring would
+            -- print "0, 0" for a real half-pixel offset.
             local function ShadowSettingsSummary(d)
                 if not d then return "" end
                 local parts = {}
@@ -413,72 +352,30 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three: the two offsets and the colour -- the blurb above them is
-            -- prose. Nothing is hoisted -- there is no boolean in here meaning
-            -- "am I doing anything" (the shadow style is chosen by the outline
-            -- dropdown in the row above, and on a dozen other pages besides).
-            local SHADOW_SETTINGS_COUNT = 3
-
-            -- ☠ THREE SETTINGS AND A SENTENCE, SO THE GROUP GOES ON THE PLATE.
-            -- Four children against the helper's ceiling of six, and the click
-            -- they were behind bought nothing: `inline` mounts the pane's own
-            -- group under the title line, and the strip stops promising settings
-            -- that are already on screen and offers to pin a second copy beside
-            -- another page instead. The row above it stays behind its strip --
-            -- see the note there for why it does not fit.
-            local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
-                BuildShadowSettingsGroup({ group = group, parent = holder, refreshStates = reflow })
-            end, nil, { inline = true })
-            local shadowRow = fontBand:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Shadow Settings"],
-                db      = tools.RowDB,
-                summary = ShadowSettingsSummary,
-                count   = SHADOW_SETTINGS_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = shadowMount,
-                footerStrip = true,
-            }))
-            -- ☠ THIS ROW CARRIES A SECTION ANCHOR, and it is the only one on the
-            -- page that is jumped to from somewhere else. Every per-element
-            -- "Shadow" checkbox in the addon sits under a link built by
-            -- UI:CreateGlobalFontsShadowLink (DandersUI/Sections.lua), which is
-            -- LinkToSetting{ page = "general_fonts", section = L["Shadow
-            -- Settings"] } -- and that jump is Search:ScrollToSection, which finds
-            -- a section by asking every page child, and every settings-group
-            -- child, for :GetText(). In classic the box's own HEADER answers. In
-            -- this layout no header is built at all: the row's name is a
-            -- FontString INSIDE the row, which the walk never reaches.
+            -- ☠ THIS CARD IS A CROSS-LINK TARGET. Every per-element "Shadow"
+            -- checkbox in the addon sits under a link built by
+            -- UI:CreateGlobalFontsShadowLink, which jumps to section
+            -- L["Shadow Settings"] on this page -- and Search:ScrollToSection
+            -- finds a section by asking every page child for :GetText(). A card
+            -- answers with its own title (and is expanded if it was shut), so the
+            -- jump lands here exactly as it did on classic's box header.
             --
-            -- ClaimKeys is what puts the answer back -- it stamps every row it is
-            -- given with a GetText returning that row's own label, which is
-            -- exactly this link's section name. So the line below is load-bearing
-            -- for more than the search row map, and removing it would take this
-            -- cross-link down with it in silence.
-            tools.ClaimKeys(shadowRow, shadowContent)
-            tools.WireModifiedTick(shadowRow)
-            tools.WireFooter(shadowRow, UpdateShadowSettings)
-            -- ⚠ NO hideOn AND NO disableOn, which mirrors classic exactly: the
-            -- box had neither. These offsets are read by whichever elements are
-            -- using the Shadow outline style, and this page cannot know that.
+            -- No tick: the shadow STYLE is chosen by the outline dropdowns, here
+            -- and on a dozen other pages. How a text shadow LOOKS, so it is
+            -- pinnable. Column 2.
+            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 2, ShadowSettingsSummary, nil, nil,
+                BuildShadowSettingsGroup)
+            BuildShadowSettingsGroup({
+                group = shadowCard, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(shadowCard)
         end
 
         -- ===== AFFECTED ELEMENTS GROUP (a 280 box in column 2 in classic, a
-        -- full-width box here) =====
-        -- STAYS A BOX in both layouts -- see the judgement at the top of the page.
-        -- It wears the band skin in the popout arm so it does not read as a second
-        -- visual language beside the rows; the classic arm passes no opts at all,
-        -- which is what it always did.
-        --
-        -- ⚠ THE LIST IS MEASURED, NOT PINNED, IN THE WIDE ARM. Its 235 was the
-        -- height twelve bullets wrap to AT 250; at the band's width several of
-        -- them stop wrapping, so the same number would leave a hole under the
-        -- list. CreateLabel measures itself whenever the call site does not pin
-        -- it, which is the pet blurbs' rule -- and classic keeps the pinned
-        -- number, because classic keeps the width it was measured at.
-        --
-        -- ⚠ THE NOTE KEEPS ITS 40 in both: one sentence is one line at 250 and
-        -- still one line wider, so the slot does not move.
+        -- card in Modern) =====
+        -- Reference text only. Classic keeps its pinned 235 for the list,
+        -- because classic keeps the width it was measured at.
         local INFO_LIST = L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• All Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"]
         local INFO_NOTE = L["Font sizes are not changed. Adjust sizes in each element's page."]
         if classicLayout then
@@ -488,18 +385,20 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = 250}), 40)
             Add(infoGroup, nil, 2)
         else
-            local infoGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
-            infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
-            local infoInner = GUI:GroupInnerWidth(infoGroup)
-            infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
-            infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
-            -- ⚠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THIS BOX. `Add`
-            -- resolves a widget's slot height on the spot, so a band added before
-            -- its rows would be measured empty. The box follows it because that is
-            -- the READING order -- with both of them "both", there is no column
-            -- flow left for a sync point to strand.
-            Add(fontBand, nil, "both")
-            Add(infoGroup, nil, "both")
+            -- Reference text, and no control: the list a user reads WHILE deciding
+            -- whether to press Apply to All. A card like every other group on the
+            -- page -- it folds away like them once it has been read -- but no
+            -- summary (it holds no value) and no pin (nothing it holds changes how
+            -- anything looks). Column 2, under Shadow Settings.
+            --
+            -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the card's width several of
+            -- the twelve bullets stop wrapping, so classic's 235 would leave a hole
+            -- under it. The note keeps its 40 -- one line at any width.
+            local band = OpenSection(L["Affected Elements"], "fonts_affected", 2, nil)
+            local infoInner = GUI:GroupInnerWidth(band)
+            band:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
+            band:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
+            CloseSection(band)
         end
     end)
     
