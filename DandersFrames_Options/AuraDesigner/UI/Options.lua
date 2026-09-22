@@ -687,6 +687,29 @@ local function CurrentAuraPool(spec)
 end
 P.CurrentAuraPool = CurrentAuraPool
 
+-- ☠ A MY BUFFS WRITE WITH NO SPEC IS REFUSED, OUT LOUD (2026-09-22). With no spec
+-- resolved (a non-healer, or a character with no spec yet) GetSpecAuras and
+-- GetSpecLayoutGroups hand back a FRESH EMPTY TABLE on every call. That is right
+-- for a read -- there is nothing to show -- and silently wrong for a write: the
+-- new record lands in a table nobody keeps, with no error and nothing listed.
+-- Every path that CREATES on My Buffs asks this first and stops when it answers
+-- true. Reads are untouched. Any Buff and the helper's pool are spec-independent.
+-- `quiet` skips the chat line for a caller that says it its own way (the
+-- picker's echo). Said once per frame, so one refused click is one line.
+P.RefuseNoSpecWrite = function(quiet)
+    if IsOtherTab() then return false end
+    if ResolveSpec() then return false end
+    if not quiet then
+        local now = GetTime and GetTime() or 0
+        if P.noSpecSaidAt ~= now then
+            P.noSpecSaidAt = now
+            DF:Say(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
+        end
+    end
+    DF:DebugWarn("AD", "Refused a My Buffs write: no spec resolved")
+    return true
+end
+
 -- WRITE access: creates the pool table (the other pool is born lazily on
 -- the first add — drag-drop, picker click, or add-by-ID).
 local function CurrentAuraPoolWrite()
@@ -695,6 +718,10 @@ local function CurrentAuraPoolWrite()
     -- created into a temporary table and vanish on the next redraw -- the one thing the
     -- filtered view cannot carry.
     if S.activeBuffTab == "other" or S.activeBuffTab == "pihelper" then return GetOtherAuras() end
+    -- The backstop behind every entry-point guard: the write is refused and said.
+    -- The caller still gets a table (a nil would be a Lua error at the user), but
+    -- it is a throwaway, which is exactly what GetSpecAuras would have handed it.
+    if P.RefuseNoSpecWrite() then return {} end
     return GetSpecAuras()
 end
 

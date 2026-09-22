@@ -1331,6 +1331,172 @@ do
           "classic opts: ...but never into a flow for the other route")
 end
 
+-- ============================================================
+-- opts.inline: EVERY NOT-YET / NOT-NEEDED STATE IS SAID, NOT GREYED (2026-09-22)
+-- ------------------------------------------------------------
+-- The classic designer runs this pane in its Effects tab, where it may change
+-- height. Section 3 hides its grid unless the chosen look has a position, section
+-- 2 says "Choose an aura first." over one dimmed block, a dim tile carries its
+-- reason on the picture, and the headings speak their state. Driven, then read
+-- off the frames the build made.
+-- ============================================================
+print("-- Add Indicator: the inline pane says its states")
+do
+    local function Kids(h)
+        local out = {}
+        for _, k in ipairs(rawget(h, "_kids") or {}) do out[#out + 1] = k end
+        return out
+    end
+    local function TextOf(fs) return fs and rawget(fs, "_text") or nil end
+    -- The pieces, found by what they are rather than by creation order.
+    local function Parts(h)
+        local p = { heads = {} }
+        for _, k in ipairs(Kids(h)) do
+            if rawget(k, "SetHeadState") then p.heads[#p.heads + 1] = k end
+            if rawget(k, "SetGridEnabled") then p.grid = k end
+            local t = rawget(k, "text")
+            if t then
+                local s = TextOf(t)
+                if s == "Choose an aura first." then p.sec2Note = k else p.sec3Line = k end
+            end
+            for _, c in ipairs(Kids(k)) do
+                if rawget(c, "SetTileState") then p.block = k break end
+            end
+        end
+        p.tiles = {}
+        for _, t in ipairs(p.block and Kids(p.block) or {}) do
+            if rawget(t, "SetTileState") then p.tiles[TextOf(rawget(t, "label"))] = t end
+        end
+        return p
+    end
+    local function Tag(head) return TextOf(rawget(head, "tag")) end
+    local function Ticked(head)
+        local tick = rawget(head, "tick")
+        return tick and tick:IsShown() or false
+    end
+    local function CaptionOf(tile)
+        local c = rawget(tile, "dfCaption")
+        return (c and c:IsShown()) and TextOf(rawget(c, "text")) or nil
+    end
+
+    local heights = {}
+    local h = CreateFrame("Frame", nil, CreateFrame("Frame", nil, nil))
+    h:SetWidth(300)
+    local closed = 0
+    local apiI = S.BuildAddIndicatorPane(h, {
+        width = 300, source = "spell", fitWidth = true, inline = true,
+        SetHeight = function(v) heights[#heights + 1] = v end,
+        Close = function() closed = closed + 1 end,
+    })
+    local p = Parts(h)
+    check(p.sec2Note ~= nil and p.sec3Line ~= nil and p.block ~= nil and p.grid ~= nil,
+          "inline: the pane builds section 2's line, the tile block and section 3's line")
+    eq(#p.heads, 3, "inline: ...under three headings")
+    local tIcon, tSquare, tBorder, tSound = p.tiles["Icon"], p.tiles["Square"], p.tiles["Border"], p.tiles["Sound Alert"]
+    check(tIcon and tSquare and tBorder and tSound and true or false,
+          "inline: ...and the nine tiles live in the block")
+
+    -- ---- no aura yet ----
+    eq(p.sec2Note and p.sec2Note:IsShown(), true, "inline, no aura: section 2 says 'Choose an aura first.'")
+    eq(p.block and p.block:GetAlpha(), 0.4, "inline, no aura: ...over the tiles, dimmed as ONE block")
+    eq(tIcon and rawget(tIcon, "dfTileState"), "normal", "inline, no aura: ...not nine tiles greyed one by one")
+    eq(tIcon and rawget(tIcon, "_flags").mouse, false, "inline, no aura: ...and the block takes no clicks")
+    eq(p.grid and p.grid:IsShown(), false, "inline, no look: section 3 hides the anchor grid")
+    eq(p.sec3Line and p.sec3Line:IsShown(), true, "inline, no look: ...and shows one line instead")
+    eq(TextOf(p.sec3Line and rawget(p.sec3Line, "text")), "Pick a look above.",
+       "inline, no look: ...saying pick a look first")
+    eq(Tag(p.heads[1]), "Next", "inline headings: the step waiting on you says Next")
+    eq(Tag(p.heads[2]), "", "inline headings: ...and a step not reached yet says nothing")
+    eq(Ticked(p.heads[1]), false, "inline headings: ...and nothing is ticked yet")
+    local hNoAura = heights[#heights]
+    check(type(hNoAura) == "number" and hNoAura > 0, "inline: the pane reports a height")
+    eq(h:GetHeight(), hNoAura, "inline: ...and is sized to it")
+
+    -- ---- an aura: section 2 wakes ----
+    apiI.PickSpell("Regrowth", "Regrowth")
+    eq(p.sec2Note:IsShown(), false, "inline, aura: the 'choose an aura' line goes")
+    eq(p.block:GetAlpha(), 1, "inline, aura: ...the block is bright")
+    eq(rawget(tIcon, "_flags").mouse, true, "inline, aura: ...and takes clicks again")
+    eq(Ticked(p.heads[1]), true, "inline headings: an answered step shows the tick")
+    eq(rawget(rawget(p.heads[1], "tick"), "_texture"), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check",
+       "inline headings: ...the addon's own check icon, not a glyph")
+    eq(Tag(p.heads[2]), "Next", "inline headings: ...and Next moves on to section 2")
+    local hAura = heights[#heights]
+    eq(hNoAura - hAura, 18, "inline: the line's slot is given back, so the pane shrinks by exactly it")
+
+    -- ---- a frame-level look: no grid, one plain line, Not needed ----
+    apiI.SelectType("border")
+    eq(p.grid:IsShown(), false, "inline, frame-level: the grid stays hidden")
+    eq(p.sec3Line:IsShown(), true, "inline, frame-level: ...one line in its place")
+    eq(TextOf(rawget(p.sec3Line, "text")), "This effect changes the whole frame.",
+       "inline, frame-level: ...saying the effect changes the whole frame")
+    local col = rawget(rawget(p.sec3Line, "text"), "_textColor")
+    eq(col and col.r, UI.Colors.text.r, "inline, frame-level: ...in full text colour, readable")
+    eq(Tag(p.heads[3]), "Not needed", "inline headings: a skipped step 3 says Not needed")
+    eq(Ticked(p.heads[2]), true, "inline headings: ...and the answered step 2 is ticked")
+    local hFrame = heights[#heights]
+
+    -- ---- a placed look: the grid, its anchor chosen ----
+    apiI.SelectType("icon")
+    eq(p.grid:IsShown(), true, "inline, placed: the grid is shown")
+    eq(p.sec3Line:IsShown(), false, "inline, placed: ...and the line is not")
+    eq(p.grid.Get and p.grid:Get(), "TOPLEFT", "inline, placed: ...with the type's anchor already chosen")
+    eq(Ticked(p.heads[3]), true, "inline headings: a placed look's step 3 is answered, and ticked")
+    local hPlaced = heights[#heights]
+    eq(hPlaced - hFrame, (18 * 3 + 2 * 2) - 18,
+       "inline: the grid costs its own height and no more -- no gap, no overlap")
+    eq(h:GetHeight(), hPlaced, "inline: ...and the host follows")
+
+    -- ---- a disabled tile says why, on the tile ----
+    placed["Regrowth|square"] = true
+    apiI.Sync()
+    eq(rawget(tSquare, "dfTileState"), "disabled", "inline captions: an added look is dimmed")
+    eq(CaptionOf(tSquare), "Added", "inline captions: ...and says Added on the picture")
+    local tip = rawget(tSquare, "dfTooltip")
+    eq(tip and tip.lines and tip.lines[2], "Already added.", "inline captions: ...keeping the tooltip")
+    eq(CaptionOf(tIcon), nil, "inline captions: a tile that is open carries no caption")
+    placed["Regrowth|square"] = nil
+
+    -- ---- a filter: the looks it cannot drive say so ----
+    local hf = CreateFrame("Frame", nil, CreateFrame("Frame", nil, nil))
+    hf:SetWidth(300)
+    local apiF = S.BuildAddIndicatorPane(hf, { width = 300, source = "filter", fitWidth = true,
+                                               inline = true, Close = function() end })
+    apiF.PickFilter("custom", "k1")
+    local pf = Parts(hf)
+    eq(CaptionOf(pf.tiles["Sound Alert"]), "Not for filters", "inline captions: a filter cannot drive Sound, and says so")
+    eq(CaptionOf(pf.tiles["Icon"]), "Not for filters", "inline captions: ...nor a placed icon")
+    eq(CaptionOf(pf.tiles["Border"]), nil, "inline captions: ...while Border stays open")
+
+    -- ---- a refused add keeps the pane open ----
+    local prevAdd = cardsEnv.AddPickedSpell
+    cardsEnv.AddPickedSpell = function() return false end
+    eq(apiI.Commit(), false, "inline: an add the store refused reports false")
+    eq(closed, 0, "inline: ...and the pane stays open rather than closing on nothing")
+    cardsEnv.AddPickedSpell = prevAdd
+    check(apiI.Commit() == true and closed == 1, "inline: an add that went through closes it as before")
+
+    -- ---- the rows page's pane: none of it ----
+    local hn = CreateFrame("Frame", nil, CreateFrame("Frame", nil, nil))
+    hn:SetWidth(260)
+    local nh = {}
+    local apiN = S.BuildAddIndicatorPane(hn, { width = 260, Close = function() end,
+                                               SetHeight = function(v) nh[#nh + 1] = v end })
+    -- (The shim's frames start un-shown, so "never hidden" is read as "no stand-in
+    -- line exists to take the grid's place".)
+    local standIns, heads = 0, {}
+    for _, k in ipairs(Kids(hn)) do
+        if rawget(k, "text") then standIns = standIns + 1 end
+        if rawget(k, "SetHeadState") then heads[#heads + 1] = k end
+    end
+    eq(standIns, 0, "rows pane: no one-line stand-ins are built there, so its grid is never swapped out")
+    eq(Tag(heads[1]), "", "rows pane: ...its headings keep their old words")
+    apiN.PickSpell("Rejuvenation", "Rejuvenation")
+    apiN.SelectType("border")
+    eq(Ticked(heads[1]), false, "rows pane: ...and no tick")
+    eq(#nh, 1, "rows pane: ...and it still reports its height exactly once")
+end
+
 CreateFrame = prevCreateFrame
 
 -- ============================================================

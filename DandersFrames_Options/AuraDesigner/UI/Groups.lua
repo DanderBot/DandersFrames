@@ -47,6 +47,10 @@ local TYPE_DEFAULTS = P.TYPE_DEFAULTS
 
 -- Create a new indicator instance for an aura, returns the instance table
 local function CreateIndicatorInstance(auraName, typeKey)
+    -- ☠ NIL, SAID, WHEN MY BUFFS HAS NO SPEC (Options.lua's P.RefuseNoSpecWrite):
+    -- the instance would land in a table nobody keeps. Every caller already treats
+    -- a nil instance as "nothing was added".
+    if P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return nil end
     local auraCfg = EnsureAuraConfig(auraName)
     if not auraCfg.indicators then
         auraCfg.indicators = {}
@@ -456,6 +460,13 @@ local function CreateProxy(auraName, typeKey)
             -- Copy-on-read: if fallback is a table, copy it into the config
             -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
             if type(fallback) == "table" then
+                -- No spec on My Buffs: hand the copy back without storing it
+                -- (the read is unchanged; the store it would land in is a throwaway).
+                if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite(true) then
+                    local copy = {}
+                    for fk, fv in pairs(fallback) do copy[fk] = fv end
+                    return copy
+                end
                 local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
                 local copy = {}
                 for fk, fv in pairs(fallback) do copy[fk] = fv end
@@ -465,6 +476,7 @@ local function CreateProxy(auraName, typeKey)
             return fallback
         end,
         __newindex = function(_, k, v)
+            if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return end
             local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
             typeCfg[k] = v
             if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
@@ -486,6 +498,7 @@ local function CreateAuraProxy(auraName)
             return nil
         end,
         __newindex = function(_, k, v)
+            if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return end
             local auraCfg = EnsureAuraConfig(auraName, pool())
             auraCfg[k] = v
             if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
@@ -1170,6 +1183,9 @@ local function CreateLayoutGroup(name, kind)
         id = adDB.nextOtherLayoutGroupID
         adDB.nextOtherLayoutGroupID = id + 1
     else
+        -- No spec on My Buffs: refused and said, before the id counter moves.
+        -- AddGroupOfKind (Editor.lua) treats the nil as "nothing was added".
+        if P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return nil end
         groups = GetSpecLayoutGroups()
         if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
         id = adDB.nextLayoutGroupID

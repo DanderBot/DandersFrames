@@ -793,33 +793,32 @@ do
               "addgroup: ...and shuts itself before the rebuild that retires its row")
     end
 
-    -- ☠ THE SPLIT PANEL'S CARD BLOCKS ARE GONE (2026-09-22). It runs these same
-    -- two panes INSIDE its tab now, one button per kind -- see
-    -- test_designers_classic.lua for the flow itself, run.
+    -- ☠ THE SPLIT PANEL'S CARD BLOCKS ARE GONE (2026-09-22). It mounts these same
+    -- two panes ON its tabs now (opts.onPage), and a tile click adds -- see
+    -- test_designers_classic.lua for the mount, run.
     check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) == nil,
           "addgroup: the split panel no longer draws its Layout Groups card block")
     check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) == nil,
           "addgroup: ...nor the Debuffs one")
-    -- The kind the classic buttons already chose reaches the pane as opts.kind,
-    -- and each kind's card carries the key it is chosen by.
     local EDITN = EDIT:gsub("\r\n", "\n")
-    check(EDITN:find('key   = "spell",\n            title = L["Spell Group"]', 1, true) ~= nil
-          and EDITN:find('key   = "filter",\n            title = L["Filter Group"]', 1, true) ~= nil
-          and EDITN:find('key   = "debuff",\n            title = L["Debuff Group"]', 1, true) ~= nil,
-          "addgroup: every group kind carries the key a classic button names it by")
-    local chosen = EDITN:match("local function BuildChosenGroupPane%(host, opts, defs, gc, addLabel%)(.-)\nend\n") or ""
-    check(chosen ~= "", "addgroup: the chosen-kind pane can be read")
-    local cClose = chosen:find("if opts.Close then opts.Close() end", 1, true)
-    local cPick  = chosen:find("def.onClick()", 1, true)
-    check(cClose and cPick and cClose < cPick,
-          "addgroup: ...and it too ends its flow before the add rebuilds the tab")
-    check(chosen:find("if def.key == \"filter\" then\n        y = BuildFilterFooter(host, y, W)", 1, true) ~= nil,
-          "addgroup: ...with the filter verbs only under a Filter Group")
-    -- Without opts.kind both panes are what the rows page always mounted.
+    -- ☠ NO CONFIRM STEP. The first pass drew the chosen kind with an Add button
+    -- under it; one click on the tile is the add now.
+    check(EDITN:find("BuildChosenGroupPane", 1, true) == nil,
+          "addgroup: the chosen-kind pane with its Add button is gone")
+    check(EDITN:find("opts.kind", 1, true) == nil,
+          "addgroup: ...and nothing asks for it by opts.kind")
     for _, fn in ipairs({ "S.BuildAddLayoutGroupPane", "S.BuildAddDebuffGroupPane" }) do
         local b = EDITN:match(fn:gsub("%.", "%%.") .. " = function%(host, opts%)(.-)\nend\n") or ""
-        check(b:find("    if opts.kind then\n        return BuildChosenGroupPane(", 1, true) ~= nil,
-              "addgroup: " .. fn .. " takes the chosen-kind path only when asked")
+        -- opts.onPage drops the numbered question; the rows page still gets it.
+        check(b:find("    if not opts.onPage then\n        CreateNumberedHeading(host, 1, L[\"WHICH KIND OF GROUP?\"], y, W)", 1, true) ~= nil,
+              "addgroup: " .. fn .. " asks its question only off the page")
+        -- The classic gate is asked on the click, before the pane closes or adds.
+        local gAt = b:find("if opts.gate and not opts.gate() then return end", 1, true)
+        local cAt = b:find("if opts.Close then opts.Close() end", 1, true)
+        check(gAt and cAt and gAt < cAt,
+              "addgroup: " .. fn .. " asks the classic gate before anything happens")
+        check(b:find('if opts.blocked then tile:SetTileState("disabled") end', 1, true) ~= nil,
+              "addgroup: " .. fn .. " greys its tiles when the add is blocked")
     end
 
     -- The order the Effects tab already draws: add, then the list.
@@ -2180,7 +2179,8 @@ do
     -- click would leak nine miniature frames per click.
     check(pane:find("tile:SetTileState(state)", 1, true) ~= nil,
           "add: a click changes each tile's STATE")
-    check(pane:find("CreateFrameTile(host, {", 1, true) ~= nil,
+    -- (Onto the host, or onto the one block opts.inline dims as a whole.)
+    check(pane:find("CreateFrameTile(tileParent, {", 1, true) ~= nil,
           "add: ...on tiles built once, in the builder")
     check(pane:find("if opts.SetHeight then opts.SetHeight(paneH) end", 1, true) ~= nil,
           "add: ...and the pane reports its height instead of assuming one")
@@ -2286,19 +2286,21 @@ do
           "add: ...and the classic add buttons are behind that same switch")
 
     -- ☠ THE CLASSIC DESIGNER RUNS THIS PANE INSIDE ITS TAB (2026-09-22), never in a
-    -- popout: two buttons, Add from a Spell / Add from a Filter, each handing the
-    -- pane the route it chose. The flow is run in test_designers_classic.lua; here
-    -- the wiring is read.
-    local defsBody = CARDS:match("S%.ClassicAddButtonDefs = function%(kind%)(.-)\nend\n") or ""
+    -- popout: two picture tiles, Add from a Spell / Add from a Filter, each handing
+    -- the pane the route it chose. The flow is run in test_designers_classic.lua;
+    -- here the wiring is read.
+    local defsBody = CARDS:match("S%.ClassicAddSourceDefs = function%(%)(.-)\nend\n") or ""
     check(defsBody:find('{ source = "spell",  label = L["Add from a Spell"]', 1, true) ~= nil,
-          "add: the classic Effects tab has an Add from a Spell button")
+          "add: the classic Effects tab has an Add from a Spell tile")
     check(defsBody:find('{ source = "filter", label = L["Add from a Filter"]', 1, true) ~= nil,
-          "add: ...and an Add from a Filter button")
+          "add: ...and an Add from a Filter tile")
     check(defsBody:find('L["Add Indicator"]', 1, true) == nil,
           "add: ...instead of one Add Indicator button")
     local flowBody = CARDS:match("S%.BuildClassicAddFlow = function%(parent, kind%)(.-)\nend\n") or ""
-    check(flowBody:find("paneOpts.source, paneOpts.fitWidth, paneOpts.restore = flow.source, true, restore", 1, true) ~= nil,
+    check(flowBody:find("source = flow.source, fitWidth = true, restore = restore,", 1, true) ~= nil,
           "add: ...each entering the pane with its route chosen, laid out for the tab")
+    check(flowBody:find("inline = true,", 1, true) ~= nil,
+          "add: ...as the inline pane, which says its states and follows its own height")
     check(flowBody:find('L["Back to Effects"]', 1, true) ~= nil,
           "add: ...headed by Back to Effects")
     check(flowBody:find("back:SetScript(\"OnClick\", function() S.EndClassicAddFlow(true, kind) end)", 1, true) ~= nil,
