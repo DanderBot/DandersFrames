@@ -326,6 +326,110 @@ local function inRaidSet(key, i)
     return set[i] == true or (i > 20 and set[i - 20] == true)
 end
 
+-- ☠ FILE SCOPE, NOT PER CALL. These were built fresh inside GetTestUnitData on
+-- every call -- six 40-entry raid tables (plus the boss names) per frame per call,
+-- and the animation ticker calls it for every test frame 20 times a second, so an
+-- animating raid preview threw away hundreds of these tables a second. They are
+-- read-only; nothing below writes to them.
+local bossNames = {
+    "Fiery Treant", "Charred Bramble", "Smoldering Sapling", "Ember Root",
+    "Blazing Thorn", "Ashen Oak", "Cinder Vine", "Glowing Grove",
+}
+
+local testNames = {
+    "Tankadin", "Healbot", "Magefire", "Stabbymc", "Huntard",
+    "Shammywow", "Dkfrost", "Warlockz", "Monkbrew", "Priestess",
+    "Druidtree", "Palaheals", "Rogueshadow", "Warriorfury", "Huntermark",
+    "Magearcane", "Warlockaff", "Shamanrest", "Monkmist", "Priestshadow",
+    "Dkblood", "Demonhunter", "Evokerdev", "Tankwarrior", "Tankdruid",
+    "Holypriest", "Discpriest", "Restoshaman", "Mistweaver", "Holypaladin",
+    "Boomkin", "Feral", "Enhance", "Elemental", "Retribution",
+    "Windwalker", "Havoc", "Devastation", "Arms", "Assassination"
+}
+local testClasses = {
+    "PALADIN", "PRIEST", "MAGE", "ROGUE", "HUNTER",
+    "SHAMAN", "DEATHKNIGHT", "WARLOCK", "MONK", "PRIEST",
+    "DRUID", "PALADIN", "ROGUE", "WARRIOR", "HUNTER",
+    "MAGE", "WARLOCK", "SHAMAN", "MONK", "PRIEST",
+    "DEATHKNIGHT", "DEMONHUNTER", "EVOKER", "WARRIOR", "DRUID",
+    "PRIEST", "PRIEST", "SHAMAN", "MONK", "PALADIN",
+    "DRUID", "DRUID", "SHAMAN", "SHAMAN", "PALADIN",
+    "MONK", "DEMONHUNTER", "EVOKER", "WARRIOR", "ROGUE"
+}
+local testRoles = {
+    "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "HEALER", "DAMAGER", "DAMAGER", "TANK", "HEALER",
+    "HEALER", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "DAMAGER", "DAMAGER", "HEALER", "HEALER", "DAMAGER",
+    "TANK", "DAMAGER", "DAMAGER", "TANK", "TANK",
+    "HEALER", "HEALER", "HEALER", "HEALER", "HEALER",
+    "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER"
+}
+-- Spec IDs matching each class/role for accurate melee/ranged separation
+local testSpecs = {
+    66,   -- 1  PALADIN/TANK      - Protection
+    257,  -- 2  PRIEST/HEALER     - Holy
+    63,   -- 3  MAGE/DAMAGER      - Fire (ranged)
+    260,  -- 4  ROGUE/DAMAGER     - Outlaw (melee)
+    254,  -- 5  HUNTER/DAMAGER    - Marksmanship (ranged)
+    264,  -- 6  SHAMAN/HEALER     - Restoration
+    251,  -- 7  DEATHKNIGHT/DPS   - Frost (melee)
+    265,  -- 8  WARLOCK/DAMAGER   - Affliction (ranged)
+    268,  -- 9  MONK/TANK         - Brewmaster
+    256,  -- 10 PRIEST/HEALER     - Discipline
+    105,  -- 11 DRUID/HEALER      - Restoration
+    65,   -- 12 PALADIN/HEALER    - Holy
+    259,  -- 13 ROGUE/DAMAGER     - Assassination (melee)
+    71,   -- 14 WARRIOR/DAMAGER   - Arms (melee)
+    255,  -- 15 HUNTER/DAMAGER    - Survival (melee)
+    64,   -- 16 MAGE/DAMAGER      - Frost (ranged)
+    266,  -- 17 WARLOCK/DAMAGER   - Demonology (ranged)
+    264,  -- 18 SHAMAN/HEALER     - Restoration
+    270,  -- 19 MONK/HEALER       - Mistweaver
+    258,  -- 20 PRIEST/DAMAGER    - Shadow (ranged)
+    250,  -- 21 DEATHKNIGHT/TANK  - Blood
+    577,  -- 22 DEMONHUNTER/DPS   - Havoc (melee)
+    1467, -- 23 EVOKER/DAMAGER    - Devastation (ranged)
+    73,   -- 24 WARRIOR/TANK      - Protection
+    104,  -- 25 DRUID/TANK        - Guardian
+    257,  -- 26 PRIEST/HEALER     - Holy
+    256,  -- 27 PRIEST/HEALER     - Discipline
+    264,  -- 28 SHAMAN/HEALER     - Restoration
+    270,  -- 29 MONK/HEALER       - Mistweaver
+    65,   -- 30 PALADIN/HEALER    - Holy
+    102,  -- 31 DRUID/DAMAGER     - Balance (ranged)
+    103,  -- 32 DRUID/DAMAGER     - Feral (melee)
+    263,  -- 33 SHAMAN/DAMAGER    - Enhancement (melee)
+    262,  -- 34 SHAMAN/DAMAGER    - Elemental (ranged)
+    70,   -- 35 PALADIN/DAMAGER   - Retribution (melee)
+    269,  -- 36 MONK/DAMAGER      - Windwalker (melee)
+    577,  -- 37 DEMONHUNTER/DPS   - Havoc (melee)
+    1473, -- 38 EVOKER/DAMAGER    - Augmentation (ranged)
+    72,   -- 39 WARRIOR/DAMAGER   - Fury (melee)
+    261,  -- 40 ROGUE/DAMAGER     - Subtlety (melee)
+}
+local testHealthPercents = {
+    0.95, 0.88, 0.72, 0.65, 0.80,
+    0.92, 0.58, 0.75, 0.85, 0.70,
+    0.90, 0.82, 0.68, 0.55, 0.78,
+    0.88, 0.62, 0.95, 0.72, 0.60,
+    0.98, 0.75, 0.82, 0.90, 0.85,
+    0.78, 0.92, 0.65, 0.88, 0.70,
+    0.82, 0.75, 0.68, 0.95, 0.58,
+    0.85, 0.72, 0.80, 0.65, 0.90
+}
+local testPowerPercents = {
+    0.85, 0.92, 0.78, 0.65, 0.70,
+    0.88, 0.55, 0.82, 0.95, 0.72,
+    0.80, 0.68, 0.90, 0.75, 0.85,
+    0.62, 0.95, 0.70, 0.88, 0.78,
+    0.92, 0.65, 0.85, 0.72, 0.80,
+    0.90, 0.75, 0.82, 0.68, 0.95,
+    0.78, 0.85, 0.70, 0.88, 0.62,
+    0.80, 0.92, 0.75, 0.68, 0.85
+}
+
 -- Get test unit data for a frame index
 -- For party: index 0 = player, 1-4 = party members
 -- For raid: index 1-40 = raid members
@@ -336,10 +440,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     -- Boss NPCs don't have classes or roles — we return a minimal fake unit
     -- so the frame renders a health bar with a readable name.
     if isBoss then
-        local bossNames = {
-            "Fiery Treant", "Charred Bramble", "Smoldering Sapling", "Ember Root",
-            "Blazing Thorn", "Ashen Oak", "Cinder Vine", "Glowing Grove",
-        }
         local i = index
         local basePercent = (0.9 - (i - 1) * 0.08)  -- slight descending stagger
         if basePercent < 0.25 then basePercent = 0.25 end
@@ -384,100 +484,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
 
     -- For raid frames, generate deterministic test data
     if isRaid then
-        local testNames = {
-            "Tankadin", "Healbot", "Magefire", "Stabbymc", "Huntard",
-            "Shammywow", "Dkfrost", "Warlockz", "Monkbrew", "Priestess",
-            "Druidtree", "Palaheals", "Rogueshadow", "Warriorfury", "Huntermark",
-            "Magearcane", "Warlockaff", "Shamanrest", "Monkmist", "Priestshadow",
-            "Dkblood", "Demonhunter", "Evokerdev", "Tankwarrior", "Tankdruid",
-            "Holypriest", "Discpriest", "Restoshaman", "Mistweaver", "Holypaladin",
-            "Boomkin", "Feral", "Enhance", "Elemental", "Retribution",
-            "Windwalker", "Havoc", "Devastation", "Arms", "Assassination"
-        }
-        local testClasses = {
-            "PALADIN", "PRIEST", "MAGE", "ROGUE", "HUNTER",
-            "SHAMAN", "DEATHKNIGHT", "WARLOCK", "MONK", "PRIEST",
-            "DRUID", "PALADIN", "ROGUE", "WARRIOR", "HUNTER",
-            "MAGE", "WARLOCK", "SHAMAN", "MONK", "PRIEST",
-            "DEATHKNIGHT", "DEMONHUNTER", "EVOKER", "WARRIOR", "DRUID",
-            "PRIEST", "PRIEST", "SHAMAN", "MONK", "PALADIN",
-            "DRUID", "DRUID", "SHAMAN", "SHAMAN", "PALADIN",
-            "MONK", "DEMONHUNTER", "EVOKER", "WARRIOR", "ROGUE"
-        }
-        local testRoles = {
-            "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "HEALER", "DAMAGER", "DAMAGER", "TANK", "HEALER",
-            "HEALER", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "DAMAGER", "DAMAGER", "HEALER", "HEALER", "DAMAGER",
-            "TANK", "DAMAGER", "DAMAGER", "TANK", "TANK",
-            "HEALER", "HEALER", "HEALER", "HEALER", "HEALER",
-            "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER"
-        }
-        -- Spec IDs matching each class/role for accurate melee/ranged separation
-        local testSpecs = {
-            66,   -- 1  PALADIN/TANK      - Protection
-            257,  -- 2  PRIEST/HEALER     - Holy
-            63,   -- 3  MAGE/DAMAGER      - Fire (ranged)
-            260,  -- 4  ROGUE/DAMAGER     - Outlaw (melee)
-            254,  -- 5  HUNTER/DAMAGER    - Marksmanship (ranged)
-            264,  -- 6  SHAMAN/HEALER     - Restoration
-            251,  -- 7  DEATHKNIGHT/DPS   - Frost (melee)
-            265,  -- 8  WARLOCK/DAMAGER   - Affliction (ranged)
-            268,  -- 9  MONK/TANK         - Brewmaster
-            256,  -- 10 PRIEST/HEALER     - Discipline
-            105,  -- 11 DRUID/HEALER      - Restoration
-            65,   -- 12 PALADIN/HEALER    - Holy
-            259,  -- 13 ROGUE/DAMAGER     - Assassination (melee)
-            71,   -- 14 WARRIOR/DAMAGER   - Arms (melee)
-            255,  -- 15 HUNTER/DAMAGER    - Survival (melee)
-            64,   -- 16 MAGE/DAMAGER      - Frost (ranged)
-            266,  -- 17 WARLOCK/DAMAGER   - Demonology (ranged)
-            264,  -- 18 SHAMAN/HEALER     - Restoration
-            270,  -- 19 MONK/HEALER       - Mistweaver
-            258,  -- 20 PRIEST/DAMAGER    - Shadow (ranged)
-            250,  -- 21 DEATHKNIGHT/TANK  - Blood
-            577,  -- 22 DEMONHUNTER/DPS   - Havoc (melee)
-            1467, -- 23 EVOKER/DAMAGER    - Devastation (ranged)
-            73,   -- 24 WARRIOR/TANK      - Protection
-            104,  -- 25 DRUID/TANK        - Guardian
-            257,  -- 26 PRIEST/HEALER     - Holy
-            256,  -- 27 PRIEST/HEALER     - Discipline
-            264,  -- 28 SHAMAN/HEALER     - Restoration
-            270,  -- 29 MONK/HEALER       - Mistweaver
-            65,   -- 30 PALADIN/HEALER    - Holy
-            102,  -- 31 DRUID/DAMAGER     - Balance (ranged)
-            103,  -- 32 DRUID/DAMAGER     - Feral (melee)
-            263,  -- 33 SHAMAN/DAMAGER    - Enhancement (melee)
-            262,  -- 34 SHAMAN/DAMAGER    - Elemental (ranged)
-            70,   -- 35 PALADIN/DAMAGER   - Retribution (melee)
-            269,  -- 36 MONK/DAMAGER      - Windwalker (melee)
-            577,  -- 37 DEMONHUNTER/DPS   - Havoc (melee)
-            1473, -- 38 EVOKER/DAMAGER    - Augmentation (ranged)
-            72,   -- 39 WARRIOR/DAMAGER   - Fury (melee)
-            261,  -- 40 ROGUE/DAMAGER     - Subtlety (melee)
-        }
-        local testHealthPercents = {
-            0.95, 0.88, 0.72, 0.65, 0.80,
-            0.92, 0.58, 0.75, 0.85, 0.70,
-            0.90, 0.82, 0.68, 0.55, 0.78,
-            0.88, 0.62, 0.95, 0.72, 0.60,
-            0.98, 0.75, 0.82, 0.90, 0.85,
-            0.78, 0.92, 0.65, 0.88, 0.70,
-            0.82, 0.75, 0.68, 0.95, 0.58,
-            0.85, 0.72, 0.80, 0.65, 0.90
-        }
-        local testPowerPercents = {
-            0.85, 0.92, 0.78, 0.65, 0.70,
-            0.88, 0.55, 0.82, 0.95, 0.72,
-            0.80, 0.68, 0.90, 0.75, 0.85,
-            0.62, 0.95, 0.70, 0.88, 0.78,
-            0.92, 0.65, 0.85, 0.72, 0.80,
-            0.90, 0.75, 0.82, 0.68, 0.95,
-            0.78, 0.85, 0.70, 0.88, 0.62,
-            0.80, 0.92, 0.75, 0.68, 0.85
-        }
-        
         local i = index
         local baseHealth = testHealthPercents[i] or 0.75
         local basePower = testPowerPercents[i] or 0.80
@@ -788,12 +794,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- own, both of which disagreed with live. (Audit, 2026-08-07.)
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Update bars to follow animated health (use animated health value)
-    local animatedTestData = {}
-    for k, v in pairs(testData) do
-        animatedTestData[k] = v
-    end
-    animatedTestData.healthPercent = health
+    -- Update bars to follow animated health (use animated health value).
+    -- ⚠ NOT COPIED. testData is this call's own fresh table (GetTestUnitData builds a
+    -- new one per call and keeps no reference), so it carries the animated value
+    -- itself. The copy it used to make was a second ~40-field throwaway table per
+    -- frame per 20 Hz tick.
+    testData.healthPercent = health
+    local animatedTestData = testData
     
     -- ☠ REDUCED MAX HEALTH MUST RE-RUN ON EVERY HEALTH CHANGE. Live's UpdateHealthFast
     -- calls it explicitly for exactly that reason; this ticker never did, so with
