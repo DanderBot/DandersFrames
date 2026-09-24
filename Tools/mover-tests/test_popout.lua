@@ -3089,4 +3089,52 @@ do
     again:Close()
 end
 
+-- ============================================================
+-- RECYCLE PINNED (memory)
+-- A closed pinned popout used to be dropped, and WoW never frees a frame --
+-- so a consumer that pins on every edit (the mover) built and leaked a whole
+-- panel per edit. With recyclePinned the closed instance is kept and revived,
+-- unpinned, the next time its key has nothing pooled.
+-- ============================================================
+print("-- Popout: recyclePinned")
+do
+    builds = 0
+    local src = source(80, 40)
+    local a = popout({ key = "recyc", recyclePinned = true })
+    a:Follow(src); a:Pin()
+    local b = popout({ key = "recyc", recyclePinned = true })
+    check(b ~= a, "recycle: a LIVE pinned instance is never handed out")
+    eq(builds, 2, "recycle: ...so the second request builds")
+    b:Follow(src); b:Pin()
+    a:Close(); b:Close()
+
+    local c = popout({ key = "recyc", recyclePinned = true })
+    check(c == a or c == b, "recycle: a closed pinned instance is revived instead of building")
+    eq(builds, 2, "recycle: ...and build does not run again")
+    check(not c.closed, "recycle: the revived instance is open")
+    check(not c:IsPinned(), "recycle: ...and unpinned")
+    check(not c.frame:IsMovable(), "recycle: ...not draggable")
+    check(c.titleBar:GetScript("OnDragStart") == nil, "recycle: ...no title-bar drag")
+    check(c.pinBtn:IsShown(), "recycle: ...and its pin button is back")
+    c:Follow(src)
+    check(c:IsShown(), "recycle: it docks and shows like a pooled instance")
+    local c2 = popout({ key = "recyc", recyclePinned = true })
+    check(c2 == c, "recycle: the revived instance is now THE pooled one")
+    c:Pin()
+    check(c:IsPinned() and c.frame:IsMovable(), "recycle: a revived instance pins again")
+    c:Close()
+    local d = popout({ key = "recyc", recyclePinned = true })
+    local e = popout({ key = "recyc", recyclePinned = true })
+    check(d == e and (d == a or d == b), "recycle: ...and closes back into the spares")
+    eq(builds, 2, "recycle: still two builds after the whole round")
+    d:Close()
+
+    -- Opt-in: without the flag a closed pinned instance is still let go.
+    local x = popout({ key = "norecyc" })
+    x:Follow(src); x:Pin(); x:Close()
+    local y = popout({ key = "norecyc" })
+    check(y ~= x, "recycle: off by default -- a pinned instance is not revived")
+    y:Close()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

@@ -647,13 +647,16 @@ local function storeFor(host)
         -- `stack` is the DOCKED set in z-order, oldest first -- see THE STACKING
         -- ORDER. A popout only joins it while it is docked outside a window; the
         -- mover's placement has no window to stand over and so keeps no order.
-        s = { pooled = {}, live = {}, stack = {} }
+        -- `spare` is key -> list of CLOSED pinned instances kept for reuse, only
+        -- for popouts that opted in with recyclePinned -- see THE PINNED SPARE.
+        s = { pooled = {}, live = {}, stack = {}, spare = {} }
         rawset(host, "_popouts", s)
     end
     -- A host whose store predates the stacking order (nothing does in one
     -- session, but the store is built lazily and read from several files) still
     -- has to answer a list here rather than nil.
     if not s.stack then s.stack = {} end
+    if not s.spare then s.spare = {} end
     return s
 end
 
@@ -2423,6 +2426,8 @@ function Popout:Pin(silent)
     -- follow, so none of this is wired until pinning.
     f:SetMovable(true)
     local bar = self.titleBar
+    -- Remembered so a recycled spare (_Unpin) can put the bar back exactly.
+    self._barMouseBeforePin = bar.IsMouseEnabled and bar:IsMouseEnabled() or false
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
     -- Nothing to redraw on either end of the drag: a pinned popout carries no
@@ -2459,6 +2464,23 @@ function Popout:AutoPin()
 end
 
 function Popout:IsPinned() return self.pinned == true end
+
+-- Undo what Pin wired, for a CLOSED spare being revived (see THE PINNED SPARE).
+-- Not a user-facing unpin -- onUnpin does not fire; nothing was unpinned in
+-- front of anyone. Positioning is left to the Follow that opens it next.
+function Popout:_Unpin()
+    self.pinned = false
+    self.frame:SetMovable(false)
+    local bar = self.titleBar
+    if bar then
+        bar:SetScript("OnDragStart", nil)
+        bar:SetScript("OnDragStop", nil)
+        bar:RegisterForDrag()
+        bar:EnableMouse(self._barMouseBeforePin and true or false)
+    end
+    self._barMouseBeforePin = nil
+    if self.pinBtn then self.pinBtn:Show() end
+end
 
 -- ---- header ------------------------------------------------------
 
@@ -2509,6 +2531,20 @@ function Popout:Close(reason)
     -- A PINNED instance is discarded: it left the pool when it was pinned and
     -- its frame is not offered back. An unpinned one stays pooled and is
     -- revived by the next request for its key -- that is what the pool is for.
+    --
+    -- ☠ THE PINNED SPARE. "Discarded" means LEAKED in WoW: the frame and
+    -- everything build mounted in it are never freed. A consumer that pins as
+    -- a matter of course (the mover auto-pins on every edit, and its family
+    -- sweep closes the pin on the next selection) built a whole new panel per
+    -- edit, for good. Opted in with recyclePinned, the closed instance waits
+    -- here instead and CreatePopout revives it unpinned when its key has no
+    -- pooled instance. Opt-in because a consumer may still hold a closed
+    -- pinned instance and assume it can never come back to life.
+    if self.pinned and self.recyclePinned then
+        local list = store.spare[self.key]
+        if not list then list = {}; store.spare[self.key] = list end
+        list[#list + 1] = self
+    end
 
     local f = self.frame
     local ox, oy, origin = dockFx(self.side)
@@ -2557,6 +2593,7 @@ local function adopt(po, opts)
     po.onPin       = opts.onPin
     po.onUnpin     = opts.onUnpin          -- accepted; v1 never unpins
     po.canAutoPin  = opts.canAutoPin
+    po.recyclePinned = opts.recyclePinned and true or nil
     po.tetherSource = opts.tetherSource
     -- ...and any override standing over it is VOID. The panel belongs to whoever
     -- just asked for it, so a stash taken while the PREVIOUS consumer's overlay
@@ -2608,6 +2645,12 @@ end
 --   onClose(popout, reason)  reason: "cross"|"family"|"source"|"api"
 --   onPin(popout) / onUnpin(popout)   onUnpin is accepted; v1 never unpins
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
+--   recyclePinned opt-in. A PINNED instance that closes is kept as a spare
+--                 for its key instead of being discarded, and the next
+--                 request that finds no pooled instance revives it UNPINNED
+--                 (build does not run again). Without it a closed pinned
+--                 panel is garbage whose frames WoW never frees -- see
+--                 THE PINNED SPARE in Close
 --   tetherSource  region or function -> region; the beam's far end. Temporarily
 --                 REPLACED, and exactly restored, by SetTetherOverride while a
 --                 consumer's overlay covers the surface the source lives on --
@@ -2656,6 +2699,18 @@ function UI:CreatePopout(opts)
 
     -- Pooled hit: same object, re-targeted, build untouched.
     local pooled = store.pooled[opts.key]
+    -- No pooled instance: a closed pinned SPARE of this key (recyclePinned) is
+    -- revived unpinned and becomes the pooled one, rather than building anew.
+    if not pooled then
+        local spares = store.spare[opts.key]
+        local n = spares and #spares or 0
+        if n > 0 then
+            pooled = spares[n]
+            spares[n] = nil
+            pooled:_Unpin()
+            store.pooled[opts.key] = pooled
+        end
+    end
     if pooled then
         pooled.closed = false
         local t0 = perfStart(host)
