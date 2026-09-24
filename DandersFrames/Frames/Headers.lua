@@ -121,6 +121,49 @@ function DF:SetArenaSortIncomplete(incomplete)
     end
 end
 
+-- ============================================================
+-- PARTY SORT RETRY -- the arena machinery above, for the party header (2026-09-24).
+-- The party header runs NAMELIST by default (self position FIRST), so it had exactly the
+-- arena's hole and none of its fix: a member whose name had not resolved was left out of the
+-- list and hidden until /reload (live report, M+). BuildPartyNameList now reports an
+-- incomplete build, ApplyPartyGroupSorting shows everyone in INDEX order, and this re-sorts
+-- once the names resolve. Same cap, same combat replay, same FrameSort hand-off.
+-- ============================================================
+local partySortRetryPending = false
+local partySortRetryCount = 0
+local partyNameListIncomplete = false
+
+local function SchedulePartySortRetry()
+    if partySortRetryPending then return end
+    if partySortRetryCount >= 24 then return end  -- ~12s safety cap; UNIT_NAME_UPDATE re-arms it
+    partySortRetryPending = true
+    partySortRetryCount = partySortRetryCount + 1
+    C_Timer.After(0.5, function()
+        partySortRetryPending = false
+        if not partyNameListIncomplete then return end
+        if IsInRaid() or (DF.GetContentType and DF:GetContentType() == "arena") then return end
+        if InCombatLockdown() then
+            -- Replays via the existing combat-end queue.
+            DF.pendingSortingUpdate = true
+        elseif DF.IsFrameSortActive and DF:IsFrameSortActive() then
+            if DF.FrameSort and DF.FrameSort.RequestSort then
+                DF.FrameSort:RequestSort()
+            end
+        elseif DF.ApplyPartyGroupSorting then
+            DF:ApplyPartyGroupSorting()
+        end
+    end)
+end
+
+function DF:SetPartySortIncomplete(incomplete)
+    partyNameListIncomplete = incomplete and true or false
+    if incomplete then
+        SchedulePartySortRetry()
+    else
+        partySortRetryCount = 0  -- complete build: re-arm the safety cap
+    end
+end
+
 -- Same pattern for role updates
 local roleThrottleFrame = CreateFrame("Frame")
 roleThrottleFrame:Hide()
@@ -4388,15 +4431,30 @@ function DF:BuildPartyNameList(selfPosition)
     })
     
     -- Add party members
+    -- ☠☠ AN UNRESOLVED NAME MUST NOT REACH THE LIST, AND MUST NOT BE SILENTLY DROPPED EITHER.
+    -- Live report (5.3.3, M+): "sometimes when someone dies, a random person just falls off my
+    -- party frames as if they left the group -- you have to /reload to get their frame back."
+    -- The header runs in NAMELIST mode by default (self position FIRST), and the secure header
+    -- HIDES any unit whose name is not in the list. This used to add UnitName's answer as-is:
+    -- UNKNOWNOBJECT ("Unknown") for a member whose player object is not loaded -- a literal that
+    -- matches nobody -- and a SECRET string in restricted content, which table.concat below
+    -- cannot take. Either way the member was missing from the header, and nothing re-sorts on
+    -- a name resolving (no roster event fires), so they stayed gone until a reload.
+    -- ⇒ Report `complete = false` and let ApplyPartyGroupSorting show everyone in INDEX order
+    -- until the names resolve -- the same fix the arena header got (BuildArenaNameList).
+    local complete = true
     for i = 1, 4 do
         local unit = "party" .. i
         if UnitExists(unit) then
             local name, realm = UnitName(unit)
-            local fullName = name
-            if realm and realm ~= "" then
-                fullName = name .. "-" .. realm
-            end
-            if name then
+            -- issecretvalue first: comparing or concatenating a secret string throws.
+            if issecretvalue(name) or issecretvalue(realm) or not name or name == UNKNOWNOBJECT then
+                complete = false
+            else
+                local fullName = name
+                if realm and realm ~= "" then
+                    fullName = name .. "-" .. realm
+                end
                 table.insert(members, {
                     unit = unit,
                     name = fullName,
@@ -4405,9 +4463,9 @@ function DF:BuildPartyNameList(selfPosition)
             end
         end
     end
-    
+
     -- Use the unified sorting function
-    return DF:BuildSortedNameList(members, DF:GetDB(), selfPosition, true)
+    return DF:BuildSortedNameList(members, DF:GetDB(), selfPosition, true), complete
 end
 
 -- ============================================================
@@ -5851,25 +5909,38 @@ function DF:ApplyPartyGroupSorting()
         headerDebug("  Sorting disabled, using INDEX (cleared all attributes)")
     else
         -- Use nameList for FIRST/LAST or any advanced sorting options
-        local nameList = DF:BuildPartyNameList(selfPosition)
-        
+        local nameList, complete = DF:BuildPartyNameList(selfPosition)
+
         -- Clear all filtering/grouping attributes that could interfere with nameList
         SetHeaderAttribute(DF.partyHeader, "groupBy", nil)
         SetHeaderAttribute(DF.partyHeader, "groupingOrder", nil)
         SetHeaderAttribute(DF.partyHeader, "groupFilter", nil)
         SetHeaderAttribute(DF.partyHeader, "roleFilter", nil)
         SetHeaderAttribute(DF.partyHeader, "strictFiltering", nil)
-        
-        -- Set nameList and sortMethod (ONLY if changed!)
-        SetHeaderAttribute(DF.partyHeader, "nameList", nameList)
-        SetHeaderAttribute(DF.partyHeader, "sortMethod", "NAMELIST")
-        
+
+        if not complete then
+            -- Someone exists whose name has not resolved (see BuildPartyNameList). A filtering
+            -- nameList would HIDE them until a reload. Show EVERYONE in INDEX order for now and
+            -- re-sort once the names resolve -- the arena header's fix, applied to party.
+            -- ⚠ A "Hide from Main Frames" pinned member shows here too for that moment. Showing
+            -- one frame too many briefly is the right side to err on; hiding a real member
+            -- mid-key was the bug.
+            SetHeaderAttribute(DF.partyHeader, "nameList", nil)
+            SetHeaderAttribute(DF.partyHeader, "sortMethod", "INDEX")
+            DF:SetPartySortIncomplete(true)
+            headerDebug("  Party nameList INCOMPLETE (unresolved name) - using INDEX + retry")
+        else
+            DF:SetPartySortIncomplete(false)
+            -- Set nameList and sortMethod (ONLY if changed!)
+            SetHeaderAttribute(DF.partyHeader, "nameList", nameList)
+            SetHeaderAttribute(DF.partyHeader, "sortMethod", "NAMELIST")
+            headerDebug("  Using nameList mode:", nameList)
+        end
+
         -- Force header to re-evaluate by hiding and showing
         -- This is required for SecureGroupHeaderTemplate to re-sort children
         DF.partyHeader:Hide()
         DF.partyHeader:Show()
-        
-        headerDebug("  Using nameList mode:", nameList)
     end
     
     -- NOTE: Frame refresh is handled by OnAttributeChanged when units swap
@@ -8431,6 +8502,14 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                 -- still gets re-sorted instead of staying in INDEX order.
                 arenaSortRetryCount = 0
                 ScheduleArenaSortRetry()
+            end
+            -- Party: the same nudge for the party header's incomplete build (see
+            -- SchedulePartySortRetry). Re-arming the cap here is what brings back a member
+            -- whose name resolves long after the retry window -- a released player running
+            -- back from the graveyard, say.
+            if partyNameListIncomplete and unit:match("^party%d") then
+                partySortRetryCount = 0
+                SchedulePartySortRetry()
             end
         end
         return

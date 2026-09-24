@@ -52,9 +52,13 @@ function DF:IsFrameSortActive()
     return (partyDB and partyDB.useFrameSort) or (raidDB and raidDB.useFrameSort)
 end
 
--- Convert an array of unit tokens to a comma-separated nameList string
+-- Convert an array of unit tokens to a comma-separated nameList string.
+-- Returns nameList, complete. `complete` is false when a PARTY member exists whose name has
+-- not resolved (nil, secret, or UNKNOWNOBJECT) -- see SortPartyFrames for why that must not
+-- become a partial list. Raid tokens keep their documented drop-and-re-sort behaviour below.
 local function UnitsToNameList(units)
     wipe(namesBuf)
+    local complete = true
     for i = 1, #units do
         local unit = units[i]
         local name
@@ -74,6 +78,10 @@ local function UnitsToNameList(units)
             end
         else
             name = GetUnitName(unit, true)
+            if issecretvalue(name) or not name or name == UNKNOWNOBJECT then
+                complete = false
+                name = nil
+            end
         end
         -- Skip nil and secret values (Midnight 12.0 returns opaque secret strings
         -- for some unit names in instanced content; type() == "string" is not
@@ -82,7 +90,7 @@ local function UnitsToNameList(units)
             namesBuf[#namesBuf + 1] = name
         end
     end
-    return tconcat(namesBuf, ",")
+    return tconcat(namesBuf, ","), complete
 end
 
 -- ============================================================
@@ -100,8 +108,24 @@ local function SortPartyFrames(units)
     if not DF.partyHeader then return false end
     if not DF.partyHeader:IsVisible() then return false end
 
-    local nameList = UnitsToNameList(units)
+    local nameList, complete = UnitsToNameList(units)
+    -- ☠ A PARTIAL LIST HIDES THE MISSING MEMBER. The secure header shows only the names in
+    -- nameList, so a member whose name had not resolved at sort time vanished from the party
+    -- frames until a reload (live report, M+). Show everyone in INDEX order and let the party
+    -- retry re-request FrameSort's order once the names resolve -- the same thing
+    -- SortArenaFrames below does for its incomplete case.
+    if not complete then
+        DF:Debug("FRAMESORT", "Party nameList incomplete - using INDEX + retry")
+        DF.partyHeader:SetAttribute("nameList", nil)
+        DF.partyHeader:SetAttribute("sortMethod", "INDEX")
+        DF.partyHeader:SetAttribute("groupBy", nil)
+        DF.partyHeader:SetAttribute("groupingOrder", nil)
+        if DF.ClearHeaderAttributeCache then DF:ClearHeaderAttributeCache(DF.partyHeader) end
+        if DF.SetPartySortIncomplete then DF:SetPartySortIncomplete(true) end
+        return true
+    end
     if nameList == "" then return false end
+    if DF.SetPartySortIncomplete then DF:SetPartySortIncomplete(false) end
 
     DF:Debug("FRAMESORT", "Sorting party frames: %s", nameList)
 
