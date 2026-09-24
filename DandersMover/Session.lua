@@ -299,10 +299,27 @@ function Sess:SetAnchorPoint(el, point)
     local pos = Registry:GetPos(el)
     if pos.anchor or pos.point == point then return end
     local before = NS.CopyPos(pos)
-    local w, h = sizeOf(el)
-    local cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
-    pos.point = point
-    pos.x, pos.y = Solver.CenterToPoint(point, cx, cy, w, h)
+    -- An element that says where its visible rect sits relative to its record
+    -- (def.visibleOffset) converts through that: the visible centre stays put and
+    -- the record is re-expressed from the new point. The size-based conversion
+    -- below assumes the record's point is a point OF the visible rect, which is
+    -- false for a container larger than what it shows (DF's raid frames).
+    local ox, oy
+    if NS.VisibleOffset then ox, oy = NS.VisibleOffset(el, pos) end
+    local nx, ny
+    if ox then
+        local vx, vy = (pos.x or 0) + ox, (pos.y or 0) + oy
+        pos.point = point
+        nx, ny = NS.VisibleOffset(el, pos)
+        if nx then pos.x, pos.y = vx - nx, vy - ny end
+    end
+    if not nx then
+        pos.point = before.point
+        local w, h = sizeOf(el)
+        local cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
+        pos.point = point
+        pos.x, pos.y = Solver.CenterToPoint(point, cx, cy, w, h)
+    end
     apply(el, "nudge")
     commit(el, before, L["Anchor point %s"])
 end

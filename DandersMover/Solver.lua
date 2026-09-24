@@ -35,6 +35,19 @@ function S.DragDelta(startPos, startCx, startCy, cx, cy)
     return (startPos.x or 0) + (cx - startCx), (startPos.y or 0) + (cy - startCy)
 end
 
+-- The X/Y pair the element panel's boxes show, and the pair the slab's own
+-- coords readout repeats: the record's x/y for a free element, the anchor's
+-- offsets for an anchored one, rounded half up. ONE producer for both, because
+-- the slab used to quote its visible rect's CENTRE instead -- a different
+-- quantity whenever the record's point is not CENTER, or the consumer's getRect
+-- is offset from its record (DF's raid frames: the frames sit inside a larger
+-- reserved container) -- so the two readouts disagreed on the same element.
+function S.Readout(pos)
+    local a = pos.anchor
+    if a then return floor((a.offsetX or 0) + 0.5), floor((a.offsetY or 0) + 0.5) end
+    return floor((pos.x or 0) + 0.5), floor((pos.y or 0) + 0.5)
+end
+
 -- Nudge distance for one arrow press / click. Ctrl wins over Shift so
 -- Shift+Ctrl is still x100, not an undefined mix.
 function S.NudgeStep(shift, ctrl)
@@ -121,6 +134,22 @@ function S.RectOverlapArea(a, b)
     local h = min(a.y + a.h / 2, b.y + b.h / 2) - max(a.y - a.h / 2, b.y - b.h / 2)
     if w > 0 and h > 0 then return w * h end
     return 0
+end
+
+-- The LOOSE clamp: a rect with any part on screen is left exactly where it is;
+-- one with nothing on screen is pulled to the nearest fully-visible spot. What
+-- an anchored solve gets (Core's NS.KeepOnScreen) and -- the same function, so
+-- the two can never disagree -- where a slab is drawn (Proxy's syncGeometry).
+-- Free elements never reach the second branch: every write that moves one
+-- clamps it fully (ClampToScreen above).
+-- Scalar maths rather than RectOverlapArea: the slab path runs per refresh and
+-- would otherwise build two tables every time.
+function S.KeepOnScreen(cx, cy, w, h, screenW, screenH)
+    local halfW, halfH = screenW / 2, screenH / 2
+    local ow = min(cx + w / 2, halfW) - max(cx - w / 2, -halfW)
+    local oh = min(cy + h / 2, halfH) - max(cy - h / 2, -halfH)
+    if ow > 0 and oh > 0 then return cx, cy end
+    return S.ClampToScreen(cx, cy, w, h, screenW, screenH)
 end
 
 -- ============================================================

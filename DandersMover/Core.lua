@@ -5,7 +5,9 @@ local addonName, NS = ...
 -- The public API lives on the LibStub object; internals live on NS.
 -- ============================================================
 -- MINOR 2 adds Lib:RefreshMovedTargets (see MOVED-TARGET SWEEP below).
-local MAJOR, MINOR = "DandersMover-1.0", 2
+-- MINOR 3 adds the optional def.visibleOffset (see RECORD-TO-VISIBLE OFFSET
+-- below), and slabs clamp the way elements do.
+local MAJOR, MINOR = "DandersMover-1.0", 3
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -144,10 +146,37 @@ function NS:ParentOf(id) return Registry:ParentId(id) end
 function NS.KeepOnScreen(cx, cy, w, h)
     local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
     if not (sw and sh and w and h) then return cx, cy end
-    if Solver.RectOverlapArea({ x = 0, y = 0, w = sw, h = sh }, { x = cx, y = cy, w = w, h = h }) > 0 then
-        return cx, cy
-    end
-    return Solver.ClampToScreen(cx, cy, w, h, sw, sh)
+    return Solver.KeepOnScreen(cx, cy, w, h, sw, sh)
+end
+
+-- ============================================================
+-- RECORD-TO-VISIBLE OFFSET
+-- ------------------------------------------------------------
+-- An element's getRect reports its VISIBLE rect, and that need not be centred
+-- on its record: DF's raid record places a container reserved for forty frames
+-- while its getRect measures the frames actually inside it. A drag copes
+-- (DragDelta moves the record by the visible movement), but an anchored solve
+-- writes the target VISIBLE centre into the record as a CENTER point -- which
+-- the consumer applies to its container, so the frames landed off their seat
+-- by exactly that offset.
+--
+-- def.visibleOffset(pos) -> dx, dy closes that: the visible centre sits at
+-- (pos.x + dx, pos.y + dy) for the record as given, in UIParent units. Only the
+-- consumer can answer it without a stale read, because it knows how its own
+-- container relates to the record. nil (no callback, or the callback returns
+-- nil) keeps the plain CENTER write, which is right for any element whose
+-- frame IS its visible rect.
+-- ============================================================
+local OFFSET_EPSILON = 0.01
+
+-- dx, dy or nil. Guarded: a consumer error must not take the solve down with it.
+function NS.VisibleOffset(el, pos)
+    local fn = el.visibleOffset
+    if not fn then return nil end
+    local ok, dx, dy = pcall(fn, pos)
+    if not ok then geterrorhandler()(dx) return nil end
+    if type(dx) ~= "number" or type(dy) ~= "number" then return nil end
+    return dx, dy
 end
 
 -- Re-solves an anchored element's absolute x/y from its target's current rect.
@@ -168,6 +197,19 @@ function NS:ResolveElement(el)
     local cx, cy = Solver.Resolve(a, w, h, rect, Solver.SPACING)
     if not cx then return false end
     cx, cy = NS.KeepOnScreen(cx, cy, w, h)
+    -- cx/cy is where the VISIBLE centre belongs; see RECORD-TO-VISIBLE OFFSET.
+    local offX, offY = NS.VisibleOffset(el, pos)
+    if offX then
+        local nx, ny = cx - offX, cy - offY
+        -- The offset is measured from live geometry, so an exact compare would
+        -- report sub-pixel float noise as a move on every solve. The record's
+        -- point is kept: the offset was asked for THAT point.
+        if abs(nx - (pos.x or 0)) < OFFSET_EPSILON and abs(ny - (pos.y or 0)) < OFFSET_EPSILON then
+            return false
+        end
+        pos.x, pos.y = nx, ny
+        return true
+    end
     local changed = pos.point ~= "CENTER" or pos.x ~= cx or pos.y ~= cy
     pos.point, pos.x, pos.y = "CENTER", cx, cy
     return changed

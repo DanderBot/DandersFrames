@@ -87,12 +87,26 @@ maths all use it, and dragging applies the movement as a delta to the record, so
 the offset between record and visible rect never drifts. Return nil while there
 is nothing to measure.
 
+### `visibleOffset`
+
+`visibleOffset = function(pos) return dx, dy end` says where the visible rect's
+centre sits relative to the record *as given*: at `(pos.x + dx, pos.y + dy)`.
+Give it when your `getRect` is not centred on your record — a container reserved
+for more than it shows, or one your code shifts off the record. An anchored
+solve then puts the *visible* rect on its seat (not the container), and the
+panel's 9-point picker re-expresses the record without moving what is visible.
+It is only ever asked about your own geometry, so answer it live: measure your
+visible centre against your container's centre, and add where the record puts
+the container. Return nil when you cannot measure; the lib then writes the
+seat's centre as a `CENTER` point, which is right when your frame *is* your
+visible rect.
+
 ## API
 
 | Call | Purpose |
 |---|---|
 | `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI. `icon` (texture path) is shown on your proxies; omitted → the bundled DandersFrames icon |
-| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `snappable`, `group`, `openSettings` (function — the panel shows a **Configure** button for the element that calls it; open your own settings UI for the element there), `twin` (`"addon:key"` of the element's counterpart, e.g. the raid container for the party container — the panel shows a **Copy to <twin>** button that copies the whole record onto the twin, re-solves it and pushes one undo entry; the anchor is dropped if carrying it over would create a loop) |
+| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `snappable`, `group`, `visibleOffset` (see above), `openSettings` (function — the panel shows a **Configure** button for the element that calls it; open your own settings UI for the element there), `twin` (`"addon:key"` of the element's counterpart, e.g. the raid container for the party container — the panel shows a **Copy to <twin>** button that copies the whole record onto the twin, re-solves it and pushes one undo entry; the anchor is dropped if carrying it over would create a loop) |
 | `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable. Also takes `getSize` / `getRect` / `snappable` |
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |
 | `Mover:RefreshAnchorTargets(addon, keys)` | The batched form: one union descendant set, one resolution order, one pass, so an element hanging off two of the listed targets is solved once instead of once per target. Use it when several targets move together (a header re-layout that shifts every sub-target) rather than looping `RefreshAnchorTarget` |
@@ -188,7 +202,8 @@ selection (the following panel goes with it), then the session.
 - A target counts as *available* when it has a `getRect` and that `getRect` returns a rect, or when it has no `getRect` and its frame exists and is visible (shown, and every ancestor shown — `IsVisible`, not `IsShown`, so a frame under a hidden container does not count). A `getRect` that returns `nil` is how you say "not meaningfully on screen right now", and it wins even if the backing frame is technically shown. Unavailable targets are never offered as snap targets, and anything anchored to one holds its last position instead of jumping — it re-solves the next time you call `RefreshAnchorTarget` or `Apply` while the target is available again.
 - `snappable = false` on `Register` / `RegisterAnchorTarget` (default true) takes a target out of the snap-zone pass only: a drag builds no zones for it and can never snap to it. It stays a first-class anchor target everywhere else — the panel's anchor and backup pickers both list it, link-drag can land on it, and anything already anchored to it keeps resolving. It is for dense sub-targets, like the per-unit frames inside a container, where twelve zones each would bury the screen.
 - A drag snaps to the **nearest** free zone whose landing position is within the **Snap distance** setting (Settings › Snapping, default 25, 0–400) of where the element is now — measured centre to centre, i.e. how far it would jump on drop. The distance is independent of the element's size, so a wide raid container and a single icon snap from the same distance. The zone highlight uses the same radius, so a zone that lights up is a zone that will take the drop.
-- Drags, nudges and X/Y edits are clamped so the visible rect stays on screen. An anchored solve is only clamped when it would leave **no part** of the element visible (a deliberate overhang keeps its seat); the slab itself is always clamped, so the handle stays reachable even when its element does not, and dragging it re-places the element where the slab goes.
+- Drags, nudges and X/Y edits are clamped so the visible rect stays on screen. An anchored solve is only clamped when it would leave **no part** of the element visible (a deliberate overhang keeps its seat). The slab follows the same rule, so it always sits exactly on its element while any of the element is on screen; only an element with nothing visible gets its slab pulled back to the nearest on-screen spot, as a handle — dragging it re-places the element where the slab goes.
+- The coords on a slab are the same numbers the panel's X/Y boxes show: the record's x/y for a free element, the anchor offsets for an anchored one, rounded.
 - A drop onto a snap zone whose target has stopped being available since the drag began (hidden, unregistered) commits as a plain move to where the preview showed, never a solve against the stale rect.
 - The per-drag **distance measures** (lines to the nearest screen edge with a px readout) and the **grid snap lines** (the crosshair on the line a drag snapped to) are **off by default** — they are precision aids, and on every drag frame they are louder than the frame being dragged. Turn either on in Settings › Snapping.
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden.

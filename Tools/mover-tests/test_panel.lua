@@ -1151,6 +1151,31 @@ do
 end
 
 reset()
+
+-- ============================================================
+-- X/Y BOXES READ Solver.Readout -- the pair the slab's coords repeat
+-- (test_proxy.lua "COORDS READOUT"). The two used to be computed separately and
+-- disagreed: the slab quoted its visible centre, the boxes the record.
+-- ============================================================
+do
+    local S = NS.Solver
+    local saved = { point = freePos.point, x = freePos.x, y = freePos.y }
+    freePos.point, freePos.x, freePos.y = "TOPLEFT", -412.6, 180.4
+    local po = refresh("P:free")
+    local rx, ry = S.Readout(freePos)
+    eq(po.ui.xBox._opts.get(), rx, "readout: the X box shows Solver.Readout's x")
+    eq(po.ui.yBox._opts.get(), ry, "readout: the Y box shows Solver.Readout's y")
+    eq(rx, -413, "readout: ...the record's x, rounded half up")
+    eq(ry, 180, "readout: ...the record's y, rounded half up")
+    freePos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 5.5, offsetY = -3.4 }
+    Pn:Refresh()
+    eq(po.ui.xBox._opts.get(), 6, "readout: anchored, the X box shows the offset, rounded like the slab's")
+    eq(po.ui.yBox._opts.get(), -3, "readout: anchored, the Y box shows the offset, rounded like the slab's")
+    freePos.anchor = nil
+    freePos.point, freePos.x, freePos.y = saved.point, saved.x, saved.y
+end
+
+reset()
 R:UnregisterAddon("P")
 R.ready = wasReady
 NS.db = nil

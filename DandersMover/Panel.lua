@@ -709,8 +709,9 @@ local function buildPanel(po, content)
         width = BOX_W, numeric = true,
         get = function()
             local el = po.el; if not el then return 0 end
-            local pos = Registry:GetPos(el)
-            return pos.anchor and (pos.anchor.offsetX or 0) or floor((pos.x or 0) + 0.5)
+            -- Solver.Readout: the same pair the slab's coords readout quotes.
+            local x = Solver.Readout(Registry:GetPos(el))
+            return x
         end,
         onCommit = function(v)
             local el = po.el
@@ -724,8 +725,8 @@ local function buildPanel(po, content)
         width = BOX_W, numeric = true,
         get = function()
             local el = po.el; if not el then return 0 end
-            local pos = Registry:GetPos(el)
-            return pos.anchor and (pos.anchor.offsetY or 0) or floor((pos.y or 0) + 0.5)
+            local _, y = Solver.Readout(Registry:GetPos(el))
+            return y
         end,
         onCommit = function(v)
             local el = po.el

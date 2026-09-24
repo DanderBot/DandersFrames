@@ -204,7 +204,10 @@ local function onDragStart(self)
         NS.Grid:SetAxisLock(shift and not ctrl, ctrl and not shift)
         local fx, fy, zone = NS.Session:DragTo(el, nx, ny)
         s:ClearAllPoints(); s:SetPoint("CENTER", UIParent, "CENTER", fx, fy)
-        s.coords:SetText(format("%d, %d", fx, fy))
+        -- The record DragTo just wrote, read like the panel reads it. No new
+        -- allocation over the old line: one format string per frame, as before.
+        local rx, ry = Solver.Readout(Registry:GetPos(el))
+        s.coords:SetText(format("%d, %d", rx, ry))
         P:UpdateZones(fx, fy, zone)
         P:UpdateLegendDodge(fx, fy, s:GetWidth() or 0, s:GetHeight() or 0)
         -- After the SetPoint above, so the tether's slab endpoint has no
@@ -463,15 +466,19 @@ local function create(el)
     b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
-    -- ☠ THE HANDLE STAYS ON SCREEN EVEN WHEN ITS ELEMENT DOES NOT. An anchored
-    -- solve can land an element outside the screen (a stale target rect --
-    -- Core's KeepOnScreen only catches the fully-off case), and a slab that
-    -- followed it there could never be clicked to bring it back. Clamped, the
-    -- slab hugs the edge instead; a drag from there re-places the element by the
-    -- cursor (DragTo positions the element at the slab's new centre), which is
-    -- the rescue. Free elements are already clamped by every write path, so the
-    -- slab and the element only ever part company in that one anchored case.
-    b:SetClampedToScreen(true)
+    -- ☠ NO SetClampedToScreen HERE. The slab used to be clamped by the client,
+    -- which clamps FULLY, while the element it stands for is only ever clamped
+    -- loosely (an anchored solve keeps any seat that leaves part of it on
+    -- screen -- Core's KeepOnScreen). So an element overhanging an edge had its
+    -- slab shoved inward, off the frames: the preview sat on screen while the
+    -- frames it described did not, the coords quoted a place nothing was, and
+    -- the FIRST drag "fixed" it -- DragTo starts from the slab's clamped centre
+    -- and moves the element there. syncGeometry now places the slab through
+    -- Solver.KeepOnScreen, the exact rule the element itself gets, so slab and
+    -- element agree whenever any of the element is visible. The one case they
+    -- still part is an element with NOTHING on screen: its slab is pulled to
+    -- the nearest visible spot as the rescue handle, and dragging it re-places
+    -- the element there.
 
     -- Role edge: full height, flush left, and UNDER the pixel border (which draws
     -- at ARTWORK sublevel 7) so the selection outline always reads over it.
@@ -649,7 +656,11 @@ local function syncGeometry(b)
     local cx, cy
     if rect then cx, cy = rect.x, rect.y; w, h = rect.w, rect.h
     else cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h) end
-    b:SetSize(math.max(w, MIN_PROXY), math.max(h, MIN_PROXY))
+    w, h = math.max(w, MIN_PROXY), math.max(h, MIN_PROXY)
+    -- The element's own clamp rule, not a harder one: see create().
+    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    if sw and sh then cx, cy = Solver.KeepOnScreen(cx, cy, w, h, sw, sh) end
+    b:SetSize(w, h)
     b:ClearAllPoints(); b:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
     -- A mover whose element is not on screen has no meaningful position to
     -- report, so the coords slot says so instead of quoting a stale number.
@@ -661,7 +672,15 @@ local function syncGeometry(b)
     local shown = Registry:IsTargetAvailable(el)
     -- Hidden frames keep a full-strength slab; the muted "hidden" word carries
     -- the state on its own.
-    b.coords:SetText(shown and format("%d, %d", cx, cy) or L["hidden"])
+    -- ☠ THE RECORD, NOT THE SLAB'S CENTRE: the same pair the panel's X/Y boxes
+    -- show (Solver.Readout). The centre is a different number whenever the
+    -- record's point is not CENTER or the visible rect is offset from the record.
+    if shown then
+        local rx, ry = Solver.Readout(pos)
+        b.coords:SetText(format("%d, %d", rx, ry))
+    else
+        b.coords:SetText(L["hidden"])
+    end
     return true
 end
 

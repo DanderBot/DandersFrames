@@ -52,6 +52,9 @@ local function stubFrame()
     function f:GetEffectiveScale() return self._scale end
     function f:SetShown(v) self._shown = v and true or false end
     function f:GetCenter() return 0, 0 end
+    -- The slab's LAST anchor, recorded: where a slab is drawn is only observable
+    -- as the offset it was handed (the stub resolves no geometry).
+    function f:SetPoint(...) self._lastPoint = { ... } end
     -- Real sizes, because the slab layout drops the coords/icon/title below
     -- fixed widths -- a stub that always answered 10 would render every proxy
     -- in its title-only form and the marker checks below would be meaningless.
@@ -460,7 +463,9 @@ do
         getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
         onChanged = function() end })
     P:Build()
-    eq(P.proxies["V:preview"].coords:GetText(), "50, 25", "getRect visible while frame hidden: coords, not 'hidden'")
+    -- The RECORD's numbers (0, 0), not the visible rect's centre (50, 25): the
+    -- slab repeats what the panel's X/Y boxes show. See the readout block below.
+    eq(P.proxies["V:preview"].coords:GetText(), "0, 0", "getRect visible while frame hidden: coords, not 'hidden'")
     eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
     P:DestroyAll()
     R:UnregisterAddon("V")
@@ -840,7 +845,10 @@ do
     P:Build()
     local uf = P:GetUnlockFrame()
     check(type(uf._level) == "number" and uf._level >= 100, "overlay: the unlock frame takes a frame level well above UIParent's children")
-    check(P.proxies["LV:a"]._clamped, "slab: clamped to the screen, so the handle can always be reached")
+    -- ☠ NOT client-clamped any more: SetClampedToScreen clamps FULLY, the element
+    -- is only ever clamped loosely, and the two parted company (see the SLAB
+    -- CLAMP PARITY block below).
+    check(not P.proxies["LV:a"]._clamped, "slab: not client-clamped -- it follows the element's own clamp rule")
     -- A zone plate sits at the overlay's own level: one below the slabs, but
     -- never back at 1.
     P:ShowZones(R:Get("LV:a"))
@@ -849,6 +857,82 @@ do
     P:HideZones()
     P:DestroyAll()
     R:UnregisterAddon("LV")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- COORDS READOUT = THE PANEL'S NUMBERS
+-- The slab used to print its visible rect's CENTRE while the panel's X/Y boxes
+-- print the RECORD (point-relative x/y, or the anchor's offsets). Those differ
+-- whenever the point is not CENTER or the consumer's getRect is offset from its
+-- record -- DF's raid frames sit inside a larger reserved container -- which is
+-- the reported "coordinates on the mover are sometimes wrong, the settings
+-- window's are right". Both now read Solver.Readout.
+-- ============================================================
+do
+    local S = NS.Solver
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("RO", { title = "RO" })
+    -- A container whose record places its TOPLEFT, with the visible frames well
+    -- inside it: the DF raid shape.
+    local freePos = { point = "TOPLEFT", x = -412.6, y = 180.4 }
+    R:Register("RO", "free", { title = "f", frame = FakeFrame(960, 540, 400, 300),
+        getRect = function() return { x = -300, y = 90, w = 180, h = 120 } end,
+        getPos = function() return freePos end, onChanged = function() end })
+    local anchoredPos = { point = "CENTER", x = 10, y = 10,
+        anchor = { target = "RO:free", edge = "bottom", align = "start", offsetX = 5.5, offsetY = -3.4 } }
+    R:Register("RO", "child", { title = "c", frame = FakeFrame(960, 540, 50, 20),
+        getRect = function() return { x = 77, y = -33, w = 50, h = 20 } end,
+        getPos = function() return anchoredPos end, onChanged = function() end })
+    P:Build()
+    local fx, fy = S.Readout(freePos)
+    eq(P.proxies["RO:free"].coords:GetText(), string.format("%d, %d", fx, fy), "readout: a free slab quotes Solver.Readout")
+    eq(P.proxies["RO:free"].coords:GetText(), "-413, 180", "readout: ...which is the record, rounded -- not the rect centre (-300, 90)")
+    local ax, ay = S.Readout(anchoredPos)
+    eq(P.proxies["RO:child"].coords:GetText(), string.format("%d, %d", ax, ay), "readout: an anchored slab quotes Solver.Readout")
+    eq(P.proxies["RO:child"].coords:GetText(), "6, -3", "readout: ...which is the anchor offsets, rounded")
+    P:DestroyAll()
+    R:UnregisterAddon("RO")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SLAB CLAMP PARITY
+-- The slab is placed by Solver.KeepOnScreen -- the rule an anchored solve gets
+-- -- so it sits exactly on its element whenever any of the element is on
+-- screen. Only an element with NOTHING visible gets a slab pulled back in (the
+-- rescue handle). UIParent is 1920x1080, so the screen is +-960 / +-540.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("CL", { title = "CL" })
+    local function reg(key, rect)
+        R:Register("CL", key, { title = key, frame = FakeFrame(960, 540, rect.w, rect.h),
+            getRect = function() return rect end,
+            getPos = function() return { point = "CENTER", x = rect.x, y = rect.y } end,
+            onChanged = function() end })
+    end
+    reg("over", { x = 900, y = -500, w = 300, h = 200 })   -- hangs off the bottom-right
+    reg("gone", { x = 2000, y = 0, w = 100, h = 40 })     -- nothing on screen
+    P:Build()
+    local over = P.proxies["CL:over"]._lastPoint
+    eq(over[4], 900, "clamp: an overhanging element's slab stays on it (x)")
+    eq(over[5], -500, "clamp: ...and (y) -- the frames and their preview never part")
+    local gone = P.proxies["CL:gone"]._lastPoint
+    eq(gone[4], 960 - 50, "clamp: an element with nothing on screen gets a slab pulled flush to the edge")
+    eq(gone[5], 0, "clamp: ...on the axis that was off only")
+    P:DestroyAll()
+    R:UnregisterAddon("CL")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil
