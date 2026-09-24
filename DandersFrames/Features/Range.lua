@@ -785,7 +785,9 @@ end
 
 rangeAnimGroup:SetScript("OnLoop", function()
     if DF:MemTestDisabled("enableRange") then return end
-    if not DF.partyHeader then return end
+    -- Readiness, not "party exists": with party frames off this used to return on every
+    -- loop and raid frames never got the spell-range poll (see DF:GroupHeadersReady).
+    if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) then return end
 
     local contentType = DF:GetContentType()
 

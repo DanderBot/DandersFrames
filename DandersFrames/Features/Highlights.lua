@@ -1189,7 +1189,8 @@ DF.UpdateAllHighlights = UpdateAllHighlights
 if DF.UpdateAll_Now then
     hooksecurefunc(DF, "UpdateAll_Now", function()
         -- partyHeader: the same "initialised yet" gate the event handler below uses.
-        if not DF.partyHeader or DF.testMode or DF.raidTestMode then return end
+        -- Readiness via any group header, not the party one (see DF:GroupHeadersReady).
+        if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) or DF.testMode or DF.raidTestMode then return end
         UpdateAllHighlights()
     end)
 end
@@ -1211,8 +1212,9 @@ highlightEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 highlightEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
-    -- Safety check - wait for initialization
-    if not DF.partyHeader then return end
+    -- Safety check - wait for initialization. ANY group header: with party frames off
+    -- DF.partyHeader never exists, and this gate used to switch raid highlights off entirely.
+    if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) then return end
     
     if event == "PLAYER_TARGET_CHANGED" then
         -- Target changed - need to update ALL frames
