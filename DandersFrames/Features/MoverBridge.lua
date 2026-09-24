@@ -173,42 +173,140 @@ local function partyRect()
     return DF:GetPartyVisibleRect()
 end
 
--- nil when the raid frames are not meaningfully on screen. That is the lib's "not
--- available" signal: nobody may snap to the raid frames while they are not up, and a
--- frame already anchored to them holds its last position instead of jumping to a stale
--- rect (DandersMover Registry:IsTargetAvailable).
-local function raidRect()
-    local r = DF.raidContainer
-    if not r then return nil end
-    local db = DF:GetRaidDB()
-    local s = db.frameScale or 1
+-- ============================================================
+-- RAID VISIBLE RECT
+-- ============================================================
+-- ☠ THE FRAMES, NOT THE CONTAINER. This used to measure the raid container, and the
+-- container is RESERVED for forty frames in every layout, by design: grouped mode sizes
+-- it for all eight groups (SecureSort:CalculateRaidGroupContainerSize, "fixed, so
+-- dragging works"), flat mode for forty units (FlatRaidFrames:UpdateContainerSize and the
+-- test copy in LightweightPositionRaidTestFramesFlat). So the mover preview was the
+-- forty-frame box whatever the raid or the test-mode count was -- at 20 test frames,
+-- twice the frames -- and it collided with things the frames never touch. It had nothing
+-- to do with the Groups Anchor either: the frames sit in one corner (or the middle) of
+-- that box, the preview was the box. Reported by Aphoex against v5.4.0-alpha.12.
+--
+-- Now the union of the raid frames actually on screen: the test pool while the raid
+-- preview is up (a mover session always has it up -- see the Unlocked callback), the
+-- live raid unit frames otherwise. nil when none is visible: the lib's "not available"
+-- signal (Registry:IsTargetAvailable), so nothing snaps to raid frames that are not up
+-- and a child anchored to them holds instead of jumping.
+--
+-- The record still places the CONTAINER, and the frames are offset inside it; that
+-- offset is what raidVisibleOffset below hands the lib, so a solve against this rect
+-- puts the frames -- not the container -- on the seat.
 
-    -- Test mode previews the raid frames in a separate non-secure container
-    -- (DandersFrames_Options/TestMode/TestFramePool.lua). The live container is empty
-    -- then, so measure what the user can actually see. Guarded: that container only
-    -- exists once the load-on-demand companion is in.
+-- Plain upvalues, not a table per call: these unions run on every layout sweep, which
+-- is every rendered frame while a settings slider is held.
+local uL, uR, uB, uT
+
+local function unionAdd(f)
+    if not f or not f.IsVisible or not f:IsVisible() then return end
+    local cx, cy, w, h = frameRect(f)
+    if not cx then return end
+    local l, r, b, t = cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2
+    if uL == nil then
+        uL, uR, uB, uT = l, r, b, t
+    else
+        if l < uL then uL = l end
+        if r > uR then uR = r end
+        if b < uB then uB = b end
+        if t > uT then uT = t end
+    end
+end
+
+-- Built once: unitFrameMap is keyed "raid1".."raid40", and concatenating the key per
+-- frame per sweep would build the same forty strings over and over.
+local RAID_UNIT = {}
+for i = 1, 40 do RAID_UNIT[i] = "raid" .. i end
+
+-- The container the raid frames are laid out in right now: the test container while
+-- the raid preview is up (TestFramePool.lua), the live one otherwise.
+local function activeRaidContainer()
     local test = DF.testRaidContainer
     if DF.IsTestModeActive and DF:IsTestModeActive("raid") and test and test:IsShown() then
-        local cx, cy, w, h = frameRect(test)
-        if not cx then return nil end
-        return { x = cx, y = cy, w = w, h = h }
+        return test, true
     end
+    return DF.raidContainer, false
+end
 
-    if not r:IsShown() then return nil end
+function DF:GetRaidVisibleRect()
+    local _, inTest = activeRaidContainer()
+    uL = nil
+    if inTest then
+        local pool = DF.testRaidFrames
+        if pool then for i = 1, 40 do unionAdd(pool[i]) end end
+    else
+        local map = DF.unitFrameMap
+        if map then for i = 1, 40 do unionAdd(map[RAID_UNIT[i]]) end end
+    end
+    if uL == nil then return nil end
+    return { x = (uL + uR) / 2, y = (uB + uT) / 2, w = uR - uL, h = uT - uB }
+end
 
-    -- anchor + ComputeRaidMainGroupAnchorOffset is EXACTLY what the container, the
-    -- mover and the test container already apply (UpdateRaidContainerPosition), so the
-    -- proxy frames the main group with no change to DF's apply logic. The lib applies
-    -- a drag as a DELTA to the record (Session.lua DragDelta), so the constant offset
-    -- can never accumulate.
-    local ax, ay = 0, 0
+local function raidRect()
+    return DF:GetRaidVisibleRect()
+end
+
+-- ============================================================
+-- RECORD -> VISIBLE OFFSET (def.visibleOffset)
+-- ============================================================
+-- Where the visible frames' centre sits relative to the record, for the record as
+-- given. Two terms, both free of any stale read:
+--   * LAYOUT: the frames' centre minus their container's centre, measured live. The
+--     frames are children of the container, so this holds wherever the container is.
+--   * RECORD: the container's centre minus the record's x/y, from maths alone -- the
+--     record places the container's `point` (plus, for raid, the constant anchor shift
+--     UpdateRaidContainerPosition adds) and the container's size says where its centre
+--     then falls.
+-- The lib uses it to solve an anchor onto the FRAMES rather than the container, and to
+-- keep them still when the 9-point picker changes the record's point. nil = cannot be
+-- measured right now; the lib then falls back to its plain centre write.
+local POINT_H = { LEFT = -1, RIGHT = 1, TOPLEFT = -1, BOTTOMLEFT = -1, TOPRIGHT = 1, BOTTOMRIGHT = 1 }
+local POINT_V = { TOP = 1, BOTTOM = -1, TOPLEFT = 1, TOPRIGHT = 1, BOTTOMLEFT = -1, BOTTOMRIGHT = -1 }
+
+local function containerOffset(container, vis, pos, shiftX, shiftY)
+    if not vis or not container or not container:IsShown() then return nil end
+    local ccx, ccy, cw, ch = frameRect(container)
+    if not ccx then return nil end
+    local point = pos.point or "CENTER"
+    local x, y = pos.x or 0, pos.y or 0
+    -- The container centre THIS record implies (the maths of Solver.PointToCenter).
+    local px = x + shiftX - (POINT_H[point] or 0) * cw / 2
+    local py = y + shiftY - (POINT_V[point] or 0) * ch / 2
+    return (vis.x - ccx) + (px - x), (vis.y - ccy) + (py - y)
+end
+
+-- The same shift UpdateRaidContainerPosition adds to the record before placing either
+-- raid container. Read from the two helpers it reads, never restated.
+local function raidAnchorShift()
+    local dx, dy = 0, 0
+    if DF.ComputeRaidContainerCompensation then
+        local cx, cy = DF:ComputeRaidContainerCompensation()
+        dx, dy = dx + (cx or 0), dy + (cy or 0)
+    end
     if DF.ComputeRaidMainGroupAnchorOffset then
-        ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
+        local ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
+        dx, dy = dx + (ax or 0), dy + (ay or 0)
     end
-    local rec = DF:GetPositionRecord("raid")
-    local w, h = r:GetSize()
-    if not w or w <= 0 then return nil end
-    return { x = (rec.x or 0) + ax, y = (rec.y or 0) + ay, w = w * s, h = h * s }
+    return dx, dy
+end
+
+local function raidVisibleOffset(pos)
+    local container = activeRaidContainer()
+    local sx, sy = raidAnchorShift()
+    return containerOffset(container, DF:GetRaidVisibleRect(), pos, sx, sy)
+end
+
+-- Party: no anchor shift (UpdateContainerPosition places the record's point as is),
+-- and the same test-or-live container choice GetPartyVisibleRect makes.
+local function partyVisibleOffset(pos)
+    local container = DF.container
+    if DF.IsTestModeActive and DF:IsTestModeActive("party") and DF.testPartyContainer
+        and DF.testPartyContainer:IsShown() then
+        container = DF.testPartyContainer
+    end
+    return containerOffset(container, DF:GetPartyVisibleRect(), pos, 0, 0)
 end
 
 -- ============================================================
@@ -310,6 +408,7 @@ local function registerElements()
             return w * s, h * s
         end,
         getRect   = partyRect,
+        visibleOffset = partyVisibleOffset,
         group     = L["Party"],
         isRelevant = function() return Bridge:IsScopeRelevant("party") end,
         openSettings = function() openOptionsPage("party", "general_frame") end,
@@ -327,6 +426,7 @@ local function registerElements()
         default   = { point = "CENTER", x = -6.666610717773438, y = -25 },
         secure    = true,
         getRect   = raidRect,
+        visibleOffset = raidVisibleOffset,
         group     = L["Raid"],
         isRelevant = function() return Bridge:IsScopeRelevant("raid") end,
         openSettings = function() openOptionsPage("raid", "general_frame") end,
@@ -939,6 +1039,10 @@ local function installHooks()
         C_Timer.After(0.1, function()
             rosterPending = false
             guarded(refreshGroup)()
+            -- The raid rect is the frames actually shown, so a roster change can resize
+            -- it with nothing having moved. The sweep measures and does nothing unless a
+            -- target really changed; gated on the lib version like the other doors.
+            if Mover.RefreshMovedTargets then requestResolve() end
             -- The per-unit and per-group slot targets are a function of the roster, so
             -- they are rebuilt off the same event. Their own debounce collapses the
             -- burst; guarded on the method so this file never hard-depends on
