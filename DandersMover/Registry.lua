@@ -428,6 +428,18 @@ function R:ParentId(elId)
     return a and self:CanonicalId(a.target) or nil
 end
 
+-- "Does anything anchor to this?" without building the list. The slab look
+-- asks it for every slab on every repaint, and a drag repaints every frame, so
+-- the list Children() allocates was pure garbage there.
+function R:HasChildren(targetId)
+    local canon = self:CanonicalId(targetId)
+    for _, el in pairs(self.elements) do
+        local primary, backup = self:ParentIds(el.id)
+        if primary == canon or backup == canon then return true end
+    end
+    return false
+end
+
 function R:Children(targetId)
     local canon = self:CanonicalId(targetId)
     local out = {}

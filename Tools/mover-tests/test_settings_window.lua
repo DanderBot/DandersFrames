@@ -26,8 +26,16 @@ NS.UI = {
     RowHeight = { checkbox = 35, dropdown = 44 },
     Colors = { textDim = { r = 0.5, g = 0.5, b = 0.5 }, background = { r = 0, g = 0, b = 0 } },
     CreateLabel = function() return FakeUIFrame() end,
+    -- The addon list's row widgets (section 4 builds rows for real).
+    MEDIA = "",
+    CreateCheckbox = function() return FakeUIFrame() end,
+    CreateGlyphButton = function() return FakeUIFrame() end,
+    CreateElementBackdrop = function() end,
 }
-CreateFrame = function() return FakeUIFrame() end
+-- COUNTED: Settings.lua caches CreateFrame at load, so this is the one door
+-- every list row, heading and box comes through (section 4).
+local framesMade = 0
+CreateFrame = function() framesMade = framesMade + 1 return FakeUIFrame() end
 NS.db = { scale = 1, addons = {} }
 -- The scale reader lives in Proxy.lua (it sizes the strip and the toast). In
 -- the full run that module is loaded; a filtered run of this file has no
@@ -52,7 +60,7 @@ check(type(handlers.RegistryChanged) == "function", "settings: ...and still for 
 -- A stand-in for build(): the fields Refresh walks, nothing else.
 local function fakeWindow()
     local f = FakeUIFrame()
-    f.cb, f.rows, f.expanded = {}, {}, {}
+    f.cb, f.rows, f.expanded, f.rowCache = {}, {}, {}, {}
     f.gridSlider, f.snapDistSlider, f.zoneShowSlider, f.scaleSlider, f.sideRow = FakeUIFrame(), FakeUIFrame(), FakeUIFrame(), FakeUIFrame(), FakeUIFrame()
     f.content, f.listWidth = FakeUIFrame(), 100
     return f
@@ -97,6 +105,45 @@ do
     eq(St.frame:GetScale(), 0.75, "scale: ...and re-takes it when it moves")
     St.frame = nil
     check(pcall(St.ApplyChromeScale, St), "scale: no window built yet is a no-op")
+end
+
+-- 4. The addon list re-uses its rows. Frames are never freed, and the list
+-- redraws on every open, every expand and every registry burst -- it used to
+-- build a fresh box and a fresh row per entry each time and just hide the old.
+do
+    local wasReady = R.ready
+    R.ready = true
+    R:RegisterAddon("SW", { title = "SW" })
+    local function def()
+        return { title = "x", frame = FakeFrame(960, 540, 100, 40),
+                 getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+                 onChanged = function() end }
+    end
+    R:Register("SW", "a", def())
+    local g = def(); g.group = "Grp"; R:Register("SW", "b", g)
+    St.frame = fakeWindow()
+    St.frame.expanded.SW = true
+    St:Show()                                   -- first draw pays for its rows
+    local first = framesMade
+    check(#St.frame.rows > 0, "list: the first draw builds rows")
+    for _ = 1, 5 do St:Refresh() end
+    eq(framesMade, first, "list: five redraws create no new frames")
+    St.frame.expanded.SW = false
+    St:Refresh()
+    St.frame.expanded.SW = true
+    St:Refresh()
+    eq(framesMade, first, "list: collapse and re-expand re-use the same rows")
+    local shown = 0
+    for _, r in ipairs(St.frame.rows) do if r:IsShown() then shown = shown + 1 end end
+    eq(shown, #St.frame.rows, "list: every listed row is shown")
+    -- A new element is the one thing that should build: one row for it.
+    R:Register("SW", "c", def())
+    St:Refresh()
+    eq(framesMade, first + 1, "list: a new element builds exactly its own row")
+    St:Hide()
+    St.frame = nil
+    R:UnregisterAddon("SW")
+    R.ready = wasReady
 end
 
 if ownReader then NS.ChromeScale = nil end

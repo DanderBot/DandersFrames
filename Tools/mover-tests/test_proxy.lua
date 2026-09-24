@@ -963,11 +963,14 @@ do
     -- ~0.1s in: the consumer's re-registration rebuilds the slabs. The overlay
     -- is left alone -- not cancelled, not hidden, event still registered.
     local cancelsBefore = count(cancelled, uf)
-    local oldSlab = P.proxies["EN:a"]
+    -- Slabs are pooled (see SLAB POOL below), so "remade" is proved by the
+    -- release having reset a state it would otherwise have carried over,
+    -- not by a new object.
+    P.proxies["EN:a"].hovered = true
     R:Register("EN", "b", elDef({ point = "CENTER", x = 200, y = 0 }))
     P:Rebuild(nil)
     check(P.proxies["EN:b"] ~= nil, "rebuild: the new element gets a slab")
-    check(P.proxies["EN:a"] ~= oldSlab, "rebuild: the slabs really were remade")
+    check(P.proxies["EN:a"].hovered ~= true, "rebuild: the slabs really were remade")
     eq(count(cancelled, uf), cancelsBefore, "rebuild: the overlay's entrance is not cancelled")
     check(uf:IsShown(), "rebuild: the overlay stays up")
     eq(count(fadedIn, uf), 1, "rebuild: ...and is not faded in a second time")
@@ -1042,3 +1045,94 @@ do
     NS.db = nil
 end
 
+-- ============================================================
+-- SLAB POOL (memory)
+-- WoW never frees a frame. A slab used to be a brand-new Button (plus nine
+-- regions) on every Build after a DestroyAll/Rebuild and was simply dropped on
+-- Remove -- so every unlock, and every mid-session rebuild (DandersFrames
+-- re-registers its targets on unlock and on every sort), leaked one slab per
+-- element for good. Released slabs now wait in a pool and the next Build takes
+-- them back. Proxy caches CreateFrame at load, so the check is by identity:
+-- every slab on screen after the churn must be one the first session made.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("PL", { title = "PL" })
+    R:Register("PL", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("PL", "b", elDef({ point = "CENTER", x = 50, y = 0 }))
+    P:Build()                               -- the first session pays for its slabs
+    local known = {}
+    for _, b in pairs(P.proxies) do known[b] = true end
+    local function allKnown()
+        for _, b in pairs(P.proxies) do if not known[b] then return false end end
+        return next(P.proxies) ~= nil
+    end
+    P:DestroyAll()
+
+    for _ = 1, 5 do P:Build(); P:DestroyAll() end
+    P:Build()
+    check(allKnown(), "pool: five lock/unlock cycles make no new slab frames")
+    for _ = 1, 5 do P:Rebuild() end
+    check(allKnown(), "pool: a mid-session rebuild reuses the slabs it tore down")
+
+    -- A reused slab is the NEW element's slab, not a ghost of the old one.
+    P:DestroyAll()
+    R:Unregister("PL", "b")
+    R:Register("PL", "c", elDef({ point = "CENTER", x = 80, y = 0 }))
+    R:Get("PL:c").title = "Cee"
+    P:Build()
+    local c = P.proxies["PL:c"]
+    check(c ~= nil and known[c], "pool: a new element takes a released slab")
+    check(c ~= nil and c.element == R:Get("PL:c"), "pool: ...which carries its new element")
+    eq(c and c.title:GetText(), "Cee", "pool: ...and its new element's title")
+    check(c and c.dragging == false and c.hovered == false, "pool: ...and no drag or hover left over")
+
+    P:DestroyAll()
+    R:UnregisterAddon("PL")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- REFRESHALL COST (memory)
+-- DragTo calls RefreshAll every rendered frame of a drag. It used to repaint
+-- every slab once PER slab (n*n applyLooks) and each look built a Children()
+-- list just to ask whether it was empty. One repaint now, and no list.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("RA", { title = "RA" })
+    R:Register("RA", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("RA", "b", elDef({ point = "CENTER", x = 50, y = 0 }))
+    R:Register("RA", "c", elDef({ point = "CENTER", x = 90, y = 0 }))
+    P:Build()
+
+    local highlights, lists = 0, 0
+    local realHighlight, realChildren = P.Highlight, R.Children
+    P.Highlight = function(...) highlights = highlights + 1 return realHighlight(...) end
+    R.Children = function(...) lists = lists + 1 return realChildren(...) end
+    P:RefreshAll()
+    P.Highlight, R.Children = realHighlight, realChildren
+    eq(highlights, 1, "refreshAll: three slabs, ONE repaint")
+    eq(lists, 0, "refreshAll: the slab look builds no Children() list")
+
+    -- HasChildren answers what #Children() > 0 did.
+    R:GetPos(R:Get("RA:b")).anchor = { target = "RA:a" }
+    check(R:HasChildren("RA:a") == true, "hasChildren: an anchored child counts")
+    check(R:HasChildren("RA:c") == false, "hasChildren: ...and none is none")
+    eq(R:HasChildren("RA:a"), #R:Children("RA:a") > 0, "hasChildren: agrees with Children()")
+    R:GetPos(R:Get("RA:b")).anchor = nil
+
+    P:DestroyAll()
+    R:UnregisterAddon("RA")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end

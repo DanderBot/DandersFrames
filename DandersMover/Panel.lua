@@ -1097,6 +1097,11 @@ function Pn:Create()
         width = CW,
         build = buildPanel,
         canAutoPin = function() return NS.db.autoPinPanels end,
+        -- Auto-pin fires on every edit and the family sweep closes that pin on
+        -- the next selection, so without this each edited element left a whole
+        -- panel of frames behind for good. OnClose drops a closed panel from
+        -- `live` and holds no other reference, so a revived one is safe here.
+        recyclePinned = true,
         -- The beam's far end is this panel's OWN mover, which after a pin is not
         -- what it is docked to (it is docked to nothing) and not the selection.
         tetherSource = function(p) return p.elId and Proxy.proxies[p.elId] or nil end,

@@ -394,7 +394,7 @@ local function applyLook(b, selected, hovered)
     local pos = Registry:GetPos(b.element)
     -- Children() is alias-aware, so a target that resolves to this element's
     -- frame counts too.
-    local isRoot = #Registry:Children(b.element.id) > 0
+    local isRoot = Registry:HasChildren(b.element.id)
     local c = pos.anchor and C_ANCHORED or (isRoot and C_ROOT or C_FREE)
     b.edge:SetColorTexture(c.r, c.g, c.b, 1)
     b.dot:SetVertexColor(c.r, c.g, c.b)
@@ -536,6 +536,29 @@ local function create(el)
     return b
 end
 
+-- ☠ SLABS ARE POOLED, NEVER DROPPED. WoW does not free a frame, so a slab that
+-- Remove let go of was leaked for good -- and every lock, every mid-session
+-- Rebuild (DandersFrames re-registers its anchor targets on unlock and on every
+-- sort) let go of ALL of them, so each unlock added a full set of Buttons plus
+-- their regions that never came back. Remove parks the slab here; acquire hands
+-- it out again and re-points it at its new element. createIndex is kept: it is
+-- the frame's own creation order, which is what breaks the z-tie it stands for.
+local spareSlabs = {}
+
+local function acquire(el)
+    local n = #spareSlabs
+    if n == 0 then return create(el) end
+    local b = spareSlabs[n]
+    spareSlabs[n] = nil
+    b.element = el
+    b.dragging, b.hovered, b.tagShown = false, false, nil
+    -- nil forces layout() to re-anchor and re-title for the new element.
+    b.layoutKey, b.layoutTitle = nil, nil
+    local addon = Registry:GetAddon(el.addon)
+    if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
+    return b
+end
+
 -- filter is the NORMALISED session filter (Session.filter): nil, or
 -- { addon = <string|nil>, keySet = <set|nil> }. The initiator's keys outside keySet
 -- get NO proxy at all, not a dimmed one (a party unlock must not put raid proxies on
@@ -564,7 +587,7 @@ function P:Build(filter, animate)
         if Registry:WantsProxy(filter, el) then
             local frame = Registry:GetFrame(el)
             if NS.db.showHiddenMovers or (frame and frame:IsShown()) then
-                local b = self.proxies[el.id] or create(el)
+                local b = self.proxies[el.id] or acquire(el)
                 b.element = el
                 self.proxies[el.id] = b
                 self:Refresh(el.id)
@@ -664,7 +687,16 @@ function P:Refresh(id)
     self:Highlight(NS.Session and NS.Session.selected)
 end
 
-function P:RefreshAll() for id in pairs(self.proxies) do self:Refresh(id) end end
+-- Every slab re-measured, then ONE repaint -- the SyncMany shape. It used to be
+-- Refresh per slab, and each Refresh repaints EVERY slab, so a drag (DragTo
+-- runs this every frame) painted n*n slabs a frame for the answer one pass gives.
+function P:RefreshAll()
+    local any = false
+    for _, b in pairs(self.proxies) do
+        if syncGeometry(b) then any = true end
+    end
+    if any then self:Highlight(NS.Session and NS.Session.selected) end
+end
 
 -- Is any slab under the cursor right now? Callers that would otherwise put
 -- session chrome back on screen (the panel a drag deliberately hid) ask first.
@@ -682,7 +714,11 @@ end
 
 function P:Remove(id)
     local b = self.proxies[id]
-    if b then b:Hide(); b:SetScript("OnUpdate", nil); self.proxies[id] = nil end
+    if b then
+        b:Hide(); b:SetScript("OnUpdate", nil); self.proxies[id] = nil
+        NS.Fx.Cancel(b)               -- an entrance still playing must not finish on a parked slab
+        spareSlabs[#spareSlabs + 1] = b
+    end
 end
 
 function P:RemoveAddon(addon)

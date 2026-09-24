@@ -925,10 +925,20 @@ do
     eq(groupBoxes, before, "pool: ...without a second build")
     a:Pin()
     local c = refresh("P:host")
-    check(c ~= a, "pool: once pinned, the next selection gets a new instance")
-    eq(groupBoxes, before + 1, "pool: ...and that one built")
+    check(c ~= a, "pool: once pinned, the next selection gets another instance")
+    -- recyclePinned: that instance is a closed pinned panel from earlier when
+    -- there is one, so at most ONE build here -- never one per pin.
+    check(groupBoxes <= before + 1, "pool: ...built at most once")
     check(a.closed, "pool: ...while the family evicted the pinned one")
     eq(#Pn.live, 1, "pool: one panel, always")
+
+    -- Pin, move on, repeat: auto-pin does exactly this on every edit. Each
+    -- evicted pin is recycled by the next selection, so the build count stops.
+    local settled = groupBoxes
+    local ids = { "P:free", "P:child", "P:host" }
+    for i = 1, 9 do refresh(ids[(i % 3) + 1]):Pin() end
+    check(groupBoxes <= settled + 1, "pool: nine pin-and-move-ons build at most one more panel")
+    eq(#Pn.live, 1, "pool: ...and still one panel up")
 end
 
 reset()

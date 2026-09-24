@@ -255,6 +255,7 @@ local function build()
     f.content = content
     f.listWidth = CONTENT - SCROLLBAR_W
     f.rows = {}
+    f.rowCache = {}               -- identity key -> row frame; see ROWS ARE CACHED
     f.expanded = {}
 
     f:SetHeight(-y - UI.Space.section + PAD)
@@ -269,57 +270,91 @@ local function clearRows(f)
     wipe(f.rows)
 end
 
--- One toggle row. Rows are hidden rather than destroyed -- frames cannot be
--- garbage-collected -- and re-created on each refresh, because this list
--- rebuilds on every expand.
-local function addRow(f, parent, y, indent, label, get, set, expandable, expandedKey)
-    local r = CreateFrame("Frame", nil, parent)
-    r:SetSize(f.listWidth, LIST_ROW)
+-- ☠ ROWS ARE CACHED BY IDENTITY, NEVER RE-CREATED. Frames cannot be
+-- garbage-collected, and this list redraws on every open, every expand and every
+-- registry burst (DandersFrames re-registers its targets on each unlock and sort)
+-- -- it used to build a fresh box, heading and checkbox row per entry on each of
+-- those and hide the old ones, so every redraw leaked the whole list. Each row now
+-- lives in f.rowCache under a key naming exactly what it shows (and, for a row,
+-- its label), so a redraw re-positions the one it already has. The get/set
+-- closures are bound at creation to that same identity, so reuse cannot point a
+-- checkbox at the wrong setting.
+local function cached(f, key)
+    local r = f.rowCache[key]
+    if r then tinsert(f.rows, r); r:Show() end
+    return r
+end
+
+local function addRow(f, parent, y, indent, label, get, set, expandable, expandedKey, key)
+    local r = cached(f, key)
+    if not r then
+        r = CreateFrame("Frame", nil, parent)
+        r:SetSize(f.listWidth, LIST_ROW)
+        r.cb = UI:CreateCheckbox(r, { label = label, get = get, set = set })
+        if expandable then
+            r.exp = UI:CreateGlyphButton(r, {
+                texture = UI.MEDIA .. "Icons\\expand_more",
+                size = 20, iconSize = 14,
+                onClick = function()
+                    f.expanded[expandedKey] = not f.expanded[expandedKey]
+                    St:Refresh()
+                end,
+            })
+            r.exp:SetPoint("RIGHT", -4, 0)
+        end
+        f.rowCache[key] = r
+        tinsert(f.rows, r)
+    else
+        r.cb:Refresh()
+    end
+    r:ClearAllPoints()
     r:SetPoint("TOPLEFT", 0, -y)
-    r.cb = UI:CreateCheckbox(r, { label = label, get = get, set = set })
     -- The checkbox factory's slot is taller than this row; anchor it so the
     -- check itself sits on the row's vertical centre.
+    r.cb:ClearAllPoints()
     r.cb:SetPoint("TOPLEFT", indent, CHECK_CONTENT_TOP + CHECK_CONTENT_H / 2 - LIST_ROW / 2)
     r.cb:SetWidth(f.listWidth - indent - (expandable and 28 or 8))
     if expandable then
-        r.exp = UI:CreateGlyphButton(r, {
-            texture = UI.MEDIA .. "Icons\\" .. (f.expanded[expandedKey] and "expand_less" or "expand_more"),
-            size = 20, iconSize = 14,
-            onClick = function()
-                f.expanded[expandedKey] = not f.expanded[expandedKey]
-                St:Refresh()
-            end,
-        })
-        r.exp:SetPoint("RIGHT", -4, 0)
+        r.exp:SetGlyph(UI.MEDIA .. "Icons\\" .. (f.expanded[expandedKey] and "expand_less" or "expand_more"))
     end
-    tinsert(f.rows, r)
     return r
 end
 
 -- A muted subheading naming the group the rows beneath it belong to. Not a
 -- toggle -- there is nothing to switch at group level, it only breaks the list up.
-local function addGroupHeading(f, parent, y, indent, text)
-    local r = CreateFrame("Frame", nil, parent)
+local function addGroupHeading(f, parent, y, indent, text, key)
+    local r = cached(f, key)
+    if not r then
+        r = CreateFrame("Frame", nil, parent)
+        r.txt = UI:CreateLabel(r, { text = text, size = 10, color = UI.Colors.textDim })
+        r.txt:SetPoint("LEFT", 0, 0)
+        f.rowCache[key] = r
+        tinsert(f.rows, r)
+    end
     r:SetSize(f.listWidth - indent, LIST_HEADING)
+    r:ClearAllPoints()
     r:SetPoint("TOPLEFT", indent, -y)
-    r.txt = UI:CreateLabel(r, { text = text, size = 10, color = UI.Colors.textDim })
-    r.txt:SetPoint("LEFT", 0, 0)
-    tinsert(f.rows, r)
     return r
 end
 
 -- One addon: its own element-backdrop box holding the addon row and, when
 -- expanded, the indented element rows.
 local function addAddonBox(f, y, name, info)
-    local box = CreateFrame("Frame", nil, f.content, "BackdropTemplate")
-    UI:CreateElementBackdrop(box)
+    local box = cached(f, "box\001" .. name)
+    if not box then
+        box = CreateFrame("Frame", nil, f.content, "BackdropTemplate")
+        UI:CreateElementBackdrop(box)
+        box:SetWidth(f.listWidth)
+        f.rowCache["box\001" .. name] = box
+        tinsert(f.rows, box)
+    end
+    box:ClearAllPoints()
     box:SetPoint("TOPLEFT", 0, -y)
-    box:SetWidth(f.listWidth)
     local inner = 0
     addRow(f, box, inner, 6, info.title,
         function() return addonDB(name).enabled ~= false end,
         function(v) Registry:SetEnabled(name, nil, v); rebuildProxies() end,
-        true, name)
+        true, name, "addon\001" .. name .. "\001" .. info.title)
     inner = inner + LIST_ROW
     if f.expanded[name] then
         -- Grouped so an addon that registers a dozen elements (DandersFrames does)
@@ -328,21 +363,22 @@ local function addAddonBox(f, y, name, info)
         for _, bucket in ipairs(Registry:GroupedElements(name)) do
             local indent = 6 + GAP
             if bucket.group then
-                addGroupHeading(f, box, inner, indent, bucket.group)
+                addGroupHeading(f, box, inner, indent, bucket.group,
+                    "group\001" .. name .. "\001" .. bucket.group)
                 inner = inner + LIST_HEADING
                 indent = indent + TIGHT
             end
             for _, el in ipairs(bucket.elements) do
+                local key = el.key
                 addRow(f, box, inner, indent, el.title,
-                    function() return addonDB(name).elements[el.key] ~= false end,
-                    function(v) Registry:SetEnabled(name, el.key, v); rebuildProxies() end,
-                    false)
+                    function() return addonDB(name).elements[key] ~= false end,
+                    function(v) Registry:SetEnabled(name, key, v); rebuildProxies() end,
+                    false, nil, "el\001" .. name .. "\001" .. key .. "\001" .. el.title)
                 inner = inner + LIST_ROW
             end
         end
     end
     box:SetHeight(inner)
-    tinsert(f.rows, box)
     return inner
 end
 
@@ -362,11 +398,17 @@ function St:Refresh()
     tsort(names)
     local y = 0
     if #names == 0 then
-        local r = CreateFrame("Frame", nil, f.content)
-        r:SetSize(f.listWidth, LIST_ROW)
-        r.txt = UI:CreateLabel(r, { text = L["No addons have registered movers yet."], size = 10, color = UI.Colors.textDim })
-        r.txt:SetPoint("LEFT", 4, 0)
-        r:SetPoint("TOPLEFT", 0, 0); tinsert(f.rows, r); y = y + LIST_ROW
+        local r = cached(f, "empty")
+        if not r then
+            r = CreateFrame("Frame", nil, f.content)
+            r:SetSize(f.listWidth, LIST_ROW)
+            r.txt = UI:CreateLabel(r, { text = L["No addons have registered movers yet."], size = 10, color = UI.Colors.textDim })
+            r.txt:SetPoint("LEFT", 4, 0)
+            r:SetPoint("TOPLEFT", 0, 0)
+            f.rowCache.empty = r
+            tinsert(f.rows, r)
+        end
+        y = y + LIST_ROW
     end
     for _, name in ipairs(names) do
         y = y + addAddonBox(f, y, name, Registry.addons[name]) + TIGHT
