@@ -169,12 +169,6 @@ local function build()
 
     -- ---- Snapping ---------------------------------------------------
     local snap = UI:CreateGroupBox(f, { title = L["Snapping"], width = INNER })
-    f.gridSlider = UI:CreateSlider(snap.content, {
-        label = L["Grid Size"], min = 10, max = 100, step = 5,
-        get = function() return NS.db.gridSize end,
-        set = function(v) NS.db.gridSize = v end,
-        onChanged = function() Grid:Refresh() end,
-    })
     -- Fixed distance, so the pull is the same for a raid container and a lone icon.
     -- 0 still snaps on a genuine overlap (gap 0), it just kills the reach.
     f.snapDistSlider = UI:CreateSlider(snap.content, {
@@ -204,11 +198,45 @@ local function build()
         -- rather than at the next drag.
         toggle(snap.content, L["Show distance measures"], "showMeasures", function() Grid:HideMeasure() end),
         toggle(snap.content, L["Show grid snap lines"], "showSnapPreview", function() Grid:HidePreview() end),
-        f.gridSlider,
         f.snapDistSlider,
         f.zoneShowSlider,
     })
     place(snap)
+
+    -- ---- Grid -------------------------------------------------------
+    -- How the grid LOOKS, and the dim behind it. Every change redraws live.
+    local gridBox = UI:CreateGroupBox(f, { title = L["Grid"], width = INNER })
+    f.gridSlider = UI:CreateSlider(gridBox.content, {
+        label = L["Grid Size"], min = 10, max = 100, step = 5,
+        get = function() return NS.db.gridSize end,
+        set = function(v) NS.db.gridSize = v end,
+        onChanged = function() Grid:Refresh() end,
+    })
+    -- Device pixels; Grid.lua snaps each line to whole pixels.
+    f.thickSlider = UI:CreateSlider(gridBox.content, {
+        label = L["Grid line thickness"], min = 1, max = 5, step = 1,
+        get = function() return NS.db.gridThickness end,
+        set = function(v) NS.db.gridThickness = v end,
+        onChanged = function() Grid:Refresh() end,
+    })
+    f.dimSlider = UI:CreateSlider(gridBox.content, {
+        label = L["Dim amount"], min = 0.1, max = 0.9, step = 0.05,
+        get = function() return NS.db.dimAlpha end,
+        set = function(v) NS.db.dimAlpha = v end,
+        onChanged = function() Grid:Refresh() end,
+    })
+    -- Grey-when-disabled: the amount means nothing with the dim off.
+    local function gateDim() f.dimSlider:SetEnabled(NS.db.dimBackground and true or false) end
+    f.gateDim = gateDim
+    stack(gridBox, {
+        f.gridSlider,
+        f.thickSlider,
+        toggle(gridBox.content, L["Dim background"], "dimBackground", function() Grid:Refresh(); gateDim() end,
+            { title = L["Dim background"], lines = { L["Darkens the game world behind the grid while the movers are open, so the grid and your frames stand out."] } }),
+        f.dimSlider,
+    })
+    gateDim()
+    place(gridBox)
 
     -- ---- Editor -----------------------------------------------------
     local editor = UI:CreateGroupBox(f, { title = L["Editor"], width = INNER })
@@ -271,7 +299,8 @@ local function build()
 
     f:SetHeight(-y - UI.Space.section + PAD)
     -- Every slider, for Refresh to re-read.
-    f.sliders = { f.gridSlider, f.snapDistSlider, f.zoneShowSlider, f.opacitySlider, f.scaleSlider }
+    f.sliders = { f.snapDistSlider, f.zoneShowSlider, f.gridSlider, f.thickSlider, f.dimSlider,
+                  f.opacitySlider, f.scaleSlider }
     return f
 end
 
@@ -400,6 +429,7 @@ function St:Refresh()
     if not f or not f:IsShown() then return end
     for _, cb in ipairs(f.cb) do cb:Refresh() end
     for _, sl in ipairs(f.sliders) do sl:RefreshValue() end
+    if f.gateDim then f.gateDim() end
     f.sideRow:Refresh()
 
     clearRows(f)

@@ -21,8 +21,37 @@ local CreateFrame, UIParent = CreateFrame, UIParent
 -- preview -- which IS a statement -- at full strength.
 local C_GRID = NS.UI.Colors.accent
 local A_LINE, A_CENTER, A_PREVIEW = 0.10, 0.30, 0.9
-local W_LINE, W_CENTER, W_PREVIEW = 1, 2, 2
+local W_PREVIEW = 2
 local A_LOCK = 0.8                       -- centre line while its axis is the locked one
+
+-- ============================================================
+-- LINE THICKNESS (Settings > Grid > Grid line thickness)
+-- In DEVICE PIXELS, 1-5, not UI units: a 1-unit line is a fraction of a pixel
+-- or a blurred 1.4 at most UI scales, which is part of why the grid was hard
+-- to see. Each line is a whole number of pixels wide and starts on a pixel
+-- boundary, so it stays crisp at any UI scale. The centre lines are one pixel
+-- heavier than the rest, as they were at the old fixed widths (1 / 2).
+-- ============================================================
+local THICK_MIN, THICK_MAX = 1, 5
+
+function G:Thickness()
+    local n = NS.db and NS.db.gridThickness
+    if type(n) ~= "number" then return THICK_MIN end
+    n = math.floor(n + 0.5)
+    if n < THICK_MIN then return THICK_MIN elseif n > THICK_MAX then return THICK_MAX end
+    return n
+end
+
+-- Device pixels per UI unit on `frame` (the kit's PixelsPerUnit rule), or nil
+-- when the client cannot say -- then lengths stay in plain units, unsnapped.
+local function pixelsPerUnit(frame)
+    local phys = GetPhysicalScreenSize
+    if not phys then return nil end
+    local eff = frame and frame.GetEffectiveScale and frame:GetEffectiveScale()
+    local _, physH = phys()
+    if type(eff) ~= "number" or eff <= 0 or type(physH) ~= "number" or physH <= 0 then return nil end
+    return eff * physH / 768
+end
 
 local function buildLines(grid)
     local pool, used = grid.lines, 0
@@ -34,18 +63,29 @@ local function buildLines(grid)
     end
     local size = NS.db.gridSize or 20
     local w, h = UIParent:GetWidth(), UIParent:GetHeight()
-    local function vline(x, alpha, thick)
+    local ppu = pixelsPerUnit(grid)
+    -- px pixels, as UI units; and a position rounded to the pixel grid then
+    -- backed off by half the line (whole pixels), so the line's EDGE lands on a
+    -- pixel boundary and its middle sits on the requested coordinate.
+    local function width(px) return ppu and px / ppu or px end
+    local function start(v, px)
+        if not ppu then return v - px / 2 end
+        return (math.floor(v * ppu + 0.5) - math.floor(px / 2)) / ppu
+    end
+    local function vline(x, alpha, px)
         local l = acquire()
-        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(thick, h)
-        l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", x, 0); l:Show()
+        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(width(px), h)
+        l:ClearAllPoints(); l:SetPoint("LEFT", grid, "CENTER", start(x, px), 0); l:Show()
         return l
     end
-    local function hline(y, alpha, thick)
+    local function hline(y, alpha, px)
         local l = acquire()
-        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(w, thick)
-        l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", 0, y); l:Show()
+        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(w, width(px))
+        l:ClearAllPoints(); l:SetPoint("BOTTOM", grid, "CENTER", 0, start(y, px)); l:Show()
         return l
     end
+    local W_LINE = G:Thickness()
+    local W_CENTER = W_LINE + 1
     -- Kept by name for the axis-lock tint; every rebuild resets them to the
     -- resting alpha, which is exactly the wanted baseline.
     grid.centerV = vline(0, A_CENTER, W_CENTER)
@@ -57,11 +97,46 @@ local function buildLines(grid)
     for i = used + 1, #pool do pool[i]:Hide() end
 end
 
+-- ============================================================
+-- BACKGROUND DIM (Settings > Grid > Dim background)
+-- A black wash over the game world for the length of a session, so the faint
+-- grid and the frames being placed stand out in a bright zone. BACKGROUND
+-- strata at the bottom level: over the world, under the grid (one level up),
+-- the slabs and every piece of mover chrome (HIGH / DIALOG). It never takes
+-- the mouse -- the world and the camera stay usable, as they do everywhere
+-- else in a session (see Proxy's unlock frame).
+-- ============================================================
+local DIM_LEVEL, GRID_LEVEL = 1, 2
+local DIM_FALLBACK = 0.4
+
+local function dimAlpha()
+    local a = NS.db and NS.db.dimAlpha
+    if type(a) ~= "number" then a = DIM_FALLBACK end
+    if a < 0 then a = 0 elseif a > 1 then a = 1 end
+    return a
+end
+
+local function ensureDim()
+    if G.dim then return G.dim end
+    local d = CreateFrame("Frame", "DandersMoverDim", UIParent)
+    d:SetAllPoints(UIParent)
+    d:SetFrameStrata("BACKGROUND")
+    d:SetFrameLevel(DIM_LEVEL)
+    d:EnableMouse(false)
+    d.tex = d:CreateTexture(nil, "BACKGROUND")
+    d.tex:SetAllPoints(d)
+    d:Hide()
+    G.dim = d
+    return d
+end
+
 local function ensure()
     if G.frame then return G.frame end
     local grid = CreateFrame("Frame", "DandersMoverGrid", UIParent)
     grid:SetAllPoints(UIParent)
     grid:SetFrameStrata("BACKGROUND")
+    grid:SetFrameLevel(GRID_LEVEL)
+    grid:EnableMouse(false)
     grid:Hide()
     grid.lines = {}
     grid.previewV = grid:CreateTexture(nil, "OVERLAY")
@@ -75,14 +150,26 @@ local function ensure()
     return grid
 end
 
-function G:Show() if NS.db.showGrid then ensure():Show() end end
-function G:Hide() if self.frame then self.frame:Hide() end end
+function G:Hide()
+    if self.frame then self.frame:Hide() end
+    if self.dim then self.dim:Hide() end
+end
+-- Both the grid and the dim follow the session: up while it is open and not
+-- suspended for combat, each only when its own setting is on.
 function G:Refresh()
     local f = ensure()
-    if NS.db.showGrid and NS.Session and NS.Session:IsActive() and not NS.Session:IsSuspended() then
+    local live = NS.Session and NS.Session:IsActive() and not NS.Session:IsSuspended()
+    if NS.db.showGrid and live then
         f:Show(); buildLines(f)
     else
         f:Hide()
+    end
+    if NS.db.dimBackground and live then
+        local d = ensureDim()
+        d.tex:SetColorTexture(0, 0, 0, dimAlpha())
+        d:Show()
+    elseif self.dim then
+        self.dim:Hide()
     end
 end
 

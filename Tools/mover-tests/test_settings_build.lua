@@ -119,6 +119,43 @@ do
     end
 end
 
+-- ============================================================
+-- GRID LOOK
+-- ============================================================
+print("-- Settings build: grid line thickness and the background dim")
+do
+    eq(DEFAULTS.gridThickness, 1, "grid: thickness defaults to 1 px")
+    eq(DEFAULTS.dimBackground, true, "grid: the dim is on by default")
+    eq(DEFAULTS.dimAlpha, 0.4, "grid: at 0.4")
+    local t = byLabel(made.sliders, "Grid line thickness")
+    check(t ~= nil, "grid: the window has a Grid line thickness slider")
+    if t then
+        eq(t._opts.min, 1, "grid: thickness from 1 px")
+        eq(t._opts.max, 5, "grid: ...to 5 px")
+        eq(t._opts.step, 1, "grid: ...in whole pixels")
+        t._opts.set(3)
+        eq(NS.db.gridThickness, 3, "grid: thickness is written to DandersMoverDB")
+        applied["Grid:Refresh"] = nil
+        t._opts.onChanged()
+        eq(applied["Grid:Refresh"], 1, "grid: ...and redraws the grid live")
+    end
+    local dimBox = byLabel(made.checks, "Dim background")
+    local dim = byLabel(made.sliders, "Dim amount")
+    check(dimBox ~= nil and dim ~= nil, "grid: a Dim background toggle and its amount slider")
+    if dimBox and dim then
+        dimBox._opts.set(false)
+        eq(NS.db.dimBackground, false, "grid: the toggle is written to DandersMoverDB")
+        eq(dim._enabled, false, "grid: the amount greys out with the dim off")
+        dimBox._opts.set(true)
+        eq(dim._enabled, true, "grid: ...and comes back with it on")
+        dim._opts.set(0.6)
+        eq(NS.db.dimAlpha, 0.6, "grid: the amount is written to DandersMoverDB")
+        applied["Grid:Refresh"] = nil
+        dim._opts.onChanged()
+        eq(applied["Grid:Refresh"], 1, "grid: ...and applied live")
+    end
+end
+
 St:Hide()
 NS.Settings = prevSettings
 NS.UI, NS.Session, NS.db, CreateFrame = prevUI, prevSession, prevDB, prevCreateFrame

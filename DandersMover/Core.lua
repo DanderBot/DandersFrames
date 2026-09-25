@@ -77,6 +77,11 @@ function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMov
 -- ============================================================
 NS.DEFAULTS = {
     gridSize = 20, snapToGrid = true, snapToFrames = true, snapToScreen = true, showGrid = true,
+    -- Grid line width in DEVICE pixels (1-5; Grid.lua pixel-snaps it), and a
+    -- black wash over the game world while a session is open so the grid and
+    -- the frames stand out in bright zones. The dim is ON by default: the grid
+    -- lines are deliberately faint, and over a bright zone they vanished.
+    gridThickness = 1, dimBackground = true, dimAlpha = 0.4,
     -- How close (screen units, edge to edge) a dragged element has to get before a
     -- snap zone claims it. Fixed, not a fraction of the element: the same distance
     -- for a raid container and for a single icon. Also the zone-highlight radius.
