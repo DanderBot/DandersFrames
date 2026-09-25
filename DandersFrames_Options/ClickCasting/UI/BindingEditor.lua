@@ -1129,6 +1129,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
+            pinRank = spellData.pinRank,
             priority = 5,  -- Default priority (10=highest, 1=lowest)
         }
         
@@ -1205,6 +1206,10 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         displayName = GetSpellDisplayInfo(spellData.spellId, displayName) or displayName
     elseif existingBinding and existingBinding.spellId then
         displayName = GetSpellDisplayInfo(existingBinding.spellId, existingBinding.spellName) or displayName
+    end
+    if displayName and panel.pendingBinding.pinRank then
+        local rank = CC.GetSpellRankText(panel.pendingBinding.spellId)
+        if rank then displayName = displayName .. " (" .. rank .. ")" end
     end
     panel.spellName:SetText(displayName or L["Unknown"])
     
@@ -1687,6 +1692,7 @@ function CC:ProcessKeybind(bindType, key)
         newBinding.actionType = self.ACTION_TYPES.SPELL
         newBinding.spellId = spellData.spellId
         newBinding.spellName = spellData.spellName or spellData.name
+        newBinding.pinRank = spellData.pinRank
     end
     
     -- Hide popup and capture frame
@@ -1760,14 +1766,19 @@ function CC:CommitQuickBindingDirect(newBinding)
     self:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
 end
 
-function CC:GetBindingsForSpell(spellName, displaySpellId)
+-- pinnedRankId: spell ID of a lower-rank entry, which matches only its own rank-pinned bindings
+function CC:GetBindingsForSpell(spellName, displaySpellId, pinnedRankId)
     local bindings = {}
-    
+
     -- If we have a displaySpellId, we can match bindings that resolve to the same display
     -- This handles transformation chains like Divine Toll/Holy Bulwark -> Sacred Weapon
     -- and Living Flame -> Chrono Flames
     for i, binding in ipairs(self.db.bindings) do
-        if binding.spellName then
+        if binding.spellName and (binding.pinRank or pinnedRankId) then
+            if binding.pinRank and binding.spellId == pinnedRankId then
+                table.insert(bindings, binding)
+            end
+        elseif binding.spellName then
             -- Direct name match
             if binding.spellName == spellName then
                 table.insert(bindings, binding)
@@ -1851,7 +1862,14 @@ function CC:CreateSpellCell(parent, spellData, index)
     icon:SetSize(40, 40)
     icon:SetTexture(displayIcon or spellData.icon)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    
+
+    if spellData.rank then
+        local rankText = cell:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        rankText:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -1, 2)
+        rankText:SetText("R" .. (spellData.rank:match("%d+") or spellData.rankOrder))
+        rankText:SetShadowOffset(1, -1)
+    end
+
     -- Name (use current display name, can wrap to 2 lines)
     local name = cell:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     name:SetPoint("TOP", icon, "BOTTOM", 0, -2)
@@ -1864,7 +1882,7 @@ function CC:CreateSpellCell(parent, spellData, index)
     
     -- Check for existing binding - just set border color, no text
     -- Pass displaySpellId to match bindings that resolve to the same displayed spell
-    local existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId)
+    local existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId, spellData.pinRank and spellData.spellId)
     if #existingBindings > 0 then
         cell:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     end
@@ -1879,7 +1897,7 @@ function CC:CreateSpellCell(parent, spellData, index)
         
         -- Tooltip: the current override spell id, so a talent-replaced spell
         -- describes what it actually casts.
-        local bindings = self.existingBindings or CC:GetBindingsForSpell(spellData.name, self.displaySpellId)
+        local bindings = self.existingBindings or CC:GetBindingsForSpell(spellData.name, self.displaySpellId, spellData.pinRank and spellData.spellId)
         DF.GUI:ShowGameTooltip(self, {
             spellID       = self.displaySpellId or spellData.spellId,
             fallbackTitle = spellData.name,
@@ -1899,6 +1917,7 @@ function CC:CreateSpellCell(parent, spellData, index)
             local spellInfo = {
                 spellName = spellData.name,  -- Base name for binding
                 spellId = spellData.spellId,  -- Base ID for binding
+                pinRank = spellData.pinRank,
                 name = spellData.name,
                 icon = spellData.icon,
             }
@@ -2112,17 +2131,17 @@ function CC:RefreshSpellGrid(skipScrollReset)
             end
             
             -- Within same category, sort alphabetically
-            return a.name < b.name
+            return CC.CompareSpellNames(a, b)
         elseif viewSort == "alphabetical" then
             -- Pure alphabetical
-            return a.name < b.name
+            return CC.CompareSpellNames(a, b)
         else
             -- Priority mode: bound spells first, then by category
             -- Get displaySpellId for proper override matching
             local _, _, aDisplayId = GetSpellDisplayInfo(a.spellId, a.name)
             local _, _, bDisplayId = GetSpellDisplayInfo(b.spellId, b.name)
-            local aBindings = CC:GetBindingsForSpell(a.name, aDisplayId)
-            local bBindings = CC:GetBindingsForSpell(b.name, bDisplayId)
+            local aBindings = CC:GetBindingsForSpell(a.name, aDisplayId, a.pinRank and a.spellId)
+            local bBindings = CC:GetBindingsForSpell(b.name, bDisplayId, b.pinRank and b.spellId)
             local aHasBinding = #aBindings > 0
             local bHasBinding = #bBindings > 0
             
@@ -2141,7 +2160,7 @@ function CC:RefreshSpellGrid(skipScrollReset)
                 return aPriority < bPriority
             end
             
-            return a.name < b.name
+            return CC.CompareSpellNames(a, b)
         end
     end)
     
@@ -3504,7 +3523,9 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
     -- Name (use current display name)
     local name = row:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     name:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-    name:SetText(displayName or spellData.name)
+    local rowText = displayName or spellData.name
+    if spellData.rank then rowText = rowText .. " (" .. spellData.rank .. ")" end
+    name:SetText(rowText)
     if isSpecialAction then
         name:SetTextColor(specialColor.r, specialColor.g, specialColor.b)
     else
@@ -3517,7 +3538,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
     if isSpecialAction then
         existingBindings = CC:GetBindingsForAction(actionType)
     else
-        existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId)
+        existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId, spellData.pinRank and spellData.spellId)
     end
     
     if #existingBindings > 0 then
@@ -3582,6 +3603,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
                 info = {
                     spellName = spellData.name,
                     spellId = spellData.spellId,
+                    pinRank = spellData.pinRank,
                     name = spellData.name,
                     icon = spellData.icon,
                 }
