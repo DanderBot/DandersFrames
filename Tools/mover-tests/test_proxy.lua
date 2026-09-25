@@ -1276,3 +1276,60 @@ do
     NS.Session = nil
     NS.db = nil
 end
+
+-- ============================================================
+-- MOVER OPACITY
+-- The slab FILL follows DandersMoverDB.moverOpacity; the outline that carries
+-- selection and hover does not, so a selected slab reads as selected at any
+-- setting. Tester report (alpha.12): the old fixed 0.95 fill hid the frames.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, moverOpacity = 0.5 }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("OP", { title = "OP" })
+    R:Register("OP", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("OP", "b", elDef({ point = "CENTER", x = 200, y = 0 }))
+    P:Build()
+    local a, b = P.proxies["OP:a"], P.proxies["OP:b"]
+    local function recordFill(s) function s:SetBackdropColor(r, g, bl, al) self._fill = al end end
+    recordFill(a); recordFill(b)
+
+    P:Highlight(nil)
+    eq(a._fill, 0.5, "opacity: a resting slab's fill is the setting")
+    a.hovered = true
+    P:Highlight(nil)
+    check(a._fill > 0.5 and a._fill <= 1, "opacity: hover lifts the fill a step, so it still stands out")
+    a.hovered = false
+
+    NS.db.moverOpacity = 0.25
+    P:ApplyOpacity()
+    eq(a._fill, 0.25, "opacity: ApplyOpacity repaints every slab live")
+    eq(b._fill, 0.25, "opacity: ...all of them")
+
+    -- Selection is the outline at full white, whatever the fill.
+    NS.Session.selected = "OP:a"
+    P:Highlight("OP:a")
+    local o = a._border
+    check(o and o[1] == 1 and o[2] == 1 and o[3] == 1 and o[4] == 1, "opacity: the selected slab keeps a full-white outline at a faint fill")
+    local rest = b._border
+    check(rest and rest[4] == 1 and rest[1] < 1, "opacity: an unselected slab keeps the neutral hairline, so the two stay distinct")
+    NS.Session.selected = nil
+
+    NS.db.moverOpacity = 0
+    P:ApplyOpacity()
+    eq(a._fill, 0.1, "opacity: clamped to 0.1 -- a slab never vanishes outright")
+    NS.db.moverOpacity = 7
+    P:ApplyOpacity()
+    eq(a._fill, 1, "opacity: clamped to 1 at the top")
+    NS.db.moverOpacity = nil
+    P:ApplyOpacity()
+    eq(a._fill, 0.5, "opacity: saved variables from before the setting read as the 0.5 default")
+
+    P:DestroyAll()
+    R:UnregisterAddon("OP")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end

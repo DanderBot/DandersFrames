@@ -87,6 +87,10 @@ NS.DEFAULTS = {
     -- being dragged.
     showMeasures = false, showSnapPreview = false,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
+    -- How solid a mover slab's FILL is (0.1-1). Only the fill: the outline, role
+    -- colour and text stay at full strength -- see slabFillAlpha in Proxy.lua.
+    -- 0.5, not the old 0.95: the frames under the movers have to stay readable.
+    moverOpacity = 0.5,
     -- Interacting with a mover's side panel pins it in place automatically; off = only the pin button pins.
     autoPinPanels = true,
     -- Size of the session chrome (top strip, element panel, toast, settings

@@ -51,7 +51,28 @@ local MIN_PROXY = 24
 local EDGE_W = 3                        -- role-coloured left edge
 local ICON_SZ, LINK_SZ = 16, 12
 local INSET, ITEM = 4, 4                -- slab padding, gap between inline items
-local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
+-- The strip's and the tab's fill. Chrome, not a mover: it does not follow the
+-- Mover Opacity setting below.
+local BODY_ALPHA = 0.95
+-- ---- mover opacity ---------------------------------------------------
+-- A slab's FILL is the only part the Mover Opacity setting (Settings > Editor,
+-- DandersMoverDB.moverOpacity) thins out. Everything that SAYS something stays
+-- at full strength over it: the role edge and dot, the icon, the title and
+-- coords, and the outline that carries selection (white), hover (softer white)
+-- and the pin marker -- so a selected slab reads as selected at any setting.
+-- The old fixed 0.95 fill hid the frames being arranged (tester report,
+-- alpha.12); NS.DEFAULTS.moverOpacity is 0.5. Hover lifts the fill a step so
+-- the slab under the cursor still stands out when the rest are faint.
+local OPACITY_MIN, OPACITY_MAX, OPACITY_FALLBACK = 0.1, 1, 0.5
+local HOVER_LIFT = 0.15
+
+local function slabFillAlpha(hovered)
+    local a = NS.db and NS.db.moverOpacity
+    if type(a) ~= "number" then a = OPACITY_FALLBACK end
+    if a < OPACITY_MIN then a = OPACITY_MIN elseif a > OPACITY_MAX then a = OPACITY_MAX end
+    if hovered then a = a + HOVER_LIFT; if a > 1 then a = 1 end end
+    return a
+end
 local WEIGHT, SEL_WEIGHT = 1, 1         -- outline thickness; selection is colour, not weight
 -- The "a panel is pinned open on this one" marker: the SAME white outline the
 -- selection and hover wear, at a third alpha. 0.4 because it has to sit clearly
@@ -430,7 +451,7 @@ local function applyLook(b, selected, hovered)
             end
         end
     end
-    b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, hovered and HOVER_ALPHA or BODY_ALPHA)
+    b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, slabFillAlpha(hovered))
     -- Selection is the OUTLINE, never the fill or the role colour: white and
     -- twice as thick. Hover is a softer white at the same weight, and it stands
     -- down for the selected proxy so hovering cannot make it look less selected.
@@ -459,7 +480,7 @@ local function create(el)
     -- and the left edge ONLY, so the outline is free to mean "selected" and the
     -- body is free to stay readable behind whatever the proxy is sitting on.
     UI:CreateElementBackdrop(b, {
-        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, slabFillAlpha(false) },
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
     })
     b.outlineWeight = WEIGHT
@@ -729,6 +750,11 @@ function P:Highlight(selectedId)
         applyLook(b, id == selectedId, b.hovered)
     end
     self:UpdateTethers()
+end
+
+-- The Mover Opacity setting moved: repaint every slab (applyLook reads it).
+function P:ApplyOpacity()
+    self:Highlight(NS.Session and NS.Session.selected)
 end
 
 function P:Remove(id)

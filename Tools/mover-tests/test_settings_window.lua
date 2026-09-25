@@ -61,7 +61,7 @@ check(type(handlers.RegistryChanged) == "function", "settings: ...and still for 
 local function fakeWindow()
     local f = FakeUIFrame()
     f.cb, f.rows, f.expanded, f.rowCache = {}, {}, {}, {}
-    f.gridSlider, f.snapDistSlider, f.zoneShowSlider, f.scaleSlider, f.sideRow = FakeUIFrame(), FakeUIFrame(), FakeUIFrame(), FakeUIFrame(), FakeUIFrame()
+    f.sliders, f.sideRow = { FakeUIFrame(), FakeUIFrame() }, FakeUIFrame()
     f.content, f.listWidth = FakeUIFrame(), 100
     return f
 end

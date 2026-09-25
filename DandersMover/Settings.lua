@@ -227,6 +227,16 @@ local function build()
         set = function(v) NS.db.scale = v end,
         onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
     })
+    -- The slabs' fill only; applied live (the mover host has no drag hooks, so
+    -- onChanged runs on every step of the drag).
+    f.opacitySlider = UI:CreateSlider(editor.content, {
+        label = L["Mover Opacity"], min = 0.1, max = 1, step = 0.05,
+        tooltip = { title = L["Mover Opacity"],
+                    lines = { L["How solid the movers are. Lower it to see the frames underneath; outlines, colours and names stay at full strength."] } },
+        get = function() return NS.db.moverOpacity end,
+        set = function(v) NS.db.moverOpacity = v end,
+        onChanged = function() if Proxy and Proxy.ApplyOpacity then Proxy:ApplyOpacity() end end,
+    })
     stack(editor, {
         toggle(editor.content, L["Keyboard nudge"], "keyboardNudge", nil,
             { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } }),
@@ -237,6 +247,7 @@ local function build()
         -- anchor targets but not draggable unless this is on. Mirrored on the legend.
         toggle(editor.content, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
         f.sideRow,
+        f.opacitySlider,
         f.scaleSlider,
     })
     place(editor)
@@ -259,6 +270,8 @@ local function build()
     f.expanded = {}
 
     f:SetHeight(-y - UI.Space.section + PAD)
+    -- Every slider, for Refresh to re-read.
+    f.sliders = { f.gridSlider, f.snapDistSlider, f.zoneShowSlider, f.opacitySlider, f.scaleSlider }
     return f
 end
 
@@ -386,10 +399,7 @@ function St:Refresh()
     local f = self.frame
     if not f or not f:IsShown() then return end
     for _, cb in ipairs(f.cb) do cb:Refresh() end
-    f.gridSlider:RefreshValue()
-    f.snapDistSlider:RefreshValue()
-    f.zoneShowSlider:RefreshValue()
-    f.scaleSlider:RefreshValue()
+    for _, sl in ipairs(f.sliders) do sl:RefreshValue() end
     f.sideRow:Refresh()
 
     clearRows(f)
