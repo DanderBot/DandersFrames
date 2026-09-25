@@ -10,9 +10,12 @@ if not NS.Lib then return end
 -- (snapping, grid size) lands here, which is where a set-once preference
 -- belongs.
 --
--- Laid out as titled group boxes in the DandersFrames settings style:
--- Snapping, Editor, Registered addons. Rows inside a box stack on the theme's
--- slot heights (UI.RowHeight), so the rhythm matches the options pages.
+-- Laid out as titled group boxes in the DandersFrames settings style: Scale on
+-- its own row under the title, then Snapping, Grid, Editor and Registered
+-- addons. Rows inside a box stack on the theme's slot heights (UI.RowHeight),
+-- so the rhythm matches the options pages. Two columns when the screen has the
+-- room -- settings left, Registered addons right -- one column when it does
+-- not (see LAYOUT).
 -- ============================================================
 local St = {}
 NS.Settings = St
@@ -32,6 +35,8 @@ local LIST_ROW = 26                       -- one toggle row in the addon list
 local LIST_HEADING = 16                   -- a group subheading between element rows
 local CHECK_CONTENT_TOP, CHECK_CONTENT_H = 3, 18   -- where the check sits inside its 35px slot
 local SEG_GAP = 2                         -- between segmented buttons
+local COL_GAP = PAD                       -- between the two columns
+local W2 = INNER * 2 + PAD * 2 + COL_GAP  -- the two-column window
 
 local function rebuildProxies()
     Sess:RebuildProxies()
@@ -121,6 +126,69 @@ local function segmentedRow(parent, label, options, get, set)
 end
 
 -- ============================================================
+-- LAYOUT
+-- Two columns when the screen is wide enough for them at the current chrome
+-- scale: the settings boxes stacked on the left, Registered addons on the
+-- right, its list stretched to the height of the left column so the two
+-- bottoms line up (the list is the one thing in the window that wants the
+-- room). Otherwise one column, the list under the settings at LIST_H, as it
+-- always was. Tester request (alpha.12), after DandersFrames' own options.
+--
+-- Re-run on every show and every scale change: the window is scaled, so how
+-- much screen it has is the screen's width in ITS units. Only positions and
+-- two sizes move -- the addon list's rows are cached by identity and keep
+-- their width (the column is the same width either way), so a relayout
+-- creates nothing.
+-- ============================================================
+local function wantsTwoColumns()
+    local sw = UIParent:GetWidth()
+    if type(sw) ~= "number" then return false end
+    return sw / chromeScale() >= W2 + PAD * 2
+end
+
+local function layout(f)
+    local two = wantsTwoColumns()
+    f.twoColumns = two
+    local width = two and W2 or W
+    f:SetWidth(width)
+    local y = f.columnsTop
+    f.scaleSlider:ClearAllPoints()
+    f.scaleSlider:SetPoint("TOPLEFT", f, "TOPLEFT", PAD * 2, f.scaleTop)
+    f.scaleSlider:SetWidth(width - PAD * 4)
+    -- Left column.
+    for _, box in ipairs(f.leftBoxes) do
+        box:ClearAllPoints()
+        box:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+        y = y - box:GetHeight() - UI.Space.section
+    end
+    local leftBottom = y + UI.Space.section          -- the last box's bottom edge
+    local addons = f.addonsBox
+    -- The box's own chrome (title strip, padding) around its content.
+    addons:SetContentHeight(LIST_H)
+    local chrome = addons:GetHeight() - LIST_H
+    local listH = LIST_H
+    addons:ClearAllPoints()
+    if two then
+        listH = max(LIST_H, (f.columnsTop - leftBottom) - chrome)
+        addons:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + INNER + COL_GAP, f.columnsTop)
+    else
+        addons:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    end
+    f.scroll:SetSize(CONTENT - SCROLLBAR_W, listH)
+    addons:SetContentHeight(listH)
+    local bottom = two and (f.columnsTop - addons:GetHeight()) or (y - addons:GetHeight())
+    if two and leftBottom < bottom then bottom = leftBottom end
+    f:SetHeight(-bottom + PAD)
+end
+
+-- A window build() made. rawget, because the lifecycle suite
+-- (test_settings_window.lua) stands the window in with a bare stub frame whose
+-- unknown fields answer a truthy no-op.
+local function relayout(f)
+    if rawget(f, "addonsBox") then layout(f) end
+end
+
+-- ============================================================
 -- BUILD
 -- ============================================================
 local function build()
@@ -151,10 +219,9 @@ local function build()
     f.title:SetWordWrap(false)
 
     local y = -(PAD + TITLE_H + GAP)
-    local function place(box)
-        box:SetPoint("TOPLEFT", PAD, y)
-        y = y - box:GetHeight() - UI.Space.section
-    end
+    -- The settings boxes, top to bottom; layout() places them (and the list).
+    f.leftBoxes = {}
+    local function place(box) tinsert(f.leftBoxes, box) end
 
     -- ---- Scale: its own row, first thing under the title ---------------
     -- It sizes this very window (and the strip, the panel, the toast and the
@@ -169,9 +236,8 @@ local function build()
         set = function(v) NS.db.scale = v end,
         onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
     })
-    f.scaleSlider:SetPoint("TOPLEFT", f, "TOPLEFT", PAD * 2, y)
-    f.scaleSlider:SetWidth(CONTENT)
-    y = y - (f.scaleSlider.preferredHeight or UI.RowHeight.slider or 50) - TIGHT
+    f.scaleTop = y
+    f.columnsTop = y - (f.scaleSlider.preferredHeight or UI.RowHeight.slider or 50) - TIGHT
 
     f.cb = {}
     local function toggle(parent, label, key, after, tooltip)
@@ -294,15 +360,14 @@ local function build()
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(CONTENT - SCROLLBAR_W, 10)
     scroll:SetScrollChild(content)
-    addons:SetContentHeight(LIST_H)
-    place(addons)
+    f.addonsBox, f.scroll = addons, scroll
     f.content = content
     f.listWidth = CONTENT - SCROLLBAR_W
     f.rows = {}
     f.rowCache = {}               -- identity key -> row frame; see ROWS ARE CACHED
     f.expanded = {}
 
-    f:SetHeight(-y - UI.Space.section + PAD)
+    layout(f)
     -- Every slider, for Refresh to re-read.
     f.sliders = { f.snapDistSlider, f.zoneShowSlider, f.gridSlider, f.thickSlider, f.dimSlider,
                   f.opacitySlider, f.scaleSlider }
@@ -487,7 +552,7 @@ NS.Lib.RegisterCallback(St, "Locked", function()
 end)
 
 function St:Show()
-    if not self.frame then self.frame = build() end
+    if not self.frame then self.frame = build() else relayout(self.frame) end
     self.sessionOwned = (Sess and Sess.IsActive and Sess:IsActive()) and true or false
     self.frame:Show()
     self:Refresh()
@@ -502,5 +567,8 @@ function St:Toggle() if self.frame and self.frame:IsShown() then self:Hide() els
 -- The Scale setting moved (its slider is in this very window): the window takes
 -- it too. Called by Proxy:ApplyChromeScale, which sizes everything else.
 function St:ApplyChromeScale()
-    if self.frame then self.frame:SetScale(chromeScale()) end
+    if not self.frame then return end
+    self.frame:SetScale(chromeScale())
+    -- The screen is a different width in the window's units now.
+    relayout(self.frame)
 end
