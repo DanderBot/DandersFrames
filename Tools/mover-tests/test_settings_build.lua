@@ -48,9 +48,10 @@ NS.UI = {
         b._opts = opts
         return b
     end,
-    CreateSlider = function(_, _, opts)
+    CreateSlider = function(_, parent, opts)
         local s = FakeUIFrame(260, 50)
         s._opts = opts
+        s._parentArg = parent
         s.preferredHeight = 50
         s._enabled = true
         function s:SetEnabled(v) self._enabled = v and true or false end
@@ -153,6 +154,43 @@ do
         applied["Grid:Refresh"] = nil
         dim._opts.onChanged()
         eq(applied["Grid:Refresh"], 1, "grid: ...and applied live")
+    end
+end
+
+-- ============================================================
+-- SCALE: FIRST THING IN THE WINDOW
+-- It used to be the last row of the Editor box, at the bottom of the window.
+-- ============================================================
+print("-- Settings build: the Scale control sits at the top, in its own row")
+do
+    local sc = byLabel(made.sliders, "Scale")
+    check(sc ~= nil, "scale: the window has a Scale slider")
+    if sc then
+        eq(sc._parentArg, f, "scale: it hangs off the window itself, not inside a settings box")
+        local p = sc._points[1]
+        eq(p and p[1], "TOPLEFT", "scale: anchored by its top-left")
+        eq(p and p[2], f, "scale: ...to the window")
+        local topY = p and p[5] or -math.huge
+        local firstBoxY = math.huge
+        for _, box in ipairs(made.boxes) do
+            local bp = box._points[1]
+            local by = bp and (bp[5] or bp[3])
+            if type(by) == "number" and by > -math.huge then
+                check(topY > by, "scale: above the '" .. tostring(box._title) .. "' box")
+            end
+        end
+        local editor
+        for _, box in ipairs(made.boxes) do if box._title == "Editor" then editor = box end end
+        check(editor ~= nil, "scale: the Editor box still exists")
+        eq(sc:GetWidth() > 0 and true, true, "scale: sized to the window's width")
+        -- The tooltip says what it now covers.
+        local line = sc._opts.tooltip and sc._opts.tooltip.lines and sc._opts.tooltip.lines[1] or ""
+        check(line:find("text on the movers", 1, true) ~= nil, "scale: its tooltip says it sizes the text on the movers")
+        sc._opts.set(1.2)
+        eq(NS.db.scale, 1.2, "scale: written to DandersMoverDB")
+        applied.ApplyChromeScale = nil
+        sc._opts.onChanged()
+        eq(applied.ApplyChromeScale, 1, "scale: ...and applied live")
     end
 end
 

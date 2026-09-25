@@ -474,6 +474,25 @@ local function applyLook(b, selected, hovered)
     end
 end
 
+-- ------------------------------------------------------------
+-- SLAB TEXT SCALE
+-- The title and coords follow the chrome scale (Settings > Scale); the slab
+-- itself, its icon and markers do not -- it is as big as its frame. Through
+-- SetTextScale rather than a sized font: the title keeps its font OBJECT, and
+-- with it the multi-alphabet family an element name in another script needs.
+-- Tester report (alpha.12): "Party Frames" and the coords ignored the setting.
+-- Only touched when the value changes; clearing layoutKey makes the next
+-- layout re-measure what fits at the new size.
+-- ------------------------------------------------------------
+local function applySlabTextScale(b)
+    local s = NS:ChromeScale()
+    if b.textScale == s then return end
+    b.textScale = s
+    if b.title.SetTextScale then b.title:SetTextScale(s) end
+    if b.coords.SetTextScale then b.coords:SetTextScale(s) end
+    b.layoutKey = nil
+end
+
 local function create(el)
     local b = CreateFrame("Button", nil, P:GetUnlockFrame(), "BackdropTemplate")
     -- A solid dark slab with a neutral hairline. The role is carried by the dot
@@ -543,6 +562,8 @@ local function create(el)
     -- with the content beside it.
     b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.25); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
     b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.25); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
+    b.textScale = nil
+    applySlabTextScale(b)
     b:SetScript("OnDragStart", onDragStart)
     b:SetScript("OnDragStop", onDragStop)
     b:SetScript("OnClick", onClick)
@@ -582,6 +603,8 @@ local function acquire(el)
     b.dragging, b.hovered, b.tagShown = false, false, nil
     -- nil forces layout() to re-anchor and re-title for the new element.
     b.layoutKey, b.layoutTitle = nil, nil
+    -- The scale may have moved while it sat parked.
+    applySlabTextScale(b)
     local addon = Registry:GetAddon(el.addon)
     if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
     return b
@@ -1020,8 +1043,11 @@ local LEGEND_ROW = 18                    -- first row: dots left, buttons right
 -- One number for everything a session draws that is NOT a slab: the top strip
 -- and its folded tab, the toast, the element panel (Panel.lua) and the settings
 -- window (Settings.lua). A slab is exactly as big as the frame it stands in for,
--- so it never scales -- which is also why the whole overlay cannot simply be
--- scaled: the slabs are its children and are placed in UIParent units.
+-- so the slab itself never scales -- which is also why the whole overlay cannot
+-- simply be scaled: the slabs are its children and are placed in UIParent
+-- units. Its TEXT does: the title and the coords take the scale through
+-- SetTextScale (applySlabTextScale), so the names read at the size the rest of
+-- the chrome was set to.
 -- The mover is standalone, so this is its own setting (DandersMoverDB.scale)
 -- rather than a read of DandersFrames' window scale; a user who wants the two
 -- to match sets this one to match. Owned here, next to the chrome it sizes,
@@ -1043,11 +1069,15 @@ local function chromeRatio(f)
     return 1
 end
 
--- The setting moved (Settings > Editor > Scale), or a session opened: size
+-- The setting moved (Settings > Scale, top of the window), or a session opened: size
 -- every piece of chrome that exists. Panel and Settings load after this file,
 -- hence the guards; each owns its own frames.
 function P:ApplyChromeScale()
     local s = NS:ChromeScale()
+    local anySlab = false
+    for _, b in pairs(self.proxies) do applySlabTextScale(b); anySlab = true end
+    -- The text widths changed, so every slab's fit is re-measured in one repaint.
+    if anySlab then self:Highlight(NS.Session and NS.Session.selected) end
     if self.legend then self.legend:SetScale(s) end
     if self.stripTab then self.stripTab:SetScale(s) end
     if self.toast then self.toast:SetScale(s) end

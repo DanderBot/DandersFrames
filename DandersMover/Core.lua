@@ -99,7 +99,8 @@ NS.DEFAULTS = {
     -- Interacting with a mover's side panel pins it in place automatically; off = only the pin button pins.
     autoPinPanels = true,
     -- Size of the session chrome (top strip, element panel, toast, settings
-    -- window). Never the slabs -- see NS:ChromeScale in Proxy.lua.
+    -- window, and the text on the slabs). Never the slabs themselves -- see
+    -- NS:ChromeScale in Proxy.lua.
     scale = 1,
     stripCollapsed = false,               -- top strip folded to its slim tab
     addons = {}, demo = {},

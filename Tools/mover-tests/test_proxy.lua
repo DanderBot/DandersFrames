@@ -89,6 +89,8 @@ local function stubFontString()
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
     function f:GetUnboundedStringWidth() return 7 * #self._text end
+    -- Recorded: the chrome scale reaches slab text through SetTextScale.
+    function f:SetTextScale(v) self._textScale = v end
     function f:ClearAllPoints() wipe(self._points) end
     function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
     return f
@@ -1329,6 +1331,48 @@ do
 
     P:DestroyAll()
     R:UnregisterAddon("OP")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SLAB TEXT FOLLOWS THE CHROME SCALE
+-- Tester report (alpha.12): the Scale setting sized the strip and the panel
+-- but not the names ("Party Frames") or the coords on the slabs. The slab
+-- itself stays the size of its frame; its title and coords take the scale.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, scale = 1.3 }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("SC", { title = "SC" })
+    R:Register("SC", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local b = P.proxies["SC:a"]
+    eq(b.title._textScale, 1.3, "slab scale: a new slab's title takes the chrome scale")
+    eq(b.coords._textScale, 1.3, "slab scale: ...and so do its coords")
+    local w, h = b:GetWidth(), b:GetHeight()
+
+    NS.db.scale = 0.8
+    b.layoutKey = 99
+    P:ApplyChromeScale()
+    eq(b.title._textScale, 0.8, "slab scale: moving the setting re-scales the title live")
+    eq(b.coords._textScale, 0.8, "slab scale: ...and the coords")
+    check(b.layoutKey ~= 99, "slab scale: ...and the slab re-measures what fits at the new size")
+    eq(b:GetWidth(), w, "slab scale: the slab itself keeps its frame's width")
+    eq(b:GetHeight(), h, "slab scale: ...and height")
+
+    -- A parked slab picks up a scale that moved while it waited in the pool.
+    P:DestroyAll()
+    NS.db.scale = 1.1
+    P:Build()
+    local again = P.proxies["SC:a"]
+    eq(again.title._textScale, 1.1, "slab scale: a slab re-used from the pool takes the current scale")
+
+    P:DestroyAll()
+    R:UnregisterAddon("SC")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil

@@ -156,6 +156,23 @@ local function build()
         y = y - box:GetHeight() - UI.Space.section
     end
 
+    -- ---- Scale: its own row, first thing under the title ---------------
+    -- It sizes this very window (and the strip, the panel, the toast and the
+    -- text on the slabs -- see NS:ChromeScale), so it is the one control that
+    -- has to be findable at a glance. It used to sit last in the Editor box, at
+    -- the bottom of the window (tester report, alpha.12).
+    f.scaleSlider = UI:CreateSlider(f, {
+        label = L["Scale"], min = 0.5, max = 1.5, step = 0.05,
+        tooltip = { title = L["Scale"],
+                    lines = { L["Size of the top strip, the element panel, this window and the text on the movers. Movers themselves always match their frames."] } },
+        get = function() return NS.db.scale end,
+        set = function(v) NS.db.scale = v end,
+        onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
+    })
+    f.scaleSlider:SetPoint("TOPLEFT", f, "TOPLEFT", PAD * 2, y)
+    f.scaleSlider:SetWidth(CONTENT)
+    y = y - (f.scaleSlider.preferredHeight or UI.RowHeight.slider or 50) - TIGHT
+
     f.cb = {}
     local function toggle(parent, label, key, after, tooltip)
         local cb = UI:CreateCheckbox(parent, {
@@ -244,17 +261,6 @@ local function build()
         { { value = "auto", text = L["Auto"] }, { value = "left", text = L["Left"] }, { value = "right", text = L["Right"] } },
         function() return NS.db.panelSide end,
         function(v) NS.db.panelSide = v; if NS.Panel then NS.Panel:Refresh() end end)
-    -- The session chrome's size -- strip, panel, toast, this window. Never the
-    -- slabs (see NS:ChromeScale). Committed on release, so the window is not
-    -- re-scaled under the cursor on every notch of the drag.
-    f.scaleSlider = UI:CreateSlider(editor.content, {
-        label = L["Scale"], min = 0.5, max = 1.5, step = 0.05,
-        tooltip = { title = L["Scale"],
-                    lines = { L["Size of the top strip, the element panel and this window. Movers themselves always match their frames."] } },
-        get = function() return NS.db.scale end,
-        set = function(v) NS.db.scale = v end,
-        onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
-    })
     -- The slabs' fill only; applied live (the mover host has no drag hooks, so
     -- onChanged runs on every step of the drag).
     f.opacitySlider = UI:CreateSlider(editor.content, {
@@ -276,7 +282,6 @@ local function build()
         toggle(editor.content, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
         f.sideRow,
         f.opacitySlider,
-        f.scaleSlider,
     })
     place(editor)
 
