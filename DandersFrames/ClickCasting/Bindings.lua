@@ -243,6 +243,44 @@ end
 -- Export to CC namespace for use in UI files
 CC.GetSpellDisplayInfo = GetSpellDisplayInfo
 
+-- WoW Forever: "/cast Name" picks the highest rank, so lower-rank bindings set
+-- pinRank to cast "Name(Rank N)"
+local function GetSpellRankText(spellId)
+    if not spellId or not C_Spell.GetSpellSubtext then return nil end
+    local subtext = C_Spell.GetSpellSubtext(spellId)
+    if subtext and subtext ~= "" then return subtext end
+    return nil
+end
+CC.GetSpellRankText = GetSpellRankText
+
+-- Resolve the spell name for the active locale via spell ID (bindings store the
+-- name from creation time).
+-- IMPORTANT: Always use the BASE spell name, never the override name.
+-- WoW's /cast command is override-aware and will automatically resolve
+-- base spells to their current form (e.g. /cast Flash of Light will cast
+-- Benediction when the proc is active). Using the override name in the
+-- macro causes "spell not learned" errors when the proc expires.
+local function GetCastSpellName(binding)
+    local name = binding.spellName
+    if binding.spellId then
+        local info = C_Spell.GetSpellInfo(binding.spellId)
+        if info and info.name then name = info.name end
+    end
+    if name and binding.pinRank then
+        local rank = GetSpellRankText(binding.spellId)
+        if rank then name = name .. "(" .. rank .. ")" end
+    end
+    return name
+end
+
+local function WithPinnedRank(binding, name)
+    if name and binding.pinRank then
+        local rank = GetSpellRankText(binding.spellId)
+        if rank then return name .. " (" .. rank .. ")" end
+    end
+    return name
+end
+
 -- Resolve the display icon (texture path or fileID) for a binding. Single
 -- source of truth for the action-type -> icon chain, shared by the full
 -- binding row (BindingEditor) and the collapsed row (Main). Always returns a
@@ -1247,9 +1285,14 @@ function CC:FindDuplicateBinding(newBinding, excludeIndex)
             local sameAction = false
             if newBinding.actionType == existing.actionType then
                 if newBinding.actionType == CC.ACTION_TYPES.SPELL then
-                    -- For spells, check spell name or ID
-                    sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
-                                 (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    -- For spells, check spell name or ID (pinned ranks by ID only)
+                    if newBinding.pinRank or existing.pinRank then
+                        sameAction = (newBinding.pinRank and existing.pinRank and
+                                      newBinding.spellId == existing.spellId) or false
+                    else
+                        sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
+                                     (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    end
                 elseif newBinding.actionType == CC.ACTION_TYPES.MACRO then
                     -- For macros, check macro ID or name
                     sameAction = (newBinding.macroId and newBinding.macroId == existing.macroId) or
@@ -1422,7 +1465,7 @@ function CC:GetBindingActionText(binding)
     local actionType = binding.actionType
     
     if actionType == self.ACTION_TYPES.SPELL then
-        return binding.spellName or "Unknown Spell"
+        return WithPinnedRank(binding, binding.spellName) or "Unknown Spell"
     elseif actionType == self.ACTION_TYPES.MACRO then
         return binding.macroName or "Unknown Macro"
     elseif actionType == self.ACTION_TYPES.ITEM then
@@ -1479,7 +1522,7 @@ function CC:GetActionDisplayString(binding)
     if binding.actionType == CC.ACTION_TYPES.SPELL then
         -- Get current display name (accounts for talent overrides)
         local displayName = GetSpellDisplayInfo(binding.spellId, binding.spellName)
-        return displayName or binding.spellName or "No Spell"
+        return WithPinnedRank(binding, displayName or binding.spellName) or "No Spell"
     elseif binding.actionType == CC.ACTION_TYPES.MACRO then
         -- Try to get macro name from stored macro or binding
         if binding.macroId then
@@ -1569,6 +1612,13 @@ function CC:CloseAllMacroDialogs()
     if _G["DFImportMacroDialog"] then _G["DFImportMacroDialog"]:Hide() end
     if _G["DFQuickMacroDialog"] then _G["DFQuickMacroDialog"]:Hide() end
     if _G["DFIconPickerDialog"] then _G["DFIconPickerDialog"]:Hide() end
+end
+
+function CC.CompareSpellNames(a, b)
+    if a.name ~= b.name then
+        return a.name < b.name
+    end
+    return (a.rankOrder or 0) < (b.rankOrder or 0)
 end
 
 -- Get all player spells (for the spell grid)
@@ -1707,6 +1757,7 @@ function CC:GetAllPlayerSpells()
                                             category = useCategory,
                                             categoryPriority = useCategoryPriority,
                                             tabName = useTabName,
+                                            slotIndex = slotIndex,
                                         },
                                         isRoot = isRoot,
                                     }
@@ -1720,16 +1771,38 @@ function CC:GetAllPlayerSpells()
     end
     
     -- Convert to results array
+    local spellsByName = {}
     for displaySpellId, data in pairs(spellsByDisplayId) do
         table.insert(results, data.spell)
+        local group = spellsByName[data.spell.name]
+        if not group then
+            group = {}
+            spellsByName[data.spell.name] = group
+        end
+        table.insert(group, data.spell)
     end
-    
+
+    -- WoW Forever lists each rank separately; all but the highest pin their rank
+    for _, group in pairs(spellsByName) do
+        if #group > 1 then
+            for _, spell in ipairs(group) do
+                spell.rank = GetSpellRankText(spell.spellId)
+                spell.rankOrder = spell.rank and tonumber(spell.rank:match("%d+")) or spell.slotIndex
+            end
+            table.sort(group, function(a, b) return a.rankOrder < b.rankOrder end)
+            for i, spell in ipairs(group) do
+                spell.rankOrder = i
+                spell.pinRank = (i < #group) or nil
+            end
+        end
+    end
+
     -- Sort by category priority first, then by name
     table.sort(results, function(a, b)
         if a.categoryPriority ~= b.categoryPriority then
             return a.categoryPriority < b.categoryPriority
         end
-        return a.name < b.name
+        return CC.CompareSpellNames(a, b)
     end)
     
     return results
@@ -2104,28 +2177,13 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
     
     -- Handle different action types
     if actionType == self.ACTION_TYPES.SPELL then
-        -- Resolve current spell name for the active locale.
-        -- Bindings store the spell name from the language the client was using at
-        -- creation time.  We must re-resolve via spell ID so the macro contains
-        -- the name WoW's parser expects on the current client language.
-        -- IMPORTANT: Always use the BASE spell name, never the override name.
-        -- WoW's /cast command is override-aware and will automatically resolve
-        -- base spells to their current form (e.g. /cast Flash of Light will cast
-        -- Benediction when the proc is active). Using the override name in the
-        -- macro causes "spell not learned" errors when the proc expires.
-        local spellName = binding.spellName
-        if binding.spellId then
-            local localizedName = GetLocalizedSpellName(binding.spellId)
-            if localizedName then
-                spellName = localizedName
-            end
-        end
+        local spellName = GetCastSpellName(binding)
         if not spellName then return nil end
-        
+
         local parts = {}
-        
+
         -- Check if this is a resurrection spell - res spells need "dead" instead of "nodead"
-        local isResSpell = self:IsResurrectionSpell(spellName, binding.spellId)
+        local isResSpell = self:IsResurrectionSpell(binding.spellName, binding.spellId)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
         
         -- SMART RESURRECTION FIRST (dead targets take priority)
@@ -2408,7 +2466,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Friendly conditions
     if friendlyBinding and friendlyBinding.spellName then
-        local spell = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
+        local spell = GetCastSpellName(friendlyBinding)
         local fb = friendlyBinding.fallback or {}
         local combatCond = GetCombatCondition(friendlyBinding)
         local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
@@ -2434,7 +2492,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Hostile conditions
     if hostileBinding and hostileBinding.spellName then
-        local spell = GetLocalizedSpellName(hostileBinding.spellId) or hostileBinding.spellName
+        local spell = GetCastSpellName(hostileBinding)
         local fb = hostileBinding.fallback or {}
         local combatCond = GetCombatCondition(hostileBinding)
         local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
@@ -2460,7 +2518,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     
     -- Any target fallback (no help/harm conditions)
     if anyBinding and anyBinding.spellName then
-        local anySpell = GetLocalizedSpellName(anyBinding.spellId) or anyBinding.spellName
+        local anySpell = GetCastSpellName(anyBinding)
         local fb = anyBinding.fallback or {}
 
         -- Check if this is a resurrection spell
@@ -2495,7 +2553,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     if friendlyBinding and friendlyBinding.spellName then
         local fb = friendlyBinding.fallback or {}
         if fb.selfCast then
-            local friendlySpell = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
+            local friendlySpell = GetCastSpellName(friendlyBinding)
             local combatCond = GetCombatCondition(friendlyBinding)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, "[@player" .. combatStr .. "] " .. friendlySpell)
@@ -2507,7 +2565,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     -- the self-cast clause above resolves first when enabled.
     for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
         if b and b.fallback and b.fallback.alwaysCast and b.spellName then
-            local spell = GetLocalizedSpellName(b.spellId) or b.spellName
+            local spell = GetCastSpellName(b)
             local combatCond = GetCombatCondition(b)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, (combatStr ~= "" and ("[" .. combatStr:sub(2) .. "] ") or "") .. spell)
