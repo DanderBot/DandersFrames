@@ -2001,7 +2001,12 @@ function UI:ShowGameTooltip(owner, opts)
     -- Same cursor default as ShowTooltip — a spell tooltip on a settings row has
     -- to behave like every other tooltip in the window, and this one was still on
     -- the old ANCHOR_RIGHT.
-    if opts.anchor then
+    -- The same placement rule as ShowTooltip, host hook included (the resident
+    -- half owns it). The inline branch is for a load that never ran the resident
+    -- half's Widgets.lua (a headless suite stubbing _priv).
+    if P.SetTooltipOwner then
+        P.SetTooltipOwner(host, owner, opts)
+    elseif opts.anchor then
         GameTooltip:SetOwner(owner, opts.anchor)
     else
         GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)

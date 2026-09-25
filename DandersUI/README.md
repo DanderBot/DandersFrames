@@ -94,6 +94,7 @@ The library has no SavedVariables and depends on nothing but LibStub.
 | `safeSetFont` | `(obj, name, size, flags) -> handled` | plain `SetFont` |
 | `fontFamily` | `(path, outline, size) -> fontObject or global name` | none (no alphabet fallback) |
 | `getScale` | `() -> number` | `1` |
+| `tooltipAnchor` | `(owner) -> anchor, x, y` — a `GameTooltip:SetOwner` anchor and offsets for every `ShowTooltip` / `ShowGameTooltip` that passes no `anchor`; return nil for the default | the cursor, lifted off the pointer |
 | `accentFor` | `(isRaid) -> {r,g,b}` | the host accent |
 | `getOverrideState` | `(db, key) -> state, globalValue` | no override indicators |
 | `resetOverride` | `(db, key) -> globalValue` | reset buttons do nothing |
@@ -176,7 +177,7 @@ its commit stays on OK/Apply.
 | Call | Purpose |
 |---|---|
 | `UI:StyleButton(btn, opts)`, `UI:StyleCheckButton(cb, opts)`, `UI:StyleEditBox(eb, opts)` | Apply the house look to a frame you built yourself |
-| `UI:ShowTooltip(owner, { title, lines, tone, anchor })`, `UI:HideTooltip()`, `UI:AttachTooltip(widget, label, labelRegion)` | The house tooltip. Never use raw `GameTooltip` for your own tooltips |
+| `UI:ShowTooltip(owner, { title, lines, tone, anchor, anchorX, anchorY })`, `UI:HideTooltip()`, `UI:AttachTooltip(widget, label, labelRegion)` | The house tooltip. Never use raw `GameTooltip` for your own tooltips |
 | `UI:ShowPopupAlert(config)`, `UI:ShowPopupInput(config)`, `UI:IsPopupShown()` | One shared modal dialog. A second call while one is open takes the frame over |
 | `UI:CreateSettingsGroup(parent, width, opts)`, `UI:CreateInfoBanner(parent, opts)`, `UI:CreateLink(parent, opts)`, `UI:FlashWidget(widget)`, `UI:LinkToSetting(widget, target)`, `UI:ShowGameTooltip(owner, opts)`, `UI:GroupInnerWidth(group)`, `UI:GetToneColor(tone)`, `UI:ToneHex(tone)`, `UI:CreateDisabledOverlay(frame)` | The page-composition layer (options manifest): collapsible settings groups (`group:AddWidget(widget, height)`), the toned info banner, inline links, link-to-setting jumps and the game-data tooltip. Collapse state persists through the host's `GetCollapsedGroups` method when it has one; section toggles fire `onSectionToggled`; link-to-setting notes render only when `scrollToSection` exists. `CreateSettingsGroup` opts: `collapsible`, `showSummary`, `collapseKey`, `padding`, `surface`, `chromeless` (no box at all -- the group IS another surface's contents), and `bandStyle` (the title is drawn ABOVE the box as a section header and the box becomes a PopoutRow plate, so a page of feature-row bands and a page of inline boxes read as one language; `chromeless` outranks it) |
 | `UI:OpenColorPicker(initialColor, hasAlpha, onAccept, onCancel, onChange, defaultColor)`, `UI:GetColorPickerFrame()` | The shared colour picker (options manifest). One frame for the whole pack, like the popup: a second open takes it over. Colours are `{r,g,b,a}` in 0-1. Palettes and the square/wheel preference persist through `pickerStore`, the title comes from `pickerTitle`, and `GetColorPickerFrame` is a handle for a consumer that has to react to the picker opening or closing |

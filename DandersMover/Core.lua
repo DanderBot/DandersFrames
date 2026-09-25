@@ -26,8 +26,40 @@ NS.UI = LibStub("DandersUI-1.0"):NewHost("DandersMover", {
     -- Proxy.lua, which is why the call is guarded -- the hook is only ever
     -- invoked long after every file has loaded.
     getScale = function() return NS.ChromeScale and NS:ChromeScale() or 1 end,
+    -- Every tooltip the mover's chrome shows is placed by NS.TooltipAnchor below.
+    tooltipAnchor = function(owner) return NS.TooltipAnchor(owner) end,
 })
 NS.UI:SetAccent(0.18, 0.612, 0.792)   -- the mover's own blue, from the old Theme.C.accent
+
+-- ============================================================
+-- TOOLTIP PLACEMENT
+-- The kit's default tooltip sits up and to the right of the CURSOR. The mover's
+-- chrome lives along the top of the screen (the strip, and any panel docked to a
+-- slab up there), where there is no room above the cursor: the client clamps the
+-- tooltip back down and it lands right under the pointer, over the button being
+-- read. So anything in the upper half of the screen hangs its tooltip BELOW the
+-- control instead -- the cursor is inside the control, so a tooltip outside it
+-- can never be under the cursor. The lower half keeps the cursor default, which
+-- has the whole screen above it to grow into.
+--
+-- `beside` (the slabs) always places off the owner: a slab is the thing being
+-- looked at, so a cursor tooltip would sit on top of it.
+-- ============================================================
+local TIP_GAP = 4
+
+function NS.TooltipAnchor(owner, beside)
+    if not (owner and owner.GetCenter) then return nil end
+    local _, cy = owner:GetCenter()
+    local sh = UIParent:GetHeight()
+    if type(cy) ~= "number" or type(sh) ~= "number" then return nil end
+    -- GetCenter is in the owner's own units; bring it to UIParent's.
+    local oe = owner.GetEffectiveScale and owner:GetEffectiveScale()
+    local ue = UIParent:GetEffectiveScale()
+    if type(oe) == "number" and type(ue) == "number" and ue > 0 then cy = cy * oe / ue end
+    if cy > sh / 2 then return "ANCHOR_BOTTOM", 0, -TIP_GAP end
+    if beside then return "ANCHOR_TOP", 0, TIP_GAP end
+    return nil
+end
 
 local Registry, Solver = NS.Registry, NS.Solver
 local pairs, ipairs, type, pcall, xpcall, geterrorhandler = pairs, ipairs, type, pcall, xpcall, geterrorhandler

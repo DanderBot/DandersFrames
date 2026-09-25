@@ -19,7 +19,7 @@ local addonName, NS = ...
 -- ☠ Bumping MINOR means bumping EXPECTED_MINOR in OptionsCore.lua in the SAME
 -- commit -- the options manifest compares the two for equality and goes inert on
 -- a mismatch. See the README's split-loading section.
-local MAJOR, MINOR = "DandersUI-1.0", 29
+local MAJOR, MINOR = "DandersUI-1.0", 30
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private
@@ -78,6 +78,8 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   safeSetFont(obj, name, size, flags) -> handled                default: plain SetFont
 --   fontFamily(path, outline, size) -> fontObject|globalName      default: none
 --   getScale() -> number             UI scale for floating chrome default: 1
+--   tooltipAnchor(owner) -> anchor, x, y   where a tooltip that names no anchor
+--        goes (a GameTooltip:SetOwner anchor + offsets); nil = the cursor default
 --   accentFor(isRaid) -> {r,g,b}     a pinned accent pole         default: the host accent
 --   getOverrideState(db, key) -> state, globalValue
 --        state is "none" | "runtime" | "overridden" | "editing"; absent = no indicators

@@ -124,6 +124,9 @@ lua.globals().options_file_source = lambda name: (HERE.parents[1] / "DandersFram
 # readers on both sides of the load-on-demand split, and a test that copied the
 # number would stop describing what ships the moment one of them moved.
 lua.globals().df_file_source = lambda name: (HERE.parents[1] / "DandersFrames" / name).read_text(encoding="utf-8")
+# ...and the same door for a DandersMover file that cannot be LOADED headless
+# (Core.lua builds its kit host at file scope), so a test cuts one function out.
+lua.globals().mover_file_source = lambda name: (ADDON / name).read_text(encoding="utf-8")
 
 # ============================================================
 # STATIC BAN: lib files never call bare shadowed factory names.

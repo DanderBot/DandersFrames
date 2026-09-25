@@ -14,7 +14,7 @@ local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {},
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
-local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime
+local CreateFrame, UIParent, GetCursorPosition, C_Timer, GetTime = CreateFrame, UIParent, GetCursorPosition, C_Timer, GetTime
 local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
 local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.format, math.sqrt, math.max, math.abs, table.sort
 
@@ -181,7 +181,7 @@ local function onDragStart(self)
     -- commits the start position rather than nil or a previous drag's values.
     self.lastX, self.lastY, self.lastZone = self.startX, self.startY, nil
     self.dragging = true
-    GameTooltip:Hide()
+    UI:HideTooltip()
     NS.Session.selected = el.id            -- select without docking the panel; EndDrag re-docks it
     P:Highlight(el.id)
     -- Only the FOLLOWING panel: it hangs off the slab that is about to move, so
@@ -533,7 +533,7 @@ local function create(el)
     b:SetScript("OnLeave", function(s)
         s.hovered = false
         P:Highlight(NS.Session and NS.Session.selected)
-        GameTooltip:Hide()
+        UI:HideTooltip()
     end)
     b.element = el
     -- Creation order breaks z-ties in the overlap cycle: at equal frame level
@@ -1342,26 +1342,47 @@ end
 -- ============================================================
 -- TOOLTIP
 -- ============================================================
+-- Through the kit's ShowTooltip (never raw GameTooltip), placed OFF the slab:
+-- below it in the upper half of the screen, above it in the lower half
+-- (NS.TooltipAnchor with `beside`). It used to hang off the slab's right edge,
+-- which the client clamps back over the slab -- and the cursor -- whenever the
+-- slab sits near the right or top edge.
+--
+-- One spec and one set of line tables, refilled per hover: a hover is not a hot
+-- path, but there is no reason for it to build garbage either.
+local tipLines = { {}, {}, " ", {}, {}, {}, {} }
+local tipSpec = { lines = {} }
+local C_TIP_BODY = { r = 0.8, g = 0.8, b = 0.8 }
+
+-- Line i of the pool, refilled, appended as the spec's line n.
+local function tipLine(n, i, text, color)
+    local line = tipLines[i]
+    if type(line) == "table" then line.text, line.color = text, color end
+    tipSpec.lines[n] = line
+    return n + 1
+end
+
 function P:ShowTooltip(b)
     if b.dragging then return end
     local el = b.element
     local addon = Registry:GetAddon(el.addon)
-    GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(el.title, 1, 1, 1)
-    GameTooltip:AddLine(addon and addon.title or el.addon, C_MUTED.r, C_MUTED.g, C_MUTED.b)
+    wipe(tipSpec.lines)
+    tipSpec.title = el.title
+    local n = tipLine(1, 1, addon and addon.title or el.addon, C_MUTED)
     local a = Registry:GetPos(el).anchor
     if a then
         local target = Registry:GetTarget(a.target)
         local name = target and target.title or L["(unavailable)"]
         local how = a.mode == "point" and format("%s → %s", a.point, a.relPoint) or format("%s/%s", a.edge, a.align)
-        GameTooltip:AddLine(format(L["Anchored to %s"], format("%s (%s)", name, how)), C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b)
+        n = tipLine(n, 2, format(L["Anchored to %s"], format("%s (%s)", name, how)), C_ANCHORED)
     end
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
-    GameTooltip:AddLine(L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], 0.8, 0.8, 0.8)
-    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; pull far away or Detach to free it."], 0.8, 0.8, 0.8) end
-    GameTooltip:AddLine(L["Press Esc or use the top strip to lock."], 0.8, 0.8, 0.8)
-    GameTooltip:Show()
+    n = tipLine(n, 3)
+    n = tipLine(n, 4, L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], C_TIP_BODY)
+    n = tipLine(n, 5, L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], C_TIP_BODY)
+    if a then n = tipLine(n, 6, L["Drop into a zone to re-anchor; pull far away or Detach to free it."], C_TIP_BODY) end
+    tipLine(n, 7, L["Press Esc or use the top strip to lock."], C_TIP_BODY)
+    tipSpec.anchor, tipSpec.anchorX, tipSpec.anchorY = NS.TooltipAnchor(b, true)
+    UI:ShowTooltip(b, tipSpec)
 end
 
 -- ============================================================

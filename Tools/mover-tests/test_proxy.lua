@@ -127,6 +127,10 @@ NS.UI = {
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
     ApplyPixelBorder = function() end,
+    -- The slab tooltip goes through the kit (never raw GameTooltip); recorded so
+    -- test_mover_tooltips.lua can read what it was handed.
+    ShowTooltip = function(_, owner, spec) NS.UI._lastTip = { owner = owner, spec = spec } end,
+    HideTooltip = function() NS.UI._lastTip = nil end,
     CreateLabel = function(_, _, opts)
         local f = stubFontString()
         if opts and opts.text then f:SetText(opts.text) end
@@ -1217,6 +1221,58 @@ do
     P:DestroyAll()
     R:UnregisterAddon("RA")
     R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE SLAB TOOLTIP (placement)
+-- Through the kit, and OFF the slab: below it near the top of the screen,
+-- above it lower down. It used to hang off the slab's right edge on raw
+-- GameTooltip, which the client clamps back over the slab (and the cursor)
+-- near the top or right edge. The rule is the real one, cut out of Core.lua;
+-- test_tooltips_mover.lua pins the rule itself.
+-- ============================================================
+do
+    local core = mover_file_source("Core.lua")
+    local s = core:find("local TIP_GAP", 1, true)
+    local e = s and core:find("\nend", core:find("function NS.TooltipAnchor", s, true), true)
+    check(s ~= nil and e ~= nil, "slab tip: NS.TooltipAnchor can be cut out of Core.lua")
+    local rule = {}
+    if s and e then assert(loadstring("local NS = ...\n" .. core:sub(s, e + 4), "@Core.lua:TooltipAnchor"))(rule) end
+    local prevAnchor = NS.TooltipAnchor
+    NS.TooltipAnchor = rule.TooltipAnchor
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("TT", { title = "TT" })
+    R:Register("TT", "a", { title = "Party Frames", frame = FakeFrame(960, 540, 100, 40),
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end, onChanged = function() end })
+    P:Build()
+    local slab = P.proxies["TT:a"]
+    -- The stub slab has no geometry of its own; give it a centre to be judged by.
+    function slab:GetCenter() return 960, 1000 end
+    NS.UI._lastTip = nil
+    slab:GetScript("OnEnter")(slab)
+    local tip = NS.UI._lastTip
+    check(tip ~= nil, "slab tip: hovering a slab shows its tooltip through the kit")
+    eq(tip and tip.owner, slab, "slab tip: owned by the slab")
+    eq(tip and tip.spec.title, "Party Frames", "slab tip: titled with the element")
+    eq(tip and tip.spec.anchor, "ANCHOR_BOTTOM", "slab tip: near the top of the screen it hangs BELOW the slab")
+    function slab:GetCenter() return 960, 100 end
+    slab:GetScript("OnEnter")(slab)
+    tip = NS.UI._lastTip
+    eq(tip and tip.spec.anchor, "ANCHOR_TOP", "slab tip: low on screen it sits ABOVE the slab -- never on it")
+    local lines = tip and #tip.spec.lines or 0
+    slab:GetScript("OnEnter")(slab)
+    eq(#NS.UI._lastTip.spec.lines, lines, "slab tip: a second hover re-fills the same lines, it does not append")
+    slab:GetScript("OnLeave")(slab)
+    eq(NS.UI._lastTip, nil, "slab tip: leaving hides it through the kit")
+    P:DestroyAll()
+    R:UnregisterAddon("TT")
+    R.ready = wasReady
+    NS.TooltipAnchor = prevAnchor
     NS.Session = nil
     NS.db = nil
 end

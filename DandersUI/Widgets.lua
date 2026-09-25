@@ -4103,13 +4103,35 @@ local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
 -- optional SetOwner args, so it dropped the lift with no error).
 P.CURSOR_LIFT_X, P.CURSOR_LIFT_Y = CURSOR_LIFT_X, CURSOR_LIFT_Y
 
+-- Where a tooltip goes, in the one order every toolkit tooltip uses:
+--   1. opts.anchor (+ optional opts.anchorX / opts.anchorY) -- the caller decided;
+--   2. the host's tooltipAnchor(owner) hook -- the consumer decided, for every
+--      tooltip it shows. Returning nil falls through to 3. The mover uses it:
+--      its chrome lives along the TOP edge, where the cursor default below is
+--      clamped back down onto the pointer;
+--   3. the cursor default, lifted off the pointer.
+-- Shared with ShowGameTooltip (Sections.lua) so a spell tooltip and a text one
+-- can never be placed by different rules.
+local function SetTooltipOwner(host, owner, opts)
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor, opts.anchorX or 0, opts.anchorY or 0)
+        return
+    end
+    local place = host.Hook and host:Hook("tooltipAnchor")
+    if place then
+        local a, ax, ay = place(owner)
+        if a then
+            GameTooltip:SetOwner(owner, a, ax or 0, ay or 0)
+            return
+        end
+    end
+    GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+end
+P.SetTooltipOwner = SetTooltipOwner
+
 function UI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
-    if opts.anchor then
-        GameTooltip:SetOwner(owner, opts.anchor)
-    else
-        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
-    end
+    SetTooltipOwner(self, owner, opts)
     -- Title colour is single-sourced from the tone's inline accent so a tooltip
     -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
     local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
