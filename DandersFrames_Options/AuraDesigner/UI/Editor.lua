@@ -615,10 +615,8 @@ end
 -- ── GROWTH (every group kind) ──
 -- `kind`: "members" | "filter" | "debuff". A member group stops after spacing;
 -- the two container-backed kinds carry the uniform styling pair and the sort
--- block. `omitOthersOnly` is the row layout saying it draws that one itself, as
--- a control row -- one boolean does not need a panel, and a popout row's own
--- tick column already IS the checkbox.
-local function BuildGroupGrowth(env, group, kind, omitOthersOnly)
+-- block.
+local function BuildGroupGrowth(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
 
@@ -673,7 +671,7 @@ local function BuildGroupGrowth(env, group, kind, omitOthersOnly)
     -- ⚠ ShowsOthersOnly, NOT IsOtherTab -- the helper's pool answers yes to the second and
     -- must not draw this: its group is othersOnly by construction, and a tick offering to
     -- turn that off would offer to make the helper watch the priest's own cooldowns.
-    if kind == "filter" and ShowsOthersOnly() and not omitOthersOnly then
+    if kind == "filter" and ShowsOthersOnly() then
         local ooCb = GUI:CreateCheckbox(host, L["Others Only"], group, "othersOnly", function()
             env.Rebuild()
             RefreshPlacedIndicators()
@@ -688,9 +686,8 @@ local function BuildGroupGrowth(env, group, kind, omitOthersOnly)
     end
 end
 
--- The ordered section list for one layout group. `omitOthersOnly` is the row
--- layout's flag -- see BuildGroupGrowth.
-local function CollectLayoutGroupSections(group, omitOthersOnly)
+-- The ordered section list for one layout group.
+local function CollectLayoutGroupSections(group)
     local isFilterGroup = (group.kind == "filter")
     local out = {}
     if isFilterGroup then
@@ -704,7 +701,7 @@ local function CollectLayoutGroupSections(group, omitOthersOnly)
                       build = function(env) BuildGroupPlacement(env, group, isFilterGroup and "filter" or "members") end }
     out[#out + 1] = { header = L["Growth"], caption = L["GROWTH"], gap = 10,
                       build = function(env)
-                          BuildGroupGrowth(env, group, isFilterGroup and "filter" or "members", omitOthersOnly)
+                          BuildGroupGrowth(env, group, isFilterGroup and "filter" or "members")
                       end }
     return out
 end
@@ -966,16 +963,10 @@ end
 -- THE LAYOUT GROUPS TAB'S HEAD AREA
 -- ------------------------------------------------------------
 -- The Spell Group / Filter Group add tiles, the teaching sentence and the
--- "debuff rows live over there" hint -- everything above the list. ONE definition,
--- two hosts: the split panel's own column and the row layout's band, exactly as
+-- "debuff rows live over there" hint -- everything above the list, as
 -- S.BuildEffectsHeadArea is for the Effects tab.
---
--- ⚠ opts.skipAddBlock: THE ROW LAYOUT HAS ITS OWN "+ Add Layout Group" ROW above
--- this area, so it asks for no tiles here. Both build the same pane.
 -- ============================================================
-S.BuildLayoutGroupsHeadArea = function(parent, yPos, opts)
-    local skipAdd = opts and opts.skipAddBlock or false
-
+S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     -- ⚠ Read BEFORE any chrome is built: the teaching sentence and the debuff-rows
     -- hint are for an EMPTY tab only.
     local hasGroups = #VisibleLayoutGroups() > 0
@@ -985,10 +976,7 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos, opts)
     -- pane (S.BuildAddLayoutGroupPane, opts.onPage) mounted straight onto this tab:
     -- a tile click creates the group, and the Create / Manage Filters pair sits
     -- under the tiles -- see Cards.lua's THE CLASSIC DESIGNER'S INLINE ADD FLOWS.
-    -- The rows page has its own row and passes skipAddBlock.
-    if not skipAdd then
-        yPos = S.BuildClassicAddTiles(parent, yPos, "layout")
-    end
+    yPos = S.BuildClassicAddTiles(parent, yPos, "layout")
 
     -- Teaching prose, first visit only. The CARDS below are pinned permanently --
     -- they are the create action, so they have to be -- but this sentence is read
@@ -1549,12 +1537,9 @@ end
 -- THE DEBUFFS TAB'S HEAD AREA
 -- ------------------------------------------------------------
 -- The Add Debuff Group button, the teaching sentence and the dedup explainer --
--- everything above the list. ONE definition, two hosts, exactly as the Layout
--- Groups tab's is -- opts.skipAddBlock included, for the same reason.
+-- everything above the list, as the Layout Groups tab's is.
 -- ============================================================
-S.BuildDebuffGroupsHeadArea = function(parent, yPos, opts)
-    local skipAdd = opts and opts.skipAddBlock or false
-
+S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     -- READ path: visiting the tab never creates adDB.debuffGroups.
     -- Read first for the same reason as the Layout Groups tab: the teaching
     -- sentence is for an empty tab, the dedup explainer for a full one.
@@ -1564,9 +1549,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos, opts)
     -- The Debuffs pool's half of the same change: its one tile, on the page
     -- (S.BuildAddDebuffGroupPane, opts.onPage), one click adds. The debuffGroups
     -- array is still born lazily on the first add.
-    if not skipAdd then
-        yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")
-    end
+    yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")
 
     -- Teaching prose, first visit only -- see the Layout Groups tab.
     if not hasGroups then

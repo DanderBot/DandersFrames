@@ -2345,9 +2345,12 @@ P.CreateGlobalDefaultsProxy = CreateGlobalDefaultsProxy
 -- That is fine for the controls and useless to a row, which needs SOMETHING that
 -- can answer "is either of these not the shipped value".
 --
--- So the row takes this record and names the two keys through ClaimKeys' `extra`
--- door, which exists for exactly this shape. Absent means enabled and Master, so
--- ClearKey unsets and the pair goes back to following the shipped answer.
+-- The rows page took this record and named the two keys through ClaimKeys'
+-- `extra` door. Absent means enabled and Master, so ClearKey unsets and the
+-- pair goes back to following the shipped answer.
+--
+-- ⚠ NO CALLER IN THE ADDON since the rows page went (2026-09-26); kept with
+-- GroupActions.lua, whose designer-defaults suite drives it.
 -- ============================================================
 local SOUND_DEFAULTS = { soundEnabled = true, soundChannel = "Master" }
 P.SOUND_DEFAULTS = SOUND_DEFAULTS
@@ -2383,12 +2386,7 @@ local function CreateSoundSettingsProxy()
 end
 P.CreateSoundSettingsProxy = CreateSoundSettingsProxy
 
--- `collect`: COLLECT MODE, the same seam BuildTypeContent carries
--- (AuraDesigner/UI/Indicators.lua). With a table here nothing is built: each
--- AddGroup records its header and its body, unrun, for the row layout to mount
--- one per popout pane. Without one this is the split panel's own column, byte for
--- byte what it always drew.
-local function BuildGlobalView(parent, collect)
+local function BuildGlobalView(parent)
     local defaults = CreateGlobalDefaultsProxy()
 
     local parentW = parent:GetWidth()
@@ -2405,35 +2403,7 @@ local function BuildGlobalView(parent, collect)
         totalHeight = totalHeight + (height or 30)
     end
 
-    -- `rowDB` and `extraKeys` are the ROW layout's business and the card ignores
-    -- them: which record a group's popout row measures itself against, and any
-    -- key bound through a custom get/set that ClaimKeys' walk therefore cannot
-    -- see. `rowDB == false` says the group holds ACTIONS rather than settings --
-    -- no modified tick, no Reset Group, because there would be nothing for either
-    -- to be about and a footer that reset nothing would be a footer that lied.
-    local function AddGroup(header, buildFn, rowDB, extraKeys)
-        if collect then
-            collect[#collect + 1] = {
-                header = header,
-                db = (rowDB == nil) and defaults or rowDB,
-                extra = extraKeys,
-                -- ☠ `parent` IS RE-POINTED AND RESTORED. It is this function's own
-                -- local, so re-pointing it re-points every widget the body creates
-                -- -- and NOT restoring it would leave the next body building onto
-                -- the previous pane's holder. Verbatim from BuildTypeContent's
-                -- collect seam, for the same reason.
-                --
-                -- NO HEADER WIDGET in a pane: the row's own label is this group's
-                -- name, and a header inside the panel would say it twice.
-                build = function(g, paneParent)
-                    local savedParent = parent
-                    parent = paneParent
-                    buildFn(g)
-                    parent = savedParent
-                end,
-            }
-            return
-        end
+    local function AddGroup(header, buildFn)
         local group = GUI:CreateSettingsGroup(parent, contentWidth - 10)
         group.padding = 10   -- match the main Options groups' inner padding (airier scale)
         group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
@@ -2497,7 +2467,7 @@ local function BuildGlobalView(parent, collect)
             nil, nil, nil,
             function() return (GetAuraDesignerDB().soundChannel) or "Master" end,  -- customGet
             function(key) GetAuraDesignerDB().soundChannel = key end), 50)         -- customSet
-    end, CreateSoundSettingsProxy(), { "soundEnabled", "soundChannel" })
+    end)
 
     -- ── DURATION TEXT ──
     AddGroup(L["Duration Text"], function(g)
@@ -2601,7 +2571,7 @@ local function BuildGlobalView(parent, collect)
             end
         end)
         g:AddWidget(importBtn, 32)
-    end, false)
+    end)
 
     -- ── STANDARD BUFFS ──
     -- Replaces the old coexistence banner's "Disable Buffs" shortcut: standard
@@ -2628,7 +2598,7 @@ local function BuildGlobalView(parent, collect)
             filtersBtn.Text:SetTextColor(0.4, 0.4, 0.4)
         end
         g:AddWidget(filtersBtn, 28)
-    end, false)
+    end)
 
     -- ── ACTIONS ──
     AddGroup(L["Actions"], function(g)
@@ -2698,11 +2668,7 @@ local function BuildGlobalView(parent, collect)
             })
         end)
         g:AddWidget(resetBtn, 32)
-    end, false)
-
-    -- Collect mode builds nothing and sizes nothing: the section list is the
-    -- whole return, and the host it was handed is untouched.
-    if collect then return collect end
+    end)
 
     parent:SetHeight(totalHeight + 10)
 end
@@ -4455,18 +4421,10 @@ P.OpenGroupSpellPicker = OpenGroupSpellPicker
 -- A FRAME-LEVEL EFFECT'S OWN TWO BLOCKS
 -- ------------------------------------------------------------
 -- Triggered By, and Priority with the border effect's Own Border opt-out beside
--- it. Extracted from S.CreateEffectCard so the popout layout's row page can
--- mount the SAME two inside popout panes: the card stacks them at running y
--- offsets down one body, a pane hosts one each at the top of its own.
+-- it. The card stacks them at running y offsets down one body.
 --
--- ☠ EXTRACTED, NOT COPIED. These are the only two blocks on an effect that are
--- not sections of BuildTypeContent, so they are the only two the collect seam
--- there cannot reach -- and 500 lines of trigger tags said twice is 500 lines
--- that would drift.
---
--- `baseH` is where the block starts inside its host -- the card's running total,
--- or 0 in a pane. Each returns the height it took, which is what the card
--- advances by; the pane uses it to size its one widget.
+-- `baseH` is where the block starts inside its host -- the card's running
+-- total. Each returns the height it took, which is what the card advances by.
 -- ============================================================
 
 S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
@@ -5425,9 +5383,8 @@ end
 --
 -- ☠ AND A POOLED PANEL CANNOT READ LIVE STATE IN ITS BUILDER. "Already added" is
 -- true or false per tile and changes underneath a panel that is merely closed,
--- so it is re-derived by a `Sync` verb the opener calls -- the same shape as
--- S.BuildFilterChips's SyncActive, and the same bug both designer panels shipped
--- with before it (spec section 23).
+-- so it is re-derived by a `Sync` verb the opener calls -- the bug both designer
+-- panels shipped with before it (spec section 23).
 -- ============================================================
 
 -- ── THE FLAT EFFECT LIST ──
@@ -6842,12 +6799,7 @@ end
 -- ============================================================
 -- THE FILTER CHIPS -- WHICH EFFECT TYPE THE LIST IS SHOWING
 -- ------------------------------------------------------------
--- ONE definition, two hosts: a wrapping row inside the split panel's column,
--- and the pane inside the filter glyph's own popout (OpenFilterPopout below).
--- The chips predate the all-rows rule they break -- a setting with more than one
--- option goes in a popout -- and in a panel they also stop being a flow with
--- nothing to flow against: the pane's width is the popout's own content width,
--- known before a single chip is placed.
+-- A wrapping row inside the split panel's column.
 --
 -- ⚠ A FUNCTION, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup, and a
 -- table built at load freezes whatever locale was live then -- the trap
@@ -6867,18 +6819,6 @@ local function FilterChips()
 end
 P.FilterChips = FilterChips
 
--- What the filter glyph writes beside itself when a filter is on. Read off the
--- SAME list the chips are built from, so a chip added there cannot summarise as
--- its own raw key here.
-local function ActiveFilterLabel()
-    local active = S.activeFilter or "all"
-    for _, chip in ipairs(FilterChips()) do
-        if chip.key == active then return chip.label end
-    end
-    return L["All"]
-end
-P.ActiveFilterLabel = ActiveFilterLabel
-
 local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 22, 4, 4
 
 -- Flow the chips into `host` and size it to what they took. `width` is the
@@ -6886,8 +6826,7 @@ local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 22, 4, 4
 -- build time the host's own width is a number the layout pass has not reached
 -- yet, and reading it is what made the chips flow at a hardcoded 260.
 --
--- Returns the re-flow verb, for a host whose width can still move -- the split
--- panel's column does, a pane's does not.
+-- Returns the re-flow verb, for a host whose width can still move.
 S.BuildFilterChips = function(host, width)
     local chipBtns = {}
     for _, chip in ipairs(FilterChips()) do
@@ -6940,73 +6879,8 @@ S.BuildFilterChips = function(host, width)
         host:SetHeight(max(-cy + CHIP_H, CHIP_H))
     end
     LayoutChips(width)
-    -- ☠ A SECOND RETURN: RE-SYNC, BECAUSE THE PANEL IS POOLED AND THIS RUNS ONCE.
-    -- The filter popout is created with a key, so reopening REUSES it and never
-    -- re-runs this builder -- the chips kept whatever was active the FIRST time it
-    -- was opened, which read as "All is always selected" however the list was
-    -- actually filtered. The opener calls this on every open.
-    --
-    -- ⚠ SECOND, not instead: the card layout's caller wants LayoutChips (it
-    -- re-flows the row on resize) and must keep getting it as the first value.
-    local function SyncActive()
-        local active = S.activeFilter or "all"
-        for k = 1, #chipBtns do
-            local b = chipBtns[k]
-            if b and b.SetActive then b:SetActive(b.dfChipKey == active) end
-        end
-    end
-    return LayoutChips, SyncActive
+    return LayoutChips
 end
-
--- ── THE FILTER GLYPH'S PANEL ──
--- ☠ A FREE-STANDING POPOUT, NOT A ROW'S PANE. The eight chips were a `Showing`
--- popout row for one release and that is 50px of page (a 44px plate plus its 6px
--- gap) spent on ONE filter -- more than the 22px chip row it replaced, which is
--- where the honest chrome total went UP rather than down. Behind a glyph on the
--- caption the page pays nothing for it at all.
---
--- Built exactly the way the canvas's Preview Scale glyph builds its panel
--- (CreateFramePreview's `compact` arm): GUI:CreatePopout keyed once so the panel
--- is POOLED, then Follow'd to the button. The kit owns the stacking, so nothing
--- here has to know about _ApplyStackLevel.
-local FILTER_POPOUT_KEY = "df.filter.auradesigner"
-local FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"
-
-local function OpenFilterPopout(btn)
-    -- Second click on the glyph shuts it, like any toggle.
-    local open = S.filterPopout
-    if open and not open.closed and open:IsShown() then
-        open:Close("api")
-        return
-    end
-    local width = GUI.PopoutContentWidth or 260
-    local pop = GUI:CreatePopout({
-        key   = FILTER_POPOUT_KEY,
-        title = L["Showing"],
-        icon  = FILTER_ICON,
-        width = width,
-        build = function(po, content)
-            local pane = CreateFrame("Frame", nil, content)
-            pane:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-            pane:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
-            -- ⚠ THE FLOW IS TOLD ITS WIDTH, not asked for it. Two horizontal
-            -- anchors own the pane's width, and at build time that number has not
-            -- resolved -- reading it off the pane is the mistake that made the
-            -- chips wrap at a hardcoded 260 on the page.
-            local _, SyncActive = S.BuildFilterChips(pane, width)
-            po.dfSyncChips = SyncActive
-            -- The shell derives the panel's height from what build mounted
-            -- (Popout:_Resize), so the content strip states its own.
-            content:SetHeight(max(pane:GetHeight() or CHIP_H, CHIP_H))
-        end,
-    })
-    pop:Follow(btn, { outsideOf = DF.GUIFrame })
-    -- After Follow, and on EVERY open: a pooled panel builds once, so this is
-    -- the only thing that makes the ticked chip match the live filter.
-    if pop.dfSyncChips then pop.dfSyncChips() end
-    S.filterPopout = pop
-end
-P.OpenFilterPopout = OpenFilterPopout
 
 -- ============================================================
 -- POWER INFUSION HELPER -- THE SHARED PANEL (priest only)
@@ -9020,22 +8894,7 @@ end
 -- false now. It used to be `true` when the split panel's picker column had taken
 -- the column over; that column is gone, and the value stays so neither caller has
 -- to change shape.
-S.BuildEffectsHeadArea = function(parent, yPos, opts)
-    local tc = GetThemeColor()
-    -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS ITS OWN "+ Add Indicator" ROW, so it
-    -- asks for neither the classic add tiles nor the helper's tiles here.
-    local skipAdd = opts and opts.skipAddBlock or false
-    -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS NOT A CHIP FLOW. The eight
-    -- chips live in a popout there, so in that layout this function draws only the
-    -- ACTIVE INDICATORS caption and the Any Buff hint -- and, with the one flowing
-    -- element gone, it reports a height that cannot be wrong. See
-    -- S.BuildFilterChips above for the chips themselves.
-    local skipChips = opts and opts.skipChips or false
-    -- ⚠ opts.filterGlyph: ...AND THE WAY IN TO THEM RIDES THE CAPTION. A row of
-    -- its own cost 50px for a single filter; a glyph on a caption the page already
-    -- pays for costs nothing. Opt-in, so the split panel keeps its chips.
-    local filterGlyph = opts and opts.filterGlyph or false
-
+S.BuildEffectsHeadArea = function(parent, yPos)
     -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
     -- object below is anchored 8px inside the host on both sides, so the column
     -- they share is the host's own width less 16 -- and the host was given an
@@ -9063,10 +8922,10 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     -- caption, the type filter and the effect cards under it are the designer's own, so the
     -- helper's list looks and behaves exactly like the designer's list -- which is what Krathe
     -- asked for three times: "It should BE AD not a copy of it."
-    if not skipAdd and IsPIHelperTab() and S.BuildPIHelperAddArea then
+    if IsPIHelperTab() and S.BuildPIHelperAddArea then
         yPos = S.BuildPIHelperAddArea(parent, yPos, function() S.SwitchTab("effects") end)
         yPos = yPos - 4
-    elseif not skipAdd then
+    else
         yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")
     end
 
@@ -9093,86 +8952,18 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     activeHeader:SetText(L["ACTIVE INDICATORS"])
     activeHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-    -- ── THE FILTER GLYPH, ON THAT CAPTION ──
-    if filterGlyph then
-        -- ☠ A FILTER THAT LOOKS THE SAME WHETHER IT IS ON OR OFF IS HOW PEOPLE
-        -- LOSE THEIR WORK. Showing only Borders hides seven kinds of indicator,
-        -- and a glyph identical to the one that means "showing everything" reads
-        -- as "they have been deleted". So the ACTIVE state is said TWICE: the
-        -- glyph goes accent, and the filter's own name is written beside it.
-        -- Neither alone survives a glance.
-        local active = (S.activeFilter or "all") ~= "all"
-        local glyph = GUI:CreateGlyphButton(parent, {
-            size = 18, iconSize = 14,
-            -- ☠ DOUBLE BACKSLASHES. Lua 5.1 passes an unrecognised escape through
-            -- as the bare character, so the single-backslash form is a path to
-            -- nothing and the client draws an empty square. It does not error,
-            -- which is why it shipped once; run.py bans it now.
-            texture = FILTER_ICON,
-            color   = active and tc or C_TEXT_DIM,
-            tooltip = {
-                title = L["Showing"],
-                lines = {
-                    L["Which kinds of indicator are listed below."],
-                    active and format(L["Showing: %s"], ActiveFilterLabel()) or nil,
-                },
-            },
-            onClick = OpenFilterPopout,
-        })
-        -- The 18px button centred on an ~11px caption line: yPos is the caption's
-        -- TOP, so lifting the button by half the difference lands the two centres
-        -- together. It still sits inside the 16px the caption spends below.
-        glyph:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos + 4)
-        -- ☠ THE PANEL IS DOCKED TO THIS BUTTON, so it goes when this button does.
-        -- Picking a chip rewrites the list, which rebuilds the page and retires
-        -- the glyph underneath it -- and a panel left up would be following a
-        -- frame that is no longer on screen. Same bargain the Preview Scale glyph
-        -- strikes with its canvas.
-        glyph:HookScript("OnHide", function()
-            local pop = S.filterPopout
-            if pop and not pop.closed then pop:Close("source") end
-        end)
-
-        local name
-        if active then
-            name = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)
-            name:SetText(ActiveFilterLabel())
-            name:SetTextColor(tc.r, tc.g, tc.b)
-        end
-
-        -- ⚠ GREY WITH THE REST OF THE PAGE. The `Showing` row this replaces
-        -- carried a disableOn and went dim with every other row when the designer
-        -- is off; a glyph that stayed lit would be the one live control on a page
-        -- of dead ones. The kit's SetGlyphEnabled does all three halves of it --
-        -- clicks off, hover off, the 0.4 dim -- and the name beside it follows.
-        if opts and opts.filterGlyphEnabled == false then
-            glyph:SetGlyphEnabled(false)
-            if name then name:SetAlpha(0.4) end
-        end
-    end
     yPos = yPos - 16
 
-    -- ── FILTER CHIPS (wrapping layout, split panel only) ──
-    -- ☠ AND THE HEIGHT COMPENSATION IS GONE WITH THEM, NOT MOVED. Section 17's
-    -- Class 1 -- a height measured before layout and then spent -- had two halves
-    -- here: flow against a width DERIVED from the host, and re-report through the
-    -- band host's own height verb when it changed anyway. Only the BAND layout
-    -- ever carried that verb, and the band layout no longer builds chips, so the
-    -- re-report had no host left to reach. The split panel scrolls a fixed-width
-    -- column and never had the problem: it re-flows, and nothing below it moves.
-    local chipsFrame
-    if not skipChips then
-        chipsFrame = CreateFrame("Frame", nil, parent)
-        chipsFrame:SetPoint("TOPLEFT", 8, yPos)
-        chipsFrame:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-        local Relayout = S.BuildFilterChips(chipsFrame, COL_W)
-        chipsFrame:SetScript("OnSizeChanged", function(_, w) Relayout(w) end)
-        yPos = yPos - (chipsFrame:GetHeight() + 10)
-    end
+    -- ── FILTER CHIPS (wrapping layout) ──
+    local chipsFrame = CreateFrame("Frame", nil, parent)
+    chipsFrame:SetPoint("TOPLEFT", 8, yPos)
+    chipsFrame:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    local Relayout = S.BuildFilterChips(chipsFrame, COL_W)
+    chipsFrame:SetScript("OnSizeChanged", function(_, w) Relayout(w) end)
+    yPos = yPos - (chipsFrame:GetHeight() + 10)
 
     -- ── OTHER BUFFS HINT ──
-    -- ⚠ ANCHORED UNDER THE CHIP ROW where there is one, not at a y the chips'
+    -- ⚠ ANCHORED UNDER THE CHIP ROW, not at a y the chips'
     -- first pass happened to produce. It is the one thing below a wrapping element
     -- in this area, so it is also the one thing a re-wrap would otherwise strand.
     -- ⚠ NOT ON THE HELPER'S POOL. "These indicators trigger no matter who casts the buff" is
@@ -9183,11 +8974,7 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local obHint
     if IsOtherTab() and not IsPIHelperTab() then
         obHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        if chipsFrame then
-            obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT", 0, -10)
-        else
-            obHint:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
-        end
+        obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT", 0, -10)
         obHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
         obHint:SetJustifyH("LEFT")
         obHint:SetWordWrap(true)
@@ -9425,13 +9212,7 @@ P.CreateGroupStyleProxy = CreateGroupStyleProxy
 -- under "adGroupStyle:<cardKey>" — cardKey is the caller's expand-key form
 -- (raw id / "othergroup:<id>" / "dgroup:<id>"), so the three stores' keys
 -- stay disjoint from each other and from the effect cards' header keys.
---
--- `collect`: COLLECT MODE, the same seam BuildTypeContent and BuildGlobalView
--- carry. With a table here nothing is built and nothing is anchored: each
--- AddSection records its header and its body, unrun, and the row layout mounts
--- one popout row per entry. Without one this is the card's own section stack,
--- byte for byte what it always drew.
-local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, collect)
+local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     local proxy = CreateGroupStyleProxy(group)
 
     -- Cosmetic edits hot-apply (coSig -> ApplyStyle); structural toggles move the
@@ -9462,10 +9243,6 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
     -- that hook too, or the body will size short.
     local sections = {}
     local sectionsStartBy = by
-    -- The pane's own reflow while a collected body runs, so the border toolkit's
-    -- refreshStates re-flows the PANEL it is inside instead of a card stack that
-    -- does not exist there. Set by the collect wrapper below; nil on the card.
-    local curReflow
 
     local function ReflowSections()
         local y = sectionsStartBy
@@ -9480,9 +9257,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
     -- Published under the name the toolkit looks for: SettingsWidgets' measured-label
     -- converge walks up from a resized widget for exactly this key, so a wrapped note
     -- inside one of these sections now re-flows the card instead of walking past it.
-    -- Not in collect mode: there is no stack to walk, and stamping this would put a
-    -- card's reflow onto whatever host the collector happened to hand in.
-    if not collect then body.dfAD_ReflowWidgets = ReflowSections end
+    body.dfAD_ReflowWidgets = ReflowSections
 
     -- One collapsible box PER CATEGORY — the expanded effect card's section
     -- structure (Appearance / Border / Duration Text / Stack Count, same names
@@ -9492,26 +9267,6 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
     -- so each section toggles independently; the toggle rides the widget's
     -- built-in AuraDesigner_RefreshPage rebuild like the effect cards'.
     local function AddSection(header, sectionKey, buildFn)
-        if collect then
-            collect[#collect + 1] = {
-                header = header,
-                -- ☠ `body` IS RE-POINTED AND RESTORED, for the reason BuildTypeContent's
-                -- seam re-points `parent`: it is this function's own local, so every
-                -- widget the body creates follows it, and not restoring it would leave
-                -- the next body building onto the previous pane's holder.
-                build = function(g, paneParent, reflow)
-                    local savedBody, savedReflow = body, curReflow
-                    body, curReflow = paneParent, reflow
-                    if reflow then
-                        paneParent.dfAD_ReflowWidgets = reflow
-                        paneParent.dfAD_ReflowInPane = reflow
-                    end
-                    buildFn(g)
-                    body, curReflow = savedBody, savedReflow
-                end,
-            }
-            return
-        end
         local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
             collapsible = true,
             collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
@@ -9591,9 +9346,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
             -- next rebuild. Matches the placed icon card's border exactly.
             refreshStates = function()
                 g:LayoutChildren()
-                -- In a pane the stack below this section is a stack of ROWS the
-                -- panel knows nothing about, so the panel re-flows itself instead.
-                if curReflow then curReflow() else ReflowSections() end
+                ReflowSections()
             end,
             sizeMin = 1, sizeMax = 5, sizeStep = 1,
         })
@@ -9708,15 +9461,6 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
         barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
         UpdateBarGrey()
     end)
-
-    -- Collect mode anchored nothing, so there is no cursor to hand back: the
-    -- section list IS the return -- carrying the style proxy, which is the record
-    -- every one of these rows binds and therefore the one its modified tick and
-    -- its Reset Group have to be measured against.
-    if collect then
-        collect.proxy = proxy
-        return collect
-    end
 
     return by
 end

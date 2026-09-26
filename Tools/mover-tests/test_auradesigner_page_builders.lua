@@ -188,60 +188,35 @@ do
 end
 
 -- ============================================================
--- 3. THE COLLECT SEAM
--- BuildTypeContent decides what an icon has and a bar does not, in ONE place,
--- for both layouts. Collect mode walks the same branches and hands the section
--- BODIES back unrun; the row page mounts each into a pane.
+-- 3. BuildTypeContent BUILDS THE CARD, AND ONLY THE CARD
+-- Its COLLECT mode -- walk the branches and hand the section bodies back unrun
+-- for the rows page to mount one per pane -- went with that page (2026-09-26).
 -- ============================================================
-print("-- Aura Designer: BuildTypeContent's collect seam")
+print("-- Aura Designer: BuildTypeContent builds the card")
 do
-    check(IND:find("local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOffset, layoutGroup, indicatorID, collect)", 1, true) ~= nil,
-          "collect: BuildTypeContent takes a collect table")
+    check(IND:find("local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOffset, layoutGroup, indicatorID)", 1, true) ~= nil,
+          "collect: BuildTypeContent takes no collect table")
+    check(IND:find("curGroup", 1, true) == nil,
+          "collect: ...and no pane group redirects a loose widget")
+    check(IND:find("dfAD_ReflowInPane", 1, true) == nil,
+          "collect: ...and nothing tells a pane from a card any more")
+    -- The card's own reflow is always stamped.
+    check(IND:find("\n    parent.dfAD_ReflowWidgets = function()", 1, true) ~= nil,
+          "collect: the card's reflow hook is stamped on every build")
 
-    -- ☠ RE-POINTED AND RESTORED. `parent` is the function's own local, so
-    -- re-pointing it re-points every widget a body creates -- and NOT restoring it
-    -- would leave the next body building onto the previous pane's holder.
-    check(IND:find("local savedParent, savedGroup = parent, curGroup", 1, true) ~= nil,
-          "collect: the seam saves the host before it re-points it")
-    check(IND:find("parent, curGroup = paneParent, g", 1, true) ~= nil,
-          "collect: ...points them at the pane")
-    check(IND:find("parent, curGroup = savedParent, savedGroup", 1, true) ~= nil,
-          "collect: ...and restores them after the body runs")
-
-    -- A loose widget (Copy Appearance) belongs to the pane whose body is running.
-    check(IND:find("if curGroup then\n            curGroup:AddWidget(widget, height or 30)", 1, true) ~= nil,
-          "collect: the top-level AddWidget redirects into the running pane")
-
-    -- The pane answers for its own re-flow, which is what the border toolkit's
-    -- refreshStates and ADStructuralRedraw both reach for.
-    check(IND:find("paneParent.dfAD_ReflowWidgets = reflow", 1, true) ~= nil,
-          "collect: the pane carries the border toolkit's reflow hook")
-    check(IND:find("paneParent.dfAD_ReflowInPane = reflow", 1, true) ~= nil,
-          "collect: ...and the flag that tells a pane from a card")
-
-    -- Nothing is built and nothing is sized in collect mode.
-    check(IND:find("if collect then return collect end", 1, true) ~= nil,
-          "collect: the tail returns the section list and sizes no host")
-    check(IND:find("if not collect then\n    parent.dfAD_ReflowWidgets = function()", 1, true) ~= nil,
-          "collect: ...and stamps no card reflow onto the collector's host")
-
-    -- ☠ A CONTROL INSIDE A PANE MUST NOT REBUILD THE PAGE. Every route into a page
-    -- builder closes every open panel first, so a tick that rebuilt would shut the
-    -- panel it was clicked in. Fifteen controls in this file reveal a sibling.
+    -- One redraw verb for the fifteen controls that reveal a sibling.
     check(IND:find("local function ADStructuralRedraw(host)", 1, true) ~= nil,
-          "collect: the file has one redraw verb that knows a pane from a card")
+          "collect: the file has one structural redraw verb")
     local direct = 0
     for _ in IND:gmatch("DF:AuraDesigner_RefreshPage%(%)") do direct = direct + 1 end
-    eq(direct, 1, "collect: ...and only ADStructuralRedraw's own fallback calls the page rebuild")
+    eq(direct, 1, "collect: ...and only ADStructuralRedraw calls the page rebuild")
     local routed = 0
     for _ in IND:gmatch("ADStructuralRedraw%(parent%)") do routed = routed + 1 end
     eq(routed, 15, "collect: ...every reveal-a-sibling control goes through it")
 
-    -- The one conditional section, and why it cannot stay conditional in a pane.
-    check(IND:find("if collect or not proxy.hideIcon then", 1, true) ~= nil,
-          "collect: text-only mode keeps the Border section and hides the ROW")
-    check(IND:find('end, nil, function() return proxy.hideIcon and true or false end)', 1, true) ~= nil,
-          "collect: ...by handing AddGroup the condition the row will carry")
+    -- Text-only mode drops the Border section at build time.
+    check(IND:find("if not proxy.hideIcon then", 1, true) ~= nil,
+          "collect: text-only mode drops the Border section")
 end
 
 -- ============================================================
@@ -256,8 +231,8 @@ do
     -- per-placement id narrowing (only where an aura resolves to several ids).
     local PRO = IND:sub(IND:find("-- ── COPY FROM", 1, true),
                         IND:find("-- Shared Duration Bar section", 1, true))
-    check(PRO:find('if collect then AddGroup(L["Copy Appearance"], BuildCopyFrom) else BuildCopyFrom() end', 1, true) ~= nil,
-          "rows: Copy Appearance is a row of its own in the popout layout")
+    check(PRO:find('        BuildCopyFrom()', 1, true) ~= nil,
+          "rows: Copy Appearance is the card's own first block")
     check(PRO:find('AddGroup(L["Tracked IDs"], function(g)', 1, true) ~= nil,
           "rows: ...and Tracked IDs is the section it always was")
 
@@ -468,12 +443,13 @@ end
 -- ============================================================
 print("-- Aura Designer: one head area per tab")
 do
-    check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos, opts)", 1, true) ~= nil,
-          "head: ...declared once, in the card file")
-    check(CARDS:find("local skipAdd = opts and opts.skipAddBlock or false", 1, true) ~= nil,
-          "head: ...and the add block is what the first argument turns off")
-    check(CARDS:find("local skipChips = opts and opts.skipChips or false", 1, true) ~= nil,
-          "head: ...the chips what the second one does")
+    check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos)", 1, true) ~= nil,
+          "head: declared once, in the card file")
+    -- The rows page's opt-outs (skipAddBlock / skipChips / filterGlyph) went with it.
+    check(CARDS:find("opts.skipAddBlock", 1, true) == nil
+          and CARDS:find("opts.skipChips", 1, true) == nil
+          and CARDS:find("opts.filterGlyph", 1, true) == nil,
+          "head: ...with none of the rows page's opt-outs left")
     -- ☠ CODE LINES ONLY. This counted raw file text, so a comment that merely NAMES
     -- the builder read as another mount -- three such mentions took the count to 5 while
     -- the declaration and the single mount were both exactly where they should be. The
@@ -488,11 +464,8 @@ do
     -- Phase 3's two: the Layout Groups and Debuffs choice-card blocks, lifted out
     -- of the tab builders they used to be welded into.
     for _, name in ipairs({ "BuildLayoutGroupsHeadArea", "BuildDebuffGroupsHeadArea" }) do
-        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)", 1, true) ~= nil,
+        check(EDIT:find("S." .. name .. " = function(parent, yPos)", 1, true) ~= nil,
               "head: " .. name .. " is declared once")
-        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)\n    local skipAdd = opts and opts.skipAddBlock or false",
-                        1, true) ~= nil,
-              "head: ...which is the first thing that builder reads (" .. name .. ")")
         local n = 0
         for _ in EDIT:gmatch("S%." .. name) do n = n + 1 end
         eq(n, 2, "head: ...declared once and mounted once by the card (" .. name .. ")")
@@ -762,52 +735,21 @@ end
 -- ============================================================
 print("-- Aura Designer: the Global tab's rows")
 do
-    local GV = CARDS:sub(CARDS:find("local function BuildGlobalView(parent, collect)", 1, true),
+    local GV = CARDS:sub(CARDS:find("local function BuildGlobalView(parent)", 1, true),
                          CARDS:find("P.BuildGlobalView = BuildGlobalView", 1, true))
     check(#GV > 100, "global: BuildGlobalView's body was found")
 
-    check(GV:find("if collect then", 1, true) ~= nil,
-          "global: AddGroup carries the collect seam")
-    check(GV:find("local savedParent = parent", 1, true) ~= nil,
-          "global: ...which saves the host before it re-points it")
-    check(GV:find("parent = savedParent", 1, true) ~= nil,
-          "global: ...and restores it after the body runs")
-    check(GV:find("if collect then return collect end", 1, true) ~= nil,
-          "global: ...and the tail sizes no host")
+    -- The collect seam and the rows page's per-block record/extra-keys went
+    -- with that page (2026-09-26).
+    check(GV:find("collect", 1, true) == nil,
+          "global: BuildGlobalView carries no collect seam")
 
-    -- The blocks, in order, and which of them is a settings group.
-    local order, dbs = {}, {}
+    -- The blocks, in order.
+    local order = {}
     for header in GV:gmatch('AddGroup%(L%["([^"]+)"%]') do order[#order + 1] = header end
     eqList(order, { "General", "Sound Alerts", "Duration Text", "Stack Text",
                     "Import from Buffs Tab", "Standard Buffs", "Actions" },
-           "global: the blocks, in the order the split panel drew them")
-
-    -- The action groups close with `end, false)`, which is the "no tick, no
-    -- footer" flag. Read from the whole block -- start of its AddGroup to the
-    -- start of the next one -- because the flag sits OUTSIDE the body's own
-    -- closing paren and a %b() match stops short of it.
-    local function blockText(name)
-        local at = GV:find("AddGroup(L[\"" .. name .. "\"]", 1, true)
-        check(at ~= nil, 'global: a block is declared for "' .. name .. '"')
-        if not at then return "" end
-        local nxt = GV:find("AddGroup(L[\"", at + 12, true) or #GV
-        return GV:sub(at, nxt)
-    end
-    for _, name in ipairs({ "Import from Buffs Tab", "Standard Buffs", "Actions" }) do
-        check(blockText(name):find("end, false)", 1, true) ~= nil,
-              "global: " .. name .. " is an action group -- no tick, no footer")
-        dbs[#dbs + 1] = name
-    end
-    eq(#dbs, 3, "global: three action groups")
-    -- ...and the four that DO hold settings take the default record.
-    for _, name in ipairs({ "General", "Duration Text", "Stack Text" }) do
-        check(blockText(name):find("end, false)", 1, true) == nil,
-              "global: " .. name .. " is a settings group -- it keeps both verbs")
-    end
-
-    -- ...and the one settings group whose keys the walk cannot see.
-    check(GV:find('end, CreateSoundSettingsProxy(), { "soundEnabled", "soundChannel" })', 1, true) ~= nil,
-          "global: Sound Alerts names its two custom-bound keys through ClaimKeys' extra door")
+           "global: the blocks, in the order the split panel draws them")
 
     -- The census of each settings block. The Global tab's table is the defaults
     -- PROXY (`defaults`), and the two sound controls bind through a custom get/set
@@ -1248,20 +1190,14 @@ do
           "folder: 0.8 is the alpha that puts the tab's edge a panel's-step off its fill")
 end
 -- ============================================================
--- 11b. THE ACTIVE INDICATORS FILTER IS A GLYPH ON THE CAPTION
+-- 11b. THE ACTIVE INDICATORS FILTER CHIPS
 -- ------------------------------------------------------------
--- Eight chips loose on the page broke the all-rows rule they predate, and were
--- also the one flowing element left in the band column (section 17, Class 1). A
--- `Showing` popout row fixed both and cost 50px -- a 44px plate plus its 6px gap,
--- MORE than the 22px chip row it replaced, which is where the honest chrome total
--- went up rather than down. A glyph on a caption the page already pays for costs
--- nothing and opens the same panel.
+-- A wrapping row of eight chips under the ACTIVE INDICATORS caption. (The rows
+-- page reached the same chips through a glyph and a pooled popout; both went
+-- with it on 2026-09-26.)
 -- ============================================================
-print("-- Aura Designer: the filter glyph")
+print("-- Aura Designer: the filter chips")
 do
-    -- ONE definition of the chips, two hosts -- the split panel's wrapping row
-    -- and the pane. A second copy is how the three duplicated FRAME_ITEMS lists
-    -- in this same file came about.
     check(CARDS:find("S.BuildFilterChips = function(host, width)", 1, true) ~= nil,
           "showing: the chips are declared once")
     check(CARDS:find("local function FilterChips()", 1, true) ~= nil,
@@ -1270,99 +1206,11 @@ do
     -- load freezes on whatever locale was live then.
     check(CARDS:find("local FILTER_CHIPS = {", 1, true) == nil,
           "showing: ...which is a verb, so it cannot freeze on the load-time locale")
-    check(CARDS:find("local function ActiveFilterLabel()", 1, true) ~= nil,
-          "showing: the active filter's name is read off that same list")
-    check(CARDS:match("local function ActiveFilterLabel%(%)(.-)\nend"):find("FilterChips()", 1, true) ~= nil,
-          "showing: ...not off a second copy of the labels")
-
-    -- The panel it opens instead. Built the way the canvas's Preview Scale glyph
-    -- builds its own: a POOLED CreatePopout, Follow'd to the button.
-    local POP = CARDS:match("local function OpenFilterPopout%(btn%)(.-)\nend\nP%.OpenFilterPopout")
-    check(POP ~= nil, "showing: the filter panel's opener can be read")
-    POP = POP or ""
-    check(POP:find("GUI:CreatePopout({", 1, true) ~= nil,
-          "showing: it is a popout, built from the shared factory")
-    check(POP:find("key   = FILTER_POPOUT_KEY", 1, true) ~= nil,
-          "showing: ...keyed once, so the panel is pooled rather than rebuilt")
-    check(POP:find("S.BuildFilterChips(pane, width)", 1, true) ~= nil,
-          "showing: ...and it holds the same eight chips, at the popout's own width")
-    check(POP:find([[pop:Follow(btn, { outsideOf = DF.GUIFrame })]], 1, true) ~= nil,
-          "showing: ...docked outside the settings window, like every other panel")
-
-    -- ☠ THE RE-SYNC, WHICH SHIPPED MISSING AND WITHOUT A TEST. A pooled popout's
-    -- `build` runs EXACTLY ONCE, so the chips set their active state at that
-    -- moment and never again -- the panel showed "All" forever, however the list
-    -- was really filtered. The fix was a second return from the chip builder and a
-    -- call on every open; only the source changed, so nothing here caught it.
-    -- Pinned now, on both halves.
-    local chipsSrc = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend")
-    check(chipsSrc ~= nil, "showing: the chip builder can be read")
-    check((chipsSrc or ""):find("local function SyncActive()", 1, true) ~= nil,
-          "showing: the builder hands back a re-sync verb")
-    check((chipsSrc or ""):find("return LayoutChips, SyncActive", 1, true) ~= nil,
-          "showing: ...as its SECOND return, so the split panel still gets the re-flow first")
-    check(POP:find("po.dfSyncChips = SyncActive", 1, true) ~= nil,
-          "showing: ...which the panel keeps")
-    local syncAt   = POP:find("if pop.dfSyncChips then pop.dfSyncChips() end", 1, true)
-    local followAt = POP:find("pop:Follow(btn, { outsideOf = DF.GUIFrame })", 1, true)
-    check(syncAt and followAt and syncAt > followAt,
-          "showing: ...and calls on EVERY open, after the dock -- not only in build")
-    -- A second click on the glyph shuts it, like any toggle.
-    check(POP:find([[open:Close("api")]], 1, true) ~= nil,
-          "showing: a second click on the glyph closes it")
-
-    -- The glyph itself, on the caption, in the head area both layouts share.
-    local HEADSRC = CARDS:match("if filterGlyph then(.-)\n    end\n    yPos = yPos %- 16")
-    check(HEADSRC ~= nil, "showing: the glyph's arm can be read")
-    HEADSRC = HEADSRC or ""
-    check(HEADSRC:find("GUI:CreateGlyphButton(parent, {", 1, true) ~= nil,
-          "showing: the way in is a glyph, from the shared factory")
-    check(HEADSRC:find("onClick = OpenFilterPopout", 1, true) ~= nil,
-          "showing: ...which opens that panel")
-    check(HEADSRC:find([[glyph:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos + 4)]], 1, true) ~= nil,
-          "showing: ...right-aligned on the ACTIVE INDICATORS caption")
-    -- ☠ filter_list, NOT filter_alt. The funnel is a different icon and the one
-    -- asked for is the three tapering lines.
-    check(CARDS:find([[local FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"]], 1, true) ~= nil,
-          "showing: the icon is filter_list, double-backslashed")
-    check(CARDS:find("Icons\\\\filter_alt", 1, true) == nil,
-          "showing: ...not the funnel")
-
-    -- ☠ A FILTER THAT LOOKS THE SAME ON AND OFF IS HOW PEOPLE LOSE THEIR WORK.
-    -- Showing only Borders hides seven kinds of indicator, so the active state is
-    -- said TWICE -- accent tint AND the filter's own name beside the glyph.
-    check(HEADSRC:find([[local active = (S.activeFilter or "all") ~= "all"]], 1, true) ~= nil,
-          "showing: the glyph knows whether a filter is in force")
-    check(HEADSRC:find("color   = active and tc or C_TEXT_DIM", 1, true) ~= nil,
-          "showing: ...accents itself when it is")
-    check(HEADSRC:find("name:SetText(ActiveFilterLabel())", 1, true) ~= nil,
-          "showing: ...and writes the filter's name beside itself, which a glance can read")
-    check(HEADSRC:find([[name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)]], 1, true) ~= nil,
-          "showing: ...on the same line, chained off the glyph")
-
-    -- ☠ THE PANEL IS DOCKED TO A BUTTON THE NEXT REBUILD RETIRES. Picking a chip
-    -- rewrites the list, which rebuilds the page; a panel left up would be
-    -- following a frame that is no longer on screen.
-    check(HEADSRC:find([[glyph:HookScript("OnHide", function()]], 1, true) ~= nil,
-          "showing: the panel goes when the glyph it is docked to does")
-    check(HEADSRC:find([[pop:Close("source")]], 1, true) ~= nil,
-          "showing: ...closed as a source close, not as a user one")
-
-    -- Opt-in, so the split panel keeps its chips and gets no glyph.
-    check(CARDS:find("local filterGlyph = opts and opts.filterGlyph or false", 1, true) ~= nil,
-          "showing: the glyph is opt-in")
-    check(EDIT:find("filterGlyph", 1, true) == nil,
-          "showing: ...and the split panel does not ask for it")
-
-    -- ⚠ AND IT GREYS WITH THE REST OF THE PAGE. The row it replaces carried a
-    -- disableOn; a glyph that stayed lit would be the one live control on a page
-    -- of dead ones. SetGlyphEnabled is the kit's all-three-halves call.
-    check(HEADSRC:find("if opts and opts.filterGlyphEnabled == false then", 1, true) ~= nil,
-          "showing: ...and the glyph reads it")
-    check(HEADSRC:find("glyph:SetGlyphEnabled(false)", 1, true) ~= nil,
-          "showing: ...greying through the kit's own verb, not a bare SetAlpha")
-    check(HEADSRC:find("if name then name:SetAlpha(0.4) end", 1, true) ~= nil,
-          "showing: ...and the filter's name beside it goes with it")
+    -- The glyph, its pooled panel and its label helper are gone.
+    check(CARDS:find("OpenFilterPopout", 1, true) == nil
+          and CARDS:find("ActiveFilterLabel", 1, true) == nil
+          and CARDS:find("FILTER_ICON", 1, true) == nil,
+          "showing: the rows page's glyph and panel went with it")
 
     -- No schema change: the chips write the same in-memory field they always did.
     local chips = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend\n")
@@ -1374,14 +1222,8 @@ do
           "showing: ...and redraws the page, because WHICH effects are listed changed")
     check(chips:find("width or 260", 1, true) ~= nil,
           "showing: the flow falls back only when it was told nothing at all")
-
-    local EN = df_file_source("Locales/enUS.lua")
-    check(EN:find("L[\"Showing\"] = true", 1, true) ~= nil,
-          "showing: the panel's title is in the source locale")
-    check(EN:find("L[\"Showing: %s\"] = true", 1, true) ~= nil,
-          "showing: ...and so is what the glyph's tooltip reports")
-    check(EN:find("L[\"Which kinds of indicator are listed below.\"] = true", 1, true) ~= nil,
-          "showing: ...and what an icon-only button has to say for itself")
+    check(chips:find("return LayoutChips", 1, true) ~= nil,
+          "showing: ...and hands back its re-flow verb")
 end
 -- ============================================================
 -- 12. THE WIDE-PAGE FLOOR IS GONE -- THE ACCEPTANCE TEST FOR THE WHOLE REWORK
@@ -1477,13 +1319,6 @@ do
           "narrow: the head area no longer re-reports a band height it cannot change")
     check(CARDS:find("parent.dfSetHeight", 1, true) == nil,
           "narrow: ...and the dead re-report is gone from the file, not left to rot")
-    -- The band layout builds no chips ON THE PAGE at all, so it has nothing to
-    -- compensate for; its copy flows inside a panel, against a width that is
-    -- known before the first chip is placed.
-    check(HEAD:find("if not skipChips then", 1, true) ~= nil,
-          "narrow: the chips are the split panel's alone")
-    check(CARDS:find("S.BuildFilterChips(pane, width)", 1, true) ~= nil,
-          "narrow: ...and the band layout's flow against a width known before it starts")
 
     -- The split panel still re-flows on resize; what it no longer does is try to
     -- move bands it does not have.
@@ -1693,15 +1528,14 @@ do
     check(pane:find('DF:Say(L["Already added."])', 1, true) ~= nil,
           "add: a duplicate is refused out loud on the type card")
 
-    -- ...and neither designer draws the block at all: the split panel's picker
-    -- column is gone, and the row layout still asks the head area for no add UI.
+    -- ...and the split panel's picker column is gone.
     check(CARDS:find("effectsPicker", 1, true) == nil,
           "add: the split panel's picker column is gone")
-    local headBody = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n")
+    local headBody = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos%)(.-)\nend\n")
     check(headBody ~= nil, "add: the head area's body can be read")
     headBody = headBody or ""
-    check(headBody:find("elseif not skipAdd then", 1, true) ~= nil,
-          "add: ...and the classic add buttons are behind that same switch")
+    check(headBody:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
+          "add: ...and it mounts the classic add tiles")
 
     -- ☠ THE CLASSIC DESIGNER RUNS THIS PANE INSIDE ITS TAB (2026-09-22), never in a
     -- popout: two picture tiles, Add from a Spell / Add from a Filter, each handing

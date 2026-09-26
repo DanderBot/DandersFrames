@@ -260,22 +260,18 @@ do
           "classic add: ...so their Back labels are gone from the source locale")
 
     -- ---- read: each classic head area mounts its tiles ----
-    local head = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
+    local head = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
     check(head:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
           "classic add: the Effects tab mounts its add tiles")
-    local lg = EDITN:match("S%.BuildLayoutGroupsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
-    local lgSkip = lg:find("if not skipAdd then", 1, true)
-    local lgCall = lg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "layout")', 1, true)
-    check(lgSkip and lgCall and lgSkip < lgCall,
-          "classic add: the Layout Groups tab mounts its tiles, unless the rows page asked it not to")
-    local dg = EDITN:match("S%.BuildDebuffGroupsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n") or ""
-    local dgSkip = dg:find("if not skipAdd then", 1, true)
-    local dgCall = dg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")', 1, true)
-    check(dgSkip and dgCall and dgSkip < dgCall,
+    local lg = EDITN:match("S%.BuildLayoutGroupsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
+    check(lg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "layout")', 1, true) ~= nil,
+          "classic add: the Layout Groups tab mounts its tiles")
+    local dg = EDITN:match("S%.BuildDebuffGroupsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
+    check(dg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")', 1, true) ~= nil,
           "classic add: the Debuffs pool's tab mounts its tile, likewise")
 
     -- ---- read: the PI Helper pool keeps its own add area, first ----
-    local piAt  = head:find("if not skipAdd and IsPIHelperTab() and S.BuildPIHelperAddArea then", 1, true)
+    local piAt  = head:find("if IsPIHelperTab() and S.BuildPIHelperAddArea then", 1, true)
     local tileAt = head:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true)
     check(piAt ~= nil and tileAt ~= nil and piAt < tileAt,
           "classic add: the PI Helper pool takes its own tiles, never the add tiles")

@@ -468,9 +468,9 @@ end
 -- ============================================================
 print("-- Text Designer: the add flow, one definition and two hosts")
 do
-    check(TD:find("local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
+    check(TD:find("local function BuildTextsHeadArea(GUI, parent, state, tdDB, page)", 1, true) ~= nil,
           "legacy: the Texts head area is declared once")
-    check(TD:find("local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
+    check(TD:find("local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page)", 1, true) ~= nil,
           "legacy: ...and so is the Text Groups one")
     check(TD:find("BuildTextsHeadArea(GUI, parent, state, tdDB, page)\n", 1, true) ~= nil,
           "legacy: the split panel's Texts tab mounts it")
@@ -482,17 +482,13 @@ do
 end
 
 -- ============================================================
--- 9a. THE CATEGORY FILTER IS A GLYPH AND A PANEL
--- The Aura Designer's eight chips became a filter_list glyph on its caption
--- opening a pooled panel; this page has the same chip row and gets the same
--- treatment. The all-rows rule the chips predate -- more than one option goes in
--- a popout -- plus it retires the one FLOWING element in this band, so the height
--- the band reports can no longer be wrong.
+-- 9a. THE CATEGORY FILTER CHIPS
+-- A wrapping chip row under the TEXT ELEMENTS caption. (The rows page reached the
+-- same chips through a glyph and a pooled popout; both went with it on
+-- 2026-09-26.)
 -- ============================================================
-print("-- Text Designer: the filter is a glyph, not a chip row")
+print("-- Text Designer: the category filter chips")
 do
-    -- ONE definition of the chips, two hosts. A second copy is how Cards.lua ended
-    -- up with three duplicated type lists.
     check(TD:find("local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)", 1, true) ~= nil,
           "tdfilter: the chips are declared once")
     check(TD:find("local function TextFilterChips()", 1, true) ~= nil,
@@ -502,116 +498,26 @@ do
     -- CONTENT_CATEGORY_LABELS is rebuilt through DF:RegisterLocaleRefresh.
     check(TD:find("local TEXT_FILTER_CHIPS = {", 1, true) == nil,
           "tdfilter: ...which is a verb, so it cannot freeze on the load-time locale")
-    check(TD:find("local function ActiveTextFilterLabel(state)", 1, true) ~= nil,
-          "tdfilter: the active filter's name is read off that same list")
-    check(TD:match("local function ActiveTextFilterLabel%(state%)(.-)\nend")
-            :find("TextFilterChips()", 1, true) ~= nil,
-          "tdfilter: ...not off a second copy of the labels")
+    -- The glyph, its pooled panel and its label helper are gone.
+    check(TD:find("OpenTextFilterPopout", 1, true) == nil
+          and TD:find("ActiveTextFilterLabel", 1, true) == nil
+          and TD:find("TD_FILTER_", 1, true) == nil,
+          "tdfilter: the rows page's glyph and panel went with it")
+    check(TD:find("opts.skipChips", 1, true) == nil and TD:find("opts.filterGlyph", 1, true) == nil,
+          "tdfilter: ...and so did the head area's opt-outs")
 
-    -- ☠ THE SYNC VERB, AND IT IS THE WHOLE POINT. GUI:CreatePopout pools by key,
-    -- so `build` runs EXACTLY ONCE -- the chips would set their active state at
-    -- that moment and never again, which reads as "All is always selected" however
-    -- the list is really filtered. That is what shipped on the Aura Designer's own
-    -- filter panel. The opener calls this on every open.
+    -- The re-sync verb stays: the add flow resets the filter to All and has to
+    -- repaint the chip row it did not click.
     local CHIPS = TD:match("local function BuildTextFilterChips.-\nend\nP%.BuildTextFilterChips")
     check(CHIPS ~= nil, "tdfilter: the chip builder can be read")
     CHIPS = CHIPS or ""
-    check(CHIPS:find("local function SyncActive()", 1, true) ~= nil,
-          "tdfilter: the builder hands back a re-sync verb")
     check(CHIPS:find("return LayoutChips, SyncActive", 1, true) ~= nil,
-          "tdfilter: ...as its SECOND return, so the split panel still gets the re-flow first")
-
-    local POP = TD:match("local function OpenTextFilterPopout%(btn, GUI, state, page, tdDB%)(.-)\nend\nP%.OpenTextFilterPopout")
-    check(POP ~= nil, "tdfilter: the panel's opener can be read")
-    POP = POP or ""
-    check(POP:find("GUI:CreatePopout({", 1, true) ~= nil,
-          "tdfilter: it is a popout, built from the shared factory")
-    check(POP:find("key   = TD_FILTER_POPOUT_KEY", 1, true) ~= nil,
-          "tdfilter: ...keyed once, so the panel is pooled rather than rebuilt")
-    -- ☠ ITS OWN KEY. A pool is keyed by name, so sharing the Aura Designer's would
-    -- hand this page the panel already bound to the other designer's filter.
-    check(TD:find('local TD_FILTER_POPOUT_KEY = "df.filter.textdesigner"', 1, true) ~= nil,
-          "tdfilter: ...under a key of its own, not the Aura Designer's")
-    check(TD:find('df.filter.auradesigner', 1, true) == nil,
-          "tdfilter: ...which it does not borrow")
-    check(POP:find("BuildTextFilterChips(GUI, pane, state, width, page, tdDB)", 1, true) ~= nil,
-          "tdfilter: ...and it holds the same chips, at the popout's own width")
-    local syncAt   = POP:find("if pop.dfSyncChips then pop.dfSyncChips() end", 1, true)
-    local followAt = POP:find("pop:Follow(btn, { outsideOf = DF.GUIFrame })", 1, true)
-    check(followAt ~= nil,
-          "tdfilter: ...docked outside the settings window, like every other panel")
-    check(syncAt and followAt and syncAt > followAt,
-          "tdfilter: ...and re-reads the live filter on EVERY open, after the dock")
-    check(POP:find('open:Close("api")', 1, true) ~= nil,
-          "tdfilter: a second click on the glyph closes it")
-
-    -- The glyph itself, on the caption, in the head area both layouts share.
-    local HEADSRC = TD:match("if filterGlyph then(.-)\n    end\n\n    %-%- \226\148\128\226\148\128 Filter chip row")
-    check(HEADSRC ~= nil, "tdfilter: the glyph's arm can be read")
-    HEADSRC = HEADSRC or ""
-    check(HEADSRC:find("GUI:CreateGlyphButton(parent, {", 1, true) ~= nil,
-          "tdfilter: the way in is a glyph, from the shared factory")
-    check(HEADSRC:find("OpenTextFilterPopout(btn, GUI, state, page, tdDB)", 1, true) ~= nil,
-          "tdfilter: ...which opens that panel")
-    check(HEADSRC:find('glyph:SetPoint("TOPRIGHT", addBtn, "BOTTOMRIGHT", 0, -CAPTION_GAP + 4)', 1, true) ~= nil,
-          "tdfilter: ...right-aligned on the TEXT ELEMENTS caption")
-    -- ☠ filter_list, DOUBLE-BACKSLASHED. Lua 5.1 drops an unrecognised escape, so
-    -- the single-backslash form is a path to nothing and the client draws an empty
-    -- square -- no error, which is why it shipped once. Same icon the Aura
-    -- Designer's filter uses: it is the same control.
-    check(TD:find([[local TD_FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"]], 1, true) ~= nil,
-          "tdfilter: the icon is filter_list, double-backslashed")
-    check(TD:find("Icons\\\\filter_alt", 1, true) == nil,
-          "tdfilter: ...not the funnel")
-
-    -- ☠ A FILTER THAT LOOKS THE SAME ON AND OFF IS HOW PEOPLE LOSE THEIR WORK.
-    -- Showing only Health hides six other categories, so the active state is said
-    -- TWICE -- accent tint AND the filter's own name beside the glyph.
-    check(HEADSRC:find('local active = (state.activeFilter or "_all") ~= "_all"', 1, true) ~= nil,
-          "tdfilter: the glyph knows whether a filter is in force")
-    check(HEADSRC:find("color   = active and tc or C_TEXT_DIM", 1, true) ~= nil,
-          "tdfilter: ...accents itself when it is")
-    check(HEADSRC:find("name:SetText(ActiveTextFilterLabel(state))", 1, true) ~= nil,
-          "tdfilter: ...and writes the filter's name beside itself, which a glance can read")
-    check(HEADSRC:find('name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)', 1, true) ~= nil,
-          "tdfilter: ...on the same line, chained off the glyph")
-
-    -- The panel is docked to a button the next rebuild retires.
-    check(HEADSRC:find('glyph:HookScript("OnHide", function()', 1, true) ~= nil,
-          "tdfilter: the panel goes when the glyph it is docked to does")
-    check(HEADSRC:find('pop:Close("source")', 1, true) ~= nil,
-          "tdfilter: ...closed as a source close, not as a user one")
-
-    check(HEADSRC:find("if opts and opts.filterGlyphEnabled == false then", 1, true) ~= nil,
-          "tdfilter: ...and the glyph reads it")
-    check(HEADSRC:find("glyph:SetGlyphEnabled(false)", 1, true) ~= nil,
-          "tdfilter: ...greying through the kit's own verb, not a bare SetAlpha")
-    check(HEADSRC:find("if name then name:SetAlpha(0.4) end", 1, true) ~= nil,
-          "tdfilter: ...and the filter's name beside it goes with it")
-
-    -- Opt-in, so the split panel keeps its chips and gets no glyph.
-    check(TD:find("local filterGlyph = opts and opts.filterGlyph or false", 1, true) ~= nil,
-          "tdfilter: the glyph is opt-in")
-    check(TD:find("local skipChips   = opts and opts.skipChips or false", 1, true) ~= nil,
-          "tdfilter: ...and so is dropping the chip row")
-    check(TD:find("BuildTextsHeadArea(GUI, parent, state, tdDB, page)\n", 1, true) ~= nil,
-          "tdfilter: ...and the split panel asks for neither")
-
-    -- ⚠ AND Measure HAS TO SURVIVE THE CHIP ROW NOT EXISTING. It used to add the
-    -- row's measured height unconditionally; with no row that is an index of nil,
-    -- and this band's height is what everything below it is anchored at.
-    local MEAS = TD:match("local function Measure%(%)(.-)\n    end")
-    check(MEAS ~= nil, "tdfilter: the band's height verb can be read")
-    check((MEAS or ""):find("if not chipRow then return base + 6 end", 1, true) ~= nil,
-          "tdfilter: ...and it answers for a band with no chip row in it")
-
-    local EN = df_file_source("Locales/enUS.lua")
-    check(EN:find('L["Showing"] = true', 1, true) ~= nil,
-          "tdfilter: the panel's title is in the source locale")
-    check(EN:find('L["Which kinds of text are listed below."] = true', 1, true) ~= nil,
-          "tdfilter: ...and what an icon-only button has to say for itself")
+          "tdfilter: the builder hands back the re-flow and the re-sync verbs")
+    check(TD:find("state.ApplyChipState = SyncActive", 1, true) ~= nil,
+          "tdfilter: ...and the split panel keeps the re-sync")
 end
 
+-- ============================================================
 -- 11. THE WIDE-PAGE FLOOR IS GONE
 -- The Text Designer's half of the acceptance test; the Aura Designer's census
 -- asserts the same thing from its own side, deliberately, because either page
@@ -749,22 +655,4 @@ do
           "tabcount: the classic strip reads that one copy rather than its own loop")
     local _, n = TD:gsub("local counts = { texts = 0, groups = 0 }", "")
     eq(n, 1, "tabcount: and the loop it used to inline is gone from the classic arm")
-end
-
--- ============================================================
--- A SWITCHED-OFF DESIGNER REFUSES INPUT, IT DOES NOT ONLY DIM
--- ------------------------------------------------------------
--- ☠ REPORTED AS "'Enable Text Designer' hides/disables the text on live frames
--- and only dimms the settings: doesn't disable the settings, I can still modify
--- everything. Same thing with Aura Designer". Classic covers the whole page
--- below the header with a scrim; the row layout only greyed the rows.
--- ============================================================
-print("-- Text Designer: switched off means unwritable, not merely dim")
-do
-    -- The head area's add CTA is part of "the feature is off" too: classic's
-    -- scrim covers it, and the row layout mounts the same head area bare.
-    check(TD:find("local ctaEnabled  = not (opts and opts.enabled == false)", 1, true) ~= nil,
-          "scrim: the head areas take an enabled flag")
-    local _, ctas = TD:gsub("if not ctaEnabled and addBtn%.SetDisabled then addBtn:SetDisabled%(true%) end", "")
-    eq(ctas, 2, "scrim: ...and both add CTAs honour it")
 end
