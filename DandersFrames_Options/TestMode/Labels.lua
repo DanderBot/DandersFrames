@@ -794,6 +794,10 @@ local ownTip
 local function ensureOwnTip()
     if ownTip then return ownTip end
     ownTip = CreateFrame("GameTooltip", "DFTestLabelTooltip", UIParent, "GameTooltipTemplate")
+    -- Stated rather than trusted to the template: it opens beside the element, which
+    -- in a mover session can be over a NEIGHBOURING slab, and a tooltip that took the
+    -- mouse there would eat the grab.
+    ownTip:EnableMouse(false)
     return ownTip
 end
 
@@ -834,8 +838,10 @@ end
 
 local hoverDriver, hoverShown
 local clearFades   -- forward declaration: defined with the fade machinery below
-local function stopHover()
-    if hoverDriver then hoverDriver:Hide() end
+
+-- Take down whatever the hover is showing -- the mark, our tooltip, any fade -- but
+-- leave the driver running. See moverSessionOpen for the one caller that wants that.
+local function dropHover()
     if ownTip then ownTip:Hide() end
     if clearFades then clearFades() end
     if hoverShown then
@@ -844,6 +850,30 @@ local function stopHover()
         if w then setMarkAlpha(w, 1); hideMark(w) end
         hoverShown = nil
     end
+end
+
+local function stopHover()
+    if hoverDriver then hoverDriver:Hide() end
+    dropHover()
+end
+
+-- ☠ QUIET WHILE THE MOVERS ARE UNLOCKED. Unlocking forces test mode on, and with
+-- Indicator Info on every slab the cursor crossed popped brackets, a tag and a second
+-- tooltip on the element UNDER the slab -- next to the mover's own slab tooltip, while
+-- the user is aiming at slabs, not at elements. Nothing here takes the mouse, so it
+-- never BLOCKED a grab (see NOTHING HERE MAY TAKE THE MOUSE at the top); it was
+-- clutter, and a hit test running every tick for a mark nobody asked for.
+-- The driver keeps running and simply stands down, so locking again brings the marks
+-- straight back without waiting for a settings pass to re-show it.
+-- The lib is looked up lazily and cached once found: it is embedded in the resident
+-- addon, but nothing here should assume the load order.
+local moverLib
+local function moverSessionOpen()
+    if not moverLib then
+        moverLib = LibStub and LibStub("DandersMover-1.0", true)
+        if not moverLib then return false end
+    end
+    return moverLib.IsUnlocked and moverLib:IsUnlocked() and true or false
 end
 
 -- ============================================================
@@ -925,6 +955,11 @@ local function ensureHoverDriver()
     hoverDriver = CreateFrame("Frame")
     local elapsed, inAlpha = 0, 0
     hoverDriver:SetScript("OnUpdate", function(_, dt)
+        -- Stood down while a mover session is open -- see moverSessionOpen.
+        if moverSessionOpen() then
+            if hoverShown or fadingOut[1] or (ownTip and ownTip:IsShown()) then dropHover() end
+            return
+        end
         -- ⚠ The FADES advance every frame; only the HIT TEST is throttled. Running the
         -- alpha maths at the poll rate made the fade visibly step.
         advanceFades(dt)
