@@ -3115,7 +3115,8 @@ end
 -- ------------------------------------------------------------
 -- The settings panel's two layouts: checkbox-gated groups render as popout
 -- rows by default, and this switches the panel to the classic inline
--- rendering. PERMANENT (ruled 2026-09-01) — both layouts are supported, every
+-- rendering. (Superseded 2026-09-26: Classic is now HIDDEN -- see the switch
+-- below.) Was PERMANENT (ruled 2026-09-01) — both layouts are supported, every
 -- new settings surface must build in both, and the mover-tests assert both.
 --
 -- It lives at the ROOT of the SavedVariable, not in .global and not in a
@@ -3125,7 +3126,23 @@ end
 -- ☠ DandersFramesDB_v2 is read AT ACCESS TIME, never captured. This file loads
 -- before the SV table is guaranteed to exist, so a captured nil would strand
 -- every read forever (the same trap as the colour-picker store in GUI.lua).
+--
+-- ☠ CLASSIC IS HIDDEN (decided 2026-09-26). THE ONE SWITCH IS THE LINE BELOW.
+-- Classic's code stays in every page, only gated off: with this false the
+-- accessor answers "Modern" for everyone, the title-bar layout picker and the
+-- Settings page's classic tick are not built, and a saved classicSettings = true
+-- is left in the SavedVariable untouched (it is simply not honoured). Set it to
+-- true and all three come back exactly as they were. Deleting the classic arms
+-- is a later, separate job. Tools/audit-classic-layout.py proves no setting is
+-- reachable only in Classic.
+DF.CLASSIC_SETTINGS_AVAILABLE = false
+
+function DF:ClassicSettingsAvailable()
+    return DF.CLASSIC_SETTINGS_AVAILABLE == true
+end
+
 function DF:IsClassicSettingsLayout()
+    if not DF:ClassicSettingsAvailable() then return false end
     return DandersFramesDB_v2 ~= nil and DandersFramesDB_v2.classicSettings == true
 end
 

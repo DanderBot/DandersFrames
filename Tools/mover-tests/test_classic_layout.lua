@@ -36,6 +36,12 @@ load_df_file_into("Core/Config.lua", DF)
 check(type(DF.IsClassicSettingsLayout) == "function", "IsClassicSettingsLayout installed")
 check(type(DF.SetClassicSettingsLayout) == "function", "SetClassicSettingsLayout installed")
 
+-- ⚠ CLASSIC IS HIDDEN (2026-09-26): with DF.CLASSIC_SETTINGS_AVAILABLE false the
+-- accessor answers false whatever is saved -- test_classic_hidden.lua pins that.
+-- Everything below is the accessor's behaviour WITH the switch on, which is what
+-- flipping it back restores, so it is turned on here and off again at the end.
+DF.CLASSIC_SETTINGS_AVAILABLE = true
+
 -- ---- no SavedVariable yet ------------------------------------------
 do
     DandersFramesDB_v2 = nil
@@ -93,6 +99,8 @@ do
     eq(DandersFramesDB_v2.global.classicSettings, nil, "not written into the global block")
     eq(DandersFramesDB_v2.classicSettings, true, "written at the SV root")
 end
+
+DF.CLASSIC_SETTINGS_AVAILABLE = false
 
 CreateFrame        = savedCreateFrame
 GetLocale          = savedGetLocale

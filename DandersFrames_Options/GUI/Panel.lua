@@ -918,6 +918,13 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
+    -- ☠ HIDDEN WITH CLASSIC (2026-09-26). The whole picker is built only while
+    -- DF.CLASSIC_SETTINGS_AVAILABLE (Core/Config.lua) is true -- the one switch.
+    -- Off, there is no layoutChip, no GUI.LayoutButton and no PaintLayoutButton
+    -- (GUI:FlipSettingsLayout guards that call), and the profile chip anchors to
+    -- the scale glyph instead. Flip the switch and this comes back unchanged.
+    local layoutChip
+    if DF:ClassicSettingsAvailable() then
     -- ⇄ SETTINGS LAYOUT. Which layout the panel draws in is account identity,
     -- like the profile chip beside it — it shapes every page, so it is reachable
     -- from every page rather than buried on the Options page (whose checkbox
@@ -946,7 +953,7 @@ function DF:CreateGUI()
         compact = { value = "compact", text = L["Modern"] },
         classic = { value = "classic", text = L["Classic"] },
     }
-    local layoutChip = GUI:CreateDropdown(
+    layoutChip = GUI:CreateDropdown(
         titleBar, "", LAYOUT_OPTIONS,
         nil, nil, nil,
         function()                                              -- customGet
@@ -986,6 +993,7 @@ function DF:CreateGUI()
     -- the hook would either error or be silently bypassed.
     GUI.PaintLayoutButton = PaintLayoutButton
     PaintLayoutButton()
+    end -- DF:ClassicSettingsAvailable()
 
     -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
     -- and it used to be answerable only by walking to the Profiles page. The
@@ -1020,7 +1028,13 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    profileChip:SetPoint("TOPRIGHT", layoutChip, "TOPLEFT", -6, 0)
+    -- Beside the layout picker when it exists; otherwise it takes the picker's
+    -- own place, the same 8 px left of the scale glyph.
+    if layoutChip then
+        profileChip:SetPoint("TOPRIGHT", layoutChip, "TOPLEFT", -6, 0)
+    else
+        profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
+    end
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 
@@ -1563,7 +1577,7 @@ function DF:CreateGUI()
                 format("%s: %d · %d px", L["Columns"], cols, math.floor(colW)),
                 -- Developer readout: settings per row inside a two-per-row card
                 -- (Debuff Bar) at this column width. Same test the card runs.
-                format("Inside cards: %d per row", InnerTracks(colW)),
+                format(L["Inside cards: %d per row"], InnerTracks(colW)),
             },
         })
     end

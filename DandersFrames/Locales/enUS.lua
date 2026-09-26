@@ -1224,6 +1224,7 @@ L["Inherited value: %s"] = true
 L["Indicators"] = true
 L["Info (All)"] = true
 L["Insanity"] = true
+L["Inside cards: %d per row"] = true
 L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."] = true
 L["Inset"] = true
 L["Instanced / PvP"] = true

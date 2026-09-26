@@ -3242,6 +3242,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- and CloseAllPopoutRows is a guarded no-op, so one builder still
             -- serves both layouts. It also takes down any panel PINNED out of the
             -- layout being left, which is right -- those belong to the old shape.
+            --
+            -- ☠ HIDDEN WITH CLASSIC (2026-09-26): built only while
+            -- DF.CLASSIC_SETTINGS_AVAILABLE (Core/Config.lua) is true -- the one
+            -- switch that also hides the title-bar picker. Off, the card holds the
+            -- font controls alone, and search never indexes this tick.
+            if DF:ClassicSettingsAvailable() then
             local classicCheck = group:AddWidget(GUI:CreateCheckbox(
                 parent, L["Use classic settings layout"],
                 nil, nil,
@@ -3259,6 +3265,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 function(val) DF:SetClassicSettingsLayout(val) end
             ), 30)
             classicCheck.tooltip = L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."]
+            end -- DF:ClassicSettingsAvailable()
         end
 
         if classicLayout then
