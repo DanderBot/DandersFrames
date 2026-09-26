@@ -2629,6 +2629,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
         end
 
+        -- ☠ MODERN'S POSITION CARD: the builder above, then Frame Level (see the
+        -- page note). ONE function for the card AND its pin -- the slider used to
+        -- be added to the card's band after the builder, so a pinned Position
+        -- panel (built from the builder alone) came up without it. Classic never
+        -- calls this: it mounts BuildResourcePositionGroup and keeps Frame Level
+        -- in its own box. The slider is classic's own call -- same key, range,
+        -- two callback slots (nothing on commit, the frame-level reapply on the
+        -- drag tick) and shared tooltip; the builder's group gate greys it with
+        -- the rest of Position.
+        local function BuildResourcePositionCardGroup(tools2)
+            BuildResourcePositionGroup(tools2)
+            tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+        end
+
         -- The anchor in the dropdown's own words, and the offsets only when they
         -- are doing something -- a card reading "0, 1" on every default profile is
         -- noise (the Border row's rule). Both numbers go in together: an X with no
@@ -2987,20 +3001,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(positionGroup, nil, 1)
         else
-            -- A pin: where the bar sits is how it LOOKS.
+            -- A pin: where the bar sits is how it LOOKS. Card and pin both mount
+            -- the card builder, so both end in Frame Level.
             local band = OpenSection(L["Position"], "resource_position", 1, ResourcePositionSummary, ResourceOffRow, nil,
-                BuildResourcePositionGroup)
-            BuildResourcePositionGroup({
+                BuildResourcePositionCardGroup)
+            BuildResourcePositionCardGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
-            -- ☠ FRAME LEVEL, THE PAGE'S LONE CONTROL, MOVED IN HERE (see the page
-            -- note). The slider classic builds in its own box, same key, same
-            -- two callback slots (nothing on commit, the frame-level reapply on
-            -- the drag tick) and the same shared tooltip; the band's group gate
-            -- greys it with the rest of Position. Card-only: a pinned Position
-            -- panel holds the builder's three.
-            band:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
             CloseSection(band)
         end
 

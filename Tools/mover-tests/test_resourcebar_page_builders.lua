@@ -235,7 +235,7 @@ local CARDS = {
       builder = "BuildResourceSizeGroup", golden = RESOURCE_SIZE, summary = "ResourceSizeSummary", dim = true, pin = true },
     { label = "Position", key = "resource_position", col = 1, box = "positionGroup", classicCol = 1,
       builder = "BuildResourcePositionGroup", golden = RESOURCE_POSITION, summary = "ResourcePositionSummary",
-      dim = true, pin = true },
+      dim = true, pin = true, cardBuilder = "BuildResourcePositionCardGroup" },
     { label = "Appearance", key = "resource_appearance", col = 2, box = "appearanceGroup", classicCol = 2,
       builder = "BuildResourceAppearanceGroup", golden = RESOURCE_APPEARANCE, summary = "ResourceAppearanceSummary",
       dim = true, pin = true },
@@ -271,7 +271,10 @@ for _, g in ipairs(CARDS) do
           g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing " .. g.summary)
     eq(call:find("ResourceOffRow", 1, true) ~= nil and call:find(g.summary .. ", ResourceOffRow", 1, true) ~= nil, g.dim == true,
        g.label .. (g.dim and ": its header greys with the page gate" or ": holds the page gate, so never greys with it"))
-    eq(call:find(g.builder, 1, true) ~= nil, g.pin == true,
+    -- `cardBuilder`: the card mounts a wrapper round the classic builder (Position
+    -- + Frame Level), and the pin is handed that SAME wrapper.
+    local cardBuilder = g.cardBuilder or g.builder
+    eq(call:find(cardBuilder, 1, true) ~= nil, g.pin == true,
        g.label .. (g.pin and ": pinnable, from its own builder" or ": decides what the bar DOES, so it grows no pin"))
 
     if g.tick then
@@ -297,7 +300,7 @@ for _, g in ipairs(CARDS) do
         check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
     end
 
-    local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
+    local mount = cardBuilder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
           g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
@@ -354,12 +357,25 @@ end
 -- ============================================================
 print("-- Resource Bar page: Frame Level inside Position")
 do
-    local block = sectionBlock("Position")
-    check(block:find('band:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)', 1, true) ~= nil,
-          "frame level: the Position card ends in classic's own slider call -- same key, range, callbacks and tooltip")
+    -- ☠ IN THE CARD BUILDER, NOT ADDED TO THE BAND AFTER IT. The pin mounts the
+    -- builder it is handed; a slider bolted onto the band after the builder
+    -- never reached a pinned Position panel.
+    local card = builderBody("BuildResourcePositionCardGroup")
+    local b = card:find("BuildResourcePositionGroup(tools2)", 1, true)
+    local s = card:find('tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)', 1, true)
+    check(b ~= nil and s ~= nil and b < s,
+          "frame level: the card builder is Position's builder, then classic's own slider call -- same key, range, callbacks and tooltip")
+    local block, call = sectionBlock("Position")
+    check(call:find("BuildResourcePositionCardGroup", 1, true) ~= nil
+      and block:find("BuildResourcePositionCardGroup({ group = band,", 1, true) ~= nil,
+          "frame level: the pin and the card mount the same card builder -- a pinned Position panel has Frame Level")
+    check(block:find("band:AddWidget", 1, true) == nil,
+          "frame level: nothing is added to the Position band outside the builder")
+    check(builderBody("BuildResourcePositionGroup"):find("Frame Level", 1, true) == nil,
+          "frame level: classic's Position builder is untouched -- its box never gains the slider")
     local frames = 0
     for _ in PAGE:gmatch('L%["Frame Level"%], 0, 100, 1, db, "resourceBarFrameLevel"') do frames = frames + 1 end
-    eq(frames, 2, "frame level: two sliders on the page -- classic's box and the Position card")
+    eq(frames, 2, "frame level: two sliders on the page -- classic's box and the Position card builder")
     check(PAGE:find("local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
       and PAGE:find('frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)', 1, true) ~= nil
       and PAGE:find("Add(frameLevelGroup, nil, 1)", 1, true) ~= nil,
