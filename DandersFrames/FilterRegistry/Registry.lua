@@ -40,16 +40,25 @@ end
 -- ------------------------------------------------------------
 -- ACCOUNT-WIDE STORE
 -- ------------------------------------------------------------
+-- ☠ ONE STORE PER GAME VERSION. Custom filters hold spell ids, and retail's ids are wrong or
+-- missing on WoW Forever. Forever keeps its own store under a separate key, so a copied
+-- retail SavedVariables file keeps its filters untouched for the trip back, and Forever
+-- never shows them. These two functions are the ONLY readers of the key -- keep it that way.
+local function StoreKey()
+    return DF.IS_FOREVER and "auraFiltersForever" or "auraFilters"
+end
+
 -- ☠ WRITES SAVEDVARIABLES. Only writers -- and readers that legitimately need the store's
 -- shape guaranteed -- may call this. Read-only paths use ReadStore below.
 function R:GetStore()
     local g = DF:GetGlobalDB()
-    if not g.auraFilters then
-        g.auraFilters = { nextFilterID = 1, customFilters = {} }
+    local key = StoreKey()
+    if not g[key] then
+        g[key] = { nextFilterID = 1, customFilters = {} }
     end
-    g.auraFilters.customFilters = g.auraFilters.customFilters or {}
-    g.auraFilters.nextFilterID = g.auraFilters.nextFilterID or 1
-    return g.auraFilters
+    g[key].customFilters = g[key].customFilters or {}
+    g[key].nextFilterID = g[key].nextFilterID or 1
+    return g[key]
 end
 
 -- Read-only view of the account-wide store. Never creates, so drawing a frame no longer
@@ -58,7 +67,7 @@ end
 local EMPTY_STORE = { nextFilterID = 1, customFilters = {} }
 function R:ReadStore()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
-    local s = g and g.auraFilters
+    local s = g and g[StoreKey()]
     if not s or type(s.customFilters) ~= "table" then return EMPTY_STORE end
     return s
 end
@@ -390,6 +399,9 @@ function R:ImportCustomFilters(imported)
         if type(def) ~= "table" then
             DF:DebugWarn("FILTER", "ImportCustomFilters: skipping non-table entry '%s'", tostring(cfId))
         else
+        -- Forever only: drop ids the client doesn't have BEFORE matching, so a
+        -- pruned import can collapse onto a local filter with the same live content.
+        self._lastImportPruned = (self._lastImportPruned or 0) + self:PruneForeignIDs(def)
         local hasContent = defHasContent(def)
         if contentMatches(store.customFilters[cfId], def, hasContent) then
             remap[cfId] = cfId
@@ -613,11 +625,48 @@ end
 -- should surface "you already have this" and let the user choose, where profile
 -- import silently reuses (ImportCustomFilters).
 function R:ImportFilterPayload(def)
+    local pruned = self:PruneForeignIDs(def)
+    if pruned > 0 and DF.Say then
+        DF:Say(string.format(DF.L["%d spell IDs that don't exist on WoW Forever were left out of the import."], pruned))
+    end
     local id = self:CreateCustomFilter(def.name)
     local dst = self:GetCustomFilter(id)
     for sid in pairs(def.spells or {}) do dst.spells[sid] = true end
     for rid in pairs(def.rawIDs or {}) do dst.rawIDs[rid] = true end
     return id
+end
+
+-- ------------------------------------------------------------
+-- WOW FOREVER: DROP IDS THE CLIENT DOES NOT HAVE, ON IMPORT ONLY
+-- ------------------------------------------------------------
+-- An imported filter is a COPY (the string still holds everything), so removing ids is
+-- safe there and nowhere else. On Forever most retail ids either don't exist or mean
+-- something else, and a row of dead "#123456" entries is worse than a shorter list.
+-- Retail never prunes: a Forever id may well exist in retail's spell table, and pruning a
+-- valid-but-unknown id there would be the destructive act.
+--
+-- ⚠ TRUST CHECK FIRST. C_Spell.DoesSpellExist reads the client spell table, but it is
+-- unverified on Forever. If it denies Auto Attack (6603, in every version of the game)
+-- the answer is unreliable, and pruning on it would empty every import -- keep everything.
+--
+-- Mutates `def` (the decoded payload) and returns how many ids it removed.
+function R:PruneForeignIDs(def)
+    if not DF.IS_FOREVER or type(def) ~= "table" then return 0 end
+    local exists = C_Spell and C_Spell.DoesSpellExist
+    if not exists or not exists(6603) then return 0 end
+    local n = 0
+    for _, key in ipairs({ "spells", "rawIDs" }) do
+        local set = def[key]
+        if type(set) == "table" then
+            for sid in pairs(set) do
+                if type(sid) ~= "number" or not exists(sid) then
+                    set[sid] = nil
+                    n = n + 1
+                end
+            end
+        end
+    end
+    return n
 end
 
 -- ------------------------------------------------------------

@@ -76,7 +76,9 @@ end
 -- button + held-modifier resolution, and the macro type is not in the
 -- SecureUnitButton gate's expectBinding set — so the 12.0.7 None-drop still
 -- never fires. RE-CHECK EACH PTR BUILD; delete this path once click is fixed.
-local CLICK_DELEGATE_BROKEN = select(4, GetBuildInfo()) >= 120100
+-- The 12.1 engine (DF.IS_MODERN_ENGINE), which includes WoW Forever: it reports
+-- 16001 but ships the 12.1.5 click path. UNVERIFIED on Forever in game.
+local CLICK_DELEGATE_BROKEN = DF.IS_MODERN_ENGINE
 
 local CLICK_BUTTON_NAME = { ["1"] = "LeftButton", ["2"] = "RightButton",
                             ["3"] = "MiddleButton", ["4"] = "Button4", ["5"] = "Button5" }

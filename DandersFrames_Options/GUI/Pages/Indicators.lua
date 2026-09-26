@@ -2968,6 +2968,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Auras > Missing Buffs
     local pageMissingBuffs = CreateSubTab("auras", "auras_missingbuffs", L["Missing Buffs"])
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- WoW Forever: the feature is off there (DF:UseFactoryForMissingBuff) until its
+        -- raid-buff ids are known, so explain instead of offering controls that do nothing.
+        -- The page stays registered -- search, auto-profiles and See Also all link to it.
+        if DF.IS_FOREVER then
+            local foreverBanner = GUI:CreateInfoBanner(self.child, {tone = "info"})
+            foreverBanner:SetText(L["Missing buff icons aren't available on WoW Forever yet."])
+            Add(foreverBanner, foreverBanner.layoutHeight, "both")
+            return
+        end
+
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
 

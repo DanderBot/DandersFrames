@@ -3342,6 +3342,16 @@ end
 function DF:UpdateTestMissingBuff(frame)
     if not frame then return end
 
+    -- Missing raid-buff icons are off on WoW Forever (see DF:UseFactoryForMissingBuff),
+    -- so test mode must not preview a feature that never draws there.
+    if DF.IS_FOREVER then
+        if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+            frame.dfMissingStripShown = false
+            frame.missingBuffStrip:Hide()
+        end
+        return
+    end
+
     local db = DF:GetFrameDB(frame)
 
     -- 12.1: the live missing-buff display is the factory badge STRIP (one badge

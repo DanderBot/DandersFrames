@@ -3345,7 +3345,9 @@ end
 do
     local MIN_INTERFACE = 120100  -- 12.1.0
     local clientToc = select(4, GetBuildInfo())
-    if type(clientToc) == "number" and clientToc < MIN_INTERFACE then
+    -- WoW Forever reports 16001 but runs the 12.1 engine and is supported
+    -- (Core\ClientFlavor.lua), so it must not trip the older-client warning.
+    if type(clientToc) == "number" and clientToc < MIN_INTERFACE and not DF.IS_FOREVER then
         local guardFrame = CreateFrame("Frame")
         guardFrame:RegisterEvent("PLAYER_LOGIN")
         guardFrame:SetScript("OnEvent", function(self)
@@ -4870,6 +4872,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Ensure structure exists
         if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
         if not DandersFramesDB_v2.currentProfile then DandersFramesDB_v2.currentProfile = "Default" end
+
+        -- Profiles copied in from the OTHER game version (retail <-> WoW Forever) park
+        -- their Aura Designer data before anything below reads or migrates it. Early on
+        -- purpose: the designer migrations then only ever see this version's data.
+        if DF.FlavorCorrection then DF.FlavorCorrection.RunLoginPass(DandersFramesDB_v2) end
         -- (Removed) wizardConfigs was seeded here for WizardBuilder.lua, which is
         -- gone. Nothing ever READ the table — it was write-only even while the
         -- builder was reachable — so there is nothing to migrate. Any key already

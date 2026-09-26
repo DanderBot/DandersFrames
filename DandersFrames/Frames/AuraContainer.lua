@@ -169,8 +169,9 @@ local _supported            -- tri-state: nil = not yet probed
 -- container creates + anchors its own buttons via AddAuraGroup / AddAuraSlot. So the
 -- positive probe is simply "does the container expose AddAuraGroup".
 local function probeSupported()
-    local toc = select(4, GetBuildInfo())
-    if type(toc) ~= "number" or toc < 120100 then return false end
+    -- The 12.1 engine, not a bare `toc >= 120100`: WoW Forever reports 16001 on the
+    -- same engine, and the capability probe below is the real test anyway.
+    if not DF.IS_MODERN_ENGINE then return false end
     if not (AuraUtil and AuraUtil.IsValidFilterString) then return false end
     local ok, frame = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
     if not ok or not frame then return false end

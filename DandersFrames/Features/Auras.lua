@@ -3819,8 +3819,13 @@ local MISSING_BADGE_SIZE = 24   -- fallback when missingBuffIconSize is unset; m
 local MISSING_BADGE_GAP  = 2
 
 -- Render gate (excludes test mode; the test drive calls the factory itself).
+-- ☠ OFF ON WOW FOREVER until its raid-buff ids are known: vanilla-era buffs come in RANKS
+-- with different spell ids, so checking retail's (rank-1) ids would flag buffed players as
+-- missing, and Skyfury / Blessing of the Bronze don't exist there. Every caller already
+-- hides the strip when this is false.
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
+        and not DF.IS_FOREVER
         and not (DF.testMode or DF.raidTestMode)
         and not DF:MemTestDisabled("enableMissingBuff")
 end

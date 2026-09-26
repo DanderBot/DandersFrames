@@ -9,6 +9,12 @@ local addonName, DF = ...
 -- Initialize the AuraDesigner namespace
 DF.AuraDesigner = DF.AuraDesigner or {}
 
+-- ☠ WOW FOREVER: the curated per-spec tables below (TooltipSpellIDs, SpellIDs,
+-- SelfOnlySpellIDs, AlternateSpellIDs, TrackableAuras) are `DF.IS_FOREVER and {} or {...}`.
+-- They hold retail spell ids for retail spec kits (Evoker, Mistweaver, ...), which don't exist
+-- or differ on Forever. Empty there, the Aura Designer offers only spells the user adds by ID.
+-- Every reader already tolerates a missing spec entry. SpecMap / SpecInfo stay shared.
+
 -- ============================================================
 -- SPEC MAP
 -- Maps CLASS_SPECNUM to internal spec key
@@ -188,7 +194,7 @@ DF.AuraDesigner.IconTextures = {
 -- (e.g. 409895 shows "Upheaval" instead of "Verdant Embrace").
 -- Map aura name → castable spell ID for correct tooltip display.
 -- ============================================================
-DF.AuraDesigner.TooltipSpellIDs = {
+DF.AuraDesigner.TooltipSpellIDs = DF.IS_FOREVER and {} or {
     VerdantEmbrace = 360995,
     EbonMight = 395296,
 }
@@ -197,7 +203,7 @@ DF.AuraDesigner.TooltipSpellIDs = {
 -- SPELL IDS PER SPEC
 -- Used for runtime aura matching via reverse spell ID lookup
 -- ============================================================
-DF.AuraDesigner.SpellIDs = {
+DF.AuraDesigner.SpellIDs = DF.IS_FOREVER and {} or {
     PreservationEvoker = {
         Echo = 364343, Reversion = 366155, EchoReversion = 367364,
         DreamBreath = 355941, EchoDreamBreath = 376788,
@@ -265,7 +271,7 @@ DF.AuraDesigner.SpellIDs = {
 -- (see AuraAdapter's GetSpecIdentity), not a filter exception. The
 -- entry was removed 2026-08-12 rather than left as a false example.
 -- ============================================================
-DF.AuraDesigner.SelfOnlySpellIDs = {
+DF.AuraDesigner.SelfOnlySpellIDs = DF.IS_FOREVER and {} or {
     RestorationDruid = {
         -- Field-verified: on the druid this reads sourceUnit = the linked ally.
         [474754] = "SymbioticRelationship",
@@ -278,7 +284,7 @@ DF.AuraDesigner.SelfOnlySpellIDs = {
 -- These are merged into the reverse lookup so both IDs resolve
 -- to the same aura name.
 -- ============================================================
-DF.AuraDesigner.AlternateSpellIDs = {
+DF.AuraDesigner.AlternateSpellIDs = DF.IS_FOREVER and {} or {
     RestorationShaman = {
         [974] = "EarthShield",  -- alternate ID for Earth Shield (primary is 383648)
         [382021] = "EarthlivingWeapon",  -- alternate ID (primary is 382024)
@@ -299,7 +305,7 @@ DF.AuraDesigner.AlternateSpellIDs = {
 -- Secret auras have secret = true (used for visual distinction in Options UI only)
 -- Colors are used for tile accents in the Options UI
 -- ============================================================
-DF.AuraDesigner.TrackableAuras = {
+DF.AuraDesigner.TrackableAuras = DF.IS_FOREVER and {} or {
     PreservationEvoker = {
         { name = "Echo",             display = "Echo",              color = {0.31, 0.76, 0.97} },
         { name = "Reversion",        display = "Reversion",         color = {0.51, 0.78, 0.52} },

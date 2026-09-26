@@ -866,6 +866,10 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     local exportData = {
         version = DF.VERSION,
         profileName = exportProfileName,
+        -- "retail" / "forever": which game version the payload's spell ids belong to.
+        -- Importers on the other version reset its Aura Designer data (FlavorCorrection).
+        -- Absent on older strings, which are all retail's.
+        sourceFlavor = DF.CLIENT_FLAVOR,
     }
     
     if not DF.db then
@@ -1430,6 +1434,11 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                 end
             end
         end
+        -- ...except the two game-version keys (Core\FlavorCorrection.lua), which describe
+        -- the SOURCE profile, not this one: its parked Aura Designer data would be another
+        -- profile's (and a shared table reference), and FC.AfterImport stamps _flavor below.
+        newProfile._parkedAD = nil
+        newProfile._flavor = nil
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
@@ -1494,6 +1503,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         adPresetsImported = false
     end
     if (aurasImported or adPresetsImported) and importData.customAuraFilters and DF.FilterRegistry then
+        DF.FilterRegistry._lastImportPruned = 0   -- counted by the WoW Forever prune, reported below
         local remap = DF.FilterRegistry:ImportCustomFilters(importData.customAuraFilters)
         local function remapCustoms(sel)
             if type(sel) == "table" and type(sel.customs) == "table" then
@@ -2021,8 +2031,22 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     local SU = DF.SettingsUndo
     if SU then SU:Clear() end
 
+    -- Retail <-> WoW Forever: Aura Designer data from the other version is keyed by its
+    -- spell ids and can't work here. The import is a copy, so it's reset rather than
+    -- parked (Core\FlavorCorrection.lua). Before the refresh, so nothing draws it first.
+    local adReset = DF.FlavorCorrection
+        and DF.FlavorCorrection.AfterImport(DF.db, importData, adPresetsImported)
+    local pruned = DF.FilterRegistry and DF.FilterRegistry._lastImportPruned or 0
+    if DF.FilterRegistry then DF.FilterRegistry._lastImportPruned = nil end
+
     DF:FullProfileRefresh()
     DF:Say(L["Profile imported successfully!"])
+    if adReset then
+        DF:Say(L["Aura Designer settings in this import came from a different version of the game and were reset, because spell IDs differ between versions."])
+    end
+    if pruned > 0 then
+        DF:Say(format(L["%d spell IDs that don't exist on WoW Forever were left out of the import."], pruned))
+    end
 
     -- If the imported state changed which frame modes are enabled, prompt
     -- the user to reload so headers can be (re)created.

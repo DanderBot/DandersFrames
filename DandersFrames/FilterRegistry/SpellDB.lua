@@ -21,14 +21,20 @@ local pairs, ipairs = pairs, ipairs
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.DBStamp = { harvest = "2026-09-09", gameBuild = 69497 }
+-- ☠ WOW FOREVER SHIPS AN EMPTY DATABASE. Every table below is `DF.IS_FOREVER and {} or
+-- { ...retail... }`: this harvest is retail's, and on Forever its ids are wrong or missing.
+-- The short-circuit means the retail tables are never even built there. R.Categories is
+-- shared (same keys, empty lists), so stored category keys and every page still work.
+-- Regeneration (/update-spelldb) must keep the `DF.IS_FOREVER and {} or` prefixes.
+R.DBStamp = DF.IS_FOREVER and { flavor = "forever" }
+    or { harvest = "2026-09-09", gameBuild = 69497 }
 
 -- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
 -- reason. Regeneration (/update-spelldb) DROPS these ids from records (a record
 -- whose only id is excluded vanishes entirely) and the diff tool treats their
 -- absence as intentional, so they stay gone across re-harvests. Remove an entry
 -- to let the next regeneration re-add the spell.
-R.Excluded = {
+R.Excluded = DF.IS_FOREVER and {} or {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
     -- Halo: a real aura, but HIDDEN - the server applies it (WCL logs 19-47M ms
     -- of uptime per id) and the client never draws it on the buff bar. 100% self,
@@ -60,7 +66,7 @@ R.Excluded = {
 -- re-runs the merge step (ids whose patched sets now match collapse into one
 -- record); the diff tool compares against the PATCHED expectation. List EVERY id
 -- of the spell. Remove an entry to return to the harvest's placement.
-R.CategoryPatch = {
+R.CategoryPatch = DF.IS_FOREVER and {} or {
     -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
     -- kept in the DB/picker but in no preset (empty final category set):
     [1278914] = {},  -- Dream Guide (out of Healing)
@@ -123,7 +129,7 @@ R.Categories = {
 
 -- Records are grouped by the section they FIRST appear in within the
 -- source data; multi-category spells carry every category in `cats`.
-R.Spells = {
+R.Spells = DF.IS_FOREVER and {} or {
     -- ------------------------------------------------------------
     -- Healing
     -- ------------------------------------------------------------

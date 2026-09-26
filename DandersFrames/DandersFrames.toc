@@ -42,6 +42,9 @@ Locales\zhTW.lua
 DandersFrames.xml
 
 # Core
+# Retail vs WoW Forever flags (DF.IS_FOREVER / DF.IS_MODERN_ENGINE). FIRST: the
+# defaults, the spell database and the profile code below all branch on them.
+Core\ClientFlavor.lua
 Core\Config.lua
 # The defaults-diff engine (DF.Defaults). Pure reads, no state -- it only ever
 # looks at DF.PartyDefaults / DF.RaidDefaults and DF.db, both at CALL time, so
@@ -50,6 +53,9 @@ Core\Config.lua
 Core\Defaults.lua
 Core\Changelog.lua
 Core\Profile.lua
+# Profiles moving between retail and WoW Forever (Aura Designer park/restore).
+# Pure functions; Core.lua calls them at ADDON_LOADED, Profile.lua after an import.
+Core\FlavorCorrection.lua
 Core.lua
 # The coalescing sink for the five heavy settings sweeps. Must load after
 # Core.lua: it replaces DF:UpdateAll with an arm-stub, and Core.lua defines the

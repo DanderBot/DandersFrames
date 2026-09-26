@@ -2205,11 +2205,18 @@ end
     do
         local stamp = R.DBStamp
         if stamp then
-            local freshText = format(L["Spell database: %s (build %d)"], stamp.harvest, stamp.gameBuild)
-            local clientBuild = tonumber((select(2, GetBuildInfo())))
-            if clientBuild and clientBuild > stamp.gameBuild then
-                freshText = freshText .. "  |c" .. GUI:ToneHex("caution")
-                    .. L["Spell database may be outdated."] .. "|r"
+            local freshText
+            -- WoW Forever ships no database (SpellDB.lua), so its stamp has no harvest
+            -- or build to print -- and `%d` on a nil build is a hard error.
+            if stamp.flavor == "forever" or not stamp.gameBuild then
+                freshText = L["No built-in spell list on WoW Forever yet. Create a custom filter, then add spells by ID."]
+            else
+                freshText = format(L["Spell database: %s (build %d)"], stamp.harvest, stamp.gameBuild)
+                local clientBuild = tonumber((select(2, GetBuildInfo())))
+                if clientBuild and clientBuild > stamp.gameBuild then
+                    freshText = freshText .. "  |c" .. GUI:ToneHex("caution")
+                        .. L["Spell database may be outdated."] .. "|r"
+                end
             end
             local freshLabel = GUI:CreateLabel(leftPanel, freshText, LEFT_W)
             freshLabel:SetPoint("TOPLEFT", leftPanel, "BOTTOMLEFT", 0, -2)
@@ -3361,7 +3368,9 @@ end
         end
 
         emptyText:SetShown(shown == 0)
-        emptyText:SetText(searchText ~= "" and L["No results found"] or L["This filter is empty."])
+        emptyText:SetText(searchText ~= "" and L["No results found"]
+            or (isPreset and DF.IS_FOREVER and L["No built-in spell list on WoW Forever yet. Create a custom filter, then add spells by ID."])
+            or L["This filter is empty."])
 
         scrollContent:SetHeight(mmax(1, y + 4))
     end
@@ -4433,7 +4442,9 @@ end
                 end
 
                 emptyTextP:SetShown(shown == 0)
-                emptyTextP:SetText(pane.query ~= "" and L["No results found"] or L["This filter is empty."])
+                emptyTextP:SetText(pane.query ~= "" and L["No results found"]
+                    or (isPreset and DF.IS_FOREVER and L["No built-in spell list on WoW Forever yet. Create a custom filter, then add spells by ID."])
+                    or L["This filter is empty."])
                 listContent:SetHeight(mmax(1, y + 4))
 
                 for _, b in ipairs(paneButtons) do
