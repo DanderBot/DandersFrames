@@ -29,7 +29,6 @@
 - (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
-- (Text Designer, Aura Designer) Switching a designer off now really does lock its settings, instead of only dimming them. You can still open a row and read what is in it, but nothing in there can be changed or added until you switch the designer back on.
 
 ### Changes
 
