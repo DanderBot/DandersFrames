@@ -1324,6 +1324,7 @@ L["Missing Buffs"] = true
 L["Missing Health"] = true
 L["Missing Health Alpha"] = true
 L["Missing Health Color"] = true
+L["Missing Health Gradient"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
 L["Modern"] = true

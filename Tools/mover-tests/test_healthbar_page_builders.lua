@@ -420,8 +420,8 @@ do
     -- ---- the cards open in the same order -- the one-column fold's --------
     local order = {}
     for at, name in PAGE:gmatch('()OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Gradient | Color | Texture | Background | Missing Health | Reduced Max Health",
-       "order: the gradient builder's card (declared once) and the five boxes' cards, in source order")
+    eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Reduced Max Health",
+       "order: the five boxes' cards, in source order (the gradient builder's title is chosen per ramp -- section 7)")
     local function at(needle) return PAGE:find(needle, 1, true) end
     local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)\n\n            local band = OpenSection(L["Background"]',
                   'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)\n        end',
@@ -459,10 +459,19 @@ do
 
     -- The box: classic's bare 280, modern's card in column 1 under a stable key
     -- per ramp, hidden with its colour mode -- and no pin (no builder argument).
-    check(PAGE:find("local gradGroup = classicLayout\n            and GUI:CreateSettingsGroup(self.child, 280)\n            or OpenSection(L[\"Gradient\"], (prefix == \"healthColor\") and \"health_gradient\" or \"health_missinggradient\",\n                1, nil, nil, hideOn)", 1, true) ~= nil,
-          "gradient: classic's 280 box, or a card keyed per ramp in column 1, hidden with its mode, with no pin")
+    check(PAGE:find("local gradGroup = classicLayout\n            and GUI:CreateSettingsGroup(self.child, 280)\n            or OpenSection((prefix == \"healthColor\") and L[\"Health Gradient\"] or L[\"Missing Health Gradient\"],\n                (prefix == \"healthColor\") and \"health_gradient\" or \"health_missinggradient\",\n                1, nil, nil, hideOn)", 1, true) ~= nil,
+          "gradient: classic's 280 box, or a card titled and keyed per ramp in column 1, hidden with its mode, with no pin")
     check(PAGE:find('if classicLayout then gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40) end', 1, true) ~= nil,
-          "gradient: ...only classic's box takes a header -- the card's title already says Gradient")
+          "gradient: ...only classic's box takes a header -- the card's title already names the gradient")
+    -- ☠ TWO CARDS, TWO TITLES. Both ramps were once "Gradient", and a column
+    -- holding two identical titles cannot be told apart. The collapse keys are
+    -- the shipped ones (checked just above), so folds survive the rename.
+    check(PAGE:find('OpenSection(L["Gradient"]', 1, true) == nil,
+          "gradient: no card is titled a bare Gradient")
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    for _, k in ipairs({ "Health Gradient", "Missing Health Gradient" }) do
+        check(ENUS:find('L["' .. k .. '"] = true', 1, true) ~= nil, "gradient: enUS ships L[\"" .. k .. "\"]")
+    end
     check(PAGE:find("if classicLayout then AddToSection(gradGroup, nil, 1) else CloseSection(gradGroup) end", 1, true) ~= nil,
           "gradient: ...column 1 in classic, the card's own band close in modern")
     check(PAGE:find("local function BuildGradientStopBox(prefix, hideOn)\n        local listKey", 1, true) ~= nil,

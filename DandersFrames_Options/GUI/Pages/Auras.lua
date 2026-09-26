@@ -1698,7 +1698,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- ☠ IN MODERN IT IS A CARD OF ITS OWN, in column 1 under the card it
         -- belongs to, and its band IS the group every row below goes into -- so
-        -- it takes no header (the card's title says "Gradient") and no pin (a
+        -- it takes no header (the card's title names the ramp) and no pin (a
         -- pinned copy would be closed by the very rebuild its + button causes).
         -- Every row, the bar and the footer are prose-shaped (no bound value), so
         -- the card's two-per-row flow gives each a row of its own; and the band
@@ -1715,12 +1715,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- inside the page builder's indent, so a second `if classicLayout then ...
         -- else` at that indent here is one the section's own arm-locators would
         -- find first. Classic builds its 280 box; modern opens a card in column 1
-        -- under a stable key of its own, hidden with its colour mode.
+        -- under a stable key of its own, hidden with its colour mode. Each card
+        -- names its ramp ("Health Gradient" / "Missing Health Gradient"): two
+        -- cards both titled "Gradient" in one column could not be told apart.
+        -- The keys are the ones they shipped with, so folds survive the rename.
         local gradGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
-            or OpenSection(L["Gradient"], (prefix == "healthColor") and "health_gradient" or "health_missinggradient",
+            or OpenSection((prefix == "healthColor") and L["Health Gradient"] or L["Missing Health Gradient"],
+                (prefix == "healthColor") and "health_gradient" or "health_missinggradient",
                 1, nil, nil, hideOn)
-        -- The card's title already says Gradient; only classic's box needs one.
+        -- The card's title already names the gradient; only classic's box needs one.
         if classicLayout then gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40) end
         local gradInner = GUI:GroupInnerWidth(gradGroup)
         -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
