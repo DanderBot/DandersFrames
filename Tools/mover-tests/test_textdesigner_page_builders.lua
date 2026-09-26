@@ -1,8 +1,13 @@
 local NS = ...
 
 -- ============================================================
--- TEXT DESIGNER PAGE BUILDERS -- the popout layout's rows
+-- TEXT DESIGNER PAGE BUILDERS
 -- ------------------------------------------------------------
+-- ⚠ 2026-09-26: the popout "rows" page (TextDesigner/UI/Rows.lua) and the
+-- designer shell were deleted; the designer only builds its split panel. The
+-- checks that pinned the rows page went with them; what is left pins the shared
+-- section builders. The history below is kept for context.
+--
 -- The Text Designer was the second and last 50/50 split-panel ISLAND: a preview
 -- welded to the left half, a three-tab settings column to the right, everything
 -- hand-anchored inside frames the page harness never saw. Phase 4 of the designer
@@ -44,8 +49,6 @@ local NS = ...
 -- ============================================================
 
 local TD    = options_file_source("TextDesigner/UI/Options.lua")
-local ROWS  = options_file_source("TextDesigner/UI/Rows.lua")
-local SHELL = options_file_source("GUI/DesignerShell.lua")
 local CARDS = options_file_source("AuraDesigner/UI/Cards.lua")
 local AURAS = options_file_source("GUI/Pages/Auras.lua")
 local TOC   = options_file_source("DandersFrames_Options.toc")
@@ -142,139 +145,29 @@ local function funcBody(src, header)
 end
 
 -- ============================================================
--- 1. THE PAGE IS ON THE STANDARD HARNESS, AND TAKES THE SHARED MACHINERY
--- The whole point of the conversion: the designer stops being an island. It
--- cannot get a band, a row, a modified tick or a search entry without these.
+-- 1. THE PAGE IS THE SPLIT PANEL
+-- 2026-09-26: the rows page (TextDesigner/UI/Rows.lua) and the designer shell
+-- were deleted; the designer builds its split panel in both settings layouts.
 -- ============================================================
-print("-- Text Designer: the page joins the column system")
+print("-- Text Designer: the page is the split panel")
 do
     check(AURAS:find("DF.BuildTextDesignerPage(GUI, self, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: the page registration passes Add and AddSpace through")
     check(TD:find("function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)", 1, true) ~= nil,
           "harness: ...and the entry point takes them")
-    check(TD:find("if Add and P.BuildTextDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
-          "harness: the popout arm needs Add, the designer switch AND a non-classic layout")
-    check(TD:find("local function BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
-          "harness: ...and the split panel survives as classic's arm")
-
-    -- ☠ THE ISLAND IS NOT IN page.children -- it never went through Add -- so
-    -- DoBuild's own retire loop cannot see it. The popout arm has to drop it by
-    -- hand or it sits under the bands showing the last mode's controls.
-    check(TD:find('for _, key in ipairs({ "presetBar", "controlsBar", "previewPanel",', 1, true) ~= nil,
-          "harness: the popout arm retires the island's own surfaces")
-    -- ...and the island's RefreshStates, which REPLACES the harness's on the page
-    -- object and would otherwise lay the band column out with a verb that reaches
-    -- for a preview panel that no longer exists.
-    check(TD:find("page.RefreshStates = function(self) return GUI.PageRefreshStates(self) end", 1, true) ~= nil,
-          "harness: ...and puts the harness's own RefreshStates back")
-
-    check(ROWS:find("local tools = GUI:CreatePopoutPageTools(page)", 1, true) ~= nil,
-          "tools: the row page takes the shared machinery")
-    check(ROWS:find("if not tools then return end", 1, true) ~= nil,
-          "tools: ...and bails where it answers nil, which is classic")
-    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
-                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
-                         "RefreshAfterGroupWrite", "HoldReason", "BandWidth" }) do
-        check(ROWS:find("local function " .. v .. "(", 1, true) == nil,
-              "tools: the row page does not re-declare " .. v)
-    end
-    check(ROWS:find("_popoutHolders", 1, true) == nil,
-          "tools: the row page never manages the popout holders itself")
-    check(ROWS:find("_popoutRowForKey", 1, true) == nil,
-          "tools: ...nor the search row map")
-
-    -- The all-rows rule, for this page.
-    check(ROWS:find("GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "band: the element's band is chromeless, at the width the layout pass gives it")
-    check(ROWS:find("GUI:CreateSettingsGroup(page.child, 280", 1, true) == nil,
-          "band: ...and nothing on the page is mounted at a column width")
-    local addBoth = 0
-    for _ in ROWS:gmatch('Add%([%w_%.]+,%s*[%w_%.]*,?%s*"both"%)') do addBoth = addBoth + 1 end
-    check(addBoth >= 4, "band: every object the page adds is added \"both\" (" .. addBoth .. ")")
-
-    -- The manifest, which is also what the all-rows sweep reads the page off.
-    check(TOC:find("TextDesigner\\UI\\Rows.lua", 1, true) ~= nil,
-          "toc: the row page is in the companion's manifest")
-    local optAt = TOC:find("TextDesigner\\UI\\Options.lua", 1, true)
-    local rowAt = TOC:find("TextDesigner\\UI\\Rows.lua", 1, true)
-    local cardAt = TOC:find("AuraDesigner\\UI\\Cards.lua", 1, true)
-    check(optAt and rowAt and optAt < rowAt,
-          "toc: ...after the file whose private table it aliases at load")
-    check(cardAt and rowAt and cardAt < rowAt,
-          "toc: ...and after the file whose canvas it borrows")
+    check(TD:find("BuildTextDesignerRowsPage", 1, true) == nil,
+          "harness: the designer has no rows arm")
+    check(TD:find("return BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
+          "harness: ...and builds the split panel")
+    check(TOC:find("TextDesigner\\UI\\Rows.lua", 1, true) == nil,
+          "toc: the row page is gone from the companion's manifest")
 end
 
 -- ============================================================
--- 2. THE SHELL IS THE SHARED ONE, AND THE TEXT DESIGNER FILLS IT IN
--- The shell was written with a second caller in mind. This is that caller, so
--- this is where "it is generic" stops being a claim and becomes a fact.
+-- 3. THE SECTION BUILDERS
 -- ============================================================
-print("-- Text Designer: the shared designer shell")
+print("-- Text Designer: the section builders")
 do
-    check(ROWS:find("GUI:BuildDesignerShell(page, {", 1, true) ~= nil,
-          "shell: the page is built through the shared shell")
-    for _, opt in ipairs({ "banner = function(parent)", "canvas = function(host, shell)",
-                           "canvasHeight = function()", "tabs = {", "activeTab = state.activeTab",
-                           "onTab     = function(key)", "buildTab = function(key, shell)" }) do
-        check(ROWS:find(opt, 1, true) ~= nil, "shell: it supplies " .. opt)
-    end
-    -- The Text Designer has no pool strip -- that is the Aura Designer's, and it
-    -- is a parameter for exactly this reason.
-    check(ROWS:find("strips", 1, true) == nil,
-          "shell: ...and no strips, which the Aura Designer alone has")
-    -- The shell still knows nothing about either designer.
-    local SHELL_CODE = SHELL:gsub("%-%-[^\n]*", "")
-    check(SHELL_CODE:find("TextDesigner", 1, true) == nil,
-          "shell: the shell never reaches for the Text Designer either")
-
-    -- The three tabs, in the order the split panel had them.
-    local tabs = {}
-    for key in ROWS:gmatch('{ key = "(%a+)",%s*label = L%[') do tabs[#tabs + 1] = key end
-    eq(#tabs, 3, "shell: three tabs")
-    eq(tabs[1], "texts",  "shell: tab 1")
-    eq(tabs[2], "groups", "shell: tab 2")
-    eq(tabs[3], "global", "shell: tab 3")
-
-    -- A tab click is the harness's own rebuild, not a show/hide of hidden frames:
-    -- the split panel's three tab-content frames are gone.
-    check(ROWS:find("state.activeTab = key", 1, true) ~= nil,
-          "shell: a tab click records which tab")
-    check(ROWS:find("if page.Refresh then page:Refresh() end", 1, true) ~= nil,
-          "shell: ...and rebuilds the page")
-end
-
--- ============================================================
--- 3. THE ROWS PER ELEMENT
--- Content / Appearance / Position, and one more on a text group. Declared in ONE
--- place, because a second list is a second chance to disagree with the builders.
--- ============================================================
-print("-- Text Designer: the rows per element")
-do
-    local mount = TD and true
-    local rows = {}
-    for label in ROWS:gmatch('AddRow%(L%["([^"]+)"%]') do rows[#rows + 1] = label end
-    eq(#rows, 4, "rows: four AddRow call sites")
-    eq(rows[1], "Content",    "rows: 1 is Content")
-    eq(rows[2], "Items",      "rows: 2 is Items")
-    eq(rows[3], "Appearance", "rows: 3 is Appearance")
-    eq(rows[4], "Position",   "rows: 4 is Position")
-
-    -- ...and Items is the only conditional one.
-    check(ROWS:find('if isGroup then\n        AddRow(L["Items"]', 1, true) ~= nil,
-          "rows: Items exists only on a text group")
-    check(ROWS:find('local isGroup = elem.contentType == "group"', 1, true) ~= nil,
-          "rows: ...and 'a text group' is the contentType the runtime uses")
-
-    -- Each row mounts the builder that already existed, not a copy of it.
-    check(ROWS:find("BuildContentSection(GUI, holder, elem, tdDB, state, page, card, 0, false, group)", 1, true) ~= nil,
-          "rows: Content mounts the split panel's own Content builder")
-    check(ROWS:find("BuildGroupItemsSection(GUI, holder, elem, tdDB, state, page, card, 0, group)", 1, true) ~= nil,
-          "rows: Items mounts the item list")
-    check(ROWS:find("BuildAppearanceSection(GUI, holder, elem, card, 0, group)", 1, true) ~= nil,
-          "rows: Appearance mounts the Appearance builder")
-    check(ROWS:find("BuildPositionSection(GUI, holder, elem, tdDB, card, 0, group)", 1, true) ~= nil,
-          "rows: Position mounts the Position builder")
-
     -- ☠ ONE BUILDER, TWO HOSTS. `place` is the whole of the difference between a
     -- card body and a pane -- if a builder grew a second copy of its widgets for
     -- the pane, the two layouts could disagree about what a text element has.
@@ -414,11 +307,6 @@ do
     }, "global")
     checkPlaced(funcBody(TD, "local function BuildGlobalTab(GUI, parent, state, tdDB, page, group)"), "global")
 
-    -- One row, not seven: the Global tab IS one group of settings.
-    check(ROWS:find("local function BuildGlobalTabRows(ctx)", 1, true) ~= nil,
-          "global: the tab is built as rows")
-    check(ROWS:find("BuildGlobalTab(GUI, holder, state, tdDB, page, group)", 1, true) ~= nil,
-          "global: ...mounting the split panel's own builder into the pane")
 end
 
 -- ============================================================
@@ -511,82 +399,14 @@ do
 end
 
 -- ============================================================
--- 6. THE ROWS ARE WIRED TO THE RECORD; THE CONTROLS ARE NOT
--- Both halves, because each mistake is silent in its own direction.
+-- 6. THE RECORD AND THE CARD'S FOLD KEY
 -- ============================================================
-print("-- Text Designer: each row's tick, keys and footer")
+print("-- Text Designer: the element record and the card's fold key")
 do
-    check(ROWS:find("local record = ElementDefaultsRecord(elem, tdDB)", 1, true) ~= nil,
-          "wiring: the row page resolves the element's defaults record")
-    check(ROWS:find("local RowRecord = function() return record end", 1, true) ~= nil,
-          "wiring: ...as a function, so a mode switch is followed rather than frozen")
-    -- ⚠ COUNTED, NOT MERELY FOUND. There is more than one CreatePopoutRow site
-    -- on this page, and a `find` is satisfied by the one that is still right --
-    -- so re-binding the other to the element would pass. Every row, every time.
-    local popoutRows, bound, claims, ticks, footers = 0, 0, 0, 0, 0
-    for _ in ROWS:gmatch("GUI:CreatePopoutRow%(") do popoutRows = popoutRows + 1 end
-    for _ in ROWS:gmatch("db      = RowRecord,") do bound = bound + 1 end
-    for _ in ROWS:gmatch("tools%.ClaimKeys%(row, content%)") do claims = claims + 1 end
-    for _ in ROWS:gmatch("tools%.WireModifiedTick%(row%)") do ticks = ticks + 1 end
-    for _ in ROWS:gmatch("tools%.WireFooter%(row, ApplyElementGroup, RowRecord%)") do footers = footers + 1 end
-    eq(popoutRows, 2, "wiring: the page has two popout-row sites -- an element's, and Global's")
-    eq(bound,   popoutRows, "wiring: ...and EVERY one takes the record")
-    eq(claims,  popoutRows, "wiring: ...claims the keys its pane registered")
-    eq(ticks,   popoutRows, "wiring: ...gets the amber modified tick")
-    eq(footers, popoutRows, "wiring: ...and a footer whose verbs write through the record")
-    check(ROWS:find("tools.RowDB", 1, true) == nil,
-          "wiring: no designer row is wired to DF.db[mode]")
-
-    -- ☠ AND THE OTHER HALF. The controls bind to `elem`; a write through the
-    -- record marks an override flag, so binding them to it would pin all five
-    -- appearance fields the moment a pane was built.
-    check(ROWS:find("BuildAppearanceSection(GUI, holder, record", 1, true) == nil,
-          "wiring: no section builder is handed the record instead of the element")
-    check(ROWS:find("BuildContentSection(GUI, holder, record", 1, true) == nil,
-          "wiring: ...not the Content one either")
     check(TD:find("if TD_OVERRIDABLE[k] then\n                elem.overrides = elem.overrides or {}", 1, true) ~= nil,
-          "wiring: ...and the record's own __newindex is what would have marked them")
-
-    -- The count badge is derived, never declared: what a Content pane holds
-    -- varies with the element's content type.
-    check(ROWS:find("count   = content and content.groupChildren and #content.groupChildren or nil", 1, true) ~= nil,
-          "wiring: the count badge is read off the pane that was actually built")
-
-    -- The Global tab's row takes the OTHER record, over the preset's own block.
-    check(ROWS:find("local record = GlobalDefaultsRecord(tdDB)", 1, true) ~= nil,
-          "wiring: the Global row takes the global-defaults record")
-end
-
--- ============================================================
--- 7. THE ELEMENT ROW EXPANDS; IT DOES NOT OPEN A PANEL
--- ...and its fold state adds no db key, which is the trap the Aura Designer's
--- conversion nearly shipped.
--- ============================================================
-print("-- Text Designer: the element is a section, its groups are the rows")
-do
-    check(ROWS:find("local section = GUI:CreateCollapsibleSection(page.child, title, false, bandW)", 1, true) ~= nil,
-          "expand: an element is a collapsible section at the band's width")
-    check(ROWS:find("section:RegisterChild(band)", 1, true) ~= nil,
-          "expand: ...and its band is a section child, so the fold collapses the rows with it")
-    check(ROWS:find("if not section.expanded then return end", 1, true) ~= nil,
-          "expand: a collapsed element builds no rows at all")
-
-    -- ☠ NO NEW DB KEYS. CreateCollapsibleSection persists its fold under the
-    -- section TITLE, and a text element's title is a USER-EDITABLE LABEL -- one
-    -- permanent profile key per element per rename. The card layout already
-    -- persists this under a stable id key; that is the key this uses.
-    check(ROWS:find('local foldKey = (isGroup and "td_group_" or "td_elem_") .. tostring(elem.id)', 1, true) ~= nil,
-          "expand: the fold key is the card layout's own stable id key")
+          "wiring: the record's own __newindex marks an override")
     check(TD:find('local cardKey = "td_elem_" .. tostring(elem.id)', 1, true) ~= nil,
-          "expand: ...which is the same key the card writes")
-    check(ROWS:find("section.Toggle = function(self)", 1, true) ~= nil,
-          "expand: Toggle is REPLACED, so the factory's own title write never runs")
-    check(ROWS:find("saved[foldKey] = self.expanded and true or nil", 1, true) ~= nil,
-          "expand: ...and writes the id key rather than the title")
-    -- The only GetCollapsedGroups read on this page is through that key.
-    local gcg = 0
-    for _ in ROWS:gmatch("GetCollapsedGroups") do gcg = gcg + 1 end
-    eq(gcg, 1, "expand: the collapsed-groups store is touched in exactly one place")
+          "expand: the card folds under a key built from the element's id")
 end
 
 -- ============================================================
@@ -596,14 +416,11 @@ end
 -- ============================================================
 print("-- Text Designer: the shared canvas")
 do
-    check(ROWS:find("AD.CreateFramePreview(host, 0, nil, {", 1, true) ~= nil,
-          "canvas: the row page mounts the Aura Designer's canvas")
     check(TD:find("local previewNote = previewPanel:CreateFontString", 1, true) ~= nil,
           "canvas: ...while the split panel still draws its own, which is classic's")
 
     for _, opt in ipairs({ "compact   = true,", "scaleDB   = tdDB,",
                            "placement = false,", "unitText  = false," }) do
-        check(ROWS:find(opt, 1, true) ~= nil, "canvas: it passes " .. opt)
     end
 
     -- ☠ WHY EACH OF THE THREE EXISTS, pinned against the canvas itself.
@@ -620,8 +437,6 @@ do
           "canvas: ...and the band's glyph panel reaches it through the live registration")
     check(CARDS:find("function P.CanvasWantedHeight(compact, scaleDB)", 1, true) ~= nil,
           "canvas: ...as does the band-height verb, which must read the same number")
-    check(ROWS:find("AD.CanvasWantedHeight(true, tdDB)", 1, true) ~= nil,
-          "canvas: ...and the Text Designer's band asks with its own table")
 
     -- placement: anchorDots is ONE module-level table and dragHintText ONE state
     -- field. A second canvas building them re-points the Aura Designer's own drop
@@ -642,20 +457,7 @@ do
     check(CARDS:find("if unitText then\n    -- Resolve fonts from settings", 1, true) ~= nil,
           "canvas: ...and gates the mock's own name and health strings")
 
-    -- The band grows with the preview scale, exactly as the Aura Designer's does.
-    check(ROWS:find("canvas.onWantHeight = function(want)", 1, true) ~= nil,
-          "canvas: the canvas reports the height it now wants")
-    check(ROWS:find("if shell and shell.SetCanvasHeight then shell.SetCanvasHeight(want) end", 1, true) ~= nil,
-          "canvas: ...and the shell regrows the band in place")
-    check(ROWS:find("local CANVAS_H = 132", 1, true) ~= nil,
-          "canvas: 132 is the FLOOR, which is the artifact's figure")
 
-    -- The preview module is re-bound to the new mock, or the page would draw text
-    -- onto a frame that no longer exists.
-    check(ROWS:find("DF.TextDesigner.Preview:Init(canvas.mockFrame, tdDB)", 1, true) ~= nil,
-          "canvas: the text preview is bound to the shared canvas's mock")
-    check(ROWS:find('host:HookScript("OnShow", function()', 1, true) ~= nil,
-          "canvas: ...and re-reads its geometry when the page shows")
 end
 
 -- ============================================================
@@ -666,30 +468,17 @@ end
 -- ============================================================
 print("-- Text Designer: the add flow, one definition and two hosts")
 do
-    check(SHELL:find("function GUI:AddDesignerLegacyTab(shell, build)", 1, true) ~= nil,
-          "legacy: the shell has a door for unconverted furniture")
-    check(ROWS:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true) ~= nil,
-          "legacy: the row page uses it for the tab's head area")
     check(TD:find("local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
           "legacy: the Texts head area is declared once")
     check(TD:find("local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
           "legacy: ...and so is the Text Groups one")
     check(TD:find("BuildTextsHeadArea(GUI, parent, state, tdDB, page)\n", 1, true) ~= nil,
           "legacy: the split panel's Texts tab mounts it")
-    check(ROWS:find("h = BuildTextsHeadArea(GUI, host, state, tdDB, page, 0,", 1, true) ~= nil,
-          "legacy: ...and the band mounts it with no scrollbar to clear")
     check(TD:find('addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)', 1, true) ~= nil,
           "legacy: ...which is the whole of the difference between the two hosts")
-
-    -- ☠ AND THE CHIP THAT REDRAWS THE LIST HAD TO LEARN WHICH LIST. In the popout
-    -- layout the list IS the page, and RenderCardList returns early without a card
-    -- list -- so the chip would have looked selected and changed nothing.
-    check(TD:find("if state.rowsMode then\n                if P.RowsRedraw then P.RowsRedraw(page) end", 1, true) ~= nil,
-          "legacy: the filter chip redraws the right list")
-    check(TD:find('if state and state.rowsMode then\n        if P.RowsRedraw then P.RowsRedraw(page) end', 1, true) ~= nil,
-          "legacy: ...and so does FullRebuildCards, which thirty call sites reach")
-    check(TD:find("GetState(page).rowsMode = false", 1, true) ~= nil,
-          "legacy: ...and the island clears the flag, so a layout flip is not stuck")
+    -- The rows layout's redraw branch went with it (2026-09-26).
+    check(TD:find("rowsMode", 1, true) == nil,
+          "legacy: no redraw verb branches on a rows layout any more")
 end
 
 -- ============================================================
@@ -793,9 +582,6 @@ do
     check(HEADSRC:find('pop:Close("source")', 1, true) ~= nil,
           "tdfilter: ...closed as a source close, not as a user one")
 
-    -- ⚠ AND IT GREYS WITH THE REST OF THE PAGE.
-    check(ROWS:find("filterGlyphEnabled = ctx.tdEnabled", 1, true) ~= nil,
-          "tdfilter: the page tells the glyph whether the designer is on")
     check(HEADSRC:find("if opts and opts.filterGlyphEnabled == false then", 1, true) ~= nil,
           "tdfilter: ...and the glyph reads it")
     check(HEADSRC:find("glyph:SetGlyphEnabled(false)", 1, true) ~= nil,
@@ -808,8 +594,6 @@ do
           "tdfilter: the glyph is opt-in")
     check(TD:find("local skipChips   = opts and opts.skipChips or false", 1, true) ~= nil,
           "tdfilter: ...and so is dropping the chip row")
-    check(ROWS:find("{ skipChips = true, filterGlyph = true,", 1, true) ~= nil,
-          "tdfilter: the band layout asks for both")
     check(TD:find("BuildTextsHeadArea(GUI, parent, state, tdDB, page)\n", 1, true) ~= nil,
           "tdfilter: ...and the split panel asks for neither")
 
@@ -828,27 +612,6 @@ do
           "tdfilter: ...and what an icon-only button has to say for itself")
 end
 
--- ============================================================
--- 10. A STRUCTURAL CHANGE INSIDE A PANE RE-OPENS THE PANE
--- Adding or removing a group item changes WHAT IS IN a pane, and the popout kit
--- builds a pane's contents once -- so the only rebuild available is the page's,
--- which closes every panel including the one the click landed in.
--- ============================================================
-print("-- Text Designer: a rebuild puts the open panel back")
-do
-    check(ROWS:find("P.RowsRedraw = function(page)", 1, true) ~= nil,
-          "reopen: the row page owns the redraw verb")
-    check(ROWS:find("if row.popout then reopenTitle = title break end", 1, true) ~= nil,
-          "reopen: ...which records the open panel before rebuilding")
-    check(ROWS:find("rowsByTitle[rowTitle] = row", 1, true) ~= nil,
-          "reopen: every row is registered by the title it would be found under")
-    check(ROWS:find("if row and row.OpenPopout then row:OpenPopout() end", 1, true) ~= nil,
-          "reopen: ...and the rebuilt page re-opens it")
-    check(ROWS:find("wipe(rowsByTitle)", 1, true) ~= nil,
-          "reopen: the registry is cleared per build, so it never holds a retired row")
-end
-
--- ============================================================
 -- 11. THE WIDE-PAGE FLOOR IS GONE
 -- The Text Designer's half of the acceptance test; the Aura Designer's census
 -- asserts the same thing from its own side, deliberately, because either page
@@ -910,20 +673,8 @@ do
     local reflow = HEAD:match('chipRow:SetScript%("OnSizeChanged", function%(%)(.-)end%)')
     check(reflow ~= nil, "narrow: the chip row re-flows on resize")
     reflow = reflow or ""
-    check(reflow:find("parent.dfSetHeight(Measure())", 1, true) ~= nil,
-          "narrow: ...and re-reports the band's height through the shell's verb")
-    check(SHELL:find("host.dfSetHeight = function", 1, true) ~= nil,
-          "narrow: ...which the shell is what provides")
 
     -- ---- class two: the preset bar --------------------------------------
-    -- New + Duplicate + Rename + Delete is 250px of labelled buttons; with the
-    -- caption and the template dropdown that is 467, against a ~410px band. The
-    -- Aura Designer's band already used the icon form.
-    local BANNER = ROWS:match("banner = function%(parent%)(.-)\n        end,")
-    check(BANNER ~= nil, "narrow: the row page's banner arm can be read")
-    BANNER = BANNER or ""
-    check(BANNER:find("iconButtons = true", 1, true) ~= nil,
-          "narrow: the band's preset bar takes the compact icon actions")
     -- ...and the split panel, which still has the 850px the labels were chosen
     -- for, still gets them.
     local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
@@ -936,8 +687,6 @@ do
     -- the eye and the delete coming the other way.
     check(SW:find("section.SetHeaderRightInset = function", 1, true) ~= nil,
           "narrow: a section header can be told what its right-hand furniture cost")
-    check(ROWS:find("section:SetHeaderRightInset(56)", 1, true) ~= nil,
-          "narrow: ...and an element's header declares its eye and delete")
 end
 
 -- ============================================================
@@ -961,20 +710,10 @@ print("-- Text Designer: the chrome diet, where it maps")
 do
     local SW = options_file_source("GUI/SettingsWidgets.lua")
 
-    -- ---- move 2: its own panel key --------------------------------------
-    check(ROWS:find('scaleKey  = "df.previewscale.text"', 1, true) ~= nil,
-          "diet: the scale panel is keyed to THIS designer")
-    check(ROWS:find('scaleKey  = "df.previewscale.aura"', 1, true) == nil,
-          "diet: ...never the Aura Designer's, which the pool would hand back instead")
     check(CARDS:find('local popKey = (opts and opts.scaleKey) or "df.previewscale.aura"', 1, true) ~= nil,
           "diet: ...and the canvas takes the key from its host")
 
     -- ---- move 3: the four actions behind one menu -----------------------
-    local BANNER = ROWS:match("banner = function%(parent%)(.-)\n        end,")
-    check(BANNER ~= nil, "diet: the row page's banner arm can be read")
-    BANNER = BANNER or ""
-    check(BANNER:find("overflowActions = true", 1, true) ~= nil,
-          "diet: the band's preset bar puts its four actions behind one glyph")
     check(SW:find("if opts.overflowActions then", 1, true) ~= nil,
           "diet: ...which is the shared bar's own option, not a copy here")
     -- ...and the split panel, which has the 850px the labels were chosen for, is
@@ -984,77 +723,10 @@ do
     check((ISLAND or ""):find("overflowActions", 1, true) == nil,
           "diet: ...and keeps its four labelled buttons")
 
-    -- ---- move 4: the fold, under a key of its own -----------------------
-    check(ROWS:find('canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "td_canvas" }', 1, true) ~= nil,
-          "diet: the canvas folds under a literal key")
-    check(ROWS:find("collapseKey = L[", 1, true) == nil,
-          "diet: ...never under the localised title, which is the recorded hazard")
-    check(SHELL:find("if fold and fold.collapseKey then", 1, true) ~= nil,
-          "diet: ...and the shell refuses to fold without one")
-    check(ROWS:find("hideLabel = true", 1, true) ~= nil,
-          "diet: the canvas drops its own caption, since the fold header carries it")
 
     -- ---- move 1 does not map, and the CTA is still there ----------------
     check(TD:find('text = L["Add Text Element"]', 1, true) ~= nil,
           "diet: the add CTA is untouched -- it was never the 230px block")
-end
-
--- ============================================================
--- 14. WHAT THIS PAGE'S CHROME COSTS, BAND BY BAND
--- The Aura Designer's census has done this since the chrome diet; the Text
--- Designer never had one, so its own bands were only ever prose. Two changes land
--- on it at once -- the shell's band rhythm ADDS three gaps, the filter glyph
--- REMOVES the chip row -- and a page that gained more than it gave back would
--- have gone unnoticed.
--- ============================================================
-print("-- Text Designer: what the chrome costs, band by band")
-do
-    -- Every figure READ OUT OF THE SOURCE, so this fails if a band grows back;
-    -- restating them here would only test that this file agrees with itself.
-    local banner     = tonumber(ROWS:match("local BANNER_H = (%d+)"))
-    local tabbar     = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
-    local foldHeader = tonumber(SHELL:match("AddBand%(section, (%d+)%)"))
-    local bandGap    = tonumber(SHELL:match("local BAND_GAP = (%d+)"))
-    local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
-    F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
-    -- The head band's own sum, off the verb that reports it rather than a copy.
-    local capGap  = tonumber(TD:match("local CAPTION_GAP = (%d+)"))
-    local a, b, c = TD:match("local base = (%d+) %+ (%d+) %+ CAPTION_GAP %+ (%d+)")
-    local tailNo  = tonumber(TD:match("if not chipRow then return base %+ (%d+) end"))
-    local head    = (tonumber(a) or 0) + (tonumber(b) or 0) + (capGap or 0)
-                  + (tonumber(c) or 0) + (tailNo or 0)
-    check(banner and tabbar and foldHeader and bandGap and F and PAD and DY
-          and capGap and a and b and c and tailNo,
-          "tdchrome: every band's height can be read from the source")
-
-    -- The canvas at the scale the original complaint was measured at.
-    local fh, scale = 64, 1.5
-    local canvas = math.max(132, math.ceil(math.max(2 * F - 2 * DY + fh * scale,
-                                                    2 * PAD + 2 * DY + fh * scale)))
-
-    -- ⚠ THREE GAPS, NOT FOUR. This page has no pool strip and no scope row, so
-    -- the rhythm falls under the banner, under the preview and under the tab
-    -- strip -- and none INSIDE the preview, whose bands are drawn joined.
-    local GAPS = 3
-    local open   = banner + foldHeader + canvas + tabbar + head + GAPS * bandGap
-    local folded = banner + foldHeader + tabbar + head + GAPS * bandGap
-
-    -- Before this pass: 76 + 28 + 132 + 28 + 98 = 362 open, 230 folded, with the
-    -- bands stacked flush and 98 of head area carrying a 24px chip row. Now
-    -- 76 + 10 + 28 + 132 + 10 + 28 + 10 + 70 = 364 open, 232 folded -- the chips
-    -- very nearly pay for the rhythm on this page.
-    check(open <= 364,
-          "tdchrome: the page above the first element is under 364px with the canvas open")
-    check(folded <= 232,
-          "tdchrome: ...and under 232px with it folded")
-    -- ...and the rhythm is stated separately, so a band growing back cannot hide
-    -- behind the new gaps.
-    check(open - GAPS * bandGap <= 334,
-          "tdchrome: ...which is a 334px page plus the rhythm, and nothing else")
-    -- ☠ THE CHIP ROW IS WHAT PAID FOR IT. 24 of row plus the 4px gap above it,
-    -- gone from the head band the moment the filter became a glyph.
-    check(head <= 70,
-          "tdchrome: the head band is the CTA and the caption, with no chip row in it")
 end
 
 -- ============================================================
@@ -1073,42 +745,10 @@ print("-- Text Designer: the tabs say how much they hold")
 do
     check(TD:find("local function TabElementCounts(countDB)", 1, true) ~= nil,
           "tabcount: the bucketing is declared once")
-    check(TD:find("P.TabElementCounts = TabElementCounts", 1, true) ~= nil,
-          "tabcount: ...and published for the other layout")
     check(TD:find("local counts = TabElementCounts(countDB or tdDB)", 1, true) ~= nil,
           "tabcount: the classic strip reads that one copy rather than its own loop")
     local _, n = TD:gsub("local counts = { texts = 0, groups = 0 }", "")
     eq(n, 1, "tabcount: and the loop it used to inline is gone from the classic arm")
-
-    -- The shell's half of the contract.
-    check(SHELL:find("local function TabText(def)", 1, true) ~= nil,
-          "tabcount: the shell composes a tab's text in one place")
-    check(SHELL:find('return format("%s (%d)", def.label, c)', 1, true) ~= nil,
-          "tabcount: ...as 'Label (N)', which is what the split panel printed")
-    check(SHELL:find("text = TabText(def)", 1, true) ~= nil,
-          "tabcount: ...and the button is built from it")
-    check(SHELL:find("function shell:RefreshTabCounts()", 1, true) ~= nil,
-          "tabcount: the strip can be re-asked without a page rebuild")
-    check(SHELL:find("if type(c) ~= \"number\" then return def.label end", 1, true) ~= nil,
-          "tabcount: a tab with no count keeps its plain label")
-
-    -- The row page's tab table, and the verb the rest of the editor calls.
-    local tabs = ROWS:match("tabs = {(.-)\n        },")
-    check(tabs ~= nil, "tabcount: the row page's tab table is readable")
-    tabs = tabs or ""
-    check(tabs:find("count = function() return TabElementCounts(tdDB).texts end", 1, true) ~= nil,
-          "tabcount: Texts carries its count")
-    check(tabs:find("count = function() return TabElementCounts(tdDB).groups end", 1, true) ~= nil,
-          "tabcount: Text Groups carries its count")
-    local globalLine = tabs:match('{ key = "global"[^%c]*')
-    check(globalLine ~= nil, "tabcount: the Global tab's line is readable")
-    check(globalLine ~= nil and globalLine:find("count", 1, true) == nil,
-          "tabcount: Global has no element list, so it carries no number")
-
-    check(ROWS:find("state.UpdateTabCounts = function() shell:RefreshTabCounts() end", 1, true) ~= nil,
-          "tabcount: the verb the editor already calls is re-pointed at the shell")
-    check(ROWS:find("state.UpdateTabCounts, state.scaleSlider = nil, nil", 1, true) == nil,
-          "tabcount: ...instead of being blanked with the split panel's furniture")
 end
 
 -- ============================================================
@@ -1121,21 +761,10 @@ end
 -- ============================================================
 print("-- Text Designer: switched off means unwritable, not merely dim")
 do
-    -- Every popout row this page mints asks the kit for the real gate.
-    local rows, gated = 0, 0
-    for _ in ROWS:gmatch("GUI:CreatePopoutRow%(") do rows = rows + 1 end
-    for _ in ROWS:gmatch("gateWhenDisabled = true") do gated = gated + 1 end
-    check(rows > 0, "scrim: the page mints popout rows")
-    eq(gated, rows, "scrim: ...and every one of them opts into the dependent gate")
-
     -- The head area's add CTA is part of "the feature is off" too: classic's
     -- scrim covers it, and the row layout mounts the same head area bare.
     check(TD:find("local ctaEnabled  = not (opts and opts.enabled == false)", 1, true) ~= nil,
           "scrim: the head areas take an enabled flag")
     local _, ctas = TD:gsub("if not ctaEnabled and addBtn%.SetDisabled then addBtn:SetDisabled%(true%) end", "")
     eq(ctas, 2, "scrim: ...and both add CTAs honour it")
-    check(ROWS:find("{ enabled = ctx.tdEnabled }", 1, true) ~= nil,
-          "scrim: the Groups tab passes the designer's own state")
-    check(ROWS:find("enabled = ctx.tdEnabled,", 1, true) ~= nil,
-          "scrim: ...and so does the Texts tab")
 end

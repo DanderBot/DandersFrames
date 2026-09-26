@@ -42,20 +42,9 @@ for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
     PAGES[#PAGES + 1] = "GUI/" .. name:gsub("\\", "/")
 end
 
--- ⚠ AND THE ONE PAGE THAT IS NOT IN GUI\Pages. The Aura Designer's popout page
--- lives with the rest of the designer's editor rather than with the settings
--- pages, because it is one arm of a builder whose other arm is the split panel.
--- It is a settings page for every purpose this rule cares about, so a shape
--- exemption on the grounds of which folder it sits in would be exactly the gap
--- this file was written to close.
-for name in TOC:gmatch("AuraDesigner\\(UI\\Rows%.lua)") do
-    PAGES[#PAGES + 1] = "AuraDesigner/" .. name:gsub("\\", "/")
-end
--- ...and the Text Designer's, which sits with its own editor for the same
--- reason and is the same kind of page.
-for name in TOC:gmatch("TextDesigner\\(UI\\Rows%.lua)") do
-    PAGES[#PAGES + 1] = "TextDesigner/" .. name:gsub("\\", "/")
-end
+-- (The Aura and Text Designers' popout pages, AuraDesigner\UI\Rows.lua and
+-- TextDesigner\UI\Rows.lua, were swept here too until they were deleted on
+-- 2026-09-26.)
 
 print("-- All-rows rule: every settings page shares two edges")
 do
@@ -134,9 +123,10 @@ do
     -- their counts only ever fall now and zero is a legitimate end state. The
     -- per-site rules above still police every one that is left; `groups` is
     -- what proves the sweep read the pages.
-    -- ⚠ 150 AND 5, NOT 200 AND 10: once every settings page became cards
-    -- (2026-09-22) the pages hold 179 groups and 7 chromeless bands. Still far
-    -- above what a sweep that silently read nothing would find.
+    -- ⚠ 150, NOT 200: once every settings page became cards (2026-09-22) the
+    -- pages hold 179 groups. Still far above what a sweep that silently read
+    -- nothing would find. (The chromeless-band floor went with the designers'
+    -- rows pages, 2026-09-26: they held every chromeless band this sweep saw --
+    -- the card sections' bands are built in GUI/Controls.lua.)
     check(groups > 150, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
-    check(chromeless >= 5, "alignment: ...and the bands (" .. chromeless .. ")")
 end

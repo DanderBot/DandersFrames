@@ -154,9 +154,7 @@ DF.TextDesigner = DF.TextDesigner or {}
 -- WHAT THE POPOUT LAYOUT'S PAGE READS
 -- ------------------------------------------------------------
 -- This file owns the content catalog, the three section builders, the item list,
--- the picker and the Global tab. TextDesigner/UI/Rows.lua mounts every one of
--- them into popout rows instead of down a card body -- the SAME functions, so
--- the two layouts cannot disagree about what a text element has.
+-- the picker and the Global tab.
 --
 -- Deliberately a private table rather than more DF.TextDesigner surface: nothing
 -- outside the settings panel has any business calling these, and the resident
@@ -169,10 +167,8 @@ DF.TextDesigner._priv = P
 -- HOW MANY THINGS EACH TAB HOLDS
 -- ------------------------------------------------------------
 -- Enabled elements only, bucketed the way the two element tabs are: a group
--- counts as a group, everything else as a text. Written once and read by BOTH
--- layouts' tab strips -- the classic strip's UpdateTabCounts and the popout
--- shell's `count` fields -- because two copies of this arithmetic is two tabs
--- that can disagree about the same profile.
+-- counts as a group, everything else as a text. Read by the tab strip's
+-- UpdateTabCounts.
 -- ============================================================
 local function TabElementCounts(countDB)
     local counts = { texts = 0, groups = 0 }
@@ -187,7 +183,6 @@ local function TabElementCounts(countDB)
     end
     return counts
 end
-P.TabElementCounts = TabElementCounts
 function DF.TextDesigner.ElementDisplayName(elem)
     if type(elem) ~= "table" then return nil end
     if type(elem.label) == "string" and elem.label ~= "" then return elem.label end
@@ -1951,15 +1946,6 @@ DF.TextDesigner.RenderCardList = RenderCardList
 -- callers (delete button, picker onPick, label edit, group-item add/remove,
 -- mode swap teardown logic, etc.) continue to work without churn.
 local function FullRebuildCards(GUI, page, tdDB, state)
-    -- ☠ TWO LAYOUTS, ONE SENTENCE. "The element list changed, redraw it" is true
-    -- in both, and thirty-odd call sites say it; only the machinery differs, so
-    -- the branch is at the VERB rather than at every call site. In the popout
-    -- layout the list IS the page, so redrawing it is the harness's own rebuild.
-    if state and state.rowsMode then
-        if P.RowsRedraw then P.RowsRedraw(page) end
-        if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
-        return
-    end
     RenderCardList(GUI, page, tdDB, state)
     if state.groupListChild and DF.TextDesigner.RenderGroupCardList then
         DF.TextDesigner.RenderGroupCardList(GUI, page, tdDB, state)
@@ -2164,12 +2150,10 @@ local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
         c.fs = fs
         c:SetScript("OnClick", function(self)
             state.activeFilter = self.key
-            -- Same two-layout branch as FullRebuildCards, and NOT that verb: a
-            -- filter chip changes what is listed, not what any frame renders, so
-            -- it must not drag every live frame through a refresh.
-            if state.rowsMode then
-                if P.RowsRedraw then P.RowsRedraw(page) end
-            elseif DF.TextDesigner.RenderCardList then
+            -- NOT FullRebuildCards: a filter chip changes what is listed, not
+            -- what any frame renders, so it must not drag every live frame
+            -- through a refresh.
+            if DF.TextDesigner.RenderCardList then
                 DF.TextDesigner.RenderCardList(GUI, page, tdDB, state)
             end
         end)
@@ -2420,14 +2404,9 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
         if not chipRow then return base + 6 end
         return base + 4 + (chipRow:GetHeight() or CHIP_H) + 6
     end
-    -- ...and re-reported when the flow changes. A band host carries dfSetHeight
-    -- (GUI/DesignerShell.lua): without it the height below is spent once, on the
-    -- first pass, and a re-wrap moves nothing. The split panel has no such verb
-    -- and never needed one -- it scrolls a fixed-width column.
     if chipRow then
         chipRow:SetScript("OnSizeChanged", function()
             if LayoutChips then LayoutChips() end
-            if parent.dfSetHeight then parent.dfSetHeight(Measure()) end
         end)
     end
     -- ── Wire the Add button to the picker ──
@@ -2982,33 +2961,6 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page, group)
 end
 
 -- ============================================================
--- THE POPOUT LAYOUT'S DOOR
--- ------------------------------------------------------------
--- Everything TextDesigner/UI/Rows.lua mounts. Assigned here, at the foot of the
--- file, so each name is the one definition above rather than a second copy.
---
--- ⚠ CONTENT_CATEGORY_LABELS IS REASSIGNED, not mutated, every time the locale
--- overlay lands (RefreshLocaleStrings), so it is exposed as a GETTER. A table
--- reference captured here would freeze the picker's chips in enUS.
--- ============================================================
-P.CONTENT_CATEGORIES        = CONTENT_CATEGORIES
-P.CategoryLabels            = function() return CONTENT_CATEGORY_LABELS end
-P.CATEGORY_COLORS           = CATEGORY_COLORS
-P.FindContentType           = FindContentType
-P.ComputeAutoLabel          = ComputeAutoLabel
-P.ElementDefaultsRecord     = ElementDefaultsRecord
-P.GlobalDefaultsRecord      = GlobalDefaultsRecord
-P.BuildContentSection       = BuildContentSection
-P.BuildGroupItemsSection    = BuildGroupItemsSection
-P.BuildAppearanceSection    = BuildAppearanceSection
-P.BuildPositionSection      = BuildPositionSection
-P.BuildGlobalTab            = BuildGlobalTab
-P.BuildTextsHeadArea        = BuildTextsHeadArea
-P.BuildGroupsHeadArea       = BuildGroupsHeadArea
-P.GetState                  = GetState
-P.FullRebuildCards          = FullRebuildCards
-
--- ============================================================
 -- BUILD ENTRYPOINT
 -- ============================================================
 
@@ -3017,10 +2969,7 @@ P.FullRebuildCards          = FullRebuildCards
 -- THE ENABLE BANNER
 -- ------------------------------------------------------------
 -- The master "Enable Text Designer" switch and its subtitle, in a bordered bar.
--- ONE definition, two hosts: the top of the split panel, and the shell's banner
--- band in the popout layout. Extracted rather than copied for one reason -- the
--- checkbox binds tdDB.enabled, and a second copy is a second chance to bind a
--- second-hand table.
+-- Sits at the top of the split panel.
 --
 -- Unanchored: the caller decides where it sits and how wide it is.
 -- ============================================================
@@ -3058,32 +3007,15 @@ local function CreateEnableBanner(GUI, parent, tdDB, onToggle)
     return bar
 end
 
--- ☠ PUBLISHED HERE, NOT IN THE BLOCK WITH ITS SIBLINGS. Every other name in
--- that block is declared ABOVE it; this one is declared BELOW, so `P.X = X`
--- up there assigned the local's value at that point -- nil. Nothing errored at
--- load: Rows.lua aliased the nil, and the page died on its first open with
--- "attempt to call a nil value". A publish must follow its declaration.
-P.CreateEnableBanner        = CreateEnableBanner
-
 -- ============================================================
 -- THE SPLIT-PANEL PAGE
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside frames the page harness never sees. It is why this page
--- had to force the settings window 210px wider than its own default, and it is
--- now the CLASSIC layout's arm only -- the popout layout takes
--- P.BuildTextDesignerRowsPage (TextDesigner/UI/Rows.lua), which emits bands into
--- the harness's own column.
---
--- ⚠ KEPT RATHER THAN DELETED, and not out of sentiment: classic is a live
--- layout, GUI:CreatePopoutPageTools returns nil in it, and every row, band and
--- panel the other arm builds needs that table.
+-- had to force the settings window 210px wider than its own default. It is the
+-- designer's only page, in both settings layouts (decided 2026-09-22).
 -- ============================================================
 local function BuildTextDesignerIsland(GUI, page, db)
-    -- ⚠ AND THE FLAG THE REDRAW VERB BRANCHES ON GOES BACK. A layout flip is a
-    -- rebuild, and a stale `rowsMode` would send every "the list changed" call
-    -- site into the popout arm's page rebuild on a page that has no rows.
-    GetState(page).rowsMode = false
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
     -- so live frames stay in sync with the editor). EnsureDB guarantees the
     -- preset carries the full TD schema.
@@ -3530,40 +3462,10 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- `Add` is the tell, and a better one than asking the layout: the popout arm
--- emits BANDS, and a band can only reach the page's column through the harness's
--- own Add. A caller that has one is on BuildPage's contract; a caller that does
--- not (the preset bar's own deferred re-invoke) can only be served the island.
--- The layout check is still made, because CreatePopoutPageTools answers nil in
--- classic and every row the other arm builds needs its table.
+-- The designer always builds its split-panel island, in both settings layouts
+-- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
+-- contract is unchanged; the island does not use them.
 -- ============================================================
 function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
-    if Add and P.BuildTextDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then
-        -- ☠ A PREVIOUS BUILD'S ISLAND IS NOT IN page.children -- it never went
-        -- through Add -- so DoBuild's own retire loop cannot see it, and it would
-        -- sit under the bands still showing the last mode's controls. These five
-        -- are the only frames the island parents to page.child; everything else
-        -- it builds is nested inside one of them.
-        local state = GetState(page)
-        for _, key in ipairs({ "presetBar", "controlsBar", "previewPanel",
-                               "rightAnchorFrame", "disabledOverlay" }) do
-            local f = state[key]
-            if f then f:Hide(); f:ClearAllPoints() end
-            state[key] = nil
-        end
-        -- ⚠ THE ADD PICKER IS HIDDEN, NOT DROPPED. It is parented to UIParent so
-        -- that it can float outside the panel, which also means it survives a page
-        -- rebuild by design and is cached for reuse -- and this runs on EVERY
-        -- rebuild, so nilling it would mint a fresh UIParent frame per tab click
-        -- and WoW cannot free the old one. Hiding is what a rebuild owes it.
-        if state.addPicker then state.addPicker:Hide() end
-        -- ⚠ AND THE ISLAND'S OWN RefreshStates GOES WITH THEM. It REPLACES the
-        -- harness's, permanently, on the page object -- so a layout flip would
-        -- leave the band column being laid out by a verb that sizes page.child to
-        -- the viewport and then reaches for a preview panel that no longer exists.
-        page.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
-        state.built = false
-        return P.BuildTextDesignerRowsPage(page, db, Add, AddSpace)
-    end
     return BuildTextDesignerIsland(GUI, page, db)
 end

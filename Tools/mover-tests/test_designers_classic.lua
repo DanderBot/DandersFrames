@@ -5,8 +5,7 @@ local NS = ...
 -- ------------------------------------------------------------
 -- Decided 2026-09-22: testers rated the classic designers the best part of the
 -- settings panel, so the Aura, Text and Filter Designers build their classic
--- version in the Modern layout too. The rows builds stay in the files, unused,
--- behind one switch (DF:DesignersUseRows).
+-- version in the Modern layout too. The rows builds were deleted 2026-09-26.
 --
 -- ☠ THE CLASSIC BUILD HAS TO REACH EVERYTHING THE ROWS BUILD DID. The rows
 -- rework moved things out of the split panel rather than copying them -- the
@@ -20,7 +19,7 @@ local NS = ...
 -- ============================================================
 
 local CFG   = df_file_source("Core/Config.lua")
-local ROWS  = options_file_source("AuraDesigner/UI/Rows.lua")
+local ROWS  = options_file_source("AuraDesigner/UI/PoolStrip.lua")
 local EDIT  = options_file_source("AuraDesigner/UI/Editor.lua")
 local TD    = options_file_source("TextDesigner/UI/Options.lua")
 local FD    = options_file_source("FilterRegistry/UI/Options.lua")
@@ -36,37 +35,24 @@ local function cut(src, startPlain)
 end
 
 -- ============================================================
--- 1. THE SWITCH IS OFF, AND ALL THREE DESIGNERS ASK IT
+-- 1. NO DESIGNER HAS A ROWS ARM ANY MORE
+-- The Modern "rows" builds and their switch (DF:DesignersUseRows) were deleted
+-- 2026-09-26; every designer goes straight to its classic build.
 -- ============================================================
-print("-- Designers: the switch is off, so classic builds in both layouts")
+print("-- Designers: classic is the only build")
 do
-    local body = cut(CFG, "function DF:DesignersUseRows()")
-    check(body ~= nil, "switch: DF:DesignersUseRows is declared in Core/Config.lua")
-    if body then
-        local DFstub = {}
-        local chunk = loadstring("local DF = ...\n" .. body)
-        check(chunk ~= nil, "switch: its body parses")
-        if chunk then
-            chunk(DFstub)
-            check(type(DFstub.DesignersUseRows) == "function", "switch: ...and defines the method")
-            if DFstub.DesignersUseRows then
-                eq(DFstub:DesignersUseRows(), false, "switch: it answers false -- the rows builds are off")
-            end
-        end
-    end
-
-    check(EDIT:find("if Add and P.BuildAuraDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
-          "switch: the Aura Designer's rows arm needs the switch")
-    check(TD:find("if Add and P.BuildTextDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then", 1, true) ~= nil,
-          "switch: the Text Designer's rows arm needs the switch")
-    check(FD:find("local tools = (Add and GUI.CreatePopoutPageTools and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout())", 1, true) ~= nil,
-          "switch: the Filter Designer's band arm needs the switch")
-    -- ☠ THE FD's LAYOUT-FLIP GUARD MUST AGREE WITH ITS ARM. It retires the old build
-    -- when the arm it was built with differs from the arm wanted now; reading the
-    -- layout alone would call a Modern-layout classic build "not classic" and rebuild
-    -- it on every visit.
-    check(FD:find("local classicNow = (DF:IsClassicSettingsLayout() or not DF:DesignersUseRows()) and true or false", 1, true) ~= nil,
-          "switch: ...and the Filter Designer's flip guard reads the same switch")
+    check(CFG:find("function DF:DesignersUseRows()", 1, true) == nil,
+          "switch: DF:DesignersUseRows is gone from Core/Config.lua")
+    check(EDIT:find("BuildAuraDesignerRowsPage", 1, true) == nil,
+          "switch: the Aura Designer has no rows arm")
+    check(TD:find("BuildTextDesignerRowsPage", 1, true) == nil,
+          "switch: the Text Designer has no rows arm")
+    check(FD:find("CreatePopoutPageTools", 1, true) == nil,
+          "switch: the Filter Designer has no band arm")
+    check(EDIT:find("return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)", 1, true) ~= nil,
+          "switch: the Aura Designer builds its island")
+    check(TD:find("return BuildTextDesignerIsland(GUI, page, db)", 1, true) ~= nil,
+          "switch: the Text Designer builds its island")
 end
 
 -- ============================================================
@@ -75,7 +61,7 @@ end
 -- ============================================================
 print("-- Aura Designer: the pool list, run")
 local poolDefsSrc = cut(ROWS, "local function PoolDefs()")
-check(poolDefsSrc ~= nil, "pool: PoolDefs can be cut out of Rows.lua")
+check(poolDefsSrc ~= nil, "pool: PoolDefs can be cut out of PoolStrip.lua")
 
 local Lid = setmetatable({}, { __index = function(_, k) return k end })
 
@@ -109,7 +95,7 @@ end
 print("-- Aura Designer: the classic pool strip builds every pool")
 do
     local stripSrc = cut(ROWS, "S.BuildPoolStrip = function(buffTabBar)")
-    check(stripSrc ~= nil, "strip: S.BuildPoolStrip can be cut out of Rows.lua")
+    check(stripSrc ~= nil, "strip: S.BuildPoolStrip can be cut out of PoolStrip.lua")
 
     local function Stub()
         local f = { scripts = {}, hooks = {}, points = {} }
@@ -200,7 +186,7 @@ do
     local b = island:find([[poolHost:SetPoint("RIGHT", specHost, "LEFT", -SPEC_GAP, 0)]], 1, true)
     check(b ~= nil and a ~= nil and b < a,
           "island: ...and the pools divide what is left of the strip beside it")
-    -- The shared builder it reuses is still the rows page's, not a copy.
+    -- The builder it mounts lives in PoolStrip.lua, not a copy.
     check(ROWS:find("S.BuildSpecPicker = function(host)", 1, true) ~= nil,
           "island: the spec picker it mounts is the one shared builder")
     check(EDIT:find("S.BuildSpecPicker = function", 1, true) == nil,
@@ -309,12 +295,10 @@ do
     local headAt = et:find("S.BuildEffectsHeadArea(parent, -10)", 1, true)
     check(flowAt and headAt and flowAt < headAt,
           "classic add: the Effects tab draws a running flow in place of its list")
-    check(ROWS:find("local BuildAddPane = isDebuffs and S.BuildAddDebuffGroupPane or S.BuildAddLayoutGroupPane", 1, true) ~= nil,
-          "classic add: the rows page still mounts the same two panes, unchanged")
 
     -- ---- run: the block itself, against stubs ----
     local s0 = CARDS:find("S.ClassicAddContext = function()", 1, true)
-    local s1 = CARDS:find("-- ☠ EXTRACTED, NOT COPIED. The popout layout's row page", s0 or 1, true)
+    local s1 = CARDS:find("-- Returns the y the caller should continue at", s0 or 1, true)
     check(s0 ~= nil and s1 ~= nil, "classic add: the flow block can be cut out of Cards.lua")
     local block = (s0 and s1) and CARDS:sub(s0, s1 - 1) or ""
 

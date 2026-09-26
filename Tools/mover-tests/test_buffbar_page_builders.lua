@@ -1268,7 +1268,6 @@ do
     -- file not listed here is not covered -- the harness cannot list a folder.
     local callers = {
         "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
-        "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
         "GUI/Controls.lua",
     }
     local calls, carded, cardedIn = 0, 0, nil
@@ -1294,7 +1293,7 @@ do
             pos = i
         end
     end
-    check(calls >= 20, "card: every known caller was scanned (" .. calls .. " calls)")
+    check(calls >= 16, "card: every known caller was scanned (" .. calls .. " calls)")
     -- The one carded call is the shared OpenSection (the page tools), which
     -- only the two converted aura bars reach.
     check(carded == 1 and cardedIn == "GUI/Controls.lua",
@@ -1409,7 +1408,6 @@ do
     -- ---- nobody else opts in ---------------------------------------------
     local callers = {
         "GUI/Pages/Indicators.lua", "GUI/Pages/Modules.lua", "GUI/Pages/Auras.lua",
-        "GUI/DesignerShell.lua", "AuraDesigner/UI/Rows.lua", "TextDesigner/UI/Rows.lua",
         "GUI/Controls.lua",
     }
     local toggled = 0

@@ -1815,14 +1815,8 @@ end
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside one S.mainFrame that the page harness never sees. It is
--- why this page had to force the window 210px wider than its own default, and it
--- is now the CLASSIC layout's arm only -- the popout layout takes
--- P.BuildAuraDesignerRowsPage (AuraDesigner/UI/Rows.lua), which emits bands into
--- the harness's own column.
---
--- ⚠ KEPT RATHER THAN DELETED, and not out of sentiment: classic is a live
--- layout, CreatePopoutPageTools returns nil in it, and every row, band and panel
--- the other arm builds needs that table. This is what classic still draws.
+-- why this page had to force the window 210px wider than its own default. It is
+-- the designer's only page, in both settings layouts (decided 2026-09-22).
 -- ============================================================
 local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local prevDB = S.db  -- capture before overwrite to detect mode switch
@@ -2096,9 +2090,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     poolHost:SetPoint("BOTTOMLEFT", buffTabBar, "BOTTOMLEFT", 0, 0)
     poolHost:SetPoint("RIGHT", specHost, "LEFT", -SPEC_GAP, 0)
     -- The pool tabs: My Buffs / Debuffs / Any Buff, plus PI Helper on a priest.
-    -- The builder is shared with nothing now; it lives beside the rows page's own
-    -- folder tabs (S.BuildPoolTabs, AuraDesigner/UI/Rows.lua) so the pool list
-    -- (PoolDefs) has one definition.
+    -- Both builders live in AuraDesigner/UI/PoolStrip.lua.
     S.BuildPoolStrip(poolHost)
     S.BuildSpecPicker(specHost)
 
@@ -2293,38 +2285,11 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- `Add` is the tell, and it is a better one than asking the layout: the popout
--- arm emits BANDS, and a band can only be emitted through the harness's own Add.
--- A caller that has one is on BuildPage's contract; a caller that does not (an
--- older call site, or the preset bar's own deferred re-invoke) can only be served
--- the island. The layout check is still made, because CreatePopoutPageTools
--- answers nil in classic and every row the other arm builds needs its table.
+-- The designer always builds its classic island, in both settings layouts
+-- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
+-- contract is unchanged; the island does not use them.
 -- ============================================================
 function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
-    if Add and P.BuildAuraDesignerRowsPage and DF:DesignersUseRows() and not DF:IsClassicSettingsLayout() then
-        -- A previous build's island is not in page.children -- it never went
-        -- through Add -- so DoBuild's own retire loop cannot see it, and it would
-        -- sit under the bands still showing the last mode's controls.
-        if S.mainFrame then
-            S.mainFrame:Hide()
-            S.mainFrame:SetParent(nil)
-            S.mainFrame = nil
-        end
-        -- ⚠ AND THE ISLAND'S OWN RefreshStates GOES WITH IT. BuildAuraDesignerIsland
-        -- REPLACES the harness's RefreshStates on the page object, permanently --
-        -- its version sizes page.child to the viewport and routes redraws to
-        -- AuraDesigner_RefreshPage -- so a layout flip landing here would leave
-        -- the band column with no layout pass at all: nothing ever positions the
-        -- bands and the page draws broken. Same restore the Text Designer's
-        -- dispatcher makes (TextDesigner/UI/Options.lua), same dispatch-by-name
-        -- shape Panel.lua's BuildPage installs (the profiler swaps the target).
-        pageRef.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
-        -- ...and the island's size cache goes too, so a flip BACK to classic
-        -- re-fires its first RefreshStates instead of early-outing on stale numbers.
-        pageRef._lastRefreshStatesH, pageRef._lastRefreshStatesW = nil, nil
-        return P.BuildAuraDesignerRowsPage(pageRef, dbRef, Add, AddSpace)
-    end
-    S.rowsMode = false
     return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
 end
 
@@ -2335,36 +2300,11 @@ end
 -- Is the designer the page on screen right now? Asked by callers off this page
 -- (GUI.lua's section-toggle hook) before they ask for a redraw.
 function DF:AuraDesigner_IsPageShown()
-    local f = S.rowsMode and S.page or S.mainFrame
+    local f = S.mainFrame
     return f and f.IsVisible and f:IsVisible() and true or false
 end
 
 function DF:AuraDesigner_RefreshPage()
-    -- ☠ IN THE POPOUT LAYOUT THERE IS NO S.mainFrame TO REFRESH. This verb means
-    -- "the data moved, redraw the page", and the page harness's own rebuild is
-    -- what that means there. Callers are unchanged: sixty-odd sites across the
-    -- editor say this sentence, and it is true in both layouts.
-    --
-    -- ⚠ CONTROLS INSIDE AN OPEN PANE MUST NOT COME HERE -- a rebuild closes every
-    -- open panel (CreatePopoutPageTools' first act), which for a tick the user
-    -- just clicked reads as the panel falling shut. Those go through
-    -- P.ADStructuralRedraw, which re-flows the pane instead.
-    if S.rowsMode then
-        -- ☠ NOT ON SCREEN -> MARK IT STALE, DO NOT REBUILD. A rebuild parks the whole
-        -- page in GUI._trashFrame, which is never freed, and callers off this page
-        -- (a Colour-by-Time edit, the global font apply, a section toggled on any
-        -- other page) used to pay one designer page each. The next visit rebuilds
-        -- it once through the page's cached path.
-        if S.page and S.page.IsVisible and not S.page:IsVisible() then
-            if S.page.Invalidate then S.page:Invalidate() end
-            return
-        end
-        if S.framePreview and S.framePreview.RefreshGeometry then
-            S.framePreview.RefreshGeometry()
-        end
-        if S.page and S.page.Refresh then S.page:Refresh() end
-        return
-    end
     if not S.mainFrame then return end
 
     -- Frame size and Preview Scale are settings like any other; re-read them here so

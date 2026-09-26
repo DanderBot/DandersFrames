@@ -3645,7 +3645,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
 end
 -- The band height the compact canvas needs at the CURRENT preview scale. Split
 -- out of the canvas because the host must size the band BEFORE calling the
--- builder that creates it -- see GUI:BuildDesignerShell's canvasHeight.
+-- builder that creates it.
 function P.CanvasWantedHeight(compact, scaleDB)
     if not compact then return 132 end
     local fdb  = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
@@ -3911,9 +3911,7 @@ end
 -- ============================================================
 -- THE SUB-TAB STRIP, PER POOL
 -- ------------------------------------------------------------
--- ★★★ ONE DEFINITION FOR BOTH LAYOUTS (2026-09-09). The split panel builds three buttons in
--- S.mainFrame and the popout page hands its list to GUI:BuildDesignerShell -- two strips, and
--- until now two hardcoded copies of the same three entries.
+-- ★★★ ONE DEFINITION (2026-09-09). The split panel builds these buttons in S.mainFrame.
 --
 -- ⚠ THE HELPER'S POOL SHOWS TWO, IN THE OTHER ORDER. Krathe, 2026-09-09: "'global' should be
 -- Triggers and the first option and Effects should be 2nd with no Layout groups for the PI
@@ -3980,21 +3978,6 @@ S.SwitchTab = function(tabKey)
     -- are belt-and-braces here -- the strip does not offer the button either way -- but a
     -- SwitchTab reached from a stale call site must land somewhere that exists.
     tabKey = CoerceTabForPool(tabKey)
-
-    -- ☠ IN THE POPOUT LAYOUT THERE IS NO TAB PANEL TO REBUILD. The row page
-    -- (AuraDesigner/UI/Rows.lua) has no S.tabBar, no S.tabScrollFrame and no
-    -- S.tabContentFrame -- its tabs are bands in the page's own column, so the
-    -- rebuild verb is the page harness's. Branching HERE rather than at the
-    -- ~60 call sites: every one of them means "the data moved, redraw the tab",
-    -- and that sentence is true in both layouts -- only the machinery differs.
-    if S.rowsMode then
-        S.activeTab = tabKey
-        S.adPickerDirty = false
-        CloseADPicker()
-        if GUI then GUI:CloseAllMenus() end
-        if S.page and S.page.Refresh then S.page:Refresh() end
-        return
-    end
 
     -- Preserve scroll position when refreshing the same tab
     local prevTab = S.activeTab
@@ -6681,7 +6664,7 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- is pooled and its build runs once, so "already added", the pool, the spec
     -- and the source's own display name are all things that can move underneath
     -- an open panel. Called by every transition above AND by the opener on every
-    -- open (AuraDesigner/UI/Rows.lua).
+    -- open.
     Sync = function()
         -- A type that the current source cannot drive, or already has, is not a
         -- selection any more.
@@ -7028,12 +7011,11 @@ P.OpenFilterPopout = OpenFilterPopout
 -- ============================================================
 -- POWER INFUSION HELPER -- THE SHARED PANEL (priest only)
 -- ------------------------------------------------------------
--- Extracted from the classic Effects head area below so the popout row page can
--- mount the SAME panel inside a popout pane (AuraDesigner/UI/Rows.lua) --
--- the S.BuildAddIndicatorPane pattern. Everything below writes through the
--- layout-agnostic P.PIH_* verbs and asks for a redraw through opts.Refresh,
--- which each layout supplies: the split panel rebuilds its Effects tab, the
--- row page rebuilds itself. Nothing in here may name a tab panel directly.
+-- Extracted from the classic Effects head area below -- the
+-- S.BuildAddIndicatorPane pattern. Everything below writes through the
+-- P.PIH_* verbs and asks for a redraw through opts.Refresh, which the split
+-- panel supplies (it rebuilds its Effects tab). Nothing in here may name a tab
+-- panel directly.
 --   opts.startY  -- the y cursor to build from (negative, parent-relative)
 --   opts.Refresh -- "the data moved, redraw this layout's Effects surface"
 -- Returns the final y cursor, so the classic arm carries on below the panel
@@ -8824,7 +8806,7 @@ S.WatchClassicAddPage = function()
         rp:HookScript("OnShow", function()
             if not S.classicAddFlowStale then return end
             S.classicAddFlowStale = nil
-            if S.rightPanel == rp and not S.rowsMode and S.SwitchTab then
+            if S.rightPanel == rp and S.SwitchTab then
                 S.SwitchTab(S.activeTab or "effects")
             end
         end)
@@ -9034,12 +9016,6 @@ S.BuildClassicAddFlow = function(parent, kind)
     return true
 end
 
--- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
--- mounts exactly this furniture above its band of effect rows. The add flow is a
--- later phase of the designer rework, and a second copy of it here would be a
--- second place to change when that phase lands -- which is how the three
--- duplicated FRAME_ITEMS lists below came about in the first place.
---
 -- Returns the y the caller should continue at, and a second value that is always
 -- false now. It used to be `true` when the split panel's picker column had taken
 -- the column over; that column is gone, and the value stays so neither caller has

@@ -3966,7 +3966,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
     -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
     -- It keeps per-build hooks and frames on the page itself (_filterDesignerBuilt,
-    -- _fdBuiltClassic, the _fd* verbs, its spacer and bands) that one page can
+    -- the _fd* verbs, its spacer) that one page can
     -- only hold for one build.
     if pageFilterDesigner then pageFilterDesigner.singleModeBuild = true end
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)

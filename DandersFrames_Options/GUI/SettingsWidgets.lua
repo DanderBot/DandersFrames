@@ -317,7 +317,6 @@ end
 -- localised heading writes a second slot, a reworded one orphans the old slot, and
 -- a title built from user data (a spell name, a group name) adds one PERMANENT
 -- profile key per record -- a schema change smuggled in under a re-presentation.
--- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
 --
 -- opts also takes `summary`, `dimOn`, `pin`, `card` and `toggle` -- see where
 -- they are read, below.
