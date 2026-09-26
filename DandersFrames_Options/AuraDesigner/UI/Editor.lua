@@ -1067,7 +1067,8 @@ end
 --   omitFilters  drop the LINKED FILTERS section. The helper's group is bound to OUR cooldown
 --                list, which its Triggers tab owns and edits; a filter picker here would be a
 --                second, contradictory way to say what the icons watch.
---   asEffect     wear the EFFECT card's chrome instead of the Layout Groups amber. Krathe's
+--   asEffect     (no visual effect since every card took the settings card look, which has
+--                no per-tab amber; kept so the caller's intent stays written down.) Krathe's
 --                sentence is "it should just show as a normal effect", and a card sitting in
 --                ACTIVE INDICATORS in the one colour this panel uses to mean "layout group"
 --                would still be saying the thing he asked it to stop saying.
@@ -1081,16 +1082,9 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     -- later would be whichever tab the user had moved to by then.
     local refreshTab = opts.refreshTab or "layout"
     local function Redraw() S.SwitchTab(refreshTab) end
-    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
-    -- The two chromes, side by side, because they are two lines of the same recipe: an effect
-    -- card takes the plain border and no chevron tint (S.CreateEffectCard), a group card takes
-    -- the amber at the two weights the tab has always drawn it at.
-    local shellBorder = opts.asEffect
-        and {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}
-        or  {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5}
-    local bodyBorder = opts.asEffect
-        and {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3}
-        or  {r = gc.r * 0.20, g = gc.g * 0.20, b = gc.b * 0.20, a = 0.3}
+    -- ⚠ ONE CHROME NOW. The effect card and the group card used to differ here -- plain
+    -- border versus the Layout Groups amber -- and both now wear the settings card look
+    -- (P.CreateCardShell), which has no per-tab tint. opts.asEffect is kept for callers.
 
     -- Expansion keys are pool-scoped — raw id on My Buffs, "othergroup:<id>" on
     -- Other; the id counters overlap.
@@ -1098,23 +1092,19 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     local isExpanded = expandedGroups[expandKey] or false
 
     -- ── CARD + HEADER ──
-    local card, header, chevron = CreateCardShell(parent, {
+    local card, header, chevron, chrome = CreateCardShell(parent, {
         yPos          = yPos,
         expanded      = isExpanded,
-        borderColor   = shellBorder,
-        chevronColor  = (not opts.asEffect) and gc or nil,
     })
     if stack then stack:Add(card) end
 
-    -- Group name
-    local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    nameText:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
-    nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
-    nameText:SetMaxLines(1)
+    -- Group name is the TITLE; what it holds is the folded SUMMARY.
     local isFilterGroup = (group.kind == "filter")
-    nameText:SetText(group.name .. "  -  "
-        .. ((opts.Summary and opts.Summary(group)) or S.LayoutGroupSummary(group)))
-    nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local nameText = chrome.title
+    nameText:SetText(group.name)
+    chrome:SetSummary((opts.Summary and opts.Summary(group)) or S.LayoutGroupSummary(group))
+    -- Right inset clears the ✕ (and the eye, on a filter group).
+    chrome:LayoutText(chevron, GUI.SectionCard.titleGap, isFilterGroup and 52 or 30)
 
     -- Delete button
     local capturedGroupID = group.id
@@ -1170,31 +1160,22 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
             end
         end)
         if not shown() then
-            nameText:SetAlpha(0.5)
+            chrome:SetDimmed(true)
         end
     end
 
-    -- Header click → toggle expansion
+    -- Header click → toggle expansion (hover is the card chrome's own)
     header:SetScript("OnClick", function()
         expandedGroups[expandKey] = not expandedGroups[expandKey]
         Redraw()
     end)
-    header:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    header:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    end)
 
-    local totalCardH = 30
+    local totalCardH = P.CardHeaderHeight()
     local cardHeaderH = totalCardH   -- captured before the body is folded in
 
     -- ── BODY (when expanded) ──
     if isExpanded then
-        local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
-        body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
-        body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-        ApplyBackdrop(body, {r = 0.09, g = 0.09, b = 0.09, a = 1}, bodyBorder)
+        local body = P.CreateCardBody(card, header)
 
         local by = -10
         local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
@@ -1270,7 +1251,7 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     end
 
     card:SetHeight(totalCardH)
-    return yPos - totalCardH - 5
+    return yPos - totalCardH - P.CardGap()
 end
 
 S.BuildLayoutGroupsTab = function()
@@ -1658,7 +1639,6 @@ S.BuildDebuffGroupsTab = function()
     if not S.tabContentFrame then return end
     local parent = S.tabContentFrame
     local yPos = S.BuildDebuffGroupsHeadArea(parent, -10)
-    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
 
     -- FULL structural refresh incl. tab rebuild — the eye, the delete and the
     -- add: the claims union moves AND the card summary / grey states must
@@ -1693,21 +1673,17 @@ S.BuildDebuffGroupsTab = function()
             local capturedGroupID = group.id
 
             -- ── CARD + HEADER ──
-            local card, header, chevron = CreateCardShell(parent, {
+            local card, header, chevron, chrome = CreateCardShell(parent, {
                 yPos          = yPos,
                 expanded      = isExpanded,
-                borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
-                chevronColor  = gc,
             })
             stack:Add(card)
 
-            -- Group name + collapsed summary
-            local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            nameText:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
-            nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
-            nameText:SetMaxLines(1)
-            nameText:SetText(group.name .. "  -  " .. S.DebuffGroupSummary(group))
-            nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            -- Group name is the TITLE; its categories are the folded SUMMARY.
+            chrome.title:SetText(group.name)
+            chrome:SetSummary(S.DebuffGroupSummary(group))
+            -- Right inset clears the eye and the ✕.
+            chrome:LayoutText(chevron, GUI.SectionCard.titleGap, 52)
 
             -- Delete button — full structural chain: the group's claimed
             -- categories return to the main debuff bar.
@@ -1747,31 +1723,21 @@ S.BuildDebuffGroupsTab = function()
                 StructuralDebuffGroupRefresh()
             end)
             if not shown() then
-                nameText:SetAlpha(0.5)
+                chrome:SetDimmed(true)
             end
 
-            -- Header click → toggle expansion
+            -- Header click → toggle expansion (hover is the card chrome's own)
             header:SetScript("OnClick", function()
                 expandedGroups[cardKey] = not expandedGroups[cardKey]
                 S.SwitchTab("layout")
             end)
-            header:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-            end)
-            header:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            end)
 
-            local totalCardH = 30
+            local totalCardH = P.CardHeaderHeight()
             local cardHeaderH = totalCardH   -- captured before the body is folded in
 
             -- ── BODY (when expanded) ──
             if isExpanded then
-                local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
-                body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
-                body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-                ApplyBackdrop(body, {r = 0.09, g = 0.09, b = 0.09, a = 1},
-                    {r = gc.r * 0.20, g = gc.g * 0.20, b = gc.b * 0.20, a = 0.3})
+                local body = P.CreateCardBody(card, header)
 
                 local by = -10
                 local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
@@ -1833,7 +1799,7 @@ S.BuildDebuffGroupsTab = function()
             end
 
             card:SetHeight(totalCardH)
-            yPos = yPos - totalCardH - 5
+            yPos = yPos - totalCardH - P.CardGap()
         end
     end
 

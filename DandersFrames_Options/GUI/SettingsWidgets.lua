@@ -1117,6 +1117,166 @@ function GUI:GetCollapsedGroups()
     return DandersFramesDB_v2.collapsedGroups
 end
 
+-- ============================================================
+-- GUI:CreateCardChrome -- THE SECTION CARD'S LOOK ON A HAND-BUILT CARD
+-- (opt-in; the Aura and Text Designers' cards only)
+-- ------------------------------------------------------------
+-- The designers' cards cannot be CreateCollapsibleSection: their headers carry
+-- furniture a section has no slot for (a spell icon, a type badge, a warning
+-- badge, a category chip, an eye, a delete), their bodies are built by hand at
+-- a running y rather than registered with a page, and each keeps its fold in
+-- its own store (expandedCards / expandedGroups / a td_* collapsedGroups key).
+-- So this hands over the LOOK and nothing else: the same GUI.SectionCard
+-- numbers, the same rounded surface, hover wash and hairline, the accent
+-- chevron and the TEXT-coloured title. The click, the fold store, the body and
+-- the furniture stay the caller's.
+--
+-- ☠ THE SURFACE IS DRAWN ON THE CARD, NOT THE HEADER. Header and body are the
+-- card's children, so every texture here sits under every control in either.
+-- Its rect is an invisible frame from the card's top to the BODY's bottom while
+-- open (the header's while shut), so a body that re-sizes itself in place
+-- carries the card with it -- nothing reads a rect mid-layout.
+--
+--   card    the card's frame; header and body are its children
+--   header  a Button child of card, anchored across its top by the caller
+--   opts.expanded   the fold the chevron starts in
+--
+-- Returns a chrome table:
+--   chrome.chevron, chrome.title, chrome.summary   regions on the header
+--   chrome:LayoutText(after, gap, rightInset)  title starts `gap` right of
+--       `after` (default: the chevron); the summary ends `rightInset` from the
+--       header's right edge, clear of the caller's buttons, and the title stops
+--       short of it
+--   chrome:SetSummary(text)   dim, right-aligned; drawn only while folded
+--   chrome:SetExpanded(open, body)   chevron art, card rect, hairline, hover corners
+--   chrome:SetDimmed(on)      title and chevron grey (the feature is off)
+--   chrome:Paint()            re-read the palette
+-- ============================================================
+function GUI:CreateCardChrome(card, header, opts)
+    local CARD = GUI.SectionCard
+    opts = opts or {}
+    local chrome = { expanded = opts.expanded and true or false, summaryText = "" }
+    header:SetHeight(CARD.header)
+
+    local style = GUI:GetSurfaceStyle()
+    local bw = style and (style.rowBorderWidth or style.borderWidth) or 1
+
+    local rect = CreateFrame("Frame", nil, card)
+    chrome.rect = rect
+    chrome.surface = GUI:CreateRoundedSurface(card, {
+        radius      = CARD.radius,
+        borderWidth = bw,
+        fill        = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 1 },
+        border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
+        anchorTo    = rect,
+    })
+    -- Over the fill, UNDER the ring, over the header's rect only -- the section
+    -- card's own recipe (see CreateCollapsibleSection).
+    chrome.hover = GUI:CreateRoundedSurface(card, {
+        radius   = CARD.radius,
+        border   = false,
+        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+        sublevel = GUI.RoundStripSublevel,
+        anchorTo = header,
+    })
+    chrome.hover:Hide()
+    chrome.line = card:CreateTexture(nil, "BORDER")
+    chrome.line:SetPoint("TOPLEFT", header, "BOTTOMLEFT", bw, 0)
+    chrome.line:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -bw, 0)
+    chrome.line:SetHeight(1)
+    chrome.line:Hide()
+
+    chrome.chevron = header:CreateTexture(nil, "OVERLAY")
+    chrome.chevron:SetPoint("LEFT", header, "LEFT", CARD.edge, 0)
+    chrome.chevron:SetSize(CARD.chevron, CARD.chevron)
+
+    chrome.title = header:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    chrome.title:SetJustifyH("LEFT")
+    chrome.title:SetWordWrap(false)
+    chrome.summary = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    chrome.summary:SetJustifyH("RIGHT")
+    chrome.summary:SetWordWrap(false)
+
+    function chrome:Paint()
+        if self.dimmed then
+            self.title:SetTextColor(0.5, 0.5, 0.5)
+            self.chevron:SetVertexColor(0.5, 0.5, 0.5)
+        else
+            local tc = self.titleColor or C_TEXT
+            self.title:SetTextColor(tc.r, tc.g, tc.b)
+            local nc = GetThemeColor()
+            self.chevron:SetVertexColor(nc.r, nc.g, nc.b)
+        end
+        -- ⚠ NEVER GREYED, the section card's rule: 0.5 grey on C_PANEL is under
+        -- the 4.5:1 floor, and the title and chevron already say it is off.
+        self.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        self.surface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+        self.surface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
+        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+        self.line:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
+    end
+
+    function chrome:SetDimmed(on)
+        self.dimmed = on and true or false
+        self:Paint()
+    end
+
+    -- The summary takes what it needs up to 45% of the header, the title the
+    -- rest: the section card's split, re-applied whenever the header re-sizes.
+    function chrome:FitSummary()
+        local fs = self.summary
+        local text = (not self.expanded) and self.summaryText or ""
+        fs:SetText(text)
+        if text == "" then
+            fs:SetWidth(1)
+            return
+        end
+        local sw = (fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth()) or fs:GetStringWidth() or 0
+        local hw = header:GetWidth() or 0
+        local cap = (hw > 0) and math.floor(hw * 0.45) or 160
+        fs:SetWidth(math.max(1, math.min(math.ceil(sw) + 1, cap)))
+    end
+
+    function chrome:SetSummary(text)
+        self.summaryText = text or ""
+        self:FitSummary()
+    end
+
+    function chrome:LayoutText(after, gap, rightInset)
+        self.summary:ClearAllPoints()
+        self.summary:SetPoint("RIGHT", header, "RIGHT", -(rightInset or CARD.edge), 0)
+        self.title:ClearAllPoints()
+        self.title:SetPoint("LEFT", after or self.chevron, "RIGHT", gap or CARD.titleGap, 0)
+        self.title:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
+        self:FitSummary()
+    end
+
+    function chrome:SetExpanded(open, body)
+        self.expanded = open and true or false
+        self.chevron:SetTexture(self.expanded
+            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
+            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        local withBody = (self.expanded and body) and true or false
+        rect:ClearAllPoints()
+        rect:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+        rect:SetPoint("RIGHT", card, "RIGHT", 0, 0)
+        rect:SetPoint("BOTTOM", withBody and body or header, "BOTTOM", 0, 0)
+        self.line:SetShown(withBody)
+        self.hover:SetCorners(withBody and CARD.cornersTop or CARD.cornersAll)
+        self:FitSummary()
+        -- The chevron's art was just swapped; re-tint rather than trust the swap.
+        self:Paint()
+    end
+
+    header:HookScript("OnEnter", function() chrome.hover:Show() end)
+    header:HookScript("OnLeave", function() chrome.hover:Hide() end)
+    header:HookScript("OnSizeChanged", function() chrome:FitSummary() end)
+
+    chrome:LayoutText()
+    chrome:SetExpanded(chrome.expanded)
+    return chrome
+end
+
 -- ---- from Widgets.lua ----
 function GUI:CreateButton(parent, text, width, height, func, iconName)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")

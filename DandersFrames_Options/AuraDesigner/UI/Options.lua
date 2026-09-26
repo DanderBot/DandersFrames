@@ -224,40 +224,56 @@ end
 -- ============================================================
 -- COLLAPSIBLE CARD SHELL
 -- The effects list, the groups list and the debuff-category list each build the
--- same thing: a card pinned to the parent's width, a 30px header button on top,
--- and a chevron at its left edge that flips with the expanded state. Past that
--- point the three diverge completely -- a spell icon and type badge, a group
--- name and link count, a list of categories -- so this owns only the shell and
--- hands back the chevron for the caller to anchor its own content to.
+-- same thing: a card pinned to the parent's width, a header button on top, and a
+-- chevron at its left edge that flips with the expanded state. Past that point
+-- the three diverge completely -- a spell icon and type badge, a group name and
+-- link count, a list of categories -- so this owns only the shell.
 --
--- opts = { yPos, expanded, borderColor, chevronColor (default C_TEXT_DIM) }
--- Returns card, header, chevron.
+-- ★ THE SETTINGS PANEL'S CARD LOOK (GUI:CreateCardChrome): one rounded card per
+-- entry, the GUI.SectionCard header height, an accent chevron, a TEXT-coloured
+-- title, a dim right-aligned summary while folded, a hairline over the body and a
+-- hover wash on the header. The chrome draws the title and summary; the caller
+-- places them with chrome:LayoutText once its own furniture is in the header.
+-- ⚠ NO PER-TAB TINT. The amber the Layout Groups / Debuffs cards used to wear on
+-- their chevron and border is gone: colour is for state, and every settings card
+-- takes the accent chevron.
+--
+-- opts = { yPos, expanded }
+-- Returns card, header, chevron, chrome.
 -- ============================================================
-local CARD_HEADER_HEIGHT = 30
-local CHEVRON_EXPANDED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-local CHEVRON_COLLAPSED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
-
 local function CreateCardShell(parent, opts)
-    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local card = CreateFrame("Frame", nil, parent)
     card:SetPoint("TOPLEFT", 8, opts.yPos)
     card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
 
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-    header:SetHeight(CARD_HEADER_HEIGHT)
+    local header = CreateFrame("Button", nil, card)
     header:SetPoint("TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(header, C_ELEMENT, opts.borderColor)
 
-    local chevron = header:CreateTexture(nil, "OVERLAY")
-    chevron:SetSize(12, 12)
-    chevron:SetPoint("LEFT", 8, 0)
-    chevron:SetTexture(opts.expanded and CHEVRON_EXPANDED or CHEVRON_COLLAPSED)
-    local cc = opts.chevronColor or C_TEXT_DIM
-    chevron:SetVertexColor(cc.r, cc.g, cc.b)
-
-    return card, header, chevron
+    local chrome = GUI:CreateCardChrome(card, header, { expanded = opts.expanded })
+    card.dfChrome = chrome
+    return card, header, chrome.chevron, chrome
 end
 P.CreateCardShell = CreateCardShell
+
+-- The header's height and the gap to the next card, read by every card list so
+-- the builders and the stack below cannot drift from the settings cards.
+P.CardHeaderHeight = function() return GUI.SectionCard.header end
+P.CardGap = function() return GUI.SectionCard.gap end
+
+-- The body of an OPEN card: under the header's hairline, inset so the body's own
+-- 8px content inset lands on the card's 12 (GUI.SectionCard.pad). No backdrop --
+-- the body is the card's own fill. Opens the chrome onto it, so the card runs
+-- down to the body's bottom and follows it when the body re-sizes in place.
+local function CreateCardBody(card, header)
+    local inset = GUI.SectionCard.pad - 8
+    local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
+    body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", inset, 0)
+    body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -inset, 0)
+    if card.dfChrome then card.dfChrome:SetExpanded(true, body) end
+    return body
+end
+P.CreateCardBody = CreateCardBody
 
 -- ============================================================
 -- CARD STACK (in-place reflow of a card list)
@@ -274,10 +290,9 @@ P.CreateCardShell = CreateCardShell
 --   stack:Reflow()                                -- after any card's height changes
 --
 -- Reflow reads each card's CURRENT height, so the caller only has to keep the
--- card itself correctly sized. Card gap (5) and the parent's bottom padding (20)
--- mirror the build-time loop exactly.
+-- card itself correctly sized. Card gap (P.CardGap, the settings cards' 8) and the
+-- parent's bottom padding (20) mirror the build-time loop exactly.
 -- ============================================================
-local CARD_GAP = 5
 
 local function CreateCardStack(parent, topY)
     local stack = { cards = {} }
@@ -292,7 +307,7 @@ local function CreateCardStack(parent, topY)
             card:ClearAllPoints()
             card:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
             card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-            y = y - card:GetHeight() - CARD_GAP
+            y = y - card:GetHeight() - P.CardGap()
         end
         parent:SetHeight(max(-y + 20, 200))
         -- Content that SHRANK leaves the scroll frame parked past its new end.

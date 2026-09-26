@@ -20,10 +20,6 @@ local C_BACKGROUND = DF.GUI.Colors.background
 local C_BORDER     = DF.GUI.Colors.border
 local C_TEXT       = DF.GUI.Colors.text
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
--- Card body backdrop — distinctly darker than C_ELEMENT (the header colour)
--- so the body content visually separates from the header. Mirrors AD's
--- two-layer card chrome.
-local C_BODY_BG    = {r = 0.09, g = 0.09, b = 0.09, a = 1}
 -- Right-side settings panel chrome. Mirrors AD's rightPanel backdrop
 -- (AuraDesigner/UI/Editor.lua) -- dark fill + dim translucent border -- so the
 -- tab strip + per-tab content sit on a visible panel surface.
@@ -543,8 +539,11 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             card.title:SetText(displayName)
             -- Re-apply the category tint so SetText doesn't reset it back to
             -- the default font colour.
+            -- A classic card's colour is its chrome's (TEXT, or grey while hidden).
             local cc = card.titleCatColor
-            if cc then
+            if card.chrome then
+                card.chrome:Paint()
+            elseif cc then
                 card.title:SetTextColor(cc.r, cc.g, cc.b, cc.a)
             else
                 card.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, C_TEXT.a)
@@ -1652,7 +1651,10 @@ end
 --   BuildAppearanceSection(GUI, parent, elem, card, yStart, group)
 --   BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group)
 local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
-    local HEADER_HEIGHT = 30
+    -- ★ THE SETTINGS PANEL'S CARD LOOK (GUI:CreateCardChrome): the section card's
+    -- header height, rounded card, accent chevron, TEXT-coloured title, the meta as
+    -- a dim right-aligned summary while folded, a hairline over the body.
+    local HEADER_HEIGHT = GUI.SectionCard.header
 
     -- Outer card: layout-only, no backdrop. Spans the scroll child fully so the
     -- element rows line up with the add button + filter row above (their content
@@ -1667,26 +1669,22 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     card._page = page
     card._elem = elem
 
+    -- The fold, read first: the chrome draws the chevron it starts in.
+    local cardKey = "td_elem_" .. tostring(elem.id)
+    card.collapsed = GUI:GetCollapsedGroups()[cardKey] == true
+    card.cardKey = cardKey
+
     -- ── HEADER ───────────────────────────────────────────────
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
+    local header = CreateFrame("Button", nil, card)
     header:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
-    header:SetHeight(HEADER_HEIGHT)
-    -- hoverTone = "neutral": a card header is a PLACE, not a call to action, so
-    -- it takes the plain C_HOVER wash rather than the accent one. Replaces the
-    -- hand-rolled OnEnter/OnLeave pair that restated the rest colours.
-    DF.GUI:StyleButton(header, { height = HEADER_HEIGHT, hoverTone = "neutral" })
+    local chrome = GUI:CreateCardChrome(card, header, { expanded = not card.collapsed })
     card.header = header
+    card.chrome = chrome
 
-    -- Collapse arrow on the LEFT
+    -- Collapse arrow on the LEFT (the chrome's accent chevron)
     local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-    local arrow = header:CreateTexture(nil, "OVERLAY")
-    arrow:SetSize(10, 10)
-    arrow:SetPoint("LEFT", header, "LEFT", 8, 0)
-    do
-        local tc = GUI:GetThemeColor()
-        arrow:SetVertexColor(tc.r, tc.g, tc.b)
-    end
+    local arrow = chrome.chevron
     card.collapseArrow = arrow
 
     -- Category-color chip (replaces AD's spell icon)
@@ -1694,33 +1692,23 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     local catColor = ct and CATEGORY_COLORS[ct.category]
     local chip = header:CreateTexture(nil, "OVERLAY")
     chip:SetSize(4, 18)
-    chip:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+    chip:SetPoint("LEFT", arrow, "RIGHT", GUI.SectionCard.titleGap, 0)
     if catColor then
         chip:SetColorTexture(catColor.r, catColor.g, catColor.b, catColor.a)
     else
         chip:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
     end
 
-    -- Title text
-    local title = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(title, 11, "OUTLINE")
-    title:SetPoint("LEFT", chip, "RIGHT", 8, 0)
+    -- Title text: TEXT colour, not the category's -- the chip carries that.
+    -- (titleCatColor stays nil, so the Label box's live rename keeps C_TEXT too.)
+    local title = chrome.title
     local displayName = (elem.label and elem.label ~= "" and elem.label) or (ct and ct.label) or elem.contentType
     title:SetText(displayName)
-    if catColor then
-        title:SetTextColor(catColor.r, catColor.g, catColor.b, catColor.a)
-        card.titleCatColor = catColor
-    else
-        title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, C_TEXT.a)
-    end
     card.title = title
 
-    -- Meta line
-    local meta = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(meta, 9, "")
-    meta:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    meta:SetTextColor(0.55, 0.6, 0.7)
-    card.meta = meta
+    -- Meta line: the folded summary. Right inset clears the eye and the ✕.
+    chrome:LayoutText(chip, 8, 52)
+    card.meta = chrome.summary
 
     -- ── ACTION ICONS (right side of header) ──────────────────
     -- Shared close glyph delete (matches AD's CreateEffectCard delete).
@@ -1768,6 +1756,8 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
             eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
         end
         eyeBtn:SetGlyphHover(elem.enabled)
+        -- A hidden element's title and chevron take the card's disabled grey.
+        chrome:SetDimmed(not elem.enabled)
     end
     updateEyeIcon()
     card.eyeBtn = eyeBtn
@@ -1788,13 +1778,10 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     end)
 
     -- ── BODY ─────────────────────────────────────────────────
+    -- No backdrop: the body is the card's own fill, under the chrome's hairline.
     local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
     body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-    DF.GUI:CreateElementBackdrop(body, {
-        bgColor     = { C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a },
-        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3 },
-    })
     card.body = body
 
     -- Build content sections inside body.
@@ -1805,21 +1792,16 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     body:SetHeight(bodyHeight)
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
-    local cardKey = "td_elem_" .. tostring(elem.id)
-    local savedStates = GUI:GetCollapsedGroups()
-    card.collapsed = savedStates[cardKey] == true
-    card.cardKey = cardKey
-
+    -- (cardKey / card.collapsed were read before the header, for the chrome.)
     local function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
-            arrow:SetTexture(mediaPath .. "chevron_right")
             card:SetHeight(HEADER_HEIGHT)
         else
             body:Show()
-            arrow:SetTexture(mediaPath .. "expand_more")
             card:SetHeight(HEADER_HEIGHT + bodyHeight)
         end
+        chrome:SetExpanded(not card.collapsed, body)
     end
     card.ApplyCollapseState = ApplyCollapseState
 
@@ -1860,7 +1842,7 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
                 end
             end
         end
-        meta:SetText(s)
+        chrome:SetSummary(s)
     end
     card:UpdateMeta()
 
@@ -1952,7 +1934,7 @@ local function RenderCardList(GUI, page, tdDB, state)
     if not state.listChild then return end
 
     local y = 0
-    local CARD_GAP = 5
+    local CARD_GAP = GUI.SectionCard.gap   -- the settings cards' gap
     for _, elem in ipairs(elementsToShow) do
         local card, totalCardH = CreateTextElementCard(GUI, state.listChild, y, elem, tdDB, state, page)
         state.cardFrames[elem.id] = card
@@ -2551,7 +2533,10 @@ end
 -- ============================================================
 
 local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
-    local HEADER_HEIGHT = 30
+    -- ★ THE SETTINGS PANEL'S CARD LOOK, as CreateTextElementCard. The group's own
+    -- colour stays on its chip only: the chevron is the accent and the title TEXT,
+    -- like every other card, and the border is the shared one.
+    local HEADER_HEIGHT = GUI.SectionCard.header
 
     -- Outer card: layout-only, no backdrop. Spans the scroll child fully so the
     -- cards line up with the add button above (mirrors CreateTextElementCard).
@@ -2559,69 +2544,45 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     card:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yPos)
     card:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, yPos)
 
-    -- Group accent color used by both header (chip, arrow, title) and the
-    -- header/body border tints — mirrors AuraDesigner/UI/Editor.lua (gc * 0.35
-    -- for header border, gc * 0.20 for body border).
     local groupColor = CATEGORY_COLORS.group
-    local headerBorder = {
-        r = groupColor.r * 0.35,
-        g = groupColor.g * 0.35,
-        b = groupColor.b * 0.35,
-        a = 0.5,
-    }
-    local bodyBorder = {
-        r = groupColor.r * 0.20,
-        g = groupColor.g * 0.20,
-        b = groupColor.b * 0.20,
-        a = 0.3,
-    }
 
-    -- ── HEADER (group-themed accent) ─────────────────────────
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
+    -- The fold, read first: the chrome draws the chevron it starts in.
+    -- Distinct key prefix from text elements so a group and a text element
+    -- with the same numeric id never share collapse state.
+    local cardKey = "td_group_" .. tostring(elem.id)
+    card.collapsed = GUI:GetCollapsedGroups()[cardKey] == true
+    card.cardKey = cardKey
+
+    -- ── HEADER ───────────────────────────────────────────────
+    local header = CreateFrame("Button", nil, card)
     header:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
-    header:SetHeight(HEADER_HEIGHT)
-    -- Same shared header style as the Texts card, but restBorderColor keeps this
-    -- one's group-coloured border at rest -- the group's identity -- while fill,
-    -- hover and disabled stay shared.
-    DF.GUI:StyleButton(header, {
-        height          = HEADER_HEIGHT,
-        hoverTone       = "neutral",
-        restBorderColor = headerBorder,
-    })
+    local chrome = GUI:CreateCardChrome(card, header, { expanded = not card.collapsed })
     card.header = header
+    card.chrome = chrome
 
     local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
-    -- Collapse arrow on the LEFT (tinted with the group category color).
-    local arrow = header:CreateTexture(nil, "OVERLAY")
-    arrow:SetSize(10, 10)
-    arrow:SetPoint("LEFT", header, "LEFT", 8, 0)
-    arrow:SetVertexColor(groupColor.r, groupColor.g, groupColor.b)
+    -- Collapse arrow on the LEFT (the chrome's accent chevron).
+    local arrow = chrome.chevron
     card.collapseArrow = arrow
 
     -- Category-color chip
     local chip = header:CreateTexture(nil, "OVERLAY")
     chip:SetSize(4, 18)
-    chip:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+    chip:SetPoint("LEFT", arrow, "RIGHT", GUI.SectionCard.titleGap, 0)
     chip:SetColorTexture(groupColor.r, groupColor.g, groupColor.b, groupColor.a or 1)
 
     -- Title text
-    local title = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(title, 11, "OUTLINE")
-    title:SetPoint("LEFT", chip, "RIGHT", 8, 0)
+    local title = chrome.title
     local displayName = (elem.label and elem.label ~= "" and elem.label) or L["Text Group"]
     title:SetText(displayName)
-    title:SetTextColor(groupColor.r, groupColor.g, groupColor.b)
     card.title = title
-    card.titleCatColor = groupColor
 
-    -- Meta line (item count — populated after BuildContentSection runs below)
-    local meta = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(meta, 9, "")
-    meta:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    meta:SetTextColor(0.55, 0.6, 0.7)
-    card.meta = meta
+    -- Meta line (item count — populated after BuildContentSection runs below):
+    -- the folded summary. Right inset clears the eye and the ✕.
+    chrome:LayoutText(chip, 8, 52)
+    card.meta = chrome.summary
 
     -- ── ACTION ICONS (right side of header) ──────────────────
     -- Shared close glyph delete (matches CreateTextElementCard / AD).
@@ -2663,6 +2624,8 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
             eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
         end
         eyeBtn:SetGlyphHover(elem.enabled)
+        -- A hidden group's title and chevron take the card's disabled grey.
+        chrome:SetDimmed(not elem.enabled)
     end
     updateEyeIcon()
     eyeBtn:SetScript("OnClick", function()
@@ -2681,13 +2644,10 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     end
 
     -- ── BODY ─────────────────────────────────────────────────
+    -- No backdrop: the body is the card's own fill, under the chrome's hairline.
     local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
     body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-    DF.GUI:CreateElementBackdrop(body, {
-        bgColor     = { C_BODY_BG.r, C_BODY_BG.g, C_BODY_BG.b, C_BODY_BG.a },
-        borderColor = { bodyBorder.r, bodyBorder.g, bodyBorder.b, bodyBorder.a },
-    })
     card.body = body
 
     -- Ensure default fields exist before BuildContentSection runs.
@@ -2708,26 +2668,19 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     body:SetHeight(bodyHeight)
 
     -- Update meta line: show item count.
-    meta:SetText(("(%d %s)"):format(#elem.groupItems, (#elem.groupItems == 1) and L["item"] or L["items"]))
+    chrome:SetSummary(("(%d %s)"):format(#elem.groupItems, (#elem.groupItems == 1) and L["item"] or L["items"]))
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
-    -- Distinct key prefix from text elements so a group and a text element
-    -- with the same numeric id never share collapse state.
-    local cardKey = "td_group_" .. tostring(elem.id)
-    local savedStates = GUI:GetCollapsedGroups()
-    card.collapsed = savedStates[cardKey] == true
-    card.cardKey = cardKey
-
+    -- (cardKey / card.collapsed were read before the header, for the chrome.)
     local function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
-            arrow:SetTexture(mediaPath .. "chevron_right")
             card:SetHeight(HEADER_HEIGHT)
         else
             body:Show()
-            arrow:SetTexture(mediaPath .. "expand_more")
             card:SetHeight(HEADER_HEIGHT + bodyHeight)
         end
+        chrome:SetExpanded(not card.collapsed, body)
     end
     card.ApplyCollapseState = ApplyCollapseState
 
@@ -2788,7 +2741,7 @@ local function RenderGroupCardList(GUI, page, tdDB, state)
     if state.groupEmptyMsg then state.groupEmptyMsg:Hide() end
 
     local y = 0
-    local CARD_GAP = 5
+    local CARD_GAP = GUI.SectionCard.gap   -- the settings cards' gap
     for _, elem in ipairs(groupsToShow) do
         local card, totalCardH = CreateGroupCard(GUI, state.groupListChild, y, elem, tdDB, state, page)
         state.groupCardFrames[elem.id] = card

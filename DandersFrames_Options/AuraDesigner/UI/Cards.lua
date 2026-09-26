@@ -5039,10 +5039,9 @@ S.CreateEffectCard = function(parent, yPos, effect)
     local isExpanded = expandedCards[cardKey] or false
 
     -- ── CARD + HEADER ──
-    local card, header, chevron = CreateCardShell(parent, {
+    local card, header, chevron, chrome = CreateCardShell(parent, {
         yPos        = yPos,
         expanded    = isExpanded,
-        borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5},
     })
 
     -- Spell icon (small, before type badge). Other-pool records resolve
@@ -5066,7 +5065,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
     -- it. Every row now reserves the same width whatever it draws inside.
     local iconSlot = CreateFrame("Frame", nil, header)
     iconSlot:SetSize(20, 20)
-    iconSlot:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+    iconSlot:SetPoint("LEFT", chevron, "RIGHT", GUI.SectionCard.titleGap, 0)
 
     local spellIcon = iconSlot:CreateTexture(nil, "ARTWORK")
     spellIcon:SetSize(isGlyphIcon and 13 or 20, isGlyphIcon and 13 or 20)
@@ -5132,15 +5131,20 @@ S.CreateEffectCard = function(parent, yPos, effect)
         text = clashText,
     })
 
-    -- Aura name + anchor/trigger/group info
-    local infoStr = effect.displayName
+    -- Aura name is the card's TITLE; the anchor / group / trigger count / Others
+    -- Only facts it used to trail are the folded SUMMARY, right-aligned and dim
+    -- (the settings cards' split). Open, the body shows all of them.
+    local summaryStr = ""
+    local function addFact(fact)
+        summaryStr = (summaryStr == "") and fact or (summaryStr .. " · " .. fact)
+    end
     local indicatorGroup = nil  -- layout group this indicator belongs to
     if isPlaced then
         indicatorGroup = GetIndicatorLayoutGroup(effect.auraName, effect.indicatorID)
         if indicatorGroup then
-            infoStr = infoStr .. "  -  " .. indicatorGroup.name
+            addFact(indicatorGroup.name)
         elseif effect.anchor then
-            infoStr = infoStr .. "  -  " .. (OPTS.ANCHOR_OPTIONS[effect.anchor] or effect.anchor)
+            addFact(OPTS.ANCHOR_OPTIONS[effect.anchor] or effect.anchor)
         end
     else
         -- Show trigger count for frame-level effects
@@ -5148,7 +5152,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
         if #triggers > 1 then
             -- No "(AND)" suffix: the operator toggle is gone (12.1 cannot evaluate
             -- triggers together read-free), so multiple triggers always mean ANY/OR.
-            infoStr = infoStr .. "  -  " .. format(L["+%d triggers"], #triggers - 1)
+            addFact(format(L["+%d triggers"], #triggers - 1))
         end
     end
     -- Other Buffs: surface the per-effect Others Only state on the collapsed
@@ -5156,24 +5160,19 @@ S.CreateEffectCard = function(parent, yPos, effect)
     -- ⚠ NOT ON THE HELPER'S POOL, where it is a constant rather than a state -- see
     -- P.ShowsOthersOnly for the whole argument.
     if ShowsOthersOnly() and effect.config and effect.config.othersOnly then
-        infoStr = infoStr .. "  -  " .. L["Others Only"]
+        addFact(L["Others Only"])
     end
-    local infoText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    if warnKey and header.dfWarningBadge and header.dfWarningBadge:IsShown() then
-        infoText:SetPoint("LEFT", header.dfWarningBadge, "RIGHT", 6, 0)
-    else
-        infoText:SetPoint("LEFT", badgeBg, "RIGHT", 6, 0)
-    end
+    chrome.title:SetText(effect.displayName)
+    -- Grouped indicators keep their dim title: the group manages them.
+    if indicatorGroup then chrome.titleColor = C_TEXT_DIM end
+    chrome:SetSummary(summaryStr)
     -- Right inset clears the action icons: eye only (grouped) or eye + ✕.
-    infoText:SetPoint("RIGHT", header, "RIGHT", indicatorGroup and -30 or -52, 0)
-    infoText:SetMaxLines(1)
-    infoText:SetText(infoStr)
-    if indicatorGroup then
-        -- Use dimmed text for grouped indicators — they're managed by the group
-        infoText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    if warnKey and header.dfWarningBadge and header.dfWarningBadge:IsShown() then
+        chrome:LayoutText(header.dfWarningBadge, 6, indicatorGroup and 30 or 52)
     else
-        infoText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        chrome:LayoutText(badgeBg, 6, indicatorGroup and 30 or 52)
     end
+    chrome:Paint()
 
     -- Delete button — hidden for grouped indicators (managed by layout group)
     local delBtn
@@ -5299,33 +5298,24 @@ S.CreateEffectCard = function(parent, yPos, effect)
         -- for a placement tracking nothing while the name and icon beside it stayed bright,
         -- which reads as the eye being wrong rather than the row being inert. Both states
         -- mean "this is not going to render", so both dim the row.
+        -- The title and chevron take the card's disabled grey (chrome:SetDimmed).
         if not shown() or tracksNothing() then
             spellIcon:SetAlpha(0.4)
-            infoText:SetAlpha(0.5)
+            chrome:SetDimmed(true)
         end
     end
 
-    -- Header click → toggle expansion
+    -- Header click → toggle expansion (hover is the card chrome's own)
     header:SetScript("OnClick", function()
         expandedCards[cardKey] = not expandedCards[cardKey]
         S.SwitchTab("effects")
     end)
-    header:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    header:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    end)
 
-    local totalCardH = 30
+    local totalCardH = P.CardHeaderHeight()
 
     -- ── BODY (only when expanded) ──
     if isExpanded then
-        local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
-        body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
-        body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
-        ApplyBackdrop(body, {r = 0.09, g = 0.09, b = 0.09, a = 1},
-            {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
+        local body = P.CreateCardBody(card, header)
 
         -- Create the appropriate proxy
         local proxy
@@ -5403,7 +5393,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
     end
 
     card:SetHeight(totalCardH)
-    return yPos - totalCardH - 5
+    return yPos - totalCardH - P.CardGap()
 end
 
 -- ── BUILD EFFECTS TAB ──
