@@ -234,7 +234,30 @@ local function build()
                     lines = { L["Size of the top strip, the element panel, this window and the text on the movers. Movers themselves always match their frames."] } },
         get = function() return NS.db.scale end,
         set = function(v) NS.db.scale = v end,
-        onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
+        -- ☠ APPLIED ON RELEASE, NEVER MID-DRAG. This slider scales the window it
+        -- sits in: applied live, the window resized under the held mouse, the
+        -- bar moved under the cursor, the value jumped, and the window resized
+        -- again -- an endless flicker (tester report, alpha.12). The mover's host
+        -- has no drag hooks, so the kit calls this on every step; while the
+        -- button is held it only arms a one-shot watcher that applies once, on
+        -- release. The value itself is still written every step.
+        onChanged = function()
+            local s = f.scaleSlider
+            if s and IsMouseButtonDown and IsMouseButtonDown("LeftButton") then
+                if not s.dfScaleWatch then
+                    s.dfScaleWatch = CreateFrame("Frame", nil, s)
+                    s.dfScaleWatch:Hide()
+                    s.dfScaleWatch:SetScript("OnUpdate", function(w)
+                        if IsMouseButtonDown("LeftButton") then return end
+                        w:Hide()
+                        if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end
+                    end)
+                end
+                s.dfScaleWatch:Show()
+                return
+            end
+            if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end
+        end,
     })
     f.scaleTop = y
     f.columnsTop = y - (f.scaleSlider.preferredHeight or UI.RowHeight.slider or 50) - TIGHT

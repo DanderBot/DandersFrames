@@ -269,3 +269,16 @@ NS.Settings = prevSettings
 NS.UI, NS.Session, NS.db, CreateFrame = prevUI, prevSession, prevDB, prevCreateFrame
 NS.Proxy, NS.Grid, UISpecialFrames = prevProxy, prevGrid, prevSpecial
 NS.ChromeScale = prevChrome
+
+-- Scale applies on RELEASE, never mid-drag: applied live it resized the window
+-- under the held slider and flickered in a loop (tester report, alpha.12).
+do
+    local SET = mover_file_source("Settings.lua"):gsub("\r\n", "\n")
+    local s = SET:find("f.scaleSlider = UI:CreateSlider(f, {", 1, true)
+    local e = s and SET:find("\n    })", s, true)
+    local body = (s and e) and SET:sub(s, e) or ""
+    check(body:find('IsMouseButtonDown("LeftButton")', 1, true) ~= nil,
+          "scale: the slider checks for a held mouse before applying")
+    check(body:find("dfScaleWatch", 1, true) ~= nil,
+          "scale: ...and defers the apply to a one-shot release watcher")
+end
