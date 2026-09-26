@@ -10,6 +10,7 @@ memory and checking the builder's keys are reported.
 Usage: python Tools/mover-tests/test_classic_audit.py
 """
 import importlib.util, pathlib, sys, tempfile
+sys.dont_write_bytecode = True      # no Tools/__pycache__ from importing the audit
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("audit", HERE.parent / "audit-classic-layout.py")
