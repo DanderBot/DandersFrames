@@ -667,11 +667,7 @@ do
           "locale: ...and PopoutRow asks for the pin phrase through the host's own L")
 
     local controls = options_file_source("GUI/Controls.lua")
-    check(controls:find("local function RegisterHoistedControls(row, list, dbFn)", 1, true) ~= nil
-      and controls:find("if type(label) == \"table\" then", 1, true) ~= nil
-      and controls:find("RegisterHoistedControls = ", 1, true) == nil,
-          "verb: hoisted controls are reached through RegisterHoistedToggle, one exported name")
-    check(controls:find("local function PopoutContent(buildInto, innerColumns, opts)", 1, true) ~= nil
+    check(controls:find("local function PopoutContent(buildInto, innerColumns)", 1, true) ~= nil
       and controls:find("innerColumns = innerColumns }", 1, true) ~= nil,
           "grid: a pane's track count is a per-row argument of the shared helper")
 
@@ -708,11 +704,9 @@ do
     end
     eq(#wrong, 0, "inline: every page opts in exactly what the roll says -- " .. table.concat(wrong, ", "))
 
-    check(controls:find("local INLINE_MAX = 6", 1, true) ~= nil
-      and controls:find("eager.group:CountVisibleChildren() <= INLINE_MAX", 1, true) ~= nil,
-          "inline: the helper carries the threshold, measured off the PANE")
-    check(options_file_source("Features/Search.lua"):find("row:IsShowingInlineContent() then return end", 1, true) ~= nil,
-          "inline: the search jump stops at a row that is showing the setting")
+    -- ...and the helper's inline arm went with the last row that could use it.
+    check(controls:find("INLINE_MAX", 1, true) == nil,
+          "inline: the helper no longer carries an inline arm")
 end
 
 -- ============================================================

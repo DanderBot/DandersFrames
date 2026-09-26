@@ -14,10 +14,9 @@ local NS = ...
 --      current mode has no default for. Popout content builds inside the same
 --      section as the row, so the stamping has to be position-independent --
 --      which it is, and this says so.
---   2. THE JUMP. "Show me" scrolls to a SECTION, not to a widget. For a control
---      that now lives inside a popout there is nothing of its own on the page to
---      land on, so NavigateToTab takes the setting's key and opens the row that
---      owns it -- read off `page._popoutRowForKey`, which any page may publish.
+--   2. THE JUMP. "Show me" scrolls to a SECTION, not to a widget. (It used to
+--      open the popout row owning the setting as well; that half went with the
+--      rows pages on 2026-09-26.)
 --
 -- ☠ THE HARNESS SHARES ONE LUA RUNTIME ACROSS EVERY TEST FILE. This file
 -- replaces the `DandersFrames` global (Search.lua takes its host off it, not off
@@ -119,116 +118,27 @@ do
 end
 
 -- ============================================================
--- 1b. THE SECTION, CORRECTED AFTER THE FACT
--- ------------------------------------------------------------
--- Position-dependent context cannot describe a page that no longer builds in
--- position order, so a popout row names its own contents once they exist. This
--- is that door, on its own; the caller is pinned in test_popout_page_tools.
--- ============================================================
-do
-    resetRegistry()
-    local e = Search:RegisterCheckbox("Show Border", "frameShowBorder", nil, false, nil)
-    eq(e.section, "Appearance", "resection: the entry starts on the last header")
-
-    Search:SetEntrySection(e, "Border")
-    eq(e.section, "Border", "resection: ...and takes the row's name instead")
-
-    -- ☠ KEYWORDS AND ALL. Find scores a keyword hit, so the old section's words
-    -- left in place would keep matching a page the entry has nothing to do with.
-    local words = {}
-    for _, w in ipairs(e.keywords or {}) do words[w] = true end
-    check(not words["appearance"], "resection: the old section's words are dropped")
-    check(words["border"], "resection: ...and the new one's indexed")
-    check(words["show"], "resection: ...while the entry's own label survives")
-    check(words["general_frame"], "resection: ...and so does its tab")
-
-    -- No-ops, each for its own reason.
-    Search:SetEntrySection(e, "")
-    eq(e.section, "Border", "resection: an empty name is refused")
-    Search:SetEntrySection(e, nil)
-    eq(e.section, "Border", "resection: ...and so is no name at all")
-
-    -- ☠ AND AN ENTRY THAT NEVER REACHED THE REGISTRY IS LEFT ALONE. Register
-    -- hands back keyless entries, entries for the other mode's defaults and
-    -- anything offered after the registry was sealed WITHOUT adding them, and an
-    -- id is the one mark that says an entry is really in there. Re-sectioning one
-    -- nothing can find would be a write nobody reads.
-    local dropped = Search:RegisterSlider("Nonsense", "noSuchSettingAnywhere", 0, 1, 1, nil, nil)
-    eq(dropped.id, nil, "resection: the dropped entry is unregistered, as before")
-    Search:SetEntrySection(dropped, "Border")
-    eq(dropped.section, nil, "resection: ...and is not re-sectioned")
-end
-
--- ============================================================
 -- 2. THE JUMP
+-- ------------------------------------------------------------
+-- NavigateToTab hands the scroll-and-flash to GUI:LinkToSetting. (The popout
+-- row half of the jump -- Search:OpenOwningPopoutRow, reading a page's
+-- `_popoutRowForKey` -- was deleted 2026-09-26 with the rows pages that
+-- published the map, and Search:SetEntrySection with the ClaimKeys that called
+-- it.)
 -- ============================================================
--- A fake page with one popout row, plus the LinkToSetting the navigate path
--- delegates its scroll-and-flash half to.
-local function fakeRow(shown)
-    local r = { opened = 0, _shown = shown ~= false }
-    function r:OpenPopout() self.opened = self.opened + 1 end
-    function r:IsShown() return self._shown end
-    return r
-end
-
 local linked
-local function newPage(map)
-    return { _popoutRowForKey = map }
-end
 DF.GUI.LinkToSetting = function(_, target) linked = target end
 
-local function navigate(key, map)
+do
+    check(Search.OpenOwningPopoutRow == nil, "jump: the popout-row half is gone")
+    check(Search.SetEntrySection == nil, "jump: ...and so is the after-the-fact section door")
     linked = nil
     queued = {}
-    DF.GUI.Pages = { general_frame = newPage(map) }
-    Search:NavigateToTab("general_frame", "Appearance", key)
-end
-
-do
-    local row = fakeRow()
-    navigate("frameBorderSize", { frameBorderSize = row })
-    eq(linked and linked.page, "general_frame", "jump: the section jump still runs")
+    DF.GUI.Pages = { general_frame = {} }
+    Search:NavigateToTab("general_frame", "Appearance", "frameBorderSize")
+    eq(linked and linked.page, "general_frame", "jump: the section jump runs")
     eq(linked and linked.section, "Appearance", "jump: ...at the entry's own section")
-    eq(row.opened, 0, "jump: the row is not opened before the jump has settled")
-    eq(fireTimers(), 1, "jump: exactly one deferred step is queued")
-    eq(row.opened, 1, "jump: and it opens the row that owns the setting")
-end
-
-do
-    -- A setting the page does not hand to a row: nothing to open, and the
-    -- section jump alone is the whole behaviour (which is the classic layout).
-    local row = fakeRow()
-    navigate("frameWidth", { frameBorderSize = row })
-    fireTimers()
-    eq(row.opened, 0, "jump: an unmapped key opens nothing")
-
-    navigate("frameBorderSize", nil)
-    eq(fireTimers(), 1, "jump: a page with no map still queues the (harmless) lookup")
-
-    navigate(nil, { frameBorderSize = fakeRow() })
-    eq(#queued, 0, "jump: no key, no deferred step at all")
-end
-
-do
-    -- A row hidden by its own predicate is not a place to dock a panel.
-    local row = fakeRow(false)
-    navigate("frameBorderSize", { frameBorderSize = row })
-    fireTimers()
-    eq(row.opened, 0, "jump: a hidden row is left closed")
-end
-
-do
-    -- ☠ THE CONTRACT THAT MATTERS: the map is read AFTER the jump, never
-    -- captured before it. Switching pages rebuilds the page, and a rebuild
-    -- retires every row -- so the row opened has to be the one the map holds at
-    -- firing time. Swapping the whole page between the call and the timer is the
-    -- headless stand-in for that rebuild.
-    local stale, rebuilt = fakeRow(), fakeRow()
-    navigate("frameBorderSize", { frameBorderSize = stale })
-    DF.GUI.Pages = { general_frame = newPage({ frameBorderSize = rebuilt }) }
-    fireTimers()
-    eq(stale.opened, 0, "jump: the row from before the jump is never opened")
-    eq(rebuilt.opened, 1, "jump: the row the rebuilt page publishes is")
+    eq(#queued, 0, "jump: ...and nothing is deferred to open a row afterwards")
 end
 
 -- ---- restore the globals -------------------------------------------

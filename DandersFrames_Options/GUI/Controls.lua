@@ -4174,12 +4174,12 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
 end
 
 -- ============================================================
--- THE POPOUT PAGE'S SHARED MACHINERY
+-- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
 -- ------------------------------------------------------------
--- Everything a settings page needs to mount its groups as popout feature rows.
--- This is the ONLY copy: a per-page fork would drift, and the first thing to
--- drift would be one of the load-bearing notes rather than the code under it.
--- The essays below are the only place each piece is explained.
+-- Everything a settings page needs to build its card sections. This is the
+-- ONLY copy: a per-page fork would drift, and the first thing to drift would be
+-- one of the load-bearing notes rather than the code under it. The essays below
+-- are the only place each piece is explained.
 --
 -- USAGE, at the top of a BuildPage builder and unconditionally:
 --
@@ -4190,32 +4190,26 @@ end
 -- of every converted group a plain `if classicLayout then` arm building the box
 -- it always built.
 --
--- WHAT COMES BACK (all closing over this page's own state -- its mounted panes,
--- its holders, its row map -- so two pages built in one session cannot reflow
--- each other's panels):
+-- WHAT COMES BACK (all closing over this page's own state -- its mounted panes
+-- and its holders -- so two pages built in one session cannot reflow each
+-- other's panels):
 --
---   PopoutContent(buildInto, innerColumns, opts) -> mount, eagerGroup
---                                       opts.inline -- mount the eager group ON
---                                       the row's plate instead of behind it
---   ClaimKeys(row, group, extra)
---   WireModifiedTick(row)
---   WireFooter(row, apply, rowDB)
---   RegisterHoistedToggle(row, label, key, onToggle)   -- the hoisted TICK
---   RegisterHoistedToggle(row, { <control declaration>, ... })  -- ...and the
---                                                       hoisted CONTROLS
---   RegisterControlRow(row, kind, key, custom, callback)
+--   OpenSection(...) / CloseSection(...)   -- one card section
+--   RegisterSection(section)               -- joins the Expand/Collapse All roster
+--   SectionControls(parent)                -- the Expand All / Collapse All strip
+--   PopoutContent(buildInto, innerColumns) -> mount, eagerGroup
+--                                          -- a section pin's panel content
 --   ReflowMounted(values)
 --   RowDB()
 --   BandWidth(col)
---   INLINE_BOX          -- the full-width box's band skin
+--
+-- (2026-09-26: the popout-row, hoisted-control and inline-pane machinery that
+-- used to live here -- ClaimKeys, WireModifiedTick, WireFooter,
+-- RegisterHoistedToggle, RegisterControlRow, the inline arm and INLINE_BOX --
+-- was deleted with the designers' rows pages, its last callers.)
 -- ============================================================
 function GUI:CreatePopoutPageTools(page)
     if not page then return nil end
-
-    -- Cleared on EVERY build, classic included. It only ever has entries in the
-    -- popout layout, and a map left behind by a previous new-UI build would
-    -- point the settings-search jump at rows this build has retired.
-    page._popoutRowForKey = nil
 
     -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
     -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
@@ -4227,13 +4221,12 @@ function GUI:CreatePopoutPageTools(page)
     -- called bare, so an older embedded copy of the pack without the verb cannot
     -- break the page.
     --
-    -- ☠ AND IT IS ABOVE THE CLASSIC BAIL, FOR THE SAME REASON THE MAP CLEAR IS.
-    -- The flip TO classic is itself a rebuild, and it is the one rebuild that
-    -- happens with a panel standing open -- the tick that flips it lives inside
-    -- one. Left below the early return, the helper would hand the classic page
-    -- back with an orphan panel still floating beside it, wired to a row this
-    -- build has retired. Classic has nothing open otherwise, so on every other
-    -- classic build this is a no-op over an empty registry.
+    -- ☠ AND IT IS ABOVE THE CLASSIC BAIL. The flip TO classic is itself a
+    -- rebuild, and it is the one rebuild that can happen with a panel standing
+    -- open. Left below the early return, the helper would hand the classic page
+    -- back with an orphan panel still floating beside it. Classic has nothing
+    -- open otherwise, so on every other classic build this is a no-op over an
+    -- empty registry.
     if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
 
     if DF:IsClassicSettingsLayout() then return nil end
@@ -4252,28 +4245,13 @@ function GUI:CreatePopoutPageTools(page)
     end
     page._popoutHolders = {}
 
-    -- What the settings SEARCH needs back, per row: (a) the hoisted toggles,
-    -- whose checkbox factory was what registered them with search, and (b) which
-    -- row owns a setting, so a hit on a popout-only control can open the panel
-    -- it is behind. (a) is RegisterHoistedToggle below; this is (b)'s map.
-    page._popoutRowForKey = {}
-
     local POPOUT_W = GUI.PopoutContentWidth or 260
 
-    -- ☠ HOW SMALL IS SMALL ENOUGH TO PUT ON THE PLATE, and it is a REFUSAL
-    -- rather than a choice. A page opts a row in (`opts.inline`); this number is
-    -- what stops an opted-in row whose pane turns out to hold thirty controls
-    -- from making a plate nobody can read. Six because two thirds of the rows in
-    -- the addon hide six settings or fewer, and a row holding four was charging
-    -- the same click as a row holding thirty-one -- the whole argument for the
-    -- hybrid page. Measured off the pane rather than off the declared count, so
-    -- a row cannot lie its way onto the plate.
-    local INLINE_MAX = 6
-
     -- Every pane currently mounted in a panel, so a toggle can re-flow the group
-    -- the user is looking at as well as the rows on the page. One list per PAGE
-    -- rather than per group: a reset behind one row can change what another
-    -- row's pane is showing, and a stale open panel costs more than a repaint.
+    -- the user is looking at as well as the sections on the page. One list per
+    -- PAGE rather than per group: a write behind one section can change what
+    -- another section's pane is showing, and a stale open panel costs more than
+    -- a repaint.
     local mounted = {}
 
     -- Re-flow one mounted group and put the panel back around it. Sized from the
@@ -4285,10 +4263,10 @@ function GUI:CreatePopoutPageTools(page)
         g:LayoutChildren()
         g:RefreshChildStates()
         -- ☠ AND THE VALUES, when the caller says a write happened that these
-        -- widgets could not have seen (a group Reset, a hold, the undo of one).
-        -- RefreshChildStates is about STATE; a checkbox's tick, a slider's thumb
-        -- and a dropdown's caption are painted at build and on OnShow, on the
-        -- assumption nothing writes a setting except the widget bound to it.
+        -- widgets could not have seen. RefreshChildStates is about STATE; a
+        -- checkbox's tick, a slider's thumb and a dropdown's caption are painted
+        -- at build and on OnShow, on the assumption nothing writes a setting
+        -- except the widget bound to it.
         --
         -- ⚠ OPT-IN, not on every reflow: this also runs on a hideOn change while
         -- a slider inside the pane is being dragged, and a value repaint mid-drag
@@ -4299,21 +4277,6 @@ function GUI:CreatePopoutPageTools(page)
         -- build, and a hideOn inside this group moves it afterwards.
         local po = st.po
         if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
-        -- ☠ ...OR THE PLATE AROUND IT, for an instance mounted ON a row rather
-        -- than in a panel. Same fact one host earlier: the group has just been
-        -- re-flowed and knows its new height, and the thing holding a slot for it
-        -- -- here the row's plate, there the panel -- does not until it is told.
-        --
-        -- ⚠ NOT WHILE THE ROW IS MEASURING. The row asks for the height from the
-        -- middle of its own layout pass, and that ask re-flows this group; coming
-        -- back to the row from here would be the layout calling itself.
-        if st.inlineRow and not st.measuring then
-            -- rawget, the convention every private-field read in this pack
-            -- follows: the kit's own layout verb, absent on an older embedded
-            -- copy of the pack.
-            local relayout = rawget(st.inlineRow, "_LayoutPlate")
-            if type(relayout) == "function" then relayout() end
-        end
     end
 
     -- `values` rides through to ReflowPane: see its header for why a value
@@ -4324,7 +4287,7 @@ function GUI:CreatePopoutPageTools(page)
         end
     end
 
-    -- ONE row's popout content, built EAGERLY -- at page build time, into a
+    -- ONE section's panel content, built EAGERLY -- at page build time, into a
     -- hidden holder -- rather than on first open. Two reasons, either sufficient
     -- on its own:
     --   (a) the settings SEARCH registry is built by re-running every page's
@@ -4335,35 +4298,15 @@ function GUI:CreatePopoutPageTools(page)
     --       what the export byte-identity gate measures.
     --
     -- The shell runs a row's `build` ONCE PER INSTANCE, so a SECOND instance (pin
-    -- one, then click the row again) asks for content a second time: the first
-    -- call adopts the pre-built group, every later one builds a fresh one through
-    -- the same builder. Which is why this is a factory rather than one captured
+    -- one, close it, pin again) asks for content a second time: the first call
+    -- adopts the pre-built group, every later one builds a fresh one through the
+    -- same builder. Which is why this is a factory rather than one captured
     -- group -- and why each group carries its own `st`, so the refresh wired into
     -- group one cannot re-flow group two.
     --
     -- `innerColumns` is the pane's own interior grid (DandersUI Sections'
-    -- opts.innerColumns), per ROW rather than per page: a pane of sliders at half
-    -- width is two stubby bars with their labels stranded, while a pane of
-    -- one-word checkboxes is exactly the list the second track was written for.
-    -- Omitted = absent = one track.
-    -- `opts.inline` asks for the EAGER instance to be mounted on the ROW's plate
-    -- rather than parked in a hidden holder waiting for a panel. See INLINE_MAX
-    -- above for what refuses it, and ClaimKeys for where the row and this factory
-    -- meet.
-    local function PopoutContent(buildInto, innerColumns, opts)
-        -- ☠ EVERY INSTANCE THIS FACTORY EVER BUILT, not only the eager one. A
-        -- hoisted control is the pane's own setting shown a second time on the
-        -- row's plate, and the pane's copy has to be HIDDEN while that is true --
-        -- one setting, one widget, one count. The pane the user is looking at may
-        -- be the SECOND instance (pin the panel, click the row again asks this
-        -- factory for content a second time), so a hide applied to the eager group
-        -- alone would leave that panel drawing the duplicate. The list is stamped
-        -- on every group built from it, which is how ClaimKeys -- handed exactly
-        -- one group -- reaches all of them.
-        local instances = {}
-        -- Set below, once the eager group exists and its size is known. Read from
-        -- inside `fresh`'s reflow closure, which runs long afterwards.
-        local inlineArm = false
+    -- opts.innerColumns). Omitted = absent = one track.
+    local function PopoutContent(buildInto, innerColumns)
         local function fresh()
             local st = {}
             local holder = CreateFrame("Frame", nil, page.child)
@@ -4379,51 +4322,20 @@ function GUI:CreatePopoutPageTools(page)
                                                { chromeless = true, padding = 0,
                                                  innerColumns = innerColumns })
             st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
-            st.group.dfPaneInstances = instances
-            instances[#instances + 1] = st
             -- What a builder's own dropdowns and checkboxes call. Cheap, and
-            -- deliberately NOT a page rebuild: a rebuild retires the row the user
-            -- is clicking through.
+            -- deliberately NOT a page rebuild: a rebuild retires the section the
+            -- user is clicking through.
             local reflow = function()
                 ReflowPane(st)
-                -- ☠ TWO LIVE COPIES OF ONE SETTING, AND A WRITE IN EITHER. An
-                -- inline row draws its group on the plate AND can have a second
-                -- instance of the same group pinned in a panel beside the page --
-                -- both bound to the same keys, both on screen at once. A
-                -- committed write in one has to repaint the other or the two sit
-                -- there disagreeing about what the setting is.
-                --
-                -- ⚠ NEVER THE INSTANCE THAT WROTE. This is the commit seam
-                -- (SettingsWidgets' RefreshOwnerStates), and a slider fires it
-                -- once per step it crosses -- so a value repaint of the widget
-                -- under the mouse snaps the thumb back to the last committed
-                -- step, which is exactly what ReflowPane's own `values` opt-in
-                -- exists to avoid.
-                --
-                -- ⚠ INLINE FACTORIES ONLY. Two instances of any other row's pane
-                -- can only both exist while one of them is PINNED, and putting
-                -- those in step is a change to every converted page rather than
-                -- to this one.
-                if inlineArm then
-                    for _, other in ipairs(instances) do
-                        if other ~= st and other.group
-                           and not (other.po and other.po.closed) then
-                            ReflowPane(other, true)
-                        end
-                    end
-                end
                 page:RefreshStates()
             end
 
             -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE, because the widget
             -- factories reach for it by name. Every one of them ends a write with
             -- `if parent.RefreshStates then parent:RefreshStates() end`; classic's
-            -- scroll child carries that forwarder (Panel.lua), this bare holder did
-            -- not, so the guard read nil and silently did NOTHING. Every `disableOn`
-            -- inside a pane was therefore stale until the panel was re-opened --
-            -- ticking Solo Mode's Rested Indicator left the two rows it gates greyed.
-            -- Builders that thread `reflow` into their own callbacks were immune;
-            -- most do not, and none should have to.
+            -- scroll child carries that forwarder (Panel.lua), a bare holder does
+            -- not, so the guard would read nil and silently do NOTHING -- every
+            -- `disableOn` inside a pane stale until the panel was re-opened.
             --
             -- ⚠ STATE ONLY, never values: ReflowPane repaints bound values only when
             -- asked (see its header), and this route never asks. A slider being
@@ -4436,54 +4348,12 @@ function GUI:CreatePopoutPageTools(page)
         end
 
         local pending = fresh()
-        -- Held by name as well: the INLINE arm below hands this instance to the
-        -- row and clears `pending`, so the group that comes back beside the mount
-        -- has to be remembered before that happens.
+        -- Held by name as well: the first mount clears `pending`, and the group
+        -- that comes back beside the mount is the eager one.
         local eager = pending
 
-        -- ☠ THE INLINE ARM: THE EAGER INSTANCE GOES ON THE PLATE, NOT BEHIND IT.
-        -- Everything it needs already exists -- it is built at page-build time,
-        -- its controls are registered with search, and ClaimKeys walks it. All
-        -- that changes is where it is mounted, and that the first click on the
-        -- strip therefore builds a SECOND instance through the same builder
-        -- rather than adopting this one.
-        --
-        -- ☠ THE COUNT IS ASKED OF THE PANE, NOT OF THE PAGE. A page opts a row
-        -- in; a pane that turns out to hold more than INLINE_MAX controls is
-        -- refused and keeps today's behaviour, so an opt-in cannot make a plate
-        -- nobody can read. CountVisibleChildren answers honestly BEFORE a layout
-        -- has run, which is the state this group is in right now.
-        if opts and opts.inline and eager.group.CountVisibleChildren
-           and eager.group:CountVisibleChildren() <= INLINE_MAX then
-            inlineArm = true
-            -- How ClaimKeys -- handed exactly one group -- finds the instance
-            -- that belongs on the plate, the same way dfPaneInstances is how it
-            -- finds all of them.
-            eager.group.dfInline = eager
-            -- ⚠ AND IT JOINS THE MOUNTED LIST HERE, because the mount that would
-            -- normally add it will never come. Reset Group, Hold: Defaults and
-            -- every page-wide reflow walk that list; an instance the user can
-            -- SEE and that list does not know about is one that would sit at the
-            -- old values after a reset.
-            mounted[#mounted + 1] = eager
-            pending = nil
-            -- ⚠ ...AND THE SELF-MEASURING WIDGET'S WALK ENDS HERE. A widget that
-            -- only learns its height after it is drawn calls GUI:RelayoutHost,
-            -- which walks up for something that can re-anchor the group's
-            -- neighbours; above a plate that is the settings WINDOW, which knows
-            -- nothing about this group. Same repair as the pane's dfReflowPane,
-            -- one host along -- and skipped while the row is measuring, for the
-            -- reason ReflowPane's own guard gives.
-            eager.holder.dfReflowPane = function()
-                if eager.measuring then return end
-                ReflowPane(eager)
-            end
-        end
-
         -- The eagerly built group comes back ALONGSIDE the mount function: it is
-        -- the one instance that exists at page-build time, so it is the one whose
-        -- children ClaimKeys can walk. Later instances build the same controls
-        -- from the same builder, so nothing is missed by ignoring them.
+        -- the one instance that exists at page-build time.
         return function(po, pane)
             local st = pending or fresh()
             pending = nil
@@ -4500,25 +4370,11 @@ function GUI:CreatePopoutPageTools(page)
             -- GROUP out and then walks up for something that can re-anchor the
             -- group's neighbours. On a page that is the page; above a pane it is the
             -- settings WINDOW, which knows nothing about this panel -- so the group
-            -- grew and the panel around it kept the height it was given right here,
-            -- clipping whatever the widget had just gained.
-            --
-            -- The AD indicator card's dfAD_ReflowWidgets is the same repair for the
-            -- same walk, one host earlier. Stamped at the MOUNT rather than in
-            -- fresh(): `pane` is what the walk passes through, and it does not exist
-            -- until a panel opens.
-            --
-            -- ⚠ A measured label with an EXPLICIT slot height never reaches this
-            -- (_slotHeightExplicit suppresses its converge). A banner has no such
-            -- opt-out -- only opts.staticHeight silences it, and that would change
-            -- what the classic page draws -- which is what made this necessary.
+            -- would grow and the panel around it keep the height it was given here,
+            -- clipping whatever the widget had just gained. Stamped at the MOUNT
+            -- rather than in fresh(): `pane` is what the walk passes through, and it
+            -- does not exist until a panel opens.
             pane.dfReflowPane = function() ReflowPane(st) end
-            -- ⚠ ...AND THE ROW'S SHOWN SET, for an instance built AFTER the row
-            -- last announced one. ClaimKeys applies a change to every instance that
-            -- existed at the time; this is the other half -- a `fresh()` built here
-            -- has never been told, and would open drawing the very control the
-            -- plate is already showing. The reflow below is the one it needs.
-            if instances.applyShown then instances.applyShown(st) end
             st.group:Show()
             ReflowPane(st)
         end, eager.group
@@ -4528,662 +4384,6 @@ function GUI:CreatePopoutPageTools(page)
     -- re-resolves on every refresh, so a mode switch is followed rather than
     -- frozen at the table this build captured.
     local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
-
-    -- ============================================================
-    -- A ROW IS A SECTION -- the two halves of saying so
-    -- ------------------------------------------------------------
-    -- In classic, a block of settings is a BOX WITH A HEADER, and that one header
-    -- does two jobs nobody had to think about: it is what the settings search
-    -- writes into every entry's breadcrumb (GUI:CreateHeader ends by calling
-    -- Search:SetCurrentSection), and it is what a cross-link or a breadcrumb
-    -- click FINDS the block by (Search:ScrollToSection asks every page child, and
-    -- every settings-group child, for :GetText()).
-    --
-    -- A popout row is that same block, and it has no header at all -- its name is
-    -- a FontString inside the row. So both jobs have to be done deliberately, and
-    -- they are done here rather than per page: the sweep has produced forty-odd
-    -- rows across a dozen pages, and forty copies of a two-line stamp is forty
-    -- chances to leave one out silently.
-    --
-    -- ☠ NEITHER HALF IS OPTIONAL, AND THEY ONLY WORK AS A PAIR. Stamping the
-    -- section without the anchor renames every breadcrumb to a section name
-    -- nothing on the page answers to, so the jump scrolls nowhere and flashes
-    -- nothing -- ScrollToSection's own DebugWarn, and "I clicked the result and
-    -- it did nothing" from the outside. Anchoring without the stamp leaves the
-    -- breadcrumbs reading whichever band header was built last.
-    local function RowLabel(row)
-        local name = row and (row._title or row._label)
-        if type(name) == "string" and name ~= "" then return name end
-        return nil
-    end
-
-    -- HALF ONE: the row answers to its own name. This is the move GUI:CreateHeader
-    -- itself makes -- that factory returns a CONTAINER and stamps
-    -- `container.GetText` so the container answers for the fontstring inside it
-    -- (GUI/SettingsWidgets.lua) -- applied to the row for the fontstring inside
-    -- IT. The walk then scrolls to the ROW and flashes the band around it, which
-    -- is what classic did when it scrolled to the header and flashed the box.
-    --
-    -- ⚠ IT OVERWRITES THE BUTTON'S OWN GetText, deliberately. A PopoutRow is a
-    -- Button (the whole row is the click target), so it inherits a GetText that
-    -- reads a fontstring the row never sets -- it answers nil to every lookup.
-    -- Nothing in the kit or the pages calls it. A page that wants a different
-    -- anchor still wins by assigning after ClaimKeys, which is the order every
-    -- caller already uses.
-    local function AnchorRow(row)
-        local name = RowLabel(row)
-        if not name then return end
-        row.GetText = function() return name end
-    end
-
-    -- HALF TWO: everything the pane registered says it lives in this row.
-    -- Guarded on the METHOD, not the table -- Search is in this companion, but a
-    -- page must not have to care whether it loaded. See Search:SetEntrySection
-    -- (Features/Search.lua) for why the correction has to happen after the fact
-    -- rather than by moving Search.CurrentSection around.
-    local function StampSection(row, entry)
-        local Search = DF.Search
-        if not (entry and Search and Search.SetEntrySection) then return end
-        local name = RowLabel(row)
-        if not name then return end
-        Search:SetEntrySection(entry, name)
-    end
-
-    -- Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not from a key list
-    -- and not from a name prefix -- a prefix would claim keys no popout owns and
-    -- would miss any spelled differently. Every shared factory stamps
-    -- container.searchEntry, so a control added to any builder is covered
-    -- without anyone having to remember this exists.
-    --
-    -- ...and the SAME walk answers which keys the row's amber modified-tick is
-    -- about, collected onto row._claimedKeys so the tick can ask the diff engine
-    -- "is any of these not the shipped default", which is exactly "does the pane
-    -- behind this row contain a change".
-    --
-    -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
-    -- searchEntry is stamped by the SEARCH registration, which is guarded on
-    -- DF.Search existing -- so on a build where search has not registered, every
-    -- key would be missed. container.overrideDbKey is stamped by the toolkit's
-    -- own AddOverrideIndicators, which every db-bound control goes through
-    -- regardless, and it covers the colour pickers and checkboxes whose search
-    -- entries are registered by a different route.
-    --
-    -- ⚠ `extra` IS NOT A CONVENIENCE. A control may be bound to a key the walk
-    -- cannot see: custom-get/set ticks over ONE table setting each stamp a
-    -- per-index override key the profile does not ship. Left to the walk alone
-    -- the row would claim keys the defaults engine cannot answer for, so its
-    -- amber tick would never light and Reset Group would write nothing while
-    -- saying it had. The real key is named through this door instead.
-    --
-    -- ⚠ AND THE SAME WALK IS WHERE THE SEARCH BREADCRUMB IS PUT RIGHT -- see
-    -- RowSection below, which is the third job this one pass does.
-    -- ...AND IT IS ANSWERED IN ONE PLACE, because there are now two callers. The
-    -- walk below resolves a widget's key in order to CLAIM it; the pane hide at
-    -- the foot of this function resolves the SAME widget's key to decide whether
-    -- the row is already drawing that setting. Two copies of the two-sources rule
-    -- above would be two chances for one of them to miss a colour picker.
-    local function KeyOf(w)
-        local se = w and w.searchEntry
-        local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
-        return (type(k) == "string") and k or nil
-    end
-
-    local function ClaimKeys(row, group, extra)
-        if not row then return end
-        -- The row's own name, ABOVE the group guard: a row is worth naming even
-        -- if the pane behind it turned out to have nothing the walk can see, and
-        -- the cross-links that jump to a row by name do not care what is in it.
-        AnchorRow(row)
-        if not (group and group.groupChildren) then return end
-        local claimed = row._claimedKeys or {}
-        row._claimedKeys = claimed
-        for _, e in ipairs(group.groupChildren) do
-            local w  = e.widget
-            local se = w and w.searchEntry
-            local k  = KeyOf(w)
-            if k then
-                page._popoutRowForKey[k] = row
-                claimed[#claimed + 1] = k
-            end
-            -- Whatever this control registered with SEARCH now says it lives in
-            -- this row, not in whichever band header happened to be built last.
-            StampSection(row, se)
-        end
-        -- ⚠ THE EXTRA KEYS ARE CLAIMED BUT NOT RE-SECTIONED, and that is a
-        -- refusal rather than an omission. An extra is named because the WALK
-        -- CANNOT SEE IT -- there is no widget and therefore no searchEntry to
-        -- stamp -- so the only way to reach one would be to hunt the Registry for
-        -- a matching dbKey. That is not safe from here: the same dbKey is
-        -- legitimately registered from more than one page (the search card cache
-        -- keys on tab AND section for exactly that reason), and this helper has
-        -- no honest way to tell which of those hits is the one on THIS page --
-        -- Search.CurrentTab is only meaningful during a registry build, and a
-        -- page rebuilt by a tab click would be reading a stale one. Re-sectioning
-        -- another page's entry is a worse bug than the one being fixed. Today the
-        -- single extra in the addon is a per-index override key with no search
-        -- entry at all, so nothing is missed by saying no.
-        for _, k in ipairs(extra or {}) do
-            page._popoutRowForKey[k] = row
-            claimed[#claimed + 1] = k
-        end
-
-        -- ☠ AND THE PANE LOSES ITS COPY OF WHATEVER THE ROW IS ALREADY DRAWING.
-        -- The strip promises "3 more settings" and the panel then opened with five,
-        -- two of them the sliders the user had just looked at on the plate. A key
-        -- on the plate is HIDDEN in the pane, never removed: the fold, the split
-        -- and the gate all take a key back off the plate, and the pane's copy has
-        -- to come straight back when they do -- a folded row must still leave the
-        -- setting reachable somewhere.
-        --
-        -- ⚠ THE KEYS ARE STILL CLAIMED, every one of them. Reset Group, Hold:
-        -- Defaults, the amber tick and the undo all read `claimed` above and none
-        -- of them cares which widget is on screen -- so the row's own control
-        -- visibly jumps on a reset, which is the right feedback.
-        --
-        -- ⚠ THIS IS WHERE THE ROW AND THE FACTORY MEET, and neither knows the
-        -- other. The row knows which KEYS are on its plate and nothing about
-        -- widgets; the factory knows which WIDGETS it built and nothing about the
-        -- row. The link is the list PopoutContent stamps on every group it builds,
-        -- so the one group handed to this verb names every instance of its own
-        -- factory -- the eager one the walk above just read, and any later
-        -- `fresh()` alike.
-        --
-        -- ⚠ AND IT HAS TO WORK IN EITHER ORDER. A page may claim its keys
-        -- BEFORE it declares its hoists (the Frame page does: ClaimKeys, the tick,
-        -- the footer, then RegisterHoistedToggle) or after. The announcement from
-        -- the row's own layout covers the first; the immediate call inside
-        -- SetOnShownKeysChanged covers the second.
-        local instances = group.dfPaneInstances
-        if instances and row.SetOnShownKeysChanged then
-            local function applyShown(st, shown)
-                local g = st.group
-                if not (g and g.SetChildHidden and g.groupChildren) then return end
-                -- ☠ A PINNED PANEL SHOWS EVERYTHING, whatever the row says.
-                -- Pinning detaches a panel from the row it came out of, and the
-                -- user pins one in order to leave the page -- at which point the
-                -- row holding the width and height sliders is not on screen at
-                -- all, and a panel that had left them out would be a panel with
-                -- no way to reach them.
-                --
-                -- ⚠ ONE RULE, BOTH CALLERS. The shown-keys hook and the mount
-                -- closure both arrive here, and a pinned instance has to answer
-                -- the same either way -- a panel pinned and then folded past
-                -- would otherwise be hidden again by the announcement.
-                --
-                -- PER INSTANCE, not per row: pinning promoted this one out of the
-                -- pool, so the shared panel the row opens next is a fresh `st`
-                -- with no pin on it and hides exactly as before.
-                if st.po and st.po.pinned then shown = nil end
-                for _, e in ipairs(g.groupChildren) do
-                    local k = KeyOf(e.widget)
-                    g:SetChildHidden(e.widget, (k and shown and shown[k]) or false)
-                end
-            end
-            -- What a pane mounted LATER asks for: the set as it stands right then,
-            -- because an instance built after the last announcement never heard it.
-            -- rawget, the convention every private-field read in this pack follows:
-            -- a row that has never shown a key simply has not got the field.
-            instances.applyShown = function(st) applyShown(st, rawget(row, "_shownKeys")) end
-            row:SetOnShownKeysChanged(function(_, shown)
-                for _, st in ipairs(instances) do
-                    applyShown(st, shown)
-                    -- The closed ones are skipped for the reason ReflowMounted
-                    -- skips them: a panel that is down has nothing to re-flow, and
-                    -- the marks above are already right for when it comes back up.
-                    if not (st.po and st.po.closed) then ReflowPane(st) end
-                end
-            end)
-            -- ...and the moment one of them is PINNED, that instance gets its
-            -- hidden copies back. Only that one: the strip's count is the row's
-            -- own arithmetic about the LOOSE panel and does not move on a pin.
-            if row.SetOnPanelPinned then
-                row:SetOnPanelPinned(function(_, po)
-                    for _, st in ipairs(instances) do
-                        if st.po == po then
-                            applyShown(st, nil)
-                            if not po.closed then ReflowPane(st) end
-                        end
-                    end
-                end)
-            end
-        end
-
-        -- ☠ AND THE STRIP'S NUMBER IS THE PANE'S, NOT A DECLARED CONSTANT.
-        -- Layout Direction declares 3 -- Growth Direction twice, one dropdown per
-        -- mode, plus a party-only anchor -- because the badge is about what is
-        -- behind the row rather than about what today's mode is showing. With
-        -- Growth Direction hoisted the strip painted 3 - 1 = 2 over a pane that
-        -- draws exactly ONE control in party and none in raid. A constant cannot
-        -- follow the mode, so the row asks the group instead: how many children
-        -- would a layout place right now, gates and pane hide included.
-        --
-        -- ☠ AND IT COUNTS THE PANE AS THE LOOSE PANEL WOULD DRAW IT, whatever
-        -- the instance in hand is doing. The group asked is the EAGER one, which
-        -- is also the instance the first click adopts -- so pinning it un-hides
-        -- every control (the pin wiring above) and a count read off its marks
-        -- ROSE on the pin: the strip read "Pin settings in popout", the click
-        -- pinned, and the strip then flipped to "2 more settings" while a second
-        -- click merely raised the panel that was already there. Wrong words for a
-        -- right click.
-        --
-        -- So the marks are not consulted at all. `ignoreHostHidden` counts the
-        -- pane as though nothing had been hidden, and `skip` takes out exactly
-        -- what the ROW is drawing at the moment of the ask -- the same set the
-        -- hide reads, from the same place, so the two cannot disagree. A child the
-        -- mode has gated away is already out by then and is never taken out twice.
-        -- rawget, the convention every private-field read in this pack follows: a
-        -- row that has never shown a key simply has not got the field.
-        --
-        -- ⚠ AND IT IS WIRED LAST, after the hide is in place, because the setter
-        -- repaints the strip on the spot -- and while the number no longer depends
-        -- on the marks, the row's own shown-hoist count does decide between the
-        -- two phrases.
-        --
-        -- A mode switch rebuilds the page, so the provider is rebuilt with it and
-        -- there is nothing to invalidate.
-        if row.SetCountProvider and group.CountVisibleChildren then
-            row:SetCountProvider(function()
-                local shown = rawget(row, "_shownKeys")
-                return group:CountVisibleChildren({
-                    ignoreHostHidden = true,
-                    skip = function(w)
-                        local k = KeyOf(w)
-                        return (k and shown and shown[k]) and true or false
-                    end,
-                })
-            end)
-        end
-
-        -- ☠ AND A SMALL GROUP IS MOUNTED ON THE PLATE RATHER THAN BEHIND IT.
-        -- This is the other half of PopoutContent's inline arm: the factory knows
-        -- which instance belongs on the row and the row knows how to draw one,
-        -- and neither knows the other until here -- the same meeting place the
-        -- shown-keys hide and the count provider above use, and for the same
-        -- reason.
-        --
-        -- ⚠ WIRED LAST, after the provider. SetInlineContent lays the plate out
-        -- on the spot, and that pass repaints the strip -- which reads the
-        -- provider to decide between "N more settings" and the offer to pin.
-        --
-        -- ⚠ THE MEASUREMENT IS THIS SIDE'S JOB. The kit hands a width and wants a
-        -- height; only a consumer knows that the answer involves re-sizing a
-        -- SettingsGroup and re-flowing it. Re-flowed ONLY when the width actually
-        -- moved, because the row asks on every layout pass and a plain window
-        -- drag is a great many of those.
-        -- rawget, the convention every private-field read in this pack follows:
-        -- a group that is not the one on a plate simply has not got the field,
-        -- and a headless frame answers an unset key with a truthy no-op FUNCTION.
-        local inline = rawget(group, "dfInline")
-        if inline and row.SetInlineContent then
-            inline.inlineRow = row
-            row:SetInlineContent(inline.holder, function(width)
-                local g = inline.group
-                if not g then return 0 end
-                width = math.max(math.floor(width or 0), 1)
-                -- ⚠ THE FLAG IS THE RE-ENTRANCY GUARD, not bookkeeping.
-                -- LayoutChildren can reach a widget that converges its own
-                -- height and calls GUI:RelayoutHost, whose walk comes
-                -- straight back through the holder's dfReflowPane -- and
-                -- that would ask the row to lay out the plate it is in the
-                -- middle of laying out.
-                -- ☠ ARMED FOR THE WHOLE MEASURE, and it used to be armed only
-                -- inside the width branch. On a cache hit the guard was down, so
-                -- a nested dfReflowPane could re-enter plateLayout from inside
-                -- plateLayout -- and the inner pass clears and refills the SAME
-                -- row._shownKeys table the outer pass is about to hand to
-                -- applyShown (the table is deliberately shared; see PopoutRow).
-                -- Restores rather than clears, so a genuinely nested measure
-                -- does not disarm the outer one on its way out.
-                local wasMeasuring = inline.measuring
-                inline.measuring = true
-                -- ☠☠ THE COUNT IS PART OF THE KEY, NOT JUST THE WIDTH, and this
-                -- was the blanking bug (Compact layout only, reported 2026-09-16:
-                -- "all the contents go blank, it only shows the headings, and it
-                -- fixes itself as soon as you scroll").
-                -- LayoutChildren is the ONLY thing that Show()s a placed child and
-                -- Hide()s an unplaced one, and it lived inside the width memo --
-                -- while CountVisibleChildren below is a LIVE predicate over the
-                -- entries' gates, deliberately independent of any layout having
-                -- run. So on a width cache hit this could answer "five visible
-                -- children, here is a positive height" about five children that
-                -- applyShown had hidden since the last layout. The row then sized
-                -- and showed a correctly-proportioned, completely empty holder
-                -- under its title, which is exactly the reported picture.
-                -- ⇒ Re-layout when EITHER moved. Scrolling repaired it because a
-                -- scroll re-drives the measure at a width that had changed.
-                -- ⚠ Scale reaches this through rounding, not through any layout of
-                -- its own: the scale path runs none (verified). Every width here
-                -- comes through SnapLen, which rounds to whole DEVICE pixels via
-                -- GetEffectiveScale, so a scale change can move the snapped width
-                -- across a boundary -- or not. Hence "intermittent, and not at any
-                -- particular scale number".
-                local n = g:CountVisibleChildren()
-                -- ☠ AND THE SCALE IS PART OF THE KEY TOO (2026-09-18, after the
-                -- width+count key above shipped in alpha.9 and the blanking did
-                -- not stop). `width` is in UI units, and a scale change does not
-                -- move it -- the window is the same number of units wide at 90%
-                -- as at 100%. But every offset, width and height LayoutChildren
-                -- chose went through SnapLen at the OLD pixels-per-unit, so after
-                -- a rescale the group is sitting on numbers derived for a scale
-                -- it is no longer drawn at, and a width+count key calls that a
-                -- hit. The Scale slider now re-lays the page once the scale is
-                -- applied (see ApplyGUIScale's caller in Panel.lua) -- and that
-                -- relayout would stop dead at this memo for every inline pane
-                -- on the page without this. Read off the group, because the
-                -- group is what SnapLen measures.
-                local scale = g.GetEffectiveScale and g:GetEffectiveScale()
-                if inline.width ~= width or inline.count ~= n or inline.scale ~= scale then
-                    inline.width = width
-                    inline.scale = scale
-                    inline.holder:SetWidth(width)
-                    g:SetWidth(width)
-                    g:LayoutChildren()
-                    g:RefreshChildStates()
-                    -- Re-read: RefreshChildStates can gate a child away, so the
-                    -- count the memo stores has to be the one this layout left
-                    -- behind rather than the one that got us in here.
-                    n = g:CountVisibleChildren()
-                    inline.count = n
-                end
-                inline.measuring = wasMeasuring
-                -- ☠ AN EMPTY GROUP MEASURES NOTHING, NOT ONE PIXEL.
-                -- LayoutChildren floors its own height at 1 (a zero-height frame
-                -- is a frame the client will not draw children into), so a pane
-                -- whose gates hid every control would hand back a 1px stripe --
-                -- and the row would wrap it in the 10px of air above and below
-                -- that a real group earns. Zero is what "there is nothing to
-                -- show" means to the row, and it folds on it.
-                -- `n`, not a third call: it is the count this measure settled on,
-                -- and asking again could answer about a gate that moved in between.
-                if n <= 0 then return 0 end
-                return math.max(g:GetHeight() or 1, 1)
-            end)
-        end
-    end
-
-    -- The tick's answer, for a row that has just had its keys claimed. Re-read on
-    -- every refresh (the row calls this, not the other way round), so a write
-    -- inside the popout lights it without anything having to be invalidated.
-    -- DF.Defaults is guarded because these pages are in the load-on-demand
-    -- companion and the engine is resident.
-    local function WireModifiedTick(row)
-        if not (row and row.SetModifiedCheck) then return end
-        row:SetModifiedCheck(function(d)
-            local D = DF.Defaults
-            return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
-        end)
-    end
-
-    -- What a write to any of a group's keys costs, in one place, so the two
-    -- footer buttons and every future one apply the SAME work.
-    --
-    -- `apply` is the GROUP's own half -- the bodies its widgets' own callbacks
-    -- drive, handed in per row because two groups' resets do not cost the same
-    -- work. Everything after it is shared: ReflowMounted repaints the controls
-    -- the user is looking at, and the row's own Refresh re-reads the summary and
-    -- the modified tick.
-    local function RefreshAfterGroupWrite(apply)
-        if apply then apply() end
-        -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys moved
-        -- WITHOUT the widgets doing it -- a group reset, a hold, and the
-        -- undo/redo of a reset (which replays ApplyGroup) -- so it is the one
-        -- path that has to repaint what the controls read.
-        ReflowMounted(true)
-        if GUI.RefreshAllOverrideIndicators then
-            GUI.RefreshAllOverrideIndicators()
-        end
-        page:RefreshStates()
-    end
-
-    -- Can these buttons be pressed at all, and if not, why. COMBAT greys both:
-    -- every key behind these rows reaches a secure frame, and the addon's
-    -- standing rule is that those writes are deferred in combat -- the footer
-    -- does not fight that, it just says so.
-    local function CombatReason()
-        if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
-        return true
-    end
-
-    -- ...and HOLD alone is additionally off while the raid auto-layout machinery
-    -- is live. Two different reasons, one gate:
-    --
-    --   EDITING a layout: every write is recorded as an override edit for that
-    --   layout, and a hold writes twice -- defaults in, the user's values back
-    --   out -- so a preview nobody committed to would land as two deliberate
-    --   edits. A LAYOUT RUNNING: writes are redirected to the stored baseline
-    --   instead of the live table, so the preview would change nothing on screen.
-    --
-    -- RESET stays available in BOTH states, and that is not an oversight. While
-    -- editing, recording the defaults as this layout's override edits is exactly
-    -- what the user asked for; while a layout is running, the redirect writes
-    -- them into the stored baseline -- which is the table the modified dots and
-    -- the row tick are reporting on, so the reset does what they say it will.
-    local function HoldReason()
-        local ok, why = CombatReason()
-        if not ok then return false, why end
-        local AP = DF.AutoProfilesUI
-        if GUI.SelectedMode == "raid" and AP then
-            local editing = AP.IsEditing and AP:IsEditing()
-            local running = AP.IsLayoutActive and AP:IsLayoutActive()
-            if editing or running then
-                return false, L["Unavailable while an auto layout is active or being edited."]
-            end
-        end
-        return true
-    end
-
-    -- The two verbs, wired onto a row whose keys have just been claimed. Both
-    -- close over row._claimedKeys BY REFERENCE rather than reading it now:
-    -- ClaimKeys fills that table after the row is built, and a copy taken here
-    -- would be the empty one.
-    -- ⚠ `rowDB` OVERRIDES WHERE THE VERBS WRITE, and exactly one kind of page
-    -- needs it. Everywhere else a row's keys live in DF.db[mode], which RowDB
-    -- answers for; a DESIGNER row's keys live on one indicator record, reached
-    -- through the metatable proxy that record's controls are bound to. Handed the
-    -- page's db instead, Reset Group would resolve nothing (the keys are not in
-    -- it) and Hold: Defaults would snapshot the wrong table -- while still saying
-    -- it had done both. Defaults to RowDB, which is every existing caller.
-    local function WireFooter(row, apply, rowDB)
-        if not (row and row.SetActions) then return end
-        rowDB = rowDB or RowDB
-        local held                    -- the hold's snapshot, between the two halves
-
-        -- THE GROUP'S APPLY, named once. Every verb runs it after it writes --
-        -- and Reset hands the same reference to the undo engine, because an undo
-        -- of a reset has no button press behind it to run this for it. Restoring
-        -- the values and running only the generic sweep is what "undo changed the
-        -- numbers but the frames did not move" looks like.
-        local function ApplyGroup()
-            RefreshAfterGroupWrite(apply)
-            row.Refresh()
-        end
-
-        row:SetActions({
-            {
-                text        = L["Reset Group"],
-                tooltipDesc = L["Reset every setting in this group to its default value."],
-                enabled     = CombatReason,
-                onClick     = function()
-                    local GA = DF.GroupActions
-                    if not GA then return end
-                    -- The row's own heading names the collapsed undo entry: a
-                    -- reset is one thing the user did to THIS group, and the
-                    -- group is what they will look for.
-                    GA:ResetKeys(GUI, rowDB(), row._claimedKeys or {}, GUI.SelectedMode,
-                                 row._title or row._label, ApplyGroup)
-                    ApplyGroup()
-                end,
-            },
-            {
-                text        = L["Hold: Defaults"],
-                hold        = true,
-                tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
-                enabled     = HoldReason,
-                onHoldStart = function()
-                    local GA = DF.GroupActions
-                    if not GA then return end
-                    held = GA:BeginHold(GUI, rowDB(), row._claimedKeys or {}, GUI.SelectedMode)
-                    ApplyGroup()
-                end,
-                onHoldEnd   = function()
-                    local GA = DF.GroupActions
-                    if not (GA and held) then return end
-                    GA:EndHold(GUI, rowDB(), row._claimedKeys or {}, held)
-                    held = nil
-                    -- The UNTHROTTLED apply on the way back, unlike the
-                    -- coalescing one used going in: a release is the moment the
-                    -- user is watching for their settings to come back, and a
-                    -- frame of defaults left on screen after they let go reads as
-                    -- the restore failing.
-                    GUI:Call("refreshNow")
-                    ApplyGroup()
-                end,
-            },
-        })
-    end
-
-    -- The hoisted toggle's own search entry. Deliberately NOT added to the row
-    -- map: the tick is ON the row, so the section jump already lands on the
-    -- control the user searched for, and opening the panel on top of that would
-    -- be noise. The callback is the one the suppressed checkbox would have
-    -- carried, so an inline result behaves as the inline checkbox does in
-    -- classic. Guarded on the METHOD, not just the table -- Search is in this
-    -- companion but the page must not care.
-    --
-    -- ⚠ AND IT TAKES THE SAME SECTION AS THE PANE BEHIND IT. This entry is
-    -- registered from the page builder, not from inside a pane, but it is
-    -- registered at the same moment and inherits the same wrong answer -- the
-    -- band header built last. The tick IS the row, so "Tooltips > Frame Tooltips"
-    -- is what its breadcrumb should read, exactly like the six controls behind
-    -- it. Stamped here rather than left to ClaimKeys because this entry is on the
-    -- ROW, not in the group ClaimKeys walks, and a row may hoist a toggle whether
-    -- or not it claims anything.
-    -- ============================================================
-    -- ...AND THE SAME VERB FOR A HOISTED *CONTROL*
-    -- ------------------------------------------------------------
-    -- The toggle was the first thing a row hoisted: the tick is ON the plate
-    -- while the settings it governs live in the panel. A row may now hoist its
-    -- commonly-changed CONTROLS the same way -- named, on a line under the title
-    -- -- because the popout sweep put every setting behind a click and the
-    -- feedback was "less overwhelming but much harder to find what ur looking
-    -- for".
-    --
-    -- ☠ ONE VERB, NOT A SIBLING. A sibling would be a second place that has to
-    -- remember the row's name, the section stamp and the search rules -- and the
-    -- rules are the SAME rules, read from the other end. So this is the toggle
-    -- verb with a second calling form, and the toggle form is untouched:
-    --
-    --   RegisterHoistedToggle(row, label, key, onToggle)   -- the tick, as before
-    --   RegisterHoistedToggle(row, { <declaration>, ... })  -- the controls
-    --
-    -- A declaration is `{ name = L["..."], kind = "slider"|"dropdown",
-    -- key = "...", ... }` -- see DandersUI/PopoutRow.lua's SetHoistedControls for
-    -- the full shape. `db` defaults to the page's own table, which is what makes
-    -- "the SAME table and key the panel's control is bound to" the default
-    -- rather than something every call site has to remember.
-    --
-    -- ☠ THE HOISTED CONTROL REGISTERS NOTHING WITH SEARCH, and that is the
-    -- opposite of what the toggle form does -- for the opposite reason. A hoisted
-    -- toggle is a control that was SUPPRESSED in the pane, so without a
-    -- re-registration the setting would be unfindable. A hoisted control is a
-    -- control that is still in the pane and already in the registry, so a second
-    -- registration would put one setting in the index twice under one label, one
-    -- key and one section -- two identical result cards. Suppressed AROUND the
-    -- build rather than per widget, because the widget is built by the KIT and
-    -- has no way to be told.
-    local function RegisterHoistedControls(row, list, dbFn)
-        if not (row and row.SetHoistedControls and type(list) == "table") then return end
-        local resolved = {}
-        for _, h in ipairs(list) do
-            if type(h) == "table" then
-                local e = {}
-                for k, v in pairs(h) do e[k] = v end
-                if e.db == nil then e.db = (dbFn or RowDB)() end
-                resolved[#resolved + 1] = e
-            end
-        end
-        local Search = DF.Search
-        local held = Search and Search.SuppressRegistration
-        if Search then Search.SuppressRegistration = true end
-        row:SetHoistedControls(resolved)
-        if Search then Search.SuppressRegistration = held end
-        -- The row's own name, for the reason the toggle form calls it: a row is
-        -- worth naming even where search never loaded, because the cross-links
-        -- that jump to a row by name do not care whether it is in the registry.
-        AnchorRow(row)
-    end
-
-    local function RegisterHoistedToggle(row, label, key, onToggle)
-        -- The CONTROLS form. Overloaded on the second argument's type rather
-        -- than split into two exported names -- see the essay above.
-        if type(label) == "table" then
-            return RegisterHoistedControls(row, label, key)
-        end
-        local Search = DF.Search
-        if not (Search and Search.RegisterCheckbox) then return end
-        row.searchEntry = Search:RegisterCheckbox(label, key, nil, false, onToggle)
-        if Search.LinkSourceWidget then Search:LinkSourceWidget(row) end
-        AnchorRow(row)
-        StampSection(row, row.searchEntry)
-    end
-
-    -- ============================================================
-    -- A CONTROL ROW IS A SECTION TOO
-    -- ------------------------------------------------------------
-    -- The same two halves, for the shape that IS a setting rather than a way in to
-    -- fifteen of them (DandersUI/ControlRow.lua). A single-control box that used to
-    -- stand beside the bands at 280 becomes one plate in a band of its own, and the
-    -- moment it does it inherits both of a popout row's problems: nothing on the
-    -- page answers to its name, and whatever it registered with search says it
-    -- lives in the last band header built.
-    --
-    -- ☠ ONE OF THE TWO KINDS IS ALREADY IN THE REGISTRY BY THE TIME THIS RUNS, AND
-    -- REGISTERING IT AGAIN WOULD PUT ONE SETTING IN TWICE. A control row's DROPDOWN
-    -- is the kit's own CreateDropdown, which fires the `registerSearch` host hook
-    -- whenever it is handed a dbKey (DandersUI/Widgets.lua) and the host answers by
-    -- calling Search:RegisterDropdown and stamping the entry on the container
-    -- (DandersFrames/GUI/GUI.lua). A CHECKBOX row has no such entry: its tick is
-    -- hand-built from the shared styler rather than embedded from
-    -- CreateCheckboxNative -- which is precisely what puts it in the popout row's
-    -- own tick column -- and neither that tick nor the kit's checkbox factory
-    -- registers anything at all. So this ADOPTS what is there and registers only
-    -- what is not.
-    --
-    -- ⚠ AND THE TWO LAYOUTS CANNOT DOUBLE UP EITHER. The registry is built by
-    -- re-running every page's builder in whichever layout is live, and every call
-    -- site of this is the `else` arm of an `if classicLayout then` whose other arm
-    -- builds the old box -- so exactly one of the two registers per build.
-    --
-    -- ⚠ NO ROW MAP ENTRY, deliberately. page._popoutRowForKey exists so a search
-    -- hit on a control hidden BEHIND a row can open the panel it is behind
-    -- (Search:OpenOwningPopoutRow). A control row opens nothing and has no
-    -- OpenPopout, so an entry here would buy a nil lookup and a false claim that
-    -- the key lives inside a panel.
-    --
-    -- The label is the ROW's, never a second string: a control row draws ONE name
-    -- and that name is the setting's, so the result and the plate say the same
-    -- thing by construction. `custom` says the value does not live in db[key] --
-    -- what the classic checkbox tells the registry for a custom get/set tick.
-    local function RegisterControlRow(row, kind, key, custom, callback)
-        if not row then return end
-        -- Half one, above every guard: a row is worth naming even where search
-        -- never loaded, because the cross-links that jump to a row by name do not
-        -- care whether it is in the registry.
-        AnchorRow(row)
-        local Search = DF.Search
-        if not Search then return end
-        local entry = row.control and row.control.searchEntry
-        if not entry and kind == "checkbox" and Search.RegisterCheckbox then
-            entry = Search:RegisterCheckbox(RowLabel(row), key, nil, custom and true or false, callback)
-            row.searchEntry = entry
-            -- The row IS the control on a checkbox row, so the row is what an
-            -- inline result reads its tooltip off.
-            if Search.LinkSourceWidget then Search:LinkSourceWidget(row) end
-        else
-            row.searchEntry = entry
-        end
-        StampSection(row, entry)
-    end
 
     -- The width a full-width band is CONSTRUCTED at, asked for rather than
     -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
@@ -5517,8 +4717,7 @@ function GUI:CreatePopoutPageTools(page)
             -- time, and every db-bound factory registers whatever it is
             -- handed -- so without this the settings registry would carry
             -- TWO entries for every setting in the section, one from the
-            -- band on the page and one from the panel's copy. The same guard
-            -- a hoisted control's build takes (RegisterHoistedControls).
+            -- band on the page and one from the panel's copy.
             --
             -- ⚠ ONLY THE EAGER ONE NEEDS IT. A later instance -- pin, close,
             -- pin again -- is built long after Search.RegistryBuilt is set,
@@ -5589,30 +4788,7 @@ function GUI:CreatePopoutPageTools(page)
         SectionControls       = SectionControls,
         OpenSection           = OpenSection,
         CloseSection          = CloseSection,
-        ClaimKeys             = ClaimKeys,
-        WireModifiedTick      = WireModifiedTick,
-        WireFooter            = WireFooter,
-        RegisterHoistedToggle = RegisterHoistedToggle,
-        RegisterControlRow    = RegisterControlRow,
         ReflowMounted         = ReflowMounted,
         BandWidth             = BandWidth,
-
-        -- ☠ ONE TABLE, PASSED AT EVERY BOX A CONVERTED PAGE STILL BUILDS. A group
-        -- standing beside a page of bands is otherwise speaking the other visual
-        -- language -- a title INSIDE a faint rectangle next to accent headers
-        -- over fat row plates. bandStyle (DandersUI/Sections.lua) is the skin
-        -- that settles it: the title moves out of the box and is drawn as the
-        -- band's own header, and the box becomes a PopoutRow plate. Nothing
-        -- inside changes. Read-only to the factory, which is what makes one
-        -- shared table safe across every box on the page.
-        --
-        -- ⚠ THE SKIN IS HALF THE ANSWER; THE OTHER HALF IS THE WIDTH. It settles
-        -- the BORDER, and never the EDGE -- a skinned 280 box under a full-width
-        -- band still starts and ends somewhere no other object on the page does.
-        -- So every surviving box on a converted page is built at BandWidth() and
-        -- added "both", and every site that passes this flag is inside an `else`
-        -- arm where `tools` is known to exist. Classic passes no opts at all,
-        -- which is what it always did.
-        INLINE_BOX            = { bandStyle = true },
     }
 end

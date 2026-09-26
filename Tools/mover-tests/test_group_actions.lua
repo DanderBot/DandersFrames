@@ -416,33 +416,15 @@ do
 
     hasPage("if values and g.RefreshChildValues then g:RefreshChildValues() end",
             "the pane reflow can repaint bound values")
-    hasPage("ReflowMounted(true)",
-            "...and the group's post-write apply asks it to")
     -- ⚠ OPT-IN, and this is the assertion that keeps it so. ReflowMounted also
     -- runs on a hideOn change while a slider inside the pane is being dragged,
     -- and a value repaint mid-drag snaps the thumb from the mouse back to the
-    -- last committed step -- every step. Exactly one caller may pass true.
-    --
-    -- Counted over the helper AND the page that calls it most, because the callers
-    -- are now split across the two: the helper holds the one opted-in call, the
-    -- page holds the bare `tools.ReflowMounted()` toggles.
-    do
-        local both = tools .. options_file_source("GUI/Pages/Options.lua")
-        local n, from = 0, 1
-        while true do
-            local s = both:find("ReflowMounted(", from, true)
-            if not s then break end
-            n, from = n + 1, s + 1
-        end
-        check(n >= 2, "readback: ReflowMounted has more than one caller")
-        local trues, from2 = 0, 1
-        while true do
-            local s = both:find("ReflowMounted(true)", from2, true)
-            if not s then break end
-            trues, from2 = trues + 1, s + 1
-        end
-        eq(trues, 1, "readback: ...and exactly one of them asks for the value sweep")
-    end
+    -- last committed step -- every step. The helper itself never asks for it;
+    -- the popout footer that did (RefreshAfterGroupWrite) was deleted with the
+    -- rows pages on 2026-09-26, and a page that writes behind its own controls
+    -- (Auras.lua) passes true itself.
+    check(tools:find("ReflowMounted(true)", 1, true) == nil,
+          "readback: the helper never forces a value sweep on its own")
 
     -- The two factories that cannot be built headlessly.
     local widgets = options_file_source("GUI/SettingsWidgets.lua")

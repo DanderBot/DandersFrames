@@ -165,9 +165,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The shared page-scope machinery, still taken in full. Its PROLOGUE is what
         -- closes any panel a previous build left standing and retires that build's
         -- holders -- a mode switch into this page can arrive with one open from the
-        -- Debuffs page -- and the page still wants BandWidth for the section widths
-        -- and RegisterControlRow for the one control row. nil in classic, which is
-        -- what every `if classicLayout then` arm below leans on.
+        -- Debuffs page -- and the page still wants BandWidth for the section widths.
+        -- nil in classic, which is what every `if classicLayout then` arm below
+        -- leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the fold, and the band its controls are laid into.

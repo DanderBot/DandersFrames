@@ -125,15 +125,8 @@ end
 local registrationId = 0
 
 -- The keyword bag, from the three facts an entry carries: its own label, the
--- section it was registered under and the tab that section is on.
---
--- ★ EXTRACTED FROM Register SO SetEntrySection CAN RE-RUN IT. A section that is
--- corrected AFTER registration -- which is what a popout row does to everything
--- inside its pane -- would otherwise leave the OLD section's words sitting in
--- here, and those words SCORE (see Find's keyword pass, +40 a hit). Fixing the
--- breadcrumb while leaving "auras" matching every Tooltips control would be half
--- a fix. Verbatim from where it lived; the `or {}` on the label arm is what
--- callers that pass their own keywords rely on, and it is kept.
+-- section it was registered under and the tab that section is on. The `or {}`
+-- on the label arm is what callers that pass their own keywords rely on.
 local function BuildKeywords(entry)
     if entry.label then
         entry.keywords = entry.keywords or {}
@@ -157,40 +150,6 @@ local function BuildKeywords(entry)
     end
 end
 
--- ★ CORRECT AN ENTRY'S SECTION AFTER THE FACT, keywords and all.
---
--- ☠ WHY THIS EXISTS. `entry.section` is stamped from Search.CurrentSection at
--- registration, and CurrentSection is only ever moved by GUI:CreateHeader and
--- GUI:CreateCollapsibleSection (GUI/SettingsWidgets.lua). On a CLASSIC page the
--- two interleave with the controls -- header, its controls, next header -- so
--- every entry inherits the header directly above it and the stamp is right.
---
--- A POPOUT page does not build in that order. Its band headers are created UP
--- FRONT, and then every row's pane is built EAGERLY into a hidden holder, so
--- every control on the page registers while CurrentSection still holds whichever
--- band header was created LAST -- the whole Tooltips page reading "Auras", every
--- row on a page with no band header reading whatever the previous page left.
--- Position-dependent context cannot describe a page that no longer builds in
--- position order, so the ROW names its own contents afterwards instead
--- (GUI:CreatePopoutPageTools' ClaimKeys, GUI/Controls.lua).
---
--- Guarded on `entry.id`: Register hands back keyless entries, entries for the
--- other mode's defaults and everything offered after the registry was built
--- WITHOUT adding them to the Registry, and an id is the one mark that says the
--- entry is really in there. Re-sectioning an entry nothing can find would be a
--- write nobody reads.
-function Search:SetEntrySection(entry, section)
-    if type(entry) ~= "table" or not entry.id then return end
-    if type(section) ~= "string" or section == "" then return end
-    if entry.section == section then return end
-
-    entry.section = section
-    -- Rebuilt rather than appended to: the point is to LOSE the old section's
-    -- words, which an append would keep.
-    entry.keywords = {}
-    BuildKeywords(entry)
-end
-
 -- ★ EVERY PAGE BUILD REMEMBERS WHAT IT REGISTERED, sealed registry or not.
 -- BuildPage's DoBuild (GUI/Panel.lua) points _captureEntries at a fresh list for
 -- the span of the builder and keeps that list with the build (page._searchEntries,
@@ -206,17 +165,17 @@ function Search:Register(entry)
         return entry
     end
 
-    -- ☠ A HOISTED CONTROL IS THE PANEL'S OWN SETTING SHOWN TWICE, AND SEARCH
-    -- MUST NOT SHOW IT TWICE. A popout row may draw a second widget bound to the
-    -- SAME table and key as one of the controls in its pane (GUI/Controls.lua's
-    -- RegisterHoistedToggle, table form) so the commonly-changed settings are
-    -- back on the plate. Every db-bound factory registers whatever it is handed,
-    -- so without this the registry would carry two entries with one label, one
-    -- key and one section -- two identical result cards for one setting.
+    -- ☠ A PINNED PANEL'S COPY OF A SECTION IS THE SAME SETTINGS SHOWN TWICE, AND
+    -- SEARCH MUST NOT SHOW THEM TWICE. A card section's pin builds a second copy
+    -- of the section's controls, bound to the same table and keys, eagerly at
+    -- page build (GUI/Controls.lua's OpenSection). Every db-bound factory
+    -- registers whatever it is handed, so without this the registry would carry
+    -- two entries with one label, one key and one section -- two identical
+    -- result cards for one setting.
     --
     -- Set and cleared by the caller AROUND the build, rather than a per-widget
-    -- opt-out, because the widget being suppressed is built by the KIT, which
-    -- has no search of its own to be told about.
+    -- opt-out, because many of the widgets being suppressed are built by the
+    -- KIT, which has no search of its own to be told about.
     if self.SuppressRegistration then
         return entry
     end
@@ -1108,10 +1067,6 @@ function Search:CreateResultWidget(parent, entry, index)
     end)
 
     -- Click to navigate
-    -- The key goes along for the ride so the jump can finish the job on a page
-    -- whose control lives behind a popout row -- see NavigateToTab. Same
-    -- dbKey-then-searchKey precedence the card cache uses, so the two agree on
-    -- what identifies a setting.
     breadcrumb:SetScript("OnClick", function()
         Search:NavigateToTab(entry.tab, entry.section, entry.dbKey or entry.searchKey)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -1261,8 +1216,8 @@ end
 -- ============================================================
 -- NAVIGATION
 -- ============================================================
--- settingKey is optional and is only consulted for the popout-row case below;
--- every existing caller that passes two arguments behaves exactly as before.
+-- settingKey is still accepted so callers need not change, but nothing reads it
+-- since the popout-row jump went (2026-09-26).
 function Search:NavigateToTab(tabName, sectionName, settingKey)
     if not tabName then return end
 
@@ -1300,47 +1255,6 @@ function Search:NavigateToTab(tabName, sectionName, settingKey)
     else
         DF:DebugWarn("SEARCH", "LinkToSetting unavailable — breadcrumb cannot navigate")
     end
-
-    self:OpenOwningPopoutRow(tabName, settingKey)
-end
-
--- ★ THE POPOUT-ROW HALF OF THE JUMP. A page may hand a block of its settings to
--- a popout row -- a row on the page, its controls inside a panel that opens off
--- it -- and then the control a result points at has NOTHING of its own on the
--- page to scroll to. The section jump above still lands correctly (the ROW is in
--- that section, and it is what gets flashed), so this is a last step rather than
--- a replacement: open the row that owns the setting, so the control the user
--- searched for is actually on screen when they arrive.
---
--- ⚠ THE MAP IS LOOKED UP AFTER THE JUMP, NEVER CAPTURED BEFORE IT. Switching to
--- a page can rebuild it, and a rebuild retires every row -- a reference taken
--- beforehand would open a panel wired to the previous build's db table.
---
--- Deliberately page-agnostic: any page may publish `page._popoutRowForKey`
--- (db key -> row) and gets this for free; a page with none costs one nil lookup.
--- The delay clears GUI:LinkToSetting's own two timings (0.12 for the tab to
--- build, then 0.05 for the scroll to settle) so the row is in its final place
--- before a panel is docked beside it.
-function Search:OpenOwningPopoutRow(tabName, settingKey)
-    if not settingKey or not tabName then return end
-    C_Timer.After(0.2, function()
-        local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages[tabName]
-        local map  = page and page._popoutRowForKey
-        local row  = map and map[settingKey]
-        -- IsShown, because a row hidden by its own hideOn is not a place to
-        -- dock a panel; OpenPopout, because an older embedded kit may not have it.
-        --
-        -- ☠ ...AND NOT AT ALL FOR A ROW THAT IS ALREADY SHOWING THE SETTING. A
-        -- small group is now mounted ON its row's plate rather than behind it, so
-        -- the section jump above has already put the control on screen -- and the
-        -- panel this would open is one with nothing left to draw, which the row
-        -- answers by PINNING it (the strip's "Pin settings in popout" path). A
-        -- pinned panel floating beside the page is a strange reward for clicking
-        -- a search result. Guarded on the verb, because an older embedded copy of
-        -- the kit does not publish it.
-        if row and row.IsShowingInlineContent and row:IsShowingInlineContent() then return end
-        if row and row.OpenPopout and row:IsShown() then row:OpenPopout() end
-    end)
 end
 
 function Search:ScrollToSection(tabName, sectionName)

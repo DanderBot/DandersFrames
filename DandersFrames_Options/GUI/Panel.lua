@@ -2181,9 +2181,6 @@ function DF:CreateGUI()
                     -- state a resize already leaves the page in.
                     -- ⚠ RE-LAY, NEVER REBUILD: RefreshCurrentPage leaks the whole page
                     -- into GUI._trashFrame. See RelayoutCurrentPage.
-                    -- ⚠ The inline panes only follow because their memo now carries
-                    -- the scale (see SetInlineContent's measure in Controls.lua);
-                    -- keyed on width alone, this relayout stopped at every one of them.
                     if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
                 end)
 
@@ -3755,12 +3752,12 @@ function DF:CreateGUI()
     -- (rebuild on every switch). The opted-out pages say why at their CreateSubTab.
     -- ============================================================
     -- The fields that belong to ONE build rather than to the page. _popoutHolders
-    -- and _popoutRowForKey are the popout page tools' (GUI:CreatePopoutPageTools):
-    -- the holders are off-page frames that build retires on its NEXT build, so they
-    -- must travel with the build or the raid build would trash the party build's.
+    -- is the page tools' (GUI:CreatePopoutPageTools): the holders are off-page
+    -- frames that build retires on its NEXT build, so they must travel with the
+    -- build or the raid build would trash the party build's.
     local MODE_BUILD_FIELDS = {
         "children", "builtForMode", "builtForDisabled", "builtCacheKey", "cacheValid",
-        "_builtDb", "_popoutHolders", "_popoutRowForKey", "_pendingShown",
+        "_builtDb", "_popoutHolders", "_pendingShown",
         -- What this build registered with search, so the index can take it
         -- rather than build the page again (page.GetIndexEntries, below).
         "_searchEntries",
