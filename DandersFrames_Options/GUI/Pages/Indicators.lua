@@ -5316,7 +5316,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --                            all and what reaches it -- and Content Types.
         --   column 2   "Appearance"  Size (Growth Direction at its foot), Border
         --                            and Duration Text: what one icon looks like.
-        --   column 1   "Effects"     Highlight Settings, Border Shadow, Border
+        --   column 1   "Effects"     Highlight Settings, Highlight Shadow, Highlight
         --                            Animation, Interrupt Settings and X Mark --
         --                            what the display DOES: it rings an important
         --                            spell, tints an interrupted one and stamps it.
@@ -5325,7 +5325,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- cards; it arranges the icons, so it sits at the foot of Size, beside
         -- Spacing and Max Icons. Highlight Settings was one panel of twenty-eight
         -- controls; in Modern it is three cards -- the ring itself, its shadow and
-        -- its animation -- each titled with a label the page already ships.
+        -- its animation. The last two are titled "Highlight Shadow" / "Highlight
+        -- Animation", never "Border ...": the page has a real Border card, and a
+        -- pinned "Personal Targeted / Border Shadow" read as that border's.
+        -- Their collapse keys are the ones they shipped with, so folds survive.
         -- Classic keeps its Growth box and its single Highlight Settings box.
         --
         -- The page gate greys the bodies as it always did: every dependent
@@ -5934,8 +5937,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             -- ☠ BORDER SHADOW IS THE HEADER'S TICK (noEnableToggle through
             -- hoistToggle). It greys with Highlight Important Spells, as the
-            -- in-box checkbox did through the toolkit's disableWhen.
-            local sband = OpenSection(L["Border Shadow"], "personaltargeted_highlightshadow", 1, PersonalHighlightShadowSummary, HighlightOffRow, nil,
+            -- in-box checkbox did through the toolkit's disableWhen. The tick
+            -- keeps the setting's own name ("Border Shadow", what classic's
+            -- checkbox and search call it); only the card's title changed.
+            local sband = OpenSection(L["Highlight Shadow"], "personaltargeted_highlightshadow", 1, PersonalHighlightShadowSummary, HighlightOffRow, nil,
                 BuildPersonalHighlightShadowGroup, {
                     db = db, key = "personalTargetedSpellImportantBorderShadowEnabled", label = L["Border Shadow"],
                     disableOn = HighlightOffRow,
@@ -5955,7 +5960,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ NO HEADER TICK: the animation's off is the "None" choice in its
             -- own dropdown, not a checkbox. No summary either -- there was none to
             -- carry over, and the effect's name is the dropdown's to say.
-            local aband = OpenSection(L["Border Animation"], "personaltargeted_highlightanim", 1, nil, HighlightOffRow, nil,
+            local aband = OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim", 1, nil, HighlightOffRow, nil,
                 BuildPersonalHighlightAnimationGroup)
             BuildPersonalHighlightAnimationGroup({
                 group = aband, parent = self.child,

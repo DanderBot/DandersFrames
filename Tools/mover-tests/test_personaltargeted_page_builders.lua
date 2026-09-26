@@ -269,11 +269,11 @@ local CARDS = {
       builder = "BuildPersonalHighlightRingGroup", golden = PT_HL_RING, summary = "PersonalHighlightSummary",
       dim = "PersonalOffRow", pin = true, split = true,
       tick = { key = "personalTargetedSpellHighlightImportant", name = "Highlight Important Spells", gate = "PersonalOffRow" } },
-    { label = "Border Shadow", key = "personaltargeted_highlightshadow", col = 1, band = "sband",
+    { label = "Highlight Shadow", key = "personaltargeted_highlightshadow", col = 1, band = "sband",
       builder = "BuildPersonalHighlightShadowGroup", golden = PT_HL_SHADOW, summary = "PersonalHighlightShadowSummary",
       dim = "HighlightOffRow", pin = true, split = true, composite = "noEnableToggle",
       tick = { key = "personalTargetedSpellImportantBorderShadowEnabled", name = "Border Shadow", gate = "HighlightOffRow" } },
-    { label = "Border Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
+    { label = "Highlight Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
       builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "nil",
       dim = "HighlightOffRow", pin = true, split = true },
     { label = "Interrupt Settings", key = "personaltargeted_interrupt", col = 1, box = "Interrupt Settings", classicCol = 2,
@@ -400,9 +400,22 @@ do
           "split: ...greyed by the same gate, as a group gate (the helper composes none)")
     -- The three cards open together, ring first.
     local r = PAGE:find('OpenSection(L["Highlight Settings"]', 1, true)
-    local s = PAGE:find('OpenSection(L["Border Shadow"]', 1, true)
-    local a = PAGE:find('OpenSection(L["Border Animation"]', 1, true)
-    check(r and s and a and r < s and s < a, "split: Highlight Settings, Border Shadow, Border Animation, in that order")
+    local s = PAGE:find('OpenSection(L["Highlight Shadow"]', 1, true)
+    local a = PAGE:find('OpenSection(L["Highlight Animation"]', 1, true)
+    check(r and s and a and r < s and s < a, "split: Highlight Settings, Highlight Shadow, Highlight Animation, in that order")
+    -- ☠ NEVER "BORDER ..." -- the page has a real Border card, and a pinned
+    -- "Personal Targeted / Border Shadow" read as that border's. The keys are
+    -- the ones the cards shipped with, so a user's folds survive the rename.
+    check(PAGE:find('OpenSection(L["Border Shadow"]', 1, true) == nil
+      and PAGE:find('OpenSection(L["Border Animation"]', 1, true) == nil,
+          "split: no card on the page is titled Border Shadow / Border Animation")
+    check(PAGE:find('OpenSection(L["Highlight Shadow"], "personaltargeted_highlightshadow",', 1, true) ~= nil
+      and PAGE:find('OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim",', 1, true) ~= nil,
+          "split: ...and the renamed cards keep their shipped collapse keys")
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    for _, k in ipairs({ "Highlight Shadow", "Highlight Animation" }) do
+        check(ENUS:find('L["' .. k .. '"] = true', 1, true) ~= nil, "split: enUS ships L[\"" .. k .. "\"]")
+    end
 end
 
 -- ============================================================
@@ -413,7 +426,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Content Types | Size | Border | Duration Text | Highlight Settings | Border Shadow | Border Animation | Interrupt Settings | X Mark",
+       "Settings | Content Types | Size | Border | Duration Text | Highlight Settings | Highlight Shadow | Highlight Animation | Interrupt Settings | X Mark",
        "order: the ten cards open in the old bands' order -- Content, Appearance, Effects")
     local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
     local appAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)', 1, true)
