@@ -5567,6 +5567,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             ptsMaxIcons.disableOn = HidePersonalOptions
         end
 
+        -- ☠ MODERN'S SIZE CARD: the builder above, then Growth Direction at its
+        -- foot. ONE function for the card AND its pin -- the dropdown used to be
+        -- added to the card's band after the builder, so a pinned Size panel
+        -- (built from the builder alone) came up without it. Classic never calls
+        -- this: it mounts BuildPersonalSizeGroup and keeps its own Growth box.
+        -- As a lone control row between the cards Growth Direction was the one
+        -- element on the page with its own width, height and indent; it decides
+        -- how the icons ARRANGE, so it reads after Spacing and Max Icons. The
+        -- same control, key, callback and gate classic's Growth box builds.
+        local function BuildPersonalSizeCardGroup(tools2)
+            BuildPersonalSizeGroup(tools2)
+            local ptsGrowth = tools2.group:AddWidget(GUI:CreateDropdown(tools2.parent, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)
+            ptsGrowth.disableOn = HidePersonalOptions
+        end
+
         -- The icon's footprint and how many of them there can be. Scale and alpha
         -- only while they are doing something -- a row reading "x1.00" on every
         -- default profile is noise (the Buff Bar's appearance rule).
@@ -5597,19 +5612,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Column 2 opens here, with the category header its three cards sit
             -- under. How big the icons are and how they arrange: pinnable.
             Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+            -- ⚠ GROWTH DIRECTION LIVES HERE IN MODERN, inside the card builder,
+            -- so the card and a pinned Size panel both end in it.
             local band = OpenSection(L["Size"], "personaltargeted_size", 2, PersonalSizeSummary, PersonalOffRow, nil,
-                BuildPersonalSizeGroup)
-            BuildPersonalSizeGroup({
+                BuildPersonalSizeCardGroup)
+            BuildPersonalSizeCardGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
-            -- ⚠ GROWTH DIRECTION LIVES HERE IN MODERN. As a lone control row
-            -- between the cards it was the one element on the page with its own
-            -- width, height and indent; it decides how the icons ARRANGE, so it
-            -- reads at the foot of Size, after Spacing and Max Icons. The same
-            -- control, key, callback and gate classic's Growth box builds.
-            local ptsGrowth = band:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)
-            ptsGrowth.disableOn = HidePersonalOptions
             CloseSection(band)
         end
 

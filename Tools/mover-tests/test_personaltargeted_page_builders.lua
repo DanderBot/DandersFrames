@@ -257,7 +257,7 @@ local CARDS = {
       dim = "PersonalOffRow" },
     { label = "Size", key = "personaltargeted_size", col = 2, box = "Size", classicCol = 1,
       builder = "BuildPersonalSizeGroup", golden = PT_SIZE, summary = "PersonalSizeSummary",
-      dim = "PersonalOffRow", pin = true },
+      dim = "PersonalOffRow", pin = true, cardBuilder = "BuildPersonalSizeCardGroup" },
     { label = "Border", key = "personaltargeted_border", col = 2, box = "Border", classicCol = 2,
       builder = "BuildPersonalBorderGroup", golden = PT_BORDER, summary = "PersonalBorderSummary",
       dim = "PersonalOffRow", pin = true, composite = "noShowToggle",
@@ -326,7 +326,10 @@ for _, g in ipairs(CARDS) do
     else
         check(call:find("OffRow", 1, true) == nil, g.label .. ": never greys -- it holds the page's switch")
     end
-    eq(call:find(g.builder, 1, true) ~= nil, g.pin == true,
+    -- `cardBuilder`: the card mounts a wrapper round the classic builder (Size +
+    -- Growth Direction), and the pin is handed that SAME wrapper.
+    local cardBuilder = g.cardBuilder or g.builder
+    eq(call:find(cardBuilder, 1, true) ~= nil, g.pin == true,
        g.label .. (g.pin and ": pinnable, from its own builder" or ": decides what SHOWS, so it grows no pin"))
 
     if g.tick then
@@ -352,7 +355,7 @@ for _, g in ipairs(CARDS) do
         check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick")
     end
 
-    local mount = g.builder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
+    local mount = cardBuilder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
           g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
@@ -437,14 +440,25 @@ do
     check(fxAt and hlAt and fxAt < hlAt, "order: Effects heads Highlight Settings")
 
     -- ---- Growth Direction moved INTO Size -----------------------------
-    local size = sectionBlock("Size")
-    check(size:find('band:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)', 1, true) ~= nil,
-          "growth: Growth Direction sits at the foot of Size -- it arranges the icons")
-    check(size:find("ptsGrowth.disableOn = HidePersonalOptions", 1, true) ~= nil,
+    -- ☠ IN THE CARD BUILDER, NOT ADDED TO THE BAND AFTER IT. The pin mounts the
+    -- builder it is handed; a dropdown bolted onto the band after the builder
+    -- never reached a pinned Size panel.
+    local sizeCard = builderBody("BuildPersonalSizeCardGroup")
+    check(sizeCard:find('tools2.group:AddWidget(GUI:CreateDropdown(tools2.parent, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)', 1, true) ~= nil,
+          "growth: Growth Direction sits at the foot of the Size card builder -- it arranges the icons")
+    check(sizeCard:find("ptsGrowth.disableOn = HidePersonalOptions", 1, true) ~= nil,
           "growth: ...with the gate classic's box gives it")
-    local g1 = size:find("BuildPersonalSizeGroup({", 1, true)
-    local g2 = size:find('L["Growth Direction"]', 1, true)
+    local g1 = sizeCard:find("BuildPersonalSizeGroup(tools2)", 1, true)
+    local g2 = sizeCard:find('L["Growth Direction"]', 1, true)
     check(g1 and g2 and g1 < g2, "growth: ...after the Size builder's own controls")
+    local size, sizeCall = sectionBlock("Size")
+    check(sizeCall:find("BuildPersonalSizeCardGroup", 1, true) ~= nil
+      and size:find("BuildPersonalSizeCardGroup({ group = band,", 1, true) ~= nil,
+          "growth: the pin and the card mount the same card builder -- a pinned Size panel has Growth Direction")
+    check(size:find("band:AddWidget", 1, true) == nil,
+          "growth: nothing is added to the Size band outside the builder")
+    check(builderBody("BuildPersonalSizeGroup"):find("Growth Direction", 1, true) == nil,
+          "growth: classic's Size builder is untouched -- its box never gains the dropdown")
     check(PAGE:find('GUI:CreateHeader(self.child, L["Growth"])', 1, true) ~= nil
       and PAGE:find("Add(growthGroup, nil, 1)", 1, true) ~= nil,
           "growth: classic still builds its own Growth box in column 1")
