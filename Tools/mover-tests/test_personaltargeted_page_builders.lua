@@ -274,7 +274,7 @@ local CARDS = {
       dim = "HighlightOffRow", pin = true, split = true, composite = "noEnableToggle",
       tick = { key = "personalTargetedSpellImportantBorderShadowEnabled", name = "Border Shadow", gate = "HighlightOffRow" } },
     { label = "Highlight Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
-      builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "nil",
+      builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "PersonalHighlightAnimationSummary",
       dim = "HighlightOffRow", pin = true, split = true },
     { label = "Interrupt Settings", key = "personaltargeted_interrupt", col = 1, box = "Interrupt Settings", classicCol = 2,
       builder = "BuildPersonalInterruptGroup", golden = PT_INTERRUPT, summary = "PersonalInterruptSummary",

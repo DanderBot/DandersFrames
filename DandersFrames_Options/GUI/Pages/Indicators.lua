@@ -5903,6 +5903,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return format("%s %d", L["Shadow Size"], math.floor(s))
         end
 
+        -- The chosen effect, in the type dropdown's own words (the toolkit's
+        -- list, not a copy of it); "Off" while it is None -- the card has no
+        -- tick, so None IS its off. A legacy type the dropdown no longer offers
+        -- prints nothing rather than a raw key.
+        local function PersonalHighlightAnimationSummary(d)
+            if not d then return "" end
+            local t = d.personalTargetedSpellImportantBorderAnimationType or "NONE"
+            if t == "NONE" then return L["Off"] end
+            return GUI:AnimationTypeNames()[t] or ""
+        end
+
         if classicLayout then
             local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
             highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
@@ -5958,9 +5969,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CloseSection(sband)
 
             -- ☠ NO HEADER TICK: the animation's off is the "None" choice in its
-            -- own dropdown, not a checkbox. No summary either -- there was none to
-            -- carry over, and the effect's name is the dropdown's to say.
-            local aband = OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim", 1, nil, HighlightOffRow, nil,
+            -- own dropdown, not a checkbox. Shut, it names the chosen effect
+            -- (PersonalHighlightAnimationSummary), "Off" on None.
+            local aband = OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim", 1, PersonalHighlightAnimationSummary, HighlightOffRow, nil,
                 BuildPersonalHighlightAnimationGroup)
             BuildPersonalHighlightAnimationGroup({
                 group = aband, parent = self.child,

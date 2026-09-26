@@ -3575,6 +3575,27 @@ function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inher
     return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
 end
 
+-- The border animations' display names, keyed by the saved type value -- the
+-- list CreateAnimationControls' type dropdown offers. Published so a card's
+-- folded summary can name the chosen effect without keeping a copy of it.
+-- ⚠ A FRESH TABLE ON EVERY CALL, built from L at call time: the dropdown adds
+-- its own _order and may delete excluded types from what it is handed, and a
+-- table built once at file scope would freeze on the load-time language.
+-- CORNERS_ONLY is not in it (no longer pickable), so a caller must cope with
+-- a nil name for a legacy saved value.
+function GUI:AnimationTypeNames()
+    return {
+        NONE = L["None"],
+        DF_PULSATE = L["DF Pulsate"],
+        DF_ORBIT = L["DF Chase"],
+        DF_DASH = L["DF Dash"],
+        DF_FLASH = L["DF Flash"],
+        DF_PIXEL = L["DF Pixel"],
+        DF_PROC = L["DF Proc"],
+        BLINK = L["Blink"],
+    }
+end
+
 function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     opts = opts or {}
     local parent       = opts.parent
@@ -3633,22 +3654,15 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     local w = {}
 
     -- All DF-owned border effects (no external glow library). The "DF " labels
-    -- are kept from when they sat alongside the retired LCG glows.
-    local animTypeOptions = {
-        NONE = L["None"],
-        DF_PULSATE = L["DF Pulsate"],
-        DF_ORBIT = L["DF Chase"],
-        DF_DASH = L["DF Dash"],
-        DF_FLASH = L["DF Flash"],
-        DF_PIXEL = L["DF Pixel"],
-        DF_PROC = L["DF Proc"],
-        BLINK = L["Blink"],
-        -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
-        -- is intentionally absent — it's kept in the engine (an existing saved
-        -- value still renders) but no longer offered as a pickable animation.
-        _order = { "NONE", "BLINK", "DF_ORBIT",
-                   "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" },
-    }
+    -- are kept from when they sat alongside the retired LCG glows. The names
+    -- come from GUI:AnimationTypeNames() (above), the one list a card summary
+    -- also reads.
+    local animTypeOptions = GUI:AnimationTypeNames()
+    -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
+    -- is intentionally absent — it's kept in the engine (an existing saved
+    -- value still renders) but no longer offered as a pickable animation.
+    animTypeOptions._order = { "NONE", "BLINK", "DF_ORBIT",
+                               "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" }
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
     -- overlay-recoverable animations).

@@ -904,5 +904,71 @@ if GUI.CreateBorderShadowControls then
     end
 end
 
+-- ============================================================
+-- ANIMATION NAMES -- one list, read by the type dropdown AND a card summary
+-- ============================================================
+-- The Personal Targeted page's Highlight Animation card names the chosen
+-- effect when it is shut. The names live in the toolkit; the card must read
+-- them through GUI:AnimationTypeNames, never keep a copy.
+print("-- Border builders: animation names are one list, shared with a card summary")
+do
+    local published = type(GUI.AnimationTypeNames) == "function"
+    check(published, "anim names: the toolkit publishes GUI:AnimationTypeNames")
+    -- Read through this, so a missing accessor FAILS the checks below rather
+    -- than erroring and taking the rest of the suite down with it.
+    local function Names() return published and GUI:AnimationTypeNames() or {} end
+    local names = Names()
+    eq(names.NONE, "None", "anim names: NONE reads None")
+    eq(names.DF_PROC, "DF Proc", "anim names: DF_PROC reads DF Proc")
+    eq(names.DF_ORBIT, "DF Chase", "anim names: DF_ORBIT reads DF Chase")
+    eq(names.CORNERS_ONLY, nil, "anim names: CORNERS_ONLY is not offered")
+    check(Names() ~= names, "anim names: a fresh table per call, so a caller's edits never leak")
+
+    -- The dropdown offers exactly those names (plus its own _order), and an
+    -- excluded type is dropped from ITS copy, not from the next caller's.
+    rec = {}
+    local g = newGroup()
+    -- WoW's global `format`, which the helper's tooltips call and this shared
+    -- runtime does not define; put back as found.
+    local savedFormat = format
+    format = format or string.format
+    GUI:CreateAnimationControls(g, { xType = "DF_PROC" }, "x", {
+        parent = PARENT, perfBanner = false, excludeTypes = { BLINK = true },
+    })
+    format = savedFormat
+    local dd
+    for _, e in ipairs(rec) do if e.kind == "dropdown" and e.key == "xType" then dd = e end end
+    check(dd ~= nil, "anim names: the type dropdown is built")
+    if dd then
+        for k, v in pairs(Names()) do
+            if k ~= "BLINK" then eq(dd.options[k], v, "anim names: the dropdown offers " .. k .. " as " .. v) end
+        end
+        eq(dd.options.BLINK, nil, "anim names: ...less the excluded type")
+    end
+    eq(Names().BLINK, "Blink", "anim names: ...which the next caller still gets")
+
+    -- The card's summary, run for real against the real list.
+    local src = options_file_source("GUI/Pages/Indicators.lua"):gsub("\r\n", "\n")
+    local a = src:find("local function PersonalHighlightAnimationSummary(d)", 1, true)
+    check(a ~= nil, "anim summary: the Highlight Animation card has a summary")
+    if a then
+        local b = src:find("\n        end\n", a, true)
+        local chunk = loadstring("return " .. src:sub(a + #"local ", b + #"\n        end"):gsub("^function PersonalHighlightAnimationSummary", "function"))
+        setfenv(chunk, { L = DF.L, GUI = GUI })
+        local fn = chunk()
+        local k = "personalTargetedSpellImportantBorderAnimationType"
+        eq(fn({ [k] = "DF_PROC" }), "DF Proc", "anim summary: shut, it names the chosen effect")
+        eq(fn({ [k] = "DF_PULSATE" }), "DF Pulsate", "anim summary: ...any of them, from the toolkit's list")
+        eq(fn({ [k] = "NONE" }), "Off", "anim summary: None reads Off")
+        eq(fn({}), "Off", "anim summary: an unset type reads Off")
+        eq(fn({ [k] = "CORNERS_ONLY" }), "", "anim summary: a legacy type prints nothing, not a raw key")
+        eq(fn(nil), "", "anim summary: no profile, no summary")
+        check(src:find('OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim", 1, PersonalHighlightAnimationSummary,', 1, true) ~= nil,
+              "anim summary: ...and the card is handed it")
+    end
+    -- ...and the page keeps no copy of the names.
+    check(src:find('L["DF Pulsate"]', 1, true) == nil, "anim summary: the page holds no copy of the effect names")
+end
+
 -- ---- restore the global --------------------------------------------
 DandersFrames = savedDF
