@@ -971,6 +971,18 @@ do
     -- entire feature. Popout:Pin takes the instance out of that pool.
     check(WIDGETS:find("if po and not po.closed and not po.pinned then po:Pin(true) end", 1, true) ~= nil,
           "pin kit: a press pins the panel out of the shared pool, so two can stand at once")
+    -- ☠ ...AND A CLOSED ONE IS RECYCLED. Every press pins, and WoW never frees
+    -- a frame, so without the kit's spare list each pin-and-close leaked a whole
+    -- panel. The behaviour is proven in test_popout_row.lua (section 25); this
+    -- pins that the settings window actually opts in.
+    check(WIDGETS:find("recyclePinned = true,", 1, true) ~= nil,
+          "pin kit: the section's panel is recycled when it closes, not leaked")
+    check(ui_file_source("PopoutRow.lua"):find('recyclePinned = rawget(row, "_recyclePinned"),', 1, true) ~= nil,
+          "pin kit: ...and the kit's row forwards the opt-in to the shell")
+    -- A revived panel may re-show a pane it built on an earlier pin; its greys
+    -- are re-run through the pane's own state pass rather than left as at close.
+    check(WIDGETS:find('if pane and type(rawget(pane, "dfReflowPane")) == "function" then', 1, true) ~= nil,
+          "pin kit: ...and a revived pane's grey states are re-run on the press")
     check(WIDGETS:find("r:TogglePopout()", 1, true) ~= nil,
           "pin kit: ...and a second press on a lit pin takes that panel down again")
     check(WIDGETS:find("onClose = function() section:SetPinLit(false) end,", 1, true) ~= nil,

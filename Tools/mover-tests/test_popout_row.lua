@@ -4582,3 +4582,87 @@ do
     eq(plain:GetHeight(), ROW_H, "inline: ...in the slot it always took")
     check(not plain:IsShowingInlineContent(), "inline: ...and says it is showing nothing")
 end
+
+-- ============================================================
+-- 25. A PINNED PANEL IS RECYCLED, NOT LEAKED (opts.recyclePinned)
+-- The settings window's section pins: a hidden controller row per section,
+-- tethered to the header, whose every press opens a panel PINNED. Without the
+-- opt-in each pin-and-close stranded a whole panel for good (WoW never frees a
+-- frame). With it the closed pin waits as a spare and the next press -- any
+-- section's -- revives it, and it has to come back as THAT section's panel.
+-- ============================================================
+print("-- Row: recyclePinned revives a closed pin as the pressing row's panel")
+do
+    local win = window()
+    local KEY = "recycle-pins"
+    local closes = {}
+    local function mk(name, title, recycle)
+        local header = place(FakeUIFrame(), 0)
+        local row = host:CreatePopoutRow(header, {
+            label = name, title = title, db = {},
+            build = counting("recyc" .. name, 50, 2),
+            window = win, tetherTo = header, popoutKey = KEY,
+            recyclePinned = recycle,
+            onClose = function(_, reason) closes[#closes + 1] = name .. ":" .. tostring(reason) end,
+        })
+        row:Hide()
+        return row
+    end
+    -- The section pin's own press, verbatim in shape (SettingsWidgets.lua).
+    local function press(row)
+        row:TogglePopout()
+        local po = row.popout
+        if po and not po.closed and not po.pinned then po:Pin(true) end
+        return po
+    end
+    local function inPinnedStore(po)
+        for _, p in ipairs(rawget(host, "_popoutRows").pinned) do
+            if p == po then return true end
+        end
+        return false
+    end
+
+    local a = mk("A", "Buff Bar / Appearance", true)
+    local b = mk("B", "Debuff Bar / Layout", true)
+
+    local p1 = press(a)
+    check(p1 and p1:IsPinned(), "recycle row: a press opens the section's panel pinned")
+    eq(p1:GetTitle(), "Buff Bar / Appearance", "recycle row: ...titled <Page> / <Section>")
+    check(inPinnedStore(p1), "recycle row: ...and in the pinned store the window sweep walks")
+
+    p1:Close("cross")
+    check(not inPinnedStore(p1), "recycle row: the cross takes it out of the pinned store")
+    check(a.popout == nil, "recycle row: ...and the row forgets it")
+
+    local p2 = press(b)
+    check(p2 == p1, "recycle row: the next press REVIVES the closed pin instead of building one")
+    check(p2:IsPinned() and not p2.closed, "recycle row: ...open and pinned again")
+    eq(p2:GetTitle(), "Debuff Bar / Layout", "recycle row: ...under the PRESSING section's title")
+    eq(builds.recycB, 1, "recycle row: ...with that section's content built into it")
+    check(p2._rowActive == p2._rowPanes[b], "recycle row: ...and B's pane is the one mounted")
+    check(p2._rowPanes[b].host:IsShown(), "recycle row: ...showing")
+    check(not p2._rowPanes[a].host:IsShown(), "recycle row: ...while A's pane is parked")
+    check(p2._boundRow == b and b.popout == p2, "recycle row: ...bound to B, and B knows it")
+    check(inPinnedStore(p2), "recycle row: ...back in the pinned store")
+
+    -- The window's close (and a mode switch's rebuild) sweeps the revived pin.
+    host:CloseAllPopoutRows("window")
+    check(p2.closed, "recycle row: CloseAllPopoutRows closes a revived pin")
+    eq(closes[#closes], "B:window", "recycle row: ...firing the PRESSING row's close hook")
+
+    -- Back to A: the same instance, A's cached pane, not a second build.
+    local p3 = press(a)
+    check(p3 == p1, "recycle row: pressing A again revives the same panel")
+    eq(p3:GetTitle(), "Buff Bar / Appearance", "recycle row: ...titled A again")
+    eq(builds.recycA, 1, "recycle row: ...re-showing A's pane rather than building it twice")
+    check(p3._rowActive == p3._rowPanes[a], "recycle row: ...with A's pane mounted")
+    host:CloseAllPopoutRows("test")
+
+    -- Opt-in: a row that did not ask discards its closed pin, as it always has.
+    local c = mk("C", "C / C", nil)
+    local q1 = press(c)
+    q1:Close("cross")
+    local q2 = press(c)
+    check(q2 ~= q1, "recycle row: without the opt-in a closed pin is not revived")
+    host:CloseAllPopoutRows("test")
+end

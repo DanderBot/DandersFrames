@@ -612,6 +612,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 -- panel would dock in the corner of the screen with its beam
                 -- pointing at nothing. See PopoutRow's opts.tetherTo.
                 tetherTo = section,
+                -- ☠ A CLOSED PIN IS KEPT, NOT LEAKED. Every press opens a panel
+                -- pinned, and WoW never frees a frame, so each pin-and-close
+                -- used to strand a whole panel for good. The kit keeps it as a
+                -- spare and the next press (any section's) revives it: the
+                -- pane cache is per ROW, so it shows that section's content
+                -- under that section's title, and it re-enters the store the
+                -- mode switch's CloseAllPopoutRows sweeps.
+                recyclePinned = true,
                 -- ...and the header goes back to plain the moment the panel
                 -- does -- its own cross, the family sweep, a mode switch's
                 -- CloseAllPopoutRows. Fired after the unbind, so `row.popout`
@@ -652,6 +660,15 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 -- silent path: the press on this icon IS the confirmation.
                 local po = r.popout
                 if po and not po.closed and not po.pinned then po:Pin(true) end
+                -- A REVIVED panel may re-show a pane it built on an earlier
+                -- pin, and a closed panel's pane takes no reflow -- so its greys
+                -- are whatever they were at close. Values repaint on OnShow;
+                -- this re-runs the pane's own state pass (PopoutContent's mount).
+                local rec = po and not po.closed and rawget(po, "_rowActive")
+                local pane = rec and rec.pane
+                if pane and type(rawget(pane, "dfReflowPane")) == "function" then
+                    pane.dfReflowPane()
+                end
                 section:SetPinLit(po and not po.closed and true or false)
             end,
         })

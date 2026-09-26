@@ -964,6 +964,15 @@ end
 --              so the pair cannot disagree. `false` forces square on a host that
 --              has opted in; OMIT and the row takes the host's own declaration,
 --              which is nothing unless the consumer called host:SetSurfaceStyle
+--   recyclePinned
+--              opt-in, FORWARDED to the shell (see CreatePopout's recyclePinned).
+--              A panel this row pinned is kept as a spare when it closes, and the
+--              next open that finds nothing pooled revives it instead of building
+--              a whole new panel. Safe here because the pane cache is keyed by
+--              ROW: a revived instance bound to another row builds (or re-shows)
+--              THAT row's pane, and the bind re-states the title, accent, footer
+--              and header toggle -- and the onPin/onClose it is handed are the
+--              opening row's, so the store and the sweeps take it back in
 --
 -- Returns the row frame with .Refresh() / .refreshContent(db), :SetEnabled(bool),
 -- :SetModifiedCheck(fn), :SetActions(list), :SetAccent(c), :SetSurface(style) / :GetSurface(),
@@ -1028,6 +1037,7 @@ function UI:CreatePopoutRow(parent, opts)
     row._key     = opts.popoutKey or DEFAULT_KEY
     row._accent  = normColor(opts.accent)
     row._onClose = (type(opts.onClose) == "function") and opts.onClose or nil
+    row._recyclePinned = opts.recyclePinned and true or nil
     row._hasToggle = opts.toggle ~= nil
     row._bound   = {}
     local offText = opts.offText or (L and L["Off"]) or "Off"
@@ -2840,6 +2850,9 @@ function UI:CreatePopoutRow(parent, opts)
             -- contract _TetherRegion exists to hold. A strip declares no
             -- popoutInset, so its whole rect is ink -- which it is.
             tetherSource = tetherRegion(),
+            -- rawget: a private field that is absent on most rows (see the
+            -- onPin note below for why a plain read is wrong here).
+            recyclePinned = rawget(row, "_recyclePinned"),
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
             onClose = function(p, reason) forgetInstance(host, p, reason) end,
