@@ -142,6 +142,25 @@ end
 function GUI.PageUsableWidth(childWidth)
     return (childWidth or 0) - 2 * SettingsBox.colMargin
 end
+
+-- ★ WHERE COLUMN 2 STARTS, in the page CHILD's x: the content box's midpoint. Its own
+-- helper so the layout pass and the resize guide below read ONE number.
+function GUI.Column2X(contentWidth)
+    return math.floor((contentWidth or 0) / 2)
+end
+
+-- ★ WHERE THE TWO COLUMNS SPLIT, in the page CHILD's x -- the centre of the gap
+-- between column 1's right edge (a band filling its column: colMargin + ColumnWidth)
+-- and column 2's left edge (Column2X). nil while the page has one column. Read by the
+-- resize grip's guide line, so the line sits where the split lands after release.
+-- ⚠ A classic page's fixed-width boxes are SettingsBox.group wide rather than
+-- ColumnWidth, so their gap is wider on the left; column 2's start is the same either way.
+function GUI.ColumnSplitX()
+    if not GUI.UsesTwoColumns() then return nil end
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local col1Right = SettingsBox.colMargin + GUI.ColumnWidth()
+    return (col1Right + GUI.Column2X(contentWidth)) / 2
+end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
@@ -387,7 +406,7 @@ local function PageRefreshStates(self)
     
     -- Layout - adjust column positions based on available width
     local x1, maxY = SettingsBox.colMargin, 0
-    local col2X = usesTwoColumns and math.floor(contentWidth / 2) or x1
+    local col2X = usesTwoColumns and GUI.Column2X(contentWidth) or x1
     -- The page's TOP margin, deliberately still a literal: it happens to equal
     -- colMargin today, and tying the vertical rhythm to a horizontal number is
     -- how one edit moves the other axis by accident.
@@ -1562,10 +1581,55 @@ function DF:CreateGUI()
         if not min then return 1 end
         return ((cardW or 0) - 2 * pad >= min) and 2 or 1
     end
+    -- ★ THE COLUMN SPLIT GUIDE. A thin accent line over the page, drawn while the grip
+    -- is held, where the page's two columns will split at this width -- the centre of
+    -- the gap between them, read from GUI.ColumnSplitX, which is built from the same
+    -- helpers the layout pass places the columns with. Gone with one column, gone on
+    -- release. ONE frame and ONE texture, made on the first drag and re-pointed after:
+    -- nothing is allocated while dragging. Never takes the mouse -- it lies over the
+    -- page the user is sizing.
+    local splitGuide, splitLine
+    local function UpdateSplitGuide()
+        local content = GUI.contentFrame
+        -- Click casting draws its own panel in place of the page, with no columns.
+        local x = content and GUI.SelectedMode ~= "clicks" and GUI.ColumnSplitX
+                  and GUI.ColumnSplitX() or nil
+        if not x then
+            if splitGuide then splitGuide:Hide() end
+            return
+        end
+        if not splitGuide then
+            splitGuide = CreateFrame("Frame", nil, content)
+            splitGuide:EnableMouse(false)
+            splitGuide:SetAllPoints(content)
+            splitLine = splitGuide:CreateTexture(nil, "OVERLAY")
+        end
+        -- Above the page's own widgets, which stack a few levels over the box.
+        splitGuide:SetFrameLevel(content:GetFrameLevel() + 100)
+        local c = GetThemeColor()
+        splitLine:SetColorTexture(c.r, c.g, c.b, 0.35)
+        -- One DEVICE pixel wide, its left edge on the grid. The x is the page child's,
+        -- and the child starts at the page viewport, `inset` in from the content box.
+        local ppu = GUI._priv.PixelsPerUnit and GUI._priv.PixelsPerUnit(splitGuide)
+        local lineW = (ppu and ppu > 0) and (1 / ppu) or 1
+        local inset = SnapLen(content, PageBox.inset) or PageBox.inset
+        local left = SnapLen(splitGuide, inset + x - lineW / 2)
+        splitLine:ClearAllPoints()
+        splitLine:SetPoint("TOPLEFT", content, "TOPLEFT", left, -inset)
+        splitLine:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", left, inset)
+        splitLine:SetWidth(lineW)
+        splitGuide:Show()
+    end
+    local function HideSplitGuide()
+        if splitGuide then splitGuide:Hide() end
+    end
+
     local function ShowSizeReadout(owner)
         local w, h = math.floor(frame:GetWidth() + 0.5), math.floor(frame:GetHeight() + 0.5)
         if w == lastW and h == lastH then return end
         lastW, lastH = w, h
+        -- Only when a number moved, like the readout: the split cannot move otherwise.
+        UpdateSplitGuide()
         local cols = GUI.UsesTwoColumns and GUI.UsesTwoColumns() and 2 or 1
         -- One column spans both halves and the gutter between them.
         local half = GUI.ColumnWidth and GUI.ColumnWidth() or 0
@@ -1588,8 +1652,12 @@ function DF:CreateGUI()
             self:SetScript("OnUpdate", ShowSizeReadout)
         end
     end)
+    -- The window closing under a held grip (Esc) never delivers the mouse-up, so the
+    -- guide is taken down with the grip as well as on release.
+    resizeHandle:HookScript("OnHide", HideSplitGuide)
     resizeHandle:SetScript("OnMouseUp", function(self, button)
         self:SetScript("OnUpdate", nil)
+        HideSplitGuide()
         GUI:HideTooltip()
         frame:StopMovingOrSizing()
         local ws = DF:GetWindowState()
