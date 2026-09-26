@@ -611,7 +611,17 @@ function Sess:DragTo(el, cx, cy)
         end
         if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
     end
-    cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+    -- ☠ A ZONE PREVIEWS WHERE THE DROP WILL SEAT IT. The drop solves the anchor,
+    -- and an anchored solve only pulls back an element with nothing on screen
+    -- (NS.KeepOnScreen) -- a seat that overhangs an edge keeps its overhang. The
+    -- preview used to clamp the zone fully on screen instead, so a zone near an
+    -- edge showed the frames in one place and the release put them in another.
+    -- Tall elements hit it first (a Column of party frames at a scale above 1).
+    if zone then
+        cx, cy = NS.KeepOnScreen(cx, cy, w, h)
+    else
+        cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+    end
     Grid:ShowMeasure(cx, cy, w, h)
     -- Tether strain-and-snap: pulling an anchored element past the thresholds
     -- (Solver.TETHER_HOLD/SNAP x snapDistance, measured from the resolved

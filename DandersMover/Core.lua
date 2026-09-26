@@ -7,7 +7,8 @@ local addonName, NS = ...
 -- MINOR 2 adds Lib:RefreshMovedTargets (see MOVED-TARGET SWEEP below).
 -- MINOR 3 adds the optional def.visibleOffset (see RECORD-TO-VISIBLE OFFSET
 -- below), and slabs clamp the way elements do.
-local MAJOR, MINOR = "DandersMover-1.0", 3
+-- MINOR 4 adds the optional target def.partOf (Registry:WouldCreateCycle).
+local MAJOR, MINOR = "DandersMover-1.0", 4
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -233,6 +234,10 @@ function NS:ResolveElement(el)
     if not a then return false end
     local target = Registry:GetTarget(a.target)
     if not target then return false end
+    -- Anchored to a part of itself (a record saved before WouldCreateCycle knew
+    -- about def.partOf): every solve would push the element one more step past
+    -- its own frame, so hold instead. Detach or drag it free to clear it.
+    if target.partOf == el.id then return false end
     local rect = Registry:GetRect(target)
     local w, h = Registry:GetSize(el)
     if not rect or not w then return false end

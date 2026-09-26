@@ -38,6 +38,16 @@ local C_Timer, UnitInRaid = C_Timer, UnitInRaid
 
 local ADDON_KEY = "DandersFrames"
 
+-- ☠ EVERY TARGET HERE IS A FRAME INSIDE ONE OF DF'S OWN MOVABLE ELEMENTS, and says so
+-- (the lib's def.partOf). Without it the lib took "My Party Frame" for a stranger to
+-- the party frames: dragging the party offered snap zones on its own frames, and a
+-- drop there anchored the party to itself -- the frames flew off on release, a
+-- different distance every time (alpha.12 report: Column layout, Snap to frames on).
+-- partOf makes that a loop, so the zones, the picker and link-drag all refuse it.
+-- An older lib (MINOR < 4) ignores the field.
+local PARTY_ELEMENT = ADDON_KEY .. ":party"
+local RAID_ELEMENT  = ADDON_KEY .. ":raid"
+
 local MT = {}
 DF.MoverTargets = MT
 
@@ -240,6 +250,7 @@ local function registerSemantic()
         getFrame = partyMeFrame,
         getRect  = function() return rectOf(partyMeFrame()) end,
         isRelevant = partyRelevant,
+        partOf   = PARTY_ELEMENT,
     })
 
     Mover:RegisterAnchorTarget(ADDON_KEY, "party.first", {
@@ -248,6 +259,7 @@ local function registerSemantic()
         getFrame = function() return partyEdgeFrame(false) end,
         getRect  = function() return rectOf(partyEdgeFrame(false)) end,
         isRelevant = partyRelevant,
+        partOf   = PARTY_ELEMENT,
     })
 
     Mover:RegisterAnchorTarget(ADDON_KEY, "party.last", {
@@ -256,6 +268,7 @@ local function registerSemantic()
         getFrame = function() return partyEdgeFrame(true) end,
         getRect  = function() return rectOf(partyEdgeFrame(true)) end,
         isRelevant = partyRelevant,
+        partOf   = PARTY_ELEMENT,
     })
 
     Mover:RegisterAnchorTarget(ADDON_KEY, "raid.me", {
@@ -264,6 +277,7 @@ local function registerSemantic()
         getFrame = raidMeFrame,
         getRect  = function() return rectOf(raidMeFrame()) end,
         isRelevant = raidRelevant,
+        partOf   = RAID_ELEMENT,
     })
 
     Mover:RegisterAnchorTarget(ADDON_KEY, "raid.first", {
@@ -272,6 +286,7 @@ local function registerSemantic()
         getFrame = function() return raidEdgeFrame(false) end,
         getRect  = function() return rectOf(raidEdgeFrame(false)) end,
         isRelevant = raidRelevant,
+        partOf   = RAID_ELEMENT,
     })
 
     Mover:RegisterAnchorTarget(ADDON_KEY, "raid.last", {
@@ -280,6 +295,7 @@ local function registerSemantic()
         getFrame = function() return raidEdgeFrame(true) end,
         getRect  = function() return rectOf(raidEdgeFrame(true)) end,
         isRelevant = raidRelevant,
+        partOf   = RAID_ELEMENT,
     })
 end
 
@@ -303,6 +319,7 @@ local function registerPartySlots()
                 getFrame = function() return partySlotFrame(n) end,
                 getRect  = function() return rectOf(partySlotFrame(n)) end,
                 isRelevant = partyRelevant,
+                partOf   = PARTY_ELEMENT,
                 snappable = false,
             })
             track("party", key)
@@ -320,6 +337,7 @@ local function registerRaidSlots()
                 getFrame = function() return raidSlotFrame(n) end,
                 getRect  = function() return rectOf(raidSlotFrame(n)) end,
                 isRelevant = raidRelevant,
+                partOf   = RAID_ELEMENT,
                 snappable = false,
             })
             track("raid", key)
@@ -374,6 +392,7 @@ local function registerRaidGroups()
                              w = acc.r - acc.l,       h = acc.t - acc.b }
                 end,
                 isRelevant = raidRelevant,
+                partOf   = RAID_ELEMENT,
                 snappable = false,
             })
             track("raid", key)
@@ -393,6 +412,7 @@ local function registerRaidGroups()
                         getFrame = slotFrame,
                         getRect  = function() return rectOf(slotFrame()) end,
                         isRelevant = raidRelevant,
+                        partOf   = RAID_ELEMENT,
                         snappable = false,
                     })
                     track("raid", slotKey)

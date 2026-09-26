@@ -28,6 +28,9 @@ local function validate(def, kind)
     if def.isRelevant ~= nil and type(def.isRelevant) ~= "function" then
         error("DandersMover: isRelevant must be a function", 3)
     end
+    if def.partOf ~= nil and type(def.partOf) ~= "string" then
+        error("DandersMover: partOf must be an \"addon:key\" string", 3)
+    end
     if kind == "element" then
         if type(def.getPos) ~= "function" then error("DandersMover: element needs getPos", 3) end
         if type(def.onChanged) ~= "function" then error("DandersMover: element needs onChanged", 3) end
@@ -60,6 +63,10 @@ local function insertTarget(self, addon, key, def, element)
         isRelevant = def.isRelevant,
         -- false = the target builds no snap zones; the picker and link-drag still reach it.
         snappable = def.snappable ~= false,
+        -- "addon:key" of the element this target is a PART of (a frame inside that
+        -- element's container). Moving the element moves the target, so anchoring
+        -- the element to it is a loop -- WouldCreateCycle walks this edge.
+        partOf = def.partOf,
     }
     return self.targets[id]
 end
@@ -461,6 +468,15 @@ end
 -- deliberately ignored: a cycle through a currently-hidden target is still a
 -- cycle the moment that target reappears, and ParentId (the ACTIVE parent)
 -- would walk right past it while the chain is holding.
+--
+-- ☠ A TARGET THAT IS PART OF AN ELEMENT MOVES WITH IT (def.partOf). CanonicalId
+-- only folds a target into an element when it is the very same frame, so a frame
+-- INSIDE an element's container -- DF's "My Party Frame" inside the party frames
+-- -- looked like a stranger. The party frames were offered snap zones on their
+-- own frames, and a drop there anchored them to themselves: each solve read the
+-- frame where the last solve had put it and pushed the container one more step,
+-- so the frames flew off on release. The partOf edge makes that a loop like any
+-- other, which closes every door at once (zones, picker, link-drag, EndDrag).
 function R:WouldCreateCycle(elId, targetId)
     local frontier, seen = { self:CanonicalId(targetId) }, {}
     while #frontier > 0 do
@@ -472,6 +488,8 @@ function R:WouldCreateCycle(elId, targetId)
                 local primary, backup = self:ParentIds(id)
                 if primary then tinsert(nxt, primary) end
                 if backup then tinsert(nxt, backup) end
+                local t = self.targets[id]
+                if t and t.partOf then tinsert(nxt, t.partOf) end
             end
         end
         frontier = nxt
