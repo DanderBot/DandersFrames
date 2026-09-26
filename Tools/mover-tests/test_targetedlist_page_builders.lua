@@ -238,7 +238,7 @@ end
 local TL_SETTINGS = {
     { "label",    "Shows a bar when an enemy is casting a spell targeting a party/raid member.", "(none)", 35 },
     { "label",    "(none)",                     "(none)",                        30 },
-    { "checkbox", "Enable",                     "targetedListEnabled",           30 },
+    { "checkbox", "Enable Targeted List",       "targetedListEnabled",           30 },
     { "checkbox", "Important Spells Only",      "targetedListImportantOnly",     30 },
     { "checkbox", "Hide Casts Targeting You",   "targetedListHideOwnCasts",      30 },
     { "checkbox", "Show Untargeted Casts",      "targetedListShowUntargeted",    30 },
@@ -472,8 +472,15 @@ do
     -- ☠ THE MASTER SWITCH FOLLOWS EVERY OTHER PAGE NOW: in Settings' body.
     check((sectionBlock("Settings")):find("targetedListEnabled", 1, true) == nil,
           "ticks: Enable is not in Settings' header")
-    check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable"], db, "targetedListEnabled"', 1, true) ~= nil,
+    check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable Targeted List"], db, "targetedListEnabled"', 1, true) ~= nil,
           "ticks: ...its builder builds it in the body, in both layouts")
+    -- The master switch names its feature, as every other page's does
+    -- ("Enable Resource Bar", "Enable Buffs") -- never a bare "Enable".
+    check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable"]', 1, true) == nil,
+          "label: the master switch is not a bare \"Enable\"")
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    check(ENUS:find('L["Enable Targeted List"] = true', 1, true) ~= nil,
+          "label: \"Enable Targeted List\" is in enUS's dev block")
 
     -- ---- Expand All / Collapse All --------------------------------------
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,

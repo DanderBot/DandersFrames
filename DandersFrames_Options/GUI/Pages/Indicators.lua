@@ -4497,7 +4497,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Suppressed when the ROW carries this tick. Still built in classic,
                 -- where it is the page's only on/off control.
                 if not tools2.hoistToggle then
-                    group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], db, "targetedListEnabled", function()
+                    group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Targeted List"], db, "targetedListEnabled", function()
                         tools2.refreshStates()
                         if DF.ToggleTargetedList then DF:ToggleTargetedList(db.targetedListEnabled) end
                         -- Reflect the enable change in test mode immediately (so disabling

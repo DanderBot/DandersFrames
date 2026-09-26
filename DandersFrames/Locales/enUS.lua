@@ -939,6 +939,7 @@ L["Enable Resurrection Icon Tooltips"] = true
 L["Enable Spec Auto-Switch"] = true
 L["Enable BG Carrier Icon"] = true
 L["Enable Summon Icon"] = true
+L["Enable Targeted List"] = true
 L["Enable Text Designer"] = true
 L["Enable Vehicle Icon"] = true
 L["enabled"] = true
