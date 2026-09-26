@@ -435,6 +435,86 @@ do
 end
 
 -- ============================================================
+-- 4. MEASURING A TARGET ALLOCATES NOTHING (MoverTargets' rect reuse)
+-- The lib measures every DF target on every layout sweep, twice, and a party
+-- drag runs that sweep every frame. Each target now measures into ITS OWN rect
+-- table, overwritten in place. Safe only because the lib never holds the raw
+-- return -- pinned here against the real lib, not just asserted in a comment.
+-- ============================================================
+do
+    resetPartyDB({ growDirection = "VERTICAL", frameScale = 1 })
+    records.party.point, records.party.x, records.party.y, records.party.anchor = "CENTER", 0, -325, nil
+    layout(5)
+    local id2 = "DandersFrames:party.slot2"
+    local slot2 = R:GetTarget(id2)
+    local slot3 = R:GetTarget("DandersFrames:party.slot3")
+    local me = R:GetTarget("DandersFrames:party.me")
+    local a, b = slot2.getRect(), slot2.getRect()
+    check(a ~= nil and a == b, "rect reuse: a target hands back its own rect table every measure")
+    check(slot3.getRect() ~= a and me.getRect() ~= a, "rect reuse: ...one table per target, never shared")
+
+    -- The lib copies before it keeps anything.
+    local copy = R:GetRect(slot2)
+    check(copy ~= a and near(copy.x, a.x) and near(copy.y, a.y) and near(copy.w, a.w),
+          "rect reuse: Registry:GetRect hands the lib a COPY")
+    Mover:RefreshMovedTargets("DandersFrames", Bridge:SubTargetKeys("party"))
+    local stamp = NS.lastRect[id2]
+    check(stamp ~= nil and stamp ~= a, "rect reuse: the sweep's stamp is its own table")
+    local sx, sy = stamp.x, stamp.y
+
+    -- A real move: wider spacing pushes slot 2 down. The reused table follows, the
+    -- COPY taken earlier does not, and the sweep still sees the move.
+    pdb.frameSpacing = 40
+    layout(5)
+    local moved = Mover:RefreshMovedTargets("DandersFrames", Bridge:SubTargetKeys("party"))
+    check(moved > 0, "rect reuse: the sweep still sees a slot move")
+    check(not near(a.y, sy), "rect reuse: ...the target's own table now holds the new rect")
+    check(near(copy.y, sy), "rect reuse: ...while the copy the lib took earlier is untouched")
+    check(near(NS.lastRect[id2].y, a.y) and near(NS.lastRect[id2].x, sx),
+          "rect reuse: ...and the sweep re-stamped the new position")
+    eq(Mover:RefreshMovedTargets("DandersFrames", Bridge:SubTargetKeys("party")), 0,
+       "rect reuse: ...and goes quiet on the next pass")
+
+    -- ALLOCATION: N measures of every party target, against a baseline that does
+    -- the same frame lookups and method calls without building a rect. The excess
+    -- is what the rects cost; a fresh 4-field table per measure is ~100 bytes.
+    local ids = {}
+    for _, key in ipairs(Bridge:SubTargetKeys("party")) do
+        local t = R:GetTarget("DandersFrames:" .. key)
+        if t and t.getRect() then ids[#ids + 1] = t end
+    end
+    check(#ids >= 8, "rect reuse: (the allocation check measures " .. #ids .. " live targets)")
+    local N = 500
+    collectgarbage("collect")
+    collectgarbage("stop")
+    local k0 = collectgarbage("count")
+    for _ = 1, N do
+        for _, t in ipairs(ids) do
+            local f = t.getFrame()
+            if f then f:IsShown(); f:GetCenter(); f:GetSize(); f:GetEffectiveScale() end
+            UIParent:GetEffectiveScale(); UIParent:GetCenter()
+        end
+    end
+    local base = collectgarbage("count") - k0
+    k0 = collectgarbage("count")
+    for _ = 1, N do
+        for _, t in ipairs(ids) do t.getRect() end
+    end
+    local used = collectgarbage("count") - k0
+    collectgarbage("restart")
+    check(used - base < 16, string.format(
+        "rect reuse: %d measures allocate no rect tables (excess %.1f KB over baseline)",
+        N * #ids, used - base))
+
+    -- The per-GROUP measure (raid, live only -- not modelled here) is table-free too.
+    local mt = df_file_source("Features/MoverTargets.lua")
+    check(mt:find("return { x =", 1, true) == nil and mt:find("union(acc", 1, true) == nil,
+          "rect reuse: no measure in MoverTargets builds a rect or union table")
+    pdb.frameSpacing = PDB_DEFAULTS.frameSpacing
+    layout(5)
+end
+
+-- ============================================================
 -- TEARDOWN
 -- ============================================================
 Sess.active = false

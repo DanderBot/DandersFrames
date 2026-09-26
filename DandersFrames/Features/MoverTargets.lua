@@ -66,8 +66,9 @@ local Bridge = DF.MoverBridge
 -- ============================================================
 -- RECT HELPERS
 -- ============================================================
--- A private copy of Features\MoverBridge.lua's frameRect/union pair (that file keeps
--- them as file-locals and exports neither). Duplicated rather than exported so the two
+-- A private copy of Features\MoverBridge.lua's frameRect (that file keeps it as a
+-- file-local and exports nothing; its union is inlined in the group measure below,
+-- table-free). Duplicated rather than exported so the two
 -- files stay independent -- MoverBridge must keep working with this file absent.
 -- Result is in UIParent units measured from UIParent CENTRE, scale-corrected; nil when
 -- the frame is missing, hidden or unsized.
@@ -85,21 +86,38 @@ end
 
 -- The lib reads getRect's return as a TABLE (Registry:GetRect does r.x / r.w), so every
 -- def goes through this rather than returning frameRect's four values directly.
-local function rectOf(f)
-    local cx, cy, w, h = frameRect(f)
-    if not cx then return nil end
-    return { x = cx, y = cy, w = w, h = h }
+--
+-- ☠ ONE RECT TABLE PER TARGET KEY, OVERWRITTEN IN PLACE -- never a fresh one per
+-- measure. The lib measures every one of these on every layout sweep, twice (once to
+-- find what moved, once to re-stamp), and a party drag in a session runs that sweep
+-- every frame: ~50 targets, so ~100 throwaway tables a frame for as long as the mouse
+-- is down.
+--
+-- Safe because the lib never HOLDS what getRect returns (DandersMover, read in full for
+-- this): Registry:GetRect copies it into a new table before anything keeps it (the
+-- link-target list, snap zones, the anchor solve), Registry:GetSize reads w/h on the
+-- spot, IsTargetAvailable only tests it against nil, and Core.lua's sweep reads it in
+-- movedSince and COPIES it in stampRect. So a caller that holds on to the result of an
+-- earlier measure never holds this table. ⚠ If the lib ever starts keeping the raw
+-- return, this must go back to allocating.
+local rects = {}
+local function rectFor(key)
+    local t = rects[key]
+    if not t then t = {}; rects[key] = t end
+    return t
 end
 
-local function union(acc, f)
+-- `t` is the target's own rect from rectFor. nil when the frame is not measurable.
+local function rectInto(t, f)
     local cx, cy, w, h = frameRect(f)
-    if not cx then return acc end
-    local l, r, b, t = cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2
-    if not acc then return { l = l, r = r, b = b, t = t } end
-    acc.l, acc.r = min(acc.l, l), max(acc.r, r)
-    acc.b, acc.t = min(acc.b, b), max(acc.t, t)
-    return acc
+    if not cx then return nil end
+    t.x, t.y, t.w, t.h = cx, cy, w, h
+    return t
 end
+
+-- A separated raid header's children, by attribute name. Hoisted so the per-group
+-- measure below does not build "child" .. i on every call.
+local CHILD_ATTR = { "child1", "child2", "child3", "child4", "child5" }
 
 -- ============================================================
 -- FRAME RESOLUTION
@@ -244,11 +262,17 @@ local function raidRelevant()  return DF.MoverBridge and DF.MoverBridge:IsScopeR
 -- change, resort and test-mode flip.
 
 local function registerSemantic()
+    -- Each key's own rect, measured into in place -- see rectFor.
+    local rPartyMe, rPartyFirst, rPartyLast =
+        rectFor("party.me"), rectFor("party.first"), rectFor("party.last")
+    local rRaidMe, rRaidFirst, rRaidLast =
+        rectFor("raid.me"), rectFor("raid.first"), rectFor("raid.last")
+
     Mover:RegisterAnchorTarget(ADDON_KEY, "party.me", {
         title    = L["My Party Frame"],
         group    = L["Party Frames"],
         getFrame = partyMeFrame,
-        getRect  = function() return rectOf(partyMeFrame()) end,
+        getRect  = function() return rectInto(rPartyMe, partyMeFrame()) end,
         isRelevant = partyRelevant,
         partOf   = PARTY_ELEMENT,
     })
@@ -257,7 +281,7 @@ local function registerSemantic()
         title    = L["First Party Frame"],
         group    = L["Party Frames"],
         getFrame = function() return partyEdgeFrame(false) end,
-        getRect  = function() return rectOf(partyEdgeFrame(false)) end,
+        getRect  = function() return rectInto(rPartyFirst, partyEdgeFrame(false)) end,
         isRelevant = partyRelevant,
         partOf   = PARTY_ELEMENT,
     })
@@ -266,7 +290,7 @@ local function registerSemantic()
         title    = L["Last Party Frame"],
         group    = L["Party Frames"],
         getFrame = function() return partyEdgeFrame(true) end,
-        getRect  = function() return rectOf(partyEdgeFrame(true)) end,
+        getRect  = function() return rectInto(rPartyLast, partyEdgeFrame(true)) end,
         isRelevant = partyRelevant,
         partOf   = PARTY_ELEMENT,
     })
@@ -275,7 +299,7 @@ local function registerSemantic()
         title    = L["My Raid Frame"],
         group    = L["Raid Frames"],
         getFrame = raidMeFrame,
-        getRect  = function() return rectOf(raidMeFrame()) end,
+        getRect  = function() return rectInto(rRaidMe, raidMeFrame()) end,
         isRelevant = raidRelevant,
         partOf   = RAID_ELEMENT,
     })
@@ -284,7 +308,7 @@ local function registerSemantic()
         title    = L["First Raid Frame"],
         group    = L["Raid Frames"],
         getFrame = function() return raidEdgeFrame(false) end,
-        getRect  = function() return rectOf(raidEdgeFrame(false)) end,
+        getRect  = function() return rectInto(rRaidFirst, raidEdgeFrame(false)) end,
         isRelevant = raidRelevant,
         partOf   = RAID_ELEMENT,
     })
@@ -293,7 +317,7 @@ local function registerSemantic()
         title    = L["Last Raid Frame"],
         group    = L["Raid Frames"],
         getFrame = function() return raidEdgeFrame(true) end,
-        getRect  = function() return rectOf(raidEdgeFrame(true)) end,
+        getRect  = function() return rectInto(rRaidLast, raidEdgeFrame(true)) end,
         isRelevant = raidRelevant,
         partOf   = RAID_ELEMENT,
     })
@@ -313,11 +337,12 @@ local function registerPartySlots()
         -- Present-slots-only: a slot with no frame right now is not registered at all.
         if partySlotFrame(n) then
             local key = "party.slot" .. n
+            local r = rectFor(key)
             Mover:RegisterAnchorTarget(ADDON_KEY, key, {
                 title    = format(L["Party Slot %d"], n),
                 group    = L["Party Frames"],
                 getFrame = function() return partySlotFrame(n) end,
-                getRect  = function() return rectOf(partySlotFrame(n)) end,
+                getRect  = function() return rectInto(r, partySlotFrame(n)) end,
                 isRelevant = partyRelevant,
                 partOf   = PARTY_ELEMENT,
                 snappable = false,
@@ -331,11 +356,12 @@ local function registerRaidSlots()
     for n = 1, 40 do
         if raidSlotFrame(n) then
             local key = "raid.slot" .. n
+            local r = rectFor(key)
             Mover:RegisterAnchorTarget(ADDON_KEY, key, {
                 title    = format(L["Raid Slot %d"], n),
                 group    = L["Raid Frames"],
                 getFrame = function() return raidSlotFrame(n) end,
-                getRect  = function() return rectOf(raidSlotFrame(n)) end,
+                getRect  = function() return rectInto(r, raidSlotFrame(n)) end,
                 isRelevant = raidRelevant,
                 partOf   = RAID_ELEMENT,
                 snappable = false,
@@ -371,6 +397,7 @@ local function registerRaidGroups()
             -- caveat, so the eight groups stay eight groups in the list.
             local bucket = format(L["Raid Group %d"], N)
             local key = "raid.group" .. N
+            local groupRect = rectFor(key)
             Mover:RegisterAnchorTarget(ADDON_KEY, key, {
                 title    = honest and bucket or format(L["Raid Group %d (header)"], N),
                 group    = bucket,
@@ -385,11 +412,26 @@ local function registerRaidGroups()
                     local h = DF.raidSeparatedHeaders
                     h = h and h[N]
                     if not h then return nil end
-                    local acc
-                    for i = 1, 5 do acc = union(acc, h:GetAttribute("child" .. i)) end
-                    if not acc then return nil end
-                    return { x = (acc.l + acc.r) / 2, y = (acc.b + acc.t) / 2,
-                             w = acc.r - acc.l,       h = acc.t - acc.b }
+                    -- The union in four plain numbers rather than an accumulator
+                    -- table, for the reason rectFor gives.
+                    local l, r, b, t
+                    for i = 1, 5 do
+                        local cx, cy, w, hh = frameRect(h:GetAttribute(CHILD_ATTR[i]))
+                        if cx then
+                            local cl, cr = cx - w / 2, cx + w / 2
+                            local cb, ct = cy - hh / 2, cy + hh / 2
+                            if l then
+                                l, r = min(l, cl), max(r, cr)
+                                b, t = min(b, cb), max(t, ct)
+                            else
+                                l, r, b, t = cl, cr, cb, ct
+                            end
+                        end
+                    end
+                    if not l then return nil end
+                    groupRect.x, groupRect.y = (l + r) / 2, (b + t) / 2
+                    groupRect.w, groupRect.h = r - l, t - b
+                    return groupRect
                 end,
                 isRelevant = raidRelevant,
                 partOf   = RAID_ELEMENT,
@@ -400,6 +442,7 @@ local function registerRaidGroups()
             for M = 1, 5 do
                 if header:GetAttribute("child" .. M) then
                     local slotKey = key .. ".slot" .. M
+                    local slotRect = rectFor(slotKey)
                     local function slotFrame()
                         local h = DF.raidSeparatedHeaders
                         h = h and h[N]
@@ -410,7 +453,7 @@ local function registerRaidGroups()
                                           or  format(L["Group %d Slot %d (header)"], N, M),
                         group    = bucket,
                         getFrame = slotFrame,
-                        getRect  = function() return rectOf(slotFrame()) end,
+                        getRect  = function() return rectInto(slotRect, slotFrame()) end,
                         isRelevant = raidRelevant,
                         partOf   = RAID_ELEMENT,
                         snappable = false,
