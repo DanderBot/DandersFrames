@@ -163,14 +163,12 @@ AuraContainer.SAFE_BORDER_ANIM = SAFE_OVERLAY_ANIM
 local _supported            -- tri-state: nil = not yet probed
 
 -- Definitive probe: the 12.1 widget types either exist or CreateFrame errors.
--- Gated first on the interface number so we don't even attempt the probe on old
--- clients. The probe frame is parented to UIParent and hidden immediately after.
+-- Feature-detected, not version-gated: WoW Forever (interface 16001) ships the 12.1
+-- API. The probe frame is parented to UIParent and hidden immediately after.
 -- PTR-4 (68569): addons no longer create AuraButtons (AddAuraFrame removed) — the
 -- container creates + anchors its own buttons via AddAuraGroup / AddAuraSlot. So the
 -- positive probe is simply "does the container expose AddAuraGroup".
 local function probeSupported()
-    local toc = select(4, GetBuildInfo())
-    if type(toc) ~= "number" or toc < 120100 then return false end
     if not (AuraUtil and AuraUtil.IsValidFilterString) then return false end
     local ok, frame = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
     if not ok or not frame then return false end
