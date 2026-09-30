@@ -13,10 +13,11 @@ DF.CHANGELOG_TEXT = [===[
 - (Aura Designer) If you set up the Power Infusion Helper in an earlier 5.4.0 alpha: it has moved onto its own tab in the Aura Designer, labelled PI Helper, and its settings are now split across Triggers and Effects. Your existing setup is carried over the first time you log in — the Square signal has been retired, so anything using it becomes an icon, and a stray "PI Helper" group left behind by an earlier alpha is cleaned up. Nothing needs doing by hand. (by Krathe)
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon, and your party and raid frames, pinned sets, the personal targeted-spells block and the targeted list all move with it. Snap them to each other or onto other addons' elements, anchor one thing to another (including to individual frames and raid groups) and set a backup anchor that takes over when the main one is hidden. The editor has undo/redo, save/discard, nudge keys, a searchable anchor list, adjustable snap ranges, a grid, and a panel that jumps you to whichever element you are editing. It is the foundation for a shared positioning system across Danders addons.
 - (Settings) The settings pages have been rebuilt. Every section is now a card you open and close by clicking its header, with its settings laid out two to a row when there's room and its current value shown in the corner when it's folded. Features switch on and off right from the card's header, Expand All / Collapse All sit at the top of each page, and hovering a setting's name explains it. Sections that change how something looks can be pinned into their own window, named after their page, so you can set two pages to match side by side. Widen the window and the page splits into two columns; narrow it and it folds back to one.
-- (Settings) Prefer the old look? A layout picker sits in the settings window's title bar, next to the profile picker. Choose Modern or Classic; it applies to the whole account.
 - (Aura Designer) Adding to the Aura Designer is now a guided flow right inside the designer: choose Add from a Spell or Add from a Filter, pick how it should look from pictures of your own frame, then pick where it goes. Looks the aura already has, or that a filter can't drive, are marked on their tile. Layout groups and debuff groups are added with one click on their picture.
 - (Frames) Frame Fade now has an on/off switch on its card, so you can turn fading off without touching the alpha values.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
+- (Settings) Hover the yellow dot beside a changed setting to see its default value, and hold-click the dot to reset it.
+- (Settings) Section headers show a small icon for common kinds of settings (appearance, layout, position, visibility and more) so they are easier to spot.
 
 ### Bug Fixes
 
@@ -34,7 +35,6 @@ DF.CHANGELOG_TEXT = [===[
 - (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
-- (Text Designer, Aura Designer) Switching a designer off now really does lock its settings, instead of only dimming them. You can still open a row and read what is in it, but nothing in there can be changed or added until you switch the designer back on.
 
 ### Changes
 
