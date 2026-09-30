@@ -4229,6 +4229,7 @@ GUI.SectionKindByKey = {
     frame_flatgrid          = "layout",
     frame_groupvisibility   = "visibility",
     frame_grouporder        = "order",
+    frame_fade              = "visibility",
     -- Visibility / Tooltips / General / Pet Frames (Options.lua)
     visibility_solo         = "visibility",
     visibility_framedisplay = "visibility",
@@ -4276,6 +4277,7 @@ GUI.SectionKindByKey = {
     missingbuffs_appearance = "appearance",
     missingbuffs_position   = "position",
     missingbuffs_border     = "border",
+    missingbuffs_buffs      = "filters",
     -- Defensive Icon (Indicators.lua)
     defensiveicon_filters     = "filters",
     defensiveicon_layout      = "layout",
@@ -4286,7 +4288,7 @@ GUI.SectionKindByKey = {
     defensiveicon_stack       = "text",
     defensiveicon_durationbar = "timer",
     -- Targeted List (Indicators.lua)
-    targetedlist_layout         = "size",
+    targetedlist_layout         = "layout",
     targetedlist_barstyle       = "appearance",
     targetedlist_barcolor       = "colours",
     targetedlist_border         = "border",
@@ -4299,6 +4301,7 @@ GUI.SectionKindByKey = {
     targetedlist_interruptpos   = "position",
     -- Personal Targeted (Indicators.lua)
     personaltargeted_size            = "size",
+    personaltargeted_content         = "filters",
     personaltargeted_border          = "border",
     personaltargeted_duration        = "text",
     personaltargeted_highlight       = "effects",
@@ -4314,10 +4317,12 @@ GUI.SectionKindByKey = {
     colors_bytime           = "colours",
     health_color            = "colours",
     health_texture          = "appearance",
+    health_background       = "appearance",
     resource_classfilter    = "filters",
     resource_size           = "size",
     resource_position       = "position",
     resource_appearance     = "appearance",
+    resource_background     = "appearance",
     resource_border         = "border",
     resource_colors         = "colours",
     healpred_floating       = "position",
@@ -4329,6 +4334,7 @@ GUI.SectionKindByKey = {
     grouplabels_font        = "text",
     grouplabels_position    = "position",
     pinned_layout           = "layout",
+    pinned_framestyle       = "size",
     -- Icons / Highlights / Dispel Overlay (Modules.lua)
     icons_text              = "text",
     highlights_selection    = "effects",
@@ -4336,6 +4342,7 @@ GUI.SectionKindByKey = {
     highlights_aggro        = "effects",
     highlights_threat       = "colours",
     dispel_border           = "border",
+    dispel_gradient         = "colours",
 }
 
 -- ============================================================
