@@ -884,12 +884,15 @@ do
        "companion: ...and neither does Controls")
 
     -- ---- ...replaced by the bracket ---------------------------------
-    -- Two apiece: the checkbox and the edit box in SettingsWidgets, the texture
-    -- and font dropdowns in Controls. The colour picker is deliberately NOT one
-    -- of them -- it has no redirect gate to route through and never had.
-    eq(countOf(widgets, 'GUI:Call("interceptWrite"'), 2,
-       "companion: the checkbox and the edit box ask the host before they write")
-    eq(countOf(widgets, 'GUI:Call("onSettingWritten"'), 2,
+    -- Two in Controls: the texture and font dropdowns. Three in SettingsWidgets:
+    -- the checkbox, the edit box, and the colour picker's modified-dot reset
+    -- (container.DotWrite). The picker's own picking session is deliberately
+    -- NOT one of them -- it has no redirect gate to route through and never
+    -- had; the reset is a one-off commit and takes the bracket every other
+    -- control's commit takes.
+    eq(countOf(widgets, 'GUI:Call("interceptWrite"'), 3,
+       "companion: the checkbox, the edit box and the picker's dot reset ask the host before they write")
+    eq(countOf(widgets, 'GUI:Call("onSettingWritten"'), 3,
        "companion: ...and tell it afterwards")
     eq(countOf(controls, 'GUI:Call("interceptWrite"'), 2,
        "companion: the texture and font dropdowns ask too")
@@ -925,10 +928,10 @@ do
     -- undo and see nothing happen -- which is the bug this argument exists for,
     -- and it is invisible from every other angle.
     --
-    -- Five in SettingsWidgets: the checkbox, the edit box, and the colour
-    -- picker's three mutation sites. Two in Controls: the texture and font
-    -- dropdowns.
-    eq(countOf(widgets, ", label, callback)"), 5,
+    -- Six in SettingsWidgets: the checkbox, the edit box, the colour picker's
+    -- three mutation sites and its dot reset. Two in Controls: the texture and
+    -- font dropdowns.
+    eq(countOf(widgets, ", label, callback)"), 6,
        "companion: every announcing site in SettingsWidgets hands over its commit callback")
     eq(countOf(controls, ", label, callback)"), 2,
        "companion: ...and both of Controls' media dropdowns do too")

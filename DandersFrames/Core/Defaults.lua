@@ -203,6 +203,21 @@ function Defaults:GetDefault(mode, key)
     return t[key]
 end
 
+-- The shipped default for key as the TABLE db resolves it -- party or raid
+-- storage, the raid overlay view, or a proxy's own adapter -- which is the same
+-- resolution IsModified uses, so the value a modified-dot's tooltip names is the
+-- value the dot was lit against. nil for anything IsModified would answer false
+-- for on the table alone (an unknown table, a key the mode does not ship).
+--
+-- ⚠ LIVE REFERENCE for table-valued keys, same rule as GetDefault: copy before
+-- writing it anywhere (the GUI host's getDefaultValue hook does).
+function Defaults:GetDefaultFor(db, key)
+    local stored, defaults, adapter = Resolve(db)
+    if not adapter and (not stored or not defaults) then return nil end
+    local _, def = KeyValues(stored, defaults, adapter, key)
+    return def
+end
+
 -- True when db's STORED value for key differs from the shipped default.
 -- False for anything the engine cannot answer honestly: an unknown table, a key
 -- the mode does not ship, a value that is not stored at all.

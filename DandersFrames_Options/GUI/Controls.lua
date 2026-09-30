@@ -1097,10 +1097,47 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     
     StyleScrollBar(scrollFrame)
 
+    -- ONE PICK OF ONE TEXTURE: what a menu row's click runs, named so the
+    -- modified-default dot's hold-to-reset runs exactly the same thing.
+    local function SelectTexture(key)
+        -- The host bracket (GUI.lua's interceptWrite / onSettingWritten): the
+        -- redirect gate and the override record. Going through the hooks is
+        -- what makes the write visible to everything else wired to them --
+        -- the undo engine among them.
+        if GUI:Call("interceptWrite", dbTable, dbKey, key) then
+            UpdateText()
+            menuFrame:Hide()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(key) end
+            return
+        end
+        dbTable[dbKey] = key
+        -- ...carrying `callback`, this dropdown's own commit, so an undo
+        -- of the pick replays the apply and not only the write.
+        GUI:Call("onSettingWritten", dbTable, dbKey, key, label, callback)
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(key)
+        end
+        UpdateText()
+        menuFrame:Hide()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the pick
+    -- above, and a value named the way the opener names it.
+    container.DotWrite = SelectTexture
+    container.DotAccepts = function(v) return type(v) == "string" end
+    container.FormatDotValue = function(v)
+        if type(v) ~= "string" then return nil end
+        if customOptions then return customOptions[v] end
+        return DF:GetTextureNameFromPath(v) or v:match("([^\\]+)$") or v
+    end
+
     local menuButtons = {}
     local ITEM_HEIGHT = 28
     local MAX_VISIBLE = 8
-    
+
     -- Function to rebuild menu with current textures
     local function RebuildMenu(filterText)
         -- Clear old buttons
@@ -1178,51 +1215,30 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
-                -- The host bracket (GUI.lua's interceptWrite / onSettingWritten): the
-                -- redirect gate and the override record. Going through the hooks is
-                -- what makes the write visible to everything else wired to them --
-                -- the undo engine among them.
-                if GUI:Call("interceptWrite", dbTable, dbKey, opt.key) then
-                    UpdateText()
-                    menuFrame:Hide()
-                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                    return
-                end
-                dbTable[dbKey] = opt.key
-                -- ...carrying `callback`, this dropdown's own commit, so an undo
-                -- of the pick replays the apply and not only the write.
-                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label, callback)
-                if container.UpdateOverrideIndicators then
-                    container:UpdateOverrideIndicators(opt.key)
-                end
-                UpdateText()
-                menuFrame:Hide()
-                DF:UpdateAll()
-                if callback then callback() end
-                RefreshOwnerStates(parent)
+                SelectTexture(opt.key)
             end)
 
             table.insert(menuButtons, menuBtn)
         end
     end
-    
+
     -- Search box text changed handler
     searchBox:SetScript("OnTextChanged", function(self)
         RebuildMenu(self:GetText())
     end)
-    
+
     -- Allow escape to close
     searchBox:SetScript("OnEscapePressed", function()
         menuFrame:Hide()
     end)
-    
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
-    
+
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
@@ -1311,6 +1327,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
@@ -1478,6 +1495,40 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     
     StyleScrollBar(scrollFrame)
 
+    -- ONE PICK OF ONE FONT: what a menu row's click runs, named so the
+    -- modified-default dot's hold-to-reset runs exactly the same thing.
+    local function SelectFont(key)
+        -- The host bracket, same conversion and same reason as the
+        -- texture dropdown above.
+        if GUI:Call("interceptWrite", dbTable, dbKey, key) then
+            UpdateText()
+            menuFrame:Hide()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(key) end
+            return
+        end
+        -- Store font NAME in database (not path)
+        dbTable[dbKey] = key
+        -- ...and the commit callback rides along, same as the texture
+        -- dropdown above.
+        GUI:Call("onSettingWritten", dbTable, dbKey, key, label, callback)
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(key)
+        end
+        UpdateText()
+        menuFrame:Hide()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the pick
+    -- above, and a font named the way the opener names it.
+    container.DotWrite = SelectFont
+    container.DotAccepts = function(v) return type(v) == "string" end
+    container.FormatDotValue = function(v)
+        if type(v) == "string" then return DF:GetFontNameFromPath(v) or v end
+    end
+
     local menuButtons = {}
     local ITEM_HEIGHT = 24
     local MAX_VISIBLE = 10
@@ -1562,27 +1613,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
-                -- The host bracket, same conversion and same reason as the
-                -- texture dropdown above.
-                if GUI:Call("interceptWrite", dbTable, dbKey, opt.key) then
-                    UpdateText()
-                    menuFrame:Hide()
-                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                    return
-                end
-                -- Store font NAME in database (not path)
-                dbTable[dbKey] = opt.key
-                -- ...and the commit callback rides along, same as the texture
-                -- dropdown above.
-                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label, callback)
-                if container.UpdateOverrideIndicators then
-                    container:UpdateOverrideIndicators(opt.key)
-                end
-                UpdateText()
-                menuFrame:Hide()
-                DF:UpdateAll()
-                if callback then callback() end
-                RefreshOwnerStates(parent)
+                SelectFont(opt.key)
             end)
             
             table.insert(menuButtons, menuBtn)
@@ -1657,6 +1688,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then

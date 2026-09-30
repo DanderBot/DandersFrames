@@ -2947,6 +2947,14 @@ L["On"] = true
 L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
 L["This list can't be built during combat."] = true
 
+-- The yellow "changed from default" dot beside a setting's name: its hover
+-- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
+-- and "None" are reused from above.
+L["Changed from default"] = true
+L["Current: %s"] = true
+L["Default: %s"] = true
+L["Hold click to reset"] = true
+
 -- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
 -- These are seen in normal play, not in the settings panel.
 -- Resurrection icon tooltip (Frames/StatusIcons.lua):

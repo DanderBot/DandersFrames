@@ -132,6 +132,20 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         return D:IsModified(db, key)
     end,
 
+    -- ...and WHAT it differs from: the shipped default the dot was lit against,
+    -- for the dot's tooltip and its hold-to-reset. Resolved by the same engine,
+    -- so party / raid / the raid overlay / a proxy's adapter all answer the way
+    -- IsModified did. ⚠ A COPY for a table value: the engine hands back the
+    -- live DF.PartyDefaults entry, and a reset writes this value into a profile
+    -- -- one write through a shared reference would rewrite the default itself.
+    getDefaultValue = function(db, key)
+        local D = DF.Defaults
+        if not (D and D.GetDefaultFor and key) then return nil end
+        local v = D:GetDefaultFor(db, key)
+        if type(v) == "table" then return DF:DeepCopy(v) end
+        return v
+    end,
+
     -- Drops the layout override AND writes the true global back into the live
     -- table, so the widget can redraw from db[key] straight after.
     resetOverride = function(db, key)

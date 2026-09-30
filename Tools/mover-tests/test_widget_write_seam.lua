@@ -133,16 +133,27 @@ do
 
     local n = 0
     for _ in body:gmatch("RefreshOwnerStates%(parent%)") do n = n + 1 end
-    -- ☠ EXACTLY ONE, AND NOT IN swatchFunc. That handler runs once per mouse-move
-    -- frame of a wheel drag; a page-wide sweep on each would be the storm the
-    -- addon's preview/commit split exists to prevent.
-    eq(n, 1, "picker: exactly one sweep per picking session")
+    -- ☠ ONE PER PICKING SESSION, AND NOT IN swatchFunc. That handler runs once
+    -- per mouse-move frame of a wheel drag; a page-wide sweep on each would be
+    -- the storm the addon's preview/commit split exists to prevent. The second
+    -- site is the modified-dot's hold-to-reset (container.DotWrite), which is a
+    -- one-off commit of its own and no part of a picking session.
+    eq(n, 2, "picker: one sweep per picking session, plus the dot reset's one")
 
     local swatchAt  = body:find("swatchFunc = function()", 1, true)
     local watcherAt = body:find('container.colorPickerWatcher:SetScript("OnUpdate"', 1, true)
-    local seamAt    = body:find("RefreshOwnerStates(parent)", 1, true)
-    check(swatchAt and watcherAt and seamAt and seamAt > watcherAt,
-          "picker: ...and it is the close watcher that runs it, never a swatch tick")
+    local dotAt     = body:find("container.DotWrite = function(v)", 1, true)
+    local dotEnd    = body:find("container.DotAccepts", 1, true)
+    local ok = swatchAt and watcherAt and dotAt and dotEnd and true or false
+    local from = 1
+    while ok do
+        local s = body:find("RefreshOwnerStates(parent)", from, true)
+        if not s then break end
+        -- Every sweep is either the close watcher's or the dot reset's.
+        if not (s > watcherAt or (s > dotAt and s < dotEnd)) then ok = false end
+        from = s + 1
+    end
+    check(ok, "picker: ...and it is the close watcher (or the dot reset) that runs it, never a swatch tick")
 
     -- ☠ THE WATCHER IS ARMED FOR EVERY PICK NOW. It used to exist only for a
     -- lightweight picker, which is the only kind that had no commit of its own --

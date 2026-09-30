@@ -1482,8 +1482,37 @@ end
 -- on a control with all three up nobody could say which was which. So the dot
 -- sits at the END OF THE LABEL'S VISIBLE TEXT: it belongs to the NAME of the
 -- setting the way a modified-mark belongs beside a filename. 6px against the
--- star's 12, because it is information, not a control -- no tooltip, no click,
--- no hit frame.
+-- star's 12, because it reads as information first.
+--
+-- ...BUT IT ANSWERS WHEN ASKED. Hovering it names the shipped default and the
+-- current value; pressing and HOLDING it (DOT_HOLD_TIME) puts the default back.
+-- The drawn dot stays 6px -- the thing the mouse finds is an invisible
+-- DOT_HIT-square frame centred on it, built the first time the dot is ever
+-- shown (a host with no isModifiedDefault hook never gets one) and shown only
+-- while the dot is. A HOLD rather than a click because the dot sits beside the
+-- words a user points at to read a tooltip, and a stray click there must not
+-- throw away a setting; while held the dot grows toward DOT_HOLD_SIZE so the
+-- gesture is visibly doing something, and letting go early, sliding off, or
+-- combat starting puts it back untouched.
+--
+-- ☠ THE RESET GOES THROUGH THE CONTROL'S OWN WRITE PATH, never db[key] = v.
+-- Each factory publishes `container.DotWrite(value)` -- the very function a
+-- user edit runs -- so the undo stack, the raid auto-layout redirect, the live
+-- refresh, dependent grey-outs and this dot all see an ordinary edit. A
+-- control that publishes no DotWrite still gets the tooltip, without the hold.
+-- Optional companions, all read by rawget (a headless frame answers an unset
+-- key with a truthy no-op FUNCTION):
+--   FormatDotValue(v) -> string|nil   how the control names a value (a
+--                                     slider's number, a dropdown's display
+--                                     text); nil / absent falls back below
+--   DotAccepts(v) -> bool             the default is one the write path can take
+--   DotReadValue() -> v               what the control DISPLAYS; when that is not
+--                                     the stored value (a customGet that scales
+--                                     or inverts), writing the stored default
+--                                     through the display path would be wrong,
+--                                     so the hold is withheld
+--   dotLocked                         set by SetEnabled(false): greyed controls
+--                                     are non-interactive, the dot included
 --
 -- ⚠ RE-ANCHORED ON EVERY UPDATE, not once at build. The offset is the label's
 -- STRING WIDTH, which is not known until the text has been laid out and changes
@@ -1515,13 +1544,163 @@ end
 -- change of meaning.
 --
 -- Installs container.UpdateModifiedDot(self) -> shown. Returns the texture.
+local DOT_SIZE, DOT_HOLD_SIZE, DOT_HIT = 6, 10, 16
+local DOT_HOLD_TIME = 0.6
+
+-- The flat white texture a colour value's swatch is drawn from, tinted inline
+-- by the |T escape's own RGB arguments. A texture rather than a block glyph:
+-- nothing guarantees the settings font carries one.
+local COLOR_SWATCH_TEX = "Interface\\Buttons\\WHITE8X8"
+
+-- A colour value as text: a small swatch in the colour itself, then its hex
+-- (and its opacity, when it has one below full). Accepts {r,g,b[,a]} keyed or
+-- positional, the two shapes Colors and inline colours use.
+function UI.FormatColorValue(c)
+    if type(c) ~= "table" then return tostring(c) end
+    local r, g, b = c.r or c[1] or 0, c.g or c[2] or 0, c.b or c[3] or 0
+    local R = math.floor(r * 255 + 0.5)
+    local G = math.floor(g * 255 + 0.5)
+    local B = math.floor(b * 255 + 0.5)
+    local s = format("|T%s:12:12:0:0:8:8:0:8:0:8:%d:%d:%d|t #%02X%02X%02X",
+        COLOR_SWATCH_TEX, R, G, B, R, G, B)
+    local a = c.a or c[4]
+    if type(a) == "number" and a < 1 then
+        s = format("%s  %d%%", s, math.floor(a * 100 + 0.5))
+    end
+    return s
+end
+
+-- Is what a control DISPLAYS the value that is STORED? Numbers and strings by
+-- ==, a colour table field by field (one level is all a setting value has).
+local function DotSameValue(a, b)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do if b[k] ~= v then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+
 local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
     local dot = container:CreateTexture(nil, "OVERLAY")
-    dot:SetSize(6, 6)
+    dot:SetSize(DOT_SIZE, DOT_SIZE)
     dot:SetTexture(MEDIA .. "Icons\\dot")
     dot:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     dot:Hide()
     container.modifiedDot = dot
+
+    -- The hit frame and the hold, all per-control state. `hit` stays nil until
+    -- the dot is first shown.
+    local hit
+    local holding, holdElapsed, holdDefault, holdWrite = false, 0, nil, nil
+
+    local function FormatValue(v)
+        local fmt = rawget(container, "FormatDotValue")
+        if type(fmt) == "function" then
+            local s = fmt(v)
+            if s ~= nil then return tostring(s) end
+        end
+        local L = host.hooks.L
+        if v == nil then return L["None"] end
+        if type(v) == "boolean" then return v and L["On"] or L["Off"] end
+        if type(v) == "table" and v.r then return UI.FormatColorValue(v) end
+        return tostring(v)
+    end
+
+    -- The control's write path, when a reset to `def` is one it can make; nil
+    -- otherwise (see the companions in the block comment above).
+    local function ResetWriter(def)
+        if def == nil or not dbTable then return nil end
+        if rawget(container, "dotLocked") then return nil end
+        local write = rawget(container, "DotWrite")
+        if type(write) ~= "function" then return nil end
+        local accepts = rawget(container, "DotAccepts")
+        if type(accepts) == "function" and not accepts(def) then return nil end
+        local read = rawget(container, "DotReadValue")
+        if type(read) == "function" and not DotSameValue(read(), dbTable[dbKey]) then return nil end
+        return write
+    end
+
+    -- Built on ENTER, never per frame. The default is re-asked every time: the
+    -- mode, the profile or the layout being edited can all have moved since.
+    local function ShowDotTooltip()
+        if not hit then return end
+        local L = host.hooks.L
+        local def = host:Call("getDefaultValue", dbTable, dbKey)
+        local lines = {}
+        if def ~= nil then lines[#lines + 1] = format(L["Default: %s"], FormatValue(def)) end
+        lines[#lines + 1] = format(L["Current: %s"], FormatValue(dbTable and dbTable[dbKey]))
+        if ResetWriter(def) then
+            lines[#lines + 1] = { text = L["Hold click to reset"], hint = true }
+        end
+        host:ShowTooltip(hit, { title = L["Changed from default"], lines = lines })
+    end
+
+    local HoldUpdate
+    local function CancelHold()
+        if not holding then return end
+        holding, holdElapsed, holdDefault, holdWrite = false, 0, nil, nil
+        hit:SetScript("OnUpdate", nil)
+        dot:SetSize(DOT_SIZE, DOT_SIZE)
+    end
+
+    -- ⚠ NO ALLOCATION IN HERE: it runs every rendered frame of a hold. Numbers
+    -- and SetSize only; the write and the tooltip happen once, at the end.
+    HoldUpdate = function(_, elapsed)
+        if InCombatLockdown() then CancelHold(); return end
+        holdElapsed = holdElapsed + (elapsed or 0)
+        if holdElapsed < DOT_HOLD_TIME then
+            local s = DOT_SIZE + (DOT_HOLD_SIZE - DOT_SIZE) * (holdElapsed / DOT_HOLD_TIME)
+            dot:SetSize(s, s)
+            return
+        end
+        local write, def = holdWrite, holdDefault
+        CancelHold()
+        -- The control's own write path. It repaints the control and, through
+        -- UpdateOverrideIndicators, this dot -- which normally goes out, taking
+        -- the hit frame (and so the hover) with it.
+        write(def)
+        container:UpdateModifiedDot()
+        if dot:IsShown() then
+            -- Still modified: the write was redirected (a running raid layout)
+            -- or landed on something that is not the default. Say so.
+            ShowDotTooltip()
+        else
+            host:HideTooltip()
+        end
+    end
+
+    local function StartHold()
+        if holding or InCombatLockdown() then return end
+        local def = host:Call("getDefaultValue", dbTable, dbKey)
+        local write = ResetWriter(def)
+        if not write then return end
+        holding, holdElapsed, holdDefault, holdWrite = true, 0, def, write
+        hit:SetScript("OnUpdate", HoldUpdate)
+    end
+
+    local function EnsureHit()
+        if hit then return hit end
+        hit = CreateFrame("Frame", nil, container)
+        hit:SetSize(DOT_HIT, DOT_HIT)
+        -- Motion AND clicks, and only over its own 16px: it is a control now.
+        hit:EnableMouse(true)
+        -- Above the label's tooltip hit (AttachTooltip's +5), so the dot wins the
+        -- few pixels where the two meet at the end of the words.
+        hit:SetFrameLevel((container:GetFrameLevel() or 0) + 6)
+        hit:SetScript("OnEnter", ShowDotTooltip)
+        hit:SetScript("OnLeave", function()
+            CancelHold()
+            host:HideTooltip()
+        end)
+        hit:SetScript("OnMouseDown", function(_, button)
+            if button == "LeftButton" then StartHold() end
+        end)
+        hit:SetScript("OnMouseUp", function() CancelHold() end)
+        hit:SetScript("OnHide", function() CancelHold() end)
+        hit:Hide()
+        container.modifiedDotHit = hit
+        return hit
+    end
 
     container.UpdateModifiedDot = function(self)
         -- host:Call answers nil when the hook is absent, which is every consumer
@@ -1540,8 +1719,16 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
             if type(maxX) == "number" and x > maxX then x = maxX end
             dot:ClearAllPoints()
             dot:SetPoint("LEFT", anchor, "LEFT", x + 4, 0)
+            -- Centred on the dot's RESTING centre, off the same anchor rather
+            -- than off the dot: the dot grows rightward from its left edge
+            -- while held, and a hit that followed it would creep out from
+            -- under a pointer that has not moved.
+            local h = EnsureHit()
+            h:ClearAllPoints()
+            h:SetPoint("CENTER", anchor, "LEFT", x + 4 + DOT_SIZE / 2, 0)
         end
         dot:SetShown(on)
+        if hit then hit:SetShown(on) end
         return on
     end
     return dot
@@ -2246,6 +2433,7 @@ function UI:CreateSlider(parent, opts)
     track:SetScript("OnSizeChanged", function() UpdateFill() end)
     
     container.SetEnabled = function(self, enabled)
+        self.dotLocked = not enabled
         slider:SetEnabled(enabled)
         -- Grey the numeric value box too: it was only EnableMouse'd (clicks blocked
         -- but still full-bright + typeable), so it stayed lit while the track dimmed.
@@ -2808,60 +2996,77 @@ function UI:CreateSlider(parent, opts)
         if not isDragging then RefreshOwnerStates(parent) end
     end)
     
-    input:SetScript("OnEnterPressed", function(self)
-        local val = tonumber(self:GetText())
-        if val then
-            val = math.max(minVal, math.min(maxVal, val))
+    -- ONE COMMIT OF ONE VALUE, the typed-entry path. Named so the modified-dot's
+    -- hold-to-reset can run exactly what typing the default into the box runs.
+    local function CommitValue(val)
+        val = math.max(minVal, math.min(maxVal, val))
 
-            -- Runtime override protection: redirect to baseline, skip refresh
-            if dbKey and host:Call("interceptWrite", dbTable, dbKey, val) then
-                self:SetText(FormatValue(val))
-                suppressCallback = true
-                slider:SetValue(val)
-                suppressCallback = false
-                UpdateFill()
-                if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
-                self:ClearFocus()
-                return
-            end
-
-            WriteValue(val)
+        -- Runtime override protection: redirect to baseline, skip refresh
+        if dbKey and host:Call("interceptWrite", dbTable, dbKey, val) then
+            input:SetText(FormatValue(val))
             suppressCallback = true
             slider:SetValue(val)
             suppressCallback = false
-
-            -- Update input text to show actual value entered
-            self:SetText(FormatValue(val))
             UpdateFill()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+            return
+        end
 
-            -- If editing a profile, also set the override (labelled, and
-            -- carrying the commit callback, as above)
-            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label, callback) end
+        WriteValue(val)
+        suppressCallback = true
+        slider:SetValue(val)
+        suppressCallback = false
 
-            -- Update override indicators
-            if container.UpdateOverrideIndicators then
-                container:UpdateOverrideIndicators(val)
-            end
+        -- Update input text to show actual value entered
+        input:SetText(FormatValue(val))
+        UpdateFill()
 
-            -- A TYPED VALUE IS A COMMIT, so it runs onChanged -- once -- and
-            -- nothing else.
-            --
-            -- ⚠ NO lightweight fallback here. `lightweight` is the PREVIEW
-            -- callback: it exists to make a drag visible cheaply, and a slider that
-            -- only has one is a slider whose full apply is the refreshNow below.
-            -- Falling back to it would run a partial update in place of a complete one.
-            if callback then
-                callback()
-            end
+        -- If editing a profile, also set the override (labelled, and
+        -- carrying the commit callback, as above)
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label, callback) end
 
-            -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)
-            host:Call("refreshNow")
-            RefreshOwnerStates(parent)
+        -- Update override indicators
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(val)
+        end
+
+        -- A TYPED VALUE IS A COMMIT, so it runs onChanged -- once -- and
+        -- nothing else.
+        --
+        -- ⚠ NO lightweight fallback here. `lightweight` is the PREVIEW
+        -- callback: it exists to make a drag visible cheaply, and a slider that
+        -- only has one is a slider whose full apply is the refreshNow below.
+        -- Falling back to it would run a partial update in place of a complete one.
+        if callback then
+            callback()
+        end
+
+        -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)
+        host:Call("refreshNow")
+        RefreshOwnerStates(parent)
+    end
+
+    input:SetScript("OnEnterPressed", function(self)
+        local val = tonumber(self:GetText())
+        if val then
+            CommitValue(val)
         else
             local v = ReadValue(); if v ~= nil then UpdateValue(v) end
         end
         self:ClearFocus()
     end)
+
+    -- The modified-default dot's hooks (see AddModifiedDot). A default outside
+    -- this bar's range is refused rather than clamped: the clamp would write a
+    -- value that is not the default and leave the dot lit.
+    container.DotWrite = CommitValue
+    container.DotReadValue = ReadValue
+    container.DotAccepts = function(v)
+        return type(v) == "number" and v >= minVal and v <= maxVal
+    end
+    container.FormatDotValue = function(v)
+        if type(v) == "number" then return FormatValue(v) end
+    end
 
     input:SetScript("OnEscapePressed", function(self)
         local v = ReadValue(); if v ~= nil then UpdateValue(v) end
@@ -3175,6 +3380,7 @@ function UI:CreateAnchorGrid(parent, opts)
 
     container.SetEnabled = function(self, enabled)
         self.enabled = enabled and true or false
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         for _, b in ipairs(cells) do b:EnableMouse(self.enabled and not (self.wrapInert and b.screenWrap == "END")) end
     end
@@ -3220,6 +3426,24 @@ function UI:CreateAnchorGrid(parent, opts)
         local wrapWords  = { START = L["Start"], END = L["End"] }
         AddOverrideIndicators(host, container, lbl, keyH, resetKey(container, keyH), 6, alignWords, dbTable)
         AddOverrideIndicators(host, vHost, caption, keyV, resetKey(vHost, keyV), 0, wrapWords, dbTable)
+        -- The modified-default dot's hooks, one set per key like the indicators
+        -- (see AddModifiedDot): the write is what a cell click runs for that
+        -- key, and a value is named by the same words the "(Global: x)" uses.
+        local function dotHooks(indHost, key, get, words)
+            indHost.DotWrite = function(v)
+                local live = container:WriteKey(key, v)
+                container:Refresh()
+                container:UpdateOverrideIndicatorsBoth()
+                if live and callback then callback() end
+            end
+            indHost.DotReadValue = get
+            indHost.FormatDotValue = function(v) return words[v] end
+            -- The grid's grey-out lives on the CONTAINER; the wrap key's dot
+            -- hangs off vHost, which SetEnabled never sees, so ask the grid.
+            indHost.DotAccepts = function() return not rawget(container, "dotLocked") end
+        end
+        dotHooks(container, keyH, getH, alignWords)
+        dotHooks(vHost, keyV, getV, wrapWords)
     end
     function container:UpdateOverrideIndicatorsBoth()
         if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators(getH()) end
@@ -3460,6 +3684,62 @@ function UI:CreateDropdown(parent, opts)
         end
     end)
 
+    -- ONE PICK OF ONE OPTION: what a menu row's click runs, named so the
+    -- modified-dot's hold-to-reset can run exactly the same thing.
+    local function SelectOption(optKey)
+        -- Runtime override protection: redirect to baseline, skip refresh
+        -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
+        -- a customSet that writes a second key in step with this one
+        -- (e.g. the raid wrap-axis compensation) needs the baseline's own
+        -- previous value to decide, since customSet itself is skipped on
+        -- this path.
+        local prevGlobal
+        if opts.onRuntimeWrite and dbKey then
+            local _, g = host:Call("getOverrideState", dbTable, dbKey)
+            prevGlobal = g
+        end
+        if dbKey and host:Call("interceptWrite", dbTable, dbKey, optKey) then
+            if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
+            UpdateText()
+            menuFrame:Hide()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
+            return
+        end
+
+        if customSet then
+            customSet(optKey)
+        else
+            dbTable[dbKey] = optKey
+        end
+
+        -- If editing a profile, also set the override. ⚠ The
+        -- DROPDOWN's label, not the chosen option's text: the label
+        -- names the setting that moved, which is what stays true
+        -- whichever option was picked. The commit callback is the
+        -- fifth argument, for a host replaying the edit later.
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label, callback) end
+
+        UpdateText()
+        menuFrame:Hide()
+        host:Call("refreshNow")
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+
+    -- The modified-default dot's hooks (see AddModifiedDot): the pick above,
+    -- and a value named by its OPTION TEXT, never its stored key. `options` is
+    -- read at call time, so a RebuildOptions since the build is honoured.
+    container.DotWrite = SelectOption
+    container.DotReadValue = function()
+        if customGet then return customGet() end
+        return dbTable and dbKey and dbTable[dbKey]
+    end
+    container.FormatDotValue = function(v)
+        local d = options[v]
+        if type(d) == "table" then d = d.text or d.label end
+        if d ~= nil then return tostring(d) end
+    end
+
     local menuButtons = {}
     local menuHeight = 0
     local sortedOptions = {}
@@ -3566,44 +3846,7 @@ function UI:CreateDropdown(parent, opts)
                 menuBtn.Highlight:SetAllPoints()
 
                 menuBtn:SetScript("OnClick", function(self)
-                    local optKey = self.optKey
-                    -- Runtime override protection: redirect to baseline, skip refresh
-                    -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
-                    -- a customSet that writes a second key in step with this one
-                    -- (e.g. the raid wrap-axis compensation) needs the baseline's own
-                    -- previous value to decide, since customSet itself is skipped on
-                    -- this path.
-                    local prevGlobal
-                    if opts.onRuntimeWrite and dbKey then
-                        local _, g = host:Call("getOverrideState", dbTable, dbKey)
-                        prevGlobal = g
-                    end
-                    if dbKey and host:Call("interceptWrite", dbTable, dbKey, optKey) then
-                        if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
-                        UpdateText()
-                        menuFrame:Hide()
-                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
-                        return
-                    end
-
-                    if customSet then
-                        customSet(optKey)
-                    else
-                        dbTable[dbKey] = optKey
-                    end
-
-                    -- If editing a profile, also set the override. ⚠ The
-                    -- DROPDOWN's label, not the chosen option's text: the label
-                    -- names the setting that moved, which is what stays true
-                    -- whichever option was picked. The commit callback is the
-                    -- fifth argument, for a host replaying the edit later.
-                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label, callback) end
-
-                    UpdateText()
-                    menuFrame:Hide()
-                    host:Call("refreshNow")
-                    if callback then callback() end
-                    RefreshOwnerStates(parent)
+                    SelectOption(self.optKey)
                 end)
 
                 menuButtons[i] = menuBtn
@@ -3761,6 +4004,7 @@ function UI:CreateDropdown(parent, opts)
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then

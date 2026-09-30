@@ -2694,7 +2694,9 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- RefreshChildValues), for a caller that wrote the key behind this widget's
     -- back -- a group reset, or the undo of one.
     container.refreshValue = UpdateState
-    cb:SetScript("OnClick", function(self)
+    -- Named (not an inline OnClick) so the modified-default dot's hold-to-reset
+    -- runs this exact click; see the Dot* hooks below.
+    local function OnCheckClick(self)
         local val = self:GetChecked()
         DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
             tostring(dbKey), tostring(overrideKey), tostring(val))
@@ -2740,16 +2742,35 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         if callback then 
             callback() 
         end
-        if parent.RefreshStates then 
-            parent:RefreshStates() 
+        if parent.RefreshStates then
+            parent:RefreshStates()
         end
         DF:UpdateAll()
-    end)
-    
+    end
+    cb:SetScript("OnClick", OnCheckClick)
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the reset
+    -- ticks the box to the default and runs the click above. Booleans only --
+    -- a box cannot show anything else -- and only while the box shows what is
+    -- stored, which an inverting customGet does not.
+    container.DotWrite = function(v)
+        cb:SetChecked(v and true or false)
+        OnCheckClick(cb)
+    end
+    container.DotAccepts = function(v) return type(v) == "boolean" end
+    container.DotReadValue = function()
+        if customGet then return customGet() end
+        return dbTable and dbKey and dbTable[dbKey]
+    end
+    container.FormatDotValue = function(v)
+        if type(v) == "boolean" then return v and L["On"] or L["Off"] end
+    end
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget (box + check fill + label) so a disabled CHECKED
         -- box greys too: native SetEnabled has no DisabledCheckedTexture, so the
         -- accent check would otherwise stay full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         cb:SetEnabled(enabled)
         if enabled then
@@ -3123,7 +3144,20 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
         self:ClearFocus()
     end)
     editbox:SetScript("OnEditFocusLost", SaveValue)
-    
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the reset
+    -- puts the default in the box and saves it the way Enter does. Strings
+    -- only -- the box saves its TEXT, so a number default would come back as a
+    -- string and never compare equal to the default again.
+    frame.DotWrite = function(v)
+        editbox:SetText(v)
+        SaveValue()
+    end
+    frame.DotAccepts = function(v) return type(v) == "string" end
+    frame.FormatDotValue = function(v)
+        if v == "" then return L["None"] end
+    end
+
     -- Optional placeholder: greyed example text shown while the box is empty
     -- and unfocused. Purely cosmetic — never written to the db.
     if placeholder and placeholder ~= "" then
@@ -3172,6 +3206,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled.
     -- Dim the whole widget + block editing, matching the other helpers.
     frame.SetEnabled = function(self, enabled)
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         editbox:SetEnabled(enabled)
         if enabled then
@@ -3493,6 +3528,46 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     -- RefreshChildValues): a colour picker's "value" is the swatch.
     container.refreshValue = UpdateSwatch
 
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot). A picker has
+    -- no single "commit one colour" path -- its session writes per wheel tick --
+    -- so the reset is the host bracket every other control's commit runs
+    -- (interceptWrite / onSettingWritten), around the picker's own in-place
+    -- write, followed by what a closed non-lightweight session runs.
+    --
+    -- ⚠ IN PLACE, KEY FOR KEY. The stored table keeps its identity (the picker,
+    -- the undo capture and anything holding it expect that), and gets exactly
+    -- the default's keys -- a default with no `a` must not keep a stored `a`, or
+    -- the defaults engine compares the two unequal and the dot stays lit.
+    -- ⚠ Each hook is handed its OWN copy: the auto-layout recorder keeps what it
+    -- is given, and handing it the live table would alias profile and layout.
+    local function CopyColor(c)
+        local t = {}
+        for k, v in pairs(c) do t[k] = v end
+        return t
+    end
+    container.DotWrite = function(v)
+        if GUI:Call("interceptWrite", dbTable, dbKey, CopyColor(v)) then
+            UpdateSwatch()
+            return
+        end
+        local c = dbTable[dbKey]
+        if type(c) ~= "table" then
+            c = {}
+            dbTable[dbKey] = c
+        end
+        for k in pairs(c) do c[k] = nil end
+        for k, val in pairs(v) do c[k] = val end
+        GUI:Call("onSettingWritten", dbTable, dbKey, CopyColor(c), label, callback)
+        UpdateSwatch()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+    container.DotAccepts = function(v) return type(v) == "table" and v.r ~= nil end
+    container.FormatDotValue = function(v)
+        if type(v) == "table" then return GUI.FormatColorValue(v) end
+    end
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
@@ -3698,6 +3773,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so the colour swatch greys even when it's a dark
         -- colour (SetDesaturated alone is invisible on near-black swatches).
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then

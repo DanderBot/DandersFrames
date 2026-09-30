@@ -12,6 +12,7 @@
 - (Aura Designer) Adding to the Aura Designer is now a guided flow right inside the designer: choose Add from a Spell or Add from a Filter, pick how it should look from pictures of your own frame, then pick where it goes. Looks the aura already has, or that a filter can't drive, are marked on their tile. Layout groups and debuff groups are added with one click on their picture.
 - (Frames) Frame Fade now has an on/off switch on its card, so you can turn fading off without touching the alpha values.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
+- (Settings) Hover the yellow dot beside a changed setting to see its default value, and hold-click the dot to reset it.
 
 ### Bug Fixes
 
