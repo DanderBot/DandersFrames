@@ -3283,11 +3283,13 @@ end
 -- Raid buff definitions: {spellID or {spellID, spellID2, ...}, configKey, name, class}
 -- Some buffs have multiple spell IDs (e.g., cast spell vs applied buff)
 -- Icons are looked up dynamically using GetSpellTexture
+-- WoW Forever gives every rank its own buff ID (and 21562 is Prayer of Fortitude
+-- rank 1 there), so the classic rank IDs and group versions are listed too.
 DF.RaidBuffs = {
-    {{1459, 432778}, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE"},
-    {21562, "missingBuffCheckStamina", "Power Word: Fortitude", "PRIEST"},
-    {6673, "missingBuffCheckAttackPower", "Battle Shout", "WARRIOR"},
-    {{1126, 432661}, "missingBuffCheckVersatility", "Mark of the Wild", "DRUID"},
+    {{1459, 432778, 1460, 1461, 10156, 10157, 23028}, "missingBuffCheckIntellect", "Arcane Intellect", "MAGE"},
+    {{21562, 1243, 1244, 1245, 2791, 10937, 10938, 21564}, "missingBuffCheckStamina", "Power Word: Fortitude", "PRIEST"},
+    {{6673, 5242, 6192, 11549, 11550, 11551, 25289}, "missingBuffCheckAttackPower", "Battle Shout", "WARRIOR"},
+    {{1126, 432661, 5232, 6756, 5234, 8907, 9884, 9885, 21849, 21850}, "missingBuffCheckVersatility", "Mark of the Wild", "DRUID"},
     {462854, "missingBuffCheckSkyfury", "Skyfury", "SHAMAN"},
     -- Blessing of the Bronze: 13 variant buff IDs from different Evoker augment specs
     {{381732, 381741, 381746, 381748, 381749, 381750, 381751, 381752, 381753, 381754, 381756, 381757, 381758}, "missingBuffCheckBronze", "Blessing of the Bronze", "EVOKER"},
