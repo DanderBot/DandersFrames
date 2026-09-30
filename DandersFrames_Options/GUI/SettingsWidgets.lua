@@ -360,7 +360,7 @@ GUI.SectionCard = {
     -- Greyed (the section's feature is off) it goes 0.5 grey either way, with
     -- the title and the chevron.
     -- ============================================================
-    iconAccent  = false,
+    iconAccent  = true,
     pad         = 12,   -- the body's inset (left, right, bottom -- and top)
     gap         = 8,    -- card -> next card
     radius      = 6,    -- a radius the kit has baked art for (Round.lua RADII)

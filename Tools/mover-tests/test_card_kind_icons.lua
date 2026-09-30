@@ -6,7 +6,7 @@ local NS = ...
 -- GUI:CreateCollapsibleSection with opts.card takes opts.kind and draws that
 -- kind's glyph between the chevron and the tick/title. The kind -> texture map
 -- is GUI.SectionCard.kinds; the icon's colour is one switch,
--- GUI.SectionCard.iconAccent (false = dim, true = the mode's accent).
+-- GUI.SectionCard.iconAccent (false = dim, true = the mode's accent; default true).
 --
 -- The factory is CUT out of SettingsWidgets.lua and RUN against stub frames,
 -- the way test_designer_cards.lua runs CreateCardChrome. The page-side tagging
@@ -104,7 +104,7 @@ if cardTableSrc and fnSrc then
         eq(CARD.icon, 16, "metrics: the icon's slot is 16")
         eq(CARD.iconGlyph, 14, "metrics: ...the glyph inside it 14")
         eq(CARD.iconGap, 8, "metrics: ...and 8 to the tick/title")
-        eq(CARD.iconAccent, false, "switch: the icon colour defaults to DIM, not accent")
+        eq(CARD.iconAccent, true, "switch: the icon colour defaults to the ACCENT")
         check(type(CARD.kinds) == "table" and CARD.kinds.layout ~= nil,
               "map: GUI.SectionCard.kinds is the one kind -> texture table")
 
@@ -140,6 +140,8 @@ if cardTableSrc and fnSrc then
               "order: chevron -> icon -> title")
 
         -- ---- colours ----
+        CARD.iconAccent = false
+        s.title.UpdateTheme()
         local v = s.kindIcon and s.kindIcon._vertex
         check(v and v.r == C_TEXT_DIM.r and v.b == C_TEXT_DIM.b,
               "colour: iconAccent=false tints the icon dim")
