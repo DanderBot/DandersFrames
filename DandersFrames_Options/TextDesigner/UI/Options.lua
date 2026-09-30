@@ -525,7 +525,12 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     -- ── Label (optional) — skipped for group items (no per-item display name) ──
     if not isGroupItem then
     elem.label = elem.label or ""
+    -- The edit box commits on every focus loss, typed or not; only a real rename
+    -- is worth the full card rebuild below (each one re-creates every card).
+    local lastLabel = elem.label
     local labelEdit = GUI:CreateEditBox(parent, L["Label (optional)"], elem, "label", function()
+        if elem.label == lastLabel then return end
+        lastLabel = elem.label
         if card and card.title then
             local activeCT = FindContentType(elem.contentType)
             local displayName = (elem.label and elem.label ~= "" and elem.label)
