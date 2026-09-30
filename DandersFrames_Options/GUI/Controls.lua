@@ -4206,6 +4206,139 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
 end
 
 -- ============================================================
+-- WHICH KIND EACH CARD IS -- the header icon's tag, per section
+-- ------------------------------------------------------------
+-- Keyed by the section's STABLE collapseKey (the second argument of every
+-- page's OpenSection), ☠ never by its title: titles are localised, and several
+-- pages share one ("Appearance", "Border"). The kinds and their textures are
+-- GUI.SectionCard.kinds (SettingsWidgets.lua); a key missing here builds a card
+-- with an empty icon slot. One table so the same kind of section gets the same
+-- kind on every page -- read down a column to check.
+--
+-- ⚠ ONLY WHERE THE KIND IS OBVIOUS. A section that is its page's own thing
+-- (a "Settings" card, Heal Absorb, the Fading page) is left out on purpose.
+-- ============================================================
+GUI.SectionKindByKey = {
+    -- Frame (Options.lua)
+    frame_size              = "size",
+    frame_border            = "border",
+    frame_bordershadow      = "border",
+    frame_layoutdirection   = "layout",
+    frame_raidmode          = "layout",
+    frame_grouplayout       = "layout",
+    frame_flatgrid          = "layout",
+    frame_groupvisibility   = "visibility",
+    frame_grouporder        = "order",
+    -- Visibility / Tooltips / General / Pet Frames (Options.lua)
+    visibility_solo         = "visibility",
+    visibility_framedisplay = "visibility",
+    tooltips_frame          = "tooltips",
+    tooltips_binding        = "tooltips",
+    tooltips_buff           = "tooltips",
+    tooltips_debuff         = "tooltips",
+    tooltips_defensive      = "tooltips",
+    tooltips_auradesigner   = "tooltips",
+    tooltips_resurrection   = "tooltips",
+    general_panelappearance = "appearance",
+    pets_layoutmode         = "layout",
+    pets_size               = "size",
+    pets_appearance         = "appearance",
+    pets_border             = "border",
+    pets_position           = "position",
+    pets_nametext           = "text",
+    pets_healthtext         = "text",
+    -- Buff Bar (Indicators.lua)
+    buffs_visibility        = "visibility",
+    buffs_filters           = "filters",
+    buffs_order             = "order",
+    buffs_appearance        = "appearance",
+    buffs_layout            = "layout",
+    buffs_position          = "position",
+    buffs_border            = "border",
+    buffs_duration          = "text",
+    buffs_stack             = "text",
+    buffs_durationbar       = "timer",
+    buffs_pandemic          = "effects",
+    -- Debuff Bar (Indicators.lua)
+    debuffs_visibility      = "visibility",
+    debuffs_filters         = "filters",
+    debuffs_blacklist       = "filters",
+    debuffs_order           = "order",
+    debuffs_appearance      = "appearance",
+    debuffs_layout          = "layout",
+    debuffs_position        = "position",
+    debuffs_border          = "border",
+    debuffs_duration        = "text",
+    debuffs_stack           = "text",
+    debuffs_dispeltext      = "text",
+    debuffs_durationbar     = "timer",
+    -- Missing Buffs (Indicators.lua)
+    missingbuffs_appearance = "appearance",
+    missingbuffs_position   = "position",
+    missingbuffs_border     = "border",
+    -- Defensive Icon (Indicators.lua)
+    defensiveicon_filters     = "filters",
+    defensiveicon_layout      = "layout",
+    defensiveicon_appearance  = "appearance",
+    defensiveicon_position    = "position",
+    defensiveicon_border      = "border",
+    defensiveicon_duration    = "text",
+    defensiveicon_stack       = "text",
+    defensiveicon_durationbar = "timer",
+    -- Targeted List (Indicators.lua)
+    targetedlist_layout         = "size",
+    targetedlist_barstyle       = "appearance",
+    targetedlist_barcolor       = "colours",
+    targetedlist_border         = "border",
+    targetedlist_timing         = "timer",
+    targetedlist_showtext       = "text",
+    targetedlist_font           = "text",
+    targetedlist_spellnamepos   = "position",
+    targetedlist_targetnamepos  = "position",
+    targetedlist_durationpos    = "position",
+    targetedlist_interruptpos   = "position",
+    -- Personal Targeted (Indicators.lua)
+    personaltargeted_size            = "size",
+    personaltargeted_border          = "border",
+    personaltargeted_duration        = "text",
+    personaltargeted_highlight       = "effects",
+    personaltargeted_highlightshadow = "effects",
+    personaltargeted_highlightanim   = "effects",
+    -- Sorting / Colours / Health Bar / Resource Bar / Heal Prediction (Auras.lua)
+    sorting_unitframes      = "order",
+    sorting_rolepriority    = "order",
+    sorting_classpriority   = "order",
+    colors_class            = "colours",
+    colors_role             = "colours",
+    colors_dispel           = "colours",
+    colors_bytime           = "colours",
+    health_color            = "colours",
+    health_texture          = "appearance",
+    resource_classfilter    = "filters",
+    resource_size           = "size",
+    resource_position       = "position",
+    resource_appearance     = "appearance",
+    resource_border         = "border",
+    resource_colors         = "colours",
+    healpred_floating       = "position",
+    healpred_anchor         = "position",
+    -- Fonts / Group Labels / Pinned Frames (Frames.lua)
+    fonts_global            = "text",
+    fonts_shadow            = "text",
+    grouplabels_format      = "text",
+    grouplabels_font        = "text",
+    grouplabels_position    = "position",
+    pinned_layout           = "layout",
+    -- Icons / Highlights / Dispel Overlay (Modules.lua)
+    icons_text              = "text",
+    highlights_selection    = "effects",
+    highlights_hover        = "effects",
+    highlights_aggro        = "effects",
+    highlights_threat       = "colours",
+    dispel_border           = "border",
+}
+
+-- ============================================================
 -- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
 -- ------------------------------------------------------------
 -- Everything a settings page needs to build its card sections. This is the
@@ -4594,6 +4727,8 @@ function GUI:CreatePopoutPageTools(page)
     --                enough (see WireTwoTrack)
     --   quietLabels  a control's own caption draws dim, so a setting can never
     --                read as a heading (see QuietLabel)
+    --   kind         overrides the header's kind icon; without it the kind is
+    --                GUI.SectionKindByKey[key] (above), never the title
 
     -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
     -- not chosen. Every factory in the kit was laid out against a 260 column; at
@@ -4781,7 +4916,8 @@ function GUI:CreatePopoutPageTools(page)
         -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
         -- in SettingsWidgets.lua).
         local section = GUI:CreateCollapsibleSection(page.child, label, true,
-            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })
+            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
+                           kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })
         section.hideOn = hideFn
         -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
         -- page and GUI.ColumnWidth). Without it the header bar would stay

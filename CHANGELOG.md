@@ -13,6 +13,7 @@
 - (Frames) Frame Fade now has an on/off switch on its card, so you can turn fading off without touching the alpha values.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 - (Settings) Hover the yellow dot beside a changed setting to see its default value, and hold-click the dot to reset it.
+- (Settings) Section headers show a small icon for common kinds of settings (appearance, layout, position, visibility and more) so they are easier to spot.
 
 ### Bug Fixes
 

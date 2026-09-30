@@ -348,7 +348,19 @@ GUI.SectionCard = {
     header      = 40,   -- header row height
     edge        = 12,   -- chevron's inset from the card's left edge
     chevron     = 10,   -- chevron size
-    titleGap    = 8,    -- chevron -> title
+    titleGap    = 8,    -- chevron -> title (with the kind icon: chevron -> icon)
+    icon        = 16,   -- the kind icon's slot, reserved on EVERY card
+    iconGlyph   = 14,   -- ...and the glyph centred in it
+    iconGap     = 8,    -- icon slot -> tick / title
+    -- ============================================================
+    -- THE KIND ICON'S COLOUR -- the one switch.
+    --   false  dim (C_TEXT_DIM): the icon reads as furniture beside the title
+    --   true   the mode's accent, the chevron's colour, re-tinted on a
+    --          party/raid switch and a theme repaint the way the chevron is
+    -- Greyed (the section's feature is off) it goes 0.5 grey either way, with
+    -- the title and the chevron.
+    -- ============================================================
+    iconAccent  = false,
     pad         = 12,   -- the body's inset (left, right, bottom -- and top)
     gap         = 8,    -- card -> next card
     radius      = 6,    -- a radius the kit has baked art for (Round.lua RADII)
@@ -364,6 +376,37 @@ GUI.SectionCard = {
     cornersAll  = { tl = true, tr = true, bl = true, br = true },
     cornersTop  = { tl = true, tr = true },
 }
+
+-- ============================================================
+-- opts.kind -> THE CARD HEADER'S ICON. One table, every kind.
+-- ------------------------------------------------------------
+-- A card names the KIND of section it is (opts.kind = "layout") and gets the
+-- glyph here between its chevron and its title. The kind is set by the caller
+-- per section -- ☠ NEVER derived from the title, which is localised. A kind not
+-- in this table draws no icon. White 32px glyphs, tinted at runtime; the new
+-- ones come from Tools/generate_header_icons.py.
+--
+-- ⚠ filter_header, NOT filter_alt: the old filter_alt.tga is drawn smaller and
+-- fainter than its siblings and is used elsewhere, so the headers get a copy
+-- refitted to the same ink box as the rest.
+do
+    local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+    GUI.SectionCard.kinds = {
+        appearance = ICONS .. "palette",
+        layout     = ICONS .. "grid_view",
+        size       = ICONS .. "open_in_full",
+        position   = ICONS .. "open_with",
+        visibility = ICONS .. "visibility",
+        text       = ICONS .. "text_fields",
+        colours    = ICONS .. "format_color_fill",
+        filters    = ICONS .. "filter_header",
+        tooltips   = ICONS .. "chat_info",
+        effects    = ICONS .. "auto_awesome",
+        border     = ICONS .. "border_style",
+        order      = ICONS .. "swap_vert",
+        timer      = ICONS .. "timer",
+    }
+end
 
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -467,6 +510,27 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- Where the tick sits: the title's old start, one chevron-gap after the arrow.
     local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26
 
+    -- ============================================================
+    -- Optional KIND ICON, between the chevron and the tick/title (opts.kind).
+    -- ------------------------------------------------------------
+    -- Order: chevron -> icon -> tick -> title. ⚠ THE SLOT IS RESERVED ON EVERY
+    -- CARD, kinded or not, so titles line up down a page and across pages; an
+    -- unkinded card just leaves it empty. Only a card moves -- a plain section
+    -- has no slot. The kind -> texture map is GUI.SectionCard.kinds; the tint is
+    -- painted with the chevron's (title.UpdateTheme, below).
+    if CARD then
+        local iconX = TICK_X
+        TICK_X = iconX + CARD.icon + CARD.iconGap
+        local tex = opts.kind and CARD.kinds and CARD.kinds[opts.kind]
+        if tex then
+            section.kind = opts.kind
+            section.kindIcon = section:CreateTexture(nil, "OVERLAY")
+            section.kindIcon:SetSize(CARD.iconGlyph, CARD.iconGlyph)
+            section.kindIcon:SetPoint("LEFT", section, "LEFT", iconX + (CARD.icon - CARD.iconGlyph) / 2, 0)
+            section.kindIcon:SetTexture(tex)
+        end
+    end
+
     -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
     -- A ticked header's title moves right by the tick and one more gap; an
     -- unticked one reserves nothing.
@@ -501,13 +565,21 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- SetPreviewDimmed has always used.
     if CARD then
         section.title.UpdateTheme = function()
+            local icon = section.kindIcon
             if section.previewDimmed then
                 section.title:SetTextColor(0.5, 0.5, 0.5)
                 section.arrow:SetVertexColor(0.5, 0.5, 0.5)
+                if icon then icon:SetVertexColor(0.5, 0.5, 0.5) end
             else
                 section.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                 local nc = GetThemeColor()
                 section.arrow:SetVertexColor(nc.r, nc.g, nc.b)
+                -- The one switch: GUI.SectionCard.iconAccent. Read on every
+                -- paint, so flipping it takes effect on the next repaint.
+                if icon then
+                    local ic = CARD.iconAccent and nc or C_TEXT_DIM
+                    icon:SetVertexColor(ic.r, ic.g, ic.b)
+                end
             end
             cardSurface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
             cardSurface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)

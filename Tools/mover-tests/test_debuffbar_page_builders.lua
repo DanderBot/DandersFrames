@@ -204,7 +204,7 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes one through the shared helper too")
     -- The helper itself: the Buff Bar's card, lifted rather than copied.
-    check(OPEN:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
+    check(OPEN:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
           "sections: the shared helper builds the kit's section as a CARD, expanded on a first run, at its column's width")
     check(OPEN:find("Add(section, 36, col)", 1, true) ~= nil
       and OPEN:find("GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })", 1, true) ~= nil

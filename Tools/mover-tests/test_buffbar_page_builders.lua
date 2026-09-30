@@ -247,7 +247,7 @@ do
     check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
           "sections: ...and so does its CloseSection")
     local open = OPEN
-    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -1220,7 +1220,7 @@ do
 
     -- ---- Buff Bar passes it -----------------------------------------
     local open = OPEN
-    check(open:find("pin = pin, card = true, toggle = toggle })", 1, true) ~= nil,
+    check(open:find("pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
           "card: Buff Bar's OpenSection opts every section in")
 
     -- ---- the 40px header --------------------------------------------
