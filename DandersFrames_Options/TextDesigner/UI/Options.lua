@@ -1627,6 +1627,25 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
 end
 
 -- ============================================================
+-- FOLD RELAYOUT
+-- A fold changes one card's height, so it re-anchors the list's cards in
+-- order and resizes the scroll child. No frames are made. `cards` is the
+-- render's ordered list (state.cardOrder / state.groupCardOrder); each card
+-- carries its current height as card.cardHeight.
+-- ============================================================
+local function RestackCards(cards, child, gap)
+    if not cards or not child then return end
+    local y = 0
+    for _, card in ipairs(cards) do
+        card:ClearAllPoints()
+        card:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+        card:SetPoint("TOPRIGHT", child, "TOPRIGHT", 0, y)
+        y = y - card.cardHeight - gap
+    end
+    child:SetHeight(math.max(1, -y + 4))
+end
+
+-- ============================================================
 -- ELEMENT CARD
 -- A collapsible card representing one text element. Built using the same
 -- direct-frame pattern as AuraDesigner's S.CreateEffectCard
@@ -1791,11 +1810,12 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     local function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
-            card:SetHeight(HEADER_HEIGHT)
+            card.cardHeight = HEADER_HEIGHT
         else
             body:Show()
-            card:SetHeight(HEADER_HEIGHT + bodyHeight)
+            card.cardHeight = HEADER_HEIGHT + bodyHeight
         end
+        card:SetHeight(card.cardHeight)
         chrome:SetExpanded(not card.collapsed, body)
     end
     card.ApplyCollapseState = ApplyCollapseState
@@ -1805,10 +1825,9 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
         card.collapsed = not card.collapsed
         GUI:GetCollapsedGroups()[cardKey] = card.collapsed or nil
         ApplyCollapseState()
-        -- Trigger full re-render so the list reflows
-        if DF.TextDesigner.RenderCardList then
-            DF.TextDesigner.RenderCardList(card._GUI, card._page, card._tdDB, card._state)
-        end
+        -- Fold in place: re-stack this list's cards. A full re-render here
+        -- built every card afresh on each click, and WoW never frees frames.
+        RestackCards(state.cardOrder, parent, GUI.SectionCard.gap)
     end)
 
     ApplyCollapseState()
@@ -1854,6 +1873,8 @@ end
 -- during reuse" bugs (card heights, dropdown options, etc.) at the cost of
 -- a few CreateFrame calls per interaction — TD has at most ~20 elements and
 -- rebuilds happen only on user-driven clicks, so cost is negligible.
+-- ⚠ Those frames are never freed, so a card FOLD does not come here: it
+-- re-stacks the live cards through RestackCards (state.cardOrder).
 -- ============================================================
 
 local function RenderCardList(GUI, page, tdDB, state)
@@ -1883,6 +1904,8 @@ local function RenderCardList(GUI, page, tdDB, state)
     else
         state.cardFrames = {}
     end
+    -- The same cards in list order, for a fold's in-place re-stack.
+    if state.cardOrder then wipe(state.cardOrder) else state.cardOrder = {} end
 
     -- Filter: only render non-group elements on the Texts tab -- groups have their
     -- own UI on the Groups tab. Additionally honor the per-category filter chip
@@ -1933,6 +1956,7 @@ local function RenderCardList(GUI, page, tdDB, state)
     for _, elem in ipairs(elementsToShow) do
         local card, totalCardH = CreateTextElementCard(GUI, state.listChild, y, elem, tdDB, state, page)
         state.cardFrames[elem.id] = card
+        state.cardOrder[#state.cardOrder + 1] = card
         y = y - totalCardH - CARD_GAP
     end
     state.listChild:SetHeight(math.max(1, -y + 4))
@@ -2503,11 +2527,12 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     local function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
-            card:SetHeight(HEADER_HEIGHT)
+            card.cardHeight = HEADER_HEIGHT
         else
             body:Show()
-            card:SetHeight(HEADER_HEIGHT + bodyHeight)
+            card.cardHeight = HEADER_HEIGHT + bodyHeight
         end
+        card:SetHeight(card.cardHeight)
         chrome:SetExpanded(not card.collapsed, body)
     end
     card.ApplyCollapseState = ApplyCollapseState
@@ -2517,11 +2542,8 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
         card.collapsed = not card.collapsed
         GUI:GetCollapsedGroups()[cardKey] = card.collapsed or nil
         ApplyCollapseState()
-        -- RenderGroupCardList is defined below this builder, so resolving via
-        -- DF.TextDesigner.* at click-time is what makes the forward reference work.
-        if DF.TextDesigner.RenderGroupCardList then
-            DF.TextDesigner.RenderGroupCardList(GUI, page, tdDB, state)
-        end
+        -- Fold in place, as CreateTextElementCard: re-stack, never rebuild.
+        RestackCards(state.groupCardOrder, parent, GUI.SectionCard.gap)
     end)
 
     ApplyCollapseState()
@@ -2552,6 +2574,8 @@ local function RenderGroupCardList(GUI, page, tdDB, state)
     else
         state.groupCardFrames = {}
     end
+    -- The same cards in list order, for a fold's in-place re-stack.
+    if state.groupCardOrder then wipe(state.groupCardOrder) else state.groupCardOrder = {} end
 
     local groupsToShow = {}
     for _, elem in ipairs(tdDB.elements) do
@@ -2573,6 +2597,7 @@ local function RenderGroupCardList(GUI, page, tdDB, state)
     for _, elem in ipairs(groupsToShow) do
         local card, totalCardH = CreateGroupCard(GUI, state.groupListChild, y, elem, tdDB, state, page)
         state.groupCardFrames[elem.id] = card
+        state.groupCardOrder[#state.groupCardOrder + 1] = card
         y = y - totalCardH - CARD_GAP
     end
     state.groupListChild:SetHeight(math.max(1, -y + 4))
@@ -2926,7 +2951,9 @@ local function BuildTextDesignerIsland(GUI, page, db)
             end
             wipe(state.cardFrames)
         end
-        if state.presetBar         then state.presetBar:Hide();         state.presetBar:ClearAllPoints()         end
+        state.cardOrder = nil
+        state.groupCardOrder = nil
+        if state.presetBar        then state.presetBar:Hide();         state.presetBar:ClearAllPoints()         end
         if state.controlsBar       then state.controlsBar:Hide();       state.controlsBar:ClearAllPoints()       end
         if state.enableCheck       then state.enableCheck:Hide();       state.enableCheck:ClearAllPoints()       end
         if state.previewPanel      then state.previewPanel:Hide();      state.previewPanel:ClearAllPoints()      end
