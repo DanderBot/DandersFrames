@@ -978,17 +978,22 @@ end
 -- return (the auras had expired unseen — game behaviour, no bug). The PLAYER token
 -- failing open shows `mine` collapsing while `all` holds roughly steady — the same auras
 -- are still there, they simply stop being credited to you once the caster resolves.
--- ⚠ Channel-gated: costs two C calls per crossing while AURACONTAINER is on, nothing
--- otherwise. Distinguishing those two shapes is the whole question, and neither is
--- observable after the fact.
+-- ⚠ Channel-gated: costs two C calls per crossing while RANGE is on, nothing otherwise.
+-- Distinguishing those two shapes is the whole question, and neither is observable after
+-- the fact.
+-- ☠ ON RANGE, NOT AURACONTAINER (2026-10-01). It fires on every range crossing of every
+-- unit, so in a moving raid it was ~3,900 of the 5,000 log lines in fifty minutes. The
+-- log evicts oldest INFO first, so a busy evening pushed out everything else on the
+-- AURACONTAINER channel, the stale-container recorder included. RANGE is already marked
+-- noisy, so it starts off; tick it when this question is the one being asked.
 function AuraContainer.NoteRangeTransition(unit, inRange)
-    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if not (DF.DebugActive and DF:DebugActive("RANGE")) then return end
     if type(unit) ~= "string" or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     if issecretvalue and issecretvalue(inRange) then return end
     local all  = auraCountOn(unit, "HELPFUL")
     local mine = auraCountOn(unit, "HELPFUL|PLAYER")
     if not (all and mine) then return end
-    DF:Debug(DBG, "range %s unit=%s helpful=%d ofWhichMine=%d%s",
+    DF:Debug("RANGE", "aura snapshot %s unit=%s helpful=%d ofWhichMine=%d%s",
         inRange and "IN " or "OUT", tostring(unit), all, mine,
         (all > 0 and mine == all) and "  <-- claims ALL of them" or "")
 end

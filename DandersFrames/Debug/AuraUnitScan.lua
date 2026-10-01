@@ -40,10 +40,28 @@ local addonName, DF = ...
 --                 bad state (a deferred op that never drained, a hide that never
 --                 lifted), which the engine checks cannot see.
 --
--- ⚠ NOT CHECKABLE, and why, so nobody spends time adding it: whether a container is
--- still registered for UNIT_AURA. IsEventRegistered is refused on containers by the
--- EventRegistrations forbidden aspect (proven in game, see setContainerProviderDeaf
--- in Frames/AuraContainer.lua). SHOWN-DISABLED is the readable half of that question.
+-- ⚠ NOT CHECKABLE, and why, so nobody spends time adding it:
+--   * Whether a container is still registered for UNIT_AURA. IsEventRegistered is
+--     refused on containers by the EventRegistrations forbidden aspect (proven in game,
+--     see setContainerProviderDeaf in Frames/AuraContainer.lua). SHOWN-DISABLED is the
+--     readable half of that question.
+--   * ☠ Whether a button is SHOWING AN AURA THAT HAS GONE -- the stale-icon case itself
+--     (a stale Prayer of Mending in raid, 2026-10-01: right unit, container listening,
+--     icon stuck with its timer run out). Counting shown buttons against the unit's real
+--     auras was proposed, and it cannot be done: Blizzard_CustomAuraButton paints
+--     visibility as SetShown(secretwrap(auraData ~= nil)) and AuraContainerUtil sets the
+--     icon as SetTexture(secretwrap(icon)) -- ALWAYS wrapped, out of combat too. So
+--     IsShown and GetTexture on an aura button are secret, and no OnShow runs in its
+--     subtree. A stale icon has no readable trace; the panic button below is the only
+--     way to timestamp one.
+--
+-- ☠ FINDINGS ARE LOGGED AS WARN (2026-10-01). The log evicts oldest INFO first once it is
+-- full, and a busy raid fills it inside an hour -- so an INFO start line was gone before
+-- anyone read it. A WARN survives until there is no INFO left to evict.
+-- ★ AND EACH SESSION LEAVES A HEARTBEAT in DandersFramesDebugDB.unitscanRuns (armed time,
+-- samples taken, last sample, findings). "Nothing caught" is only evidence when the
+-- heartbeat shows the recorder was sampling at the time; on 2026-10-01 it was not
+-- possible to tell, because the "recorder armed" line had been evicted.
 --
 -- Hidden frames are skipped entirely: a frame nobody can see cannot show a stale
 -- aura, and the previous version filled the log with frames whose unit had left.
@@ -79,6 +97,21 @@ local function store()
     return DandersFramesDebugDB.unitscan
 end
 
+-- This session's heartbeat row: proof the recorder ran, and how much it looked.
+local MAX_RUNS = 20
+local run
+local function heartbeat()
+    if run then return run end
+    DandersFramesDebugDB = DandersFramesDebugDB or {}
+    DandersFramesDebugDB.unitscanRuns = DandersFramesDebugDB.unitscanRuns or {}
+    local runs = DandersFramesDebugDB.unitscanRuns
+    if #runs >= MAX_RUNS then table.remove(runs, 1) end
+    run = { session = SESSION, armed = date("%H:%M:%S"), samples = 0, combatSamples = 0,
+            findings = 0, last = nil }
+    runs[#runs + 1] = run
+    return run
+end
+
 -- Problems seen on the PREVIOUS sample, keyed kind|unit|lane -> { since = GetTime() }.
 -- A key present last sample and absent now has CLEARED; that edge is what tells us a
 -- stale indicator was "brief" and for how long.
@@ -97,7 +130,9 @@ local function record(kind, unit, lane, detail)
     seenNow[ep] = true
     if not active[ep] then
         active[ep] = { since = GetTime(), at = date("%H:%M:%S") }
-        DF:Debug("UNITSCAN", "START %s %s [%s] combat=%s enc=%s | %s", kind, tostring(unit),
+        local hb = heartbeat()
+        hb.findings = hb.findings + 1
+        DF:DebugWarn("UNITSCAN", "START %s %s [%s] combat=%s enc=%s | %s", kind, tostring(unit),
             tostring(lane), tostring(inCombat()), tostring(currentEncounter or "-"), tostring(detail))
     end
 
@@ -127,7 +162,7 @@ local function closeEpisodes()
     local t = GetTime()
     for ep, info in pairs(active) do
         if not seenNow[ep] then
-            DF:Debug("UNITSCAN", "CLEAR %s after %.1fs (started %s)", ep, t - info.since, info.at)
+            DF:DebugWarn("UNITSCAN", "CLEAR %s after %.1fs (started %s)", ep, t - info.since, info.at)
             active[ep] = nil
         end
     end
@@ -184,6 +219,11 @@ local function checkHandle(h, unit, lane, frame, hiddenFlag)
 end
 
 local function sample(postCombat)
+    local hb = heartbeat()
+    hb.samples = hb.samples + 1
+    if inCombat() then hb.combatSamples = hb.combatSamples + 1 end
+    hb.last = date("%H:%M:%S")
+
     local function visit(frame)
         if not frame or not frame.unit then return end
         local okV, vis = pcall(frame.IsVisible, frame)
@@ -345,7 +385,7 @@ function DF:MarkAuraFault(note)
         note = note,
         rows = rows,
     }
-    DF:Debug("UNITSCAN", "SNAPSHOT %d taken (%d frames%s) -- rows in DandersFramesDebugDB.unitsnaps",
+    DF:DebugWarn("UNITSCAN", "SNAPSHOT %d taken (%d frames%s) -- rows in DandersFramesDebugDB.unitsnaps",
         #snaps, #rows, flagged and (", flagged " .. flagged) or "")
     DEFAULT_CHAT_FRAME:AddMessage(format(
         "|cff33ff99DF unitscan|r |cffffcc00snapshot %d taken|r (%d frames%s)",
@@ -355,6 +395,13 @@ end
 function DF:DumpAuraUnitLog(clear)
     local log = store()
     local out = DEFAULT_CHAT_FRAME
+    local runs = (DandersFramesDebugDB and DandersFramesDebugDB.unitscanRuns) or {}
+    for i = math.max(1, #runs - 4), #runs do
+        local r = runs[i]
+        out:AddMessage(format("|cff33ff99DF unitscan|r session %s: armed %s, %d samples (%d in combat),"
+            .. " last %s, %d finding(s)", tostring(r.session), tostring(r.armed), r.samples or 0,
+            r.combatSamples or 0, tostring(r.last), r.findings or 0))
+    end
     out:AddMessage("|cff33ff99DF unitscan|r " .. #log .. " finding(s)")
     if #log == 0 then
         out:AddMessage("  |cff40ff40nothing caught|r (the recorder is armed automatically)")
@@ -414,6 +461,7 @@ end
 
 driver:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "PLAYER_LOGIN" then
+        heartbeat()
         DF:Debug("UNITSCAN", "recorder armed, session %s", SESSION)
         armTicker(IDLE_INTERVAL)
     elseif event == "ENCOUNTER_START" then
