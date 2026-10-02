@@ -6905,6 +6905,15 @@ end
 -- Reads settings and applies them to headers
 -- ============================================================
 
+-- Readiness check for "are the group frames up yet?". Use this rather than DF.partyHeader:
+-- with party frames disabled the party header is never created.
+function DF:GroupHeadersReady()
+    if DF.partyHeader or DF.arenaHeader then return true end
+    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then return true end
+    if DF.raidSeparatedHeaders and next(DF.raidSeparatedHeaders) then return true end
+    return false
+end
+
 -- The real body. DF:ApplyHeaderSettings() is now an arm-stub that coalesces
 -- requests through DF.Apply -- see Core\ApplyScheduler.lua.
 function DF:ApplyHeaderSettings_Now()
@@ -6924,9 +6933,9 @@ function DF:ApplyHeaderSettings_Now()
         return
     end
     
-    -- Double-check headers exist
-    if not DF.partyHeader then
-        headerDebug("ApplyHeaderSettings skipped - party header missing")
+    -- Each section below guards its own header.
+    if not DF:GroupHeadersReady() then
+        headerDebug("ApplyHeaderSettings skipped - no group header exists")
         return
     end
     
