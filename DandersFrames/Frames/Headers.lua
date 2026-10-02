@@ -6905,11 +6905,8 @@ end
 -- Reads settings and applies them to headers
 -- ============================================================
 
--- ☠ "ARE THE FRAMES UP YET?" MUST NOT MEAN "IS THE PARTY HEADER UP?". With party frames
--- switched off, CreatePartyHeader never runs, so every guard that used DF.partyHeader as its
--- readiness proxy turned raid-only setups off wholesale: the range poll (raid frames only faded
--- on the coarse UNIT_IN_RANGE_UPDATE event -- live report, 5.3.3), target/threat highlights,
--- and this function's raid half. Any group header that exists means frames exist.
+-- Readiness check for "are the group frames up yet?". Use this rather than DF.partyHeader:
+-- with party frames disabled the party header is never created.
 function DF:GroupHeadersReady()
     if DF.partyHeader or DF.arenaHeader then return true end
     if DF.FlatRaidFrames and DF.FlatRaidFrames.header then return true end
@@ -6936,8 +6933,7 @@ function DF:ApplyHeaderSettings_Now()
         return
     end
     
-    -- Double-check headers exist. ANY header, not the party one: everything below guards
-    -- its own header, and a raid-only profile has no party header (see GroupHeadersReady).
+    -- Each section below guards its own header.
     if not DF:GroupHeadersReady() then
         headerDebug("ApplyHeaderSettings skipped - no group header exists")
         return
