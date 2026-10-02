@@ -1006,9 +1006,7 @@ function DF:InitializeHeaderChild(frame)
                 GameTooltip_SetDefaultAnchor(GameTooltip, self)
             end
             GameTooltip:SetUnit(self.unit)
-            -- Raider.IO fallback, only when Raider.IO cannot resolve the unit itself
-            -- -- see DF:ShowRaiderIOFallback (Frames/Create.lua) for why the test is
-            -- the tooltip's GUID and not GetUnit().
+            -- Only draws when Raider.IO cannot resolve the unit itself (see DF:ShowRaiderIOFallback).
             if DF.ShowRaiderIOFallback then DF:ShowRaiderIOFallback(GameTooltip, self.unit) end
             -- Start refresh ticker so tooltip addons (RaiderIO) can respond
             -- to modifier key changes while hovering

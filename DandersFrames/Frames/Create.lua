@@ -301,22 +301,11 @@ bindingTooltip:SetScript("OnEvent", function(self)
 end)
 
 -- ============================================================
--- RAIDER.IO FALLBACK -- only when Raider.IO cannot see the unit itself
+-- RAIDER.IO FALLBACK
 -- ============================================================
--- On secure header children GameTooltip:GetUnit() comes back SECRET, and Raider.IO
--- used to read the unit that way, so its unit-tooltip hook bailed and DF drew the
--- profile through the public RaiderIO.ShowProfile instead.
---
--- ☠ DUPLICATE BLOCK (field report 2026-10-02, Raider.IO v202610012155). Raider.IO
--- now resolves the unit from GetPrimaryTooltipData().guid (UnitTokenFromGUID, then a
--- group-token scan -- GetTooltipUnit in its core.lua), so its own hook draws the
--- block on our frames. DF kept testing GetUnit(), still saw a secret, and drew it a
--- second time. ⇒ Ask the question Raider.IO asks: when the tooltip's GUID is
--- readable, Raider.IO has already handled it and we stay out. The old GetUnit test
--- remains for clients without GetPrimaryTooltipData.
--- ⚠ The trade: a Raider.IO build old enough to still read GetUnit() would now show
--- nothing on our frames. Raider.IO ships a database refresh most days, so a copy that
--- old is not one anyone is running; drawing twice for everyone current is worse.
+-- On secure header children GameTooltip:GetUnit() is secret. Raider.IO resolves the unit
+-- from the tooltip data's GUID instead, so it draws its own block whenever that GUID is
+-- readable; draw it ourselves only when it is not, or the block appears twice.
 function DF:ShowRaiderIOFallback(tooltip, unit)
     local rio = _G.RaiderIO
     if not (rio and rio.ShowProfile) or not unit then return end
