@@ -122,12 +122,9 @@ function DF:SetArenaSortIncomplete(incomplete)
 end
 
 -- ============================================================
--- PARTY SORT RETRY -- the arena machinery above, for the party header (2026-09-24).
--- The party header runs NAMELIST by default (self position FIRST), so it had exactly the
--- arena's hole and none of its fix: a member whose name had not resolved was left out of the
--- list and hidden until /reload (live report, M+). BuildPartyNameList now reports an
--- incomplete build, ApplyPartyGroupSorting shows everyone in INDEX order, and this re-sorts
--- once the names resolve. Same cap, same combat replay, same FrameSort hand-off.
+-- PARTY SORT RETRY
+-- Same shape as the arena retry above. While a party member's name is unresolved the
+-- header runs in INDEX order; this re-sorts once names resolve (no roster event fires).
 -- ============================================================
 local partySortRetryPending = false
 local partySortRetryCount = 0
@@ -4430,18 +4427,9 @@ function DF:BuildPartyNameList(selfPosition)
         isPlayer = true
     })
     
-    -- Add party members
-    -- ☠☠ AN UNRESOLVED NAME MUST NOT REACH THE LIST, AND MUST NOT BE SILENTLY DROPPED EITHER.
-    -- Live report (5.3.3, M+): "sometimes when someone dies, a random person just falls off my
-    -- party frames as if they left the group -- you have to /reload to get their frame back."
-    -- The header runs in NAMELIST mode by default (self position FIRST), and the secure header
-    -- HIDES any unit whose name is not in the list. This used to add UnitName's answer as-is:
-    -- UNKNOWNOBJECT ("Unknown") for a member whose player object is not loaded -- a literal that
-    -- matches nobody -- and a SECRET string in restricted content, which table.concat below
-    -- cannot take. Either way the member was missing from the header, and nothing re-sorts on
-    -- a name resolving (no roster event fires), so they stayed gone until a reload.
-    -- ⇒ Report `complete = false` and let ApplyPartyGroupSorting show everyone in INDEX order
-    -- until the names resolve -- the same fix the arena header got (BuildArenaNameList).
+    -- Add party members. An unresolved name (secret, nil or UNKNOWNOBJECT) must not reach the
+    -- list -- the header hides any unit whose name is not in it -- so report complete = false
+    -- and let ApplyPartyGroupSorting fall back to INDEX.
     local complete = true
     for i = 1, 4 do
         local unit = "party" .. i
@@ -5919,12 +5907,8 @@ function DF:ApplyPartyGroupSorting()
         SetHeaderAttribute(DF.partyHeader, "strictFiltering", nil)
 
         if not complete then
-            -- Someone exists whose name has not resolved (see BuildPartyNameList). A filtering
-            -- nameList would HIDE them until a reload. Show EVERYONE in INDEX order for now and
-            -- re-sort once the names resolve -- the arena header's fix, applied to party.
-            -- ⚠ A "Hide from Main Frames" pinned member shows here too for that moment. Showing
-            -- one frame too many briefly is the right side to err on; hiding a real member
-            -- mid-key was the bug.
+            -- A member's name is unresolved: show everyone in INDEX order until it resolves.
+            -- A "Hide from Main Frames" pinned member also shows meanwhile; that is intended.
             SetHeaderAttribute(DF.partyHeader, "nameList", nil)
             SetHeaderAttribute(DF.partyHeader, "sortMethod", "INDEX")
             DF:SetPartySortIncomplete(true)
@@ -8503,10 +8487,7 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                 arenaSortRetryCount = 0
                 ScheduleArenaSortRetry()
             end
-            -- Party: the same nudge for the party header's incomplete build (see
-            -- SchedulePartySortRetry). Re-arming the cap here is what brings back a member
-            -- whose name resolves long after the retry window -- a released player running
-            -- back from the graveyard, say.
+            -- Re-arm the party retry cap: a name can resolve long after the retry window.
             if partyNameListIncomplete and unit:match("^party%d") then
                 partySortRetryCount = 0
                 SchedulePartySortRetry()

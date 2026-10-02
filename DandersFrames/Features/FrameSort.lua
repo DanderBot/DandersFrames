@@ -53,9 +53,8 @@ function DF:IsFrameSortActive()
 end
 
 -- Convert an array of unit tokens to a comma-separated nameList string.
--- Returns nameList, complete. `complete` is false when a PARTY member exists whose name has
--- not resolved (nil, secret, or UNKNOWNOBJECT) -- see SortPartyFrames for why that must not
--- become a partial list. Raid tokens keep their documented drop-and-re-sort behaviour below.
+-- Returns nameList, complete: complete is false when a party member's name is unresolved
+-- (nil, secret or UNKNOWNOBJECT).
 local function UnitsToNameList(units)
     wipe(namesBuf)
     local complete = true
@@ -109,11 +108,8 @@ local function SortPartyFrames(units)
     if not DF.partyHeader:IsVisible() then return false end
 
     local nameList, complete = UnitsToNameList(units)
-    -- ☠ A PARTIAL LIST HIDES THE MISSING MEMBER. The secure header shows only the names in
-    -- nameList, so a member whose name had not resolved at sort time vanished from the party
-    -- frames until a reload (live report, M+). Show everyone in INDEX order and let the party
-    -- retry re-request FrameSort's order once the names resolve -- the same thing
-    -- SortArenaFrames below does for its incomplete case.
+    -- The secure header hides any unit missing from nameList, so a partial list would hide
+    -- a member. Show everyone in INDEX order; SchedulePartySortRetry re-sorts later.
     if not complete then
         DF:Debug("FRAMESORT", "Party nameList incomplete - using INDEX + retry")
         DF.partyHeader:SetAttribute("nameList", nil)
