@@ -5658,6 +5658,8 @@ end
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported()) then return end
+    -- For the stale-container recorder: tells whether SyncFrame ever ran for this frame.
+    frame.dfADLastSyncAt = date("%H:%M:%S")
 
     -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
     -- transition, then stay quiet. Merely skipping the sync would leave every

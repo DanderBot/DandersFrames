@@ -623,7 +623,7 @@ function DF:UpdateRange(frame)
     -- ☠ AURA SNAPSHOT AT THE RANGE EDGE — the one moment that answers "did the aura
     -- really persist, or did Only Mine stop filtering?", and the one moment nobody can
     -- type a command in. Lives on the cache-MISS branch so it fires once per real
-    -- crossing, not once per range check. Self-gated on the AURACONTAINER debug channel
+    -- crossing, not once per range check. Self-gated on the RANGE debug channel
     -- (costs nothing while off) and pcall'd, because a diagnostic must never be able to
     -- break the range pass it rides on. See AuraContainer.NoteRangeTransition for how
     -- to read the pair of lines it produces.
