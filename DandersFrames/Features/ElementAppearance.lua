@@ -1139,10 +1139,7 @@ function DF:UpdateDispelOverlayAppearance(frame)
     -- them (SetAlpha included) from addon code errors in restricted content —
     -- the old per-button loop error-spammed every range tick in raid combat
     -- (live-caught). Same channel the buff/defensive row fades already use.
-    -- ⚠ TWO HANDLES, ONE FADE. The dispel icon row (Features/Dispel.lua,
-    -- DriveDispelIconRow) is a second container on the same frame carrying the type
-    -- symbols; it fades with the overlay or it stays at full alpha out of range and on
-    -- the dead -- the exact gap PR #267's version of the row shipped with.
+    -- The dispel icon row (DriveDispelIconRow) is a second container; it fades with the overlay.
     for _, h in ipairs({ frame.dispelFactory, frame.dispelIconRow }) do
         if h and h.GetFrame then
             local w = h:GetFrame()

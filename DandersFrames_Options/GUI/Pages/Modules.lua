@@ -1634,14 +1634,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
             GateHide(tools2, iconSize)
             iconSize.disableOn = DisableIfNoIcon
-            -- ★ MAX SYMBOLS (2026-09-16). One symbol per dispellable aura, this many deep;
-            -- the row grows into the frame from the corner the position picks. At 1 -- the
-            -- default -- it is exactly the single badge it always was. Krathe: "by default
-            -- it should show the same as the overlay, so just 1, but if people want to show
-            -- extra they can increase the slider."
-            -- ⚠ COMMIT ONLY, no drag callback: the count is tuning state on the row's
-            -- container and re-tunes on commit; a per-tick re-tune while dragging is work
-            -- for nothing on a five-step slider.
+            -- Commit callback only: each change re-tunes the row's container.
             local iconMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Symbols"], 1, 5, 1, db, "dispelIconMax", function()
                 ApplyDispelSettings()
             end), 55)

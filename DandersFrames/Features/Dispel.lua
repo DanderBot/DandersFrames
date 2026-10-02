@@ -1506,12 +1506,7 @@ local function dispelSlotPlan(db, selfOnly)
         -- border ring). Four separate strip textures, now on one button.
         edges    = (gradientOn and gradientStyle == "EDGE")
                    and { "TOP", "BOTTOM", "LEFT", "RIGHT" } or nil,
-        -- ☠ NO BADGE ROLE ANY MORE (2026-09-16). The type symbol is a GROUP now -- the
-        -- dispel icon ROW, a second container beside this one (DriveDispelIconRow) that
-        -- lays out one symbol per dispellable aura, Max Symbols deep. At the default of
-        -- one it shows exactly what the badge on this slot showed: the engine's first
-        -- match for the same filter. See the note above the row's init for why a group
-        -- succeeds where the five per-type SLOTS could not.
+        -- No type-symbol role: the symbol is the separate icon row (DriveDispelIconRow).
     }
     local slots = {}
     -- Mode marker for the tuning signature. Explicit, because the old derivation
@@ -1637,7 +1632,6 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
             st[#st + 1] = "r:g=" .. tostring(r.gradient)
                 .. ",b=" .. tostring(r.border and true or false)
                 .. ",e=" .. (r.edges and table.concat(r.edges, "/") or "none")
-            -- (No badge term: the symbol left this slot for the icon row, 2026-09-16.)
         end
     end
     -- The bound carrier is created in the initializeFrame (DispelSlotSecureInit), so
@@ -2064,10 +2058,6 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         carriers[#carriers + 1] = { tex = ring }
     end
 
-    -- (The TYPE BADGE used to be a carrier on this slot. It is the dispel icon ROW now --
-    -- DispelIconRowSecureInit below -- so the main slot carries only the wash, the ring
-    -- and the strips.)
-
     -- ONE bind pass for every carrier (clear-once-then-append; see BindDispelCarriers).
     BindDispelCarriers(btn, carriers, db, key)
 
@@ -2185,40 +2175,19 @@ local function StyleGameMainSlot(btn, frame, db)
     end
 end
 
--- ★★ THE DISPEL ICON ROW (2026-09-16). One symbol per dispellable aura, Max Symbols
--- deep, engine-laid-out -- a GROUP in a row-mode container of its own, beside the
--- overlay's slot container.
---
--- ☠ WHY A GROUP SUCCEEDS WHERE THE PER-TYPE SLOTS FAILED. The 2026-07-10 design had
--- five icon SLOTS, one per dispel type, each with includeDispelTypes. They could not be
--- made mutually exclusive (an aura carries exactly ONE dispelName, so excluding Magic
--- from the Curse slot removes nothing), presence was Blizzard's (SetShown on the slot
--- button) so we never knew WHICH were lit, and laying them out was rejected for that
--- reason: without knowing which are shown, only fixed per-type cells are possible,
--- which pushes the symbol off its corner in the common single-type case. It collapsed
--- to one badge on the main slot.
--- A GROUP has none of that problem. The engine fills it with every aura that passes the
--- filter and lays the buttons out itself -- one per aura, packed from the anchor,
--- nothing to know. Krathe, 2026-09-16: "by default it should show the same as the
--- overlay, so just 1, but if people want to show extra they can increase the slider."
--- At one it IS the badge: same filter, same first match, same corner. (Jordan's
--- PR #267 found this shape; the execution here is ours -- see the PR review.)
---
--- ⚠ THE BUTTON DRAWS NOTHING OF ITS OWN. The row's style hides the icon and the
--- cooldown (style.icon.show = false -- the key the container actually reads, not a
--- nested `button` table), so each button is a bare cell and the bound carrier below is
--- all it shows. The carrier is bound with BadgeCarrierOptions -- the Icon style, so
--- Blizzard picks the RaidFrame-Icon-Debuff* art for the aura's type; we never read
--- the type and never SetAtlas.
--- ⚠ SAME FIELD NAMES AS THE OLD BADGE (dfDispelBadge / -Dim / -Holder), on purpose:
--- RevealDispelCarriers, DarkenAllDims, the stale-art clear and the /df debug dispel
--- dump all address the badge by those names and need no second set of branches.
--- ⚠ NO SIZE, NO POINT, NO LEVEL HERE. The engine sizes and places the button from the
--- row's layout; the holder is SetAllPoints(btn) and rides it. The main slot's badge
--- had to re-level itself over the content overlay because it sat on a frame-sized
--- button; this row's WINDOW is levelled there once, at build (DriveDispelIconRow).
--- ⚠ BORN DARK, like every carrier: the dim host is alpha 0 until BindDispelCarriers
--- confirms the bind and RevealDispelCarriers restores dispelIconAlpha.
+-- ============================================================
+-- DISPEL ICON ROW
+-- One type symbol per dispellable aura, up to Max Symbols: a GROUP in its own row-mode
+-- container, so the engine adds and lays out one button per matching aura. Per-type
+-- slots cannot do this -- an aura has one dispelName, so they cannot be made mutually
+-- exclusive, and slot visibility is secret, so they cannot be packed.
+-- Each button draws nothing itself (the style hides icon and cooldown); the carrier is
+-- bound with BadgeCarrierOptions, so the engine picks the art for the aura's type.
+-- The fields use the badge names (dfDispelBadge / -Dim / -Holder) so
+-- RevealDispelCarriers, DarkenAllDims and the debug dump cover these buttons.
+-- No size, point or level here: the engine places the button and the holder rides it.
+-- Born dark: the dim host stays at alpha 0 until BindDispelCarriers confirms the bind.
+-- ============================================================
 local function DispelIconRowSecureInit(btn, db)
     if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
     local holder = CreateFrame("Frame", nil, btn)
@@ -2234,10 +2203,8 @@ local function DispelIconRowSecureInit(btn, db)
     BindDispelCarriers(btn, { { tex = badge, opts = BadgeCarrierOptions() } }, db, "icons")
 end
 
--- The row's tainted style pass, per button: opacity and the pulse. Nothing else -- see
--- the init above for why size, point and level are not ours here.
--- ⚠ Opacity on the DIM host, texture normalised to 1 (the dim-host rule,
--- StyleGameMainSlot), and gated on the bind like every carrier (DispelCarriersBound).
+-- Per-button style pass: opacity on the dim host (texture held at 1, gated on the bind)
+-- and the pulse.
 local function StyleDispelIconRowButton(btn, db)
     local badge = btn.dfDispelBadge
     if not badge then return end
@@ -2357,9 +2324,8 @@ local function StyleOneSlot(btn, frame, db, info)
         BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
     end
     do
-        -- ONE button, every role it owns (see dispelSlotPlan's `roles`). There is only
-        -- the main slot now -- the per-type icon slots are gone, and the type symbol is
-        -- the dispel icon ROW's job (its own container; StyleDispelIconRow).
+        -- ONE button, every role it owns (see dispelSlotPlan's `roles`). The type symbol
+        -- is styled by the icon row instead (StyleDispelIconRowButton).
         -- StyleGameMainSlot runs UNCONDITIONALLY: besides dressing the gradient
         -- carrier it owns the shared geometry pass (ApplyOverlayLayout), hides
         -- the legacy regions, and applies the darken/pulse — all of which the
@@ -2655,10 +2621,7 @@ local function dispelFilterRecords(slots, db, frame)
     return recs
 end
 
--- ═══ THE DISPEL ICON ROW — the drive ═══
--- Growth follows the corner: a symbol anchored at a right-hand corner grows LEFT, a
--- top one grows DOWN, so the row always runs into the frame rather than off it. With
--- Max Symbols at one (the default) growth never applies and the row is the badge.
+-- Growth follows the corner so the row runs into the frame, not off it.
 local ICON_ROW_GROWTH = {
     TOPLEFT = "RIGHT_DOWN", TOP = "RIGHT_DOWN", TOPRIGHT = "LEFT_DOWN",
     LEFT = "RIGHT_DOWN", CENTER = "RIGHT_DOWN", RIGHT = "LEFT_DOWN",
@@ -2668,9 +2631,8 @@ local ICON_ROW_MAX = 5
 
 local warnedIconRowInit = false
 
--- The row's records: the SAME filters and candidate maps as the overlay's slots (main,
--- plus the racial/totem gap slot when the plan has one), so the row's first symbol is
--- the overlay's aura. No roles — the row builds one carrier per button in its own init.
+-- Same filters and candidate maps as the overlay's slots, so the row's first symbol is
+-- the overlay's aura.
 local function dispelIconRowRecords(slots, db)
     local recs = {}
     for i = 1, #slots do
@@ -2705,22 +2667,18 @@ local function dispelIconRowLayout(db, max)
     }
 end
 
--- Where the badge sat: one over the content overlay, so the symbol clears the name and
--- health text. Expressed as an offset from the unit frame because that is what the
--- handle's ApplyZOrder adds to its parent's level.
+-- One level above the content overlay so symbols clear the name and health text. Given
+-- as an offset from the unit frame, which is what ApplyZOrder adds to its parent's level.
 local function dispelIconRowLevelOffset(frame)
     local band = (frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
         or (frame:GetFrameLevel() + 25)
     return band + 1 - frame:GetFrameLevel()
 end
 
--- Three tiers, the overlay's own split: STRUCTURAL (the record KEY SET -- AddAuraGroup
--- is add-only, so a key change is a rebuild) -> Destroy+Create; TUNING (filter strings,
--- the dispel-type maps, Max Symbols) -> ApplyTuning in place; LAYOUT (size, corner,
--- offsets) -> ApplyStyle in place. Then the per-button opacity/pulse pass, out of
--- combat, latched on the layout version and the handle's build generation exactly as
--- StyleDispelSlots is -- a regen-deferred build hands over fresh buttons.
--- ⚠ ApplyTuning REPLACES config.max with what it is given, so max rides every tune.
+-- Three tiers, like the overlay: record key set -> rebuild (AddAuraGroup is add-only);
+-- filters and max -> ApplyTuning; layout -> ApplyStyle. The style pass is latched on the
+-- layout version and build generation, since a regen-deferred build brings new buttons.
+-- ApplyTuning replaces config.max, so max is passed on every tune.
 local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
     local h = frame.dispelIconRow
     if db.dispelShowIcon == false then
@@ -2754,8 +2712,7 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
             max = max,
             filter = dispelIconRowRecords(slots, db),
             layout = L,
-            -- ⚠ THE KEYS THE CONTAINER READS: style.icon / style.cooldown, not a nested
-            -- `button` table. A bare cell -- the bound carrier is the whole picture.
+            -- The container reads style.icon / style.cooldown (not a nested `button` table).
             style = { icon = { show = false }, cooldown = { show = false } },
             frameLevelOffset = lvlOff,
             enabled = true,
@@ -2861,10 +2818,8 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- broken rather than a non-dwarf short-circuiting before it ever runs (field log,
     -- 2026-08-26 16:56). A diagnostic that reads as a fault is worse than no diagnostic.
     local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
-    -- ⚠ THE ICON ROW IS IN THE LATCH TOO. Its version and generation are its own
-    -- (dfDispelIconRowVersion / -Gen, stamped by DriveDispelIconRow), and a row that is
-    -- switched off is current by definition -- otherwise every per-UNIT_AURA call on
-    -- every frame would fall through to the full plan for a container that does not exist.
+    -- The icon row has its own version/generation. A switched-off row counts as current,
+    -- or every UNIT_AURA would fall through to the full plan.
     local row = frame.dispelIconRow
     local rowWanted = db.dispelShowIcon ~= false
     local rowCurrent
