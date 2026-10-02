@@ -301,6 +301,37 @@ bindingTooltip:SetScript("OnEvent", function(self)
 end)
 
 -- ============================================================
+-- RAIDER.IO FALLBACK -- only when Raider.IO cannot see the unit itself
+-- ============================================================
+-- On secure header children GameTooltip:GetUnit() comes back SECRET, and Raider.IO
+-- used to read the unit that way, so its unit-tooltip hook bailed and DF drew the
+-- profile through the public RaiderIO.ShowProfile instead.
+--
+-- ☠ DUPLICATE BLOCK (field report 2026-10-02, Raider.IO v202610012155). Raider.IO
+-- now resolves the unit from GetPrimaryTooltipData().guid (UnitTokenFromGUID, then a
+-- group-token scan -- GetTooltipUnit in its core.lua), so its own hook draws the
+-- block on our frames. DF kept testing GetUnit(), still saw a secret, and drew it a
+-- second time. ⇒ Ask the question Raider.IO asks: when the tooltip's GUID is
+-- readable, Raider.IO has already handled it and we stay out. The old GetUnit test
+-- remains for clients without GetPrimaryTooltipData.
+-- ⚠ The trade: a Raider.IO build old enough to still read GetUnit() would now show
+-- nothing on our frames. Raider.IO ships a database refresh most days, so a copy that
+-- old is not one anyone is running; drawing twice for everyone current is worse.
+function DF:ShowRaiderIOFallback(tooltip, unit)
+    local rio = _G.RaiderIO
+    if not (rio and rio.ShowProfile) or not unit then return end
+    if tooltip.GetPrimaryTooltipData then
+        local data = tooltip:GetPrimaryTooltipData()
+        local guid = data and data.guid
+        if guid and not issecretvalue(guid) then return end
+    else
+        local _, ttUnit = tooltip:GetUnit()
+        if ttUnit and not issecretvalue(ttUnit) then return end
+    end
+    rio.ShowProfile(tooltip, unit)
+end
+
+-- ============================================================
 -- TOOLTIP REFRESH TICKER
 -- Re-fires GameTooltip:SetUnit() every 0.25s while hovering a unit frame.
 -- Allows addons like RaiderIO that check IsModifierKeyDown() inside
@@ -568,10 +599,7 @@ local function StartTooltipRefresh(frame)
         if mod == tooltipRefreshModState then return end
         tooltipRefreshModState = mod
         GameTooltip:SetUnit(f.unit)
-        local _, ttUnit = GameTooltip:GetUnit()
-        if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-            _G.RaiderIO.ShowProfile(GameTooltip, f.unit)
-        end
+        DF:ShowRaiderIOFallback(GameTooltip, f.unit)
     end)
 end
 
@@ -1910,10 +1938,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             PositionFrameTooltip(self)
             local unit = GetCleanUnitForTooltip(self) or self.unit
             GameTooltip:SetUnit(unit)
-            local _, ttUnit = GameTooltip:GetUnit()
-            if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-                _G.RaiderIO.ShowProfile(GameTooltip, unit)
-            end
+            DF:ShowRaiderIOFallback(GameTooltip, unit)
             StartTooltipRefresh(self)
         end
         DF:ShowBindingTooltip(self)
