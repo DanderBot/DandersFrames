@@ -686,13 +686,9 @@ function DF:InitializeHeaderChild(frame)
     -- ========================================
     frame.dfEventsEnabled = true  -- Flag checked by global handler
 
-    -- Trigger a comprehensive update for the frame. Coalesced per frame: a join burst
-    -- can reassign the same child several times in one render frame (each header
-    -- update re-sorts), and each reassignment would queue its own identical
-    -- FullFrameRefresh for the next tick. One flag, cleared when the timer runs, keeps
-    -- it to one repaint per child per burst -- the repaint reads self.unit at fire
-    -- time, so it always paints the FINAL unit of the burst. Shared by the full
-    -- reassign path and the same-GUID path below.
+    -- One FullFrameRefresh per child per render frame: a roster burst can reassign a
+    -- child several times, and the refresh reads self.unit when it fires, so it paints
+    -- the final unit.
     local function QueueFullFrameRefresh(self)
         if self._dfFullRefreshQueued then return end
         self._dfFullRefreshQueued = true
@@ -788,20 +784,9 @@ function DF:InitializeHeaderChild(frame)
                 -- involving it is stale.
                 if self.isPinnedFrame then DF:InvalidatePinnedUnitCache() end
 
-                -- ☠☠ THE SAME PLAYER IS NOT THE SAME BINDING. This shortcut predates the
-                -- 12.1 containers: in v4 every aura read asked the unit token fresh, so a
-                -- renumbered token was harmless. Every aura container is now bound to a
-                -- TOKEN at SetUnit and keeps it -- so when a join renumbers the raid and
-                -- this player goes raid7 -> raid6, the frame's aura rows, dispel overlay,
-                -- dispel icons and every Aura Designer container went on watching
-                -- "raid7", which is now SOMEONE ELSE. Nothing re-pointed them until an
-                -- unrelated global refresh happened by. Field-caught by the stale-
-                -- container recorder (Krathe, 2026-09-28): frames raid6..raid19 all
-                -- ENGINE-UNIT "bound to the next token" on a join, out of combat, nothing
-                -- pending, for 22s and then again until the log ended.
-                -- ⇒ Queue the same coalesced refresh as the full path; its drives compare
-                -- each container's unit with self.unit and retarget (deferring in combat
-                -- exactly as they do for any other reassignment).
+                -- Same player, new token: aura containers are bound to the TOKEN at
+                -- SetUnit, so they would keep watching the old one (now someone else).
+                -- The refresh's drives retarget any container whose unit differs.
                 QueueFullFrameRefresh(self)
                 return
             end
@@ -906,8 +891,6 @@ function DF:InitializeHeaderChild(frame)
                 -- handles all unit events and dispatches via unitFrameMap[unit].
             end
             
-            -- Trigger a comprehensive update for the frame (coalesced; see
-            -- QueueFullFrameRefresh above).
             if actualUnit then
                 QueueFullFrameRefresh(self)
             end
