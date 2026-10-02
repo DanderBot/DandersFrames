@@ -2120,9 +2120,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- Up-front explainer for the Match inheritance + per-setting override model.
+        -- The match drives only size, scale, spacing and border (GetSetBaselineDB); auras come
+        -- from the set's Aura Designer template. The banner names both so neither is assumed.
         local matchInfoBanner = GUI:CreateInfoBanner(self.child, {
             tone = "info",
-            text = L["Pinned frames are based on your Party or Raid frames — choose which below. Change any setting to override it for these frames; use the reset button beside an overridden setting to revert it to the inherited value."],
+            text = L["Width, height, scale, spacing and border follow your Party or Raid frames — choose which below. Change any of them to override it for these frames; use the reset button beside an overridden setting to revert it. Auras are not affected: they come from the Aura Designer Template below, or from the group you are in when it is left on Inherit."],
         })
         layoutGroup:AddWidget(matchInfoBanner, matchInfoBanner.layoutHeight or 44)
 
@@ -2158,7 +2160,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         local matchOptions = { party = L["Party"], raid = L["Raid"] }
-        layoutGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Based on"], matchOptions, "matchMode", function()
+        layoutGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Size & Spacing From"], matchOptions, "matchMode", function()
             UpdateHighlightLayout()
             RefreshMatchOverrides()
         end), 55)
