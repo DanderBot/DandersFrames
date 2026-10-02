@@ -7856,7 +7856,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Live: every shown frame with any dispel state; Test: shown test frames
                 if DF.IterateAllFrames then
                     DF:IterateAllFrames(function(f)
-                        if f and f:IsShown() and (f.dfDispelOverlay or f.dispelFactory) then
+                        if f and f:IsShown() and (f.dfDispelOverlay or f.dispelFactory or f.dispelIconRow) then
                             dumpFrame(f, tostring(f.unit))
                         end
                     end)
