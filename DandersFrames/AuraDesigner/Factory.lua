@@ -5658,8 +5658,7 @@ end
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported()) then return end
-    -- Stamp for the passive recorder (Debug/AuraUnitScan.lua): a slot owner found on the
-    -- wrong unit is a different fault depending on whether this ever ran for the frame.
+    -- For the stale-container recorder: tells whether SyncFrame ever ran for this frame.
     frame.dfADLastSyncAt = date("%H:%M:%S")
 
     -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the

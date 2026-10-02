@@ -981,11 +981,8 @@ end
 -- ⚠ Channel-gated: costs two C calls per crossing while RANGE is on, nothing otherwise.
 -- Distinguishing those two shapes is the whole question, and neither is observable after
 -- the fact.
--- ☠ ON RANGE, NOT AURACONTAINER (2026-10-01). It fires on every range crossing of every
--- unit, so in a moving raid it was ~3,900 of the 5,000 log lines in fifty minutes. The
--- log evicts oldest INFO first, so a busy evening pushed out everything else on the
--- AURACONTAINER channel, the stale-container recorder included. RANGE is already marked
--- noisy, so it starts off; tick it when this question is the one being asked.
+-- On RANGE (noisy, off by default), not AURACONTAINER: it fires on every crossing of
+-- every unit and would evict the rest of the log.
 function AuraContainer.NoteRangeTransition(unit, inRange)
     if not (DF.DebugActive and DF:DebugActive("RANGE")) then return end
     if type(unit) ~= "string" or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
@@ -8809,11 +8806,7 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     local owner = ownerOf(frame)
     if not (owner and owner.container and type(unit) == "string") then return false end
     if owner.unit == unit then return true end
-    -- ★ ONE LINE PER AD SLOT RETARGET, in the log (2026-09-21). The aura ROWS have logged
-    -- theirs since the collapse; the placed indicators never did, so a raid where the
-    -- passive recorder saw slot owners sit on the previous occupant's token for minutes
-    -- had nothing in the log to say whether this function was ever reached. Roster
-    -- churn only -- a few lines per shuffle, not per event.
+    -- One line per AD slot-owner retarget (roster changes only, not per event).
     DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
         InCombatLockdown() and " (in combat: deferred to regen)" or "")
     -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on

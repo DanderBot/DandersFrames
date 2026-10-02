@@ -1,72 +1,29 @@
 local addonName, DF = ...
 
 -- ============================================================
--- TEMPORARY DIAGNOSTIC -- PASSIVE STALE-CONTAINER RECORDER
+-- STALE-CONTAINER RECORDER (temporary diagnostic)
+-- Samples every visible frame (1s in combat, 2s out) for containers showing the wrong
+-- unit or no longer listening. Findings go to the debug log under UNITSCAN as START and
+-- CLEAR lines with durations -- logged as WARN, because the log evicts INFO first -- and
+-- to DandersFramesDebugDB.unitscan as one row per problem per session. Each session also
+-- writes a heartbeat to DandersFramesDebugDB.unitscanRuns, so an empty result can be told
+-- apart from a recorder that never ran.
+--     /run DandersFrames:DumpAuraUnitLog()        -- print; pass true to clear afterwards
 --
--- Runs by itself. No command during combat, nothing to remember mid-pull.
--- Arms on login, samples all the time (every second in combat, every two out
--- of it), and writes what it finds to TWO places:
---
---   * the DEBUG LOG (category UNITSCAN) -- one line when a problem STARTS and one
---     when it CLEARS, with how long it lasted. This is the timeline; it sits next
---     to the roster, latch and retarget lines, so a reload is the whole report.
---   * DandersFramesDebugDB.unitscan -- one row per problem per SESSION, with the
---     count and the latest detail. Read it after raid with
---
---     /run DandersFrames:DumpAuraUnitLog()          -- print what it caught
---     /run DandersFrames:DumpAuraUnitLog(true)      -- print, then clear
---
--- ☠ WHY IT WAS REWRITTEN (2026-09-24). Krathe: "the log should find the problem --
--- it's pointless if it keeps missing it." It missed for three reasons:
---   1. It sampled only IN COMBAT. A stale indicator out of combat was invisible.
---   2. Rows were merged by key with NO DATE and the detail was never refreshed, so a
---      repeat in a later session looked like the old row with a bigger count, and new
---      diagnostic fields never appeared on a key that already existed.
---   3. Every check trusted DF's OWN bookkeeping (owner.unit, _pendingOp). A container
---      can be wrong while every DF memo says it is right.
---
--- WHAT IT CHECKS -- the first two ask the ENGINE, not DF, which is the point:
---
---   ENGINE-UNIT   The container's own GetUnit() differs from the frame's unit, on a
---                 visible frame. The container parses auras for the unit it is bound
---                 to, so this frame is showing SOMEONE ELSE'S auras -- durations that
---                 never move, icons that never clear. Covers every lane: aura rows,
---                 dispel, every Aura Designer store, and the AD slot owner.
---   SHOWN-DISABLED  The container's window is shown but the container is disabled.
---                 A disabled container unregisters UNIT_AURA, so whatever it painted
---                 last stays on screen with nothing to update it.
+-- Checks:
+--   ENGINE-UNIT     the container's own GetUnit() differs from the frame's unit, so it
+--                   shows another player's auras
+--   SHOWN-DISABLED  window shown but container disabled, so UNIT_AURA is unregistered
 --   STUCK-PENDING-OP / REBUILD-UPGRADE / STUCK-HIDDEN / STUCK-AD-SLOTS / WRONG-AD-SLOTS
---                 The original four hypotheses, kept: they describe the path INTO a
---                 bad state (a deferred op that never drained, a hide that never
---                 lifted), which the engine checks cannot see.
+--                   DF-side states that lead into a stale container
+-- Not checkable:
+--   * UNIT_AURA registration: IsEventRegistered is forbidden on containers.
+--   * A button still showing an aura that has gone: aura buttons secret-wrap their
+--     visibility and icon, out of combat too, so IsShown and GetTexture are secret.
+--     MarkAuraFault is the only way to timestamp one.
+-- Hidden frames are skipped: they cannot show a stale aura.
 --
--- ⚠ NOT CHECKABLE, and why, so nobody spends time adding it:
---   * Whether a container is still registered for UNIT_AURA. IsEventRegistered is
---     refused on containers by the EventRegistrations forbidden aspect (proven in game,
---     see setContainerProviderDeaf in Frames/AuraContainer.lua). SHOWN-DISABLED is the
---     readable half of that question.
---   * ☠ Whether a button is SHOWING AN AURA THAT HAS GONE -- the stale-icon case itself
---     (a stale Prayer of Mending in raid, 2026-10-01: right unit, container listening,
---     icon stuck with its timer run out). Counting shown buttons against the unit's real
---     auras was proposed, and it cannot be done: Blizzard_CustomAuraButton paints
---     visibility as SetShown(secretwrap(auraData ~= nil)) and AuraContainerUtil sets the
---     icon as SetTexture(secretwrap(icon)) -- ALWAYS wrapped, out of combat too. So
---     IsShown and GetTexture on an aura button are secret, and no OnShow runs in its
---     subtree. A stale icon has no readable trace; the panic button below is the only
---     way to timestamp one.
---
--- ☠ FINDINGS ARE LOGGED AS WARN (2026-10-01). The log evicts oldest INFO first once it is
--- full, and a busy raid fills it inside an hour -- so an INFO start line was gone before
--- anyone read it. A WARN survives until there is no INFO left to evict.
--- ★ AND EACH SESSION LEAVES A HEARTBEAT in DandersFramesDebugDB.unitscanRuns (armed time,
--- samples taken, last sample, findings). "Nothing caught" is only evidence when the
--- heartbeat shows the recorder was sampling at the time; on 2026-10-01 it was not
--- possible to tell, because the "recorder armed" line had been evicted.
---
--- Hidden frames are skipped entirely: a frame nobody can see cannot show a stale
--- aura, and the previous version filled the log with frames whose unit had left.
---
--- DELETE THIS FILE and its TOC line when we are done.
+-- Delete this file and its TOC line when done.
 -- ============================================================
 
 local format, date = string.format, date
@@ -84,8 +41,8 @@ local LANES = {
     { field = "dispelFactory",    label = "dispel",    hidden = nil },
 }
 
--- Every Aura Designer store that holds container-backed handles (see ad_storage_map;
--- "placed" holds SlotHandles, which are checked through the frame's slot owner instead).
+-- AD stores holding container-backed handles. "placed" holds SlotHandles, which are
+-- checked through the frame's slot owner instead.
 local AD_STORES = { "healthbar", "background", "border", "nametext", "healthtext",
                     "fgroups", "dgroups" }
 
@@ -112,9 +69,8 @@ local function heartbeat()
     return run
 end
 
--- Problems seen on the PREVIOUS sample, keyed kind|unit|lane -> { since = GetTime() }.
--- A key present last sample and absent now has CLEARED; that edge is what tells us a
--- stale indicator was "brief" and for how long.
+-- Problems seen on the previous sample (kind|unit|lane -> start). A key that is gone
+-- from the current sample has cleared.
 local active = {}
 local seenNow = {}
 
@@ -156,8 +112,7 @@ local function record(kind, unit, lane, detail)
     }
 end
 
--- Episodes present last sample but not this one have ended. Logged with duration, which
--- is the number that separates "a frame late" from "stuck until something else fixed it".
+-- Log the episodes that ended since the last sample, with their duration.
 local function closeEpisodes()
     local t = GetTime()
     for ep, info in pairs(active) do
@@ -169,18 +124,15 @@ local function closeEpisodes()
     wipe(seenNow)
 end
 
--- Engine truth for one container: the unit it is actually bound to, and whether it is
--- enabled. Plain Lua fields on a container we created -- readable, never secret -- but
--- pcall'd anyway because a torn-down container can be half gone.
+-- The unit the container is actually bound to, and whether it is enabled. pcall'd: a
+-- torn-down container can be half gone.
 local function engineState(c)
     if not c then return nil end
     local okU, u = pcall(c.GetUnit, c)
     local okE, en = pcall(c.IsEnabled, c)
     if okU and issecretvalue and issecretvalue(u) then okU = false end
     if okE and issecretvalue and issecretvalue(en) then okE = false end
-    -- ☠ Explicit ifs, NOT `okE and en or nil`: en is FALSE exactly when the container is
-    -- disabled, and the and/or idiom turns that false into nil -- which made SHOWN-DISABLED
-    -- impossible to fire. Caught by the mock test before it shipped.
+    -- Explicit ifs: `okE and en or nil` would turn a disabled container's false into nil.
     local bound, enabled = nil, nil
     if okU then bound = u end
     if okE then enabled = (en == true) end
@@ -289,8 +241,8 @@ local function sample(postCombat)
                             .. tostring(owner.pendingUnit) .. " after combat")
                     end
                 else
-                    -- ★ WHY was nothing pending? Record the conditions the Factory's
-                    -- retarget walk needs, so the log names the gate it fell at.
+                    -- Nothing pending: record the conditions the Factory's retarget walk
+                    -- needs, so the log shows which one failed.
                     local placed = adStore and adStore.placed
                     local nPlaced, nMine, nParked = 0, 0, 0
                     if placed then
@@ -323,17 +275,13 @@ local function sample(postCombat)
     closeEpisodes()
 end
 
--- ---- panic button --------------------------------------------------------
---
--- The detectors above are still guesses about WHERE staleness comes from. This one
--- assumes nothing: it snapshots every visible frame's container state at the moment you
--- press it, engine truth included, so even a fault nobody has thought of leaves evidence.
---
--- Bind it. One keypress is doable mid-heal; typing a command is not:
+-- ============================================================
+-- PANIC BUTTON
+-- ============================================================
+-- Snapshots every visible frame's container state (engine binding included) when pressed,
+-- for faults none of the checks above describe. Bind it to a key:
 --     /run DandersFrames:MarkAuraFault()
---
--- If you can get the mouse over the offending frame first, it records which unit that
--- was -- but do not chase it, the snapshot is worth having regardless.
+-- Also records the mouseover unit, if any.
 local MAX_SNAPS = 20
 
 function DF:MarkAuraFault(note)
@@ -434,11 +382,11 @@ function DF:DumpAuraUnitLog(clear)
     end
 end
 
--- ---- arming --------------------------------------------------------------
---
--- Always on: a fast ticker in combat, a slower one out of it. Out of combat was the gap
--- the stale indicator on 2026-09-24 fell through. The cost is a few field reads and two
--- plain getters per container per sample.
+-- ============================================================
+-- ARMING
+-- ============================================================
+-- Always on: 1s ticker in combat, 2s out of it. Cost per sample: a few field reads and
+-- two plain getters per container.
 
 local driver = CreateFrame("Frame")
 driver:RegisterEvent("PLAYER_LOGIN")
