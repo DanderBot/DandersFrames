@@ -30,6 +30,9 @@
 - (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
+- (Blizzard Frames) Fix Blizzard's party frames losing their Edit Mode size when DandersFrames isn't hiding them.
+- (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
+- (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
 
 ### Changes
 

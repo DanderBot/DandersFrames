@@ -1250,8 +1250,13 @@ function CC:FindDuplicateBinding(newBinding, excludeIndex)
             if newBinding.actionType == existing.actionType then
                 if newBinding.actionType == CC.ACTION_TYPES.SPELL then
                     -- For spells, check spell name or ID
-                    sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
-                                 (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    if DF.IS_FOREVER and (newBinding.lowRank or existing.lowRank) then
+                        -- Different ranks are different actions
+                        sameAction = (newBinding.lowRank and existing.lowRank and newBinding.spellId == existing.spellId) or false
+                    else
+                        sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
+                                     (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    end
                 elseif newBinding.actionType == CC.ACTION_TYPES.MACRO then
                     -- For macros, check macro ID or name
                     sameAction = (newBinding.macroId and newBinding.macroId == existing.macroId) or
@@ -1481,7 +1486,11 @@ function CC:GetActionDisplayString(binding)
     if binding.actionType == CC.ACTION_TYPES.SPELL then
         -- Get current display name (accounts for talent overrides)
         local displayName = GetSpellDisplayInfo(binding.spellId, binding.spellName)
-        return displayName or binding.spellName or "No Spell"
+        displayName = displayName or binding.spellName
+        if displayName and binding.lowRank then
+            displayName = CC:FormatSpellRankLabel(displayName, binding.spellRank)
+        end
+        return displayName or "No Spell"
     elseif binding.actionType == CC.ACTION_TYPES.MACRO then
         -- Try to get macro name from stored macro or binding
         if binding.macroId then
@@ -1664,7 +1673,9 @@ function CC:GetAllPlayerSpells()
                                 -- This handles cases where the spellbook entry itself is an override
                                 -- e.g., Chrono Flames (431443) -> Living Flame (361469)
                                 local trueRootId = baseSpellId
-                                if C_Spell.GetBaseSpell then
+                                -- Forever: no override chains, and each rank must keep its
+                                -- own ID (so it isn't folded into another rank)
+                                if C_Spell.GetBaseSpell and not DF.IS_FOREVER then
                                     local baseId = C_Spell.GetBaseSpell(baseSpellId)
                                     if baseId and baseId ~= baseSpellId then
                                         trueRootId = baseId
@@ -1700,6 +1711,16 @@ function CC:GetAllPlayerSpells()
                                         end
                                     end
                                     
+                                    -- Forever: rank text ("Rank 2") and whether a higher
+                                    -- rank is known (see SPELL RANKS)
+                                    local rank, lowRank
+                                    if DF.IS_FOREVER then
+                                        local subName = spellBookItemInfo.subName
+                                        rank = (subName and subName ~= "") and subName or nil
+                                        lowRank = C_SpellBook.IsSpellBookItemLowRank
+                                            and C_SpellBook.IsSpellBookItemLowRank(slotIndex, bookType) or nil
+                                    end
+
                                     spellsByDisplayId[displaySpellId] = {
                                         spell = {
                                             name = baseName,           -- Root spell name for binding
@@ -1709,6 +1730,8 @@ function CC:GetAllPlayerSpells()
                                             category = useCategory,
                                             categoryPriority = useCategoryPriority,
                                             tabName = useTabName,
+                                            rank = rank,
+                                            lowRank = lowRank,
                                         },
                                         isRoot = isRoot,
                                     }
@@ -1731,9 +1754,16 @@ function CC:GetAllPlayerSpells()
         if a.categoryPriority ~= b.categoryPriority then
             return a.categoryPriority < b.categoryPriority
         end
+        if a.name == b.name then
+            -- Ranks of one spell: highest first
+            local ra = tonumber(a.rank and a.rank:match("%d+")) or 0
+            local rb = tonumber(b.rank and b.rank:match("%d+")) or 0
+            if ra ~= rb then return ra > rb end
+            return (a.spellId or 0) > (b.spellId or 0)
+        end
         return a.name < b.name
     end)
-    
+
     return results
 end
 
@@ -1868,6 +1898,62 @@ local function GetLocalizedSpellName(spellId)
         return info and info.name
     end
     return nil
+end
+
+-- ============================================================
+-- SPELL RANKS (WoW Forever)
+-- Classic-style clients list every rank of a spell separately, all under the
+-- same name, and a bare "/cast Name" always casts the HIGHEST rank. So a
+-- lower-rank binding is stored with lowRank (+ its rank text as a fallback) and
+-- casts "Name(Rank N)"; a top-rank binding stays a bare name so it moves up to
+-- each new rank as it is learned. Bindings made before this have no lowRank
+-- and keep behaving as top-rank. Retail never sets any of these fields.
+-- ============================================================
+
+-- Copy the rank fields from a spell-list entry onto a new binding
+function CC:ApplySpellRank(binding, spellData)
+    if not (DF.IS_FOREVER and binding and spellData) then return end
+    if spellData.lowRank then
+        binding.lowRank = true
+        binding.spellRank = spellData.rank
+    else
+        binding.lowRank = nil
+        binding.spellRank = nil
+    end
+end
+
+-- Rank text for a lower-rank binding, or nil when it should cast the bare name
+local function GetBindingRankText(binding)
+    if not (DF.IS_FOREVER and binding and binding.lowRank) then return nil end
+    local rank = binding.spellId and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(binding.spellId)
+    if not rank or rank == "" then rank = binding.spellRank end
+    if not rank or rank == "" then return nil end
+    return rank
+end
+
+-- The name a macro should /cast for this binding: "Name(Rank N)" or "Name"
+local function GetCastSpellName(binding, name)
+    if not name then return nil end
+    local rank = GetBindingRankText(binding)
+    return rank and (name .. "(" .. rank .. ")") or name
+end
+
+-- Label for the UI: "Name (Rank N)" for a ranked entry/binding
+function CC:FormatSpellRankLabel(name, rank)
+    if DF.IS_FOREVER and name and rank and rank ~= "" then
+        return name .. " (" .. rank .. ")"
+    end
+    return name
+end
+
+-- Does this binding cast the given spell-list entry? Forever only: a lower-rank
+-- binding matches its exact rank; any other binding casts the top rank, so it
+-- matches only the entry that is not a lower rank.
+function CC:BindingMatchesRankedSpell(binding, spellData)
+    if binding.lowRank then
+        return binding.spellId == spellData.spellId
+    end
+    return binding.spellName == spellData.name and not spellData.lowRank
 end
 
 -- Get the player's available resurrection spells (returns localized names)
@@ -2142,6 +2228,10 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
             end
         end
         
+        -- Lower-rank binding (Forever): cast that exact rank. Added after the
+        -- resurrection checks above, which match on the bare name.
+        spellName = GetCastSpellName(binding, spellName)
+
         -- Check what fallback options are enabled
         -- For frame click-casting to work, we ALWAYS need @mouseover when binding applies to frames
         -- because WoW sets the frame's unit as mouseover when you hover/click it
@@ -2418,6 +2508,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell
         local isResSpell = CC:IsResurrectionSpell(spell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        spell = GetCastSpellName(friendlyBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = friendlyBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2444,6 +2536,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell (e.g., Soulstone can be used on hostile? unlikely but consistent)
         local isResSpell = CC:IsResurrectionSpell(spell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        spell = GetCastSpellName(hostileBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = hostileBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2468,6 +2562,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell
         local isResSpell = CC:IsResurrectionSpell(anySpell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        anySpell = GetCastSpellName(anyBinding, anySpell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = anyBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2497,7 +2593,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     if friendlyBinding and friendlyBinding.spellName then
         local fb = friendlyBinding.fallback or {}
         if fb.selfCast then
-            local friendlySpell = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
+            local friendlySpell = GetCastSpellName(friendlyBinding, GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName)
             local combatCond = GetCombatCondition(friendlyBinding)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, "[@player" .. combatStr .. "] " .. friendlySpell)
@@ -2509,7 +2605,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     -- the self-cast clause above resolves first when enabled.
     for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
         if b and b.fallback and b.fallback.alwaysCast and b.spellName then
-            local spell = GetLocalizedSpellName(b.spellId) or b.spellName
+            local spell = GetCastSpellName(b, GetLocalizedSpellName(b.spellId) or b.spellName)
             local combatCond = GetCombatCondition(b)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, (combatStr ~= "" and ("[" .. combatStr:sub(2) .. "] ") or "") .. spell)
