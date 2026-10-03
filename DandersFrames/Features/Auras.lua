@@ -4445,6 +4445,12 @@ local strippedFrames = {}
 -- Track frames that have been reparented to the hidden frame
 local reparentedFrames = {}
 
+-- Blizzard frames WE hid (alpha / scale / Hide). The "show" side of the visibility
+-- pass only touches frames in here: restoring unconditionally overwrote Blizzard's
+-- own state on every pass -- Edit Mode's party Frame Size (PartyFrame scale, bug
+-- #1127) and the raid frames' out-of-range alpha (flicker + FPS drop, bug #1126).
+local dfHiddenFrames = {}
+
 -- Hidden parent frame for fully disabling Blizzard frames (Grid2 pattern)
 local blizzardHiddenParent = CreateFrame("Frame")
 blizzardHiddenParent:Hide()
@@ -4573,6 +4579,8 @@ local function InstallBlizzardHooks()
 
     local function ForceHideSideMenuFrame(frame)
         if not frame then return end
+        -- Recorded so the visibility pass shows it again once the menu should be back
+        dfHiddenFrames[frame] = true
         pcall(function()
             if not InCombatLockdown() then
                 frame:Hide()
@@ -4634,35 +4642,40 @@ function DF:UpdateBlizzardFrameVisibility()
         InstallBlizzardHooks()
     end
     
-    -- Function to safely apply visibility using SetAlpha only
+    -- Alpha-only hide. Showing only undoes OUR hide -- a frame we never hid keeps
+    -- whatever alpha Blizzard gave it (range fade, Edit Mode opacity).
     local function SafeHideFrame(frame, hide)
-        if not frame then return end
-        pcall(function()
-            if hide then
-                frame:SetAlpha(0)
-            else
-                frame:SetAlpha(1)
-            end
-        end)
+        if not frame or not frame.SetAlpha then return end
+        if hide then
+            dfHiddenFrames[frame] = true
+            pcall(frame.SetAlpha, frame, 0)
+        elseif dfHiddenFrames[frame] then
+            dfHiddenFrames[frame] = nil
+            pcall(frame.SetAlpha, frame, 1)
+        end
     end
-    
+
     local function SafeScaleContainer(frame, hide)
         if not frame then return end
         if InCombatLockdown() then return end
-        pcall(function()
-            if hide then
+        if hide then
+            dfHiddenFrames[frame] = true
+            pcall(function()
                 frame:SetAlpha(0)
                 frame:SetScale(0.001)
-            else
+            end)
+        elseif dfHiddenFrames[frame] then
+            dfHiddenFrames[frame] = nil
+            pcall(function()
                 frame:SetAlpha(1)
-                frame:SetScale(1)
-            end
-        end)
-    end
-    
-    local function SafeSetAlpha(frame, alpha)
-        if frame and frame.SetAlpha then
-            pcall(function() frame:SetAlpha(alpha) end)
+                -- Let Edit Mode put its own Frame Size back (PartyFrame scale is
+                -- FrameSize/100); plain 1 only if that isn't available.
+                local restored = frame == PartyFrame and frame.UpdateSystemSettingFrameSize
+                    and pcall(frame.UpdateSystemSettingFrameSize, frame)
+                if not restored then
+                    frame:SetScale(1)
+                end
+            end)
         end
     end
     
@@ -4683,9 +4696,9 @@ function DF:UpdateBlizzardFrameVisibility()
     
     -- Handle CompactPartyFrame (raid-style party frames)
     if CompactPartyFrame then
-        SafeSetAlpha(CompactPartyFrame, hidePartyFrames and 0 or 1)
-        SafeSetAlpha(CompactPartyFrame.title, hidePartyFrames and 0 or 1)
-        SafeSetAlpha(CompactPartyFrame.borderFrame, hidePartyFrames and 0 or 1)
+        -- (title is handled with the side menu below, which decides its final alpha)
+        SafeHideFrame(CompactPartyFrame, hidePartyFrames)
+        SafeHideFrame(CompactPartyFrame.borderFrame, hidePartyFrames)
         if hidePartyFrames then
             HideSelectionHighlights(CompactPartyFrame)
         end
@@ -4709,12 +4722,9 @@ function DF:UpdateBlizzardFrameVisibility()
             else
                 RestoreParent(frame)
                 SafeHideFrame(frame, hidePartyFrames)
-                local petFrame = _G["PartyMemberFrame" .. i .. "PetFrame"]
-                SafeSetAlpha(petFrame, hidePartyFrames and 0 or 1)
-                local buffFrame = _G["PartyMemberFrame" .. i .. "BuffFrame"]
-                SafeSetAlpha(buffFrame, hidePartyFrames and 0 or 1)
-                local debuffFrame = _G["PartyMemberFrame" .. i .. "DebuffFrame"]
-                SafeSetAlpha(debuffFrame, hidePartyFrames and 0 or 1)
+                SafeHideFrame(_G["PartyMemberFrame" .. i .. "PetFrame"], hidePartyFrames)
+                SafeHideFrame(_G["PartyMemberFrame" .. i .. "BuffFrame"], hidePartyFrames)
+                SafeHideFrame(_G["PartyMemberFrame" .. i .. "DebuffFrame"], hidePartyFrames)
             end
         end
     end
@@ -4773,20 +4783,29 @@ function DF:UpdateBlizzardFrameVisibility()
     -- The hooks on Show() only re-hide when ShouldHideSideMenu() is true,
     -- so calling Show() here is safe — if we're showing, the setting is on
     -- and the hook will be a no-op.
+    -- Showing only undoes OUR hide: an unconditional Show() every pass popped frames
+    -- Blizzard keeps hidden on purpose (e.g. the Edit Mode party side panel).
     local function ForceHideShow(frame, hide)
         if not frame then return end
-        pcall(function()
-            if InCombatLockdown() then
-                frame:SetAlpha(hide and 0 or 1)
-            else
-                if hide then
-                    frame:Hide()
+        local inCombat = InCombatLockdown()
+        if hide then
+            dfHiddenFrames[frame] = true
+            pcall(function()
+                if inCombat then
+                    frame:SetAlpha(0)
                 else
-                    frame:SetAlpha(1)
-                    frame:Show()
+                    frame:Hide()
                 end
-            end
-        end)
+            end)
+        elseif dfHiddenFrames[frame] then
+            pcall(function()
+                frame:SetAlpha(1)
+                if not inCombat then frame:Show() end
+            end)
+            -- In combat only the alpha came back; keep the record so the next
+            -- out-of-combat pass (PLAYER_REGEN_ENABLED) does the Show().
+            if not inCombat then dfHiddenFrames[frame] = nil end
+        end
     end
 
     -- Handle raid frame manager
@@ -4808,19 +4827,14 @@ function DF:UpdateBlizzardFrameVisibility()
     local partySideMenuVisible = showSideMenu or not hidePartyFrames
 
     if CompactPartyFrame then
-        -- Only adjust title if we want to show/hide the side menu differently
-        if not partySideMenuVisible then
-            SafeSetAlpha(CompactPartyFrame.title, 0)
-        else
-            SafeSetAlpha(CompactPartyFrame.title, 1)
-        end
+        SafeHideFrame(CompactPartyFrame.title, not partySideMenuVisible)
         ForceHideShow(CompactPartyFrame.dropdown, not partySideMenuVisible)
         ForceHideShow(CompactPartyFrame.menuButton, not partySideMenuVisible)
     end
 
     if PartyFrame then
         ForceHideShow(PartyFrame.DropdownButton, not partySideMenuVisible)
-        SafeSetAlpha(PartyFrame.PartyMemberFrameDropDown, partySideMenuVisible and 1 or 0)
+        SafeHideFrame(PartyFrame.PartyMemberFrameDropDown, not partySideMenuVisible)
     end
 
     if EditModeManagerFrame and EditModeManagerFrame.PartyFramesSidePanel then
