@@ -80,8 +80,22 @@ local cachedDefensiveFilters = nil   -- mode-independent
 --
 -- Gated on the bar actually being ON: excluding the category while nothing else
 -- displays it would make those buffs invisible on every bar.
+-- WoW Forever ships an EMPTY spell database (FilterRegistry/SpellDB.lua), so the
+-- default category selection resolves to an include map with NOTHING in it and
+-- the buff bar would show no buffs at all. Until Forever has its own database,
+-- an empty result there falls back to Blizzard's own raid-frame buff rule (the
+-- RAID token) instead. A custom filter with spells in it still wins.
+local function UseForeverRaidBuffFallback(db)
+    if not (DF.IS_FOREVER and DF.FilterRegistry) or db.directBuffShowAll then return false end
+    local res = DF.FilterRegistry:ResolveSelection(db.buffFilterSelection, false)
+    return res.kind == "include" and next(res.map) == nil
+end
+
 local function BuildDirectBuffFilters(db)
     local f = db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL"
+    if UseForeverRaidBuffFallback(db) then
+        f = f .. "|" .. (AuraFilters.Raid or "RAID")
+    end
     if db.buffDeduplicateDefensives and db.defensiveIconEnabled
         and AuraFilters.BigDefensive and DF.FilterRegistry then
         local res = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
@@ -2767,7 +2781,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- (Show All / empty selection) leaves the exclude union untouched — the
         -- pre-registry behavior, byte-for-byte.
         local res = DF.FilterRegistry:ResolveSelection(db.buffFilterSelection, db.directBuffShowAll)
-        if res.kind == "include" then
+        if res.kind == "include" and UseForeverRaidBuffFallback(db) then
+            -- Forever, nothing to include: the RAID token in the filter string
+            -- (BuildDirectBuffFilters) does the choosing; an empty include map
+            -- here would hide every buff.
+        elseif res.kind == "include" then
             local inc = {}
             local excl = candidateFilters and candidateFilters.excludeSpellIDs
             for id in pairs(res.map) do

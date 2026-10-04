@@ -33,6 +33,7 @@
 - (Blizzard Frames) Fix Blizzard's party frames losing their Edit Mode size when DandersFrames isn't hiding them.
 - (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
 - (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
+- (Buffs) WoW Forever: the Buff Bar now shows the same buffs as Blizzard's own raid frames, since there's no built-in spell list there yet. Custom filters still work as normal.
 
 ### Changes
 
