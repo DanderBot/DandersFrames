@@ -4040,14 +4040,10 @@ function NativeBackend:build()
     -- keys are remembered so ApplyStyle can hot-apply per-group layout and ApplyTuning
     -- can hot-apply max/sort/candidateFilters (all live mutators).
     local filters = normalizeFilters(config.filter)
-    -- ☠ SINGLE-SLOT means exactly ONE slot. The declaration loop below runs per
-    -- filter record, and every slot it declares pins to the same corner -- so a
-    -- multi-record config would stack its buttons on top of each other where the
-    -- group path would have flowed them side by side. No current consumer can hit
-    -- this (poolFilter returns one string, which normalizeFilters turns into one
-    -- record), but the flag's name promises something the loop does not enforce.
-    -- Fall back to groups rather than render wrong: correct output, no saving.
-    if isSingleSlot and #filters ~= 1 then
+    -- Single-slot pins every declared slot to the same corner, so several records stack
+    -- on top of each other. Only a consumer that wants that (config.stackSlots) gets it;
+    -- anyone else falls back to groups, which flow side by side.
+    if isSingleSlot and #filters ~= 1 and not config.stackSlots then
         DF:DebugWarn(DBG, "singleSlot config has %d filter records; using groups", #filters)
         isSingleSlot = false
     end

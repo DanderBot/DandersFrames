@@ -2177,10 +2177,12 @@ end
 
 -- ============================================================
 -- DISPEL ICON ROW
--- One type symbol per dispellable aura, up to Max Symbols: a GROUP in its own row-mode
--- container, so the engine adds and lays out one button per matching aura. Per-type
--- slots cannot do this -- an aura has one dispelName, so they cannot be made mutually
--- exclusive, and slot visibility is secret, so they cannot be packed.
+-- One type symbol per dispellable aura, up to Max Symbols, in its own row-mode container.
+-- Above 1, each overlay slot becomes a GROUP, so the engine adds and lays out one button
+-- per matching aura (per-type slots cannot do this: an aura has one dispelName, so they
+-- cannot be made mutually exclusive, and slot visibility is secret, so they cannot be
+-- packed). At 1, each overlay slot becomes a slot stacked on the same corner, which
+-- renders exactly like the badge the overlay's slots used to carry.
 -- Each button draws nothing itself (the style hides icon and cooldown); the carrier is
 -- bound with BadgeCarrierOptions, so the engine picks the art for the aura's type.
 -- The fields use the badge names (dfDispelBadge / -Dim / -Holder) so
@@ -2675,7 +2677,8 @@ local function dispelIconRowLevelOffset(frame)
     return band + 1 - frame:GetFrameLevel()
 end
 
--- Three tiers, like the overlay: record key set -> rebuild (AddAuraGroup is add-only);
+-- Three tiers, like the overlay: record key set or slot/group shape -> rebuild
+-- (AddAuraGroup is add-only, and a slot cannot become a group);
 -- filters and max -> ApplyTuning; layout -> ApplyStyle. The style pass is latched on the
 -- layout version and build generation, since a regen-deferred build brings new buttons.
 -- ApplyTuning replaces config.max, so max is passed on every tune.
@@ -2693,7 +2696,8 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
     if max < 1 then max = 1 elseif max > ICON_ROW_MAX then max = ICON_ROW_MAX end
     local keys = {}
     for i = 1, #slots do keys[i] = slots[i].key end
-    local sig = "icons|" .. table.concat(keys, ",")
+    local single = max == 1
+    local sig = "icons|" .. table.concat(keys, ",") .. (single and "|single" or "")
     local tune = tostring(tuneSig) .. "|max=" .. max
     local L = dispelIconRowLayout(db, max)
     local laySig = L.size .. "|" .. L.anchor .. "|" .. L.growth .. "|" .. L.offsetX .. "|" .. L.offsetY .. "|" .. L.wrap
@@ -2710,6 +2714,8 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
             unit = frame.unit,
             mode = "row",
             max = max,
+            singleSlot = single,
+            stackSlots = true,
             filter = dispelIconRowRecords(slots, db),
             layout = L,
             -- The container reads style.icon / style.cooldown (not a nested `button` table).
