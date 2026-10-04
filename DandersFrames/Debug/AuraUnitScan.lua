@@ -2,6 +2,8 @@ local addonName, DF = ...
 
 -- ============================================================
 -- STALE-CONTAINER RECORDER (temporary diagnostic)
+-- Runs only while the debug console is on with UNITSCAN logged; for everyone else the
+-- ticker is a no-op and nothing is written to SavedVariables.
 -- Samples every visible frame (1s in combat, 2s out) for containers showing the wrong
 -- unit or no longer listening. Findings go to the debug log under UNITSCAN as START and
 -- CLEAR lines with durations -- logged as WARN, because the log evicts INFO first -- and
@@ -45,6 +47,8 @@ local LANES = {
 -- checked through the frame's slot owner instead.
 local AD_STORES = { "healthbar", "background", "border", "nametext", "healthtext",
                     "fgroups", "dgroups" }
+local AD_LANES = {}
+for i = 1, #AD_STORES do AD_LANES[i] = "AD " .. AD_STORES[i] end
 
 local currentEncounter
 
@@ -147,8 +151,17 @@ local function windowShown(h)
     return shown and true or false
 end
 
+-- Age of the frame's last Factory:SyncFrame, formatted only when a row is written.
+local function syncAge(frame)
+    local t = frame.dfADLastSyncAt
+    if type(t) ~= "number" then return "never" end
+    return format("%.1fs ago", GetTime() - t)
+end
+
 -- The two engine checks, for one Handle (a real per-consumer container).
-local function checkHandle(h, unit, lane, frame, hiddenFlag)
+-- laneKey, when given, is appended to the lane label only if a finding is recorded,
+-- so a clean sample builds no strings.
+local function checkHandle(h, unit, lane, frame, hiddenFlag, laneKey)
     if not h or h._destroyed then return end
     local c = h.backend and h.backend.container
     if not c then return end
@@ -157,6 +170,10 @@ local function checkHandle(h, unit, lane, frame, hiddenFlag)
     -- A row that hid itself for a deferred retarget legitimately shows the old binding
     -- until regen; it shows NOTHING meanwhile, so it cannot be stale. Skip it.
     local selfHidden = hiddenFlag and frame[hiddenFlag]
+    local stale = bound and bound ~= unit and shown ~= false and not selfHidden
+    local disabled = shown == true and enabled == false
+    if not (stale or disabled) then return end
+    if laneKey ~= nil then lane = lane .. ":" .. tostring(laneKey) end
     if bound and bound ~= unit and shown ~= false and not selfHidden then
         record("ENGINE-UNIT", unit, lane, format(
             "container bound to %s, frame is %s | cfgUnit=%s pendingOp=%s shown=%s enabled=%s gen=%s",
@@ -216,7 +233,7 @@ local function sample(postCombat)
                     for key, entry in pairs(t) do
                         local h = entry and entry.handle
                         if h and h.backend then
-                            checkHandle(h, unit, "AD " .. AD_STORES[s] .. ":" .. tostring(key), frame)
+                            checkHandle(h, unit, AD_LANES[s], frame, nil, key)
                         end
                     end
                 end
@@ -231,7 +248,7 @@ local function sample(postCombat)
                 record("ENGINE-UNIT", unit, "AD slots", format(
                     "slot owner container bound to %s, frame is %s | owner.unit=%s pending=%s enabled=%s lastSync=%s",
                     tostring(bound), tostring(unit), tostring(owner.unit), tostring(owner.pendingUnit),
-                    tostring(enabled), tostring(frame.dfADLastSyncAt)))
+                    tostring(enabled), syncAge(frame)))
             end
             if owner.unit ~= unit then
                 if owner.pendingUnit then
@@ -263,7 +280,7 @@ local function sample(postCombat)
                             .. " parked=%d adEnabled=%s factory=%s exists=%s lastSync=%s",
                             tostring(owner.unit), tostring(bound), nPlaced, nMine, nParked,
                             tostring(adOn and true or false), tostring(fac and true or false),
-                            tostring(UnitExists(unit)), tostring(frame.dfADLastSyncAt)))
+                            tostring(UnitExists(unit)), syncAge(frame)))
                 end
             end
         end
@@ -314,7 +331,7 @@ function DF:MarkAuraFault(note)
             local bound, enabled = engineState(owner.container)
             parts[#parts + 1] = format("ADslots(owner=%s,engine=%s,en=%s,pending=%s,sync=%s)",
                 tostring(owner.unit), tostring(bound), tostring(enabled),
-                tostring(owner.pendingUnit), tostring(frame.dfADLastSyncAt))
+                tostring(owner.pendingUnit), syncAge(frame))
         end
         rows[#rows + 1] = table.concat(parts, " ")
     end
@@ -385,8 +402,12 @@ end
 -- ============================================================
 -- ARMING
 -- ============================================================
--- Always on: 1s ticker in combat, 2s out of it. Cost per sample: a few field reads and
--- two plain getters per container.
+-- 1s ticker in combat, 2s out of it, gated per tick on the debug console so it can be
+-- switched on mid-session without a reload. Off, each tick is one predicate call.
+
+local function recorderActive()
+    return DF.DebugActive and DF:DebugActive("UNITSCAN") or false
+end
 
 local driver = CreateFrame("Frame")
 driver:RegisterEvent("PLAYER_LOGIN")
@@ -402,14 +423,14 @@ local function armTicker(interval)
     if ticker then ticker:Cancel() end
     tickerInterval = interval
     ticker = C_Timer.NewTicker(interval, function()
-        if DF.testMode or DF.raidTestMode then return end
+        if DF.testMode or DF.raidTestMode or not recorderActive() then return end
         pcall(sample, false)
     end)
 end
 
 driver:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "PLAYER_LOGIN" then
-        heartbeat()
+        if recorderActive() then heartbeat() end
         DF:Debug("UNITSCAN", "recorder armed, session %s", SESSION)
         armTicker(IDLE_INTERVAL)
     elseif event == "ENCOUNTER_START" then
@@ -425,6 +446,8 @@ driver:SetScript("OnEvent", function(_, event, arg1, arg2)
         armTicker(COMBAT_INTERVAL)
     elseif event == "PLAYER_REGEN_ENABLED" then
         armTicker(IDLE_INTERVAL)
-        C_Timer.After(POST_COMBAT_DELAY, function() pcall(sample, true) end)
+        C_Timer.After(POST_COMBAT_DELAY, function()
+            if recorderActive() then pcall(sample, true) end
+        end)
     end
 end)
