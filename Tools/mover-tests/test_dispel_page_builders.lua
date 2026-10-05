@@ -306,6 +306,7 @@ local DISPEL_SETTINGS = {
 local DISPEL_ICON = {
     { "checkbox", "Show Dispel Symbol", "dispelShowIcon",      30 },
     { "slider",   "Symbol Size",        "dispelIconSize",      55 },
+    { "slider",   "Max Symbols",        "dispelIconMax",       55 },
     { "slider",   "Symbol Opacity",     "dispelIconAlpha",     55 },
     { "dropdown", "Symbol Position",    "dispelIconPosition",  55 },
     { "slider",   "Offset X",           "dispelIconOffsetX",   55 },
