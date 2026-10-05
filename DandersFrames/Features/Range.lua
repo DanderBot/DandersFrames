@@ -785,7 +785,8 @@ end
 
 rangeAnimGroup:SetScript("OnLoop", function()
     if DF:MemTestDisabled("enableRange") then return end
-    if not DF.partyHeader then return end
+    -- Any group header, not DF.partyHeader: party frames can be disabled.
+    if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) then return end
 
     local contentType = DF:GetContentType()
 
