@@ -685,7 +685,30 @@ function DF:InitializeHeaderChild(frame)
     -- registration needed - eliminates timing bugs on unit changes.
     -- ========================================
     frame.dfEventsEnabled = true  -- Flag checked by global handler
-    
+
+    -- One FullFrameRefresh per child per render frame: a roster burst can reassign a
+    -- child several times, and the refresh reads self.unit when it fires, so it paints
+    -- the final unit.
+    local function QueueFullFrameRefresh(self)
+        if self._dfFullRefreshQueued then return end
+        self._dfFullRefreshQueued = true
+        C_Timer.After(0, function()
+            self._dfFullRefreshQueued = nil
+            if self:IsVisible() and self.unit then
+                -- Use full frame refresh for complete update
+                if DF.FullFrameRefresh then
+                    DF:FullFrameRefresh(self)
+                else
+                    -- Fallback if FullFrameRefresh not yet loaded
+                    if DF.UpdateUnitFrame then DF:UpdateUnitFrame(self) end
+                    if DF.UpdateAuras then DF:UpdateAuras(self) end
+                    if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(self) end
+                    if DF.UpdateRoleIcon then DF:UpdateRoleIcon(self) end
+                end
+            end
+        end)
+    end
+
     -- Sync unit attribute to frame.unit property (for compatibility with existing code)
     -- The header assigns units via attributes, but a lot of code uses frame.unit directly
     -- Use GUID comparison to detect actual player changes
@@ -761,6 +784,10 @@ function DF:InitializeHeaderChild(frame)
                 -- involving it is stale.
                 if self.isPinnedFrame then DF:InvalidatePinnedUnitCache() end
 
+                -- Same player, new token: aura containers are bound to the TOKEN at
+                -- SetUnit, so they would keep watching the old one (now someone else).
+                -- The refresh's drives retarget any container whose unit differs.
+                QueueFullFrameRefresh(self)
                 return
             end
 
@@ -864,31 +891,8 @@ function DF:InitializeHeaderChild(frame)
                 -- handles all unit events and dispatches via unitFrameMap[unit].
             end
             
-            -- Trigger a comprehensive update for the frame. Coalesced per
-            -- frame: a join burst can reassign the same child several times
-            -- in one render frame (each header update re-sorts), and each
-            -- reassignment queued its own identical FullFrameRefresh for the
-            -- next tick. One flag, cleared when the timer runs, keeps it to
-            -- one repaint per child per burst — the repaint reads self.unit
-            -- at fire time, so it always paints the FINAL unit of the burst.
-            if actualUnit and not self._dfFullRefreshQueued then
-                self._dfFullRefreshQueued = true
-
-                C_Timer.After(0, function()
-                    self._dfFullRefreshQueued = nil
-                    if self:IsVisible() and self.unit then
-                        -- Use full frame refresh for complete update
-                        if DF.FullFrameRefresh then
-                            DF:FullFrameRefresh(self)
-                        else
-                            -- Fallback if FullFrameRefresh not yet loaded
-                            if DF.UpdateUnitFrame then DF:UpdateUnitFrame(self) end
-                            if DF.UpdateAuras then DF:UpdateAuras(self) end
-                            if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(self) end
-                            if DF.UpdateRoleIcon then DF:UpdateRoleIcon(self) end
-                        end
-                    end
-                end)
+            if actualUnit then
+                QueueFullFrameRefresh(self)
             end
 
             -- Fire OnFramesSorted for external API subscribers whenever a child's
