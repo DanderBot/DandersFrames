@@ -1,12 +1,14 @@
 -- ============================================================
 -- WOW FOREVER SPELL DATABASE + PER-VERSION FILTER STORE
---   DandersFrames/FilterRegistry/SpellDB.lua   (empty on Forever)
+--   DandersFrames/FilterRegistry/SpellDB_Forever.lua (generated; Forever's records)
+--   DandersFrames/FilterRegistry/SpellDB.lua   (retail's; Forever's via its prefixes)
 --   DandersFrames/FilterRegistry/Registry.lua  (store key, PruneForeignIDs)
 -- Both loaded REAL.
 -- ============================================================
 
 local function loadDB(isForever)
     local ns = { IS_FOREVER = isForever or nil }
+    load_df_file_into("FilterRegistry/SpellDB_Forever.lua", ns)   -- TOC order: just before SpellDB
     load_df_file_into("FilterRegistry/SpellDB.lua", ns)
     return ns
 end
@@ -30,21 +32,47 @@ do  -- retail is untouched
     check(next(RR.Excluded) ~= nil, "retail keeps its exclusion list")
 end
 
-do  -- Forever ships nothing, but every shared shape survives
-    eq(#RF.Spells, 0, "Forever ships no records")
-    eq(countKeys(RF.ByID), 0, "Forever ByID is empty")
+do  -- Forever carries its OWN generated database, never retail's
+    check(#RF.Spells > 50, "Forever ships its generated records (" .. #RF.Spells .. ")")
+    check(RR.ForeverSpells == nil and retail.RaidBuffs == nil, "the Forever file is a no-op on retail")
     eq(countKeys(RF.Excluded), 0, "Forever has no exclusions")
     eq(countKeys(RF.CategoryPatch), 0, "Forever has no category patch")
     eq(RF.DBStamp.flavor, "forever", "Forever stamp is marked")
-    check(RF.DBStamp.gameBuild == nil and RF.DBStamp.harvest == nil,
-        "Forever stamp has no harvest/build (the Options label must branch, not format them)")
+    check(type(RF.DBStamp.gameBuild) == "number", "Forever stamp carries the build it was generated from")
     eq(#RF.Categories, #RR.Categories, "Forever keeps every category")
     for i, cat in ipairs(RR.Categories) do
         eq(RF.Categories[i] and RF.Categories[i].key, cat.key, "category " .. i .. " key matches retail")
-        local bucket = RF.ByCategory[cat.key]
-        check(type(bucket) == "table" and #bucket == 0,
-            "Forever category '" .. cat.key .. "' exists and is empty (not nil: nil means 'deleted')")
+        check(type(RF.ByCategory[cat.key]) == "table", "Forever category '" .. cat.key .. "' exists (nil means 'deleted')")
     end
+    -- every rank is its own id: the lowest rank AND the top rank both resolve
+    eq(RF.ByID[139] and RF.ByID[139].n, "Renew", "Renew rank 1 resolves")
+    eq(RF.ByID[25315] and RF.ByID[25315].n, "Renew", "Renew top rank resolves to the same record")
+    check(RF.ByID[21562] and RF.ByID[21562] == RF.ByID[1243], "Prayer of Fortitude folds into Fortitude")
+    check(RR.ByID[25315] == nil or RR.ByID[25315].n ~= "Renew", "retail does not carry Forever's rank ids")
+    -- no id is claimed by two records (ByID would silently keep only the last)
+    local seen, dup = {}, nil
+    for _, rec in ipairs(RF.Spells) do
+        for _, id in ipairs({ rec.id, unpack(rec.alts or {}) }) do
+            if seen[id] then dup = id end
+            seen[id] = true
+        end
+    end
+    check(dup == nil, "no spell id appears in two Forever records (" .. tostring(dup) .. ")")
+end
+
+do  -- Missing Buffs: the four shared group buffs, every rank, under the retail keys
+    eq(#forever.RaidBuffs, 4, "Forever tracks four raid buffs")
+    local keys = {}
+    for _, info in ipairs(forever.RaidBuffs) do keys[info[2]] = info end
+    for _, k in ipairs({ "missingBuffCheckStamina", "missingBuffCheckIntellect",
+                         "missingBuffCheckVersatility", "missingBuffCheckAttackPower" }) do
+        check(keys[k] and type(keys[k][1]) == "table" and #keys[k][1] > 3, k .. " lists its ranks")
+    end
+    local fort = {}
+    for _, id in ipairs(keys.missingBuffCheckStamina[1]) do fort[id] = true end
+    check(fort[1243] and fort[10938] and fort[21562], "Fortitude counts rank 1, top rank and Prayer of Fortitude")
+    eq(forever.ClassToRaidBuff.SHAMAN, nil, "no Shaman raid buff on Forever")
+    eq(forever.ClassToRaidBuff.PRIEST, "missingBuffCheckStamina", "Priest -> Fortitude")
 end
 
 -- ---- 2. the registry on Forever -----------------------------------
@@ -80,18 +108,18 @@ do  -- the store is keyed per version
         "a Forever filter lands in auraFiltersForever")
     eq(snapshot(forever._global.auraFilters), before, "retail's store is byte-identical afterwards")
 
-    eq(RF:AddSpellToCustom(id, 1459), "raw", "with no database every add is a raw id")
-    eq(RF:AddSpellToCustom(id, 1459), "exists", "...and a repeat is reported")
+    eq(RF:AddSpellToCustom(id, 999001), "raw", "an id the database doesn't know is a raw id")
+    eq(RF:AddSpellToCustom(id, 999001), "exists", "...and a repeat is reported")
     local list = RF:FilterSpellList(id)
     eq(#list, 1, "the custom filter lists its one id")
     eq(list[1] and list[1].raw, true, "...as a raw row")
 
-    local catKey = RR.Categories[1].key
-    local cl = RF:FilterSpellList(catKey)
+    local cl = RF:FilterSpellList("tierSetAuras")
     check(type(cl) == "table" and #cl == 0, "an empty category lists {} (not nil)")
+    check(#RF:FilterSpellList("healing") > 0, "a filled Forever category lists its spells")
 
     local f = RF:GetCustomFilter(id)
-    check(f and f.rawIDs[1459] and not next(f.spells), "no promotion out of rawIDs with an empty database")
+    check(f and f.rawIDs[999001] and not next(f.spells), "an unknown id stays raw")
 end
 
 -- ---- 3. the import prune -------------------------------------------
@@ -111,7 +139,9 @@ withSpells(function(id) return id == 6603 or id == 1459 end, function()
     local remap = RF:ImportCustomFilters({ x1 = { name = "Imported", spells = { [774] = true }, rawIDs = { [1459] = true } } })
     eq(RF._lastImportPruned, 1, "profile-import path counts its prune")
     local imported = RF:GetCustomFilter(remap.x1)
-    check(imported and imported.rawIDs[1459] and not imported.spells[774], "imported filter holds only live ids")
+    -- 1459 is in the Forever database, so the import may promote it out of rawIDs
+    check(imported and (imported.rawIDs[1459] or imported.spells[1459]) and not imported.spells[774],
+        "imported filter holds only live ids")
 end)
 
 withSpells(function() return false end, function()

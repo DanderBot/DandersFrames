@@ -171,6 +171,7 @@ TextDesigner\Migration.lua
 TextDesigner\Preview.lua
 
 # Filter Registry
+FilterRegistry\SpellDB_Forever.lua
 FilterRegistry\SpellDB.lua
 FilterRegistry\Registry.lua
 

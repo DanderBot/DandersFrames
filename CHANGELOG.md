@@ -34,7 +34,8 @@
 - (Blizzard Frames) Fix Blizzard's party frames losing their Edit Mode size when DandersFrames isn't hiding them.
 - (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
 - (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
-- (Buffs) WoW Forever: the Buff Bar now shows the same buffs as Blizzard's own raid frames, since there's no built-in spell list there yet. Custom filters still work as normal.
+- (Buffs) WoW Forever: the buff filters now have a built-in spell list for every class, covering every rank of each spell, so the Buff Bar and Defensive icons work out of the box. Any category that's still empty falls back to the same buffs Blizzard's own raid frames show.
+- (Missing Buffs) WoW Forever: missing buff icons now work for Fortitude, Arcane Intellect, Mark of the Wild and Battle Shout, counting every rank and the group versions.
 - (Sorting) WoW Forever: separating melee and ranged now sorts by class, so Rogues and Warriors no longer end up with the ranged.
 - (Dispel) WoW Forever: diseases no longer go missing from the dispel overlay for Priests.
 - (Range) WoW Forever: low-level healers now get proper out-of-range fading instead of a rough distance check.

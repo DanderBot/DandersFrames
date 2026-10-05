@@ -21,12 +21,14 @@ local pairs, ipairs = pairs, ipairs
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
--- ☠ WOW FOREVER SHIPS AN EMPTY DATABASE. Every table below is `DF.IS_FOREVER and {} or
+-- ☠ WOW FOREVER HAS ITS OWN DATABASE. Every table below is `DF.IS_FOREVER and <forever> or
 -- { ...retail... }`: this harvest is retail's, and on Forever its ids are wrong or missing.
--- The short-circuit means the retail tables are never even built there. R.Categories is
--- shared (same keys, empty lists), so stored category keys and every page still work.
--- Regeneration (/update-spelldb) must keep the `DF.IS_FOREVER and {} or` prefixes.
-R.DBStamp = DF.IS_FOREVER and { flavor = "forever" }
+-- The short-circuit means the retail tables are never even built there. Forever's records
+-- and stamp come from FilterRegistry/SpellDB_Forever.lua (generated from the client's own
+-- spell tables, loaded just before this file); Excluded / CategoryPatch stay empty there.
+-- R.Categories is shared, so stored category keys and every page work on both.
+-- Regeneration (/update-spelldb) must keep the `DF.IS_FOREVER and ... or` prefixes.
+R.DBStamp = DF.IS_FOREVER and (R.ForeverStamp or { flavor = "forever" })
     or { harvest = "2026-09-09", gameBuild = 69497 }
 
 -- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
@@ -129,7 +131,7 @@ R.Categories = {
 
 -- Records are grouped by the section they FIRST appear in within the
 -- source data; multi-category spells carry every category in `cats`.
-R.Spells = DF.IS_FOREVER and {} or {
+R.Spells = DF.IS_FOREVER and (R.ForeverSpells or {}) or {
     -- ------------------------------------------------------------
     -- Healing
     -- ------------------------------------------------------------

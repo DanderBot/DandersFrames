@@ -2008,9 +2008,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         local stamp = R.DBStamp
         if stamp then
             local freshText
-            -- WoW Forever ships no database (SpellDB.lua), so its stamp has no harvest
-            -- or build to print -- and `%d` on a nil build is a hard error.
-            if stamp.flavor == "forever" or not stamp.gameBuild then
+            -- A stamp with no build (WoW Forever before its database was generated) has
+            -- nothing to print -- and `%d` on a nil build is a hard error.
+            if not stamp.gameBuild then
                 freshText = L["No built-in spell list on WoW Forever yet. Create a custom filter, then add spells by ID."]
             else
                 freshText = format(L["Spell database: %s (build %d)"], stamp.harvest, stamp.gameBuild)

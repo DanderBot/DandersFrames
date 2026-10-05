@@ -3234,7 +3234,6 @@ L["PI Helper — Already has active Power Infusion"] = true
 -- off there, and profiles moving between retail and Forever (Core\FlavorCorrection.lua).
 L["%d spell IDs that don't exist on WoW Forever were left out of the import."] = true
 L["Aura Designer settings in this import came from a different version of the game and were reset, because spell IDs differ between versions."] = true
-L["Missing buff icons aren't available on WoW Forever yet."] = true
 L["No built-in spell list on WoW Forever yet. Create a custom filter, then add spells by ID."] = true
 L["Profiles From Another Game Version"] = true
 L["Some of your profiles came from retail. Their Aura Designer setup has been put aside because spell IDs differ on WoW Forever, and comes back if you use them on retail again.\n\nWoW Forever has no built-in spell list yet: create a custom filter in the Filter Designer and add spells by ID."] = true
