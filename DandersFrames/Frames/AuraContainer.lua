@@ -978,17 +978,19 @@ end
 -- return (the auras had expired unseen — game behaviour, no bug). The PLAYER token
 -- failing open shows `mine` collapsing while `all` holds roughly steady — the same auras
 -- are still there, they simply stop being credited to you once the caster resolves.
--- ⚠ Channel-gated: costs two C calls per crossing while AURACONTAINER is on, nothing
--- otherwise. Distinguishing those two shapes is the whole question, and neither is
--- observable after the fact.
+-- ⚠ Channel-gated: costs two C calls per crossing while RANGE is on, nothing otherwise.
+-- Distinguishing those two shapes is the whole question, and neither is observable after
+-- the fact.
+-- On RANGE (noisy, off by default), not AURACONTAINER: it fires on every crossing of
+-- every unit and would evict the rest of the log.
 function AuraContainer.NoteRangeTransition(unit, inRange)
-    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if not (DF.DebugActive and DF:DebugActive("RANGE")) then return end
     if type(unit) ~= "string" or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     if issecretvalue and issecretvalue(inRange) then return end
     local all  = auraCountOn(unit, "HELPFUL")
     local mine = auraCountOn(unit, "HELPFUL|PLAYER")
     if not (all and mine) then return end
-    DF:Debug(DBG, "range %s unit=%s helpful=%d ofWhichMine=%d%s",
+    DF:Debug("RANGE", "aura snapshot %s unit=%s helpful=%d ofWhichMine=%d%s",
         inRange and "IN " or "OUT", tostring(unit), all, mine,
         (all > 0 and mine == all) and "  <-- claims ALL of them" or "")
 end
@@ -8804,6 +8806,9 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     local owner = ownerOf(frame)
     if not (owner and owner.container and type(unit) == "string") then return false end
     if owner.unit == unit then return true end
+    -- One line per AD slot-owner retarget (roster changes only, not per event).
+    DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
+        InCombatLockdown() and " (in combat: deferred to regen)" or "")
     -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on
     -- the OLD token deliberately, so GetUnit stays truthful about what is on screen and
     -- a repeat call simply re-queues rather than reporting a retarget that has not

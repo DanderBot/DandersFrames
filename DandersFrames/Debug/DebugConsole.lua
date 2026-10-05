@@ -91,6 +91,7 @@ local CATEGORY_GROUPS = {
             -- flips with the probe that broke trust, latches, recovery re-parses.
             -- Edge-triggered only, so it is quiet outside actual gate activity.
             { key = "IDGATE",        desc = "Identity gate: park/hide verdicts with reasons, latches, recovery" },
+            { key = "UNITSCAN",      desc = "Stale-container recorder: wrong-unit and not-listening containers, with durations" },
             -- ☠ REGISTERED BECAUSE THE PATHS OUTNUMBERED THE MEMORY OF THEM. A unit
             -- tooltip can be raised from FOUR places -- the standalone frame's OnEnter,
             -- the header child's own, the pet frame's own, and the 0.25s refresh ticker
