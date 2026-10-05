@@ -121,6 +121,46 @@ function DF:SetArenaSortIncomplete(incomplete)
     end
 end
 
+-- ============================================================
+-- PARTY SORT RETRY
+-- Same shape as the arena retry above. While a party member's name is unresolved the
+-- header runs in INDEX order; this re-sorts once names resolve (no roster event fires).
+-- ============================================================
+local partySortRetryPending = false
+local partySortRetryCount = 0
+local partyNameListIncomplete = false
+
+local function SchedulePartySortRetry()
+    if partySortRetryPending then return end
+    if partySortRetryCount >= 24 then return end  -- ~12s safety cap; UNIT_NAME_UPDATE re-arms it
+    partySortRetryPending = true
+    partySortRetryCount = partySortRetryCount + 1
+    C_Timer.After(0.5, function()
+        partySortRetryPending = false
+        if not partyNameListIncomplete then return end
+        if IsInRaid() or (DF.GetContentType and DF:GetContentType() == "arena") then return end
+        if InCombatLockdown() then
+            -- Replays via the existing combat-end queue.
+            DF.pendingSortingUpdate = true
+        elseif DF.IsFrameSortActive and DF:IsFrameSortActive() then
+            if DF.FrameSort and DF.FrameSort.RequestSort then
+                DF.FrameSort:RequestSort()
+            end
+        elseif DF.ApplyPartyGroupSorting then
+            DF:ApplyPartyGroupSorting()
+        end
+    end)
+end
+
+function DF:SetPartySortIncomplete(incomplete)
+    partyNameListIncomplete = incomplete and true or false
+    if incomplete then
+        SchedulePartySortRetry()
+    else
+        partySortRetryCount = 0  -- complete build: re-arm the safety cap
+    end
+end
+
 -- Same pattern for role updates
 local roleThrottleFrame = CreateFrame("Frame")
 roleThrottleFrame:Hide()
@@ -4385,16 +4425,22 @@ function DF:BuildPartyNameList(selfPosition)
         isPlayer = true
     })
     
-    -- Add party members
+    -- Add party members. An unresolved name (secret, nil or UNKNOWNOBJECT) must not reach the
+    -- list -- the header hides any unit whose name is not in it -- so report complete = false
+    -- and let ApplyPartyGroupSorting fall back to INDEX.
+    local complete = true
     for i = 1, 4 do
         local unit = "party" .. i
         if UnitExists(unit) then
             local name, realm = UnitName(unit)
-            local fullName = name
-            if realm and realm ~= "" then
-                fullName = name .. "-" .. realm
-            end
-            if name then
+            -- issecretvalue first: comparing or concatenating a secret string throws.
+            if issecretvalue(name) or issecretvalue(realm) or not name or name == UNKNOWNOBJECT then
+                complete = false
+            else
+                local fullName = name
+                if realm and realm ~= "" then
+                    fullName = name .. "-" .. realm
+                end
                 table.insert(members, {
                     unit = unit,
                     name = fullName,
@@ -4403,9 +4449,9 @@ function DF:BuildPartyNameList(selfPosition)
             end
         end
     end
-    
+
     -- Use the unified sorting function
-    return DF:BuildSortedNameList(members, DF:GetDB(), selfPosition, true)
+    return DF:BuildSortedNameList(members, DF:GetDB(), selfPosition, true), complete
 end
 
 -- ============================================================
@@ -5849,25 +5895,34 @@ function DF:ApplyPartyGroupSorting()
         headerDebug("  Sorting disabled, using INDEX (cleared all attributes)")
     else
         -- Use nameList for FIRST/LAST or any advanced sorting options
-        local nameList = DF:BuildPartyNameList(selfPosition)
-        
+        local nameList, complete = DF:BuildPartyNameList(selfPosition)
+
         -- Clear all filtering/grouping attributes that could interfere with nameList
         SetHeaderAttribute(DF.partyHeader, "groupBy", nil)
         SetHeaderAttribute(DF.partyHeader, "groupingOrder", nil)
         SetHeaderAttribute(DF.partyHeader, "groupFilter", nil)
         SetHeaderAttribute(DF.partyHeader, "roleFilter", nil)
         SetHeaderAttribute(DF.partyHeader, "strictFiltering", nil)
-        
-        -- Set nameList and sortMethod (ONLY if changed!)
-        SetHeaderAttribute(DF.partyHeader, "nameList", nameList)
-        SetHeaderAttribute(DF.partyHeader, "sortMethod", "NAMELIST")
-        
+
+        if not complete then
+            -- A member's name is unresolved: show everyone in INDEX order until it resolves.
+            -- A "Hide from Main Frames" pinned member also shows meanwhile; that is intended.
+            SetHeaderAttribute(DF.partyHeader, "nameList", nil)
+            SetHeaderAttribute(DF.partyHeader, "sortMethod", "INDEX")
+            DF:SetPartySortIncomplete(true)
+            headerDebug("  Party nameList INCOMPLETE (unresolved name) - using INDEX + retry")
+        else
+            DF:SetPartySortIncomplete(false)
+            -- Set nameList and sortMethod (ONLY if changed!)
+            SetHeaderAttribute(DF.partyHeader, "nameList", nameList)
+            SetHeaderAttribute(DF.partyHeader, "sortMethod", "NAMELIST")
+            headerDebug("  Using nameList mode:", nameList)
+        end
+
         -- Force header to re-evaluate by hiding and showing
         -- This is required for SecureGroupHeaderTemplate to re-sort children
         DF.partyHeader:Hide()
         DF.partyHeader:Show()
-        
-        headerDebug("  Using nameList mode:", nameList)
     end
     
     -- NOTE: Frame refresh is handled by OnAttributeChanged when units swap
@@ -8438,6 +8493,11 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                 -- still gets re-sorted instead of staying in INDEX order.
                 arenaSortRetryCount = 0
                 ScheduleArenaSortRetry()
+            end
+            -- Re-arm the party retry cap: a name can resolve long after the retry window.
+            if partyNameListIncomplete and unit:match("^party%d") then
+                partySortRetryCount = 0
+                SchedulePartySortRetry()
             end
         end
         return
