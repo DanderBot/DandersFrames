@@ -2046,8 +2046,9 @@ function DF:GetUnitRole(unit)
     -- fallback still runs if the player's own role ever reads secret. Callers
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
+    -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
     if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
-       and GetSpecializationRole then
+       and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
     end

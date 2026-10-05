@@ -306,6 +306,35 @@ local classFallbacks = {
     WARRIOR     = { friendly = nil, hostile = 355 },
 }
 
+-- WoW Forever (vanilla-era spells): retail's fallbacks above are learned late or don't
+-- exist there (Hand of Reckoning, Flame Shock's retail ID), which left low-level healers
+-- on interact distance. Lists are tried in order, first known spell wins. Its single
+-- generic spec per class never hits specSpells, so these always decide.
+if DF.IS_FOREVER then
+    classFallbacks = {
+        DRUID   = { friendly = { 5185, 774, 8936 }, hostile = { 5176, 8921 } },  -- Healing Touch, Rejuvenation, Regrowth / Wrath, Moonfire
+        HUNTER  = { friendly = nil, hostile = { 75 } },                          -- Auto Shot
+        MAGE    = { friendly = { 1459 }, hostile = { 133, 116 } },               -- Arcane Intellect / Fireball, Frostbolt
+        PALADIN = { friendly = { 635, 19750 }, hostile = { 879 } },              -- Holy Light, Flash of Light / Exorcism
+        PRIEST  = { friendly = { 2050, 2061 }, hostile = { 585 } },              -- Lesser Heal, Flash Heal / Smite
+        ROGUE   = { friendly = nil, hostile = { 2764, 36554 } },                 -- Throw, Shadowstep
+        SHAMAN  = { friendly = { 331, 8004 }, hostile = { 403 } },               -- Healing Wave, Lesser Healing Wave / Lightning Bolt
+        WARLOCK = { friendly = { 20707, 5697 }, hostile = { 686 } },             -- Soulstone, Unending Breath / Shadow Bolt
+        WARRIOR = { friendly = nil, hostile = { 355, 100 } },                    -- Taunt, Charge
+    }
+end
+
+-- A fallback entry is one spell ID or a list of them; returns the first the player knows.
+local function FirstKnownSpell(entry)
+    if type(entry) == "table" then
+        for _, id in ipairs(entry) do
+            if IsPlayerSpell(id) then return id end
+        end
+        return nil
+    end
+    return entry and IsPlayerSpell(entry) and entry or nil
+end
+
 -- ============================================================
 -- REZ SPELL TABLE
 -- Used for accurate range checking on dead targets.
@@ -388,8 +417,8 @@ local function UpdateRangeSpell()
     -- Fallback to class defaults (validated with IsPlayerSpell)
     if classFallbacks[playerClass] then
         local spells = classFallbacks[playerClass]
-        currentFriendlySpell = spells.friendly and IsPlayerSpell(spells.friendly) and spells.friendly or nil
-        currentHostileSpell = spells.hostile and IsPlayerSpell(spells.hostile) and spells.hostile or nil
+        currentFriendlySpell = FirstKnownSpell(spells.friendly)
+        currentHostileSpell = FirstKnownSpell(spells.hostile)
         DF:Debug("RANGE", "spell from class fallback: friendly=%s hostile=%s",
             tostring(currentFriendlySpell), tostring(currentHostileSpell))
         return

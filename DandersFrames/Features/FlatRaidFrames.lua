@@ -189,7 +189,8 @@ function FlatRaidFrames:BuildSortedNameList()
             end
         end
         
-        if specID and specID > 0 then
+        -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it sorts by class.
+        if specID and specID > 0 and not DF.IS_FOREVER then
             return meleeSpecs[specID] and "MELEE" or "RANGED"
         end
         

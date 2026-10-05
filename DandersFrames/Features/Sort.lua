@@ -81,7 +81,9 @@ function Sort:GetUnitRole(unit, db)
             local specID = nil
             
             -- For player, we can get spec directly
-            if UnitIsUnit(unit, "player") then
+            -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it
+            -- takes the class branch below like everyone else.
+            if UnitIsUnit(unit, "player") and not DF.IS_FOREVER then
                 specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 1)
             else
                 -- For other players, try to get from inspection cache or guess from class
@@ -226,7 +228,8 @@ function Sort:CompareTestData(dataA, dataB, db)
         if db.sortSeparateMeleeRanged then
             -- Check spec ID first (most accurate)
             local specID = data.specID
-            if specID and specID > 0 then
+            -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it sorts by class.
+            if specID and specID > 0 and not DF.IS_FOREVER then
                 return MELEE_SPECS[specID] and "MELEE" or "RANGED"
             end
             

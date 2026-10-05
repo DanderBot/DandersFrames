@@ -421,6 +421,11 @@ end
 local NO_BASELINE_DISPEL_CLASS = { HUNTER = true, WARLOCK = true, MAGE = true }
 
 function DF:GetDispelTypesToExclude()
+    -- WoW Forever: DISPEL_SPELLS is retail's list. A Forever Priest knows 527 (Dispel
+    -- Magic there), which would make the table "prove" it can't cure Disease and hide
+    -- diseases it can cure (Cure/Abolish Disease aren't listed). No subtraction until
+    -- Forever has its own table.
+    if DF.IS_FOREVER then return nil end
     local _, class = UnitClass("player")
     local entries = DISPEL_SPELLS[class]
     if not entries then return nil end          -- uncurated class: not our place to say

@@ -35,6 +35,10 @@
 - (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
 - (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
 - (Buffs) WoW Forever: the Buff Bar now shows the same buffs as Blizzard's own raid frames, since there's no built-in spell list there yet. Custom filters still work as normal.
+- (Sorting) WoW Forever: separating melee and ranged now sorts by class, so Rogues and Warriors no longer end up with the ranged.
+- (Dispel) WoW Forever: diseases no longer go missing from the dispel overlay for Priests.
+- (Range) WoW Forever: low-level healers now get proper out-of-range fading instead of a rough distance check.
+- (Roles) WoW Forever: your role now comes from the group instead of your spec, which doesn't say whether you heal there.
 - (Raid Frames) With party frames turned off, raid frames now fade properly when players are out of range, show target and aggro highlights, and apply their layout and sorting settings. (by Krathe)
 - (Auras) Fix frames showing another player's buffs, debuffs and Aura Designer indicators after someone joined or left the raid. (by Krathe)
 - (Party Frames) Fix a party member's frame sometimes disappearing mid-dungeon, often after someone died, until you reloaded. (by Krathe)
