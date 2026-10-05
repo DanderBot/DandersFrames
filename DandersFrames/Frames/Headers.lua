@@ -1010,14 +1010,8 @@ function DF:InitializeHeaderChild(frame)
                 GameTooltip_SetDefaultAnchor(GameTooltip, self)
             end
             GameTooltip:SetUnit(self.unit)
-            -- GetUnit() returns a secret value due to secure frame taint from
-            -- SecureGroupHeaderTemplate, so TooltipDataProcessor-based addons
-            -- can't read the unit. Bypass via RaiderIO's public API, but only
-            -- when the normal path fails to avoid duplicate tooltip lines.
-            local _, ttUnit = GameTooltip:GetUnit()
-            if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-                _G.RaiderIO.ShowProfile(GameTooltip, self.unit)
-            end
+            -- Only draws when Raider.IO cannot resolve the unit itself (see DF:ShowRaiderIOFallback).
+            if DF.ShowRaiderIOFallback then DF:ShowRaiderIOFallback(GameTooltip, self.unit) end
             -- Start refresh ticker so tooltip addons (RaiderIO) can respond
             -- to modifier key changes while hovering
             if DF.StartTooltipRefresh then DF:StartTooltipRefresh(self) end

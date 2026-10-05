@@ -301,6 +301,26 @@ bindingTooltip:SetScript("OnEvent", function(self)
 end)
 
 -- ============================================================
+-- RAIDER.IO FALLBACK
+-- ============================================================
+-- On secure header children GameTooltip:GetUnit() is secret. Raider.IO resolves the unit
+-- from the tooltip data's GUID instead, so it draws its own block whenever that GUID is
+-- readable; draw it ourselves only when it is not, or the block appears twice.
+function DF:ShowRaiderIOFallback(tooltip, unit)
+    local rio = _G.RaiderIO
+    if not (rio and rio.ShowProfile) or not unit then return end
+    if tooltip.GetPrimaryTooltipData then
+        local data = tooltip:GetPrimaryTooltipData()
+        local guid = data and data.guid
+        if guid and not issecretvalue(guid) then return end
+    else
+        local _, ttUnit = tooltip:GetUnit()
+        if ttUnit and not issecretvalue(ttUnit) then return end
+    end
+    rio.ShowProfile(tooltip, unit)
+end
+
+-- ============================================================
 -- TOOLTIP REFRESH TICKER
 -- Re-fires GameTooltip:SetUnit() every 0.25s while hovering a unit frame.
 -- Allows addons like RaiderIO that check IsModifierKeyDown() inside
@@ -568,10 +588,7 @@ local function StartTooltipRefresh(frame)
         if mod == tooltipRefreshModState then return end
         tooltipRefreshModState = mod
         GameTooltip:SetUnit(f.unit)
-        local _, ttUnit = GameTooltip:GetUnit()
-        if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-            _G.RaiderIO.ShowProfile(GameTooltip, f.unit)
-        end
+        DF:ShowRaiderIOFallback(GameTooltip, f.unit)
     end)
 end
 
@@ -1910,10 +1927,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             PositionFrameTooltip(self)
             local unit = GetCleanUnitForTooltip(self) or self.unit
             GameTooltip:SetUnit(unit)
-            local _, ttUnit = GameTooltip:GetUnit()
-            if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-                _G.RaiderIO.ShowProfile(GameTooltip, unit)
-            end
+            DF:ShowRaiderIOFallback(GameTooltip, unit)
             StartTooltipRefresh(self)
         end
         DF:ShowBindingTooltip(self)
