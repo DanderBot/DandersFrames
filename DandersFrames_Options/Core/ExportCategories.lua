@@ -460,6 +460,7 @@ DF.ExportCategories = {
         "dispelIconOffsetY",
         "dispelIconPosition",
         "dispelIconSize",
+        "dispelIconMax",
         "dispelOverlayDispelType",
         "dispelOverlayEnabled",
         "dispelShowBorder",

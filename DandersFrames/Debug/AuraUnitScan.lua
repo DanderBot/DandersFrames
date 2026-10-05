@@ -41,6 +41,7 @@ local LANES = {
     { field = "debuffFactory",    label = "debuff",    hidden = "dfDebuffFactoryHidden" },
     { field = "defensiveFactory", label = "defensive", hidden = "dfDefFactoryHidden" },
     { field = "dispelFactory",    label = "dispel",    hidden = nil },
+    { field = "dispelIconRow",    label = "dispelicons", hidden = nil },
 }
 
 -- AD stores holding container-backed handles. "placed" holds SlotHandles, which are
