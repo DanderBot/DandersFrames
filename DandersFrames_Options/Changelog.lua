@@ -18,6 +18,7 @@ DF.CHANGELOG_TEXT = [===[
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 - (Settings) Hover the yellow dot beside a changed setting to see its default value, and hold-click the dot to reset it.
 - (Settings) Section headers show a small icon for common kinds of settings (appearance, layout, position, visibility and more) so they are easier to spot.
+- (Dispel) The dispel type symbol can now show one symbol per dispellable debuff. Set **Max Symbols** (1 to 5) on the Dispel page; at 1 it looks exactly as before, and higher values line up a symbol for each debuff from the corner you picked. The symbols fade with the overlay when a player is out of range or dead. (by Krathe, original idea by JordanKlaers)
 
 ### Bug Fixes
 
@@ -35,12 +36,26 @@ DF.CHANGELOG_TEXT = [===[
 - (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
+- (Blizzard Frames) Fix Blizzard's party frames losing their Edit Mode size when DandersFrames isn't hiding them.
+- (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
+- (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
+- (Buffs) WoW Forever: the buff filters now have a built-in spell list for every class, covering every rank of each spell, so the Buff Bar and Defensive icons work out of the box. Any category that's still empty falls back to the same buffs Blizzard's own raid frames show.
+- (Missing Buffs) WoW Forever: missing buff icons now work for Fortitude, Arcane Intellect, Mark of the Wild and Battle Shout, counting every rank and the group versions.
+- (Sorting) WoW Forever: separating melee and ranged now sorts by class, so Rogues and Warriors no longer end up with the ranged.
+- (Dispel) WoW Forever: diseases no longer go missing from the dispel overlay for Priests.
+- (Range) WoW Forever: low-level healers now get proper out-of-range fading instead of a rough distance check.
+- (Roles) WoW Forever: your role now comes from the group instead of your spec, which doesn't say whether you heal there.
+- (Raid Frames) With party frames turned off, raid frames now fade properly when players are out of range, show target and aggro highlights, and apply their layout and sorting settings. (by Krathe)
+- (Auras) Fix frames showing another player's buffs, debuffs and Aura Designer indicators after someone joined or left the raid. (by Krathe)
+- (Party Frames) Fix a party member's frame sometimes disappearing mid-dungeon, often after someone died, until you reloaded. (by Krathe)
+- (Tooltips) Fix the Raider.IO score appearing twice when hovering party and raid frames. (by Krathe)
 
 ### Changes
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
+- (Pinned Frames) The "Based on" option is now called "Size & Spacing From", and the note above it explains that auras come from the set's Aura Designer Template, not from this choice. (by Krathe)
 
 ## [5.3.3]
 
