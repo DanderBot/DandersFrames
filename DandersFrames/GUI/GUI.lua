@@ -95,6 +95,18 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- A mover belongs to the thing it moves, so its pole is pinned rather than
     -- following whichever page the window happens to be showing.
     accentFor = function(isRaid) return GUI.GetThemeColorFor(isRaid) end,
+    -- Banners the user folded to a chip (CreateInfoBanner's dismissKey). Account-
+    -- wide, like the other "you have read this" stores (seenTabs, seenSections).
+    tipStore = function()
+        if not DandersFramesDB_v2 then return nil end
+        DandersFramesDB_v2.hiddenTips = DandersFramesDB_v2.hiddenTips or {}
+        return DandersFramesDB_v2.hiddenTips
+    end,
+    -- How those banners start: GLOBAL > Settings > Page Tips.
+    tipMode = function()
+        local g = DF.GetGlobalDB and DF:GetGlobalDB()
+        return (g and g.pageTips) or "show"
+    end,
     onPopupOpen = function() DF:ClearSettingHighlights() end,
 
     -- ---- auto-profile override semantics ------------------------

@@ -1262,7 +1262,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_healthbar_multi",
                     tone = "info",
                     text = L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1317,7 +1317,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_background_multi",
                     tone = "info",
                     text = L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1372,7 +1372,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_group",
                     tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
@@ -1389,7 +1389,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- player's OWN cast — and for a spell that My Buffs also tracked,
             -- both pools' sounds would fire. Surface it (B1 concern 2).
             if IsOtherTab() then
-                local obBanner = GUI:CreateInfoBanner(parent, {
+                local obBanner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_anyone",
                     tone = "info",
                     text = L["Sound alerts play when anyone gains this buff, including your own casts."],
                 })

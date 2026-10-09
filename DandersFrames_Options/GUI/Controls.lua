@@ -4700,13 +4700,41 @@ function GUI:CreatePopoutPageTools(page)
         -- Driven from the page's own state pass, which is the pass that has just
         -- decided which sections are shown -- so the verdict is never a frame
         -- stale.
-        strip.refreshContent = function()
+        -- A FOLDED TIP'S CHIP SITS ON THIS ROW, after Collapse All, rather than on
+        -- a row of its own above it (CreateInfoBanner's dismissKey). The banner
+        -- then takes no room while folded -- its hideOn says so -- and its chip
+        -- shows only where the banner itself would: not when the banner's own
+        -- hideOn hides it.
+        local tips = {}
+        strip.AdoptTip = function(banner)
+            local chip = banner and banner.tipChip
+            if not chip then return end
+            local prev = tips[#tips]
+            chip:SetParent(strip)
+            chip:ClearAllPoints()
+            chip:SetPoint("LEFT", prev and prev.chip or collapseBtn, "RIGHT", 6, 0)
+            banner._chipAway = true
+            local own = banner.hideOn
+            banner.hideOn = function(d) return banner._folded or (own and own(d)) or false end
+            banner.onFoldChanged = function()
+                if page.RefreshStates then page:RefreshStates() end
+            end
+            tips[#tips + 1] = { banner = banner, chip = chip, own = own }
+        end
+
+        strip.refreshContent = function(_, d)
             local shut, open = 0, 0
             local n = eachVisibleSection(function(s)
                 if s.expanded then open = open + 1 else shut = shut + 1 end
             end)
             expandBtn:SetDisabled(n == 0 or shut == 0)
             collapseBtn:SetDisabled(n == 0 or open == 0)
+            d = d or (DF.db and DF.db[GUI.SelectedMode])
+            for _, t in ipairs(tips) do
+                local b = t.banner
+                t.chip:SetShown(b._folded and not b._tipsOff
+                    and not (t.own and d and t.own(d)) or false)
+            end
         end
         strip.refreshContent()
         return strip

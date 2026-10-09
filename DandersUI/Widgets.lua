@@ -4271,6 +4271,35 @@ P.INFO_BANNER_TONES = INFO_BANNER_TONES
 
 -- The line grammar, shared by ShowTooltip and ShowGameTooltip so a toolkit
 -- line appended under a spell tooltip reads exactly like one under a plain title.
+-- A HINT LINE (what a click does, why something is off) is set a step smaller
+-- and darker than the text, so it reads as an aside and not as more of it.
+-- ⚠ GameTooltip's line font strings are SHARED by every tooltip in the game, so
+-- a shrunk one is put back the moment the tooltip clears -- left alone, the
+-- next tooltip to reach that line number would draw it small. The original is
+-- restored as it was found: the font object if there was one, then the exact
+-- face, size and flags on top, so a UI addon that styled the lines keeps them.
+local HINT_STEP = 2
+local shrunkLines = {}
+local function RestoreShrunkLines()
+    for fs, s in pairs(shrunkLines) do
+        if s.obj then fs:SetFontObject(s.obj) end
+        fs:SetFont(s.file, s.size, s.flags)
+        shrunkLines[fs] = nil
+    end
+end
+if GameTooltip and GameTooltip.HookScript then
+    GameTooltip:HookScript("OnTooltipCleared", RestoreShrunkLines)
+end
+local function ShrinkLastTooltipLine()
+    if not GameTooltip.NumLines then return end
+    local fs = _G["GameTooltipTextLeft" .. GameTooltip:NumLines()]
+    if not fs or shrunkLines[fs] then return end
+    local file, size, flags = fs:GetFont()
+    if not file or not size then return end
+    shrunkLines[fs] = { obj = fs:GetFontObject(), file = file, size = size, flags = flags }
+    fs:SetFont(file, size - HINT_STEP, flags)
+end
+
 local function AddTooltipLines(host, lines)
     if not lines then return end
     local acc
@@ -4282,7 +4311,7 @@ local function AddTooltipLines(host, lines)
         elseif type(line) == "table" and (line.text or line.left) then
             local r, g, b = 0.7, 0.7, 0.7
             if line.hint then
-                r, g, b = 0.55, 0.55, 0.55
+                r, g, b = 0.48, 0.48, 0.48
             elseif line.accent then
                 acc = acc or host:GetAccent()
                 r, g, b = acc.r, acc.g, acc.b
@@ -4298,6 +4327,7 @@ local function AddTooltipLines(host, lines)
                 GameTooltip:AddDoubleLine(line.left, line.right, r, g, b, 1, 1, 1)
             else
                 GameTooltip:AddLine(line.text, r, g, b, true)
+                if line.hint then ShrinkLastTooltipLine() end
             end
         end
     end

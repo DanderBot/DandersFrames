@@ -1138,6 +1138,10 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- How the settings pages' explainer banners start: "show", "fold" (as their
+    -- icon chip) or "off". Account-wide: it is about learning the window, not a
+    -- profile's look. Shown by default so a new user meets them.
+    pageTips = "show",
     -- The one-line greeting printed at login. Account-wide like its Notifications
     -- sibling above: it is chat chrome, not a per-profile visual. Default ON so a
     -- new user still learns `/df` exists; anyone who already knows can silence it.

@@ -521,7 +521,7 @@ function Profiler:CreateUI()
     -- settingsGroup, and walks the parent chain looking for a RefreshStates host
     -- it will never find on a floating window — so the banner simply sizes
     -- itself against the two anchors below.
-    local hookBanner = DF.GUI:CreateInfoBanner(f, { tone = "caution" })
+    local hookBanner = DF.GUI:CreateInfoBanner(f, { dismissKey = "profiler_hooks", notice = true, tone = "caution" })
     hookBanner:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 6)
     hookBanner:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 6)
     f.hookBanner = hookBanner

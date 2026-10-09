@@ -819,6 +819,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
         html = true,
+        dismissKey = "filterdesigner_intro",
         text = BUFF_BANNER,
         onLinkClick = fdBannerLinkClick,
     })
@@ -944,8 +945,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- chip here would claim a relationship that does not exist.
     local CHIP_POOL_N = #CHIP_DEFS_BUFF
     local chipRow = CreateFrame("Frame", nil, parent)
+    -- Both corners off the banner's BOTTOM edge. A "RIGHT" point is the banner's
+    -- vertical middle, which moves with its height -- and with Page Tips hidden
+    -- the banner is a pixel tall.
     chipRow:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -10)
-    chipRow:SetPoint("RIGHT", banner, "RIGHT", 0, 0)
+    chipRow:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -10)
     chipRow:SetHeight(CHIP_H)
 
     -- ⚠ The chips are SIZED FROM THE ROW, not given a fixed width: a label like

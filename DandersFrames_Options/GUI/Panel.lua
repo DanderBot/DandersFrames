@@ -4085,7 +4085,7 @@ function DF:CreateGUI()
             -- of rendering any controls. Whitelisted pages (General, Profiles,
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
-                local banner = GUI:CreateInfoBanner(parent, { tone = "info" })
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "mode_disabled", notice = true, tone = "info" })
                 banner:SetText(GUI.SelectedMode == "raid"
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))

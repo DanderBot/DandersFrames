@@ -2275,7 +2275,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- NOT scoped by the party/raid tab -- exports and imports operate on the
         -- whole profile, gated only by the Export for / Import for rows.
         local scopeBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "importexport_scope",
             text = L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."],
         })
         Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")

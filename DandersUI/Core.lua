@@ -114,6 +114,11 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   onSectionToggled(key, expanded)          after a collapsible section toggles
 --   scrollToSection(page, section) -> widget jump the settings scroll to a section; absent =
 --        link-to-setting controls don't render
+--   tipStore() -> table                      persistent per-banner choices, dismissKey -> true
+--        (closed) | false (opened); absent = no banner offers its x
+--   tipMode() -> "show" | "fold" | "off"     how dismissible banners start: open, as their
+--        chip, or not drawn at all (never an opts.notice banner); absent = "show". Call
+--        host:RefreshTips() after it changes
 function UI:NewHost(name, hooks)
     if type(name) ~= "string" or name == "" then
         error("DandersUI: NewHost needs a consumer name", 2)

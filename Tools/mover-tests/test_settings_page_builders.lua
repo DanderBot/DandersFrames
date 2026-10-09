@@ -182,6 +182,8 @@ local PANEL_APPEARANCE = {
     { "fontdropdown",    "Settings Font",         "DF.db.settingsFont",        55 },
     { "outlinedropdown", "Settings Font Outline", "DF.db.settingsFontOutline", 55 },
     { "label", "Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those.", "(none)", 60 },
+    { "dropdown", "Page Tips", "DF:GetGlobalDB().pageTips", 55 },
+    { "label", "Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them.", "(none)", 46 },
     { "checkbox",        "Use classic settings layout", "(none)",              30 },
 }
 local NOTIFICATIONS = {

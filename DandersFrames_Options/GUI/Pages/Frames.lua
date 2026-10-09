@@ -1097,7 +1097,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is: the same sentence, without a box titled with the tab's own name.
             -- The classic box (and its deferred height-measuring) is untouched above.
             local pinnedIntro = GUI:CreateInfoBanner(self.child, {
-                tone = "info",
+                tone = "info", dismissKey = "pinned_intro",
                 text = L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."],
             })
             Add(pinnedIntro, pinnedIntro.layoutHeight, "both")
@@ -1839,7 +1839,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- banner: only the per-set Enable flag can differ per layout; everything
         -- else is shared. Hidden unless editing a raid layout.
         local pinnedLayoutNote = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "pinned_layoutnote",
             text = L["Auto layouts can only change whether pinned frames are shown (Enable). All other pinned frame settings are shared across layouts."],
         })
         pinnedLayoutNote.hideOn = function()
@@ -2180,7 +2180,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The match drives only size, scale, spacing and border (GetSetBaselineDB); auras come
         -- from the set's Aura Designer template. The banner names both so neither is assumed.
         local matchInfoBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "pinned_matchsize",
             text = L["Width, height, scale, spacing and border follow your Party or Raid frames — choose which below. Change any of them to override it for these frames; use the reset button beside an overridden setting to revert it. Auras are not affected: they come from the Aura Designer Template below, or from the group you are in when it is left on Inherit."],
         })
         layoutGroup:AddWidget(matchInfoBanner, matchInfoBanner.layoutHeight or 44)

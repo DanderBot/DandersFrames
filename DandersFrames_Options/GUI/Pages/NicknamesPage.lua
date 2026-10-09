@@ -89,7 +89,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
 
     -- ===== Account-wide banner (mirrors the Settings page's global banner) =====
     Add(GUI:CreateInfoBanner(parent, {
-        tone = "info",
+        tone = "info", dismissKey = "nicknames_scope",
         text = L["Nicknames are account-wide — shared across every character and profile, on both Party and Raid."],
     }), 44, "both")
 

@@ -4308,7 +4308,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -- overflows (text spills past the box) on narrow windows until a manual
         -- drag forces a relayout.
         local reflowingHost = parent and parent.dfAD_ReflowWidgets ~= nil
-        local perfBanner = GUI:CreateInfoBanner(parent, {
+        local perfBanner = GUI:CreateInfoBanner(parent, { dismissKey = "border_animation_perf",
             tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = reflowingHost or nil,

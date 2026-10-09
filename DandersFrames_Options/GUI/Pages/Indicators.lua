@@ -21,7 +21,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- AD COEXISTENCE INFO BANNER
         -- Shows when Aura Designer is active (with or without buffs).
         -- ========================================
-        local adBanner = GUI:CreateInfoBanner(self.child, {tone = "info"})
+        local adBanner = GUI:CreateInfoBanner(self.child, { dismissKey = "buffbar_ad_state", notice = true,tone = "info"})
 
         -- Link markup helper: |cCOLOR|HlinkData|hText|h|r — the banner recolours
         -- links via the theme, so the markup colour is only a placeholder.
@@ -85,7 +85,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- default check so it reads as "advanced indicators available", not a
         -- completed-state confirmation. Reuses adLink/adOnLink (the openAD path).
         -- ========================================
-        local adPromoBanner = GUI:CreateInfoBanner(self.child, {tone = "success"})
+        local adPromoBanner = GUI:CreateInfoBanner(self.child, {tone = "success", dismissKey = "buffbar_adpromo"})
         adPromoBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small")
         adPromoBanner.refreshContent = function(b)
             b:SetHTML(L["The buff bar shows auras. The Aura Designer makes the frame react to them — recolour the health bar, ring the frame, flash a corner icon, play a sound. Per spell, or per filter."] .. " " ..
@@ -1387,7 +1387,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- group's cards stand together in a one-column window as well as two.
         -- Expand All / Collapse All first, at "both": they act on every card.
         if not classicLayout then
-            Add(tools.SectionControls(self.child), 24, "both")
+            local controls = Add(tools.SectionControls(self.child), 24, "both")
+            -- The Aura Designer promo, folded, sits on this row (see AdoptTip).
+            controls.AdoptTip(adPromoBanner)
             tools.MountCardGroups(Add, {
                 { label = L["Content"], col = 1, keys = {
                     "buffs_visibility", "buffs_filters", "buffs_order",
@@ -1764,7 +1766,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- just grown by. Unlike a measured label this cannot be opted out of with
             -- an explicit slot height (only opts.staticHeight silences it, and that
             -- would change what CLASSIC draws).
-            local catCaution = GUI:CreateInfoBanner(parent, {
+            local catCaution = GUI:CreateInfoBanner(parent, { dismissKey = "debuff_categories_note",
                 tone = "caution",
                 text = L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."],
                 minHeight = 30,
@@ -3094,7 +3096,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- shows EVERY tracked-and-missing buff (the legacy "first missing only"
             -- priority pick needed a cross-aura read). Legacy path keeps the caveat.
             local mbOwns = DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db)
-            local mPlusWarn = GUI:CreateInfoBanner(parent, { tone = mbOwns and "info" or "caution" })
+            local mPlusWarn = GUI:CreateInfoBanner(parent, { dismissKey = "missingbuff_mplus", tone = mbOwns and "info" or "caution" })
             mPlusWarn:SetText(mbOwns
                 and L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."]
                 or L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."])

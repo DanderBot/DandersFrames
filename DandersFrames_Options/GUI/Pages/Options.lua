@@ -3201,6 +3201,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],
                 260), 60)
 
+            -- The pages' explainer banners (CreateInfoBanner's dismissKey): open,
+            -- started as their icon chip, or not drawn. ☠ PICKING ONE FORGETS EVERY
+            -- PER-BANNER CHOICE, so the choice is what every tip does -- a tip the
+            -- user had opened under "Closed" must not stay open after they pick
+            -- "Closed" again. Notices (state, not explanation) ignore this.
+            group:AddWidget(GUI:CreateDropdown(parent, L["Page Tips"], {
+                show = L["Show"], fold = L["Closed"], off = L["Hidden"],
+                _order = { "show", "fold", "off" },
+            }, DF:GetGlobalDB(), "pageTips", function()
+                if DandersFramesDB_v2 and DandersFramesDB_v2.hiddenTips then
+                    wipe(DandersFramesDB_v2.hiddenTips)
+                end
+                if GUI.RefreshTips then GUI:RefreshTips() end
+            end), 55)
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them."],
+                260), 46)
+
             -- Classic-layout fallback for the settings redesign. Account-level and
             -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
             -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /

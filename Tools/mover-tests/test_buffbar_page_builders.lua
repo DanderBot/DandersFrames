@@ -1134,7 +1134,7 @@ do
           "bulk: Collapse All greys when every visible section is already shut")
     -- Driven from the page's state pass -- the pass that has just decided which
     -- sections are shown -- so the verdict is never a frame stale.
-    check(CTRL_RAW:find("strip.refreshContent = function()", 1, true) ~= nil,
+    check(CTRL_RAW:find("strip.refreshContent = function(_, d)", 1, true) ~= nil,
           "bulk: ...re-judged on every page state pass, like every other gated control")
 
     -- ---- (e) the store, written the way a manual fold writes it ----------

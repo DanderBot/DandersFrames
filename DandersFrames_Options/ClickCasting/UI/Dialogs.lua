@@ -125,7 +125,7 @@ local function CreateImportPopup()
     -- Warning text panel (shared caution/warning banner; auto-resizes to its text).
     -- frame.warning keeps a SetText interface (the banner exposes :SetText), so the
     -- later PopulateImportPopup calls work unchanged.
-    local warningPanel = DF.GUI:CreateInfoBanner(frame, { tone = "caution" })
+    local warningPanel = DF.GUI:CreateInfoBanner(frame, { dismissKey = "clickcast_warning", notice = true, tone = "caution" })
     warningPanel:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)
     warningPanel:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", -10, -10)
     frame.warning = warningPanel

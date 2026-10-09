@@ -60,7 +60,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local roleOrderWidget = nil
         
         -- ===== COMBAT STATUS BANNER (full width) =====
-        local combatBanner = GUI:CreateInfoBanner(self.child, { fontTemplate = "DFFontNormal" })
+        local combatBanner = GUI:CreateInfoBanner(self.child, { dismissKey = "combat_lockout", notice = true, fontTemplate = "DFFontNormal" })
 
         local function UpdateCombatBanner()
             if not db.sortEnabled then
