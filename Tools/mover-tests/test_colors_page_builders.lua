@@ -243,10 +243,10 @@ local PALETTES = {
       dbName = "classColorsDB", boxVar = "col1", column = "1", key = "colors_class", col = 1,
       list = CLASS_LIST, blurb = CLASS_BLURB, blurbH = 50, resetVar = "resetAllBtn" },
     { builder = "BuildRoleColorsGroup", label = "Role Colors",
-      dbName = "roleColorsDB", boxVar = "col2", column = "2", key = "colors_role", col = 2,
+      dbName = "roleColorsDB", boxVar = "col2", column = "2", key = "colors_role", col = 1,
       list = ROLE_LIST, blurb = ROLE_BLURB, blurbH = 50, resetVar = "roleResetBtn" },
     { builder = "BuildDispelColorsGroup", label = "Dispel Type Colors",
-      dbName = "dispelColorsDB", boxVar = "dispelCol", column = "1", key = "colors_dispel", col = 1,
+      dbName = "dispelColorsDB", boxVar = "dispelCol", column = "1", key = "colors_dispel", col = 2,
       list = DISPEL_LIST, blurb = DISPEL_BLURB, blurbH = 55, resetVar = "dispelResetBtn" },
 }
 
@@ -351,6 +351,13 @@ do
     -- through UI:CreateDispelColorsPageLink -> LinkToSetting{ section =
     -- L["Dispel Type Colors"] }, and Search:ScrollToSection finds a page child
     -- by :GetText() -- which a collapsible section answers with its title.
+    -- The two groups: Unit Colors heads column 1, Aura Colors column 2.
+    local function before(a, b) local i, j = PAGE:find(a, 1, true), PAGE:find(b, 1, true); return i and j and i < j end
+    check(before('Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)', 'OpenSection(L["Class Colors"]'),
+          "groups: Unit Colors heads column 1, before Class Colors")
+    check(before('Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)', 'OpenSection(L["Dispel Type Colors"]'),
+          "groups: Aura Colors heads column 2, before Dispel Type Colors")
+
     check(PAGE:find('OpenSection(L["Dispel Type Colors"], "colors_dispel"', 1, true) ~= nil,
           "anchor: the dispel card's title is the section name the cross-link aims at")
     check(ui_file_source("Sections.lua"):find('section = L["Dispel Type Colors"]', 1, true) ~= nil,

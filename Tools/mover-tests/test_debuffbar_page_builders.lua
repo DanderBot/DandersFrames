@@ -9,12 +9,11 @@ local NS = ...
 -- Duplicate Debuffs), moved into Debuff Filters as Hide Duplicate Buffs moved
 -- into Buff Filters.
 --
---   column 1   "Content"  Visibility, Debuff Filters, Debuff Blacklist,
---                         Order & Limits.
---              ...then    Duration Bar, the 12.1-factory extra, under NO
---                         category header (it can hide).
---   column 2   "Icon"     Appearance, Layout, Position, Border, Important Debuffs.
---              "Text"     Duration Text, Stack Count, Dispel Text.
+--   column 1   "Content"     Visibility, Debuff Filters, Debuff Blacklist,
+--                            Order & Limits.
+--              "Text"        Duration Text, Stack Count, Dispel Text.
+--   column 2   "Layout"      Layout, Position.
+--              "Appearance"  Icon Style, Border, Important Debuffs, Duration Bar.
 --
 -- ...plus the two opt-ins this page introduced (the Buff Bar now takes them
 -- too): controls TWO PER ROW inside a wide enough card, and captions drawn dim
@@ -219,11 +218,24 @@ do
     check(CLOSE:find("Add(band, nil, band.dfSectionCol)", 1, true) ~= nil,
           "sections: the band goes in after its last control, in its section's column")
 
-    -- ---- the three category headers, added straight to a column ----------
-    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" }, { "Text", "2" } }) do
-        local n = 0
-        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
-        eq(n, 1, "headers: the " .. pair[1] .. " category header opens column " .. pair[2] .. ", once")
+    -- ---- the groups: one table, mounted in order (tools.MountCardGroups) ----
+    -- The page's Add order is what a one-column window stacks, so the cards
+    -- register with tools.DeferCard and mount group by group, each group
+    -- under its header.
+    local groupsSrc = PAGE:match("tools%.MountCardGroups%(Add, (%b{})%)")
+    check(groupsSrc ~= nil, "groups: the cards mount by group from one table")
+    local gotGroups = {}
+    for label, col, keys in (groupsSrc or ""):gmatch('label = L%["([^"]+)"%], col = (%d), keys = {(.-)}') do
+        local ks = {}
+        for k in keys:gmatch('"([%w_]+)"') do ks[#ks + 1] = k end
+        gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
+    end
+    eq(table.concat(gotGroups, " | "),
+       "Content@1: debuffs_visibility, debuffs_filters, debuffs_blacklist, debuffs_order | Layout@2: debuffs_layout, debuffs_position | Appearance@2: debuffs_appearance, debuffs_border, debuffs_important, debuffs_durationbar | Text@1: debuffs_duration, debuffs_stack, debuffs_dispeltext",
+       "groups: Content, Layout, Appearance, Text, each over its cards")
+    for _, key in ipairs({ "debuffs_visibility", "debuffs_filters", "debuffs_blacklist", "debuffs_order", "debuffs_appearance", "debuffs_layout", "debuffs_position", "debuffs_border", "debuffs_important", "debuffs_duration", "debuffs_stack", "debuffs_dispeltext", "debuffs_durationbar" }) do
+        check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
+              "groups: " .. key .. " registers its card for the group mount")
     end
 
     -- ---- the vocabulary, at PAGE scope, declared exactly once ---------
@@ -418,7 +430,7 @@ local CARDS = {
       builder = "BuildDebuffBlacklistGroup",  golden = DEBUFF_BLACKLIST,  summary = "DebuffBlacklistSummary" },
     { label = "Order & Limits",    key = "debuffs_order",       col = 1, box = "Order & Limits",   classicCol = 1,
       builder = "BuildDebuffOrderGroup",      golden = DEBUFF_ORDER,      summary = "DebuffOrderSummary", dim = true },
-    { label = "Appearance",        key = "debuffs_appearance",  col = 2, box = "Appearance",       classicCol = 2,
+    { label = "Icon Style",        key = "debuffs_appearance",  col = 2, box = "Appearance",       classicCol = 2,
       builder = "BuildDebuffAppearanceGroup", golden = DEBUFF_APPEARANCE, summary = "DebuffAppearanceSummary",
       dim = true, pin = true },
     { label = "Layout",            key = "debuffs_layout",      col = 2, box = "Layout",           classicCol = 1,
@@ -432,16 +444,16 @@ local CARDS = {
     { label = "Important Debuffs", key = "debuffs_important",   col = 2, box = nil,                classicCol = 2,
       builder = "BuildImportantDebuffsGroup", golden = DEBUFF_IMPORTANT,  summary = "ImportantDebuffsSummary",
       dim = true, pin = true, tick = { key = "debuffImportantHighlight", name = "Highlight Important Debuffs" } },
-    { label = "Duration Text",     key = "debuffs_duration",    col = 2, box = "Duration Text",    classicCol = 2,
+    { label = "Duration Text",     key = "debuffs_duration",    col = 1, box = "Duration Text",    classicCol = 2,
       builder = "BuildDebuffDurationGroup",   golden = DEBUFF_DURATION,   summary = "DebuffDurationSummary",
       dim = true, pin = true, tick = { key = "debuffShowDuration", name = "Show Duration" } },
-    { label = "Stack Count",       key = "debuffs_stack",       col = 2, box = "Stack Count",      classicCol = 2,
+    { label = "Stack Count",       key = "debuffs_stack",       col = 1, box = "Stack Count",      classicCol = 2,
       builder = "BuildDebuffStackGroup",      golden = DEBUFF_STACK,      summary = "DebuffStackSummary", dim = true, pin = true },
-    { label = "Dispel Text",       key = "debuffs_dispeltext",  col = 2, box = "Dispel Text",      classicCol = 2,
+    { label = "Dispel Text",       key = "debuffs_dispeltext",  col = 1, box = "Dispel Text",      classicCol = 2,
       builder = "BuildDebuffDispelTextGroup", golden = DEBUFF_DISPEL,     summary = "DebuffDispelSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "debuffDispelSymbolEnabled", name = "Show Dispel Text" } },
-    { label = "Duration Bar",      key = "debuffs_durationbar", col = 1, box = "Duration Bar",     classicCol = 2,
+    { label = "Duration Bar",      key = "debuffs_durationbar", col = 2, box = "Duration Bar",     classicCol = 2,
       builder = "BuildDebuffDurationBarGroup", golden = DEBUFF_DURBAR,    summary = "DebuffDurationBarSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "debuffDurationBarEnabled", name = "Enable Duration Bar" } },
@@ -530,19 +542,12 @@ end
 
 print("-- Debuff Bar page: the cards together")
 do
-    -- ---- the order, which is also the one-column fold's order ----------
+    -- ---- the source order: classic's; the cards MOUNT in the group table's ----
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Appearance | Layout | Position | Border | Important Debuffs | Duration Text | Stack Count | Dispel Text | Duration Bar",
-       "order: the thirteen cards open in the order the old bands read: Content, Icon, Text, Duration Bar")
-    -- The two category headers in column 2 open ABOVE the card that leads them.
-    local iconAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)', 1, true)
-    local appAt  = PAGE:find('OpenSection(L["Appearance"]', 1, true)
-    local textAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)', 1, true)
-    local durAt  = PAGE:find('OpenSection(L["Duration Text"]', 1, true)
-    check(iconAt and appAt and iconAt < appAt, "order: Icon heads Appearance")
-    check(textAt and durAt and textAt < durAt, "order: Text heads Duration Text")
+       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Important Debuffs | Duration Text | Stack Count | Dispel Text | Duration Bar",
+       "order: the thirteen cards are declared in classic's order")
 
     -- ---- one checkbox per setting --------------------------------------
     -- Five ticks, five hoists, every hoist inside a ticked card -- so the classic
@@ -567,9 +572,9 @@ do
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: the page adds the pair at the top, spanning both columns")
     local stripAt   = PAGE:find("tools.SectionControls", 1, true)
-    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    check(stripAt and contentAt and stripAt < contentAt,
-          "bulk: ...above the first category header, because it acts on the whole page")
+    local mountAt   = PAGE:find("tools.MountCardGroups(Add,", 1, true)
+    check(stripAt and mountAt and stripAt < mountAt,
+          "bulk: ...above the first group header, because it acts on the whole page")
 
     -- ---- Hide Duplicate Debuffs moved INTO Debuff Filters ----------------
     local filters = sectionBlock("Debuff Filters")

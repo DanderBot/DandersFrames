@@ -355,9 +355,9 @@ local REDUCED_MAX = {
 
 print("-- Health Bar page: Reduced Max Health")
 do
-    local g = { builder = "BuildReducedMaxHealthGroup", label = "Reduced Max Health",
+    local g = { builder = "BuildReducedMaxHealthGroup", label = "Settings",
                 boxHeader = "Settings", box = "reducedGroup", column = "1",
-                key = "health_reduced", col = 2, summary = "ReducedMaxHealthSummary", tick = true }
+                key = "health_reduced", col = 1, summary = "ReducedMaxHealthSummary", tick = true }
     local body = builderBody(g.builder)
     checkCensus(census(body), REDUCED_MAX, "reduced max health")
     local _, call = checkShared(g)
@@ -420,12 +420,13 @@ do
     -- ---- the cards open in the same order -- the one-column fold's --------
     local order = {}
     for at, name in PAGE:gmatch('()OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Reduced Max Health",
+    eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Settings",
        "order: the five boxes' cards, in source order (the gradient builder's title is chosen per ramp -- section 7)")
     local function at(needle) return PAGE:find(needle, 1, true) end
     local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)\n\n            local band = OpenSection(L["Background"]',
                   'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)\n        end',
-                  'OpenSection(L["Reduced Max Health"]' }
+                  'Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")',
+                  'OpenSection(L["Settings"]' }
     local prev = 0
     for _, n in ipairs(seq) do
         local p = PAGE:find(n, prev + 1, true)

@@ -216,8 +216,8 @@ do
           "shadow settings: classic keeps its box, its header and column 1")
 
     local block, call = sectionBlock("Shadow Settings", "BuildShadowSettingsGroup({")
-    check(call:find('OpenSection(L["Shadow Settings"], "fonts_shadow", 2, ShadowSettingsSummary, nil, nil, BuildShadowSettingsGroup)', 1, true) ~= nil,
-          "shadow settings: a card keyed fonts_shadow in column 2, printing its summary, pinnable")
+    check(call:find('OpenSection(L["Shadow Settings"], "fonts_shadow", 1, ShadowSettingsSummary, nil, nil, BuildShadowSettingsGroup)', 1, true) ~= nil,
+          "shadow settings: a card keyed fonts_shadow in column 1, printing its summary, pinnable")
     check(block:find("BuildShadowSettingsGroup({ group = shadowCard, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
           "shadow settings: mounts the builder exactly as classic does")
 

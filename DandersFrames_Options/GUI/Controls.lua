@@ -4970,6 +4970,41 @@ function GUI:CreatePopoutPageTools(page)
         Add(band, nil, band.dfSectionCol)
     end
 
+    -- CARD GROUPS. A page whose cards are declared in an order that interleaves
+    -- its groups registers each Modern card's mount with DeferCard, then
+    -- MountCardGroups adds them group by group, each under its header. The
+    -- page's Add order is what a one-column window stacks, so this is what
+    -- keeps a group's cards together there. A registered card in no group
+    -- mounts after the groups, so a new card cannot silently drop off a page.
+    --   groups: { { label = L["..."], col = 1|2, keys = { "card_key", ... },
+    --               hideOn = fn? }, ... }
+    local deferredKeys, deferredMounts = {}, {}
+    local function DeferCard(key, mount)
+        deferredKeys[#deferredKeys + 1] = key
+        deferredMounts[key] = mount
+    end
+    local function MountCardGroups(Add, groups)
+        local mounted = {}
+        for _, grp in ipairs(groups) do
+            local header = GUI:CreateHeader(page.child, grp.label)
+            if grp.hideOn then header.hideOn = grp.hideOn end
+            Add(header, 40, grp.col)
+            for _, key in ipairs(grp.keys) do
+                local mount = deferredMounts[key]
+                if mount and not mounted[key] then
+                    mounted[key] = true
+                    mount()
+                end
+            end
+        end
+        for _, key in ipairs(deferredKeys) do
+            if not mounted[key] then
+                mounted[key] = true
+                deferredMounts[key]()
+            end
+        end
+    end
+
     return {
         PopoutContent         = PopoutContent,
         RowDB                 = RowDB,
@@ -4979,5 +5014,7 @@ function GUI:CreatePopoutPageTools(page)
         CloseSection          = CloseSection,
         ReflowMounted         = ReflowMounted,
         BandWidth             = BandWidth,
+        DeferCard             = DeferCard,
+        MountCardGroups       = MountCardGroups,
     }
 end

@@ -10,8 +10,9 @@ local NS = ...
 --
 --   column 1   "Content"     Settings (holds the PAGE gate in its body),
 --                            Content Types.
---   column 2   "Appearance"  Size (Growth Direction at its foot), Border (Show
---                            Border is the header's tick), Duration Text.
+--   column 2   "Layout"      Size (Growth Direction at its foot).
+--              "Appearance"  Border (Show Border is the header's tick).
+--              "Text"        Duration Text.
 --   column 1   "Effects"     Highlight Settings, Border Shadow, Border
 --                            Animation, Interrupt Settings, X Mark.
 --
@@ -156,7 +157,7 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    for _, pair in ipairs({ { "Content", "1" }, { "Appearance", "2" }, { "Effects", "1" } }) do
+    for _, pair in ipairs({ { "Content", "1" }, { "Layout", "2" }, { "Appearance", "2" }, { "Text", "2" }, { "Effects", "1" } }) do
         local n = 0
         for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
         eq(n, 1, "headers: the " .. pair[1] .. " category header sits in column " .. pair[2] .. ", once")
@@ -430,13 +431,19 @@ do
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Settings | Content Types | Size | Border | Duration Text | Highlight Settings | Highlight Shadow | Highlight Animation | Interrupt Settings | X Mark",
-       "order: the ten cards open in the old bands' order -- Content, Appearance, Effects")
+       "order: the ten cards open in group order -- Content, Layout, Appearance, Text, Effects")
     local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    local appAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)', 1, true)
+    local layAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 2)', 1, true)
     local sizeAt    = PAGE:find('OpenSection(L["Size"]', 1, true)
+    local appAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)', 1, true)
+    local borderAt  = PAGE:find('OpenSection(L["Border"]', 1, true)
+    local textAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)', 1, true)
+    local durAt     = PAGE:find('OpenSection(L["Duration Text"]', 1, true)
     local fxAt      = PAGE:find('Add(GUI:CreateHeader(self.child, L["Effects"]), 40, 1)', 1, true)
     local hlAt      = PAGE:find('OpenSection(L["Highlight Settings"]', 1, true)
-    check(contentAt and appAt and sizeAt and contentAt < appAt and appAt < sizeAt, "order: Appearance heads Size")
+    check(contentAt and layAt and sizeAt and contentAt < layAt and layAt < sizeAt, "order: Layout heads Size")
+    check(sizeAt and appAt and borderAt and sizeAt < appAt and appAt < borderAt, "order: Appearance heads Border")
+    check(borderAt and textAt and durAt and borderAt < textAt and textAt < durAt, "order: Text heads Duration Text")
     check(fxAt and hlAt and fxAt < hlAt, "order: Effects heads Highlight Settings")
 
     -- ---- Growth Direction moved INTO Size -----------------------------

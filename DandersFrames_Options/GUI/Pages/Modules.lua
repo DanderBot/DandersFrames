@@ -192,6 +192,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- link are not settings, so each takes a row of its own; the four
             -- controls between them lay out 2 x 2 when the card is wide enough.
             -- It decides how status text LOOKS, so it pins.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
             local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,
                 nil, nil, BuildIconTextGroup)
             BuildIconTextGroup({
@@ -579,6 +580,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Driven off the same spec. Classic builds the boxes it always built, in
         -- column 1, registered to the section; Modern builds the icon's card.
         -- ============================================
+        -- Modern mounts the icon cards by subject group once every spec is in
+        -- (the loop after the last MountIcon); classic mounts each box as it is
+        -- declared, in declaration order.
+        local queuedIcons = {}
         local function MountIcon(spec)
             spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil
             if spec.id then
@@ -590,7 +595,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
 
             if not classicLayout then
-                MountIconCard(spec)
+                queuedIcons[#queuedIcons + 1] = spec
                 return
             end
 
@@ -918,6 +923,35 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } },
         })
+
+        -- Modern: the icon cards by subject, each group under its header in its
+        -- column. An icon in no group still mounts, after the groups, so a new
+        -- one cannot silently drop off the page.
+        if not classicLayout then
+            local ICON_GROUPS = {
+                { label = L["Group Roles"], col = 1, keys = { "roleIcon", "leaderIcon", "raidRoleIcon" } },
+                { label = L["Markers"],     col = 1, keys = { "raidTargetIcon", "pingIcon" } },
+                { label = L["Status"],      col = 2, keys = { "readyCheckIcon", "summonIcon", "resurrectionIcon",
+                                                              "phasedIcon", "afkIcon", "vehicleIcon" } },
+                { label = L["Combat"],      col = 2, keys = { "combatIcon", "bgCarrierIcon" } },
+            }
+            local byKey, mounted = {}, {}
+            for _, spec in ipairs(queuedIcons) do byKey[spec.key] = spec end
+            for _, grp in ipairs(ICON_GROUPS) do
+                Add(GUI:CreateHeader(self.child, grp.label), 40, grp.col)
+                for _, key in ipairs(grp.keys) do
+                    local spec = byKey[key]
+                    if spec then
+                        spec.col = grp.col
+                        MountIconCard(spec)
+                        mounted[key] = true
+                    end
+                end
+            end
+            for _, spec in ipairs(queuedIcons) do
+                if not mounted[spec.key] then MountIconCard(spec) end
+            end
+        end
     end)
     
     -- Indicators > Highlights
@@ -1152,6 +1186,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is one dropdown tall until a mode is picked. Column 2, and the
             -- first card added, so the one-column fold still reads in the order
             -- the three sections had.
+            Add(GUI:CreateHeader(self.child, L["Targeting"]), 40, 2)
             local band = OpenSection(L["Selection Highlight"], "highlights_selection", 2, SelectionSettingsSummary,
                 nil, nil, BuildSelectionHighlightGroup)
             BuildSelectionHighlightGroup({
@@ -1303,6 +1338,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- highlight with behaviour of its own (Only Show When Tanking, Hide on
             -- Tanks). With Threat Colors under it that is also the balanced
             -- split -- two cards against Selection and Hover's two.
+            Add(GUI:CreateHeader(self.child, L["Threat"]), 40, 1)
             local band = OpenSection(L["Aggro Highlight"], "highlights_aggro", 1, AggroSettingsSummary,
                 nil, nil, BuildAggroHighlightGroup)
             BuildAggroHighlightGroup({
@@ -1575,6 +1611,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(tools.SectionControls(self.child), 24, "both")
             -- Holds the page gate, so it never greys and never dims; decides
             -- what SHOWS, so no pin.
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
             local band = OpenSection(L["Settings"], "dispel_settings", 1, DispelSettingsSummary)
             BuildDispelSettingsGroup({
                 group = band, parent = self.child,
@@ -1699,6 +1736,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- own (hoistToggle). The key keeps its classic reading (off only when
             -- explicitly false), and the tick greys with the page gate, as the
             -- header dims. A pin: it decides how the symbol LOOKS.
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
             local band = OpenSection(L["Dispel Symbol"], "dispel_symbol", 2, DispelIconSummary, DispelOffRow, nil,
                 BuildDispelIconGroup, {
                     db = db, key = "dispelShowIcon", label = L["Show Dispel Symbol"],
@@ -1900,7 +1938,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- pin. Column 1, under Settings: see the essay at the top. It is
             -- added last, so the one-column fold reads Settings, Dispel Symbol,
             -- Border, Gradient -- the order the page always had.
-            local band = OpenSection(L["Gradient"], "dispel_gradient", 1, DispelGradientSummary, DispelOffRow, nil,
+            local band = OpenSection(L["Gradient"], "dispel_gradient", 2, DispelGradientSummary, DispelOffRow, nil,
                 BuildDispelGradientGroup, {
                     db = db, key = "dispelShowGradient", label = L["Show Gradient"],
                     isOn = function(d) return d.dispelShowGradient ~= false end,

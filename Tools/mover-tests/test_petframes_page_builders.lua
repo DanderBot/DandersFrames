@@ -133,8 +133,8 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    -- Three category headers, each opening its run of cards.
-    for _, pair in ipairs({ { "Layout", "1" }, { "Frame", "2" }, { "Text", "1" } }) do
+    -- Four category headers, each opening its run of cards.
+    for _, pair in ipairs({ { "Content", "1" }, { "Layout", "1" }, { "Appearance", "2" }, { "Text", "1" } }) do
         local n = 0
         for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
         eq(n, 1, "headers: the " .. pair[1] .. " category header, in column " .. pair[2] .. ", once")
@@ -237,7 +237,7 @@ local HEALTH_TEXT = {
 -- (the text as it appears in the call), dim = greys with the page gate, pin =
 -- passes its builder.
 local CARDS = {
-    { label = "Pet Frame Settings", key = "pets_settings", col = 1, classicCol = 1,
+    { label = "Settings", classicLabel = "Pet Frame Settings", key = "pets_settings", col = 1, classicCol = 1,
       builder = "BuildPetGeneralGroup", golden = GENERAL, summary = "nil" },
     { label = "Layout Mode", key = "pets_layoutmode", col = 1, classicCol = 1,
       builder = "BuildPetLayoutModeGroup", golden = LAYOUT_MODE, summary = "nil", dim = true },
@@ -245,7 +245,7 @@ local CARDS = {
       builder = "BuildPetGroupSettingsGroup", golden = GROUP_SETTINGS, summary = "PetGroupSummary", dim = true, pin = true },
     { label = "Size", key = "pets_size", col = 1, classicCol = 1,
       builder = "BuildPetSizeGroup", golden = SIZE, summary = "PetSizeSummary", dim = true, pin = true },
-    { label = "Appearance", key = "pets_appearance", col = 2, classicCol = 2,
+    { label = "Frame Style", classicLabel = "Appearance", key = "pets_appearance", col = 2, classicCol = 2,
       builder = "BuildPetAppearanceGroup", golden = APPEARANCE, summary = "PetAppearanceSummary", dim = true, pin = true },
     { label = "Health Bar", key = "pets_healthbar", col = 2, classicCol = 2,
       builder = "BuildPetHealthBarGroup", golden = HEALTH_BAR, summary = "PetHealthBarSummary", dim = true, pin = true },
@@ -269,7 +269,7 @@ for _, g in ipairs(CARDS) do
     local calls = 0
     for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
     eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    local esc = g.label:gsub("%p", "%%%0")
+    local esc = (g.classicLabel or g.label):gsub("%p", "%%%0")
     local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
     check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
           g.label .. ": the classic box keeps its header and column " .. g.classicCol)
@@ -349,18 +349,18 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Pet Frame Settings | Layout Mode | Group Settings | Size | Appearance | Border | Health Bar | Position | Name Text | Health Text",
+       "Settings | Layout Mode | Group Settings | Size | Frame Style | Border | Health Bar | Position | Name Text | Health Text",
        "order: the cards open in the order they stack -- Name Text after Position, so the Text cards follow Layout in column 1")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
     eq(hoists, 1, "ticks: exactly one mount skips its in-body toggle (Border)")
-    check((select(1, sectionBlock("Pet Frame Settings", "BuildPetGeneralGroup"))):find("petEnabled", 1, true) == nil,
+    check((select(1, sectionBlock("Settings", "BuildPetGeneralGroup"))):find("petEnabled", 1, true) == nil,
           "ticks: Enable Pet Frames is not hoisted -- it is the page gate, in the first card's body")
 
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    local firstAt = PAGE:find('OpenSection(L["Pet Frame Settings"]', 1, true)
+    local firstAt = PAGE:find('OpenSection(L["Settings"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
     local bare = 0

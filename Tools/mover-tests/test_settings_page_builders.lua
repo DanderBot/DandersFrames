@@ -195,13 +195,13 @@ local CARDS = {
       summary = "function() return FrameModesSummary(DF.db) end" },
     { label = "Blizzard Frames", key = "general_blizzard", col = 1, classicCol = 1,
       builder = "BuildBlizzardFramesGroup", golden = BLIZZARD_FRAMES, summary = "nil" },
-    { label = "Rendering", key = "general_rendering", col = 2, classicCol = 1,
+    { label = "Rendering", key = "general_rendering", col = 1, classicCol = 1,
       builder = "BuildRenderingGroup", golden = RENDERING,
       summary = "function() return RenderingSummary(DF:GetGlobalDB()) end", pin = true },
     { label = "Settings Panel Appearance", key = "general_panelappearance", col = 2, classicCol = 2,
       builder = "BuildPanelAppearanceGroup", golden = PANEL_APPEARANCE,
       summary = "function() return PanelAppearanceSummary(DF.db) end", pin = true },
-    { label = "Notifications", key = "general_notifications", col = 1, classicCol = 2,
+    { label = "Notifications", key = "general_notifications", col = 2, classicCol = 2,
       builder = "BuildNotificationsGroup", golden = NOTIFICATIONS, summary = "nil" },
 }
 

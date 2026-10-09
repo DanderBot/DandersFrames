@@ -344,7 +344,7 @@ local CARDS = {
     { label = "Border", key = "dispel_border", col = 2, classicCol = 2,
       builder = "BuildDispelBorderGroup", golden = DISPEL_BORDER, summary = "DispelBorderSummary",
       dim = true, pin = true, tick = { key = "dispelShowBorder", name = "Show Border" } },
-    { label = "Gradient", key = "dispel_gradient", col = 1, classicCol = 1,
+    { label = "Gradient", key = "dispel_gradient", col = 2, classicCol = 1,
       builder = "BuildDispelGradientGroup", golden = DISPEL_GRADIENT, summary = "DispelGradientSummary",
       dim = true, pin = true, tick = { key = "dispelShowGradient", name = "Show Gradient" } },
 }
@@ -360,7 +360,7 @@ for _, g in ipairs(CARDS) do
 
     local box
     for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"])'
+        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"])'
         local hit = PAGE:find(want, at, true)
         if hit and hit - at < 900 then box = name break end
     end
@@ -413,6 +413,14 @@ do
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Settings | Dispel Symbol | Border | Gradient",
        "order: the four cards open in the order the page always read")
+
+    -- The groups: Content over the dispel choice in column 1, Appearance over
+    -- the three looks in column 2, each header before its first card.
+    local function before(a, b) local i, j = PAGE:find(a, 1, true), PAGE:find(b, 1, true); return i and j and i < j end
+    check(before('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 'OpenSection(L["Settings"]'),
+          "groups: Content heads column 1, before Settings")
+    check(before('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)', 'OpenSection(L["Dispel Symbol"]'),
+          "groups: Appearance heads column 2, before Dispel Symbol")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0

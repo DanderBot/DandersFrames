@@ -212,10 +212,28 @@ do
     -- classic arm is reached only in classic and no Modern card is ever a
     -- classic section with a preview.
     local mount = builderBody("MountIcon")
-    local early = mount:find("if not classicLayout then\n                MountIconCard(spec)\n                return\n            end", 1, true)
+    local early = mount:find("if not classicLayout then\n                queuedIcons[#queuedIcons + 1] = spec\n                return\n            end", 1, true)
     local sectionAt = mount:find("local section = AddSection(spec.section)", 1, true)
     check(early and sectionAt and early < sectionAt,
-          "classic: Modern returns into MountIconCard before the classic section and preview are built")
+          "classic: Modern queues the spec and returns before the classic section and preview are built")
+
+    -- ...and the queue is mounted by subject group, every icon in exactly one
+    -- group, with a fallback so an icon left out of the groups still mounts.
+    local groupsSrc = PAGE:match("local ICON_GROUPS = (%b{})")
+    check(groupsSrc ~= nil, "groups: the Modern icon groups are one table")
+    local seen, dup = {}, false
+    for key in (groupsSrc or ""):gmatch('"(%w+Icon)"') do
+        if seen[key] then dup = true end
+        seen[key] = true
+    end
+    check(not dup, "groups: no icon is in two groups")
+    for _, key in ipairs({ "roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon",
+                           "summonIcon", "bgCarrierIcon", "combatIcon", "resurrectionIcon", "phasedIcon",
+                           "afkIcon", "vehicleIcon", "raidRoleIcon" }) do
+        check(seen[key], "groups: " .. key .. " is in a group")
+    end
+    check(PAGE:find("if not mounted[spec.key] then MountIconCard(spec) end", 1, true) ~= nil,
+          "groups: an icon in no group still mounts")
 end
 
 -- ============================================================

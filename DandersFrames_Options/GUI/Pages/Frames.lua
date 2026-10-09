@@ -328,6 +328,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- nothing until Apply to All writes ~30 per-element fonts in one press,
             -- and a second, pinned scratch pad bound to the same scratch table
             -- would only be a second copy of the same button. Column 1.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
             local fontCard = OpenSection(L["Global Font Settings"], "fonts_global", 1, nil)
             BuildFontSelectionGroup({
                 group = fontCard, parent = self.child,
@@ -362,8 +363,8 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             --
             -- No tick: the shadow STYLE is chosen by the outline dropdowns, here
             -- and on a dozen other pages. How a text shadow LOOKS, so it is
-            -- pinnable. Column 2.
-            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 2, ShadowSettingsSummary, nil, nil,
+            -- pinnable. Column 1, under Global Font Settings.
+            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 1, ShadowSettingsSummary, nil, nil,
                 BuildShadowSettingsGroup)
             BuildShadowSettingsGroup({
                 group = shadowCard, parent = self.child,
@@ -389,11 +390,12 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- whether to press Apply to All. A card like every other group on the
             -- page -- it folds away like them once it has been read -- but no
             -- summary (it holds no value) and no pin (nothing it holds changes how
-            -- anything looks). Column 2, under Shadow Settings.
+            -- anything looks). Column 2, under Content.
             --
             -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the card's width several of
             -- the twelve bullets stop wrapping, so classic's 235 would leave a hole
             -- under it. The note keeps its 40 -- one line at any width.
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 2)
             local band = OpenSection(L["Affected Elements"], "fonts_affected", 2, nil)
             local infoInner = GUI:GroupInnerWidth(band)
             band:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
@@ -530,6 +532,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Buff Bar: it is the PAGE's master switch, a fold is not a switch, and
             -- the other three cards grey with it. So this card never greys itself.
             -- Behaviour, so no pin. Raid + groups only, header and band together.
+            do
+                local header = GUI:CreateHeader(self.child, L["Content"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 1)
+            end
             local band = OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, nil, nil, HideGroupLabelOptions)
             BuildLabelSettingsGroup({
                 group = band, parent = self.child,
@@ -569,6 +576,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- on the same key with the same two gates: raid + groups (header and
             -- band together) and the page's enable (the card greys with it). How
             -- the label READS is how it LOOKS, so it is pinnable. Column 2.
+            do
+                local header = GUI:CreateHeader(self.child, L["Text"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 2)
+            end
             local band = OpenSection(L["Text Format"], "grouplabels_format", 2, nil,
                 DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)
             BuildTextFormatGroup({
@@ -658,6 +670,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Where the label sits is how it LOOKS, so it is pinnable. Raid +
             -- groups only, greying with the page's enable. Column 1, under Raid
             -- Group Labels, as classic's box.
+            do
+                local header = GUI:CreateHeader(self.child, L["Layout"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 1)
+            end
             local positionBand = OpenSection(L["Position"], "grouplabels_position", 1, PositionSummary,
                 DisableGroupLabelOptions, HideGroupLabelOptions, BuildPositionGroup)
             BuildPositionGroup({

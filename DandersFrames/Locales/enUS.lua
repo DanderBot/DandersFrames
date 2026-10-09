@@ -2950,6 +2950,17 @@ L["This list can't be built during combat."] = true
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
+-- Settings page group headers (the Modern layout card groups).
+L["Frames"] = true
+L["Interface"] = true
+L["Unit Colors"] = true
+L["Aura Colors"] = true
+L["Range"] = true
+L["Unit State"] = true
+L["Group Roles"] = true
+L["Markers"] = true
+L["Targeting"] = true
+L["Threat"] = true
 L["Changed in this section"] = true
 L["%d changed from default"] = true
 L["%d set by this auto layout"] = true

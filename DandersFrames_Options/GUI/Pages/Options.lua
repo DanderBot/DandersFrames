@@ -1583,6 +1583,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- ones below. The range spell and the check interval are behaviour,
             -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
             -- for the range helpers -- a pinned second copy would re-point them.
+            Add(GUI:CreateHeader(self.child, L["Range"]), 40, 1)
             local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
             BuildRangeCheckGroup({
                 group = rangeBand, parent = self.child,
@@ -1695,6 +1696,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- ran (its tools2.refreshStates is the state pass here) -- never a
             -- page rebuild. How a dead frame is drawn is how it LOOKS, so it is
             -- pinnable.
+            Add(GUI:CreateHeader(self.child, L["Unit State"]), 40, 2)
             local band = OpenSection(L["Dead/Offline Fading"], "fading_dead", 2, DeadFadeSummary, nil, nil,
                 BuildDeadFadeGroup, {
                     db = db, key = "fadeDeadFrames", label = L["Enable Dead Fade"],
@@ -2053,7 +2055,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- tick that greyed the whole page would surprise people. So the first
             -- card holds it and its blurb, and never greys itself. Its commit also
             -- repaints a pinned panel, whose own gate reads the same key.
-            local settingsBand = OpenSection(L["Pet Frame Settings"], "pets_settings", 1, nil)
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+            local settingsBand = OpenSection(L["Settings"], "pets_settings", 1, nil)
             BuildPetGeneralGroup({
                 group = settingsBand, parent = self.child,
                 refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
@@ -2266,8 +2269,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Column 2 opens here, with the category header its three cards sit
             -- under. How the frame LOOKS, so it is pinnable; greys with the page
             -- gate.
-            Add(GUI:CreateHeader(self.child, L["Frame"]), 40, 2)
-            local band = OpenSection(L["Appearance"], "pets_appearance", 2, PetAppearanceSummary, PetsOffRow, nil,
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+            local band = OpenSection(L["Frame Style"], "pets_appearance", 2, PetAppearanceSummary, PetsOffRow, nil,
                 BuildPetAppearanceGroup)
             BuildPetAppearanceGroup({
                 group = band, parent = self.child,
@@ -2937,6 +2940,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             --
             -- ⚠ NO HEADER TICK: two INDEPENDENT modes, either can be off without
             -- the other. Behaviour, so no pin.
+            Add(GUI:CreateHeader(self.child, L["Frames"]), 40, 1)
             local band = OpenSection(L["Frame Modes"], "general_framemodes", 1,
                 function() return FrameModesSummary(DF.db) end)
             BuildFrameModesGroup({
@@ -3183,9 +3187,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- the per-mode db; the update rate lives in DF:GetGlobalDB(), so the
             -- summary reads that and ignores what it was handed.
             --
-            -- Column 2 opens here. Two independent settings, so no header tick.
-            -- Render quality is how the frames LOOK, so it is pinnable.
-            local band = OpenSection(L["Rendering"], "general_rendering", 2,
+            -- The last of the Frames cards. Two independent settings, so no
+            -- header tick. Render quality is how the frames LOOK, so it is pinnable.
+            local band = OpenSection(L["Rendering"], "general_rendering", 1,
                 function() return RenderingSummary(DF:GetGlobalDB()) end, nil, nil, BuildRenderingGroup)
             BuildRenderingGroup({
                 group = band, parent = self.child,
@@ -3305,6 +3309,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- How the settings window LOOKS, so it is pinnable. ⚠ The classic
             -- layout switch rides in here, in a pinned copy too: flipping it runs
             -- GUI:FlipSettingsLayout, which closes every panel first.
+            Add(GUI:CreateHeader(self.child, L["Interface"]), 40, 2)
             local band = OpenSection(L["Settings Panel Appearance"], "general_panelappearance", 2,
                 function() return PanelAppearanceSummary(DF.db) end, nil, nil, BuildPanelAppearanceGroup)
             BuildPanelAppearanceGroup({
@@ -3391,8 +3396,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         else
             -- ☠ NO SUMMARY. Two yes/nos, and neither has a word the locale ships
             -- that could stand in for it. Two independent switches, so no header
-            -- tick; behaviour, so no pin. The last card down column 1.
-            local band = OpenSection(L["Notifications"], "general_notifications", 1, nil)
+            -- tick; behaviour, so no pin.
+            local band = OpenSection(L["Notifications"], "general_notifications", 2, nil)
             BuildNotificationsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -3633,6 +3638,51 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
         end
 
+        -- ===== GROUP VISIBILITY (a 280 box in classic, a raid card) =========
+        -- Eight ticks, raid only. The card lays them out two per row when it is
+        -- wide enough -- four rows of two is the shape a group picker wants. The
+        -- classic box stays one track, as it always was.
+        --
+        -- ☠ THE TICKS ARE CUSTOM-GET/SET OVER ONE TABLE SETTING. Each stamps a
+        -- per-index override key ("raidGroupVisible_3") that the profile does not
+        -- ship; the real key is the one table, raidGroupVisible.
+        local function ApplyGroupVisibility()
+            if db.raidUseGroups then
+                -- Separated mode
+                DF:UpdateRaidHeaderVisibility(); DF:PositionRaidHeaders()
+            else
+                -- Flat mode - rebuild groupFilter and nameList
+                if DF.FlatRaidFrames then
+                    DF.FlatRaidFrames:UpdateContainerSize()
+                    DF.FlatRaidFrames:UpdateSorting()
+                end
+            end
+            UpdateFrames()
+        end
+
+        local function BuildGroupVisGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            -- fullRow: a blurb describes the whole card, not the tick beside it.
+            -- Inert wherever the interior is one track (the classic box).
+            local groupVisHintLabel = group:AddWidget(GUI:CreateLabel(parent, L["Choose which groups to display."], 250), 25)
+            groupVisHintLabel.fullRow = true
+
+            if not db.raidGroupVisible then
+                db.raidGroupVisible = {[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true}
+            end
+
+            for i = 1, 8 do
+                local groupIndex = i
+                local overrideKey = "raidGroupVisible_" .. i
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Group"] .. " " .. i, nil, nil,
+                    ApplyGroupVisibility,
+                    function() return db.raidGroupVisible[groupIndex] ~= false end,
+                    function(val) db.raidGroupVisible[groupIndex] = val end,
+                    overrideKey
+                ), 25)
+            end
+        end
+
         -- ===== FRAME SIZE (a 280 box in classic, the first Layout card) =====
         -- Verbatim, taking the group and parent it should build into -- same
         -- factories, same L keys, same db keys, same callbacks, same slot
@@ -3699,6 +3749,44 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Buff Bar's placement and its reasons: they act on cards in both
             -- columns, and "both" carries them through the one-column fold intact.
             Add(tools.SectionControls(self.child), 24, "both")
+            -- Content: which raid groups show. Raid only, so its header hides
+            -- with the card outside raid.
+            local contentHeader = GUI:CreateHeader(self.child, L["Content"])
+            contentHeader.hideOn = function() return GUI.SelectedMode ~= "raid" end
+            Add(contentHeader, 40, 1)
+            do
+                -- How many of the eight are on, and -- while the list is short enough
+                -- to be worth reading -- which ones are not.
+                local function GroupVisSummary(d)
+                    if not d then return "" end
+                    local vis = d.raidGroupVisible
+                    local shown, hidden = 0, {}
+                    for i = 1, 8 do
+                        if type(vis) ~= "table" or vis[i] ~= false then
+                            shown = shown + 1
+                        else
+                            hidden[#hidden + 1] = i
+                        end
+                    end
+                    local parts = { format("%d/8", shown) }
+                    if #hidden > 0 and #hidden <= 3 then
+                        parts[#parts + 1] = format("%s %s", L["Hidden"], table.concat(hidden, ", "))
+                    end
+                    return table.concat(parts, " \194\183 ")
+                end
+
+                -- Raid only, header and band together, as the box. Eight one-word
+                -- ticks, which the card lays out two per row when it is wide enough
+                -- (the builder's hint is a full row of its own). Which groups show is
+                -- behaviour, so no pin.
+                local band = OpenSection(L["Group Visibility"], "frame_groupvisibility", 1, GroupVisSummary, nil,
+                    function() return GUI.SelectedMode ~= "raid" end)
+                BuildGroupVisGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                CloseSection(band)
+            end
             -- The category header the layout cards sit under.
             Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
             -- No tick: a frame has a size either way. How big a frame is is how
@@ -4601,51 +4689,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             CloseSection(band)
         end
 
-        -- ===== GROUP VISIBILITY (a 280 box in classic, a raid card) =========
-        -- Eight ticks, raid only. The card lays them out two per row when it is
-        -- wide enough -- four rows of two is the shape a group picker wants. The
-        -- classic box stays one track, as it always was.
-        --
-        -- ☠ THE TICKS ARE CUSTOM-GET/SET OVER ONE TABLE SETTING. Each stamps a
-        -- per-index override key ("raidGroupVisible_3") that the profile does not
-        -- ship; the real key is the one table, raidGroupVisible.
-        local function ApplyGroupVisibility()
-            if db.raidUseGroups then
-                -- Separated mode
-                DF:UpdateRaidHeaderVisibility(); DF:PositionRaidHeaders()
-            else
-                -- Flat mode - rebuild groupFilter and nameList
-                if DF.FlatRaidFrames then
-                    DF.FlatRaidFrames:UpdateContainerSize()
-                    DF.FlatRaidFrames:UpdateSorting()
-                end
-            end
-            UpdateFrames()
-        end
-
-        local function BuildGroupVisGroup(tools2)
-            local group, parent = tools2.group, tools2.parent
-            -- fullRow: a blurb describes the whole card, not the tick beside it.
-            -- Inert wherever the interior is one track (the classic box).
-            local groupVisHintLabel = group:AddWidget(GUI:CreateLabel(parent, L["Choose which groups to display."], 250), 25)
-            groupVisHintLabel.fullRow = true
-
-            if not db.raidGroupVisible then
-                db.raidGroupVisible = {[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true}
-            end
-
-            for i = 1, 8 do
-                local groupIndex = i
-                local overrideKey = "raidGroupVisible_" .. i
-                group:AddWidget(GUI:CreateCheckbox(parent, L["Group"] .. " " .. i, nil, nil,
-                    ApplyGroupVisibility,
-                    function() return db.raidGroupVisible[groupIndex] ~= false end,
-                    function(val) db.raidGroupVisible[groupIndex] = val end,
-                    overrideKey
-                ), 25)
-            end
-        end
-
+        -- ===== GROUP VISIBILITY, CLASSIC =====================================
+        -- The card is built under Content, above the Layout cards; the classic
+        -- box stays where it always stood.
         if classicLayout then
             local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280)
             groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
@@ -4656,38 +4702,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 refreshStates = function() self:RefreshStates() end,
             })
             Add(groupVisGroup, nil, 1)
-        else
-            -- How many of the eight are on, and -- while the list is short enough
-            -- to be worth reading -- which ones are not.
-            local function GroupVisSummary(d)
-                if not d then return "" end
-                local vis = d.raidGroupVisible
-                local shown, hidden = 0, {}
-                for i = 1, 8 do
-                    if type(vis) ~= "table" or vis[i] ~= false then
-                        shown = shown + 1
-                    else
-                        hidden[#hidden + 1] = i
-                    end
-                end
-                local parts = { format("%d/8", shown) }
-                if #hidden > 0 and #hidden <= 3 then
-                    parts[#parts + 1] = format("%s %s", L["Hidden"], table.concat(hidden, ", "))
-                end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- Raid only, header and band together, as the box. Eight one-word
-            -- ticks, which the card lays out two per row when it is wide enough
-            -- (the builder's hint is a full row of its own). Which groups show is
-            -- behaviour, so no pin.
-            local band = OpenSection(L["Group Visibility"], "frame_groupvisibility", 1, GroupVisSummary, nil,
-                function() return GUI.SelectedMode ~= "raid" end)
-            BuildGroupVisGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
         end
 
         -- ===== GROUP DISPLAY ORDER (a 280 box in classic, a raid card) =======

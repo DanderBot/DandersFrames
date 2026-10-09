@@ -286,7 +286,7 @@ local HP_ANCHOR = {
 -- `dim` = header greys with the page gate, `hide` = the floating gate on both
 -- halves, `pin` = passes its builder (decides how the bar LOOKS).
 local CARDS = {
-    { label = "Heal Prediction",       key = "healpred_settings", col = 1, box = "settingsGroup", classicCol = "1",
+    { label = "Settings", classicLabel = "Heal Prediction", key = "healpred_settings", col = 1, box = "settingsGroup", classicCol = "1",
       builder = "BuildHealPredictionSettingsGroup", golden = HP_SETTINGS,
       summary = "HealPredictionCardSummary", pin = true },
     { label = "Floating Bar Position", key = "healpred_floating", col = 2, box = "floatingGroup", classicCol = "1",
@@ -310,7 +310,7 @@ for _, g in ipairs(CARDS) do
 
     check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
           g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"]), 40)', 1, true) ~= nil,
+    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"]), 40)', 1, true) ~= nil,
           g.label .. ": ...under the header it always had")
     check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
           g.label .. ": ...and still goes to column " .. g.classicCol)
@@ -383,8 +383,17 @@ do
     -- The order, which is also the one-column fold's order.
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Heal Prediction | Floating Bar Position | Floating Bar Anchor",
+    eq(table.concat(order, " | "), "Settings | Floating Bar Position | Floating Bar Anchor",
        "order: the three cards open in the order the classic boxes read")
+
+    -- The groups: Content over Settings in column 1; Layout over the two
+    -- floating cards in column 2, hiding with them unless the bar floats.
+    local function before(a, b) local i, j = PAGE:find(a, 1, true), PAGE:find(b, 1, true); return i and j and i < j end
+    check(before('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 'OpenSection(L["Settings"]'),
+          "groups: Content heads column 1, before Settings")
+    check(PAGE:find('layoutHeader.hideOn = HealPredFloatingHiddenOn', 1, true) ~= nil
+      and before('Add(layoutHeader, 40, 2)', 'OpenSection(L["Floating Bar Position"]'),
+          "groups: Layout heads column 2 and hides with the floating cards")
 end
 
 -- ============================================================

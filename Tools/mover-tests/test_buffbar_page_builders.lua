@@ -14,14 +14,12 @@ local NS = ...
 -- page, and a shut header keeps the row's old summary string in its right
 -- corner. The twelfth, a lone checkbox, is still a CONTROL ROW.
 --
---   column 1   "Content"  Visibility, Buff Filters, Order & Limits and the
---                         Hide Duplicate Buffs control row.
---              ...then    Duration Bar and Pandemic, the two 12.1-factory
---                         extras, under NO category header: both carry the same
---                         hideOn, so a header there would be a title standing
---                         over nothing on a client with no factory row.
---   column 2   "Icon"     Appearance, Layout, Position, Border.
---              "Text"     Duration Text, Stack Count.
+--   column 1   "Content"     Visibility, Buff Filters (Hide Duplicate Buffs at
+--                            its foot), Order & Limits.
+--              "Text"        Duration Text, Stack Count.
+--              "Effects"     Pandemic.
+--   column 2   "Layout"      Layout, Position.
+--              "Appearance"  Icon Style, Border, Duration Bar.
 --
 -- ☠ THE DEBUFF BAR USES THE SAME CARDS (the section helper was lifted into the
 -- page tools for it), and this page now takes its two opt-ins as well -- two
@@ -265,16 +263,25 @@ do
     check(close ~= nil and close:find("Add(band, nil, band.dfSectionCol)", 1, true) ~= nil,
           "sections: the band is added in its own right, in the column its section is in")
 
-    -- ---- the three category headers -----------------------------------
-    -- ⚠ ADDED STRAIGHT TO A COLUMN, not into a band: there is no band spanning a
-    -- whole category any more, so the header that names one is a page child like
-    -- the sections under it.
-    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" }, { "Text", "2" } }) do
-        check(PAGE:find('Add(GUI:CreateHeader(self.child, L["' .. pair[1] .. '"]), 40, ' .. pair[2] .. ')', 1, true) ~= nil,
-              "bands: the " .. pair[1] .. " category header opens column " .. pair[2])
+    -- ---- the groups: one table, mounted in order (tools.MountCardGroups) ----
+    -- The page's Add order is what a one-column window stacks, so the cards
+    -- register with tools.DeferCard and mount group by group, each group
+    -- under its header.
+    local groupsSrc = PAGE:match("tools%.MountCardGroups%(Add, (%b{})%)")
+    check(groupsSrc ~= nil, "groups: the cards mount by group from one table")
+    local gotGroups = {}
+    for label, col, keys in (groupsSrc or ""):gmatch('label = L%["([^"]+)"%], col = (%d), keys = {(.-)}') do
+        local ks = {}
+        for k in keys:gmatch('"([%w_]+)"') do ks[#ks + 1] = k end
+        gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
-    -- ☠ AND THE FACTORY PAIR HAS NO HEADER. Both carry HideDurationBar, so a
-    -- header there would be a section title left standing over nothing.
+    eq(table.concat(gotGroups, " | "),
+       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack | Effects@1: buffs_pandemic",
+       "groups: Content, Layout, Appearance, Text, Effects, each over its cards")
+    for _, key in ipairs({ "buffs_visibility", "buffs_filters", "buffs_order", "buffs_appearance", "buffs_layout", "buffs_position", "buffs_border", "buffs_duration", "buffs_stack", "buffs_durationbar", "buffs_pandemic" }) do
+        check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
+              "groups: " .. key .. " registers its card for the group mount")
+    end
     for _, band in ipairs({ "contentBand", "iconBand", "textBand", "factoryBand" }) do
         check(PAGE:find(band, 1, true) == nil,
               "bands: the old " .. band .. " is gone -- every section carries a band of its own")
@@ -330,7 +337,7 @@ do
     -- which are exactly the groups classic dims. `dimOn` is the header half:
     -- the kit greys the section title, the band's own disableOn/disableChildrenOn
     -- greys the controls under it, exactly as they did inside a pane.
-    for _, name in ipairs({ "Order & Limits", "Appearance", "Layout", "Position",
+    for _, name in ipairs({ "Order & Limits", "Icon Style", "Layout", "Position",
                             "Border", "Duration Text", "Stack Count", "Duration Bar" }) do
         check(sectionBlock(name):find("BuffsOffRow", 1, true) ~= nil,
               "gate: the " .. name .. " section greys while the bar is off")
@@ -510,7 +517,7 @@ local SECTIONS = {
     { builder = "BuildBuffOrderGroup", label = "Order & Limits", boxHeader = "Order & Limits",
       golden = BUFF_ORDER, classicColumn = "1", key = "buffs_order", column = "1",
       summary = "BuffOrderSummary" },
-    { builder = "BuildBuffAppearanceGroup", label = "Appearance", boxHeader = "Appearance",
+    { builder = "BuildBuffAppearanceGroup", label = "Icon Style", boxHeader = "Appearance",
       golden = BUFF_APPEARANCE, classicColumn = "2", key = "buffs_appearance", column = "2",
       summary = "BuffAppearanceSummary" },
     { builder = "BuildBuffLayoutGroup", label = "Layout", boxHeader = "Layout",
@@ -524,14 +531,14 @@ local SECTIONS = {
       summary = "BuffBorderSummary", hoistedIn = 0,
       tick = { key = "buffShowBorder", label = "Show Border" } },
     { builder = "BuildBuffDurationGroup", label = "Duration Text", boxHeader = "Duration Text",
-      golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "2",
+      golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "1",
       summary = "BuffDurationSummary", hoistedIn = 1,
       tick = { key = "buffShowDuration", label = "Show Duration" } },
     { builder = "BuildBuffStackGroup", label = "Stack Count", boxHeader = "Stack Count",
-      golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "2",
+      golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "1",
       summary = "BuffStackSummary" },
     { builder = "BuildBuffDurationBarGroup", label = "Duration Bar", boxHeader = "Duration Bar",
-      golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "1",
+      golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "2",
       summary = "BuffDurationBarSummary", hoistedIn = 1, hide = true,
       tick = { key = "buffDurationBarEnabled", label = "Enable Duration Bar" } },
     { builder = "BuildBuffPandemicGroup", label = "Pandemic", boxHeader = "Pandemic",
@@ -735,15 +742,14 @@ do
     check(PAGE:find("bandStyle", 1, true) == nil,
           "boxes: the band skin is never restated as a literal (this page needs none)")
 
-    -- ---- the two-column split, and the order inside each column ------
-    -- Content and the factory pair left, Icon and Text right -- the same split
-    -- the four bands had. Within a column the Add order IS the layout order, so
-    -- the sections are asserted in sequence rather than merely present.
+    -- ---- the source order -----------------------------------------
+    -- The order the cards are declared in, which is classic's; the order they
+    -- mount in is the group table's (section 1).
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Buff Filters | Order & Limits | Appearance | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
-       "order: the eleven sections are opened in the order the page reads in one column")
+       "Visibility | Buff Filters | Order & Limits | Icon Style | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
+       "order: the eleven sections are declared in classic's order")
 
     -- ☠ AND BOTH HALVES FILL THEIR COLUMN. The layout pass only resizes an
     -- indented widget otherwise, so a header or a band placed in a column without
@@ -829,7 +835,7 @@ print("-- Buff Bar page: the pin")
 
 -- The eight that decide how the bar LOOKS...
 local PINNED = {
-    { label = "Appearance",   builder = "BuildBuffAppearanceGroup" },
+    { label = "Icon Style",   builder = "BuildBuffAppearanceGroup" },
     { label = "Layout",       builder = "BuildBuffLayoutGroup" },
     { label = "Position",     builder = "BuildBuffPositionGroup" },
     { label = "Border",       builder = "BuildBuffBorderGroup" },
@@ -1057,9 +1063,9 @@ do
     -- point, which costs nothing at the top of a page where both columns are at
     -- zero.
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    check(stripAt ~= nil and contentAt ~= nil and stripAt < contentAt,
-          "bulk: ...above the first category header, because it acts on the whole page")
+    local mountAt = PAGE:find("tools.MountCardGroups(Add,", 1, true)
+    check(stripAt ~= nil and mountAt ~= nil and stripAt < mountAt,
+          "bulk: ...above the first group header, because it acts on the whole page")
     local mounts = 0
     for _ in PAGE:gmatch("tools%.SectionControls%(") do mounts = mounts + 1 end
     eq(mounts, 1, "bulk: ...and exactly once")
@@ -1322,7 +1328,7 @@ do
         { label = "Duration Bar",  key = "buffDurationBarEnabled", name = "Enable Duration Bar" },
         { label = "Pandemic",      key = "buffPandemicEnabled",    name = "Enable" },
     }
-    local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Appearance",
+    local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Icon Style",
                        "Layout", "Position", "Stack Count" }
     for _, t in ipairs(TICKED) do
         local block = sectionBlock(t.label)

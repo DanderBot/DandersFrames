@@ -270,6 +270,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(tools.SectionControls(self.child), 24, "both")
             -- ☠ NO TICK: Enable Custom Sorting is the page gate and stays in the
             -- body, built by the builder exactly as classic builds it. No pin.
+            Add(GUI:CreateHeader(self.child, L["Sorting"]), 40, 1)
             local band = OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)
             BuildSortOptionsGroup({
                 group = band, parent = self.child,
@@ -875,6 +876,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
+            Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)
             -- Column 1, pinnable, no summary (see the page note).
             local band = OpenSection(L["Class Colors"], "colors_class", 1, nil, nil, nil, BuildClassColorsGroup)
             BuildClassColorsGroup({
@@ -929,8 +931,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(col2, nil, 2)
         else
-            -- Column 2, pinnable, no summary.
-            local band = OpenSection(L["Role Colors"], "colors_role", 2, nil, nil, nil, BuildRoleColorsGroup)
+            -- Column 1 under Class Colors, pinnable, no summary.
+            local band = OpenSection(L["Role Colors"], "colors_role", 1, nil, nil, nil, BuildRoleColorsGroup)
             BuildRoleColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -977,10 +979,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(dispelCol, nil, 1)
         else
-            -- Column 1 under Class Colors, pinnable, no summary. Its title is the
+            -- Column 2, opening Aura Colors, pinnable, no summary. Its title is the
             -- cross-link anchor the debuff Border and Dispel Overlay pages jump to
             -- (see the page note) -- keep it in step with theirs.
-            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 1, nil, nil, nil, BuildDispelColorsGroup)
+            Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)
+            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, nil, nil, nil, BuildDispelColorsGroup)
             BuildDispelColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -2095,6 +2098,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
 
+            -- The four looks, across both columns.
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, "both")
+
             -- Pins on all three: they are what the bar is drawn IN and ON.
             local band = OpenSection(L["Color"], "health_color", 1, HealthColorSummary, nil, nil,
                 BuildHealthColorGroup)
@@ -2288,7 +2294,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- suppressed checkbox ran plus the state pass that re-greys the four
             -- controls under it -- never a page rebuild. A pin: the overlay's
             -- texture, colour and blend are how it LOOKS.
-            local band = OpenSection(L["Reduced Max Health"], "health_reduced", 2, ReducedMaxHealthSummary, nil, nil,
+            -- Its own group under the looks, as classic gives it its own section:
+            -- an extra the bar can show, not how the bar looks.
+            Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
+            local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
                 BuildReducedMaxHealthGroup, {
                     db = db, key = "reducedMaxHealthEnabled", label = L["Enable"],
                     onChanged = function()
@@ -2938,11 +2947,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
             -- The category header the two General cards sit under.
-            Add(GUI:CreateHeader(self.child, L["General"]), 40, 1)
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
             -- ☠ NO TICK: Enable Resource Bar is the page gate and stays in the body
             -- (see the page note), built by the builder exactly as classic builds
             -- it. No pin: which roles get a bar is behaviour, not looks.
-            local band = OpenSection(L["Resource Bar Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
+            local band = OpenSection(L["Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
             BuildResourceSettingsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -3023,8 +3032,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(appearanceGroup, nil, 2)
         else
             -- The category header the four Style cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Style"]), 40, 2)
-            local band = OpenSection(L["Appearance"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+            local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
                 BuildResourceAppearanceGroup)
             BuildResourceAppearanceGroup({
                 group = band, parent = self.child,
@@ -3758,7 +3767,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- mode and the source.
             --
             -- A pin: the texture, the colours and the blend are how the bar LOOKS.
-            local band = OpenSection(L["Heal Prediction"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+            local band = OpenSection(L["Settings"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
                 BuildHealPredictionSettingsGroup)
             BuildHealPredictionSettingsGroup({
                 group = band, parent = self.child,
@@ -3815,6 +3825,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ COLUMN 2, HIDDEN UNLESS THE BAR FLOATS -- header and band together.
             -- Greys its header with the page gate; its controls grey themselves.
             -- A pin: size and fill direction are how the bar LOOKS.
+            -- Layout heads column 2 and hides with its two cards unless the bar floats.
+            local layoutHeader = GUI:CreateHeader(self.child, L["Layout"])
+            layoutHeader.hideOn = HealPredFloatingHiddenOn
+            Add(layoutHeader, 40, 2)
             local band = OpenSection(L["Floating Bar Position"], "healpred_floating", 2, HealPredictionFloatingSummary,
                 HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionFloatingGroup)
             BuildHealPredictionFloatingGroup({
