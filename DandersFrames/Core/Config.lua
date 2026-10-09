@@ -929,9 +929,11 @@ local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
 -- flag). These let the GUI bind a flag dropdown and a shadow checkbox to a single
 -- stored value without a destructive migration of existing profiles.
 
+-- A boolean is a Shadow tick that reached a store raw (a layout override or an
+-- old profile): true reads as shadow with no outline, false as none.
 -- Returns the flag portion (always "NONE" rather than "" for dropdown matching).
 function DF:OutlineFlag(stored)
-    stored = stored or "NONE"
+    if type(stored) ~= "string" then return "NONE" end
     local rest = stored:match("^SHADOW;(.*)$")
     if rest then stored = rest end
     if stored == "" or stored == "SHADOW" then return "NONE" end
@@ -940,7 +942,7 @@ end
 
 -- Returns true if the stored value includes a drop shadow.
 function DF:OutlineHasShadow(stored)
-    if not stored then return false end
+    if type(stored) ~= "string" then return stored == true end
     return stored == "SHADOW" or stored:match("^SHADOW;") ~= nil
 end
 
@@ -966,11 +968,15 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     -- every caller, and a corrupted import can store a boolean/number/table in
     -- a font key. Coerce instead of crashing (a bad outline once broke frame
     -- layout addon-wide on login): bad font name -> fallback font, bad size ->
-    -- default, bad outline -> no flags.
+    -- default, bad outline -> no flags (true -> shadow, as DF:OutlineHasShadow reads it).
     if type(fontNameOrPath) ~= "string" then fontNameOrPath = nil end
     fontSize = tonumber(fontSize) or 10
     if fontSize <= 0 then fontSize = 10 end
-    if type(outline) ~= "string" then outline = "" end
+    if outline == true then
+        outline = "SHADOW"
+    elseif type(outline) ~= "string" then
+        outline = ""
+    end
 
     -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy

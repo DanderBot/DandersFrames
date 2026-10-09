@@ -2789,8 +2789,14 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         -- two keys differ, or a customSet puts the value somewhere else, the undo
         -- engine's "did it land plainly in db[key]" test fails and it records
         -- nothing -- which is right, because db[key] is then not the store.
-        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, val) then
-            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+        --
+        -- opts.storedValue maps the tick to what customSet stores under that key,
+        -- for a box whose key does not hold a boolean (Shadow). The bracket records
+        -- that value, or a layout override would store the bare tick.
+        local stored = val
+        if opts and opts.storedValue then stored = opts.storedValue(val) end
+        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, stored) then
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(stored) end
             return
         end
 
@@ -2800,11 +2806,11 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         -- edited (what the removed SetProfileSetting call did) and commits the
         -- undo entry -- carrying `callback`, this checkbox's own commit, so the
         -- undo replays the apply and not only the write.
-        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, val, label, callback)
+        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, stored, label, callback)
 
         -- Update override indicators
         if container.UpdateOverrideIndicators then
-            container:UpdateOverrideIndicators(val)
+            container:UpdateOverrideIndicators(stored)
         end
         
         -- ☠ (Removed) three "calling X" entry traces, one immediately above each call.
@@ -3895,8 +3901,10 @@ end
 function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inheritKey)
     local function effective() return dbTable[dbKey] or (inheritKey and dbTable[inheritKey]) end
     local get = function() return DF:OutlineHasShadow(effective()) end
-    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
-    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
+    local function compose(val) return DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
+    local set = function(val) dbTable[dbKey] = compose(val) end
+    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set, nil,
+        { storedValue = compose })
 end
 
 -- The border animations' display names, keyed by the saved type value -- the

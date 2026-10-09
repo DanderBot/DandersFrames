@@ -159,7 +159,7 @@ do
     -- The two wrappers delegate, and the delegation is the opt-in.
     check(widgets:find("return GUI:CreateDropdown(parent, label or L[\"Outline\"], options, dbTable, dbKey, callback, get, set)", 1, true) ~= nil,
           "outline dropdown: it returns the shared dropdown, so it inherits the sweep")
-    check(widgets:find("return GUI:CreateCheckbox(parent, label or L[\"Shadow\"], dbTable, dbKey, callback, get, set)", 1, true) ~= nil,
+    check(widgets:find("return GUI:CreateCheckbox(parent, label or L[\"Shadow\"], dbTable, dbKey, callback, get, set, nil,", 1, true) ~= nil,
           "shadow tick: it returns the shared checkbox, so it inherits the sweep")
 
     -- ...and the two shared controls those wrappers land on are the kit's, which
