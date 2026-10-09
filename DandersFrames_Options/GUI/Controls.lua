@@ -756,10 +756,15 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         end)
 
         local menuButtons = {}
+        -- ☠ REUSED BY POSITION, NEVER MADE AGAIN. Rebuild runs on every refresh of
+        -- the control, and it made a fresh button per option each time, hiding the
+        -- old ones -- frames the game never frees. Seven per refresh (2 + 2 + 3) on
+        -- every page with a Growth control, found by the GUI trace's growth probe.
+        local pool = {}
 
         -- Rebuild populates menu items from current options
         frame.Rebuild = function(self, newOptions)
-            for _, mb in ipairs(menuButtons) do mb:Hide() end
+            for _, mb in ipairs(pool) do mb:Hide() end
             wipe(menuButtons)
 
             local sorted = {}
@@ -780,18 +785,21 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
 
             local menuHeight = 0
             for i, opt in ipairs(sorted) do
-                local menuBtn = CreateFrame("Button", nil, menuFrame)
-                menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
-                menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
-                menuBtn:SetHeight(22)
-
-                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                local menuBtn = pool[i]
+                if not menuBtn then
+                    menuBtn = CreateFrame("Button", nil, menuFrame)
+                    menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
+                    menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
+                    menuBtn:SetHeight(22)
+                    menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                    menuBtn.Text:SetPoint("LEFT", 8, 0)
+                    menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                    menuBtn.Highlight:SetAllPoints()
+                    pool[i] = menuBtn
+                end
+                menuBtn:Show()
                 menuBtn.Text:SetText(opt.value)
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-                menuBtn.Highlight:SetAllPoints()
                 local c = GetThemeColor()
                 menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
 
@@ -1150,14 +1158,15 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local MAX_VISIBLE = 8
 
     -- Function to rebuild menu with current textures
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box, and it used to make a fresh
+    -- row each time and drop the old ones -- frames the game never frees, a
+    -- whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        -- Clear old buttons
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
-        
+
         -- Get fresh texture list (use custom options if provided)
         local options = customOptions or DF:GetTextureList()
         local sortedOptions = {}
@@ -1189,17 +1198,27 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-            
-            -- Texture preview
-            menuBtn.Preview = menuBtn:CreateTexture(nil, "ARTWORK")
-            menuBtn.Preview:SetPoint("LEFT", 4, 0)
-            menuBtn.Preview:SetSize(80, 18)
-            -- Handle "Solid" special case
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Preview = menuBtn:CreateTexture(nil, "ARTWORK")
+                menuBtn.Preview:SetPoint("LEFT", 4, 0)
+                menuBtn.Preview:SetSize(80, 18)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                menuBtn.Text:SetPoint("LEFT", 90, 0)
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
+
+            -- Texture preview. "Solid" is a flat colour; a reused row may carry
+            -- the green preview tint from a texture, so it is reset here.
             if opt.key == "Solid" then
                 menuBtn.Preview:SetColorTexture(0.3, 0.3, 0.3, 1)
+                menuBtn.Preview:SetVertexColor(1, 1, 1)
             else
                 -- Safe setter + tiling, for the reasons on the button swatch above.
                 -- Menu rows are built from REGISTERED media so a dead path is far
@@ -1208,9 +1227,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 DF:SafeSetTexture(menuBtn.Preview, opt.key)
                 menuBtn.Preview:SetVertexColor(0.3, 0.7, 0.3)  -- Green tint for preview
             end
-            
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            menuBtn.Text:SetPoint("LEFT", 90, 0)
+
             menuBtn.Text:SetText(opt.value)
             
             -- Highlight selected item
@@ -1220,11 +1237,9 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
             
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
-            
+
             menuBtn:SetScript("OnClick", function()
                 SelectTexture(opt.key)
             end)
@@ -1548,14 +1563,15 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local MAX_VISIBLE = 10
 
     -- Function to rebuild menu with current fonts
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box, and it used to make a fresh
+    -- row each time and drop the old ones -- frames the game never frees, a
+    -- whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        -- Clear old buttons
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
-        
+
         -- Get fresh font list
         local options = DF:GetFontList()
         local sortedOptions = {}
@@ -1587,14 +1603,20 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-            
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY")
-            menuBtn.Text:SetPoint("LEFT", 8, 0)
-            menuBtn.Text:SetPoint("RIGHT", -8, 0)
-            menuBtn.Text:SetJustifyH("LEFT")
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY")
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                menuBtn.Text:SetPoint("RIGHT", -8, 0)
+                menuBtn.Text:SetJustifyH("LEFT")
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
             
             -- Set default font first, then try to use the actual font for preview
             menuBtn.Text:SetFontObject(DFFontHighlightSmall)
@@ -1621,11 +1643,9 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
             
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
-            
+
             menuBtn:SetScript("OnClick", function()
                 SelectFont(opt.key)
             end)
@@ -1838,11 +1858,13 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local ITEM_HEIGHT = 22
     local MAX_VISIBLE = 10
 
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box, and it used to make a fresh
+    -- row each time and drop the old ones -- frames the game never frees, a
+    -- whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
 
         local options = DF:GetSoundList()
@@ -1871,14 +1893,20 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         end
 
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            menuBtn.Text:SetPoint("LEFT", 8, 0)
-            menuBtn.Text:SetPoint("RIGHT", -8, 0)
-            menuBtn.Text:SetJustifyH("LEFT")
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                menuBtn.Text:SetPoint("RIGHT", -8, 0)
+                menuBtn.Text:SetJustifyH("LEFT")
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
             menuBtn.Text:SetText(opt.value)
 
             -- Highlight selected item
@@ -1889,8 +1917,6 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
 
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
 

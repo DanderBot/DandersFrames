@@ -257,3 +257,16 @@ do
     check(not rawget(slid, "fxIn"):IsPlaying() and rawget(slid, "fxInFade"):IsPlaying(),
           "fade: switching kind stops the other group")
 end
+
+print("-- Global tab: dropdown menus reuse their rows (frames are never freed)")
+do
+    local C = CONTROLS
+    local _, pools = C:gsub("local rowPool = {}", "")
+    eq(pools, 3, "pool: the texture, font and sound menus each keep a row pool")
+    local _, reuse = C:gsub("local menuBtn = rowPool%[i%]", "")
+    eq(reuse, 3, "pool: ...and take a row from it before making one")
+    check(C:find("local menuBtn = pool[i]", 1, true) ~= nil,
+          "pool: the Growth control's three menus reuse theirs too")
+    local _, orphaned = C:gsub("menuBtn:SetParent%(nil%)", "")
+    eq(orphaned, 0, "pool: no menu throws its old rows away")
+end
