@@ -5746,7 +5746,7 @@ function Factory:SyncFrame(frame)
     -- UNIT RETARGET (roster churn): frames are reused across units, but every container's
     -- unit is declared at Create and none of the sigs carry it — so re-point any live handle
     -- whose unit no longer matches the frame (mirror DriveMissingBuffFactory's h:SetUnit pass;
-    -- SetUnit self-defers to regen in combat). Cheap per-pass: one config read per handle.
+    -- SetUnit applies in combat too). Cheap per-pass: one config read per handle.
     do
         local u = frame.unit
         for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",

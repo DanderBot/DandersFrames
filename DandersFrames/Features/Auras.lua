@@ -3162,8 +3162,8 @@ end
 -- Handle:Refresh is the addon-callable re-parse and it RETURNS whether a genuine one
 -- happened, so this is a fix and an instrument at once: it forces the parse, and a "did NOT
 -- happen" line is the bounce having failed rather than an unexplained icon.
--- ✅ Source-confirmed combat-safe (see the note on Handle:Refresh). No combat gate needed
--- anyway — in combat the retarget itself defers to regen, so this cannot be reached there.
+-- The drives call this out of combat only; in combat the bounce is unavailable and the
+-- post-combat heal re-parses everything after regen.
 -- ⚠ Cheap: the drives call this only on an ACTUAL unit change, never per pass.
 -- ⚠ Handle:Refresh never throws (it pcalls internally) and answers false BOTH for a
 -- failed bounce and for a backend that simply has not attached yet — a deferred
@@ -3233,31 +3233,19 @@ function DF:DriveBuffFactory(frame, db)
         h:GetFrame():SetAlpha(rowAlpha)
     end
 
-    -- Keep the container on the frame's current unit. OOC retargets immediately; in combat
-    -- the factory defers the retarget, so hide the row until regen rather than show the
-    -- previous unit's buffs. Hide via the PLAIN anchor frame (GetFrame():SetShown), NOT
-    -- h:SetShown -- the latter also queues an 'enable' op which, paired with the queued
-    -- 'retarget', would upgrade to a full rebuild (frame leak). The container's own
-    -- OnShow/OnHide drive event (de)registration. (SetUnit combat-legality is queued for Krathe.)
+    -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfBuffFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "buff", frame.unit) end
-    elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "buff: regen, unhiding row after deferred retarget")
-        frame.dfBuffFactoryHidden = nil
     end
-    -- Show/hide only on state change (no per-event SetShown churn on the live tree).
-    -- Through SetIntentShown, not the raw frame: intent must be recorded on the
-    -- handle or the identity-gate sweep resurrects a hidden row (no enable op, so
-    -- the queued-retarget frame leak SetShown carries does not apply).
-    local rowShown = not frame.dfBuffFactoryHidden
-    if frame.dfBuffFactoryShown ~= rowShown then
-        frame.dfBuffFactoryShown = rowShown
-        h:SetIntentShown(rowShown)
+    -- Shown once, through SetIntentShown so the intent is recorded on the handle (the
+    -- identity-gate sweep restores recorded intent); no per-event SetShown churn.
+    if not frame.dfBuffFactoryShown then
+        frame.dfBuffFactoryShown = true
+        h:SetIntentShown(true)
     end
 
     -- Apply setting changes only when the layout version actually bumped — and only OUT
@@ -3443,18 +3431,13 @@ function DF:DriveDebuffFactory(frame, db)
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "debuff", frame.unit) end
-    elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "debuff: regen, unhiding row after deferred retarget")
-        frame.dfDebuffFactoryHidden = nil
     end
-    local rowShown = not frame.dfDebuffFactoryHidden
-    if frame.dfDebuffFactoryShown ~= rowShown then
-        frame.dfDebuffFactoryShown = rowShown
-        h:SetIntentShown(rowShown)   -- intent-recorded hide; see the buff drive
+    if not frame.dfDebuffFactoryShown then
+        frame.dfDebuffFactoryShown = true
+        h:SetIntentShown(true)   -- see the buff drive
     end
 
     if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
@@ -3762,27 +3745,17 @@ function DF:DriveDefensiveFactory(frame, db)
 
     if not h then return end
 
-    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via
-    -- h:SetIntentShown, NOT h:SetShown -- the latter queues an enable op that would
-    -- upgrade a queued retarget into a full rebuild (frame leak). SetIntentShown is the
-    -- op-free variant that still records intent, so the gate sweep can't resurrect it.
+    -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfDefFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "defensive", frame.unit) end
-    elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "defensive: regen, unhiding row after deferred retarget")
-        frame.dfDefFactoryHidden = nil
     end
-    -- Show/hide only on state change (no per-event SetShown churn on the live tree —
-    -- build-once-leave-it, mirrors DriveBuffFactory).
-    local rowShown = not frame.dfDefFactoryHidden
-    if frame.dfDefFactoryShown ~= rowShown then
-        frame.dfDefFactoryShown = rowShown
-        h:SetIntentShown(rowShown)
+    if not frame.dfDefFactoryShown then
+        frame.dfDefFactoryShown = true
+        h:SetIntentShown(true)   -- see the buff drive
     end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it
