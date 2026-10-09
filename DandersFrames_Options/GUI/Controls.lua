@@ -23,6 +23,53 @@ local AddOrderListOverrideIndicators = GUI._priv.AddOrderListOverrideIndicators
 -- (which loads first). See its header for why it is rawget and why it is on
 -- the commit side of the preview/commit split.
 local RefreshOwnerStates = GUI._priv.RefreshOwnerStates
+
+-- ============================================================
+-- MEDIA MENU ORDER
+-- The texture, font and sound menus list DandersFrames' own media first, then
+-- SharedMedia_MyMedia's (where people keep their personal collection), then
+-- everything else, each group A-Z with a faint line where a group starts. LSM
+-- does not record who registered a name, so the group is read off the FILE
+-- PATH. "Solid" is the texture menus' no-texture choice and leads the list.
+-- ============================================================
+local MEDIA_GROUPS = {
+    "\\addons\\dandersframes\\",
+    "\\addons\\sharedmedia_mymedia\\",
+}
+local function MediaGroup(path)
+    if path == "Solid" then return 0 end
+    if type(path) ~= "string" then return #MEDIA_GROUPS + 1 end
+    local p = path:lower():gsub("/", "\\")
+    for i, home in ipairs(MEDIA_GROUPS) do
+        if p:find(home, 1, true) then return i end
+    end
+    return #MEDIA_GROUPS + 1
+end
+
+-- Sorts a menu's {key, value} list in place; pathOf(option) -> its file path.
+local function SortMedia(list, pathOf)
+    for _, o in ipairs(list) do o.group = MediaGroup(pathOf(o)) end
+    table.sort(list, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        return a.value < b.value
+    end)
+end
+
+-- The line above a row that starts a new group. Made on the first row that
+-- needs one and kept; rows are pooled, so it is shown or hidden every rebuild.
+local function MarkMediaGroup(row, list, i)
+    local starts = i > 1 and list[i].group ~= list[i - 1].group
+    if starts and not row.GroupDivider then
+        local d = row:CreateTexture(nil, "OVERLAY")
+        local ppu = GUI._priv.PixelsPerUnit and GUI._priv.PixelsPerUnit(row)
+        d:SetPoint("TOPLEFT", 4, 0)
+        d:SetPoint("TOPRIGHT", -4, 0)
+        d:SetHeight((ppu and ppu > 0) and (1 / ppu) or 1)
+        d:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.35)
+        row.GroupDivider = d
+    end
+    if row.GroupDivider then row.GroupDivider:SetShown(starts) end
+end
 -- ============================================================
 -- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiration panel. Pairs with the
 -- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
@@ -1179,7 +1226,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return o.key end)
         
         -- Resize menu and scroll child
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
@@ -1213,6 +1260,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 rowPool[i] = menuBtn
             end
             menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
 
             -- Texture preview. "Solid" is a flat colour; a reused row may carry
             -- the green preview tint from a texture, so it is reset here.
@@ -1584,7 +1632,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return DF:GetFontPath(o.key) end)
         
         -- Resize menu and scroll child
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
@@ -1617,6 +1665,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 rowPool[i] = menuBtn
             end
             menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
             
             -- Set default font first, then try to use the actual font for preview
             menuBtn.Text:SetFontObject(DFFontHighlightSmall)
@@ -1877,7 +1926,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return DF:GetSoundPath(o.key) end)
 
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
@@ -1907,6 +1956,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 rowPool[i] = menuBtn
             end
             menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
             menuBtn.Text:SetText(opt.value)
 
             -- Highlight selected item
