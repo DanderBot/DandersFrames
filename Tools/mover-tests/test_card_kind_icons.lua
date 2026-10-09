@@ -91,8 +91,14 @@ if cardTableSrc and fnSrc then
         "local GUI, DF, L, C_PANEL, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM, GetThemeColor, CreateFrame = ...\n"
         .. cardTableSrc .. "\n" .. (kindsSrc or "") .. "\n" .. fnSrc)
     check(chunk ~= nil, "kind: the cut parses (" .. tostring(err) .. ")")
+    -- The atlas-or-path setter, recording what it was handed and the swatch's
+    -- desaturation (the fake texture answers SetDesaturated with a no-op).
+    local DFt = { SetIconTextureOrAtlas = function(_, tex, t)
+        tex:SetTexture(t)
+        rawset(tex, "SetDesaturated", function(self, v) self._desat = v and true or false end)
+    end }
     if chunk then
-        chunk(GUI, {}, setmetatable({}, { __index = function(_, k) return k end }),
+        chunk(GUI, DFt, setmetatable({}, { __index = function(_, k) return k end }),
               C_PANEL, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM,
               function() return ACCENT end,
               function(_, _, parent) return MakeFrame() end)
@@ -215,6 +221,50 @@ if cardTableSrc and fnSrc then
         local plain = GUI:CreateCollapsibleSection(MakeFrame(500, 800), "Plain", true, 500, { kind = "layout" })
         check(plain.kindIcon == nil, "plain: a non-card section ignores kind")
         eq(leftX(plain.title), 26, "plain: ...and its title stays at 26")
+
+        -- ---- a card's PREVIEW takes the icon slot (the Icons page) ----
+        local pv = build({ kind = "layout" })
+        pv:SetPreviewIcons({ { texture = "off", desaturate = true }, { text = "MT" }, { texture = "live" } })
+        local slot = rawget(pv, "previewSlot")
+        check(slot ~= nil, "preview: a card draws its preview in the header's icon slot")
+        eq(slot and slot:GetTexture(), "live", "preview: ...ONE swatch, the first live entry")
+        eq(slot and slot:GetWidth(), ICON, "preview: ...at the slot's size")
+        local sp = slot and slot._points[1]
+        eq(sp and sp[4], CARD.edge + CARD.chevron + CARD.titleGap + ICON / 2,
+           "preview: ...centred in the slot, so the title does not move")
+        eq(pv.kindIcon and pv.kindIcon._shown, false, "preview: ...in place of the kind icon")
+        eq(slot and slot._desat, false, "preview: a live entry is in colour")
+        pv:SetPreviewIcons({ { texture = "a", desaturate = true }, { texture = "b", desaturate = true } })
+        eq(slot and slot:GetTexture(), "a", "preview: nothing live -- the first entry, ...")
+        eq(slot and slot._desat, true, "preview: ...greyed")
+        pv:SetPreviewIcons({ { text = "AFK" } })
+        eq(slot and slot._shown, false, "preview: text only -- no swatch")
+        eq(pv.kindIcon and pv.kindIcon._shown, true, "preview: ...and the kind icon is back")
+        eq(#pv.previewIcons, 0, "preview: a card never builds the right-end swatches")
+
+        -- ---- more icons than the slot: a hover lists them all ----
+        local shownPopup
+        GUI.ShowCardPreviewPopup = function(_, owner, title, entries) shownPopup = { owner = owner, title = title, entries = entries } end
+        GUI.HideCardPreviewPopup = function() shownPopup = nil end
+        local many = build({})
+        many:SetPreviewIcons({ { texture = "t", desaturate = true }, { texture = "h" }, { text = "x" }, { texture = "d" } })
+        local mhit = rawget(many, "previewHit")
+        check(mhit ~= nil, "popup: a card with several icons gets a hover over its swatch")
+        eq(mhit and mhit._shown, true, "popup: ...shown")
+        eq(mhit and mhit._flags and mhit._flags.mouseClick, false, "popup: ...that takes motion, never clicks (the swatch still folds the card)")
+        local onEnter = mhit and mhit:GetScript("OnEnter")
+        if onEnter then onEnter(mhit) end
+        eq(shownPopup and #shownPopup.entries, 3, "popup: the hover lists every icon entry")
+        eq(shownPopup and shownPopup.entries[1].texture, "t", "popup: ...in order, an off one included")
+        eq(shownPopup and shownPopup.title, "Title", "popup: ...under the card's title")
+        local onLeave = mhit and mhit:GetScript("OnLeave")
+        if onLeave then onLeave(mhit) end
+        eq(shownPopup, nil, "popup: leaving the swatch hides it")
+        many:SetPreviewIcons({ { texture = "only" } })
+        eq(mhit and mhit._shown, false, "popup: one icon -- no hover")
+        local one = build({})
+        one:SetPreviewIcons({ { texture = "only" } })
+        eq(rawget(one, "previewHit"), nil, "popup: a one-icon card never builds it")
     end
 end
 
@@ -222,3 +272,34 @@ end
 local open = (CTRL:match("\n    local function OpenSection%(Add, .-\n    end\n") or ""):gsub("%s+", " ")
 check(open:find("kind = (extra and extra.kind) or GUI.SectionKindByKey[key] }", 1, true) ~= nil,
       "tools: OpenSection hands the card its kind, from the collapseKey table (never the title)")
+
+-- ---- the popup itself: every icon in a row under the card's title ----
+local popSrc = cut(SW, "local previewPopup\nfunction GUI:ShowCardPreviewPopup", "\nfunction GUI:HideCardPreviewPopup()\n    if previewPopup then previewPopup:Hide() end\nend\n")
+check(popSrc ~= nil, "popup: GUI:ShowCardPreviewPopup can be cut out of SettingsWidgets.lua")
+if popSrc then
+    local made
+    local G2 = { CreatePanelBackdrop = function() end, RegisterScaledSurface = function(_, f) f._scaled = true end }
+    local DF2 = { SetIconTextureOrAtlas = function(_, tex, t) tex:SetTexture(t)
+        rawset(tex, "SetDesaturated", function(self, v) self._desat = v and true or false end) end }
+    local chunk = loadstring("local GUI, DF, C_TEXT, CreateFrame, UIParent = ...\n" .. popSrc)
+    check(chunk ~= nil, "popup: the cut parses")
+    if chunk then
+        chunk(G2, DF2, { r = 1, g = 1, b = 1 },
+              function(_, _, parent) made = FakeUIFrame(); made._parent = parent; return made end, "UIParent")
+        local owner = FakeUIFrame()
+        G2:ShowCardPreviewPopup(owner, "Ping Icon", { { texture = "a" }, { texture = "b", desaturate = true }, { texture = "c" } })
+        check(made ~= nil and made._parent == "UIParent", "popup: one frame, off UIParent so the page cannot clip it")
+        eq(made and made._scaled, true, "popup: ...registered for the GUI scale")
+        eq(made and made.title:GetText(), "Ping Icon", "popup: titled with the card's name")
+        local sw = made and made.swatches or {}
+        eq(#sw, 3, "popup: a swatch per icon")
+        eq(sw[2] and sw[2]:GetTexture(), "b", "popup: ...in order")
+        eq(sw[2] and sw[2]._desat, true, "popup: ...an off one greyed")
+        eq(sw[1] and sw[1]._desat, false, "popup: ...a live one in colour")
+        eq(made and made._shown, true, "popup: shown")
+        G2:ShowCardPreviewPopup(owner, "Raid Role", { { texture = "x" } })
+        eq(sw[2] and sw[2]._shown, false, "popup: a shorter list hides the spare swatches")
+        G2:HideCardPreviewPopup()
+        eq(made and made._shown, false, "popup: hidden on request")
+    end
+end

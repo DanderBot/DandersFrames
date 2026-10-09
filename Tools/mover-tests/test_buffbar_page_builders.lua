@@ -245,7 +245,7 @@ do
     check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
           "sections: ...and so does its CloseSection")
     local open = OPEN
-    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(page.child, label, not (extra and extra.collapsed), BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -253,9 +253,10 @@ do
           "sections: ...the band is chromeless, at the width the layout pass will give it")
     check(open:find("section:RegisterChild(band)", 1, true) ~= nil,
           "sections: ...and registered to the section, which is what makes the fold hide it")
-    -- ☠ EXPANDED ON A FIRST RUN. This is a test of FOLDING, so nothing may start
-    -- hidden; the user's own folds are what persist after that.
-    check(open:find("label, true,", 1, true) ~= nil,
+    -- ☠ EXPANDED ON A FIRST RUN unless a page asks for shut cards, and this page
+    -- does not; the user's own folds are what persist after that.
+    check(open:find("label, not (extra and extra.collapsed),", 1, true) ~= nil
+          and PAGE:find("collapsed = true", 1, true) == nil,
           "sections: ...and every section starts expanded, so nothing is hidden by default")
     -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL. `Add` resolves a widget's slot
     -- height on the spot, so a band Add'd while still empty gets no room.

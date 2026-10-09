@@ -4729,7 +4729,8 @@ function GUI:CreatePopoutPageTools(page)
     -- SavedVariables slot on whatever it is handed, so a localised or reworded
     -- title would write a second slot and orphan the first.
     --
-    -- ⚠ EXPANDED ON A FIRST RUN. The user's own folds are what persist after that.
+    -- ⚠ EXPANDED ON A FIRST RUN unless the page asks otherwise (extra.collapsed).
+    -- The user's own folds are what persist after that.
     --
     -- ☠ THE PIN IS OPT-IN: passing `builder` is what puts it on the header, and
     -- a page passes one only for a section that decides how the bar LOOKS. The
@@ -4750,6 +4751,8 @@ function GUI:CreatePopoutPageTools(page)
     --                read as a heading (see QuietLabel)
     --   kind         overrides the header's kind icon; without it the kind is
     --                GUI.SectionKindByKey[key] (above), never the title
+    --   collapsed    the card starts SHUT on a first run (a page of many cards
+    --                that reads best as a list of headers -- Icons)
 
     -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
     -- not chosen. Every factory in the kit was laid out against a 260 column; at
@@ -4936,7 +4939,7 @@ function GUI:CreatePopoutPageTools(page)
         end
         -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
         -- in SettingsWidgets.lua).
-        local section = GUI:CreateCollapsibleSection(page.child, label, true,
+        local section = GUI:CreateCollapsibleSection(page.child, label, not (extra and extra.collapsed),
             BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
                            kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })
         section.hideOn = hideFn

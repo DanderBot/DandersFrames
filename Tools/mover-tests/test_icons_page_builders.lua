@@ -166,8 +166,8 @@ do
 
     -- ---- the section helpers: forwards to the shared ones, with both opt-ins
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
-          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions, shut on a first run")
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
@@ -295,10 +295,14 @@ do
     check(stripAt and textAt and firstIcon and stripAt < textAt and textAt < firstIcon,
           "order: Expand All / Collapse All first, spanning both columns, then Icon Text, then the icons")
 
-    -- ☠ NO HEADER PREVIEWS ON A CARD. The preview wiring is classic's alone.
-    check(card:find("WireStatusPreview", 1, true) == nil and card:find("onSection", 1, true) == nil
-          and card:find("afterMount", 1, true) == nil,
-          "preview: a card never wires a header preview")
+    -- ★ EVERY ICON CARD PREVIEWS ITS ICON, as classic's headers always did: the
+    -- same spec.preview, through the same wiring, onto the card's own section.
+    check(card:find("local section = band.collapsibleSection", 1, true) ~= nil
+          and card:find("if spec.preview then WireStatusPreview(section, spec.preview) end", 1, true) ~= nil,
+          "preview: an icon card wires its header preview")
+    check(card:find("if spec.onSection then spec.onSection(section) end", 1, true) ~= nil
+          and card:find("if spec.afterMount then spec.afterMount() end", 1, true) ~= nil,
+          "preview: ...and Role's card is handed to its own preview (onSection, afterMount)")
 end
 
 -- ============================================================

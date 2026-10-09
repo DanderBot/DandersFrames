@@ -92,11 +92,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its two
-        -- opt-ins, which every card here takes.
+        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its opt-ins,
+        -- which every card here takes. Shut on a first run: fifteen cards read
+        -- as a gallery of headers, each with its icon's preview.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true })
+                { twoTrack = true, quietLabels = true, collapsed = true })
         end
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
         local function CloseSection(band)
@@ -253,7 +254,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             end
             roleSection:SetPreviewIcons(icons)
-            if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
+            -- A card's title never greys (its corner says Off); classic's did.
+            if roleSection.SetPreviewDimmed and not roleSection.isCard then
+                roleSection:SetPreviewDimmed(not anyShown)
+            end
         end
 
         local function RoleSettingsCB() DF:UpdateAllRoleIcons(); UpdateRolePreview() end
@@ -339,7 +343,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local colorKey = opts.enableKey and opts.enableKey:gsub("Enabled$", "TextColor")
                 local textColor = colorKey and db[colorKey]
                 local entries = {}
-                if opts.showTextKey and db[opts.showTextKey] then
+                -- A card's preview is one icon in its header's icon slot, with no
+                -- room for text (see SetPreviewIcons), so it stays the icon.
+                if opts.showTextKey and db[opts.showTextKey] and not section.isCard then
                     for _, key in ipairs(opts.texts or {}) do
                         if type(key) == "table" then
                             -- table form: { key = <text key>, colorKey = <colour key> },
@@ -370,7 +376,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
                 for _, e in ipairs(entries) do e.desaturate = not enabled end
                 section:SetPreviewIcons(entries)
-                section:SetPreviewDimmed(not enabled)
+                if not section.isCard then section:SetPreviewDimmed(not enabled) end
             end
             if DF.iconPreviewRefreshers then table.insert(DF.iconPreviewRefreshers, refresh) end
             refresh(true)
@@ -402,7 +408,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --   summary         replaces the shared Settings summary (Role)
         --   summaryExtra    what this icon's Settings summary says beyond the shared part
         --   extraGroup      a fourth box (AFK's Timer Text): a card of its own in Modern
-        --   preview         WireStatusPreview's opts (classic only)
+        --   preview         WireStatusPreview's opts: the header's icon preview
         -- ============================================
         local function BuildIconSettingsGroup(tools2, spec)
             local group, parent = tools2.group, tools2.parent
@@ -554,6 +560,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec),
                 nil, nil, BuildIconCard, toggle)
+            local section = band.collapsibleSection
+            if spec.onSection then spec.onSection(section) end
+            if spec.preview then WireStatusPreview(section, spec.preview) end
             BuildIconCard({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -572,6 +581,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 CloseSection(band)
             end
+            if spec.afterMount then spec.afterMount() end
         end
 
         -- ============================================

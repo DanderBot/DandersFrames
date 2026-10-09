@@ -621,6 +621,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- painted with the chevron's (title.UpdateTheme, below).
     if CARD then
         local iconX = TICK_X
+        section._dfIconSlotX = iconX
         TICK_X = iconX + CARD.icon + CARD.iconGap
         local tex = opts.kind and CARD.kinds and CARD.kinds[opts.kind]
         if tex then
@@ -1229,6 +1230,76 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- right end, and whichever is called second has to be able to correct the
         -- first.
         self._previewIconData = icons
+        -- ☠ ON A CARD THE PREVIEW IS THE HEADER'S ICON. The right end belongs to
+        -- the summary and the pin, so the swatch takes the icon slot instead,
+        -- which every card reserves -- titles still line up. ONE entry fits: the
+        -- first that is live, else the first; a hover on it shows them all.
+        -- Text entries have no room there; the card's summary already says when
+        -- an icon shows as text.
+        if CARD then
+            local pick
+            for _, e in ipairs(icons or {}) do
+                if e.texture and not pick then pick = e end
+                if e.texture and not e.desaturate then pick = e break end
+            end
+            local tex = self.previewSlot
+            if pick and not tex then
+                tex = self:CreateTexture(nil, "OVERLAY")
+                self.previewSlot = tex
+            end
+            if tex then
+                if pick then
+                    local size = CARD.icon - 2 * (pick.inset or 0)
+                    tex:SetSize(size, size)
+                    tex:ClearAllPoints()
+                    tex:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                    local co = pick.coords
+                    DF:SetIconTextureOrAtlas(tex, pick.texture, co and co[1], co and co[2], co and co[3], co and co[4])
+                    local dim = pick.desaturate and true or false
+                    tex:SetDesaturated(dim)
+                    -- After the texture call, which resets the vertex colour.
+                    local c = (not dim) and pick.color
+                    if c then
+                        tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                    else
+                        tex:SetVertexColor(1, 1, 1, 1)
+                    end
+                    tex:Show()
+                else
+                    tex:Hide()
+                end
+            end
+            if self.kindIcon then self.kindIcon:SetShown(not pick) end
+
+            -- More than the slot shows: a hover lists every one. Motion only, so
+            -- a click on the swatch still folds the card, and the header keeps
+            -- its hover wash while the pointer is on it.
+            local all = {}
+            for _, e in ipairs(icons or {}) do
+                if e.texture then all[#all + 1] = e end
+            end
+            self._previewAll = all
+            local hit = self.previewHit
+            if #all > 1 and not hit then
+                hit = CreateFrame("Frame", nil, self)
+                hit:SetSize(CARD.icon + 4, CARD.icon + 4)
+                hit:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                hit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+                hit:EnableMouse(true)
+                hit:SetMouseClickEnabled(false)
+                hit:SetScript("OnEnter", function(h)
+                    if cardHover then cardHover:Show() end
+                    GUI:ShowCardPreviewPopup(h, self.sectionTitleText, self._previewAll)
+                end)
+                hit:SetScript("OnLeave", function()
+                    GUI:HideCardPreviewPopup()
+                    if cardHover and not clickArea:IsMouseOver() then cardHover:Hide() end
+                end)
+                self.previewHit = hit
+            end
+            if hit then hit:SetShown(#all > 1) end
+            return
+        end
         local n = icons and #icons or 0
         local SIZE, GAP, RIGHT_INSET = 18, 4, -10
         -- ⚠ THE SWATCHES SHARE THE RIGHT END WITH THE CALLER'S OWN FURNITURE. A
@@ -1322,6 +1393,66 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end)
     
     return section
+end
+
+-- ============================================================
+-- A CARD PREVIEW'S POPUP: every icon a card previews, on a hover of the one
+-- swatch its header has room for (SetPreviewIcons). Greyed entries stay greyed,
+-- as they are on the header. One shared frame, off UIParent so the page's
+-- scroll frame cannot clip it -- and so registered for the GUI scale.
+-- ============================================================
+local previewPopup
+function GUI:ShowCardPreviewPopup(owner, title, entries)
+    if not (owner and entries and #entries > 0) then return end
+    local SIZE, GAP, PAD, TITLE_H = 24, 6, 8, 14
+    local f = previewPopup
+    if not f then
+        f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        f:SetFrameStrata("TOOLTIP")
+        f:SetClampedToScreen(true)
+        GUI:CreatePanelBackdrop(f)
+        f.title = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        f.title:SetPoint("TOPLEFT", PAD, -PAD)
+        f.swatches = {}
+        if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(f) end
+        previewPopup = f
+    end
+    f.title:SetText(title or "")
+    f.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local rowY = -(PAD + TITLE_H + GAP + SIZE / 2)
+    for i, e in ipairs(entries) do
+        local tex = f.swatches[i]
+        if not tex then
+            tex = f:CreateTexture(nil, "ARTWORK")
+            f.swatches[i] = tex
+        end
+        local size = SIZE - 2 * (e.inset or 0)
+        tex:SetSize(size, size)
+        tex:ClearAllPoints()
+        tex:SetPoint("CENTER", f, "TOPLEFT", PAD + SIZE / 2 + (i - 1) * (SIZE + GAP), rowY)
+        local co = e.coords
+        DF:SetIconTextureOrAtlas(tex, e.texture, co and co[1], co and co[2], co and co[3], co and co[4])
+        local dim = e.desaturate and true or false
+        tex:SetDesaturated(dim)
+        -- After the texture call, which resets the vertex colour.
+        local c = (not dim) and e.color
+        if c then
+            tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+        else
+            tex:SetVertexColor(1, 1, 1, 1)
+        end
+        tex:Show()
+    end
+    for i = #entries + 1, #f.swatches do f.swatches[i]:Hide() end
+    local rowW = #entries * SIZE + (#entries - 1) * GAP
+    f:SetSize(math.max(rowW, f.title:GetStringWidth() or 0) + 2 * PAD, PAD + TITLE_H + GAP + SIZE + PAD)
+    f:ClearAllPoints()
+    f:SetPoint("BOTTOMLEFT", owner, "TOPLEFT", -4, 4)
+    f:Show()
+end
+
+function GUI:HideCardPreviewPopup()
+    if previewPopup then previewPopup:Hide() end
 end
 
 -- Collapsed state persistence (stored in SavedVariables, survives logout)
