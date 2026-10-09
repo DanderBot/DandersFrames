@@ -141,6 +141,7 @@ function P:GetUnlockFrame()
         P:SetPeek(next(P.altDown) ~= nil)
     end)
     f:Hide()
+    UI:AddFontRoot(f)   -- the strip and panels follow a Settings Font change
     self.unlockFrame = f
     return f
 end

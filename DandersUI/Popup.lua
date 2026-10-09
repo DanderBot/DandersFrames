@@ -189,6 +189,7 @@ local function CreatePopupFrame(host)
     tinsert(UISpecialFrames, "DFPopupFrame")
 
     PopupFrame = f
+    host:AddFontRoot(f)
     return f
 end
 

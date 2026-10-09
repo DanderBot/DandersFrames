@@ -133,6 +133,7 @@ NS.UI = {
     -- test_mover_tooltips.lua can read what it was handed.
     ShowTooltip = function(_, owner, spec) NS.UI._lastTip = { owner = owner, spec = spec } end,
     HideTooltip = function() NS.UI._lastTip = nil end,
+    AddFontRoot = function() end,
     CreateLabel = function(_, _, opts)
         local f = stubFontString()
         if opts and opts.text then f:SetText(opts.text) end

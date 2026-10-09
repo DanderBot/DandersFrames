@@ -694,6 +694,7 @@ function DF:CreateGUI()
     end
     frame:Hide()
     DF.GUIFrame = frame
+    GUI:AddFontRoot(frame)   -- the tabs and header follow a Settings Font change
 
     -- Entrance fade (DandersUI UI.Fx, reached through the GUI host). OnShow
     -- covers EVERY path that shows the window -- DF:ToggleGUI, the test-mode
@@ -2709,6 +2710,7 @@ function DF:CreateGUI()
     -- index pass does to all 34 of them.
     GUI._pageDock = CreateFrame("Frame")
     GUI._pageDock:Hide()
+    GUI:AddFontRoot(GUI._pageDock)   -- parked pages follow a font change too
 
     -- Move a page out of the window's frame tree. Idempotent and cheap; the page
     -- is expected to be hidden already (every caller hides first).
