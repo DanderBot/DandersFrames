@@ -4307,7 +4307,10 @@ end
 -- kind on every page -- read down a column to check.
 --
 -- ⚠ ONLY WHERE THE KIND IS OBVIOUS. A section that is its page's own thing
--- (a "Settings" card, Heal Absorb, the Fading page) is left out on purpose.
+-- (Heal Absorb, the Fading page) is left out on purpose: an icon that has to be
+-- explained is worse than the empty slot. The exception is a page's main
+-- "Settings" card, which all share one kind -- where a feature lives reads the
+-- same on every page.
 -- ============================================================
 GUI.SectionKindByKey = {
     -- Frame (Options.lua)
@@ -4398,10 +4401,12 @@ GUI.SectionKindByKey = {
     personaltargeted_highlight       = "effects",
     personaltargeted_highlightshadow = "effects",
     personaltargeted_highlightanim   = "effects",
+    personaltargeted_interrupt       = "interrupt",
     -- Sorting / Colours / Health Bar / Resource Bar / Heal Prediction (Auras.lua)
     sorting_unitframes      = "order",
     sorting_rolepriority    = "order",
     sorting_classpriority   = "order",
+    sorting_framesort       = "order",
     colors_class            = "colours",
     colors_role             = "colours",
     colors_dispel           = "colours",
@@ -4409,6 +4414,8 @@ GUI.SectionKindByKey = {
     health_color            = "colours",
     health_texture          = "appearance",
     health_background       = "appearance",
+    health_missing          = "missinghealth",
+    absorbs_healabsorb      = "healabsorb",
     resource_classfilter    = "filters",
     resource_size           = "size",
     resource_position       = "position",
@@ -4426,6 +4433,7 @@ GUI.SectionKindByKey = {
     grouplabels_position    = "position",
     pinned_layout           = "layout",
     pinned_framestyle       = "size",
+    pinned_autopopulate     = "autopopulate",
     -- Icons / Highlights / Dispel Overlay (Modules.lua)
     icons_text              = "text",
     highlights_selection    = "effects",
@@ -4434,6 +4442,39 @@ GUI.SectionKindByKey = {
     highlights_threat       = "colours",
     dispel_border           = "border",
     dispel_gradient         = "colours",
+    -- Global Settings page (Options.lua)
+    general_language        = "language",
+    general_notifications   = "notifications",
+    general_blizzard        = "visibility",
+    general_minimap         = "minimap",
+    general_framemodes      = "framemodes",
+    -- The card holds pixel-perfect scaling AND the aura update rate, so the icon
+    -- names the category (screen/display settings), not either setting.
+    general_rendering       = "rendering",
+    -- Frame / Pets / Fading (Options.lua)
+    frame_permanentmover    = "position",
+    pets_healthbar          = "health",
+    fading_health           = "health",
+    fading_elements         = "alpha",
+    fading_range            = "range",
+    fading_dead             = "dead",
+    -- Integrations / Absorbs (Auras.lua)
+    integrations_colorpicker = "colorpicker",
+    absorbs_shield          = "shield",
+    -- Debuff Bar (Indicators.lua)
+    debuffs_important       = "important",
+    -- Each page's -- or feature group's -- main "Settings" card, across the files above
+    resource_settings         = "settings",
+    healpred_settings         = "settings",
+    pinned_settings           = "settings",
+    missingbuffs_settings     = "settings",
+    defensiveicon_settings    = "settings",
+    targetedlist_settings     = "settings",
+    personaltargeted_settings = "settings",
+    dispel_settings           = "settings",
+    pets_settings             = "settings",
+    health_reduced            = "settings",   -- under the Reduced Max Health heading
+    grouplabels_settings      = "settings",
 }
 
 -- ============================================================

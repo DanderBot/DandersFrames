@@ -422,6 +422,26 @@ do
         border     = ICONS .. "border_style.png",
         order      = ICONS .. "swap_vert.png",
         timer      = ICONS .. "timer.png",
+        settings   = ICONS .. "tune.png",
+        language   = ICONS .. "language.png",
+        notifications = ICONS .. "notifications.png",
+        colorpicker = ICONS .. "colorize.png",
+        shield     = ICONS .. "shield.png",
+        important  = ICONS .. "priority_high.png",
+        minimap    = ICONS .. "map.png",
+        framemodes = ICONS .. "dashboard.png",
+        rendering  = ICONS .. "display_settings.png",
+        autopopulate = ICONS .. "group_add.png",
+        health     = ICONS .. "favorite.png",
+        missinghealth = ICONS .. "heart_minus.png",
+        healabsorb = ICONS .. "shield_with_heart.png",
+        alpha      = ICONS .. "transition_fade.png",
+        range      = ICONS .. "social_distance.png",
+        interrupt  = ICONS .. "flash_off.png",
+        -- ⚠ FILLED, the one solid glyph in the set, on purpose: a slashed or
+        -- badged skull blurred to a blob at card size, and the solid one is a
+        -- single shape that still reads there.
+        dead       = ICONS .. "skull.png",
     }
 end
 

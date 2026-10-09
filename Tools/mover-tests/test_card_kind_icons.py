@@ -37,7 +37,7 @@ print("-- Card kind icons: map -> files on disk, tags -> map, tags -> real keys"
 m = re.search(r"GUI\.SectionCard\.kinds = \{(.*?)\n    \}", SW, re.S)
 check(m is not None, "map: GUI.SectionCard.kinds found in SettingsWidgets.lua")
 kinds = dict(re.findall(r'(\w+)\s*=\s*ICONS \.\. "(\w+)\.png"', m.group(1))) if m else {}
-check(len(kinds) == 13, "map: 13 kinds (got %d)" % len(kinds))
+check(len(kinds) == 30, "map: 30 kinds (got %d)" % len(kinds))
 check(re.search(r'local ICONS = "Interface\\\\AddOns\\\\DandersFrames\\\\Media\\\\Icons\\\\"', SW) is not None,
       "map: textures resolve under the resident addon's Media/Icons")
 
