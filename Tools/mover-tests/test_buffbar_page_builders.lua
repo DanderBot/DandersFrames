@@ -685,6 +685,13 @@ do
     -- or it is left a zero-width slot and draws nothing.
     check(WIDGETS:find('self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)', 1, true) ~= nil,
           "summary: beside a pin, the tag stops at the summary rather than squeezing it out")
+    -- A short title must not hold 55% of the header while the summary truncates
+    -- beside an empty gap: the floor applies only when the words compete.
+    check(WIDGETS:find("if avail < titleNat then", inset or 1, true) ~= nil
+      and WIDGETS:find("titleW = math.max(math.min(titleNat, math.floor(free * 0.55)), avail)", inset or 1, true) ~= nil,
+          "summary: the title's 55% floor never exceeds what its own words need")
+    check(WIDGETS:find('hooksecurefunc(fs, "SetText", reapply)', inset or 1, true) ~= nil,
+          "summary: the split is re-measured on any text write, a font change included")
 end
 
 -- ============================================================

@@ -1053,9 +1053,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             if free < 40 then return end
             -- The title takes the room the tag and the summary leave, sized from
             -- what they show NOW: an open card shows no summary, so its title
-            -- gets the whole header. Beside a tag ("+2 triggers") or a summary it
-            -- never drops under 55% -- the title is the identity, so they
-            -- truncate first. Re-run whenever either text changes.
+            -- gets the whole header. When all three fit, the title's box runs
+            -- to the tag, so the tag and the summary stay packed against the
+            -- right end. When they do not, the title keeps its own width up to
+            -- 55% -- it is the identity, so they truncate first -- but never
+            -- claims more than its words need: a short title left the summary
+            -- truncating beside an empty gap.
             local function shown(fs)
                 local t = fs and fs:GetText()
                 if not t or t == "" then return 0 end
@@ -1063,7 +1066,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             end
             local tagW = shown(self.tag)
             local sumW = (self.summary and self.pinBtn) and shown(self.summary) or 0
-            local titleW = math.max(math.floor(free * 0.55), free - tagW - sumW)
+            local titleNat = math.ceil(self.title:GetUnboundedStringWidth() or 0)
+            local avail = free - tagW - sumW
+            local titleW = avail
+            if avail < titleNat then
+                titleW = math.max(math.min(titleNat, math.floor(free * 0.55)), avail)
+            end
             titleW = math.max(40, math.min(free, titleW))
             self.title:SetWordWrap(false)
             -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
@@ -1085,6 +1093,19 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         end
         self:HookScript("OnSizeChanged", apply)
         self._dfApplyHeaderWidths = apply
+        -- ⚠ RE-SPLIT ON ANY TEXT WRITE, a font change included: the split is
+        -- measured from the strings, and a Settings Font change re-sets every
+        -- string's text (DandersUI Fonts.lua's Nudge) without resizing the
+        -- header. Hooked once; the hook calls whichever apply is current.
+        if not self._dfWidthTextHooked then
+            self._dfWidthTextHooked = true
+            local function reapply()
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
+            end
+            for _, fs in ipairs({ self.title, self.tag, self.summary }) do
+                hooksecurefunc(fs, "SetText", reapply)
+            end
+        end
         apply()
         -- Order-independent: the swatches read this inset, so if they were placed
         -- first they are re-flowed now.
