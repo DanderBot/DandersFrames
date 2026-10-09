@@ -205,9 +205,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Same arguments, same order, and the Debuff Bar's two opt-ins: controls
         -- two per row inside a card that is wide enough, and captions drawn dim
         -- so a setting never reads as a heading -- so the twin pages match.
+        -- Shut on a first run, like Icons: one of the heaviest pages in the panel,
+        -- and read best as a list of headers to open the one wanted. A user's own
+        -- folds persist after that.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true })
+                { twoTrack = true, quietLabels = true, collapsed = true })
         end
 
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header --
@@ -1480,9 +1483,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ONE SECTION: the Buff Bar's helper (tools.OpenSection), plus this page's
         -- two opt-ins, which every card here takes.
+        -- Shut on a first run, like Icons: one of the heaviest pages in the panel,
+        -- and read best as a list of headers to open the one wanted. A user's own
+        -- folds persist after that.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true })
+                { twoTrack = true, quietLabels = true, collapsed = true })
         end
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
         local function CloseSection(band)
@@ -3519,9 +3525,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
         -- opt-ins, which every card here takes.
+        -- Shut on a first run, like Icons: one of the heaviest pages in the panel,
+        -- and read best as a list of headers to open the one wanted. A user's own
+        -- folds persist after that.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true })
+                { twoTrack = true, quietLabels = true, collapsed = true })
         end
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
         local function CloseSection(band)

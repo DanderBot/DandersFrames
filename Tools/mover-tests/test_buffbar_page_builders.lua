@@ -237,8 +237,8 @@ do
     -- ...each a forward to the shared helper, now with the Debuff Bar's two
     -- opt-ins (two tracks, quiet captions), so the twin pages match.
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
-          "sections: ...the page's OpenSection forwards to the shared one, asking for two per row and dim captions")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
+          "sections: ...the page's OpenSection forwards to the shared one, asking for two per row, dim captions, shut on a first run")
     -- The moved dedup takes a row of its own on a two-track card.
     check(sectionBlock("Buff Filters"):find("dedupCb.fullRow = true", 1, true) ~= nil,
           "sections: Hide Duplicate Buffs sits on a row of its own at the foot of Buff Filters")
@@ -253,11 +253,11 @@ do
           "sections: ...the band is chromeless, at the width the layout pass will give it")
     check(open:find("section:RegisterChild(band)", 1, true) ~= nil,
           "sections: ...and registered to the section, which is what makes the fold hide it")
-    -- ☠ EXPANDED ON A FIRST RUN unless a page asks for shut cards, and this page
-    -- does not; the user's own folds are what persist after that.
+    -- SHUT ON A FIRST RUN: this page asks for it (one of the heaviest pages, read
+    -- best as a list of headers); the user's own folds are what persist after that.
     check(open:find("label, not (extra and extra.collapsed),", 1, true) ~= nil
-          and PAGE:find("collapsed = true", 1, true) == nil,
-          "sections: ...and every section starts expanded, so nothing is hidden by default")
+          and PAGE:find("collapsed = true", 1, true) ~= nil,
+          "sections: ...and every section starts shut on a first run")
     -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL. `Add` resolves a widget's slot
     -- height on the spot, so a band Add'd while still empty gets no room.
     local close = CLOSE

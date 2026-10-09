@@ -639,11 +639,11 @@ print("-- Debuff Bar page: two per row and quiet captions -- opt-in")
 do
     -- ---- who asks -------------------------------------------------------
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("{ twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+    check(fwd:find("{ twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
           "opt-in: every Debuff Bar card asks for two tracks and quiet captions")
     -- The Buff Bar has since taken both too, so the twin pages match.
     local bfwd = (BUFFPAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(bfwd:find("{ twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+    check(bfwd:find("{ twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
           "opt-in: the Buff Bar asks for the same two")
     -- In the helper: each opt-in is read off `extra` and nothing else, so a
     -- caller that passes none builds exactly the Buff Bar's card.
