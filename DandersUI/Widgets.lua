@@ -1468,27 +1468,30 @@ function UI:CreateOverrideResetButton(parent, opts)
 end
 
 -- ============================================================
--- THE MODIFIED-DEFAULT DOT
--- A SECOND indicator kind, and it answers a different question from the star
--- above. The star compares the stored value against the auto-layout GLOBAL; the
--- dot compares it against the value the addon SHIPS. Either can be up without
--- the other, and on a raid control both can be up at once -- which is why they
--- are drawn on opposite sides of the widget, at different sizes, in different
--- colours.
+-- THE MODIFIED DOT
+-- The one indicator for "this setting is not what it would otherwise be". Two
+-- colours, one place:
+--   * the RAID ACCENT (host hook accentFor) while an auto layout's value
+--     differs from the global one -- "overridden" while that layout is being
+--     edited, "runtime" while it is running. Layouts are raid only.
+--   * AMBER (C_NOTICE) otherwise, while the value differs from the shipped
+--     default.
+-- An override wins when both hold: it is the layer a hold removes first.
+-- The override star, reset button and inline "(Global: x)" text it replaced
+-- are built for debug mode only (see AddOverrideIndicators).
 --
--- WHERE IT GOES, AND WHY NOT BESIDE THE STAR. The star and the red reset button
--- own the container's TOP-RIGHT and read as one cluster. A third glyph there
--- would join that cluster visually while meaning something unrelated to it, and
--- on a control with all three up nobody could say which was which. So the dot
--- sits at the END OF THE LABEL'S VISIBLE TEXT: it belongs to the NAME of the
--- setting the way a modified-mark belongs beside a filename. 6px against the
--- star's 12, because it reads as information first.
+-- It sits at the END OF THE LABEL'S VISIBLE TEXT, belonging to the setting's
+-- name. A consumer may re-anchor it (DandersFrames puts it at the label's
+-- top-left); every re-anchor runs after this placement.
 --
--- ...BUT IT ANSWERS WHEN ASKED. Hovering it names the shipped default and the
--- current value; pressing and HOLDING it (DOT_HOLD_TIME) puts the default back.
+-- ...BUT IT ANSWERS WHEN ASKED. Hovering it names the shipped default, the
+-- global value when a layout is involved, and the current (or layout) value.
+-- Pressing and HOLDING it (DOT_HOLD_TIME) removes one layer: an override goes
+-- back to the global (the control's own override reset), anything else back to
+-- the default. A running layout's value has no hold -- the layout owns it.
 -- The drawn dot stays 6px -- the thing the mouse finds is an invisible
 -- DOT_HIT-square frame centred on it, built the first time the dot is ever
--- shown (a host with no isModifiedDefault hook never gets one) and shown only
+-- shown (a host with neither dot hook never gets one) and shown only
 -- while the dot is. A HOLD rather than a click because the dot sits beside the
 -- words a user points at to read a tooltip, and a stray click there must not
 -- throw away a setting; while held the dot grows toward DOT_HOLD_SIZE so the
@@ -1534,16 +1537,7 @@ end
 -- number because only the consumer knows the rect the dot has to stay inside;
 -- the kit only knows to obey it.
 --
--- ⚠ AND IT DISPLACES THE "(Global: x)" TEXT. That text anchors to the label's
--- ANCHOR right edge. For a label pinned only on its left (a slider's, a
--- dropdown's) that edge IS the end of the text -- exactly where the dot now
--- sits -- so the two would overlap in the raid editing state. When the dot is up
--- the global text starts after the DOT instead. A stretched label (a checkbox's,
--- pinned to both container edges) never collided, and moving its global text in
--- beside the dot rather than out at the container edge is an improvement, not a
--- change of meaning.
---
--- Installs container.UpdateModifiedDot(self) -> shown. Returns the texture.
+-- Installs container.UpdateModifiedDot(self) -> shown, kind. Returns the texture.
 local DOT_SIZE, DOT_HOLD_SIZE, DOT_HIT = 6, 10, 16
 local DOT_HOLD_TIME = 0.6
 
@@ -1580,7 +1574,7 @@ local function DotSameValue(a, b)
     return true
 end
 
-local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
+local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideReset)
     local dot = container:CreateTexture(nil, "OVERLAY")
     dot:SetSize(DOT_SIZE, DOT_SIZE)
     dot:SetTexture(MEDIA .. "Icons\\dot")
@@ -1620,19 +1614,59 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         return write
     end
 
-    -- Built on ENTER, never per frame. The default is re-asked every time: the
-    -- mode, the profile or the layout being edited can all have moved since.
+    -- What a hold does, one layer at a time: a layout override goes back to the
+    -- global value (the control's own override reset); anything else goes back
+    -- to the shipped default. A running layout's value is not the control's to
+    -- reset. Returns write, its argument, and the tooltip's hint.
+    local function HoldPlan()
+        local L = host.hooks.L
+        local kind = rawget(container, "modifiedDotKind")
+        if kind == "overridden" then
+            if onOverrideReset and not rawget(container, "dotLocked") then
+                return onOverrideReset, nil, L["Click and hold to reset to your global value"]
+            end
+            return nil
+        elseif kind == "runtime" then
+            return nil
+        end
+        local def = host:Call("getDefaultValue", dbTable, dbKey)
+        local write = ResetWriter(def)
+        if write then return write, def, L["Click and hold to reset to the default"] end
+        return nil
+    end
+
+    -- Built on ENTER, never per frame. Every value is re-asked: the mode, the
+    -- profile or the layout being edited can all have moved since.
     local function ShowDotTooltip()
         if not hit then return end
         local L = host.hooks.L
+        local kind = rawget(container, "modifiedDotKind")
+        local ov, globalValue = host:Call("getOverrideState", dbTable, dbKey)
+        local inLayout = ov ~= nil and ov ~= "none"
         local def = host:Call("getDefaultValue", dbTable, dbKey)
         local lines = {}
         if def ~= nil then lines[#lines + 1] = format(L["Default: %s"], FormatValue(def)) end
-        lines[#lines + 1] = format(L["Current: %s"], FormatValue(dbTable and dbTable[dbKey]))
-        if ResetWriter(def) then
-            lines[#lines + 1] = { text = L["Hold click to reset"], hint = true }
+        if inLayout then lines[#lines + 1] = format(L["Global: %s"], FormatValue(globalValue)) end
+        -- A control with no table of its own (an override key into a sub-table)
+        -- reports what it displays.
+        local current
+        if dbTable then
+            current = dbTable[dbKey]
+        else
+            local read = rawget(container, "DotReadValue")
+            if type(read) == "function" then current = read() end
         end
-        host:ShowTooltip(hit, { title = L["Changed from default"], lines = lines })
+        lines[#lines + 1] = format(inLayout and L["This layout: %s"] or L["Current: %s"], FormatValue(current))
+        local _, _, hint = HoldPlan()
+        if hint then
+            lines[#lines + 1] = { text = hint, hint = true }
+        elseif kind == "runtime" then
+            lines[#lines + 1] = { text = L["To change this, edit the layout in Auto Layouts."], hint = true }
+        end
+        local title = (kind == "overridden" and L["Set by this auto layout"])
+            or (kind == "runtime" and L["Set by the active auto layout"])
+            or L["Changed from default"]
+        host:ShowTooltip(hit, { title = title, lines = lines })
     end
 
     local HoldUpdate
@@ -1661,7 +1695,8 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         write(def)
         container:UpdateModifiedDot()
         if dot:IsShown() then
-            -- Still modified: the write was redirected (a running raid layout)
+            -- Still marked: a layer remains (an override reset back to a
+            -- global that is not the default), or the write was redirected
             -- or landed on something that is not the default. Say so.
             ShowDotTooltip()
         else
@@ -1671,10 +1706,9 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
 
     local function StartHold()
         if holding or InCombatLockdown() then return end
-        local def = host:Call("getDefaultValue", dbTable, dbKey)
-        local write = ResetWriter(def)
+        local write, arg = HoldPlan()
         if not write then return end
-        holding, holdElapsed, holdDefault, holdWrite = true, 0, def, write
+        holding, holdElapsed, holdDefault, holdWrite = true, 0, arg, write
         hit:SetScript("OnUpdate", HoldUpdate)
     end
 
@@ -1702,13 +1736,26 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         return hit
     end
 
+    -- Returns shown, and the kind: "overridden" / "runtime" (an auto layout's
+    -- value differs from the global one -- the raid accent, since layouts are
+    -- raid only) or "default" (differs from the shipped value -- amber). An
+    -- override wins: it is the layer a hold removes first.
     container.UpdateModifiedDot = function(self)
-        -- host:Call answers nil when the hook is absent, which is every consumer
+        -- host:Call answers nil when a hook is absent, which is every consumer
         -- that has not opted in: no dot, ever, and nothing to configure. The
-        -- engine behind the hook is the consumer's -- this library knows only
-        -- that some (db, key) pairs are "not the shipped value".
-        local on = host:Call("isModifiedDefault", dbTable, dbKey) and true or false
+        -- engines behind the hooks are the consumer's.
+        local ov = host:Call("getOverrideState", dbTable, dbKey)
+        local kind
+        if ov == "overridden" or ov == "runtime" then
+            kind = ov
+        elseif host:Call("isModifiedDefault", dbTable, dbKey) then
+            kind = "default"
+        end
+        container.modifiedDotKind = kind
+        local on = kind ~= nil
         if on then
+            local c = (kind ~= "default") and host:Call("accentFor", true) or C_NOTICE
+            dot:SetVertexColor(c.r, c.g, c.b)
             -- rawget for both, the convention this file already uses for an
             -- optional private field (see the _skipOverrideIndicators probe
             -- below): a headless frame answers an unset key with a truthy no-op
@@ -1729,7 +1776,7 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         end
         dot:SetShown(on)
         if hit then hit:SetShown(on) end
-        return on
+        return on, kind
     end
     return dot
 end
@@ -1784,96 +1831,23 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
     -- engine is handed nil and answers "not modified" -- the honest answer for a
     -- value that is not a top-level setting. If a caller ever pairs a real
     -- dbTable with a differing override key, split the two keys apart here.
-    AddModifiedDot(host, container, lbl, dbTable, dbKey)
+    AddModifiedDot(host, container, lbl, dbTable, dbKey, onReset)
 
-    -- Function to update override indicators
+    -- The dot is the one indicator: an auto-layout override and a changed
+    -- default are its two colours, and its tooltip carries the default, the
+    -- global and the layout's value (see AddModifiedDot). The star, the reset
+    -- button and the inline global text are built for debug mode only.
     container.UpdateOverrideIndicators = function(self, currentValue)
-        -- ☠ THE DOT IS PAINTED FIRST, ABOVE EVERY EARLY RETURN BELOW. The
-        -- override state answers "none" for the whole of party mode by design
-        -- (the consumer's getOverrideState gates on raid), and returning there
-        -- without touching the dot would mean modified-marks appeared in raid
-        -- only -- half the panel, and the half nobody would think to check.
-        local modified = self.UpdateModifiedDot and self:UpdateModifiedDot() or false
-
-        -- Debug mode shows all buttons
-        if S.overrideDebugMode then
-            self.overrideStar:Show()
-            self.overrideResetBtn:Show()
+        if self.UpdateModifiedDot then self:UpdateModifiedDot() end
+        local debug = S.overrideDebugMode and true or false
+        self.overrideStar:SetShown(debug)
+        self.overrideResetBtn:SetShown(debug)
+        self.overrideCheckIcon:Hide()
+        if debug then
             self.overrideGlobalText:SetText("(debug)")
             self.overrideGlobalText:SetTextColor(1, 0.8, 0.2)
-            self.overrideGlobalText:Show()
-            self.overrideCheckIcon:Hide()
-            return
         end
-
-        local state, globalValue = host:Call("getOverrideState", dbTable, dbKey)
-        if not state or state == "none" then
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideGlobalText:Hide()
-            self.overrideCheckIcon:Hide()
-            return
-        end
-
-        -- "runtime" is an overlay the user cannot reset from the control (the
-        -- owning profile has to be edited), so it gets the star and the value
-        -- but no reset button.
-        if state == "runtime" then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
-            self.overrideStar:Show()
-            self.overrideResetBtn:Hide()
-        elseif state == "overridden" then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
-            self.overrideStar:Show()
-            self.overrideResetBtn:Show()
-        else   -- "editing", value matches the global
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-        end
-
-        local globalDisplay
-        if type(globalValue) == "boolean" then
-            globalDisplay = globalValue and L["Yes"] or L["No"]
-        elseif type(globalValue) == "number" then
-            if globalValue == math.floor(globalValue) then
-                globalDisplay = tostring(globalValue)
-            else
-                globalDisplay = format("%.2f", globalValue)
-            end
-        elseif type(globalValue) == "table" then
-            globalDisplay = globalValue.r and L["Color"] or "..."
-        elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
-            local mapped = self.overrideOptionsMap[globalValue]
-            globalDisplay = (type(mapped) == "table" and (mapped.text or mapped.label or globalValue)) or tostring(mapped)
-        else
-            globalDisplay = tostring(globalValue or L["None"])
-        end
-
-        self.overrideGlobalText:SetText(format(L["(Global: %s)"], globalDisplay))
-        self.overrideGlobalText:ClearAllPoints()
-        -- Start after the DOT when one is up -- on a left-anchored label the
-        -- label's right edge and the end of its text are the same point, which
-        -- is where the dot now sits. See AddModifiedDot.
-        if modified and self.modifiedDot then
-            self.overrideGlobalText:SetPoint("LEFT", self.modifiedDot, "RIGHT", 4, 0)
-        else
-            self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
-        end
-
-        -- The check icon marks "matches the global", which is only meaningful
-        -- while editing: a runtime overlay is by definition a difference.
-        if state == "editing" then
-            self.overrideGlobalText:SetTextColor(0.3, 0.6, 0.3)
-            self.overrideCheckIcon:ClearAllPoints()
-            self.overrideCheckIcon:SetPoint("LEFT", self.overrideGlobalText, "RIGHT", 2, 0)
-            self.overrideCheckIcon:Show()
-        else
-            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
-            self.overrideCheckIcon:Hide()
-        end
-        self.overrideGlobalText:Show()
+        self.overrideGlobalText:SetShown(debug)
     end
     
     -- Register this widget for refresh tracking
@@ -1927,9 +1901,15 @@ local function AddOrderListOverrideIndicators(host, container, dbKey, onReset, d
         self.overrideStar:SetShown(on)
         self.overrideResetBtn:SetShown(on)
         self.overrideModifiedText:SetShown(on)
+        -- The auto-layout colour, as on every control's dot (AddModifiedDot).
+        local c = on and host:Call("accentFor", true)
+        if c then
+            self.overrideStar.icon:SetVertexColor(c.r, c.g, c.b)
+            self.overrideModifiedText:SetTextColor(c.r, c.g, c.b, 0.8)
+        end
         if on then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
+            self.overrideStar.tooltipText = L["Set by this auto layout"]
+            self.overrideStar.tooltipSubText = L["This layout changes the order. Use the reset button to go back to your global order."]
         end
     end
 

@@ -23,8 +23,8 @@ local select = select
 
 -- The modified-default dot sits against the top-left of the control's label,
 -- just clear of the first letter, so it is in the same place whatever the
--- label says. The kit places it after the text; this re-anchors it after every kit
--- placement. Kept on the DF side so the kit's MINOR does not move.
+-- label says. The kit places it after the text; this re-anchors it after
+-- every kit placement.
 --
 -- `label` is optional: the kit anchors the dot to the label it measured, so
 -- that anchor is read back when the caller cannot reach the FontString (the
@@ -37,6 +37,18 @@ local select = select
 local DOT_TL_X, DOT_TL_Y, DOT_TL_HIT = -4, -1, 8
 -- Published for the card header's own mark, which sits in the same place.
 GUI.ModifiedDotTopLeft = { x = DOT_TL_X, y = DOT_TL_Y, hit = DOT_TL_HIT, size = 6 }
+
+-- An override marker that says "an auto layout changes something here" (a nav
+-- tab or category, the profile chip, the position lock) takes the colour the
+-- control dot uses for an override: the raid accent, since layouts are raid
+-- only. Painted on every show, because the accent can be re-themed.
+function GUI:ShowLayoutOverrideMarker(marker, show)
+    if show then
+        local c = GUI.GetThemeColorFor and GUI.GetThemeColorFor(true)
+        if c and marker.icon then marker.icon:SetVertexColor(c.r, c.g, c.b) end
+    end
+    marker:SetShown(show and true or false)
+end
 
 -- The card a control belongs to, if any: the header tick names it directly,
 -- anything in a card's body reaches it through its settings group.
@@ -53,10 +65,9 @@ end
 function GUI:PinModifiedDotTopLeft(container, label)
     local kitUpdateDot = rawget(container, "UpdateModifiedDot")
     if not kitUpdateDot then return container end
-    -- The control's own label: where "(Global: x)" starts when no dot is up.
     local ownLabel = label
     container.UpdateModifiedDot = function(self)
-        local on = kitUpdateDot(self)
+        local on, kind = kitUpdateDot(self)
         local dot, hit = rawget(self, "modifiedDot"), rawget(self, "modifiedDotHit")
         if on and dot then
             -- Read per update: a popout row repoints the kit at the name it
@@ -77,33 +88,13 @@ function GUI:PinModifiedDotTopLeft(container, label)
         -- The card's header mark counts this control; it re-asks on its own.
         local card = CardOf(self)
         if card and card.QueueModifiedMark then card:QueueModifiedMark() end
-        return on
-    end
-    -- The kit starts the "(Global: x)" text after the dot when one is up, which
-    -- would now put it over the label; it starts after the label instead, as
-    -- it does with no dot.
-    local function placeGlobalText(self)
-        local globalText = rawget(self, "overrideGlobalText")
-        if globalText and ownLabel then
-            globalText:ClearAllPoints()
-            globalText:SetPoint("LEFT", ownLabel, "RIGHT", 4, 0)
-        end
-    end
-    local kitUpdateIndicators = rawget(container, "UpdateOverrideIndicators")
-    if kitUpdateIndicators then
-        container.UpdateOverrideIndicators = function(self, ...)
-            kitUpdateIndicators(self, ...)
-            placeGlobalText(self)
-        end
+        return on, kind
     end
     -- A dot the kit already painted while building the control is re-placed
     -- now. The kit slider paints in its constructor and repaints from OnShow,
     -- which a slider born visible never gets.
     local dot = rawget(container, "modifiedDot")
-    if dot and dot:IsShown() then
-        container:UpdateModifiedDot()
-        placeGlobalText(container)
-    end
+    if dot and dot:IsShown() then container:UpdateModifiedDot() end
     return container
 end
 

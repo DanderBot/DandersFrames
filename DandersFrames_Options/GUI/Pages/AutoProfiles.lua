@@ -1881,16 +1881,15 @@ function AutoProfilesUI:SetupEditingBanner()
 
     -- =============================================
     -- OVERRIDE MARKERS ON NAV TABS / CATEGORIES
-    -- A small dot (shared GUI:CreateOverrideMarker — same size, colour and
-    -- hover tooltip as every other override marker) on tabs/categories that
-    -- carry an override. Clicks fall through to the tab (the marker propagates).
+    -- A small dot (shared GUI:CreateOverrideMarker, in the auto-layout colour --
+    -- see GUI:ShowLayoutOverrideMarker) on tabs/categories that carry an
+    -- override. Clicks fall through to the tab (the marker propagates).
     -- =============================================
     for tabName, tab in pairs(GUI.Tabs) do
         if not tab.overrideStar then
             local m = GUI:CreateOverrideMarker(tab, 8)
             m:SetPoint("LEFT", 12, 0)
-            m.tooltipText = L["Override active"]
-            m.tooltipSubText = L["This page has an overridden setting."]
+            m.tooltipSubText = L["This page has settings the layout changes."]
             tab.overrideStar = m
         end
     end
@@ -1900,8 +1899,7 @@ function AutoProfilesUI:SetupEditingBanner()
         if not cat.overrideStar then
             local m = GUI:CreateOverrideMarker(cat, 8)
             m:SetPoint("RIGHT", -6, 0)
-            m.tooltipText = L["Override active"]
-            m.tooltipSubText = L["A page in this category has an overridden setting."]
+            m.tooltipSubText = L["A page in this category has settings the layout changes."]
             cat.overrideStar = m
         end
     end
@@ -1975,8 +1973,8 @@ function AutoProfilesUI:HideSidebarHint()
     end
 end
 
--- Refresh orange star indicators on sidebar tabs/categories
--- Shows stars on tabs that contain overridden settings
+-- Refresh the override markers on sidebar tabs/categories (the raid accent):
+-- shown on tabs that contain overridden settings
 function AutoProfilesUI:RefreshTabOverrideStars()
     local GUI = DF.GUI
     if not GUI or not GUI.Tabs then return end
@@ -2000,14 +1998,14 @@ function AutoProfilesUI:RefreshTabOverrideStars()
         end
     end
 
+    -- The title says which layout: the one being edited, or the one running.
+    local title = self:IsEditing() and L["Set by this auto layout"] or L["Set by the active auto layout"]
+
     -- Update tab stars
     for tabName, tab in pairs(GUI.Tabs) do
         if tab.overrideStar then
-            if tabsWithOverrides[tabName] then
-                tab.overrideStar:Show()
-            else
-                tab.overrideStar:Hide()
-            end
+            tab.overrideStar.tooltipText = title
+            GUI:ShowLayoutOverrideMarker(tab.overrideStar, tabsWithOverrides[tabName])
         end
     end
 
@@ -2015,6 +2013,7 @@ function AutoProfilesUI:RefreshTabOverrideStars()
     if GUI.Categories then
         for catName, cat in pairs(GUI.Categories) do
             if cat.overrideStar then
+                cat.overrideStar.tooltipText = title
                 local hasOverride = false
                 if cat.children then
                     for _, childBtn in ipairs(cat.children) do
@@ -2024,11 +2023,7 @@ function AutoProfilesUI:RefreshTabOverrideStars()
                         end
                     end
                 end
-                if hasOverride then
-                    cat.overrideStar:Show()
-                else
-                    cat.overrideStar:Hide()
-                end
+                GUI:ShowLayoutOverrideMarker(cat.overrideStar, hasOverride)
             end
         end
     end

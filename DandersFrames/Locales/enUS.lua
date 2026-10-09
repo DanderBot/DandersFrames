@@ -1394,10 +1394,6 @@ L["OR"] = true
 L["Offset X"] = true
 L["Offset Y"] = true
 L["Override Border"] = true
-L["Override active"] = true
-L["This page has an overridden setting."] = true
-L["A page in this category has an overridden setting."] = true
-L["The frame position is overridden in this layout."] = true
 L["This built-in filter has been changed from its defaults."] = true
 L["Oldest First"] = true
 L["Only changed settings will be saved"] = true
@@ -1830,8 +1826,6 @@ L["Thickness"] = true
 L["Thin"] = true
 L["This filter is empty."] = true
 L["This filter was exported by a newer version of DandersFrames."] = true
-L["This setting differs from the global profile value. Click the reset button to revert."] = true
-L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."] = true
 L["This spell has %d spell IDs. Click to choose which ones to track."] = true
 L["This will capture %s everywhere — even away from the frames — and replace its current action:"] = true
 L["Threat & Range"] = true
@@ -2956,11 +2950,26 @@ L["This list can't be built during combat."] = true
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
-L["1 setting in this section is changed."] = true
-L["%d settings in this section are changed."] = true
+L["Changed in this section"] = true
+L["%d changed from default"] = true
+L["%d set by this auto layout"] = true
+L["%d set by the active auto layout"] = true
+L["This page has settings the layout changes."] = true
+L["A page in this category has settings the layout changes."] = true
+L["Layout: %s"] = true
+L["This layout moves the frames."] = true
+L["This layout changes the order. Use the reset button to go back to your global order."] = true
+L["Use the reset button to go back to your global value."] = true
+L["Set for this pinned set"] = true
+L["Global: %s"] = true
+L["This layout: %s"] = true
+L["Set by this auto layout"] = true
+L["Set by the active auto layout"] = true
+L["Click and hold to reset to your global value"] = true
+L["Click and hold to reset to the default"] = true
+L["To change this, edit the layout in Auto Layouts."] = true
 L["Current: %s"] = true
 L["Default: %s"] = true
-L["Hold click to reset"] = true
 
 -- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
 -- These are seen in normal play, not in the settings panel.

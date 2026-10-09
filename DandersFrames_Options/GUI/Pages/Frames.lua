@@ -1292,9 +1292,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
                 -- Runtime override mode: show star + global value, no reset button
                 if isRuntimeOverridden and not isEditing then
-                    self.overrideStar.tooltipText = L["Override active"]
-                    self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
-                    self.overrideStar:Show()
+                    self.overrideStar.tooltipText = L["Set by the active auto layout"]
+                    self.overrideStar.tooltipSubText = L["To change this, edit the layout in Auto Layouts."]
+                    GUI:ShowLayoutOverrideMarker(self.overrideStar, true)
                     self.overrideResetBtn:Hide()
                     self.overrideCheckIcon:Hide()
 
@@ -1325,9 +1325,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local globalValue = AutoProfilesUI:GetGlobalValue(pinnedKey)
 
                 if isOverridden then
-                    self.overrideStar.tooltipText = L["Override active"]
-                    self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
-                    self.overrideStar:Show()
+                    self.overrideStar.tooltipText = L["Set by this auto layout"]
+                    self.overrideStar.tooltipSubText = L["Use the reset button to go back to your global value."]
+                    GUI:ShowLayoutOverrideMarker(self.overrideStar, true)
                     self.overrideResetBtn:Show()
                 else
                     self.overrideStar:Hide()
@@ -1589,7 +1589,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             starFrame:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
             starFrame:SetScript("OnEnter", function(s)
                 GUI:ShowTooltip(s, {
-                    title = L["Override active"],
+                    title = L["Set for this pinned set"],
                     lines = { string.format(L["Inherited value: %s"], FmtVal(MatchValue())) },
                 })
             end)

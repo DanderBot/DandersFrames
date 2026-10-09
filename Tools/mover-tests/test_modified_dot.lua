@@ -121,6 +121,8 @@ CreateFrame = function(kind, _, parent)
     return f
 end
 C_Timer = { After = function(_, fn) fn() end }
+-- WoW's global alias, which SettingsWidgets.lua uses.
+format = format or string.format
 
 load_ui_file_into("Widgets.lua", ns)
 
@@ -267,10 +269,49 @@ do
     eq(TT.title, "Changed from default", "tooltip: the header")
     eq(TT.lines[1] and TT.lines[1].text, "Default: 1", "tooltip: the default, in the slider's own format")
     eq(TT.lines[2] and TT.lines[2].text, "Current: 2.5", "tooltip: the current value, same format")
-    eq(TT.lines[3] and TT.lines[3].text, "Hold click to reset", "tooltip: the hint")
+    eq(TT.lines[3] and TT.lines[3].text, "Click and hold to reset to the default", "tooltip: the hint")
     check(TT.lines[3] and TT.lines[3].r < TT.lines[2].r, "tooltip: ...drawn dimmer than the values")
     fire(hit, "OnLeave")
     check(not TT.shown, "tooltip: hidden on leave")
+end
+
+-- An auto-layout override: the tooltip carries the default, the global and the
+-- layout's value, and a hold removes ONE layer -- the override, back to the
+-- global, through the control's own reset. A running layout has no hold.
+print("-- Modified dot: an override's tooltip, and a hold that peels one layer")
+do
+    local db, defaults = { w = 30 }, { w = 10 }
+    local host = newHost(db, defaults)
+    local ov, resets = "overridden", 0
+    host.hooks.getOverrideState = function() return ov, 20 end
+    host.hooks.resetOverride = function(t, key)
+        resets = resets + 1
+        ov = "editing"
+        t[key] = 20
+        return 20
+    end
+    local s = slider(host, db, "w")
+    fire(s.modifiedDotHit, "OnEnter")
+    eq(TT.title, "Set by this auto layout", "override: the header")
+    eq(TT.lines[1] and TT.lines[1].text, "Default: 10", "override: the default")
+    eq(TT.lines[2] and TT.lines[2].text, "Global: 20", "override: ...the global")
+    eq(TT.lines[3] and TT.lines[3].text, "This layout: 30", "override: ...and the layout's value")
+    eq(TT.lines[4] and TT.lines[4].text, "Click and hold to reset to your global value", "override: the hint names the layer")
+
+    hold(s.modifiedDotHit, 20, 0.05)
+    eq(resets, 1, "override hold: the control's override reset ran once")
+    eq(db.w, 20, "override hold: ...and the value is the global")
+    check(s.modifiedDot:IsShown(), "override hold: the global still differs from the default, so the dot stays")
+    eq(TT.title, "Changed from default", "override hold: ...and says the next layer")
+    eq(TT.lines[4] and TT.lines[4].text, "Click and hold to reset to the default", "override hold: ...with its own hint")
+
+    ov = "runtime"
+    s:UpdateOverrideIndicators(20)
+    fire(s.modifiedDotHit, "OnEnter")
+    eq(TT.title, "Set by the active auto layout", "runtime: the header")
+    eq(TT.lines[4] and TT.lines[4].text, "To change this, edit the layout in Auto Layouts.", "runtime: no hold, a pointer")
+    hold(s.modifiedDotHit, 20, 0.05)
+    eq(resets, 1, "runtime: a hold does nothing")
 end
 
 do
@@ -560,7 +601,8 @@ do
     check(section.modifiedMarkHit:IsShown(), "mark: ...with its hover")
     check(section.modifiedMarkHit._flags.mouseClick == false, "mark: ...which takes no clicks, so the header still folds")
     fire(section.modifiedMarkHit, "OnEnter")
-    eq(TT.lines[1].text, "1 setting in this section is changed.", "mark: ...and says how many")
+    eq(TT.title, "Changed in this section", "mark: its title")
+    eq(TT.lines[1].text, "1 changed from default", "mark: ...and how many, by kind")
     db.w = 10
     changed:UpdateOverrideIndicators(10)
     check(not section.modifiedMark:IsShown(), "mark: back to default puts it out, from the control's own update")

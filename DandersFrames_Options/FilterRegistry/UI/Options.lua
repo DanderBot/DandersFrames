@@ -2146,12 +2146,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.count:SetJustifyH("RIGHT")
         row.count:SetTextColor(0.5, 0.5, 0.5)
 
-        -- "Modified" override marker (preset has per-profile enable/disable
-        -- overrides). Shared filled-dot marker used for overrides addon-wide;
-        -- it propagates clicks so it doesn't swallow the row's select handler.
+        -- "Changed from defaults" marker (the built-in filter has per-profile
+        -- enable/disable changes). The shared filled-dot marker, in the amber a
+        -- setting's changed-from-default dot uses; it propagates clicks so it
+        -- doesn't swallow the row's select handler.
         row.dot = GUI:CreateOverrideMarker(row, 8)
+        row.dot.icon:SetVertexColor(GUI.Colors.notice.r, GUI.Colors.notice.g, GUI.Colors.notice.b)
         row.dot:SetPoint("RIGHT", row.count, "LEFT", -3, 0)
-        row.dot.tooltipText = L["Override active"]
+        row.dot.tooltipText = L["Changed from default"]
         row.dot.tooltipSubText = L["This built-in filter has been changed from its defaults."]
 
         -- The filter's own on/off switch. Created here but hidden on every bind by

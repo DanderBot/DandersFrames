@@ -410,9 +410,10 @@ do
 end
 
 -- ============================================================
--- THE CARD'S MODIFIED MARK: something in this card is not the shipped
--- default. Same dot, same place as a control's (the title's top-left), so a
--- shut card says what its controls would.
+-- THE CARD'S MODIFIED MARK: something in this card is not what it would
+-- otherwise be. Same dot, same place as a control's (the title's top-left), so
+-- a shut card says what its controls would: the raid accent when any control
+-- in it is an auto-layout override, amber when only defaults are changed.
 --
 -- The count asks every control in the body its own UpdateModifiedDot, the
 -- predicate its dot uses, so the two cannot disagree -- and a shut card
@@ -436,7 +437,7 @@ function GUI:AttachCardModifiedMark(section, clickArea)
     mark:Hide()
     section.modifiedMark = mark
 
-    local changedCount = 0
+    local changedCount, overrideCount, runtimeCount = 0, 0, 0
     -- Motion only: a click on it still folds the card.
     local markHit = CreateFrame("Frame", nil, section)
     markHit:SetSize(DOT.hit, DOT.hit)
@@ -445,9 +446,13 @@ function GUI:AttachCardModifiedMark(section, clickArea)
     markHit:EnableMouse(true)
     markHit:SetMouseClickEnabled(false)
     markHit:SetScript("OnEnter", function(self)
-        local line = (changedCount == 1) and L["1 setting in this section is changed."]
-            or format(L["%d settings in this section are changed."], changedCount)
-        GUI:ShowTooltip(self, { title = L["Changed from default"], lines = { line } })
+        -- One line per kind, in the words each control's own dot uses.
+        local lines = {}
+        local defaultCount = changedCount - overrideCount - runtimeCount
+        if defaultCount > 0 then lines[#lines + 1] = format(L["%d changed from default"], defaultCount) end
+        if overrideCount > 0 then lines[#lines + 1] = format(L["%d set by this auto layout"], overrideCount) end
+        if runtimeCount > 0 then lines[#lines + 1] = format(L["%d set by the active auto layout"], runtimeCount) end
+        GUI:ShowTooltip(self, { title = L["Changed in this section"], lines = lines })
     end)
     markHit:SetScript("OnLeave", function() GUI:HideTooltip() end)
     markHit:Hide()
@@ -460,19 +465,31 @@ function GUI:AttachCardModifiedMark(section, clickArea)
     end
     scan = function(frame)
         if rawget(frame, "UpdateModifiedDot") then
-            if frame:UpdateModifiedDot() then changedCount = changedCount + 1 end
+            local on, kind = frame:UpdateModifiedDot()
+            if on then
+                changedCount = changedCount + 1
+                if kind == "overridden" then
+                    overrideCount = overrideCount + 1
+                elseif kind == "runtime" then
+                    runtimeCount = runtimeCount + 1
+                end
+            end
             return
         end
         each(frame:GetChildren())
     end
     section.RefreshModifiedMark = function(self)
         walking = true
-        changedCount = 0
+        changedCount, overrideCount, runtimeCount = 0, 0, 0
         for _, child in ipairs(self.sectionChildren) do scan(child) end
         local tick = rawget(self, "headerToggle")
         local tickChanged = tick and rawget(tick, "UpdateModifiedDot") and tick:UpdateModifiedDot() or false
         walking = false
         local show = changedCount > 0 and not tickChanged
+        if show then
+            local c = (overrideCount + runtimeCount > 0) and GUI:Call("accentFor", true) or C_NOTICE
+            mark:SetVertexColor(c.r, c.g, c.b)
+        end
         mark:SetShown(show)
         markHit:SetShown(show)
     end

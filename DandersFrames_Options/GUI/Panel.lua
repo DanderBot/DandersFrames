@@ -1077,7 +1077,7 @@ function DF:CreateGUI()
     -- same tooltip shape as the one beside Unlock.
     local profileOverrideStar = GUI:CreateOverrideMarker(titleBar, 12)
     profileOverrideStar:SetPoint("RIGHT", profileChip, "LEFT", -2, 0)
-    profileOverrideStar.tooltipText = L["Override active"]
+    profileOverrideStar.tooltipText = L["Set by the active auto layout"]
 
     -- Repainted from UpdateThemeColors, which every mode switch and every
     -- window show already runs -- the two moments the answer can have changed
@@ -1093,11 +1093,9 @@ function DF:CreateGUI()
         local layout = AP and AP.IsLayoutActive and AP:IsLayoutActive()
             and AP.GetActiveLayoutName and AP:GetActiveLayoutName()
         if layout then
-            profileOverrideStar.tooltipSubText = format(L["Profile: %s"], layout)
-            profileOverrideStar:Show()
-        else
-            profileOverrideStar:Hide()
+            profileOverrideStar.tooltipSubText = format(L["Layout: %s"], layout)
         end
+        GUI:ShowLayoutOverrideMarker(profileOverrideStar, layout)
     end
     GUI.UpdateProfileChip = UpdateProfileChip
 
@@ -1779,11 +1777,11 @@ function DF:CreateGUI()
 
     -- Position override marker (shown next to the lock button when the frame
     -- position is overridden in the layout being edited). Shared marker helper →
-    -- dot + hover tooltip, one colour with every other override marker.
+    -- dot + hover tooltip, in the auto-layout colour (GUI:ShowLayoutOverrideMarker).
     local positionOverrideStar = GUI:CreateOverrideMarker(deck2, 14)
     positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", SnapLen(positionOverrideStar, 4), 0)
-    positionOverrideStar.tooltipText = L["Override active"]
-    positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
+    positionOverrideStar.tooltipText = L["Set by this auto layout"]
+    positionOverrideStar.tooltipSubText = L["This layout moves the frames."]
     GUI.PositionOverrideStar = positionOverrideStar
 
     local btnTest = CreateFrame("Button", nil, deck2, "BackdropTemplate")
@@ -1954,7 +1952,7 @@ function DF:CreateGUI()
     local function UpdatePositionOverrideIndicator()
         -- Debug mode shows indicator
         if S.overrideDebugMode then
-            positionOverrideStar:Show()
+            GUI:ShowLayoutOverrideMarker(positionOverrideStar, true)
             return
         end
         
@@ -1973,11 +1971,7 @@ function DF:CreateGUI()
         local xOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorX")
         local yOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorY")
         
-        if xOverridden or yOverridden then
-            positionOverrideStar:Show()
-        else
-            positionOverrideStar:Hide()
-        end
+        GUI:ShowLayoutOverrideMarker(positionOverrideStar, xOverridden or yOverridden)
     end
     GUI.UpdatePositionOverrideIndicator = UpdatePositionOverrideIndicator
     
