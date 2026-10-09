@@ -4,11 +4,11 @@ local NS = ...
 -- A CARD LAYS OUT AT THE WIDTH IT IS ABOUT TO HAVE
 -- DandersFrames_Options/GUI/Panel.lua (PageRefreshStates)
 -- ------------------------------------------------------------
--- A settings group lays its children out off its CURRENT width, and the page
--- pass used to size a filling band only AFTER laying it out. So the pass that
--- folded the page to one column, or back to two, laid every card out for the
--- old width: two tracks spilling out of a card that had just narrowed, a
--- widened card's controls still at the narrow width (Krathe, 2026-10-08).
+-- A settings group lays its children out off its CURRENT width, so the page
+-- pass must size a filling band BEFORE laying it out. Sized after, the pass
+-- that folds the page to one column, or back to two, lays every card out for
+-- the old width: two tracks spilling out of a card that has just narrowed, a
+-- widened card's controls still at the narrow width.
 --
 -- Panel.lua does not load headlessly, so the real functions are lifted out of
 -- it by name (as test_resize_split_guide.lua does) and run over fake frames.

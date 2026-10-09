@@ -1798,9 +1798,9 @@ end
 -- ------------------------------------------------------------
 -- ☠ EVERY FULL BUILD ENDS HERE, NOT ONLY THE REFRESH. A full build makes a new
 -- S.mainFrame and the cover belongs to the frame it was made on, so the rebuild
--- every party/raid switch runs came up with NO cover -- and the page's
--- RefreshStates skips the refresh at an unchanged size, so nothing put one
--- back: a disabled designer whose preview and tabs all still worked.
+-- every party/raid switch runs would come up with NO cover -- and the page's
+-- RefreshStates skips the refresh at an unchanged size, so nothing else puts
+-- one back: a disabled designer whose preview and tabs all still work.
 -- ☠ FROM THE MODE, NOT THE PRESET: the enable click writes the mode, and a read
 -- of the preset field it no longer writes would untick the box under the user.
 -- ============================================================

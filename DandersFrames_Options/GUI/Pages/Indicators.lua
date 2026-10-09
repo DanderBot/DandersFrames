@@ -626,9 +626,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     refreshStates = function() self:RefreshStates() end,
                 })
                 -- ⚠ HIDE DUPLICATE BUFFS LIVES HERE IN MODERN. As a lone control row
-                -- between the cards it was the one element on the page with its own
-                -- width, height and indent; it decides which buffs show, so it is a
-                -- filter, and it reads as one at the foot of this section.
+                -- between the cards it would be the one element on the page with its
+                -- own width, height and indent; it decides which buffs show, so it is
+                -- a filter, and it reads as one at the foot of this section.
                 local dedupCb = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Buffs"], db, "buffDeduplicateDefensives", DedupChanged), 30)
                 dedupCb.tooltip = DEDUP_TIP
                 -- On a row of its own when the card lays out two per row, as on the
@@ -1867,8 +1867,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     refreshStates = function() self:RefreshStates() end,
                 })
                 -- ⚠ HIDE DUPLICATE DEBUFFS LIVES HERE IN MODERN, the Buff Bar's move.
-                -- As a lone control row between the cards it was the one element on the
-                -- page with its own width, height and indent; it decides which debuffs
+                -- As a lone control row between the cards it would be the one element on
+                -- the page with its own width, height and indent; it decides which debuffs
                 -- show, so it is a filter, and it reads as one at the foot of this
                 -- section -- on its own row, after the dispel-mode pair above it.
                 local dedupCb = band:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged), 30)

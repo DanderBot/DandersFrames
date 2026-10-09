@@ -1553,8 +1553,8 @@ end
 local DOT_SIZE, DOT_HOLD_SIZE, DOT_HIT = 6, 10, 16
 local DOT_HOLD_TIME = 0.6
 -- ☠ THE HOLD SHOWS AS A RING THAT FILLS, not only as the dot growing. The dot
--- sits under the pointer while it is held, and 6px -> 10px under a cursor was
--- reported as barely noticeable. A ring wider than the hit square is visible
+-- sits under the pointer while it is held, and 6px -> 10px under a cursor is
+-- barely noticeable. A ring wider than the hit square is visible
 -- around the pointer, and filling clockwise says "keep holding" and "how long".
 -- Drawn by a Cooldown frame's radial swipe over the ring art, so nothing runs
 -- per frame for it; a faint full ring underneath is the track it fills.

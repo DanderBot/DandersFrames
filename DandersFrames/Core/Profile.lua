@@ -100,14 +100,13 @@ end
 -- is, under the same name. Used by the GUI "Reset Profile to Defaults" button
 -- and /df reset.
 --
--- ☠ REPLACED, NOT RESET KEY BY KEY. This used to reset the two modes and then
--- chase the profile-ROOT state the mode resets never reached -- the designer
--- preset libraries, the filter overrides, sync links, the settings font -- one
--- reported miss at a time, and it still left the class and power colours, the
--- auto layouts and the Party/Raid switches behind. A fresh table from the same
--- constructor a new profile uses cannot miss anything that constructor seeds,
--- and ActivateProfile then runs the same migrations, refresh and reload check
--- a profile switch does.
+-- ☠ REPLACED, NOT RESET KEY BY KEY. Resetting the two modes misses the
+-- profile-ROOT state they never reach -- designer preset libraries, filter
+-- overrides, sync links, the settings font, class and power colours, auto
+-- layouts, the Party/Raid switches -- and every new root key would be one more
+-- to chase. A fresh table from the constructor a new profile uses cannot miss
+-- anything it seeds, and ActivateProfile then runs the same migrations,
+-- refresh and reload check a profile switch does.
 --
 -- ⚠ NOT SAVED FIRST. SetProfile saves the outgoing profile before switching;
 -- here that would write the old settings straight back over the new table.

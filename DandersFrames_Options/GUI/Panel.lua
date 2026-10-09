@@ -2344,10 +2344,9 @@ function DF:CreateGUI()
             local page = GUI.Pages[GUI.CurrentPageName]
             local built = page.children
             local stamp = format("%.3f,%.3f,%.3f", nc.r, nc.g, nc.b)
-            -- ⚠ ONLY WHEN THE COLOUR CHANGED, the page's own list included. This
-            -- ran on every switch and every call, and on a full page it was most
-            -- of the time a tab switch took (Frame: ~150ms) to repaint a page
-            -- already in the right colour.
+            -- ⚠ ONLY WHEN THE COLOUR CHANGED, the page's own list included. On a
+            -- full page the walk is most of what a tab switch costs (Frame:
+            -- ~150ms), and a page already in the right colour needs none of it.
             GUI._lastRepaintNodes = nil
             if built and not GUI._holdPageRepaint and built._themedAccent ~= stamp then
                 built._themedAccent = stamp
@@ -2836,11 +2835,11 @@ function DF:CreateGUI()
     -- dock means alive and parked, and every page in it is expected back.
     --
     -- ☠ A PARKED PAGE IS PINNED TO THE DOCK AT A FIXED SIZE, NOT LEFT ANCHORED TO
-    -- `content`. It used to keep its anchors, and then every step of a resize-grip
-    -- drag re-resolved every built page's whole subtree: the window resizes about
-    -- its centre, so every rect under `content` moves each frame. Reported as a
-    -- resize that stutters once enough pages have been opened with their cards
-    -- expanded, or after the Changed Settings page had listed a lot. Pinned, a
+    -- `content`. Anchored there, every step of a resize-grip drag re-resolves
+    -- every built page's whole subtree: the window resizes about its centre, so
+    -- every rect under `content` moves each frame, and the resize stutters once
+    -- enough pages have been opened with their cards expanded, or after the
+    -- Changed Settings page has listed a lot. Pinned, a
     -- parked page still measures at a real size and can be BUILT in place, which
     -- is what search's index pass does to all 34 of them; it is the size the page
     -- last had, and AdoptPage puts it back on `content` at the current one.

@@ -5,10 +5,9 @@ local NS = ...
 -- DandersFrames_Options/AuraDesigner/UI/Editor.lua
 -- ------------------------------------------------------------
 -- The "Aura Designer is disabled" cover hangs off S.mainFrame, and a full build
--- (every party/raid switch, a template switch) makes a new S.mainFrame. Only the
--- refresh used to raise the cover, and the page skips that refresh at an
--- unchanged size -- so after a switch a disabled designer was fully clickable
--- (Aphoex, reported repeatedly).
+-- (every party/raid switch, a template switch) makes a new S.mainFrame. If only
+-- the refresh raised the cover, the page skipping that refresh at an unchanged
+-- size would leave a disabled designer fully clickable after a switch.
 --
 -- The real ApplyEnabledState is lifted out by name and run over fake frames; the
 -- two places that must call it are checked in the source.

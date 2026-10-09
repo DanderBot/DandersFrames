@@ -1021,8 +1021,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
     -- ☠ THE NAME WINS THE ROOM, NOT THE SWATCH. In a half-width card track the
-    -- button is ~170px, and a fixed 80px swatch left the name ~60 -- "DF
-    -- Minimalist" no longer fit. The swatch gives way down to 40 first; at the
+    -- button is ~170px, and a fixed 80px swatch would leave the name ~60, too
+    -- narrow for "DF Minimalist". The swatch gives way down to 40 first; at the
     -- 260 the factory was drawn for it is its full 80.
     btn:SetScript("OnSizeChanged", function(self, w)
         self.Preview:SetWidth(math.max(40, math.min(80, math.floor(((w or 0) - 100) / 2))))
@@ -1206,9 +1206,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
 
     -- Function to rebuild menu with current textures
     -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
-    -- open and every keystroke in its search box, and it used to make a fresh
-    -- row each time and drop the old ones -- frames the game never frees, a
-    -- whole list of them per open.
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
     local rowPool = {}
     local function RebuildMenu(filterText)
         for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
@@ -1612,9 +1611,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
 
     -- Function to rebuild menu with current fonts
     -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
-    -- open and every keystroke in its search box, and it used to make a fresh
-    -- row each time and drop the old ones -- frames the game never frees, a
-    -- whole list of them per open.
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
     local rowPool = {}
     local function RebuildMenu(filterText)
         for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
@@ -1908,9 +1906,8 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local MAX_VISIBLE = 10
 
     -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
-    -- open and every keystroke in its search box, and it used to make a fresh
-    -- row each time and drop the old ones -- frames the game never frees, a
-    -- whole list of them per open.
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
     local rowPool = {}
     local function RebuildMenu(filterText)
         for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end

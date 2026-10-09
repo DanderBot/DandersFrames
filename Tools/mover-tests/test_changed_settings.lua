@@ -589,7 +589,7 @@ end
 -- Split by PAGE: the Global ledger lists every setting on a Global-tab page,
 -- whichever store holds it -- the account-wide table, the profile root, or the
 -- party table both modes read shared settings from -- and the mode ledgers list
--- everything else. ☠ It used to read the account-wide table only, and said
+-- everything else. ☠ Reading the account-wide table alone would say
 -- "Everything is at its defaults" over a changed Blizzard toggle.
 -- ============================================================
 print("-- Changed Settings: the Global tab's ledger")

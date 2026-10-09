@@ -1218,7 +1218,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Colors Smoothly is on). Low values left, high right.
         -- ⚠ THE BANDS ARE PLACED FROM THE STRIP'S LIVE WIDTH, on every size change:
         -- the editor strip is stretched to the box or card it sits in, and bands laid
-        -- out once at the 256 it was built at stayed that wide in a wider card.
+        -- out once at the 256 it is built at would stay that wide in a wider card.
         local previewW, stripH = 256, 18
         local strips = {}
         local function BuildStrip(w, h, smoothMode, unit)
