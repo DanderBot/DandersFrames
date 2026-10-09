@@ -360,6 +360,16 @@ function UI:ShowPopupAlert(config)
     ConfigureForAlert(self, config)
 end
 
+-- Close the open dialog, as its close button would; true when one was open. For
+-- a consumer that takes the keyboard itself: its Escape is consumed before the
+-- client's UISpecialFrames sweep, so the dialog would otherwise never close on it.
+function UI:DismissPopup()
+    if not (PopupFrame and PopupFrame:IsShown()) then return false end
+    self:Call("onPopupOpen")
+    PopupFrame:Hide()
+    return true
+end
+
 -- ============================================================
 -- INPUT MODE
 -- The one dialog shape this popup lacked, and the only reason ~8 surfaces were

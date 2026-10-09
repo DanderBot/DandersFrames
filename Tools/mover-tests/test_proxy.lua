@@ -779,12 +779,11 @@ do
     local wasReady = R.ready
     R.ready = true
     NS.db = { showHiddenMovers = true, keyboardNudge = true, addons = {} }
-    -- Two file-scope side effects a headless run has to stand in for: the
-    -- registry callback the session subscribes to, and the exit popup it
-    -- declares. The callback stub is put straight back so no later suite sees it.
+    -- The one file-scope side effect a headless run has to stand in for: the
+    -- registry callback the session subscribes to. The stub is put straight back
+    -- so no later suite sees it.
     local prevRegister = NS.Lib.RegisterCallback
     NS.Lib.RegisterCallback = prevRegister or function() end
-    StaticPopupDialogs = StaticPopupDialogs or {}
     load_addon_file("Session.lua")
     NS.Lib.RegisterCallback = prevRegister
     local Sess = NS.Session
@@ -804,8 +803,21 @@ do
     local onKey = uf:GetScript("OnKeyDown")
     check(onKey ~= nil, "esc: the session installs a key handler on the unlock frame")
 
-    -- (a) mid-gesture: the link is cancelled and nothing else happens.
+    -- (0) the exit prompt is up: Esc closes it and nothing else happens.
+    local prevDismiss = rawget(NS.UI, "DismissPopup")
+    local promptOpen = true
+    NS.UI.DismissPopup = function()
+        local was = promptOpen
+        promptOpen = false
+        return was
+    end
     Sess.selected = "E:one"
+    onKey(uf, "ESCAPE")
+    check(not promptOpen, "esc: an open exit prompt is closed first")
+    eq(Sess.selected, "E:one", "esc: ...and the selection survives it")
+    eq(locks, 0, "esc: ...and the session does not end")
+
+    -- (a) mid-gesture: the link is cancelled and nothing else happens.
     Sess.linking = { id = "E:one", mode = "primary" }
     onKey(uf, "ESCAPE")
     check(Sess.linking == nil, "esc: a live link gesture is cancelled first")
@@ -820,6 +832,7 @@ do
     -- (c) nothing left to back out of: NOW it locks.
     onKey(uf, "ESCAPE")
     eq(locks, 1, "esc: with nothing selected, Esc locks the session")
+    NS.UI.DismissPopup = prevDismiss
 
     Sess:EnableKeyboard(false)
     check(uf:GetScript("OnKeyDown") == nil, "esc: disabling the keyboard takes the handler off")

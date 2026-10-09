@@ -39,7 +39,7 @@ local Solver = NS.Solver
 
 local saved = {
     CreateFrame = CreateFrame, C_Timer = C_Timer, hooksecurefunc = hooksecurefunc,
-    IsInRaid = IsInRaid, debugprofilestop = debugprofilestop, StaticPopupDialogs = StaticPopupDialogs,
+    IsInRaid = IsInRaid, debugprofilestop = debugprofilestop,
     Proxy = NS.Proxy, Session = NS.Session, Grid = NS.Grid, db = NS.db, ready = R.ready,
 }
 
@@ -290,7 +290,6 @@ Mover:RegisterAnchorTarget("PDT", "box", { title = "box", frame = FakeFrame(440,
 
 NS.db = { snapToFrames = false, snapToGrid = false, snapToScreen = false, snapDistance = 25, addons = {} }
 NS.Grid = setmetatable({}, { __index = function() return function() end end })
-StaticPopupDialogs = StaticPopupDialogs or {}
 do
     local prevTimer = C_Timer
     C_Timer = { After = function() end }
@@ -524,7 +523,7 @@ Mover.UnregisterCallback(Bridge, "Locked")
 Mover:UnregisterAddon("DandersFrames")
 Mover:UnregisterAddon("PDT")
 CreateFrame, C_Timer, IsInRaid = saved.CreateFrame, saved.C_Timer, saved.IsInRaid
-debugprofilestop, StaticPopupDialogs = saved.debugprofilestop, saved.StaticPopupDialogs
+debugprofilestop = saved.debugprofilestop
 if ownHook then hooksecurefunc = nil end
 NS.Proxy, NS.Session, NS.Grid, NS.db = saved.Proxy, saved.Session, saved.Grid, saved.db
 R.ready = saved.ready
