@@ -23,6 +23,9 @@ local ipairs, pairs, type, format, unpack, wipe = ipairs, pairs, type, string.fo
 local math, tinsert, tostring, tonumber = math, table.insert, tostring, tonumber
 local PlaySound, SOUNDKIT, InCombatLockdown, C_Timer = PlaySound, SOUNDKIT, InCombatLockdown, C_Timer
 local strtrim, _G = strtrim, _G
+-- The modified dot's hold ring is the one caller. Stubbed rather than assumed so
+-- the file stays loadable outside the game, as Core.lua does for its own.
+local GetTime = GetTime or function() return 0 end
 
 -- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE. A host stamps `RefreshStates` on
 -- whatever a control was parented to -- a settings page's scroll child, or the
@@ -1549,6 +1552,14 @@ end
 -- Installs container.UpdateModifiedDot(self) -> shown, kind. Returns the texture.
 local DOT_SIZE, DOT_HOLD_SIZE, DOT_HIT = 6, 10, 16
 local DOT_HOLD_TIME = 0.6
+-- ☠ THE HOLD SHOWS AS A RING THAT FILLS, not only as the dot growing. The dot
+-- sits under the pointer while it is held, and 6px -> 10px under a cursor was
+-- reported as barely noticeable. A ring wider than the hit square is visible
+-- around the pointer, and filling clockwise says "keep holding" and "how long".
+-- Drawn by a Cooldown frame's radial swipe over the ring art, so nothing runs
+-- per frame for it; a faint full ring underneath is the track it fills.
+local DOT_RING = 22
+local DOT_RING_TRACK_ALPHA = 0.25
 
 -- The flat white texture a colour value's swatch is drawn from, tinted inline
 -- by the |T escape's own RGB arguments. A texture rather than a block glyph:
@@ -1678,12 +1689,16 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         host:ShowTooltip(hit, { title = title, lines = lines })
     end
 
+    local ringTrack, ringFill   -- built with the hit frame
+
     local HoldUpdate
     local function CancelHold()
         if not holding then return end
         holding, holdElapsed, holdDefault, holdWrite = false, 0, nil, nil
         hit:SetScript("OnUpdate", nil)
         dot:SetSize(DOT_SIZE, DOT_SIZE)
+        if ringTrack then ringTrack:Hide() end
+        if ringFill then ringFill:Hide() end
     end
 
     -- ⚠ NO ALLOCATION IN HERE: it runs every rendered frame of a hold. Numbers
@@ -1719,6 +1734,18 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         if not write then return end
         holding, holdElapsed, holdDefault, holdWrite = true, 0, arg, write
         hit:SetScript("OnUpdate", HoldUpdate)
+        -- The ring takes the dot's own colour: amber for a default, the raid
+        -- accent for a layout override.
+        local r, g, b = dot:GetVertexColor()
+        if ringTrack then
+            ringTrack:SetVertexColor(r, g, b, DOT_RING_TRACK_ALPHA)
+            ringTrack:Show()
+        end
+        if ringFill then
+            if ringFill.SetSwipeColor then ringFill:SetSwipeColor(r, g, b, 1) end
+            ringFill:Show()
+            ringFill:SetCooldown(GetTime(), DOT_HOLD_TIME)
+        end
     end
 
     local function EnsureHit()
@@ -1740,6 +1767,26 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         end)
         hit:SetScript("OnMouseUp", function() CancelHold() end)
         hit:SetScript("OnHide", function() CancelHold() end)
+
+        -- The hold's ring, centred on the dot and hidden until a hold starts.
+        -- Children of the hit, so they go wherever it goes.
+        ringTrack = hit:CreateTexture(nil, "ARTWORK")
+        ringTrack:SetTexture(MEDIA .. "DF_Ring")
+        ringTrack:SetSize(DOT_RING, DOT_RING)
+        ringTrack:SetPoint("CENTER", dot, "CENTER", 0, 0)
+        ringTrack:Hide()
+        ringFill = CreateFrame("Cooldown", nil, hit)
+        ringFill:SetSize(DOT_RING, DOT_RING)
+        ringFill:SetPoint("CENTER", dot, "CENTER", 0, 0)
+        if ringFill.SetSwipeTexture then ringFill:SetSwipeTexture(MEDIA .. "DF_Ring") end
+        -- Reverse: the swipe covers the ELAPSED part, so the ring grows.
+        if ringFill.SetReverse then ringFill:SetReverse(true) end
+        if ringFill.SetDrawEdge then ringFill:SetDrawEdge(false) end
+        if ringFill.SetDrawBling then ringFill:SetDrawBling(false) end
+        if ringFill.SetHideCountdownNumbers then ringFill:SetHideCountdownNumbers(true) end
+        ringFill:Hide()
+        hit.ringTrack, hit.ringFill = ringTrack, ringFill
+
         hit:Hide()
         container.modifiedDotHit = hit
         return hit

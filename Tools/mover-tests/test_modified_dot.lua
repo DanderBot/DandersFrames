@@ -373,6 +373,9 @@ do
     fire(hit, "OnEnter")
     fire(hit, "OnMouseDown", "LeftButton")
     check(hit:GetScript("OnUpdate") ~= nil, "hold: pressing starts the per-frame update")
+    -- The ring around the dot is what reads under a pointer: shown on the press.
+    check(hit.ringFill and hit.ringFill:IsShown(), "hold: the ring that fills is shown")
+    check(hit.ringTrack and hit.ringTrack:IsShown(), "hold: ...over its faint full track")
     local up = hit:GetScript("OnUpdate")
     up(hit, 0.3)
     eq(db.w, 30, "hold: nothing is written before the threshold")
@@ -404,6 +407,7 @@ do
     fire(hit, "OnMouseUp", "LeftButton")
     eq(hit:GetScript("OnUpdate"), nil, "release: the update stops")
     eq(s.modifiedDot:GetWidth(), 6, "release: the dot shrinks back")
+    check(not hit.ringFill:IsShown() and not hit.ringTrack:IsShown(), "release: the ring goes")
     eq(db.w, 30, "release: nothing written")
 
     -- A new press starts from zero, not from where the last one stopped.
