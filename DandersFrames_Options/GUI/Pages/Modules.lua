@@ -2713,24 +2713,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- differs from the shipped default, grouped by the page that owns it, one
     -- click from the setting itself. The diff walk, the grouping and the value
     -- formatting all live in Features/ChangedSettings.lua so they can be
-    -- asserted headlessly; everything here is the drawing.
-    local pageChangedSettings = CreateSubTab("profiles", DF.ChangedSettings.PAGE_ID, L["Changed Settings"])
-    -- ☠ NOT INDEXED BY SEARCH, and this flag is the mechanism (read in
-    -- Search:BuildFullRegistry). Building the registry re-runs every page's
-    -- builder and this builder ASKS for the registry, so without the skip the
-    -- two call each other forever; and even one level deep is wrong, because a
-    -- nested Refresh on this page retires the widgets the outer Refresh already
-    -- placed. See the header of Features/ChangedSettings.lua.
-    if pageChangedSettings then pageChangedSettings.skipSearchIndex = true end
-    BuildPage(pageChangedSettings, function(self, db, Add, AddSpace, AddSyncPoint)
+    -- asserted headlessly; everything here is the drawing. Two pages draw it:
+    -- Party/Raid's for the mode, GLOBAL's (scope "global") for the account-wide
+    -- settings.
+    local function BuildChangedSettings(self, Add, AddSpace, scope)
         local CS = DF.ChangedSettings
         -- ⚠ FIRST, BEFORE ANY WIDGET IS ADDED. BuildReport may build the search
         -- registry, which re-runs every other page's builder and ends by calling
         -- RefreshStates on whatever page is on screen -- this one. With nothing
         -- added yet that pass runs over an empty children list and is a no-op;
         -- move this below the first Add() and it re-lays a half-built page.
-        local report, reason = CS:BuildReport(GUI)
-        local modeLabel = (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
+        local report, reason = CS:BuildReport(GUI, scope)
+        local isGlobal = (scope == "global")
+        local modeLabel = isGlobal and L["Global"]
+            or (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
 
         -- Dim hex for the "-> default" half of a value cell. Built from the
         -- palette rather than typed, so the ledger follows a theme change like
@@ -2788,8 +2784,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return
         end
 
-        headerGroup:AddWidget(GUI:CreateLabel(self.child,
-            format(L["Showing %s settings in the current profile. Click a row to jump to the setting."],
+        headerGroup:AddWidget(GUI:CreateLabel(self.child, isGlobal
+            and L["Showing the settings on the Global tab: account-wide ones, and those shared by Party and Raid. Click a row to jump to the setting."]
+            or format(L["Showing %s settings in the current profile. Click a row to jump to the setting."],
                 modeLabel)), nil)
 
         if report.count == 0 then
@@ -2807,7 +2804,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- debug-log export use -- a singleton, so no frame is leaked per
             -- click. Rebuilt on the click rather than captured at page build:
             -- the user may have changed something since.
-            local fresh = CS:BuildReport(GUI)
+            local fresh = CS:BuildReport(GUI, scope)
             DF:ShowPopupInput({
                 title       = L["Changed Settings"],
                 message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
@@ -2905,6 +2902,24 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         AddFootnote()
+    end
+
+    -- ☠ NOT INDEXED BY SEARCH, and this flag is the mechanism (read in
+    -- Search:BuildFullRegistry). Building the registry re-runs every page's
+    -- builder and this builder ASKS for the registry, so without the skip the
+    -- two call each other forever; and even one level deep is wrong, because a
+    -- nested Refresh on this page retires the widgets the outer Refresh already
+    -- placed. See the header of Features/ChangedSettings.lua.
+    local pageChangedSettings = CreateSubTab("profiles", DF.ChangedSettings.PAGE_ID, L["Changed Settings"])
+    if pageChangedSettings then pageChangedSettings.skipSearchIndex = true end
+    BuildPage(pageChangedSettings, function(self, db, Add, AddSpace, AddSyncPoint)
+        BuildChangedSettings(self, Add, AddSpace)
+    end)
+
+    local pageChangedGlobal = CreateSubTab("profiles", DF.ChangedSettings.GLOBAL_PAGE_ID, L["Changed Settings"])
+    if pageChangedGlobal then pageChangedGlobal.skipSearchIndex = true end
+    BuildPage(pageChangedGlobal, function(self, db, Add, AddSpace, AddSyncPoint)
+        BuildChangedSettings(self, Add, AddSpace, "global")
     end)
 
     -- ========================================

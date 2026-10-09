@@ -38,7 +38,7 @@ if defs then
     if chunk then chunk(G, function(isRaid) return isRaid and RAID or PARTY end) end
 end
 local want = { "general_settings", "general_integrations", "general_nicknames", "general_fonts", "display_classcolors",
-               "auras_filterdesigner", "profiles_manage", "profiles_importexport", "debug_console" }
+               "auras_filterdesigner", "profiles_manage", "profiles_importexport", "profiles_changed_global", "debug_console" }
 for _, id in ipairs(want) do
     check(G.IsGlobalPage and G.IsGlobalPage(id), "pages: " .. id .. " is on GLOBAL")
 end

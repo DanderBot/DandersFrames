@@ -555,6 +555,7 @@ GUI.GlobalPages = {
     auras_filterdesigner  = true,
     profiles_manage       = true,
     profiles_importexport = true,
+    profiles_changed_global = true,
     debug_console         = true,
 }
 GUI.GlobalView = false

@@ -2915,6 +2915,7 @@ L["Indexing settings..."] = true
 L["Not everything is listed: a few controls and ordered lists are not tracked here."] = true
 L["On"] = true
 L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
+L["Showing the settings on the Global tab: account-wide ones, and those shared by Party and Raid. Click a row to jump to the setting."] = true
 L["This list can't be built during combat."] = true
 
 -- The yellow "changed from default" dot beside a setting's name: its hover
