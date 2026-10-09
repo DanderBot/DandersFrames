@@ -760,17 +760,10 @@ function DF:CreateGUI()
         if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
             GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
         end
-        -- ...and the page that was cross-fading OUT, if the window was closed
-        -- inside the ~90ms of a tab switch (see THE PAGE CROSSFADE). Its own fade
-        -- can no longer finish -- hiding the window stops the animation -- so the
-        -- callback that would have parked it never runs, and it would sit
-        -- parented and shown until the next tab change. It IS hidden here, unlike
-        -- the current page above: nothing is coming back to it.
-        if GUI.ParkPage and GUI._fadingPage then
-            GUI._fadingPage:Hide()
-            GUI:ParkPage(GUI._fadingPage)
-            GUI._fadingPage = nil
-        end
+        -- ...and the page cover, if the window was closed inside a switch's fade
+        -- (see THE PAGE FADE): a stopped fade never runs the callback that hides
+        -- it, and it would open over the page next time.
+        if GUI._pageCover then GUI._pageCover:Hide() end
     end)
     
     -- =========================================================================
@@ -2219,9 +2212,22 @@ function DF:CreateGUI()
     -- END HEADER CONTROLS
     -- =========================================================================
     
+    -- The GUI debug category's trace of a page switch: one line per switch, each
+    -- step's milliseconds, then when the NEXT frame began -- work a step defers
+    -- (an OnShow, a timer, a size change) lands between the two.
+    local switchMarks
+    local function SwitchMark(label)
+        if not switchMarks then return end
+        local t = debugprofilestop()
+        switchMarks[#switchMarks + 1] = format("%s %.1f", label, t - switchMarks.last)
+        switchMarks.last = t
+    end
+
     -- Every ThemeListeners list under `frame`, repainted to the host accent.
+    local repaintNodes = 0
     local function RepaintTree(frame, depth)
         if type(frame) ~= "table" or depth > 40 then return end
+        repaintNodes = repaintNodes + 1
         local list = rawget(frame, "ThemeListeners")
         if type(list) == "table" then
             for _, w in ipairs(list) do
@@ -2264,6 +2270,7 @@ function DF:CreateGUI()
             or (activeMode == btnClicks and C_CLICKS)
             or C_ACCENT
         modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
+        SwitchMark("t:modes")
 
         -- Test button look via the shared toggle styling (matches how the Lock
         -- button is refreshed below). The old inline version painted a stray
@@ -2281,6 +2288,7 @@ function DF:CreateGUI()
         -- the ThemeListeners loop below never reaches it either — refresh its hover
         -- wash to the current mode accent here alongside Test/Lock.
         if infoBtn and infoBtn.UpdateTheme then infoBtn.UpdateTheme() end
+        SwitchMark("t:toolbar")
         
         -- Show/hide Test and Lock buttons based on mode
         if GUI.SelectedMode == "clicks" then
@@ -2292,12 +2300,14 @@ function DF:CreateGUI()
         end
         
         title.UpdateTheme()
+        SwitchMark("t:title")
         -- Deck 1's chip: the profile list can have changed (created, deleted,
         -- renamed on the Profiles page) and so can the auto-layout overlay, and
         -- neither event has a reason to reach into the header on its own. This
         -- runs on every mode switch and on every window show, which is every
         -- moment the header is about to be looked at.
         UpdateProfileChip()
+        SwitchMark("t:profile")
 
         -- Update active tab
         local nc = GetThemeColor()
@@ -2321,6 +2331,7 @@ function DF:CreateGUI()
             end
         end
         
+        SwitchMark("t:nav")
         -- Update theme listeners
         -- ☠ THE WHOLE BUILD, when it was painted in another accent. A page is
         -- built in whichever tab's accent is up -- the search index builds every
@@ -2333,24 +2344,38 @@ function DF:CreateGUI()
             local page = GUI.Pages[GUI.CurrentPageName]
             local built = page.children
             local stamp = format("%.3f,%.3f,%.3f", nc.r, nc.g, nc.b)
-            if built and built._themedAccent ~= stamp then
+            -- ⚠ ONLY WHEN THE COLOUR CHANGED, the page's own list included. This
+            -- ran on every switch and every call, and on a full page it was most
+            -- of the time a tab switch took (Frame: ~150ms) to repaint a page
+            -- already in the right colour.
+            GUI._lastRepaintNodes = nil
+            if built and not GUI._holdPageRepaint and built._themedAccent ~= stamp then
                 built._themedAccent = stamp
-                for _, child in ipairs(built) do RepaintTree(child, 0) end
-            end
-            if page.child and page.child.ThemeListeners then
-                for _, widget in ipairs(page.child.ThemeListeners) do
-                    if widget.UpdateTheme then widget:UpdateTheme() end
+                repaintNodes = 0
+                -- The PAGE FRAME, not the build's Add()ed children: a page that
+                -- places its own frames (the Filter Designer's panels, its New and
+                -- Import rows) hangs them here, outside that list. The other mode's
+                -- parked build is under it too and is painted with it, so its
+                -- stamp is cleared: it is repainted in its own colour when it is
+                -- next shown.
+                if page.child then RepaintTree(page.child, 0) end
+                for _, slot in pairs(page._modeBuilds or {}) do
+                    if slot.children then slot.children._themedAccent = nil end
                 end
+                GUI._lastRepaintNodes = repaintNodes
             end
+            SwitchMark("t:page")
         end
         
         -- Update test panel if open (but don't trigger circular updates)
         if DF.TestPanel and DF.TestPanel:IsShown() then
             DF.TestPanel:UpdateStateNoCallback()
         end
+        SwitchMark("t:testpanel")
         
         -- Update lock button state
         UpdateLockButtonState()
+        SwitchMark("t:lock")
     end
     GUI.UpdateThemeColors = UpdateThemeColors
 
@@ -2471,7 +2496,11 @@ function DF:CreateGUI()
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
         end
+        -- The page on screen is still the OTHER mode's build until the refresh
+        -- below swaps it; repainting it here would be undone on the way back.
+        GUI._holdPageRepaint = true
         UpdateThemeColors()
+        GUI._holdPageRepaint = nil
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
         -- Cached, not forced: a mode switch shows the other mode's build if it
@@ -2539,7 +2568,10 @@ function DF:CreateGUI()
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
         end
+        -- See the Party handler.
+        GUI._holdPageRepaint = true
         UpdateThemeColors()
+        GUI._holdPageRepaint = nil
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
         -- Cached, not forced: a mode switch shows the other mode's build if it
@@ -2747,6 +2779,41 @@ function DF:CreateGUI()
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
+
+    -- The page fade's cover: two flat layers in the window's and the content
+    -- area's own background colours, which together are what shows behind a page.
+    -- Inset by the border so the content edge does not blink. No mouse: it lies
+    -- over the page being clicked. See THE PAGE FADE.
+    local pageCover = CreateFrame("Frame", nil, content)
+    local coverInset = SnapLen(content, 1) or 1
+    pageCover:SetPoint("TOPLEFT", coverInset, -coverInset)
+    pageCover:SetPoint("BOTTOMRIGHT", -coverInset, coverInset)
+    pageCover:SetFrameLevel(content:GetFrameLevel() + 500)
+    pageCover:EnableMouse(false)
+    local coverBg = pageCover:CreateTexture(nil, "BACKGROUND")
+    coverBg:SetAllPoints()
+    local coverTint = pageCover:CreateTexture(nil, "BORDER")
+    coverTint:SetAllPoints()
+    pageCover:Hide()
+    GUI._pageCover = pageCover
+    local function PlayPageCover()
+        -- ☠ The window is ROUNDED CHROME when SURFACE is on and has no backdrop to
+        -- ask -- calling GetBackdropColor there errored and cut the tab switch
+        -- off halfway. Its fill is the one ApplyRoundedChrome was handed above.
+        local r, g, b, a
+        if frame.GetBackdropColor then
+            r, g, b, a = frame:GetBackdropColor()
+        else
+            r, g, b, a = C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, C_BACKGROUND.a or 0.95
+        end
+        coverBg:SetColorTexture(r or 0, g or 0, b or 0, a or 1)
+        local cr, cg, cb, ca = content:GetBackdropColor()
+        coverTint:SetColorTexture(cr or 0, cg or 0, cb or 0, ca or 0)
+        pageCover:SetAlpha(1)
+        pageCover:Show()
+        GUI.Fx.FadeOut(pageCover, 0.12, function() pageCover:Hide() end)
+    end
+
     GUI.tabFrame = tabFrame
 
     -- =========================================================================
@@ -2781,12 +2848,9 @@ function DF:CreateGUI()
     -- is expected to be hidden already (every caller hides first).
     --
     -- ★ A PARKED PAGE IS ALWAYS AT ALPHA 1, and this is the one place that can
-    -- guarantee it. Pages cross-fade on a tab switch (see THE PAGE CROSSFADE), so
-    -- a page can be part-way through a fade when something ELSE decides to put it
-    -- away -- a second tab click, the window closing, search's index pass sweeping
-    -- all 34 of them. Fx.Cancel stops whatever was running and restores the
-    -- resting alpha, so no path can leave a page in the dock at 0.3 to come back
-    -- translucent later. Free when nothing is animating.
+    -- guarantee it: if anything ever fades a page, Fx.Cancel stops it and restores
+    -- the resting alpha, so no path can leave a page in the dock half-faded to come
+    -- back translucent later. Free when nothing is animating.
     function GUI:ParkPage(page)
         if not page or page._parked then return end
         if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end
@@ -2990,13 +3054,16 @@ function DF:CreateGUI()
     }
 
     -- Apply the right minimum for a page id, expanding if we are currently under it.
+    -- Returns whether the page is a wide one, and whether the window just widened.
     local function ApplyPageWidthBounds(name)
         local wanted = WIDE_PAGES[name] and wideMinWidth or normalMinWidth
         frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
+        local widened = false
         if frame:GetWidth() < wanted then
             frame:SetWidth(wanted)
+            widened = true
         end
-        return WIDE_PAGES[name]
+        return WIDE_PAGES[name], widened
     end
 
     -- Function to show normal Party/Raid content
@@ -3089,13 +3156,21 @@ function DF:CreateGUI()
         if GUI.SelectedMode == "clicks" then
             GUI.SelectedMode = GUI._lastFrameMode or "party"
         end
+        if not switchMarks and DF.DebugActive and DF:DebugActive("GUI") then
+            local t0 = debugprofilestop()
+            switchMarks = { last = t0, t0 = t0 }
+        end
         GUI.GlobalView = global and true or false
         GUI:SetAccent(GUI.CurrentAccent())
+        SwitchMark("accent")
         local held = GUI._redirectingTab
         GUI._redirectingTab = true
         GUI:ShowNormalContent()
         GUI._redirectingTab = held
-        UpdateThemeColors()
+        SwitchMark("sidebar")
+        -- ⚠ NO REPAINT HERE. Every caller selects a page next, and SelectTab ends
+        -- in one; a repaint now would walk the page being LEFT in the new accent,
+        -- and walk it again the next time it is shown in its own.
     end
 
     -- =========================================================================
@@ -3109,12 +3184,26 @@ function DF:CreateGUI()
     GUI.Pages = {}
     
     local function SelectTab(name)
+        -- The trace EnterView started is finished here; a switch nested inside
+        -- this one (a redirect) only adds to it.
+        local ownsTrace = false
+        if DF.DebugActive and DF:DebugActive("GUI") then
+            if not switchMarks then
+                local t0 = debugprofilestop()
+                switchMarks = { last = t0, t0 = t0, owned = true }
+                ownsTrace = true
+            elseif not switchMarks.owned then
+                switchMarks.owned = true
+                ownsTrace = true
+            end
+        end
         -- ★ A PAGE LIVES ON ONE TAB, and asking for it goes there: search results,
         -- cross-links and every "open in Filter Designer" land here, from either
         -- side and from BINDS.
         if GUI.Tabs[name] and (GUI.IsGlobalPage(name) ~= (GUI.GlobalView == true)
                                or GUI.SelectedMode == "clicks") then
             GUI:EnterView(GUI.IsGlobalPage(name))
+            SwitchMark("view")
         end
 
         -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
@@ -3154,38 +3243,34 @@ function DF:CreateGUI()
         -- verbs. Guarded for an older embedded copy of the pack.
         if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
 
-        -- ★ THE PAGE CROSSFADE.
+        -- ★ THE PAGE FADE.
         -- ------------------------------------------------------------
-        -- The page being left fades out while the page arriving fades in, over
-        -- each other. Every page is anchored to the SAME two corners of `content`,
-        -- so the two occupy the identical rect and there is no layout to jump --
-        -- which is what makes a crossfade the right shape here rather than a
-        -- fade-out followed by a fade-in. Sequencing them would put ~90ms of
-        -- nothing-happening in front of every tab click, and a tab click that does
-        -- not respond for a tenth of a second reads as lag, not as polish.
+        -- The old page goes at once, and the new one is shown under a COVER in the
+        -- empty panel's own colours that lifts away, so the page fades in.
+        -- ☠ NO PAGE IS ANIMATED -- NOT EVEN THE OUTGOING ONE. Starting an alpha
+        -- animation on a page costs in proportion to everything on it: measured
+        -- with the GUI trace, the Debuff Bar's fade-in ~175ms and the Filter
+        -- Designer's fade-out ~80-95ms, on every switch. A crossfade was tried with
+        -- only the old page animated and still read as sluggish on the big pages.
+        -- The cover is two textures, whatever the page holds.
         --
-        -- ⚠ ONLY WHEN THERE IS SOMETHING TO CROSS-FADE FROM: a visible outgoing
-        -- page, a different one arriving, and a window already on screen. The
-        -- FIRST page of a window-open gets nothing -- the window itself is fading
-        -- in around it, and a second fade inside that one only reads as slow.
-        local fading = frame:IsShown()
-            and leavingTab and leavingTab ~= name
-            and GUI.Pages[leavingTab] or nil
-        if fading and not fading:IsShown() then fading = nil end
+        -- ⚠ ONLY WHEN THERE IS SOMETHING TO FADE FROM: a visible outgoing page, a
+        -- different one arriving, and a window already on screen. The FIRST page
+        -- of a window-open gets nothing -- the window itself is fading in around
+        -- it, and a second fade inside that one only reads as slow.
+        local leaving = leavingTab and GUI.Pages[leavingTab]
+        local crossfade = frame:IsShown() and leavingTab ~= name
+            and leaving and leaving:IsShown() and true or false
 
         -- Hide every page, and PARK the ones we are not about to show. Hiding
         -- alone is what the eight-second window open was made of: a hidden page
         -- still parented under the window is a subtree the engine walks on every
         -- Show and Hide of it. See THE PAGE DOCK.
-        --
-        -- ...except the one that is fading: it stays shown, and parks itself at
-        -- the end of its own fade. Everything else here is unchanged.
         for k, page in pairs(GUI.Pages) do
-            if page ~= fading then
-                page:Hide()
-                if k ~= name then GUI:ParkPage(page) end
-            end
+            page:Hide()
+            if k ~= name then GUI:ParkPage(page) end
         end
+        SwitchMark("leave")
         -- The rail is not cleared here: it is about to be GLIDED onto the new row
         -- further down, and taking it off screen first is exactly the blink the
         -- shared marker exists to remove.
@@ -3224,7 +3309,13 @@ function DF:CreateGUI()
         -- page so its content lays out at the final width instead of building narrow and
         -- staying squashed until a resize. (WIDE_PAGES + ApplyPageWidthBounds live at panel
         -- scope so ShowNormalContent shares them -- see the note there.)
-        if ApplyPageWidthBounds(name) then
+        local isWide, widened = ApplyPageWidthBounds(name)
+        local pageNow = GUI.Pages[name]
+        -- ⚠ Only when the window just widened, or the page's first showing. The
+        -- nudge re-flows the whole page twice, and on every visit it made each
+        -- entry into a wide page (Global's Filter Designer and Nicknames) slow.
+        if isWide and (widened or (pageNow and not pageNow._widthSettled)) then
+            if pageNow then pageNow._widthSettled = true end
             -- Belt-and-braces: re-assert the width next frame so size-dependent
             -- layout settles without a manual resize. A page can build at a
             -- pre-layout width (tabs overflow the panel / cards squashed); nudging
@@ -3248,35 +3339,32 @@ function DF:CreateGUI()
             -- Out of the dock and back under the content frame BEFORE the Show,
             -- so it is never shown while detached (and so RefreshCached below
             -- builds against the real geometry).
+            SwitchMark("bounds")
             GUI:AdoptPage(GUI.Pages[name])
             GUI.Pages[name]:Show()
+            SwitchMark("show")
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
+            local before = GUI.Pages[name].children
             GUI.Pages[name]:RefreshCached()
+            -- A changed list without a reason is the other mode's saved build
+            -- swapped in, not a build.
+            SwitchMark((GUI.Pages[name].children == before) and "cached"
+                or (GUI._lastBuildReason and ("BUILT(" .. GUI._lastBuildReason .. ")"))
+                or "swapped")
+            GUI._lastBuildReason = nil
             if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
+            SwitchMark("states")
         end
 
-        -- The crossfade itself, AFTER the incoming page has been adopted, shown,
-        -- rebuilt and re-stated. Everything expensive about a tab switch happens
-        -- between those lines, and a fade started before it would simply stall on
-        -- the build -- and would show a frame of half-laid-out page while it did.
-        -- Nothing renders between the Show above and the FadeIn here: it is all
+        -- The fade itself, AFTER the incoming page has been adopted, shown, rebuilt
+        -- and re-stated. Everything expensive about a tab switch happens between
+        -- those lines, and a fade started before it would simply stall on the
+        -- build -- and would show a frame of half-laid-out page while it did.
+        -- Nothing renders between the Show above and the cover here: it is all
         -- one frame.
-        if fading then
-            -- Tracked so the window's OnHide can finish the job if it is closed
-            -- inside the fade -- a stopped animation never calls its onDone.
-            GUI._fadingPage = fading
-            GUI.Fx.FadeOut(fading, 0.09, function()
-                if GUI._fadingPage == fading then GUI._fadingPage = nil end
-                -- ⚠ ASK AGAIN BEFORE HIDING. Fx already skips a cancelled fade's
-                -- onDone, and hiding a frame cancels its animations -- but "hide
-                -- and park this page" is exactly the deferred callback you do not
-                -- want landing on a page the user has clicked straight back to.
-                -- Spamming two tabs must not be able to park the one on screen.
-                if GUI.Pages[GUI.CurrentPageName] == fading then return end
-                fading:Hide()
-                GUI:ParkPage(fading)
-            end)
-            if GUI.Pages[name] then GUI.Fx.FadeIn(GUI.Pages[name], 0.12) end
+        if crossfade then
+            PlayPageCover()
+            SwitchMark("cover")
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
@@ -3313,7 +3401,18 @@ function DF:CreateGUI()
         if GUI.Tabs[name] then
             if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end
         end
+        SwitchMark("nav")
         UpdateThemeColors()
+        if ownsTrace and switchMarks then
+            SwitchMark(GUI._lastRepaintNodes and format("theme(walked %d)", GUI._lastRepaintNodes) or "theme")
+            local t0 = switchMarks.t0
+            DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
+                table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            switchMarks = nil
+            C_Timer.After(0, function()
+                DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+            end)
+        end
     end
     GUI.SelectTab = SelectTab
 
@@ -4246,6 +4345,12 @@ function DF:CreateGUI()
 
             -- Cache miss: build fresh for this mode.
             -- DoBuild sets cacheValid and calls RefreshStates() before returning.
+            -- Which test failed, for the GUI trace's BUILT mark.
+            GUI._lastBuildReason = (not self.cacheValid and "invalid")
+                or (self.builtForMode ~= GUI.SelectedMode and "mode")
+                or (self.builtForDisabled ~= isDisabled and "disabled")
+                or (not self.singleModeBuild and not BuildDbMatches(self, db) and "db")
+                or "key"
             DoBuild(self)
         end
 

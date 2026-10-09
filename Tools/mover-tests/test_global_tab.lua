@@ -149,7 +149,7 @@ print("-- Global tab: a page painted in the other tab's accent is repainted whol
 do
     local fn = PANEL:match("\n    local function RepaintTree%(frame, depth%).-\n    end\n")
     check(fn ~= nil, "repaint: the tree walk can be read")
-    local RepaintTree = fn and loadstring(fn .. "\nreturn RepaintTree")()
+    local RepaintTree = fn and loadstring("local repaintNodes = 0" .. fn .. "\nreturn RepaintTree")()
     if RepaintTree then
         local painted = {}
         local function w(name) return { UpdateTheme = function() painted[#painted + 1] = name end } end
@@ -163,9 +163,11 @@ do
         eq(table.concat(painted, ","), "expand,collapse,arrow,nested",
            "repaint: listeners on a strip and inside a card are reached")
     end
-    check(PANEL:find("if built and built._themedAccent ~= stamp then", 1, true) ~= nil
-      and PANEL:find("for _, child in ipairs(built) do RepaintTree(child, 0) end", 1, true) ~= nil,
-          "repaint: only the active build is walked, once per accent it is shown in")
+    check(PANEL:find("if built and not GUI._holdPageRepaint and built._themedAccent ~= stamp then", 1, true) ~= nil
+      and PANEL:find("if page.child then RepaintTree(page.child, 0) end", 1, true) ~= nil,
+          "repaint: the whole page frame is walked, once per accent it is shown in")
+    check(PANEL:find("if slot.children then slot.children._themedAccent = nil end", 1, true) ~= nil,
+          "repaint: ...and the other mode's parked build, painted with it, is repainted when it returns")
     local SECT = ui_file_source("Sections.lua"):gsub("\r\n", "\n")
     local tone = SECT:match("function banner:SetTone%(toneName%).-\n    end\n")
     check(tone and tone:find("table.insert(p.ThemeListeners, self)", 1, true) ~= nil,
@@ -198,4 +200,60 @@ do
     check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
       and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
           "leave: both mode buttons ask first")
+end
+
+print("-- Global tab: switching tabs repaints only the page arriving")
+do
+    local ev = PANEL:match("\n    function GUI:EnterView%(global%)(.-)\n    end\n")
+    check(ev ~= nil and ev:find("UpdateThemeColors()", 1, true) == nil,
+          "switch: EnterView leaves the repaint to the SelectTab that follows it")
+    local _, holds = PANEL:gsub("GUI._holdPageRepaint = true\n        UpdateThemeColors%(%)\n        GUI._holdPageRepaint = nil", "")
+    eq(holds, 2, "switch: Party and Raid hold the walk until the build is swapped")
+    check(PANEL:find("if isWide and (widened or (pageNow and not pageNow._widthSettled)) then", 1, true) ~= nil,
+          "switch: a wide page's width nudge runs when the window widened or on its first showing only")
+end
+
+print("-- Global tab: a page already in the colour is not repainted")
+do
+    local gate = PANEL:match("if built and not GUI._holdPageRepaint and built._themedAccent ~= stamp then(.-)SwitchMark%(\"t:page\"%)")
+    check(gate ~= nil, "gate: the repaint block can be read")
+    local _, loops = PANEL:gsub("for _, widget in ipairs%(page%.child%.ThemeListeners%) do", "")
+    eq(loops, 0, "gate: the page's own list is reached only by the gated walk, never on every switch")
+end
+
+print("-- Global tab: a page's fade-in is alpha only")
+do
+    local chunk = loadstring(ui_file_source("Fx.lua"), "@Fx.lua")
+    local UIx = {}
+    chunk("DandersUI", { __DandersUI = UIx })
+    local Fx = UIx.Fx
+    local function target()
+        local t = { made = {} }
+        function t:Show() end
+        function t:SetAlpha() end
+        function t:CreateAnimationGroup()
+            local g = { playing = false }
+            function g:CreateAnimation(kind)
+                t.made[#t.made + 1] = kind
+                local a = {}
+                function a:SetFromAlpha() end; function a:SetToAlpha() end
+                function a:SetDuration() end;  function a:SetOffset() end
+                return a
+            end
+            function g:IsPlaying() return self.playing end
+            function g:Stop() self.playing = false end
+            function g:Play() self.playing = true end
+            return g
+        end
+        return t
+    end
+    local page = target()
+    Fx.FadeIn(page, 0.12)
+    eq(table.concat(page.made, ","), "Alpha", "fade: a plain fade-in plays no Translation")
+    local slid = target()
+    Fx.FadeIn(slid, 0.1, 0, 6)
+    eq(table.concat(slid.made, ","), "Alpha,Translation", "fade: ...a sliding one still does")
+    Fx.FadeIn(slid, 0.1)
+    check(not rawget(slid, "fxIn"):IsPlaying() and rawget(slid, "fxInFade"):IsPlaying(),
+          "fade: switching kind stops the other group")
 end

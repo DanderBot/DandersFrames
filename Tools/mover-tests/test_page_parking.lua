@@ -473,39 +473,33 @@ do
     check(adoptAt and showAt and adoptAt < showAt,
           "panel: ...and adopts it BEFORE showing it, never while detached")
 
-    -- ---- THE PAGE CROSSFADE, and its four safety rails ---------------
-    -- Pages cross-fade on a tab switch: they occupy the identical rect, so both
-    -- can be visible for ~90ms with no layout to jump. That puts a page in a
-    -- state the parking work was built to prevent -- shown, parented, and NOT the
-    -- current one -- so every way out of it is pinned here.
+    -- ---- THE PAGE FADE -----------------------------------------------
+    -- The old page is hidden and parked at once like any other, and the new one
+    -- is shown under a cover in the empty panel's colours that fades away. No
+    -- page is ever animated: starting an alpha animation on a big page cost up to
+    -- ~200ms a switch, and the old page's fade-out alone ~80-95ms (GUI trace).
     --
-    -- 1. It only happens when there is something to cross-fade FROM: a visible
-    --    outgoing page, a different one arriving, and a window already on screen.
-    --    The first page of a window-open gets none of it.
-    has("local fading = frame:IsShown()", "the crossfade needs a window already on screen")
-    has("and leavingTab and leavingTab ~= name", "...a DIFFERENT page to arrive at")
-    has("if fading and not fading:IsShown() then fading = nil end",
-        "...and an outgoing page that is actually visible")
-    -- 2. The fading page is the ONE page the hide/park loop skips.
-    has("if page ~= fading then", "the loop leaves the fading page shown, and only that one")
-    -- 3. The fades start AFTER the incoming page is adopted, shown and rebuilt --
-    --    the expensive part of a tab switch -- so nothing stalls mid-animation and
-    --    no half-laid-out page is ever rendered.
+    -- 1. Only when there is something to fade FROM: a visible outgoing page, a
+    --    different one arriving, and a window already on screen.
+    has("local crossfade = frame:IsShown() and leavingTab ~= name", "the fade needs a window already on screen and a DIFFERENT page")
+    has("and leaving and leaving:IsShown() and true or false", "...and an outgoing page that is actually visible")
+    -- 2. No page is left shown by the hide/park loop, and none is faded.
+    check(src:find("if page ~= fading then", 1, true) == nil,
+          "panel: the hide/park loop leaves no page shown for a fade")
+    check(src:find("GUI.Fx.FadeIn(GUI.Pages[name]", 1, true) == nil
+      and src:find("GUI.Fx.FadeOut(fading", 1, true) == nil,
+          "panel: no page is faded -- only the cover")
+    -- 3. The cover starts AFTER the incoming page is adopted, shown and rebuilt.
     local buildAt = src:find("GUI.Pages[name]:RefreshCached()", 1, true)
-    local fadeAt  = src:find("GUI.Fx.FadeOut(fading, 0.09", 1, true)
-    local fadeInAt = src:find("GUI.Fx.FadeIn(GUI.Pages[name], 0.12)", 1, true)
-    check(buildAt and fadeAt and buildAt < fadeAt,
-          "panel: the crossfade starts after the incoming page is built, not before")
-    check(fadeInAt and fadeAt < fadeInAt, "panel: out and in are started together")
-    -- 4. Three ways the fade can be interrupted, and none of them may strand a
-    --    page: the deferred park asks again before firing, the window's close
-    --    finishes the job the stopped animation cannot, and PARKING ITSELF
-    --    cancels -- which is what makes "a parked page is at alpha 1" true for
-    --    every caller, search's index pass included.
-    has("if GUI.Pages[GUI.CurrentPageName] == fading then return end",
-        "the deferred park re-checks, so spamming two tabs cannot park the visible one")
-    has("if GUI.ParkPage and GUI._fadingPage then",
-        "closing the window inside a fade still parks the page that was leaving")
+    local coverAt = src:find("            PlayPageCover()", 1, true)
+    check(buildAt and coverAt and buildAt < coverAt,
+          "panel: the cover starts after the incoming page is built, not before")
+    -- 4. The cover takes no clicks, hides itself when its fade ends, and the
+    --    window's close hides it if that fade was cut short.
+    has("pageCover:EnableMouse(false)", "the cover takes no clicks")
+    has("GUI.Fx.FadeOut(pageCover, 0.12, function() pageCover:Hide() end)", "the cover hides itself when its fade ends")
+    has("if GUI._pageCover then GUI._pageCover:Hide() end", "closing the window inside a fade hides the cover")
+    has("if frame.GetBackdropColor then", "the cover asks the window's backdrop only when it has one (rounded chrome has none)")
     local parkAt = src:find("function GUI:ParkPage(page)", 1, true)
     local cancelAt = src:find("if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end", 1, true)
     check(parkAt and cancelAt and cancelAt > parkAt and cancelAt - parkAt < 400,
