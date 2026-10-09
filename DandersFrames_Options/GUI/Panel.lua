@@ -247,6 +247,38 @@ local function ApplyGUIScale(frame, value, keepPlace)
     end
 end
 
+-- ★ THE WIDTH THE LAYOUT PASS GIVES A WIDGET, or nil when it keeps its own.
+-- ☠ ONE FUNCTION, ASKED TWICE. A settings group lays its children out off its
+-- CURRENT width, so PageRefreshStates sizes every group to this BEFORE its
+-- LayoutChildren runs, and the placement loop sizes everything to it after.
+-- Sized only in the loop, a fold to one column or back left each card laid out
+-- for the old width until the next refresh: two tracks spilling out of a card
+-- that had just narrowed, or a widened card's controls still at the narrow
+-- width, wrapping.
+-- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A classic page's
+-- boxes are built at a FIXED width and sit in a column wider than themselves;
+-- sizing those to the column would restyle a layout this is not allowed to
+-- touch. Only a band that declares it wants to FILL its column is resized --
+-- to the column with two, and to the WHOLE usable width with one, which is
+-- what makes the two-column layout a presentation of the same page rather
+-- than a second one.
+local function LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+    -- true is one level (20px), a number is that many levels.
+    local indentOffset = 0
+    if widget.indent then
+        indentOffset = type(widget.indent) == "number" and widget.indent * 20 or 20
+    end
+    if widget.layoutCol == "both" then
+        return usableWidth - indentOffset
+    elseif indentOffset > 0 then
+        -- An indented widget keeps its column's right edge.
+        return math.floor((usableWidth - SettingsBox.colGutter) / 2) - indentOffset
+    elseif widget.layoutColFill then
+        return usesTwoColumns and GUI.ColumnWidth() or usableWidth
+    end
+    return nil
+end
+
 -- ============================================================
 -- PAGE STATE REFRESH
 -- ------------------------------------------------------------
@@ -268,10 +300,30 @@ local function PageRefreshStates(self)
     if not self.children then return end
     local db = DF.db[GUI.SelectedMode]
     if not db then return end
-    
+
+    -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
+    -- BUILDS itself at a column width has to agree with the pass that POSITIONS it
+    -- about whether there are two columns at all, and two copies of this condition
+    -- is how they would come to disagree by one pixel at the cutover.
+    local usesTwoColumns = GUI.UsesTwoColumns()
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    -- The width a page's widgets actually have, DERIVED rather than a literal:
+    -- the scroll child (see GUI.PageChildWidth) less the page's own left and
+    -- right margins.
+    --
+    -- Through GUI.PageUsableWidth, because a PAGE needs the same number: a
+    -- full-width feature band has to be BUILT at the width this loop is about to
+    -- stretch it to, or its first layout runs at the constructed 280.
+    local usableWidth = GUI.PageUsableWidth(childWidth)
+
     -- First pass: handle SettingsGroups - layout their children and calculate heights
     for _, widget in ipairs(self.children) do
         if widget.isSettingsGroup then
+            -- At the width the placement loop below will give it, FIRST: see
+            -- LayoutWidthFor.
+            local w = LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+            if w then widget:SetWidth(SnapLen(widget, w)) end
             -- Layout children within the group (handles hideOn internally)
             widget:LayoutChildren()
             -- Process disableOn for group children
@@ -380,23 +432,8 @@ local function PageRefreshStates(self)
     -- viewport now stopping at the scrollbar rather than 6px past it, the same
     -- unchecked condition would have cut up to 7px off the box's right border.
     -- The layout is not "collapse when the columns touch", it is "collapse when
-    -- either column stops fitting", so it now says so.
-    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
-    local childWidth = GUI.PageChildWidth(contentWidth)
-    -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
-    -- BUILDS itself at a column width has to agree with the pass that POSITIONS it
-    -- about whether there are two columns at all, and two copies of this condition
-    -- is how they would come to disagree by one pixel at the cutover.
-    local usesTwoColumns = GUI.UsesTwoColumns()
-
-    -- The width a page's widgets actually have, DERIVED rather than a literal:
-    -- the scroll child (see GUI.PageChildWidth) less the page's own left and
-    -- right margins.
-    --
-    -- Through GUI.PageUsableWidth, because a PAGE needs the same number: a
-    -- full-width feature band has to be BUILT at the width this loop is about to
-    -- stretch it to, or its first layout runs at the constructed 280.
-    local usableWidth = GUI.PageUsableWidth(childWidth)
+    -- either column stops fitting", so it now says so. (GUI.UsesTwoColumns,
+    -- asked at the top of this function.)
 
     -- Check if editing banner is active (adds 50px at top)
     local bannerOffset = 0
@@ -494,44 +531,19 @@ local function PageRefreshStates(self)
             if widget.layoutCol == "both" then
                 local startY = math.min(y1, y2)
                 widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
-                -- Set width to span both columns (with scrollbar padding)
-                widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
                 y1 = startY - h
                 y2 = startY - h
             elseif widget.layoutCol == 2 and usesTwoColumns then
                 widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
                                 SnapLen(widget, y2))
-                -- Reduce width for indented widgets to maintain alignment
-                if indentOffset > 0 and widget.SetWidth then
-                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
-                    widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                elseif widget.layoutColFill and widget.SetWidth then
-                    -- ☠ OPT-IN, AND THAT IS THE WHOLE POINT. A classic page's boxes are
-                    -- built at a FIXED width and sit in a column wider than themselves --
-                    -- sizing those to the column would restyle a layout this is not
-                    -- allowed to touch. Only a band that declares it wants to FILL its
-                    -- column gets resized, which today is the reworked page's bands.
-                    widget:SetWidth(SnapLen(widget, GUI.ColumnWidth()))
-                end
                 y2 = y2 - h
             else
                 -- Column 1, or column 2 when in single-column mode
                 widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
-                -- Reduce width for indented widgets to maintain alignment
-                if indentOffset > 0 and widget.SetWidth then
-                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
-                    widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                elseif widget.layoutColFill and widget.SetWidth then
-                    -- ⚠ AND THE COLLAPSE IS HERE. When the page folds back to one column
-                    -- a filling band takes the WHOLE usable width again, which is what
-                    -- makes the two-column layout a presentation of the same page rather
-                    -- than a second one: narrow the window and it is the single stack it
-                    -- always was, at full width.
-                    widget:SetWidth(SnapLen(widget,
-                        usesTwoColumns and GUI.ColumnWidth() or usableWidth))
-                end
                 y1 = y1 - h
             end
+            local w = LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+            if w then widget:SetWidth(SnapLen(widget, w)) end
             
             local currentBottom = math.min(y1, y2)
             if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end

@@ -957,10 +957,20 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     btn.Preview:SetSize(80, 16)
     
     btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("LEFT", 90, 0)
+    btn.Text:SetPoint("LEFT", btn.Preview, "RIGHT", 6, 0)
     btn.Text:SetPoint("RIGHT", -20, 0)
     btn.Text:SetJustifyH("LEFT")
+    -- One line, truncated: a wrapped name spills out of the 24px button.
+    btn.Text:SetWordWrap(false)
     btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    -- ☠ THE NAME WINS THE ROOM, NOT THE SWATCH. In a half-width card track the
+    -- button is ~170px, and a fixed 80px swatch left the name ~60 -- "DF
+    -- Minimalist" no longer fit. The swatch gives way down to 40 first; at the
+    -- 260 the factory was drawn for it is its full 80.
+    btn:SetScript("OnSizeChanged", function(self, w)
+        self.Preview:SetWidth(math.max(40, math.min(80, math.floor(((w or 0) - 100) / 2))))
+    end)
     
     -- Arrow indicator
     local arrow = btn:CreateTexture(nil, "OVERLAY")
@@ -1400,6 +1410,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     btn.Text:SetPoint("LEFT", 8, 0)
     btn.Text:SetPoint("RIGHT", -20, 0)
     btn.Text:SetJustifyH("LEFT")
+    -- One line, truncated: a wrapped name spills out of the 24px button.
+    btn.Text:SetWordWrap(false)
     btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Arrow indicator
