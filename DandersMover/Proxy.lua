@@ -128,14 +128,17 @@ function P:GetUnlockFrame()
     -- Alt-peek. The event is only registered while a session is up (Build /
     -- DestroyAll), so this cannot fire outside one.
     --
-    -- The event's OWN payload says which way this key went (1 = pressed); the
-    -- poll only decides whether the OTHER Alt is still holding the peek on a
-    -- release. Reading the poll for the direction too let a press whose state
-    -- the client had not caught up with yet read as a release.
+    -- ☠ THE EVENTS DECIDE, NOT IsAltKeyDown. Each event's own payload says which
+    -- way that key went (1 = pressed), and the two Alts are tracked apart, so a
+    -- release only keeps the peek up while the OTHER Alt's own press stands.
+    -- Asking IsAltKeyDown() on a release instead read the client's lagging
+    -- state: after an alt-tab, or a burst of fast taps, it still answered "down"
+    -- for a second or two, so a real release left the overlay faded until Alt
+    -- was held long enough for the client to catch up.
     f:SetScript("OnEvent", function(_, _, key, down)
         if key ~= "LALT" and key ~= "RALT" then return end
-        local pressed = down == 1 or down == true
-        P:SetPeek(pressed or IsAltKeyDown())
+        P.altDown[key] = (down == 1 or down == true) or nil
+        P:SetPeek(next(P.altDown) ~= nil)
     end)
     f:Hide()
     self.unlockFrame = f
@@ -147,6 +150,7 @@ end
 -- PEEK_ALPHA while Alt is held; release restores. Ignored while a drag is in
 -- flight -- the drag is the one thing that must stay fully visible.
 local PEEK_ALPHA = 0.1
+P.altDown = {}   -- "LALT"/"RALT" -> true while that key's press stands
 
 function P:SetPeek(on)
     on = on and true or false
@@ -177,7 +181,10 @@ function P:WatchPeek(on)
     end
     if not on or not (C_Timer and C_Timer.NewTicker) then return end
     self.peekTicker = C_Timer.NewTicker(PEEK_POLL, function()
-        if not IsAltKeyDown() then P:SetPeek(false) end
+        if not IsAltKeyDown() then
+            P.altDown = {}
+            P:SetPeek(false)
+        end
     end)
 end
 
@@ -629,6 +636,7 @@ function P:Build(filter, animate)
         self.dismissToken = (self.dismissToken or 0) + 1
         NS.Fx.Cancel(f)
         self.peeking = false          -- Cancel above restored alpha 1
+        self.altDown = {}
         self:WatchPeek(false)
         if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
         if animate then NS.Fx.FadeIn(f, FADE_IN) else f:Show() end
@@ -800,6 +808,7 @@ function P:DestroyAll()
     if self.unlockFrame then
         if self.unlockFrame.UnregisterEvent then self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED") end
         self.peeking = false
+        self.altDown = {}
         self.unlockFrame:SetAlpha(1)
         self.unlockFrame:Hide()
     end

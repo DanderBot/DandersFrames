@@ -945,12 +945,12 @@ do
 end
 
 -- ============================================================
--- ALT-PEEK: PAYLOAD FIRST, THEN A POLL WHILE PEEKING
+-- ALT-PEEK: THE EVENTS DECIDE, THEN A POLL WHILE PEEKING
 -- The release can go missing (an alt-tab out on a held Alt; a burst of fast
--- presses), and the equality guard in SetPeek then swallowed the NEXT press too,
--- so the overlay sat faded until a press AND a release had both arrived. The
--- handler now reads the event's own payload for the direction, and while
--- peeking a ticker asks the client whether Alt is really still down.
+-- presses), and the client's own Alt state can lag a real release by a second
+-- or two. Each Alt is tracked from its own events, so a release restores
+-- whatever the client says; while peeking a ticker clears a peek whose release
+-- never arrived.
 -- ============================================================
 do
     local wasReady = R.ready
@@ -992,6 +992,18 @@ do
     onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 0)
     check(P.peeking == false, "peek: the last release restores")
     check(tickers[#tickers].cancelled, "peek: ...and cancels that peek's poll")
+
+    -- Back from an alt-tab the client still reports Alt down. A tap's release
+    -- must restore anyway: the event is the truth, the client state is stale.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    tickers[#tickers].fn()
+    check(P.peeking == true, "peek: a stale 'down' from the client keeps the poll from clearing it...")
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 0)
+    check(P.peeking == false, "peek: ...but one tap's release restores, whatever the client says")
+    eq(uf._alpha, 1, "peek: ...at full alpha")
+    altDown = false
 
     -- Other keys are ignored outright.
     onEvent(uf, "MODIFIER_STATE_CHANGED", "LSHIFT", 1)
