@@ -295,10 +295,17 @@ do
     has("GUI._pageDock:Hide()", "...and is hidden")
     has("page:SetParent(GUI._pageDock)", "ParkPage moves the page into the dock")
     has("page:SetParent(content)", "AdoptPage brings it back under the content frame")
+    -- Pinned in the dock at its last size, not left anchored to `content`: anchored,
+    -- every step of a resize-grip drag re-resolved every built page.
+    has('GUI._pageDock:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)', "the dock has a rect of its own")
+    has('page:SetPoint("TOPLEFT", GUI._pageDock, "TOPLEFT", 0, 0)', "ParkPage pins the page to the dock")
+    has("page:SetSize(w, h)", "...at a fixed size")
+    has("if resized then GUI.Pages[name]:RefreshStates() end",
+        "a page back at a new width gets the second layout pass")
 
-    -- ---- anchors survive the round trip -----------------------------
-    -- `content` is named EXPLICITLY in both CreateSubTab and AdoptPage: a parked
-    -- page has to keep measuring at full size, because search builds it there.
+    -- ---- anchors come back on adoption ------------------------------
+    -- `content` is named EXPLICITLY in both CreateSubTab and AdoptPage, and
+    -- AdoptPage re-asserts both corners: the pin in the dock replaced them.
     eq(countOf('page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)'), 2,
        "panel: the top-left anchor names content in both CreateSubTab and AdoptPage")
     -- The RIGHT offset is the scrollbar GUTTER, not the inset -- see THE CONTENT
@@ -596,7 +603,10 @@ do
         SetParent = function(self, f) self._parent = f; self._parents = self._parents + 1 end,
         GetParent = function(self) return self._parent end,
         ClearAllPoints = function(self) self._points = 0 end,
-        SetPoint = function(self) self._points = self._points + 1; self._anchors = self._anchors + 1 end,
+        SetPoint = function(self, _, rel) self._points = self._points + 1; self._anchors = self._anchors + 1; self._rel = rel end,
+        GetWidth = function() return 600 end,
+        GetHeight = function() return 400 end,
+        SetSize = function(self, w, h) self._size = { w, h } end,
     }
 
     local NS = { DF = DF }
@@ -613,6 +623,9 @@ do
     Search:_ParkResultsPanel()
     eq(panel:GetParent(), dock, "results: hiding parks the panel in the dock")
     eq(panel._parked, true,     "results: ...and marks it parked")
+    -- Pinned to the dock at its size, so a resize of the window does not re-resolve it.
+    eq(panel._rel, dock,        "results: ...pinned to the dock, not left anchored into the window")
+    eq(panel._size and panel._size[1], 600, "results: ...at the size it had")
 
     -- Idempotent: a second hide must not re-park or disturb anything. HideResults
     -- runs on every close, and ShowResults on every keystroke, so a park/adopt
@@ -633,8 +646,9 @@ do
     -- Adopting an unparked panel is free and must not re-anchor again. ⚠ Asserted
     -- on the CUMULATIVE count, not on _points -- ClearAllPoints + two SetPoints
     -- lands back on 2 and would hide a redundant round trip completely.
+    local anchorsAfterAdopt = panel._anchors
     Search:_AdoptResultsPanel()
-    eq(panel._anchors, 2,  "results: adopting twice re-anchors nothing")
+    eq(panel._anchors, anchorsAfterAdopt, "results: adopting twice re-anchors nothing")
     eq(panel._parents, parentsAfterPark + 1, "results: ...and never re-parents")
 
     -- ---- an older Panel.lua with no dock ---------------------------

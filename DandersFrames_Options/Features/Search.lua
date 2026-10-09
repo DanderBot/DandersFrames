@@ -474,9 +474,10 @@ function Search:_BeginRegistryBuild()
                 -- page does not take it out of the subtree the engine walks;
                 -- reparenting it does. See THE PAGE DOCK in GUI/Panel.lua.
                 --
-                -- ⚠ Parked pages keep their anchors to the content frame, so
-                -- page:Refresh() above builds correctly on a page already in the
-                -- dock (which, after the first tab switch, every page but one is).
+                -- ⚠ A parked page is pinned in the dock at the size it last had,
+                -- so page:Refresh() above builds at a real width on a page already
+                -- in the dock (which, after the first tab switch, every page but
+                -- one is).
                 if DF.GUI.ParkPage then DF.GUI:ParkPage(page) end
             end
         end
@@ -1546,7 +1547,13 @@ function Search:_ParkResultsPanel()
     if not panel or panel._parked then return end
     local dock = DF.GUI and DF.GUI._pageDock
     if not dock then return end          -- older Panel.lua: behave as before
+    -- Pinned at its size, not left anchored into the window, for the reason
+    -- THE PAGE DOCK gives: anchored, every resize step re-resolved every card.
+    local w, h = panel:GetWidth(), panel:GetHeight()
     panel:SetParent(dock)
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", dock, "TOPLEFT", 0, 0)
+    if w and w > 0 and h and h > 0 then panel:SetSize(w, h) end
     panel._parked = true
 end
 

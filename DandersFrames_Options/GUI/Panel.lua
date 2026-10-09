@@ -2835,13 +2835,19 @@ function DF:CreateGUI()
     -- coming back (that is where a rebuild retires a page's old children); the
     -- dock means alive and parked, and every page in it is expected back.
     --
-    -- ⚠ A parked page KEEPS ITS ANCHORS to `content` -- which is why the
-    -- SetPoint in CreateSubTab names `content` explicitly instead of leaning on
-    -- the omitted-relativeTo default. A parked page therefore still measures at
-    -- its real size and can be BUILT in place, which is exactly what search's
-    -- index pass does to all 34 of them.
+    -- ☠ A PARKED PAGE IS PINNED TO THE DOCK AT A FIXED SIZE, NOT LEFT ANCHORED TO
+    -- `content`. It used to keep its anchors, and then every step of a resize-grip
+    -- drag re-resolved every built page's whole subtree: the window resizes about
+    -- its centre, so every rect under `content` moves each frame. Reported as a
+    -- resize that stutters once enough pages have been opened with their cards
+    -- expanded, or after the Changed Settings page had listed a lot. Pinned, a
+    -- parked page still measures at a real size and can be BUILT in place, which
+    -- is what search's index pass does to all 34 of them; it is the size the page
+    -- last had, and AdoptPage puts it back on `content` at the current one.
     GUI._pageDock = CreateFrame("Frame")
     GUI._pageDock:Hide()
+    GUI._pageDock:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+    GUI._pageDock:SetSize(1, 1)
     GUI:AddFontRoot(GUI._pageDock)   -- parked pages follow a font change too
 
     -- Move a page out of the window's frame tree. Idempotent and cheap; the page
@@ -2854,8 +2860,19 @@ function DF:CreateGUI()
     function GUI:ParkPage(page)
         if not page or page._parked then return end
         if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end
+        local w, h = page:GetWidth(), page:GetHeight()
+        if not (w and w > 0 and h and h > 0) then
+            local inset = page._contentInset or PageBox.inset
+            local gutter = page._contentGutter or PageBox.gutter
+            w = (content:GetWidth() or 0) - inset - gutter
+            h = (content:GetHeight() or 0) - 2 * inset
+        end
         page:SetParent(GUI._pageDock)
+        page:ClearAllPoints()
+        page:SetPoint("TOPLEFT", GUI._pageDock, "TOPLEFT", 0, 0)
+        page:SetSize(w, h)
         page._parked = true
+        page._parkedW = w
     end
 
     -- ...and bring it back, re-asserting the anchors rather than trusting them to
@@ -2869,8 +2886,12 @@ function DF:CreateGUI()
     --
     -- Early-out when the page is not parked, so callers on hot paths
     -- (RefreshCurrentPage, the window's OnShow) can call it unconditionally.
+    --
+    -- Returns true when the page comes back at a different width than it was
+    -- parked at (the window was resized meanwhile): its rows were laid out
+    -- against the old width, and the caller re-lays them.
     function GUI:AdoptPage(page)
-        if not page or not page._parked then return end
+        if not page or not page._parked then return false end
         page:SetParent(content)
         page._parked = nil
         local inset = page._contentInset or PageBox.inset
@@ -2882,6 +2903,8 @@ function DF:CreateGUI()
         page:ClearAllPoints()
         page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
         page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
+        local w = page:GetWidth()
+        return (w and page._parkedW and math.abs(w - page._parkedW) > 0.5) and true or false
     end
 
     -- =========================================================================
@@ -3340,7 +3363,7 @@ function DF:CreateGUI()
             -- so it is never shown while detached (and so RefreshCached below
             -- builds against the real geometry).
             SwitchMark("bounds")
-            GUI:AdoptPage(GUI.Pages[name])
+            local resized = GUI:AdoptPage(GUI.Pages[name])
             GUI.Pages[name]:Show()
             SwitchMark("show")
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
@@ -3352,7 +3375,11 @@ function DF:CreateGUI()
                 or (GUI._lastBuildReason and ("BUILT(" .. GUI._lastBuildReason .. ")"))
                 or "swapped")
             GUI._lastBuildReason = nil
-            if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
+            if GUI.Pages[name].RefreshStates then
+                GUI.Pages[name]:RefreshStates()
+                -- Back at a new width: the second pass RelayoutCurrentPage explains.
+                if resized then GUI.Pages[name]:RefreshStates() end
+            end
             SwitchMark("states")
         end
 
