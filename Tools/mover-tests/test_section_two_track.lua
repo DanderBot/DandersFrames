@@ -241,6 +241,8 @@ if HELPERS and HELPERS.WireTwoTrack then
         slider.label:SetTextColor(0.6, 0.6, 0.6)
         eq(slider.label._c[1], 0.6, "quiet: greyed, it keeps the dim colour...")
         eq(slider.label._c[4], 0.5, "quiet: ...at half alpha, so a greyed setting still reads as greyed")
+        slider.label:SetTextColor(0.9, 0.9, 0.9)
+        eq(slider.label._c[4], 1, "quiet: switched back on, the caption is at full alpha again, not left faded")
         slider.label:SetTextColor(1, 0.5, 0, 1)
         eq(slider.label._c[1], 1, "quiet: any other colour (an override marker's) passes straight through")
         eq(box.label._c[1], 0.9, "quiet: a checkbox's caption is the control, and keeps its colour")

@@ -679,11 +679,11 @@ do
 
     -- ---- quiet captions ---------------------------------------------------
     local quiet = TOOLS:match("local function QuietLabel%(fs%)(.-)\n    end\n") or ""
-    check(quiet:find("return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a)", 1, true) ~= nil,
+    check(quiet:find("return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a or 1)", 1, true) ~= nil,
           "quiet: a live caption draws in the theme's dim text colour")
     check(quiet:find("return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)", 1, true) ~= nil,
           "quiet: ...a greyed one stays dim at half alpha, so off still reads as off")
-    check(quiet:find("return set(self, r, g, b, a)", 1, true) ~= nil,
+    check(quiet:find("return set(self, r, g, b, a or 1)", 1, true) ~= nil,
           "quiet: ...and any other colour passes straight through")
     check(quiet:find("SetFont", 1, true) == nil and quiet:find("upper", 1, true) == nil,
           "quiet: the font object is untouched and nothing is upper-cased")

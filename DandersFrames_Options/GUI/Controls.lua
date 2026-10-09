@@ -4854,6 +4854,11 @@ function GUI:CreatePopoutPageTools(page)
     -- straight through. No factory changes, and a caption on any other page is
     -- never touched.
     --
+    -- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint "on" with no alpha,
+    -- and greyed is painted at half alpha here; an "on" that passed the nil along
+    -- left nothing promising the half alpha would ever be undone, so a caption
+    -- could stay faded after its card was switched back on.
+    --
     -- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
     -- one.
     local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
@@ -4863,11 +4868,11 @@ function GUI:CreatePopoutPageTools(page)
         local set = fs.SetTextColor
         fs.SetTextColor = function(self, r, g, b, a)
             if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
-                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a)
+                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a or 1)
             elseif near(r, C_TEXT_DIM.r) and near(g, C_TEXT_DIM.g) and near(b, C_TEXT_DIM.b) then
                 return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
             end
-            return set(self, r, g, b, a)
+            return set(self, r, g, b, a or 1)
         end
         fs:SetTextColor(fs:GetTextColor())
     end
