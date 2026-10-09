@@ -269,18 +269,6 @@ local SHIPPED_MEDIA_FILES = {
     "Icons\\notes.tga",
     "Icons\\preview.tga",
     "Icons\\preview_off.tga",
-    -- The first .png ICON we ship (the absorb bar textures were the first PNGs of any
-    -- kind). Deliberately left unconverted, to learn whether PNG icons behave.
-    --
-    -- ⚠ Listed here only because this manifest is GENERATED FROM THE FOLDER and has
-    -- to match it. Icons/ entries are INERT: the healing repair walks
-    -- TEXTURE_REPAIR_KEYS -- an explicit list of user-selectable PROFILE keys -- and
-    -- never enumerates this table, while GUI icons are hardcoded at their call sites
-    -- and go through a raw SetTexture rather than DF:SafeSetTexture. Nothing can heal
-    -- a GUI icon and nothing should try; a user cannot pick one, so a wrong one is a
-    -- bug in our source rather than a stale profile. That is true of every Icons\\
-    -- line above this one too.
-    "Icons\\question.png",
     "Icons\\refresh.tga",
     "Icons\\remove.tga",
     "Icons\\reorder.tga",

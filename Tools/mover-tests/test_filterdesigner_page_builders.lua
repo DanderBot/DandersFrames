@@ -109,8 +109,8 @@ do
           "narrow: ...and the row takes the height of the rows it wrapped to")
     check(SRC:find('chipRow:SetScript("OnSizeChanged", LayoutChips)', 1, true) ~= nil,
           "narrow: ...re-taken whenever the band changes width")
-    check(SRC:find('helpBtn:SetPoint("TOPRIGHT", 0, 0)', 1, true) ~= nil,
-          "narrow: ...and the help glyph stays beside the FIRST row of chips")
+    check(SRC:find("helpBtn", 1, true) == nil and SRC:find("ShowFilterHelp", 1, true) == nil,
+          "narrow: no help glyph -- the banner already says what its popup said")
 
     -- ---- CLASS TWO: header row 3, a row of fixed-width children ----
     -- The island's Spell ID box, Add button and Add-from-Database button are all
