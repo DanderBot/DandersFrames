@@ -2602,20 +2602,20 @@ end
 -- time (SetOwner anchor + the ShouldShowTooltip combat gate), so this spec rides
 -- style.* and hot-applies through the cosmetic ApplyStyle pass — no rebuild.
 -- key = "Buff"/"Debuff"/"Defensive" (the Tooltips page's per-row blocks).
--- Model mapping (mirrors the legacy frame-tooltip semantics in Create.lua):
---   DEFAULT -> ANCHOR_BOTTOMLEFT 0,0 (the template's own default — explicit so a
---              hot-apply can always overwrite a previous mode)
+-- The tooltip is Blizzard's forbidden AuraButtonTooltip, so the only lever is an
+-- owner-relative or cursor anchor name: there is no "game default" placement.
 --   CURSOR  -> cursor-follow anchor, side picked from AnchorPos (offsets unused,
 --              matching the page greying them out)
 --   FRAME   -> "ANCHOR_"..AnchorPos on the hovered icon + the X/Y offsets.
---              CENTER has no native anchor name -> falls back to DEFAULT
+--              CENTER has no native anchor name -> ANCHOR_BOTTOMLEFT 0,0
 --              (SetTooltipAnchorPoint asserts on anything off its list).
+--   DEFAULT -> FRAME. A stored value the page no longer offers; it shows as the icon.
 local NATIVE_TOOLTIP_POINTS = {
     TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, RIGHT = true,
     BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
 }
 local function buildTooltipSpec(db, key)
-    local mode = db["tooltip" .. key .. "Anchor"] or "DEFAULT"
+    local mode = db["tooltip" .. key .. "Anchor"]
     local pos  = db["tooltip" .. key .. "AnchorPos"]
     local point, x, y = "ANCHOR_BOTTOMLEFT", 0, 0
     if mode == "CURSOR" then
@@ -2626,7 +2626,7 @@ local function buildTooltipSpec(db, key)
         else
             point = "ANCHOR_CURSOR"
         end
-    elseif mode == "FRAME" and NATIVE_TOOLTIP_POINTS[pos] then
+    elseif NATIVE_TOOLTIP_POINTS[pos] then
         point = "ANCHOR_" .. pos
         x = db["tooltip" .. key .. "X"] or 0
         y = db["tooltip" .. key .. "Y"] or 0

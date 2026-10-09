@@ -2563,6 +2563,8 @@ L["Which part of the element the text is pinned to. Offset X and Y then nudge it
 L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."] = true
 L["What the tooltip attaches to. Game Default hands it back to Blizzard's own placement; Cursor follows the mouse; Unit Frame pins it to the frame you are hovering."] = true
 L["Which point of the thing above the tooltip hangs from. Greyed out under Game Default, because Blizzard is placing it."] = true
+L["What the tooltip attaches to. Aura tooltips are drawn by the game and can only attach to the icon or follow the cursor."] = true
+L["Which point of the icon the tooltip hangs from. Under Cursor, it picks which side of the cursor the tooltip opens on."] = true
 L["Attached puts each pet beside its owner's frame, so you read them together. Separate Pet Group collects every pet into one block you can place anywhere. The rest of this page changes to match your choice."] = true
 L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."] = true
 L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."] = true

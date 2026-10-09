@@ -577,6 +577,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- all five pairs rather than five times over.
         local TIP_ANCHOR_TO = L["What the tooltip attaches to. Game Default hands it back to Blizzard's own placement; Cursor follows the mouse; Unit Frame pins it to the frame you are hovering."]
         local TIP_ANCHOR_POS = L["Which point of the thing above the tooltip hangs from. Greyed out under Game Default, because Blizzard is placing it."]
+        -- The aura rows' pair: their tooltip is the game's own aura tooltip, which
+        -- can only be placed against the icon or the cursor.
+        local TIP_AURA_ANCHOR_TO = L["What the tooltip attaches to. Aura tooltips are drawn by the game and can only attach to the icon or follow the cursor."]
+        local TIP_AURA_ANCHOR_POS = L["Which point of the icon the tooltip hangs from. Under Cursor, it picks which side of the cursor the tooltip opens on."]
 
         -- Anchor position values (shared)
         local anchorPositionValues = {
@@ -638,21 +642,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             CURSOR = L["Cursor"],
             FRAME = L["Unit Frame"],
         }
+        -- No Game Default on the aura rows (see TIP_AURA_ANCHOR_TO). A profile that
+        -- still stores DEFAULT is read as FRAME, as Features/Auras.lua applies it.
         local buffAnchorValues = {
-            DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Buff Icon"],
         }
         local debuffAnchorValues = {
-            DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Debuff Icon"],
         }
         local defAnchorValues = {
-            DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Defensive Icon"],
         }
+        local function AuraAnchorMode(v)
+            if v == "CURSOR" then return "CURSOR" end
+            return "FRAME"
+        end
+        local function AuraAnchorGet(key)
+            return function() return AuraAnchorMode(db[key]) end
+        end
 
         -- 12.1 factory rows read all of these on the layout-version bump: the Enable
         -- toggle is structural (mouse-motion opt-in, in the row sig -> Rebuild), while
@@ -775,7 +785,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return function(d)
                 if not d then return "" end
                 local parts = {}
-                local anchor = anchorValues[d[anchorKey]]
+                local anchor = anchorValues[AuraAnchorMode(d[anchorKey])]
                 if anchor then parts[#parts + 1] = anchor end
                 if d[combatKey] then
                     parts[#parts + 1] = format("%s %s", L["Combat"], L["Never"])
@@ -939,18 +949,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
             group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", RefreshAuraTooltips), 30)
 
-            local buffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
-            buffAnchorTo.tooltip = TIP_ANCHOR_TO
+            local buffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end, AuraAnchorGet("tooltipBuffAnchor")), 55)
+            buffAnchorTo.tooltip = TIP_AURA_ANCHOR_TO
 
             local buffAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", RefreshAuraTooltips), 55)
-            buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
-            buffAnchorPos.tooltip = TIP_ANCHOR_POS
+            buffAnchorPos.tooltip = TIP_AURA_ANCHOR_POS
 
             local buffOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", RefreshAuraTooltips), 55)
-            buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+            buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor == "CURSOR" end
 
             local buffOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", RefreshAuraTooltips), 55)
-            buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+            buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor == "CURSOR" end
         end
 
         if classicLayout then
@@ -1018,18 +1027,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
             group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", RefreshAuraTooltips), 30)
 
-            local debuffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
-            debuffAnchorTo.tooltip = TIP_ANCHOR_TO
+            local debuffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end, AuraAnchorGet("tooltipDebuffAnchor")), 55)
+            debuffAnchorTo.tooltip = TIP_AURA_ANCHOR_TO
 
             local debuffAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", RefreshAuraTooltips), 55)
-            debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
-            debuffAnchorPos.tooltip = TIP_ANCHOR_POS
+            debuffAnchorPos.tooltip = TIP_AURA_ANCHOR_POS
 
             local debuffOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", RefreshAuraTooltips), 55)
-            debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+            debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor == "CURSOR" end
 
             local debuffOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", RefreshAuraTooltips), 55)
-            debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+            debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor == "CURSOR" end
         end
 
         if classicLayout then
@@ -1072,18 +1080,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
             group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", RefreshAuraTooltips), 30)
 
-            local defAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
-            defAnchorTo.tooltip = TIP_ANCHOR_TO
+            local defAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end, AuraAnchorGet("tooltipDefensiveAnchor")), 55)
+            defAnchorTo.tooltip = TIP_AURA_ANCHOR_TO
 
             local defAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", RefreshAuraTooltips), 55)
-            defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
-            defAnchorPos.tooltip = TIP_ANCHOR_POS
+            defAnchorPos.tooltip = TIP_AURA_ANCHOR_POS
 
             local defOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", RefreshAuraTooltips), 55)
-            defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+            defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor == "CURSOR" end
 
             local defOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", RefreshAuraTooltips), 55)
-            defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+            defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor == "CURSOR" end
         end
 
         if classicLayout then
