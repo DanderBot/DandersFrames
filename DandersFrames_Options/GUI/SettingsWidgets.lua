@@ -438,9 +438,8 @@ do
         alpha      = ICONS .. "transition_fade.png",
         range      = ICONS .. "social_distance.png",
         interrupt  = ICONS .. "flash_off.png",
-        -- ⚠ FILLED, the one solid glyph in the set, on purpose: a slashed or
-        -- badged skull blurred to a blob at card size, and the solid one is a
-        -- single shape that still reads there.
+        -- The plain outline skull: a slashed or badged one blurs to a blob at
+        -- card size.
         dead       = ICONS .. "skull.png",
     }
 end
