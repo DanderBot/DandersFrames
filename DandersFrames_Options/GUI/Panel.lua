@@ -2219,6 +2219,21 @@ function DF:CreateGUI()
     -- END HEADER CONTROLS
     -- =========================================================================
     
+    -- Every ThemeListeners list under `frame`, repainted to the host accent.
+    local function RepaintTree(frame, depth)
+        if type(frame) ~= "table" or depth > 40 then return end
+        local list = rawget(frame, "ThemeListeners")
+        if type(list) == "table" then
+            for _, w in ipairs(list) do
+                if type(w) == "table" and w.UpdateTheme then w:UpdateTheme() end
+            end
+        end
+        if frame.GetChildren then
+            local kids = { frame:GetChildren() }
+            for i = 1, #kids do RepaintTree(kids[i], depth + 1) end
+        end
+    end
+
     local function UpdateThemeColors()
         -- Mode buttons use the shared underline-tab style; SetActive drives the
         -- accent label + the cell (each button's per-mode accent set at creation).
@@ -2307,8 +2322,21 @@ function DF:CreateGUI()
         end
         
         -- Update theme listeners
+        -- ☠ THE WHOLE BUILD, when it was painted in another accent. A page is
+        -- built in whichever tab's accent is up -- the search index builds every
+        -- page from wherever the user is -- and a widget registers on its OWN
+        -- parent's list (the Expand All strip, a card, a section), which the
+        -- page-level list below never reaches. Only the active build is walked:
+        -- the other mode's build is parked under the same page.child, and
+        -- painting it here would leave it in this accent when it comes back.
         if GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName] then
             local page = GUI.Pages[GUI.CurrentPageName]
+            local built = page.children
+            local stamp = format("%.3f,%.3f,%.3f", nc.r, nc.g, nc.b)
+            if built and built._themedAccent ~= stamp then
+                built._themedAccent = stamp
+                for _, child in ipairs(built) do RepaintTree(child, 0) end
+            end
             if page.child and page.child.ThemeListeners then
                 for _, widget in ipairs(page.child.ThemeListeners) do
                     if widget.UpdateTheme then widget:UpdateTheme() end

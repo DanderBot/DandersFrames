@@ -485,6 +485,15 @@ function UI:StyleButton(btn, opts)
     end
 
     btn.ApplyThemeColor = function(c)
+        -- A greyed button keeps its greyed rest through a repaint: the wash stays
+        -- killed (SetDisabled) and the dim backdrop stays. Only the label takes
+        -- the colour, at the alpha SetDisabled left it.
+        if btn.dfDisabled then
+            hl:SetVertexColor(c.r, c.g, c.b, 0)
+            if (ghost or tinted) and btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
+            if (ghost or tinted) and btn.Icon then btn.Icon:SetVertexColor(c.r, c.g, c.b) end
+            return
+        end
         applyWash(c)
         if isTabStyle then
             restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)

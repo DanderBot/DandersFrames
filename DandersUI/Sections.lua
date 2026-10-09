@@ -1413,6 +1413,15 @@ function UI:CreateInfoBanner(parent, opts)
         if tone.useThemeBorder then
             local tc = host:GetAccent() or {r = 1, g = 1, b = 1}
             self:SetBackdropBorderColor(tc.r, tc.g, tc.b, tone.borderAlpha or 1)
+            -- The border is the accent's, so a change of accent has to reach it.
+            if not self._themeRegistered then
+                self._themeRegistered = true
+                local p = self:GetParent()
+                if p then
+                    p.ThemeListeners = p.ThemeListeners or {}
+                    table.insert(p.ThemeListeners, self)
+                end
+            end
         elseif tone.border then
             self:SetBackdropBorderColor(tone.border[1], tone.border[2], tone.border[3], tone.border[4] or 1)
         end

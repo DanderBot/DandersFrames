@@ -144,3 +144,34 @@ check(AUTOPROF:find("local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton
       "editing: GLOBAL is locked with Party and Binds while an auto layout is edited")
 check(OPTIONS:find("Settings on this page apply globally", 1, true) == nil,
       "settings: the 'applies globally' banner is gone -- the tab says it")
+
+print("-- Global tab: a page painted in the other tab's accent is repainted whole")
+do
+    local fn = PANEL:match("\n    local function RepaintTree%(frame, depth%).-\n    end\n")
+    check(fn ~= nil, "repaint: the tree walk can be read")
+    local RepaintTree = fn and loadstring(fn .. "\nreturn RepaintTree")()
+    if RepaintTree then
+        local painted = {}
+        local function w(name) return { UpdateTheme = function() painted[#painted + 1] = name end } end
+        local function node(list, ...)
+            local kids = { ... }
+            return { ThemeListeners = list, GetChildren = function() return unpack(kids) end }
+        end
+        local strip = node({ w("expand"), w("collapse") })
+        local card  = node({ w("arrow") }, node({ w("nested") }))
+        RepaintTree(node(nil, strip, card), 0)
+        eq(table.concat(painted, ","), "expand,collapse,arrow,nested",
+           "repaint: listeners on a strip and inside a card are reached")
+    end
+    check(PANEL:find("if built and built._themedAccent ~= stamp then", 1, true) ~= nil
+      and PANEL:find("for _, child in ipairs(built) do RepaintTree(child, 0) end", 1, true) ~= nil,
+          "repaint: only the active build is walked, once per accent it is shown in")
+    local SECT = ui_file_source("Sections.lua"):gsub("\r\n", "\n")
+    local tone = SECT:match("function banner:SetTone%(toneName%).-\n    end\n")
+    check(tone and tone:find("table.insert(p.ThemeListeners, self)", 1, true) ~= nil,
+          "repaint: an accent-bordered banner registers for the repaint")
+    local WID = ui_file_source("Widgets.lua"):gsub("\r\n", "\n")
+    local apply = WID:match("btn.ApplyThemeColor = function%(c%)(.-)\n        applyWash%(c%)")
+    check(apply and apply:find("if btn.dfDisabled then", 1, true) and apply:find("hl:SetVertexColor(c.r, c.g, c.b, 0)", 1, true),
+          "repaint: a greyed button stays greyed -- its hover wash is not brought back")
+end
