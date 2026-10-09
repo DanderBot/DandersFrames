@@ -1794,6 +1794,42 @@ end
 -- ============================================================
 
 -- ============================================================
+-- THE ENABLE STATE -- the banner's tick and the disabled cover
+-- ------------------------------------------------------------
+-- ☠ EVERY FULL BUILD ENDS HERE, NOT ONLY THE REFRESH. A full build makes a new
+-- S.mainFrame and the cover belongs to the frame it was made on, so the rebuild
+-- every party/raid switch runs came up with NO cover -- and the page's
+-- RefreshStates skips the refresh at an unchanged size, so nothing put one
+-- back: a disabled designer whose preview and tabs all still worked.
+-- ☠ FROM THE MODE, NOT THE PRESET: the enable click writes the mode, and a read
+-- of the preset field it no longer writes would untick the box under the user.
+-- ============================================================
+local function ApplyEnabledState()
+    if not S.mainFrame then return end
+    local adEnabled = DF.IsAuraDesignerEnabledForMode
+        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
+    if S.enableBanner then
+        S.enableBanner.checkbox:SetChecked(adEnabled)
+    end
+    local split = S.mainFrame.splitContainer
+    if not split then return end
+    if not adEnabled then
+        if not S.mainFrame.disabledOverlay then
+            -- Shared with the Text Designer and Raid Auto Layouts; this page only
+            -- owns the extent (the whole split container) and the label.
+            local overlay = GUI:CreateDisabledOverlay(split, {
+                label = L["Aura Designer is disabled"],
+            })
+            overlay:SetAllPoints()
+            S.mainFrame.disabledOverlay = overlay
+        end
+        S.mainFrame.disabledOverlay:Show()
+    elseif S.mainFrame.disabledOverlay then
+        S.mainFrame.disabledOverlay:Hide()
+    end
+end
+
+-- ============================================================
 -- THE SPLIT-PANEL PAGE
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
@@ -2263,6 +2299,8 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     end)
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
+    -- The cover lives on S.mainFrame, which this build has just replaced.
+    ApplyEnabledState()
 end
 
 -- ============================================================
@@ -2347,43 +2385,10 @@ function DF:AuraDesigner_RefreshPage()
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
 
-    -- Update enable state.
-    -- ☠ FROM THE MODE, NOT THE PRESET. These two reads are what broke the enable click
-    -- when the switch moved to the mode db: the click writes the mode, then calls THIS
-    -- refresh, and this re-synced the checkbox and the overlay from the preset field
-    -- the click no longer writes -- so the box unticked itself and the disabled overlay
-    -- stayed up until a page revisit ran the full build (whose reads were updated).
-    -- "when I click enable the toggle does not stick and AD does not activate" (Krathe,
-    -- 2026-08-22) was exactly these two lines. They read GetAuraDesignerDB().enabled
-    -- INLINE, which is why the sweep that fixed every named `adDB.enabled` missed them.
-    local adEnabled = DF.IsAuraDesignerEnabledForMode
-        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
-    if S.enableBanner then
-        S.enableBanner.checkbox:SetChecked(adEnabled)
-    end
+    ApplyEnabledState()
     -- Spec dropdown lives on the main tab strip (B2): refresh its text on
     -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
     UpdateSpecDropdownState()
-
-    -- Show/hide disabled overlay on the split container
-    if S.mainFrame.splitContainer then
-        if not adEnabled then
-            if not S.mainFrame.disabledOverlay then
-                -- Shared with the Text Designer and Raid Auto Layouts; this S.page
-                -- only owns the extent (the whole split container) and the label.
-                local overlay = GUI:CreateDisabledOverlay(S.mainFrame.splitContainer, {
-                    label = L["Aura Designer is disabled"],
-                })
-                overlay:SetAllPoints()
-                S.mainFrame.disabledOverlay = overlay
-            end
-            S.mainFrame.disabledOverlay:Show()
-        else
-            if S.mainFrame.disabledOverlay then
-                S.mainFrame.disabledOverlay:Hide()
-            end
-        end
-    end
 
     -- Refresh buffs tab banner state if visible
     local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]
