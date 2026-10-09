@@ -2406,11 +2406,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- this page"; with no columns left to balance, the two whole-icon treatments
         -- read as a pair at the foot of the band.
         --
-        -- ☠ THE HEADER SWATCH IS CLASSIC-ONLY. The box's header carries a live
-        -- preview of the corner marker (GUI:AttachHeaderSwatch); the Modern card's
-        -- summary carries the two facts the swatch showed, in words (the size step
-        -- and which corner the marker sits in).
-        local UpdateImportantSwatch   -- assigned below in classic, once the header exists
+        -- The corner marker itself, previewed on the header in both layouts (asked
+        -- for in the field: the section names a feature whose art you otherwise
+        -- cannot see without pulling a mob) -- beside the title on classic's box,
+        -- in the icon slot on the Modern card. Greyed whenever the marker is not
+        -- actually rendering: debuffs off, highlight off, or marker off.
+        local UpdateImportantSwatch   -- assigned below, once the header exists
+        local function ImportantMarkerLayers(d)
+            return {
+                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge",
+                  color = d.debuffImportantBadgeColor },
+                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark",
+                  color = d.debuffImportantMarkColor },
+            }
+        end
+        local function ImportantMarkerOff(d)
+            return not d.showDebuffs or not d.debuffImportantHighlight or d.debuffImportantBadge == false
+        end
         local function ImportantChanged()
             if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
@@ -2514,10 +2526,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         if classicLayout then
             local impGroup = GUI:CreateSettingsGroup(self.child, 280)
-            -- Header carries a live preview of the corner marker itself (asked for in the
-            -- field: the section names a feature whose art you otherwise cannot see without
-            -- pulling a mob). Greys out — like the icon sections' previews — whenever the
-            -- marker is not actually rendering: debuffs off, highlight off, or marker off.
             local impHeader = GUI:CreateHeader(self.child, L["Important Debuffs"])
             impGroup:AddWidget(impHeader, 40)
             -- 13px: the marker art is a filled disc, so it reads heavier than the padded
@@ -2528,12 +2536,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 if not impSwatch then return end
                 d = d or DF.db[GUI.SelectedMode]
                 if not d then return end
-                impSwatch:SetSwatch({
-                    { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge",
-                      color = d.debuffImportantBadgeColor },
-                    { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark",
-                      color = d.debuffImportantMarkColor },
-                }, not d.showDebuffs or not d.debuffImportantHighlight or d.debuffImportantBadge == false)
+                impSwatch:SetSwatch(ImportantMarkerLayers(d), ImportantMarkerOff(d))
             end
             -- RefreshChildStates calls refreshContent(db) on every shown child, so the
             -- swatch follows a mode switch / profile load without its own event.
@@ -2575,6 +2578,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     hoistToggle = true,
                 })
                 CloseSection(band)
+                -- 14, the kind glyphs' size: the filled disc reads heavier than the
+                -- padded atlases the other cards preview. Repainted on the card's own
+                -- state pass, so it follows a mode switch or profile load.
+                local section = band.collapsibleSection
+                UpdateImportantSwatch = function(d)
+                    d = d or DF.db[GUI.SelectedMode]
+                    if not d then return end
+                    section:SetPreviewIcons({ { size = 14, layers = ImportantMarkerLayers(d),
+                                                desaturate = ImportantMarkerOff(d) } })
+                end
+                local refreshContent = section.refreshContent
+                section.refreshContent = function(s, d)
+                    if refreshContent then refreshContent(s, d) end
+                    UpdateImportantSwatch(d)
+                end
+                UpdateImportantSwatch(db)
             end)
         end
 

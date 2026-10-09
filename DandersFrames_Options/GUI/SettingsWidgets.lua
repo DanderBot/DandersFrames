@@ -1239,39 +1239,51 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- first that is live, else the first; a hover on it shows them all.
         -- Text entries have no room there; the card's summary already says when
         -- an icon shows as text.
+        --
+        -- An entry may be LAYERED -- { layers = { {texture, color}, ... },
+        -- size = n } -- drawn bottom to top in one slot: the Important Debuffs
+        -- marker is a tinted disc with a tinted glyph over it. Greyed, each
+        -- tinted layer keeps its own brightness in grey, so the glyph still
+        -- reads on its disc.
         if CARD then
             local pick
             for _, e in ipairs(icons or {}) do
-                if e.texture and not pick then pick = e end
-                if e.texture and not e.desaturate then pick = e break end
+                local drawable = e.texture or e.layers
+                if drawable and not pick then pick = e end
+                if drawable and not e.desaturate then pick = e break end
             end
-            local tex = self.previewSlot
-            if pick and not tex then
-                tex = self:CreateTexture(nil, "OVERLAY")
-                self.previewSlot = tex
-            end
-            if tex then
-                if pick then
-                    local size = CARD.icon - 2 * (pick.inset or 0)
-                    tex:SetSize(size, size)
-                    tex:ClearAllPoints()
-                    tex:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
-                    local co = pick.coords
-                    DF:SetIconTextureOrAtlas(tex, pick.texture, co and co[1], co and co[2], co and co[3], co and co[4])
-                    local dim = pick.desaturate and true or false
-                    tex:SetDesaturated(dim)
-                    -- After the texture call, which resets the vertex colour.
-                    local c = (not dim) and pick.color
-                    if c then
-                        tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
-                    else
-                        tex:SetVertexColor(1, 1, 1, 1)
-                    end
-                    tex:Show()
-                else
-                    tex:Hide()
+            local layers = pick and (pick.layers or { pick }) or {}
+            local pool = self.previewLayers or {}
+            self.previewLayers = pool
+            local dim = pick and pick.desaturate and true or false
+            for i, layer in ipairs(layers) do
+                local tex = pool[i]
+                if not tex then
+                    -- Ascending sublevel: layer 2 draws over layer 1.
+                    tex = self:CreateTexture(nil, "OVERLAY", nil, i)
+                    pool[i] = tex
                 end
+                local size = (pick.size or CARD.icon) - 2 * (pick.inset or 0)
+                tex:SetSize(size, size)
+                tex:ClearAllPoints()
+                tex:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                local co = layer.coords
+                DF:SetIconTextureOrAtlas(tex, layer.texture, co and co[1], co and co[2], co and co[3], co and co[4])
+                tex:SetDesaturated(dim)
+                -- After the texture call, which resets the vertex colour.
+                local c = layer.color
+                if c and dim then
+                    local grey = 0.3 * (c.r or 1) + 0.59 * (c.g or 1) + 0.11 * (c.b or 1)
+                    tex:SetVertexColor(grey, grey, grey, c.a or 1)
+                elseif c then
+                    tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                else
+                    tex:SetVertexColor(1, 1, 1, 1)
+                end
+                tex:Show()
             end
+            for i = #layers + 1, #pool do pool[i]:Hide() end
+            self.previewSlot = pool[1]
             if self.kindIcon then self.kindIcon:SetShown(not pick) end
 
             -- More than the slot shows: a hover lists every one. Motion only, so

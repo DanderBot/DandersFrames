@@ -26,11 +26,7 @@ REVIEWED = {
     ("general_pinnedframes", "call", "GUI:AddSectionNewBadge"):
         "the gold 'New' badge on Classic's Frame Type box header",
     ("auras_debuffs", "call", "GUI:AttachHeaderSwatch"):
-        "a read-only marker preview on Classic's Important Debuffs header",
-    ("auras_debuffs", "field", "debuffImportantBadgeColor"):
-        "read by that preview only; the colour picker is in the shared builder, in both layouts",
-    ("auras_debuffs", "field", "debuffImportantMarkColor"):
-        "read by that preview only; the colour picker is in the shared builder, in both layouts",
+        "Classic's marker preview beside its header title; the Modern card shows the same marker in its icon slot",
     ("general_frame", "call", "GUI.RelayoutCurrentPage"):
         "Classic's border box refresh callback; Modern's cards use their own state pass",
 }

@@ -242,6 +242,36 @@ if cardTableSrc and fnSrc then
         eq(pv.kindIcon and pv.kindIcon._shown, true, "preview: ...and the kind icon is back")
         eq(#pv.previewIcons, 0, "preview: a card never builds the right-end swatches")
 
+        -- ---- a LAYERED entry: the Important Debuffs marker, disc then glyph ----
+        local lay = build({})
+        local function marker(off)
+            return { { size = 14, desaturate = off, layers = {
+                { texture = "disc", color = { r = 1, g = 0.5, b = 0 } },
+                { texture = "mark", color = { r = 1, g = 1, b = 1 } } } } }
+        end
+        lay:SetPreviewIcons(marker(false))
+        local ly = rawget(lay, "previewLayers") or {}
+        eq(#ly, 2, "layered: one texture per layer, in the one slot")
+        eq(ly[1] and ly[1]:GetTexture(), "disc", "layered: ...the disc first")
+        eq(ly[2] and ly[2]:GetTexture(), "mark", "layered: ...the glyph over it")
+        eq(ly[1] and ly[1]:GetWidth(), 14, "layered: ...at the entry's own size")
+        local v1 = ly[1] and ly[1]._vertex
+        check(v1 and v1.r == 1 and v1.g == 0.5 and v1.b == 0, "layered: each layer takes its own tint")
+        lay:SetPreviewIcons(marker(true))
+        v1 = ly[1] and ly[1]._vertex
+        local v2 = ly[2] and ly[2]._vertex
+        check(v1 and v2 and v1.r == v1.g and v1.g == v1.b and v1.r < v2.r,
+              "layered: greyed, each layer keeps its brightness in grey, so the glyph still reads on its disc")
+        lay:SetPreviewIcons({ { texture = "single" } })
+        eq(ly[2] and ly[2]._shown, false, "layered: a plain entry after it hides the extra layer")
+
+        -- ---- the Debuff Bar's Important Debuffs card uses it ----
+        local IND = options_file_source("GUI/Pages/Indicators.lua")
+        check(IND:find("section:SetPreviewIcons({ { size = 14, layers = ImportantMarkerLayers(d),", 1, true) ~= nil,
+              "layered: the Important Debuffs card previews its marker in the icon slot")
+        check(IND:find("impSwatch:SetSwatch(ImportantMarkerLayers(d), ImportantMarkerOff(d))", 1, true) ~= nil,
+              "layered: ...from the same layers and gate as classic's header swatch")
+
         -- ---- more icons than the slot: a hover lists them all ----
         local shownPopup
         GUI.ShowCardPreviewPopup = function(_, owner, title, entries) shownPopup = { owner = owner, title = title, entries = entries } end
