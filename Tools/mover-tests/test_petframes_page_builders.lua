@@ -238,9 +238,9 @@ local HEALTH_TEXT = {
 -- passes its builder.
 local CARDS = {
     { label = "Settings", classicLabel = "Pet Frame Settings", key = "pets_settings", col = 1, classicCol = 1,
-      builder = "BuildPetGeneralGroup", golden = GENERAL, summary = "nil" },
+      builder = "BuildPetGeneralGroup", golden = GENERAL, summary = "PetSettingsSummary" },
     { label = "Layout Mode", key = "pets_layoutmode", col = 1, classicCol = 1,
-      builder = "BuildPetLayoutModeGroup", golden = LAYOUT_MODE, summary = "nil", dim = true },
+      builder = "BuildPetLayoutModeGroup", golden = LAYOUT_MODE, summary = "PetLayoutModeSummary", dim = true },
     { label = "Group Settings", key = "pets_group", col = 1, classicCol = 1,
       builder = "BuildPetGroupSettingsGroup", golden = GROUP_SETTINGS, summary = "PetGroupSummary", dim = true, pin = true },
     { label = "Size", key = "pets_size", col = 1, classicCol = 1,
@@ -354,7 +354,7 @@ do
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
     eq(hoists, 1, "ticks: exactly one mount skips its in-body toggle (Border)")
-    check((select(1, sectionBlock("Settings", "BuildPetGeneralGroup"))):find("petEnabled", 1, true) == nil,
+    check((select(1, sectionBlock("Settings", "BuildPetGeneralGroup"))):find('key = "petEnabled"', 1, true) == nil,
           "ticks: Enable Pet Frames is not hoisted -- it is the page gate, in the first card's body")
 
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,

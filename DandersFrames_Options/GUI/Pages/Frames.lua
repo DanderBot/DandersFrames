@@ -371,7 +371,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- box then starts level with the first card without a heading of
             -- its own.
             Add(GUI:CreateHeader(self.child, L["Text"]), 40, "both")
-            local fontCard = OpenSection(L["Font Settings"], "fonts_global", 1, nil)
+            -- ⚠ ONLY THE SDF TICK: the font and outline here are a one-shot Apply,
+            -- not a stored setting, so there is no value to name for them.
+            -- ☠ THE PROFILE ROOT -- fontSlug sits at DF.db.
+            local function GlobalFontSummary()
+                return format("SDF %s", DF.db.fontSlug and L["On"] or L["Off"])
+            end
+            local fontCard = OpenSection(L["Font Settings"], "fonts_global", 1, GlobalFontSummary)
             BuildFontSelectionGroup({
                 group = fontCard, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -581,7 +587,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 header.hideOn = HideGroupLabelOptions
                 Add(header, 40, 1)
             end
-            local band = OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, nil, nil, HideGroupLabelOptions)
+            local function GroupLabelsSummary(d)
+                if not d then return "" end
+                return d.groupLabelEnabled and L["On"] or L["Off"]
+            end
+            local band = OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, GroupLabelsSummary, nil, HideGroupLabelOptions)
             BuildLabelSettingsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -625,7 +635,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 header.hideOn = HideGroupLabelOptions
                 Add(header, 40, 2)
             end
-            local band = OpenSection(L["Text Format"], "grouplabels_format", 2, nil,
+            local function LabelFormatSummary(d)
+                return d and formatOptions[d.groupLabelFormat] or ""
+            end
+            local band = OpenSection(L["Text Format"], "grouplabels_format", 2, LabelFormatSummary,
                 DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)
             BuildTextFormatGroup({
                 group = band, parent = self.child,
@@ -1835,7 +1848,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
             settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         else
-            settingsGroup = OpenSection(L["Settings"], "pinned_settings", 1, nil, nil,
+            -- ☠ THE SELECTED SET, NOT THE PAGE'S TABLE -- every pinned card's
+            -- summary reads GetCurrentSet(), so it follows the set tab.
+            settingsGroup = OpenSection(L["Settings"], "pinned_settings", 1, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                return set.enabled and L["On"] or L["Off"]
+            end, nil,
                 function() return activeSubTab ~= "setup" end)
         end
 
@@ -2111,7 +2130,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- A card on the Setup sub-tab, greying (header and body) while the
             -- set is disabled, as the box's body does. (The New badge's section
             -- is long out of GUI.NewSections, so there is no badge to carry.)
-            frameTypeGroup = OpenSection(L["Frame Type"], "pinned_frametype", 2, nil,
+            -- The dropdown's words written out here: frameTypeOptions is declared
+            -- below this call, out of the closure's reach.
+            frameTypeGroup = OpenSection(L["Frame Type"], "pinned_frametype", 2, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                return set.frameType == "friendlyBoss" and L["Friendly Boss NPCs"] or L["Player Frames"]
+            end,
                 function() return PinnedSetDisabled() end,
                 function() return activeSubTab ~= "setup" end)
         end
@@ -2176,7 +2201,14 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Style"]), 40)
         else
             -- A card on the Appearance sub-tab.
-            layoutGroup = OpenSection(L["Frame Style"], "pinned_framestyle", 1, nil, nil,
+            -- Which frames the size follows. An unset matchMode follows the
+            -- set's own mode (PinnedFrames.lua GetSetBaselineDB), i.e. this page's.
+            layoutGroup = OpenSection(L["Frame Style"], "pinned_framestyle", 1, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local m = set.matchMode or ((db == DF.db.raid) and "raid" or "party")
+                return format(L["Sized as %s"], m == "raid" and L["Raid"] or L["Party"])
+            end, nil,
                 function() return activeSubTab ~= "appearance" end)
         end
 
@@ -2332,7 +2364,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             arrangeGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         else
             -- A card on the Appearance sub-tab.
-            arrangeGroup = OpenSection(L["Layout"], "pinned_layout", 2, nil, nil,
+            -- Direction, then where it wraps -- the Flat Grid card's "Wrap 5".
+            arrangeGroup = OpenSection(L["Layout"], "pinned_layout", 2, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local dir = set.growDirection == "VERTICAL" and L["Vertical"] or L["Horizontal"]
+                local per = tonumber(set.unitsPerRow)
+                if not per then return dir end
+                return format("%s \194\183 %s %d", dir, L["Wrap"], math.floor(per))
+            end, nil,
                 function() return activeSubTab ~= "appearance" end)
         end
 
@@ -2512,7 +2552,17 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
         else
             -- A full-width card on the Members sub-tab, under the roster.
-            autoPopGroup = OpenSection(L["Auto-Populate"], "pinned_autopopulate", "both", nil, nil, membersHideOn)
+            -- The roles it adds, or Off with none.
+            autoPopGroup = OpenSection(L["Auto-Populate"], "pinned_autopopulate", "both", function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local parts = {}
+                if set.autoAddTanks then parts[#parts + 1] = L["Tanks"] end
+                if set.autoAddHealers then parts[#parts + 1] = L["Healers"] end
+                if set.autoAddDPS then parts[#parts + 1] = L["DPS"] end
+                if #parts == 0 then return L["Off"] end
+                return table.concat(parts, " \194\183 ")
+            end, nil, membersHideOn)
         end
         autoPopGroup:AddWidget(GUI:CreateLabel(self.child, L["Automatically add players by role when they join your group."], 510), 20)
 

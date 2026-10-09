@@ -332,6 +332,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             else
                 -- ☠ USE FRAMESORT ADDON IS THE HEADER'S TICK; the builder skips
                 -- its own (hoistToggle). Same key, label and commit. No pin.
+                -- ⚠ NO SUMMARY, by decision: the tick is the whole card, and shut
+                -- and off the corner already reads "Off".
                 local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
                     db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
                     onChanged = UseFrameSortChanged,
@@ -578,20 +580,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(colorPickerGroup, nil, 1)
         else
-            -- One word, and only for the state worth a word. Replacing every
-            -- OTHER addon's picker is the setting a user will want confirmed at a
-            -- glance, and L["All"] says it in a word the locale already ships.
-            -- The this-addon-only state gets nothing: there is no existing word
-            -- for it that is not either vague or a brand name standing in for a
-            -- sentence -- and a summary is not worth inventing a string for.
+            -- Whose pickers are DF's: every addon's, this addon's only, or none
+            -- (Blizzard's everywhere). The global tick wins -- it installs the
+            -- hook whatever the other says.
             --
             -- ⚠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S `db`. The card's corner is
             -- handed the per-mode table by the page pass; these two keys live in
             -- the global db, so the summary reads that instead.
             local function ColorPickerSummary()
                 local g = DF:GetGlobalDB()
-                if g and g.colorPickerGlobalOverride then return L["All"] end
-                return ""
+                if not g then return "" end
+                if g.colorPickerGlobalOverride then return L["All Addons"] end
+                if g.colorPickerOverride then return format(L["%s only"], "DandersFrames") end
+                return L["Blizzard"]
             end
 
             -- ☠ THE PAGE'S TWO BULK VERBS, at col "both" -- the Debuff Bar's
@@ -719,6 +720,35 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
         end
 
+        -- A palette card's summary: "Default", or how many swatches differ from
+        -- the colour their own Reset All writes back. An unseeded swatch is
+        -- still the default.
+        local function PaletteSummary(store, list, keyField, defaultOf)
+            local n = 0
+            for _, info in ipairs(list) do
+                local c, d = store[info[keyField]], defaultOf(info[keyField])
+                if type(c) == "table" and type(d) == "table"
+                    and (math.abs((c.r or 0) - (d.r or 0)) > 0.005
+                      or math.abs((c.g or 0) - (d.g or 0)) > 0.005
+                      or math.abs((c.b or 0) - (d.b or 0)) > 0.005) then
+                    n = n + 1
+                end
+            end
+            if n == 0 then return L["Default"] end
+            return format(L["%d custom"], n)
+        end
+        -- Each default is what that palette's own Reset All writes back.
+        local function ClassColorsSummary()
+            return PaletteSummary(classColorsDB, CLASS_LIST, "token",
+                function(t) return RAID_CLASS_COLORS and RAID_CLASS_COLORS[t] end)
+        end
+        local function RoleColorsSummary()
+            return PaletteSummary(roleColorsDB, ROLE_LIST, "token", function(t) return ROLE_DEFAULTS[t] end)
+        end
+        local function DispelColorsSummary()
+            return PaletteSummary(dispelColorsDB, DISPEL_LIST, "key", function(k) return dispelGamePalette[k] end)
+        end
+
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: four 280 boxes -- Class Colors
         -- then Dispel Type Colors down column 1, Role Colors then the Color by
@@ -737,8 +767,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- set per profile, shared by party and raid -- and each group's own "Reset
         -- All to Default" button IS the reset story; it stays inside its card.
         --
-        -- ⚠ NO SUMMARIES, AND NOTHING IS INVENTED TO MAKE ONE. A palette of
-        -- swatches has no four of anything to name; a shut card is just its title.
+        -- A palette's summary is "Default" or "N custom" (PaletteSummary); Color
+        -- by Time has none -- see its card.
         --
         -- ⚠ THE PALETTES ARE PINNABLE (they decide how frames look); Color by Time
         -- is NOT, because every structural edit in it rebuilds the page, which
@@ -877,8 +907,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
             Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)
-            -- Column 1, pinnable, no summary (see the page note).
-            local band = OpenSection(L["Class Colors"], "colors_class", 1, nil, nil, nil, BuildClassColorsGroup)
+            -- Column 1, pinnable.
+            local band = OpenSection(L["Class Colors"], "colors_class", 1, ClassColorsSummary, nil, nil, BuildClassColorsGroup)
             BuildClassColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -931,8 +961,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(col2, nil, 2)
         else
-            -- Column 1 under Class Colors, pinnable, no summary.
-            local band = OpenSection(L["Role Colors"], "colors_role", 1, nil, nil, nil, BuildRoleColorsGroup)
+            -- Column 1 under Class Colors, pinnable.
+            local band = OpenSection(L["Role Colors"], "colors_role", 1, RoleColorsSummary, nil, nil, BuildRoleColorsGroup)
             BuildRoleColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -979,11 +1009,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(dispelCol, nil, 1)
         else
-            -- Column 2, opening Aura Colors, pinnable, no summary. Its title is the
+            -- Column 2, opening Aura Colors, pinnable. Its title is the
             -- cross-link anchor the debuff Border and Dispel Overlay pages jump to
             -- (see the page note) -- keep it in step with theirs.
             Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)
-            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, nil, nil, nil, BuildDispelColorsGroup)
+            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, DispelColorsSummary, nil, nil, BuildDispelColorsGroup)
             BuildDispelColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1136,6 +1166,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- nothing below has to know which layout it is building into. The card's
         -- band re-sizes its rows on every layout pass; the 260px rows inside were
         -- laid out for the box and sit left-aligned in a wider card.
+        --
+        -- ⚠ NO SUMMARY, by decision: the card is a breakpoint editor over two
+        -- ramps, and neither a count nor a list of thresholds says anything a
+        -- glance can use.
         local cbtGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
             or OpenSection(L["Color by Time"], "colors_bytime", cbtColumn)
@@ -1738,6 +1772,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- names its ramp ("Health Gradient" / "Missing Health Gradient"): two
         -- cards both titled "Gradient" in one column could not be told apart.
         -- The keys are the ones they shipped with, so folds survive the rename.
+        -- ⚠ NO SUMMARY, by decision: a gradient stop list has no value to name,
+        -- and the card only shows while its colour mode is Gradient anyway.
         local gradGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
             or OpenSection((prefix == "healthColor") and L["Health Gradient"] or L["Missing Health Gradient"],
@@ -3061,9 +3097,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ SHOW BACKGROUND IS THE HEADER'S TICK; the builder skips its own
             -- (hoistToggle). The commit is what the in-body checkbox ran, plus a
             -- reflow for a pinned copy -- never a page rebuild. It greys with the
-            -- page gate. No summary: the tick's Off is the whole of what a shut
-            -- card has to say.
-            local band = OpenSection(L["Background"], "resource_background", 2, nil, ResourceOffRow, nil,
+            -- page gate. Shown and shut, the corner gives the colour's alpha --
+            -- the one number in a card whose other control is a swatch.
+            local function ResourceBackgroundSummary(d)
+                local c = d and d.resourceBarBackgroundColor
+                if type(c) ~= "table" then return "" end
+                return format("%s %.2f", L["Alpha"], tonumber(c.a) or 1)
+            end
+            local band = OpenSection(L["Background"], "resource_background", 2, ResourceBackgroundSummary, ResourceOffRow, nil,
                 BuildResourceBackgroundGroup, {
                     db = db, key = "resourceBarBackgroundEnabled", label = L["Show Background"],
                     disableOn = ResourceOffRow,

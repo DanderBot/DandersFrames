@@ -1121,18 +1121,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- The one thing three swatches cannot say for themselves: whether they
-        -- are being used at all. Silent on the shipped profile, which takes the
-        -- game's own threat palette.
+        -- are being used at all. "Default" on the shipped profile, which takes
+        -- the game's own threat palette.
         local function ThreatColorsSummary(d)
             if not d then return "" end
-            local parts = {}
-            if d.aggroUseCustomColors then
-                parts[#parts + 1] = L["Use Custom Colors"]
-                -- With Only Show When Tanking on, two of the three swatches are
-                -- out of reach -- the highlight only ever appears at tanking
-                -- threat -- so the row names the one that is left.
-                if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
-            end
+            if not d.aggroUseCustomColors then return L["Default"] end
+            local parts = { L["Use Custom Colors"] }
+            -- With Only Show When Tanking on, two of the three swatches are out
+            -- of reach -- the highlight only ever appears at tanking threat --
+            -- so the row names the one that is left.
+            if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
             return Join(parts)
         end
 

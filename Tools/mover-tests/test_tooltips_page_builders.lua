@@ -333,8 +333,8 @@ do
       and PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
           "resurrection: classic keeps its box, its checkbox and column 2")
     local block, call = sectionBlock("Resurrection Icon Tooltips")
-    check(call:find('OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, nil)', 1, true) ~= nil,
-          "resurrection: a card keyed tooltips_resurrection in column 1, no tick, no pin")
+    check(call:find('OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, ResurrectionTooltipSummary)', 1, true) ~= nil,
+          "resurrection: a card keyed tooltips_resurrection in column 1, saying On / Off -- no tick, no pin")
     check(block:find('band:AddWidget(' .. CHECK, 1, true) ~= nil,
           "resurrection: its one checkbox is the same call classic makes, in the card's body")
 

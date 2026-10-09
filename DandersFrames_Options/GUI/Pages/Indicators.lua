@@ -3645,12 +3645,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 30)
         end
 
-        -- The one tick the row does not carry, in its own words. Silent while it is
-        -- off, which is the shipped profile.
+        -- The page gate first -- it lives in the body, not on the header -- then
+        -- the swipe tick in its own words while it is on.
         local function DefensiveSettingsSummary(d)
             if not d then return "" end
-            if not d.defensiveIconHideSwipe then return "" end
-            return L["Hide Cooldown Swipe"]
+            if not d.defensiveIconEnabled then return L["Off"] end
+            if not d.defensiveIconHideSwipe then return L["On"] end
+            return format("%s \194\183 %s", L["On"], L["Hide Cooldown Swipe"])
         end
 
         if classicLayout then
@@ -5507,12 +5508,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             ptsOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
         end
 
-        -- The one profile tick the row does not carry, in its own words. Silent
-        -- while it is off, which is the shipped profile.
+        -- The page gate first -- it lives in the body, not on the header -- then
+        -- which spells it shows.
         local function PersonalSettingsSummary(d)
             if not d then return "" end
-            if not d.personalTargetedSpellImportantOnly then return "" end
-            return L["Important Spells Only"]
+            if not d.personalTargetedSpellEnabled then return L["Off"] end
+            return d.personalTargetedSpellImportantOnly and L["Important Spells Only"] or L["All Spells"]
         end
 
         if classicLayout then
@@ -5568,10 +5569,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateLabel(parent, L["Content type filters configured in Party tab."], 250), 25)
         end
 
-        -- ☠ IT NAMES WHAT IS LEFT ON, AND ONLY ONCE SOMETHING IS OFF. All five are
-        -- on in the shipped profile, so the row is silent there rather than
-        -- reciting the default back -- and the moment any one is switched off
-        -- there are at most four left to name, which is the budget exactly.
+        -- "All Content" with all five on, which is the shipped profile; the
+        -- moment any one is switched off there are at most four left to name,
+        -- which is the budget exactly.
         local function PersonalContentSummary(d)
             if not d then return "" end
             local parts = {}
@@ -5581,7 +5581,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if d.personalTargetedSpellInRaids then parts[#parts + 1] = L["Raids"] else off = off + 1 end
             if d.personalTargetedSpellInArena then parts[#parts + 1] = L["Arena"] else off = off + 1 end
             if d.personalTargetedSpellInBattlegrounds then parts[#parts + 1] = L["Battlegrounds"] else off = off + 1 end
-            if off == 0 then return "" end
+            if off == 0 then return L["All Content"] end
+            if #parts == 0 then return L["None"] end
             return Join(parts)
         end
 

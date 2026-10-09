@@ -199,8 +199,8 @@ do
     -- The collapse key keeps its old name: renaming it would forget every
     -- user's fold.
     local block, call = sectionBlock("Font Settings", "BuildFontSelectionGroup({")
-    check(call:find('OpenSection(L["Font Settings"], "fonts_global", 1, nil)', 1, true) ~= nil,
-          "font settings: a card keyed fonts_global in column 1 -- no summary, no tick, no pin")
+    check(call:find('OpenSection(L["Font Settings"], "fonts_global", 1, GlobalFontSummary)', 1, true) ~= nil,
+          "font settings: a card keyed fonts_global in column 1, naming SDF -- no tick, no pin")
     check(block:find("BuildFontSelectionGroup({ group = fontCard, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
           "font settings: mounts the builder exactly as classic does")
 end

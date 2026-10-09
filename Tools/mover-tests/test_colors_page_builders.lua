@@ -125,11 +125,12 @@ local function checkShared(builder, label, boxVar, column, key, col)
     check(PAGE:find("Add(" .. boxVar .. ", nil, " .. column .. ")", 1, true) ~= nil,
           label .. ": ...still added to column " .. column)
 
-    -- ☠ A PALETTE HAS NO ON/OFF AND NOTHING TO SUMMARISE, and it decides how
-    -- frames look -- so a pin, no tick, no summary, no gates.
+    -- ☠ A PALETTE HAS NO ON/OFF, and it decides how frames look -- so a pin,
+    -- no tick, no gates, and a "Default" / "N custom" summary of its own.
     local block, call = sectionBlock(label)
-    check(block:find('OpenSection(L["' .. label .. '"], "' .. key .. '", ' .. col .. ', nil, nil, nil, ' .. builder .. ')', 1, true) ~= nil,
-          label .. ": a card keyed " .. key .. " in column " .. col .. ", no summary, pinnable from its own builder")
+    local summaryFn = label:gsub("Dispel Type", "Dispel"):gsub("%s+", "") .. "Summary"
+    check(block:find('OpenSection(L["' .. label .. '"], "' .. key .. '", ' .. col .. ', ' .. summaryFn .. ', nil, nil, ' .. builder .. ')', 1, true) ~= nil,
+          label .. ": a card keyed " .. key .. " in column " .. col .. ", summarised by " .. summaryFn .. ", pinnable from its own builder")
     check(call:find('key = "', 1, true) == nil, label .. ": ...and no header tick -- a palette is always in force")
     local mount = builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
     check(block:find(mount, 1, true) ~= nil, label .. ": mounts the builder exactly as classic does")

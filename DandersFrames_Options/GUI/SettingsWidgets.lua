@@ -4199,16 +4199,27 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
-    local options = {
+-- A fresh table each call: the dropdown takes ownership of the one it is handed.
+local function OutlineNames()
+    return {
         NONE = L["None"],
         OUTLINE = L["Outline"],
         THICKOUTLINE = L["Thick Outline"],
         MONOCHROME = L["Monochrome"],
         ["MONOCHROME, OUTLINE"] = L["Monochrome Outline"],
         ["MONOCHROME, THICKOUTLINE"] = L["Monochrome Thick Outline"],
-        _order = OUTLINE_FLAG_ORDER,
     }
+end
+
+-- The words the outline dropdown prints for a stored value, so a card summary
+-- names an outline exactly as the control does.
+function GUI:OutlineName(stored)
+    return OutlineNames()[DF:OutlineFlag(stored)]
+end
+
+function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
+    local options = OutlineNames()
+    options._order = OUTLINE_FLAG_ORDER
     local get = function() return DF:OutlineFlag(dbTable[dbKey] or (inheritKey and dbTable[inheritKey])) end
     local set = function(flag) dbTable[dbKey] = DF:ComposeOutline(flag, DF:OutlineHasShadow(dbTable[dbKey] or (inheritKey and dbTable[inheritKey]))) end
     return GUI:CreateDropdown(parent, label or L["Outline"], options, dbTable, dbKey, callback, get, set)

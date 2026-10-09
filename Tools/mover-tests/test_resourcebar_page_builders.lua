@@ -240,7 +240,7 @@ local CARDS = {
       builder = "BuildResourceAppearanceGroup", golden = RESOURCE_APPEARANCE, summary = "ResourceAppearanceSummary",
       dim = true, pin = true },
     { label = "Background", key = "resource_background", col = 2, box = "bgGroup", classicCol = 2,
-      builder = "BuildResourceBackgroundGroup", golden = RESOURCE_BACKGROUND, summary = "nil",
+      builder = "BuildResourceBackgroundGroup", golden = RESOURCE_BACKGROUND, summary = "ResourceBackgroundSummary",
       dim = true, pin = true, tick = { key = "resourceBarBackgroundEnabled", name = "Show Background" } },
     { label = "Border", key = "resource_border", col = 2, box = "borderGroup", classicCol = 2,
       builder = "BuildResourceBorderGroup", golden = RESOURCE_BORDER, summary = "ResourceBorderSummary",

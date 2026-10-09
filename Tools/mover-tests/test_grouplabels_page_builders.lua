@@ -156,10 +156,10 @@ local TEXT_FORMAT = {
 local CARDS = {
     { label = "Raid Group Labels", key = "grouplabels_settings", col = 1, classicCol = 1,
       builder = "BuildLabelSettingsGroup", golden = LABEL_SETTINGS,
-      call = 'OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, nil, nil, HideGroupLabelOptions)' },
+      call = 'OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, GroupLabelsSummary, nil, HideGroupLabelOptions)' },
     { label = "Text Format", key = "grouplabels_format", col = 2, classicCol = 2,
       builder = "BuildTextFormatGroup", golden = TEXT_FORMAT, pin = true, calls = 2,
-      call = 'OpenSection(L["Text Format"], "grouplabels_format", 2, nil, DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)' },
+      call = 'OpenSection(L["Text Format"], "grouplabels_format", 2, LabelFormatSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)' },
     { label = "Font Settings", key = "grouplabels_font", col = 2, classicCol = 2,
       builder = "BuildFontGroup", golden = FONT_SETTINGS, pin = true,
       call = 'OpenSection(L["Font Settings"], "grouplabels_font", 2, FontSettingsSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildFontGroup)' },

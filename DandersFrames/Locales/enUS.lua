@@ -3236,4 +3236,21 @@ L["No built-in spell list on WoW Forever yet. Create a custom filter, then add s
 L["Profiles From Another Game Version"] = true
 L["Some of your profiles came from retail. Their Aura Designer setup has been put aside because spell IDs differ on WoW Forever, and comes back if you use them on retail again.\n\nWoW Forever has no built-in spell list yet: create a custom filter in the Filter Designer and add spells by ID."] = true
 L["Some of your profiles came from WoW Forever. Their Aura Designer setup has been put aside because spell IDs differ on retail, and comes back if you use them on WoW Forever again."] = true
+-- Settings card summaries: the short words a shut card prints in its corner.
+-- "%s only" and "%s hidden" take one or more frame names ("Party", "Party · Raid").
+L["%s only"] = true
+L["%s hidden"] = true
+L["%s shown"] = true
+L["%d custom"] = true
+L["Sized as %s"] = true
+L["All Addons"] = true
+L["All Content"] = true
+L["All Spells"] = true
+L["Auto"] = true
+L["Login Message"] = true
+L["Pixel-Perfect"] = true
+L["Player"] = true
+L["Shown"] = true
+L["Side Menu"] = true
+L["Updates"] = true
 --@end-do-not-package@
