@@ -2109,7 +2109,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "refresh", L["Reset Profile to Defaults"], 240, 26, function()
             DF:ShowPopupAlert({
                 title   = L["Reset Profile to Defaults"],
-                message = L["Reset current profile to defaults?\nThis will reset BOTH Party and Raid settings."],
+                message = L["Reset current profile to defaults?\nEverything in it goes back to how a new profile starts, including Party, Raid, colours and auto layouts."],
                 buttons = {
                     {
                         label = L["Reset"],

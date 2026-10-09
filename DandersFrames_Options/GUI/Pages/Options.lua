@@ -3200,10 +3200,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function BuildPanelAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateFontDropdown(parent, L["Settings Font"], DF.db, "settingsFont", function()
-                if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
+                DF:SyncSettingsFont()
             end), 55)
             group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Settings Font Outline"], DF.db, "settingsFontOutline", function()
-                if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
+                DF:SyncSettingsFont()
             end), 55)
             group:AddWidget(GUI:CreateLabel(parent,
                 L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],

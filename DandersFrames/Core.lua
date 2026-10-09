@@ -5170,10 +5170,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
 
         -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
-        -- loaded; the Settings Font dropdowns re-apply it via GUI:RefreshSettingsFont)
-        if DF.GUI and DF.GUI.ApplySettingsFont then
-            DF.GUI:ApplySettingsFont()
-        end
+        -- loaded; the Settings Font dropdowns re-apply it through the same call)
+        DF:SyncSettingsFont()
 
         -- Ensure auraBlacklist table exists (profile-level, shared across party/raid)
         if not DF.db.auraBlacklist then
@@ -8625,6 +8623,8 @@ end
 -- ============================================================
 
 function DF:FullProfileRefresh()
+    -- Before the combat gate: the panel font is chrome, not protected frames.
+    DF:SyncSettingsFont()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return
