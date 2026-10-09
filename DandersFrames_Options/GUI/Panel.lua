@@ -2415,7 +2415,19 @@ function DF:CreateGUI()
         GUI.SelectTab(GUI:LastTabInView())
     end)
 
+    -- Back from GLOBAL to the mode it sat on. No mode changes, so the switch in
+    -- the handlers below -- the sync, the locks, the test hand-over, a new search
+    -- index, a second refresh of the page and of every override dot -- has
+    -- nothing to do. This is GLOBAL's own path, the other way.
+    local function LeaveGlobalTo(mode)
+        if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
+        GUI:EnterView(false)
+        GUI.SelectTab(GUI:LastTabInView())
+        return true
+    end
+
     btnParty:SetScript("OnClick", function()
+        if LeaveGlobalTo("party") then return end
         -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
         -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
         GUI.GlobalView = false
@@ -2488,6 +2500,7 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        if LeaveGlobalTo("raid") then return end
         -- Leaving GLOBAL, if it was up -- see the Party handler.
         GUI.GlobalView = false
         -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of

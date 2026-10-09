@@ -175,3 +175,27 @@ do
     check(apply and apply:find("if btn.dfDisabled then", 1, true) and apply:find("hl:SetVertexColor(c.r, c.g, c.b, 0)", 1, true),
           "repaint: a greyed button stays greyed -- its hover wash is not brought back")
 end
+
+print("-- Global tab: back to the mode it sat on is not a mode switch")
+do
+    local fn = PANEL:match("\n    local function LeaveGlobalTo%(mode%).-\n    end\n")
+    check(fn ~= nil, "leave: the shortcut can be read")
+    local LeaveGlobalTo = fn and loadstring("local GUI = ...\n" .. fn .. "\nreturn LeaveGlobalTo")
+    if LeaveGlobalTo then
+        local calls = {}
+        local G = { GlobalView = true, SelectedMode = "party" }
+        function G:EnterView(g) calls[#calls + 1] = "view:" .. tostring(g); self.GlobalView = g end
+        function G:LastTabInView() return "general_frame" end
+        G.SelectTab = function(n) calls[#calls + 1] = "tab:" .. n end
+        local leave = LeaveGlobalTo(G)
+        eq(leave("raid"), false, "leave: to the OTHER mode it is a real switch")
+        eq(#calls, 0, "leave: ...and the shortcut touches nothing")
+        eq(leave("party"), true, "leave: to the mode underneath it takes the shortcut")
+        eq(table.concat(calls, ","), "view:false,tab:general_frame", "leave: ...the view, then the page that tab showed last")
+        G.GlobalView = false; calls = {}
+        eq(leave("party"), false, "leave: from Party itself it does nothing")
+    end
+    check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
+      and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
+          "leave: both mode buttons ask first")
+end
