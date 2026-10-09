@@ -852,6 +852,42 @@ function R:GetSpellDisplay(rec)
 end
 
 -- ------------------------------------------------------------
+-- SPELL RANKS (WoW Forever)
+-- Vanilla-era spells have one id per rank. R.ForeverRanks (SpellDB_Forever.lua) maps
+-- each ranked id to its rank NUMBER; the words come from the client, so they are in
+-- the player's language. nil everywhere on retail.
+-- ------------------------------------------------------------
+function R:GetSpellRank(id)
+    return R.ForeverRanks and R.ForeverRanks[id] or nil
+end
+
+-- "Renew (Rank 3)" for a ranked id, the name unchanged otherwise
+function R:FormatRankedName(id, name)
+    local n = self:GetSpellRank(id)
+    if not n or not name then return name end
+    local text = C_Spell and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(id)
+    if type(text) ~= "string" or text == "" then
+        text = format(DF.L["Rank %d"], n)
+    end
+    return name .. " (" .. text .. ")"
+end
+
+-- "Renew (Ranks 1-10)" for a record covering several ranks, the name unchanged otherwise
+function R:FormatRankSpan(rec, name)
+    if not (R.ForeverRanks and rec and name) then return name end
+    local lo, hi = R.ForeverRanks[rec.id], R.ForeverRanks[rec.id]
+    for _, alt in ipairs(rec.alts or {}) do
+        local n = R.ForeverRanks[alt]
+        if n then
+            lo = (not lo or n < lo) and n or lo
+            hi = (not hi or n > hi) and n or hi
+        end
+    end
+    if not lo or lo == hi then return name end
+    return format(DF.L["%s (Ranks %d-%d)"], name, lo, hi)
+end
+
+-- ------------------------------------------------------------
 -- NAME LOOKUP (lazy)
 -- name -> record, indexing BOTH the shipped English `n` and the
 -- runtime localized C_Spell name of every record. Built once on

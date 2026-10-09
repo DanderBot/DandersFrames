@@ -2980,7 +2980,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 local tracked = not R:IsSpellIDMuted(sid)
                 put(token, {
                     child = true, rec = rec, id = sid,
-                    name = nm or rec.n,
+                    -- WoW Forever: every rank is its own id, so say which one this row is
+                    name = R:FormatRankedName(sid, nm or rec.n),
                     icon = icon or FALLBACK_ICON,
                     chip = R:FormatSpellID(sid),
                     enabled = tracked,
@@ -3050,7 +3051,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 local name, icon = R:GetSpellDisplay(rec)
                 if matches(name) then
                     put(rec.class, {
-                        rec = rec, id = rec.id, name = name, icon = icon,
+                        rec = rec, id = rec.id, name = R:FormatRankSpan(rec, name), icon = icon, sortName = name,
                         chip = RecordChip(rec),
                         enabled = R:IsSpellEnabled(selKey, rec),
                         tooltipID = rec.id,
@@ -3070,7 +3071,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                         local name, icon = R:GetSpellDisplay(rec)
                         if matches(name) then
                             put(rec.class, {
-                                rec = rec, id = sid, name = name, icon = icon,
+                                rec = rec, id = sid, name = R:FormatRankSpan(rec, name), icon = icon, sortName = name,
                                 chip = RecordChip(rec),
                                 -- On a curated list the row shows a tick, so it needs
                                 -- the state to draw. Absent on a hand-built filter,

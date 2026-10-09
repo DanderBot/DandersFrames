@@ -122,6 +122,23 @@ do  -- the store is keyed per version
     check(f and f.rawIDs[999001] and not next(f.spells), "an unknown id stays raw")
 end
 
+do  -- rank numbers + labels
+    eq(RF:GetSpellRank(139), 1, "Renew 139 is rank 1")
+    eq(RF:GetSpellRank(425268), 1, "...and so is its second rank-1 id (a map, not list order)")
+    eq(RF:GetSpellRank(25315), 10, "Renew 25315 is rank 10")
+    eq(RR.GetSpellRank and RR:GetSpellRank(139), nil, "retail has no ranks")
+    forever.L = setmetatable({}, { __index = function(_, k) return k end })
+    local prev = C_Spell
+    C_Spell = { GetSpellSubtext = function() return nil end }   -- data not loaded yet
+    eq(RF:FormatRankedName(6074, "Renew"), "Renew (Rank 2)", "falls back to the rank number")
+    C_Spell = { GetSpellSubtext = function() return "Rang 2" end }
+    eq(RF:FormatRankedName(6074, "Renew"), "Renew (Rang 2)", "prefers the client's own (localized) text")
+    eq(RF:FormatRankedName(12042, "Arcane Power"), "Arcane Power", "a single-rank spell is left alone")
+    C_Spell = prev
+    eq(RF:FormatRankSpan(RF.ByID[139], "Renew"), "Renew (Ranks 1-10)", "a record shows its rank span")
+    eq(RF:FormatRankSpan(RF.ByID[12042], "Arcane Power"), "Arcane Power", "...and a single-rank one doesn't")
+end
+
 -- ---- 3. the import prune -------------------------------------------
 local prevCSpell = C_Spell
 local function withSpells(existsFn, fn)
