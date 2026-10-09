@@ -129,7 +129,7 @@ function CC:CreateBindingRow(parent, binding, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(10, 10)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
     
     deleteBtn:SetScript("OnEnter", function()
@@ -485,7 +485,7 @@ function CC:CreateEditBindingPanel()
     DF.GUI:StyleButton(clearBindBtn, {
         tone = "danger",
         text = L["Unbind"],
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close", size = 14 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png", size = 14 },
     })
     clearBindBtn:SetScript("OnClick", function()
         panel.pendingBinding.bindType = nil
@@ -677,7 +677,7 @@ function CC:CreateEditBindingPanel()
         text = L["Advanced"],
         font = "DFFontNormal",
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png",
             size = 12,
             color = C_TEXT_DIM,
         },
@@ -906,11 +906,11 @@ function CC:CreateEditBindingPanel()
         local expandedHeight = isMacroOnly and 540 or EXPANDED_HEIGHT
         
         if panel.advancedExpanded then
-            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             advancedContent:Show()
             panel:SetHeight(expandedHeight)
         else
-            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             advancedContent:Hide()
             panel:SetHeight(collapsedHeight)
         end
@@ -927,7 +927,7 @@ function CC:CreateEditBindingPanel()
     saveBtn:SetPoint("BOTTOMRIGHT", -12, 12)
     DF.GUI:StyleButton(saveBtn, {
         width = 90, height = 28, tone = "success", accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save", size = 18 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save.png", size = 18 },
         text = L["Save"],
     })
     saveBtn:SetScript("OnClick", function()
@@ -948,7 +948,7 @@ function CC:CreateEditBindingPanel()
         width = 80, height = 28,
         tone = "danger",
         text = L["Delete"],
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 18 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png", size = 18 },
     })
     deleteBtn:SetScript("OnClick", function()
         CC:DeleteFromEditBindingPanel()
@@ -1293,7 +1293,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if currentPriority ~= DEFAULT_PRIORITY and not panel.advancedExpanded then
             panel.advancedExpanded = true
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Show()
@@ -1342,7 +1342,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if hasAdvancedOptions and not panel.advancedExpanded then
             panel.advancedExpanded = true
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Show()
@@ -1351,7 +1351,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             -- Collapse if no advanced options
             panel.advancedExpanded = false
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Hide()
@@ -3010,7 +3010,7 @@ function CC:CreateConsumableCell(parent, itemData, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(8, 8)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     deleteBtn:SetScript("OnEnter", function() deleteIcon:SetVertexColor(1, 0.3, 0.3) end)
     deleteBtn:SetScript("OnLeave", function() deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
@@ -3114,7 +3114,7 @@ function CC:CreateConsumableListRow(parent, itemData, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(10, 10)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     deleteBtn:SetScript("OnEnter", function() deleteIcon:SetVertexColor(1, 0.3, 0.3) end)
     deleteBtn:SetScript("OnLeave", function() deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)

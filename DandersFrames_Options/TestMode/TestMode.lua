@@ -3912,7 +3912,7 @@ function DF:CreateTestPanel()
             -- deliberately left alone: dropping both at once is how it became invisible
             -- the first time round.
             local arrow = labelBtn:CreateTexture(nil, "OVERLAY")
-            arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             arrow:SetSize(8, 8)
             arrow:SetPoint("LEFT", labelText, "RIGHT", 2, 0)
             arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
@@ -4180,7 +4180,7 @@ function DF:CreateTestPanel()
         local chevron = header:CreateTexture(nil, "OVERLAY")
         chevron:SetSize(12, 12)
         chevron:SetPoint("LEFT", 8, 0)
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         section.chevron = chevron
 
@@ -4279,10 +4279,10 @@ function DF:CreateTestPanel()
         section.SetExpanded = function(self, expanded)
             self.expanded = expanded
             if self.expanded then
-                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
                 self.content:Show()
             else
-                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
                 self.content:Hide()
             end
         end

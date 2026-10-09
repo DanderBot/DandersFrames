@@ -516,7 +516,7 @@ P.CreateAuraProxy = CreateAuraProxy
 -- spell icon and collapsible header, with a tooltip explaining why.
 -- ============================================================
 
-local WARNING_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.tga"
+local WARNING_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png"
 
 -- Resolve a warningKey to localized tooltip text. Keys are defined
 -- here rather than Config.lua so they can go through L[] without
@@ -981,7 +981,7 @@ local function OpenFilterPicker(opts)
         local icon = sb:CreateTexture(nil, "OVERLAY")
         icon:SetPoint("LEFT", 6, 0)
         icon:SetSize(12, 12)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
         local dim = GUI.Colors.textDim
         icon:SetVertexColor(dim.r, dim.g, dim.b)
 

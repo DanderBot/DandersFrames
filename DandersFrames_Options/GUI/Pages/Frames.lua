@@ -1194,7 +1194,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         addSetBtn:SetSize(64, 28)
         -- Ghost action: a faint cell (matching the tabs) with an accent "+ Add"
         -- that brightens on hover — consistent with the strip, quiet add action.
-        GUI:StyleButton(addSetBtn, { ghost = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add"], font = "DFFontHighlight" })
+        GUI:StyleButton(addSetBtn, { ghost = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 }, text = L["Add"], font = "DFFontHighlight" })
         addSetBtn:SetScript("OnClick", DoAddSet)
 
         -- Count / active-set meter, right of the strip (each enabled set is a live
@@ -1307,7 +1307,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Checkmark icon
             local checkIcon = container:CreateTexture(nil, "OVERLAY")
             checkIcon:SetSize(8, 8)
-            checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+            checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
             checkIcon:SetVertexColor(0.3, 0.7, 0.3)
             checkIcon:Hide()
             container.overrideCheckIcon = checkIcon

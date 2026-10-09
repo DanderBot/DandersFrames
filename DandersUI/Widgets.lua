@@ -1077,7 +1077,7 @@ function UI:CreateCloseButton(parent, opts)
         width = size, height = size,
         tone = "danger",
         icon = {
-            texture = MEDIA .. "Icons\\close",
+            texture = MEDIA .. "Icons\\close.png",
             size = math.max(8, math.floor(size * 0.55)),
             color = restColor,
         },
@@ -1440,7 +1440,7 @@ function UI:CreateOverrideMarker(parent, size)
     local icon = btn:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("CENTER")
     icon:SetSize(size, size)
-    icon:SetTexture(MEDIA .. "Icons\\dot")
+    icon:SetTexture(MEDIA .. "Icons\\dot.png")
     icon:SetVertexColor(c[1], c[2], c[3])
     btn.icon = icon
     btn:SetScript("OnEnter", function(s)
@@ -1465,7 +1465,7 @@ function UI:CreateOverrideResetButton(parent, opts)
     host:StyleButton(btn, {
         width = size, height = size,
         tone = "danger",
-        icon = { texture = MEDIA .. "Icons\\refresh", size = size - 6 },
+        icon = { texture = MEDIA .. "Icons\\refresh.png", size = size - 6 },
     })
     btn:Hide()
     -- StyleButton owns OnEnter (hover wash); hook the tooltip on top.
@@ -1597,7 +1597,7 @@ end
 local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideReset)
     local dot = container:CreateTexture(nil, "OVERLAY")
     dot:SetSize(DOT_SIZE, DOT_SIZE)
-    dot:SetTexture(MEDIA .. "Icons\\dot")
+    dot:SetTexture(MEDIA .. "Icons\\dot.png")
     dot:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     dot:Hide()
     container.modifiedDot = dot
@@ -1869,7 +1869,7 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
     -- Checkmark icon for matching global value
     local checkIcon = container:CreateTexture(nil, "OVERLAY")
     checkIcon:SetSize(8, 8)
-    checkIcon:SetTexture(MEDIA .. "Icons\\check")
+    checkIcon:SetTexture(MEDIA .. "Icons\\check.png")
     checkIcon:SetVertexColor(0.3, 0.7, 0.3)
     checkIcon:Hide()
     container.overrideCheckIcon = checkIcon
@@ -3582,7 +3582,7 @@ function UI:CreateDropdown(parent, opts)
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture(MEDIA .. "Icons\\expand_more")
+    arrow:SetTexture(MEDIA .. "Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- SetDisplayOverride: a fixed opener caption that wins over the selected
@@ -3685,7 +3685,7 @@ function UI:CreateDropdown(parent, opts)
         local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
         searchIcon:SetPoint("LEFT", 6, 0)
         searchIcon:SetSize(12, 12)
-        searchIcon:SetTexture(MEDIA .. "Icons\\search")
+        searchIcon:SetTexture(MEDIA .. "Icons\\search.png")
         searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")

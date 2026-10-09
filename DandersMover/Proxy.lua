@@ -1160,7 +1160,7 @@ local function buildLegend()
     -- Collapse chevron at the strip's right end: the strip folds away to a
     -- slim tab at the top screen edge (state remembered in DandersMoverDB).
     f.btnCollapse = UI:CreateGlyphButton(f, {
-        texture = UI.MEDIA .. "Icons\\expand_less", size = LEGEND_ROW, iconSize = 12,
+        texture = UI.MEDIA .. "Icons\\expand_less.png", size = LEGEND_ROW, iconSize = 12,
         tooltip = { title = L["Collapse"], lines = { L["Fold the strip away to a small tab at the top of the screen."] } },
         onClick = function() P:SetStripCollapsed(true) end,
     })
@@ -1231,7 +1231,7 @@ local function buildStripTab()
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
     })
     t.icon = t:CreateTexture(nil, "OVERLAY")
-    t.icon:SetTexture(UI.MEDIA .. "Icons\\expand_more")
+    t.icon:SetTexture(UI.MEDIA .. "Icons\\expand_more.png")
     t.icon:SetSize(12, 12)
     t.icon:SetPoint("CENTER")
     t.icon:SetVertexColor(C_MUTED.r, C_MUTED.g, C_MUTED.b)

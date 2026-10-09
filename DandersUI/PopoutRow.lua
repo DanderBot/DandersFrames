@@ -1194,7 +1194,7 @@ function UI:CreatePopoutRow(parent, opts)
     local chevron = plate:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(M.chevron, M.chevron)
     chevron:SetPoint("RIGHT", plate, "RIGHT", -PAD_X, 0)
-    chevron:SetTexture(ICON_PATH .. "chevron_right")
+    chevron:SetTexture(ICON_PATH .. "chevron_right.png")
     chevron:SetVertexColor(1, 1, 1, 0.5)
     row.chevron = chevron
 
@@ -1236,7 +1236,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- text columns would read as part of the label or the summary.
     local modTick = badgePill:CreateTexture(nil, "OVERLAY")
     modTick:SetSize(M.modTick, M.modTick)
-    modTick:SetTexture(ICON_PATH .. "dot")
+    modTick:SetTexture(ICON_PATH .. "dot.png")
     modTick:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     modTick:SetPoint("CENTER", badgePill, "TOPRIGHT", 0, 0)
     modTick:Hide()
@@ -1251,7 +1251,7 @@ function UI:CreatePopoutRow(parent, opts)
     local gear = plate:CreateTexture(nil, "OVERLAY")
     gear:SetSize(M.gear, M.gear)
     gear:SetPoint("RIGHT", badgePill, "LEFT", -M.colGap, 0)
-    gear:SetTexture(ICON_PATH .. "settings")
+    gear:SetTexture(ICON_PATH .. "settings.png")
     gear:SetVertexColor(1, 1, 1, 0.6)
     row.gear = gear
 

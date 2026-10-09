@@ -147,7 +147,7 @@ if cardTableSrc and chromeSrc then
             if pt[1] == "BOTTOM" and pt[2] == body then bottomToBody = true end
         end
         check(bottomToBody, "fold: open, the card runs down to the body's bottom")
-        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
            "fold: open, the chevron points down")
         chrome:SetExpanded(false, body)
         check(not chrome.line:IsShown(), "fold: shut, no hairline")
@@ -157,7 +157,7 @@ if cardTableSrc and chromeSrc then
             if pt[1] == "BOTTOM" and pt[2] == header then bottomToHeader = true end
         end
         check(bottomToHeader, "fold: shut, the card is the header alone")
-        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png",
            "fold: shut, the chevron points right")
 
         -- Disabled.

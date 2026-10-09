@@ -455,7 +455,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.grip = row:CreateTexture(nil, "ARTWORK")
         row.grip:SetSize(12, 12)
         row.grip:SetPoint("LEFT", 2, 0)
-        row.grip:SetTexture(ICON .. "reorder")
+        row.grip:SetTexture(ICON .. "reorder.png")
         row.grip:SetVertexColor(0.4, 0.4, 0.4)
 
         -- priority number
@@ -474,7 +474,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.arrow = row:CreateTexture(nil, "OVERLAY")
         row.arrow:SetSize(10, 10)
         row.arrow:SetPoint("LEFT", row.charFS, "RIGHT", 2, 0)
-        row.arrow:SetTexture(ICON .. "chevron_right")
+        row.arrow:SetTexture(ICON .. "chevron_right.png")
         row.arrow:SetVertexColor(0.5, 0.5, 0.5)
 
         -- override / conflict indicator, inlined to the LEFT of the nickname
@@ -487,7 +487,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.flag.tex = row.flag:CreateTexture(nil, "OVERLAY")
         row.flag.tex:SetSize(12, 12)
         row.flag.tex:SetPoint("CENTER")
-        row.flag.tex:SetTexture(ICON .. "warning")
+        row.flag.tex:SetTexture(ICON .. "warning.png")
         row.flag:SetScript("OnEnter", function(self)
             if not self.tipTitle then return end
             GUI:ShowTooltip(self, {
@@ -515,7 +515,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.del = CreateFrame("Button", nil, row, "BackdropTemplate")
         GUI:StyleButton(row.del, {
             width = 26, height = 22, tone = "danger",
-            icon = { texture = ICON .. "delete", size = 12 },
+            icon = { texture = ICON .. "delete.png", size = 12 },
         })
         row.del.Icon:ClearAllPoints()
         row.del.Icon:SetPoint("CENTER")
@@ -867,7 +867,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         r.status:SetPoint("LEFT", 4, 0)
         r.status.tex = r.status:CreateTexture(nil, "OVERLAY")
         r.status.tex:SetAllPoints()
-        r.status.tex:SetTexture(ICON .. "warning")
+        r.status.tex:SetTexture(ICON .. "warning.png")
         r.status.tex:SetVertexColor(1, 0.35, 0.35)
         r.status:SetScript("OnEnter", function(self)
             if not self.tip then return end
@@ -880,7 +880,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         r.who:SetTextColor(0.8, 0.8, 0.8)
         r.arrow = r:CreateTexture(nil, "OVERLAY")
         r.arrow:SetSize(10, 10); r.arrow:SetPoint("LEFT", r.who, "RIGHT", 2, 0)
-        r.arrow:SetTexture(ICON .. "chevron_right"); r.arrow:SetVertexColor(0.5, 0.5, 0.5)
+        r.arrow:SetTexture(ICON .. "chevron_right.png"); r.arrow:SetVertexColor(0.5, 0.5, 0.5)
         r.nick = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         r.nick:SetPoint("LEFT", r.arrow, "RIGHT", 6, 0); r.nick:SetWidth(110); r.nick:SetJustifyH("LEFT")
         r.nick:SetTextColor(0.9, 0.9, 0.9)
@@ -929,7 +929,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 r.status:Show()
                 r.status.tip = RECV_REASON_TEXT[item.reason] or L["Blocked"]
                 if item.reason == "user" then
-                    r.block.Icon:SetTexture(ICON .. "lock"); r.block.Icon:SetVertexColor(1, 0.8, 0.2); r.block:Show()
+                    r.block.Icon:SetTexture(ICON .. "lock.png"); r.block.Icon:SetVertexColor(1, 0.8, 0.2); r.block:Show()
                 else
                     r.block:Hide()  -- filter-blocked: not user-reversible here
                 end
@@ -937,7 +937,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 r.who:SetTextColor(0.8, 0.8, 0.8)
                 r.nick:SetTextColor(0.9, 0.9, 0.9)
                 r.status:Hide(); r.status.tip = nil
-                r.block.Icon:SetTexture(ICON .. "lock_open"); r.block.Icon:SetVertexColor(0.6, 0.6, 0.6); r.block:Show()
+                r.block.Icon:SetTexture(ICON .. "lock_open.png"); r.block.Icon:SetVertexColor(0.6, 0.6, 0.6); r.block:Show()
             end
             r:ClearAllPoints()
             r:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)

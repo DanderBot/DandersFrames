@@ -605,7 +605,7 @@ do
     check(not p.notch:IsShown(), "notch: a built popout has no connection point yet")
     p:Follow(src)
     check(p.notch:IsShown(), "notch: following, the point is up")
-    eq(p.notch:GetTexture(), "Icons\\notch", "notch: it wears the diamond")
+    eq(p.notch:GetTexture(), "Icons\\notch.png", "notch: it wears the diamond")
     eq(p.notch._vertex.r, ACCENT.r, "notch: tinted with the accent")
     eq(p.notch:GetWidth(), 10, "notch: ~10px")
     local pt = p.notch._points[#p.notch._points]
@@ -1016,7 +1016,7 @@ end
 -- the shell adds no locale file of its own.
 do
     local p = popout({ key = "pinglyph" })
-    eq(p.pinBtn._opts.texture, "Icons\\pin", "glyph: the pin button uses the pin art")
+    eq(p.pinBtn._opts.texture, "Icons\\pin.png", "glyph: the pin button uses the pin art")
     eq(p.pinBtn._opts.tooltip.title, "Pin", "glyph: with a tooltip read from the host locale")
     p:Close()
 end

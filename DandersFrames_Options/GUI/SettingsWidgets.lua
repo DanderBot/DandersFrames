@@ -400,28 +400,28 @@ GUI.SectionCard = {
 -- A card names the KIND of section it is (opts.kind = "layout") and gets the
 -- glyph here between its chevron and its title. The kind is set by the caller
 -- per section -- ☠ NEVER derived from the title, which is localised. A kind not
--- in this table draws no icon. White 32px glyphs, tinted at runtime; the new
--- ones come from Tools/generate_header_icons.py.
+-- in this table draws no icon. White 64x64 PNG glyphs, tinted at runtime --
+-- named WITH ".png": an extensionless path resolves to .blp/.tga only.
 --
--- ⚠ filter_header, NOT filter_alt: the old filter_alt.tga is drawn smaller and
+-- ⚠ filter_header, NOT filter_alt: the old filter_alt is drawn smaller and
 -- fainter than its siblings and is used elsewhere, so the headers get a copy
 -- refitted to the same ink box as the rest.
 do
     local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
     GUI.SectionCard.kinds = {
-        appearance = ICONS .. "palette",
-        layout     = ICONS .. "grid_view",
-        size       = ICONS .. "open_in_full",
-        position   = ICONS .. "open_with",
-        visibility = ICONS .. "visibility",
-        text       = ICONS .. "text_fields",
-        colours    = ICONS .. "format_color_fill",
-        filters    = ICONS .. "filter_header",
-        tooltips   = ICONS .. "chat_info",
-        effects    = ICONS .. "auto_awesome",
-        border     = ICONS .. "border_style",
-        order      = ICONS .. "swap_vert",
-        timer      = ICONS .. "timer",
+        appearance = ICONS .. "palette.png",
+        layout     = ICONS .. "grid_view.png",
+        size       = ICONS .. "open_in_full.png",
+        position   = ICONS .. "open_with.png",
+        visibility = ICONS .. "visibility.png",
+        text       = ICONS .. "text_fields.png",
+        colours    = ICONS .. "format_color_fill.png",
+        filters    = ICONS .. "filter_header.png",
+        tooltips   = ICONS .. "chat_info.png",
+        effects    = ICONS .. "auto_awesome.png",
+        border     = ICONS .. "border_style.png",
+        order      = ICONS .. "swap_vert.png",
+        timer      = ICONS .. "timer.png",
     }
 end
 
@@ -447,7 +447,7 @@ function GUI:AttachCardModifiedMark(section, clickArea)
     local DOT = GUI.ModifiedDotTopLeft
     local mark = section:CreateTexture(nil, "OVERLAY")
     mark:SetSize(DOT.size, DOT.size)
-    mark:SetTexture(GUI.MEDIA .. "Icons\\dot")
+    mark:SetTexture(GUI.MEDIA .. "Icons\\dot.png")
     mark:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     mark:SetPoint("CENTER", section.title, "TOPLEFT", DOT.x, DOT.y)
     mark:Hide()
@@ -618,9 +618,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)
     section.arrow:SetSize(CARD and CARD.chevron or 12, CARD and CARD.chevron or 12)
     if section.expanded then
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     else
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
     end
     section.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
@@ -845,7 +845,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         local pinBtn = GUI:CreateGlyphButton(section, {
             -- The pin lives in the KIT's media, not DandersFrames' own: the old
             -- Media\Icons\pin path does not exist and drew nothing.
-            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin",
+            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin.png",
             size    = PIN_SIZE,
             iconSize = CARD and CARD.pinIcon or nil,
             tooltip = { title = L["Pin settings in popout"] },
@@ -1158,9 +1158,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         if self.expanded == want then return false end
         self.expanded = want
         if self.expanded then
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
         else
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         end
         -- Persist collapsed state to SavedVariables (only store true, remove when
         -- expanded). The caller's stable key wins over the title -- see the header.
@@ -1638,8 +1638,8 @@ function GUI:CreateCardChrome(card, header, opts)
     function chrome:SetExpanded(open, body)
         self.expanded = open and true or false
         self.chevron:SetTexture(self.expanded
-            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png"
+            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         local withBody = (self.expanded and body) and true or false
         rect:ClearAllPoints()
         rect:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
@@ -1667,7 +1667,7 @@ function GUI:CreateButton(parent, text, width, height, func, iconName)
     local opts = { width = width or 120, height = height or 22, text = text }
     -- Optional leading icon by Media\Icons name (14px to suit the small buttons).
     if iconName then
-        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName, size = 14 }
+        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png", size = 14 }
     end
     GUI:StyleButton(btn, opts)
     btn:SetScript("OnClick", function(self)
@@ -1771,7 +1771,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local arrow = ddBtn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -4, 0)
     arrow:SetSize(10, 10)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local menu = CreateFrame("Frame", nil, ddBtn, "BackdropTemplate")
@@ -1857,7 +1857,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
     shareIcon:SetSize(12, 12)
     shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
-    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync")
+    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync.png")
     shareIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     shareIcon:Hide()
 
@@ -1918,7 +1918,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             GUI:StyleButton(b, {
                 width = 22, height = 22,
                 icon = {
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
                     size = 14, color = C_TEXT,
                 },
             })
@@ -1995,7 +1995,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             -- bare character, so "Interface\AddOns\..." silently becomes
             -- "InterfaceAddOns..." -- a path to nothing, which the client draws as an
             -- empty square. It does not error, which is why it shipped.
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu.png",
             tooltip = { title = L["Templates"],
                         lines = { L["Create, duplicate, rename or delete a template."] } },
         })
@@ -2195,7 +2195,7 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
         text = text,
         align = align,
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
             size = iconSize or 18,
             color = C_TEXT,
         },
@@ -2234,10 +2234,10 @@ end
 --   size   rendered height AND width in pixels (default 12, the body text size)
 --   color  {r,g,b} 0-1, default the panel's body text colour
 --
--- Every icon in Media\Icons is a 32x32 tga, which is what the texel arguments
+-- Every icon in Media\Icons is a 64x64 png, which is what the texel arguments
 -- describe; a future icon at another size needs its own call, not a change here.
 local ICON_ESCAPE_PATH   = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-local ICON_ESCAPE_TEXELS = 32
+local ICON_ESCAPE_TEXELS = 64
 
 function GUI:InlineIcon(name, size, color)
     size = size or 12
@@ -2247,7 +2247,7 @@ function GUI:InlineIcon(name, size, color)
         if v < 0 then return 0 elseif v > 255 then return 255 end
         return v
     end
-    return format("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
+    return format("|T%s%s.png:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
         ICON_ESCAPE_PATH, name, size, size,
         ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
         ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
@@ -2429,8 +2429,8 @@ function GUI:CreateChoiceCardGroup(parent, opts)
     arrow:SetPoint("LEFT", 0, 0)
     arrow:SetSize(12, 12)
     arrow:SetTexture(expanded
-        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png"
+        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local label = header:CreateFontString(nil, "OVERLAY")
@@ -2583,7 +2583,7 @@ function GUI:CreateChoiceCard(parent, opts)
         local ai = actionBtn:CreateTexture(nil, "OVERLAY")
         ai:SetSize(16, 16)
         ai:SetPoint("CENTER")
-        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit"))
+        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit") .. ".png")
         -- Full text colour at REST, accent on hover. Dim-at-rest is the idiom for a
         -- glyph sitting beside a label that already names it; this one has no label.
         ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -3312,7 +3312,7 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noi
         noisyIcon:SetFrameLevel(row:GetFrameLevel() + 2)
         local tex = noisyIcon:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints()
-        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
+        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png")
         -- The caution tone's ICON colour, read straight from the shared tone table
         -- so this stays in step with every banner and note that uses it.
         -- ☠ Read at CALL time, not through a file-scope alias. INFO_BANNER_TONES

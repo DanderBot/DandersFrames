@@ -388,7 +388,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         barIcon:SetPoint("CENTER", 0, 0)
         -- "expand_more" is a down chevron; rotate 180° so it points UP — this bar
         -- collapses the (expanded) section, so an up arrow reads correctly.
-        barIcon:SetTexture(ICON_PATH .. "expand_more")
+        barIcon:SetTexture(ICON_PATH .. "expand_more.png")
         barIcon:SetRotation(math.pi)
         barIcon:SetVertexColor(1, 1, 1, 0.5)
 
@@ -409,7 +409,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 if saved then saved[stateKey] = true end
             end
             if group.collapseArrow then
-                group.collapseArrow:SetTexture(ICON_PATH .. "chevron_right")
+                group.collapseArrow:SetTexture(ICON_PATH .. "chevron_right.png")
             end
             -- A page that owns its own layout (rather than re-flowing itself off
             -- RefreshStates below) re-runs it from this hook.
@@ -546,7 +546,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
             local arrow = widget:CreateTexture(nil, "OVERLAY")
             arrow:SetSize(10, 10)
             arrow:SetPoint("RIGHT", widget.text, "LEFT", -2, 0)
-            arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right") or (ICON_PATH .. "expand_more"))
+            arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right.png") or (ICON_PATH .. "expand_more.png"))
             local c = host:GetAccent()
             arrow:SetVertexColor(c.r, c.g, c.b)
             self.collapseArrow = arrow
@@ -576,7 +576,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
                     -- only store true, remove when expanded
                     if saved then saved[stateKey] = self.collapsed or nil end
                 end
-                arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right") or (ICON_PATH .. "expand_more"))
+                arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right.png") or (ICON_PATH .. "expand_more.png"))
                 -- Refresh the page to recalculate layout. A page that owns its own
                 -- layout re-runs it from the hook; pages built by the standard page
                 -- builder expose RefreshStates on the group's parent.
@@ -1426,7 +1426,7 @@ function UI:CreateInfoBanner(parent, opts)
             self:SetBackdropBorderColor(tone.border[1], tone.border[2], tone.border[3], tone.border[4] or 1)
         end
         if tone.icon then
-            self:SetIconTexture(ICON_PATH .. tone.icon)
+            self:SetIconTexture(ICON_PATH .. tone.icon .. ".png")
         end
         if tone.iconColor then
             self:SetIconColor(tone.iconColor[1], tone.iconColor[2], tone.iconColor[3])
@@ -1713,7 +1713,7 @@ function UI:CreateInfoBanner(parent, opts)
         chip:SetSize(CHIP_H, CHIP_H)
         host:StyleButton(chip, {
             ghost = true, width = CHIP_H, height = CHIP_H,
-            icon = toneDef.icon and { texture = ICON_PATH .. toneDef.icon, size = 18 } or nil,
+            icon = toneDef.icon and { texture = ICON_PATH .. toneDef.icon .. ".png", size = 18 } or nil,
         })
         -- Where the x was, so the hand that closed it finds it again.
         chip:SetPoint("TOPRIGHT", banner, "TOPRIGHT", 0, 0)

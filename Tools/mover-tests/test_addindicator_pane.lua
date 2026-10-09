@@ -1327,7 +1327,7 @@ do
     eq(p.block:GetAlpha(), 1, "inline, aura: ...the block is bright")
     eq(rawget(tIcon, "_flags").mouse, true, "inline, aura: ...and takes clicks again")
     eq(Ticked(p.heads[1]), true, "inline headings: an answered step shows the tick")
-    eq(rawget(rawget(p.heads[1], "tick"), "_texture"), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check",
+    eq(rawget(rawget(p.heads[1], "tick"), "_texture"), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png",
        "inline headings: ...the addon's own check icon, not a glyph")
     eq(Tag(p.heads[2]), "Next", "inline headings: ...and Next moves on to section 2")
     local hAura = heights[#heights]

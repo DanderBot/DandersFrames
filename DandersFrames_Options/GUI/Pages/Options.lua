@@ -63,7 +63,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Copy is a normal button; the shared styler owns the backdrop/hover AND
         -- the icon+label layout via the icon/text opts. (Label set per-mode below.)
         GUI:StyleButton(btn, {
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy", size = 18, color = { r = 0.9, g = 0.9, b = 0.9 } },
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy.png", size = 18, color = { r = 0.9, g = 0.9, b = 0.9 } },
             text = L["Copy to Raid"],
         })
         
@@ -81,7 +81,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             GUI:StyleButton(linkBtn, {
                 fadeActiveText = true,
                 -- icon swaps sync / sync_disabled with the linked state (set in UpdateAppearance)
-                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync_disabled", size = 18, color = { r = 0.9, g = 0.9, b = 0.9 } },
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync_disabled.png", size = 18, color = { r = 0.9, g = 0.9, b = 0.9 } },
                 text = L["Sync with Raid"],
             })
         end
@@ -108,7 +108,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- State shown by the toggle border/fill (SetActive) + the label
                 -- word; text stays white in both states, like the other toggles.
                 linkBtn:SetActive(isLinked)
-                linkBtn.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLinked and "sync" or "sync_disabled"))
+                linkBtn.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLinked and "sync" or "sync_disabled") .. ".png")
                 linkBtn.Text:SetText(isLinked and format(L["Synced with %s"], dest) or format(L["Sync with %s"], dest))
                 linkBtn.Text:SetTextColor(0.9, 0.9, 0.9)
                 linkBtn.Icon:SetVertexColor(0.9, 0.9, 0.9)
@@ -239,7 +239,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- red hover; we keep the content-fit width + the tooltip hook.
         GUI:StyleButton(resetBtn, {
             tone = "danger",
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 18 },
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh.png", size = 18 },
             text = L["Reset Page"],
         })
         resetBtn:SetWidth(GUI.SnapLenUp(resetBtn, math.ceil(resetBtn.Text:GetStringWidth()) + 36))
@@ -306,7 +306,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- content-fit width + tooltip hook.
         GUI:StyleButton(resetBtn, {
             tone = "danger",
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 18 },
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh.png", size = 18 },
             text = L["Reset Page"],
         })
         resetBtn:SetWidth(GUI.SnapLenUp(resetBtn, math.ceil(resetBtn.Text:GetStringWidth()) + 36))

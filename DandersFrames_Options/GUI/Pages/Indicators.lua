@@ -86,7 +86,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- completed-state confirmation. Reuses adLink/adOnLink (the openAD path).
         -- ========================================
         local adPromoBanner = GUI:CreateInfoBanner(self.child, {tone = "success", dismissKey = "buffbar_adpromo"})
-        adPromoBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small")
+        adPromoBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small.png")
         adPromoBanner.refreshContent = function(b)
             b:SetHTML(L["The buff bar shows auras. The Aura Designer makes the frame react to them — recolour the health bar, ring the frame, flash a corner icon, play a sound. Per spell, or per filter."] .. " " ..
                 adLink("openAD", L["Open Aura Designer"]), adOnLink)

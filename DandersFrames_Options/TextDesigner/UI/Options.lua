@@ -805,7 +805,7 @@ function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, ySta
             if capturedIdx > 1 then
                 local upBtn = DF.GUI:CreateGlyphButton(itemRow, {
                     width = 20, height = 13, iconSize = 12,
-                    texture  = mediaPath .. "expand_more",
+                    texture  = mediaPath .. "expand_more.png",
                     rotation = math.pi,   -- 180° = points up
                     onClick  = function()
                         elem.groupItems[capturedIdx], elem.groupItems[capturedIdx - 1] =
@@ -818,7 +818,7 @@ function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, ySta
             if capturedIdx < #elem.groupItems then
                 local downBtn = DF.GUI:CreateGlyphButton(itemRow, {
                     width = 20, height = 13, iconSize = 12,
-                    texture = mediaPath .. "expand_more",
+                    texture = mediaPath .. "expand_more.png",
                     onClick = function()
                         elem.groupItems[capturedIdx], elem.groupItems[capturedIdx + 1] =
                             elem.groupItems[capturedIdx + 1], elem.groupItems[capturedIdx]
@@ -1322,7 +1322,7 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     local searchIcon = searchBar:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(0.6, 0.6, 0.6)
 
     local searchBox = CreateFrame("EditBox", nil, searchBar)
@@ -1342,7 +1342,7 @@ function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     -- Reddens on hover rather than the default brighten: it discards the query.
     local clearBtn = DF.GUI:CreateGlyphButton(searchBar, {
         size       = 16,
-        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
         color      = { 0.5, 0.5, 0.5 },
         hoverColor = { 1, 0.3, 0.3 },
     })
@@ -1770,9 +1770,9 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     -- an "off" eye shouldn't light up under the mouse.
     local function updateEyeIcon()
         if elem.enabled then
-            eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+            eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
         else
-            eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+            eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
         end
         eyeBtn:SetGlyphHover(elem.enabled)
         -- A hidden element's title and chevron take the card's disabled grey.
@@ -2242,7 +2242,7 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page)
     -- Right edge aligns with the element list's scroll box (which is inset -22 for
     -- the scrollbar) so the button doesn't overhang the element rows below it.
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
-    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Text Element"], font = "DFFontHighlight" })
+    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 }, text = L["Add Text Element"], font = "DFFontHighlight" })
     state.addBtn = addBtn
 
     -- ── Section caption ──
@@ -2476,9 +2476,9 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     -- an "off" eye shouldn't light up under the mouse.
     local function updateEyeIcon()
         if elem.enabled then
-            eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+            eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
         else
-            eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+            eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
         end
         eyeBtn:SetGlyphHover(elem.enabled)
         -- A hidden group's title and chevron take the card's disabled grey.
@@ -2628,7 +2628,7 @@ local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page)
     -- Right edge aligns with the group list's scroll box (inset -22 for the
     -- scrollbar) so the button doesn't overhang the cards below — matches Texts.
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
-    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Group"], font = "DFFontHighlight" })
+    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 }, text = L["Add Group"], font = "DFFontHighlight" })
 
     addBtn:SetScript("OnClick", function()
         -- Add a new group element directly (no picker — only one type)

@@ -1363,7 +1363,7 @@ function Search:CreateSearchBar(parent)
     local icon = frame:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 6, 0)
     icon:SetSize(15, 15)
-    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     icon:SetVertexColor(0.72, 0.72, 0.72)
 
     local editbox = CreateFrame("EditBox", nil, frame)
@@ -1385,7 +1385,7 @@ function Search:CreateSearchBar(parent)
     -- Clearing is destructive, so this one overrides the shared white hover with
     -- the soft red every other destructive glyph in the GUI uses.
     local clearBtn = DF.GUI:CreateGlyphButton(frame, {
-        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
         size       = 16,
         color      = { 0.5, 0.5, 0.5 },
         hoverColor = { 1, 0.3, 0.3 },

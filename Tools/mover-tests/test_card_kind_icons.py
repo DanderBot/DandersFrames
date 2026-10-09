@@ -3,7 +3,8 @@ the header itself).
 
   * every kind in GUI.SectionCard.kinds (SettingsWidgets.lua) points at a
     texture that exists in DandersFrames/Media/Icons, at the icon spec
-    (32x32, 32-bit, uncompressed, bottom-left origin, TGA 2.0 footer);
+    (a 64x64 8-bit RGBA PNG, named WITH its .png -- the client resolves an
+    extensionless path to .blp/.tga only);
   * every kind used in GUI.SectionKindByKey (Controls.lua) is in that map;
   * every collapseKey tagged there is a real section key on some page, so a
     typo cannot silently leave a card without its icon.
@@ -35,23 +36,22 @@ print("-- Card kind icons: map -> files on disk, tags -> map, tags -> real keys"
 
 m = re.search(r"GUI\.SectionCard\.kinds = \{(.*?)\n    \}", SW, re.S)
 check(m is not None, "map: GUI.SectionCard.kinds found in SettingsWidgets.lua")
-kinds = dict(re.findall(r'(\w+)\s*=\s*ICONS \.\. "(\w+)"', m.group(1))) if m else {}
+kinds = dict(re.findall(r'(\w+)\s*=\s*ICONS \.\. "(\w+)\.png"', m.group(1))) if m else {}
 check(len(kinds) == 13, "map: 13 kinds (got %d)" % len(kinds))
 check(re.search(r'local ICONS = "Interface\\\\AddOns\\\\DandersFrames\\\\Media\\\\Icons\\\\"', SW) is not None,
       "map: textures resolve under the resident addon's Media/Icons")
 
 ICON_DIR = ROOT / "DandersFrames/Media/Icons"
 for kind, name in sorted(kinds.items()):
-    path = ICON_DIR / (name + ".tga")
-    check(path.is_file(), "file: kind %r -> %s.tga exists" % (kind, name))
+    path = ICON_DIR / (name + ".png")
+    check(path.is_file(), "file: kind %r -> %s.png exists" % (kind, name))
     if not path.is_file():
         continue
     data = path.read_bytes()
-    idlen, cmap, itype = data[0], data[1], data[2]
-    w, h, bpp, desc = struct.unpack("<HHBB", data[12:18])
-    check((itype, w, h, bpp, desc) == (2, 32, 32, 32, 0x08),
-          "file: %s.tga is 32x32 BGRA uncompressed, bottom-left origin" % name)
-    check(data.endswith(b"TRUEVISION-XFILE.\x00"), "file: %s.tga carries the TGA 2.0 footer" % name)
+    check(data[:8] == b"\x89PNG\r\n\x1a\n", "file: %s.png is a PNG" % name)
+    # IHDR: width, height (big-endian), bit depth, colour type 6 = RGBA
+    w, h, depth, ctype = struct.unpack(">IIBB", data[16:26])
+    check((w, h, depth, ctype) == (64, 64, 8, 6), "file: %s.png is 64x64 8-bit RGBA" % name)
 
 check(kinds.get("filters") == "filter_header",
       "map: filters uses the refitted filter_header, never the smaller filter_alt")

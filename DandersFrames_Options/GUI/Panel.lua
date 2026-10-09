@@ -896,7 +896,7 @@ function DF:CreateGUI()
     -- brightens the icon to the theme colour on hover.
     GUI:StyleButton(infoBtn, {
         width = 20, height = 20,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\notes", size = 16, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\notes.png", size = 16, color = C_TEXT_DIM },
     })
     infoBtn:HookScript("OnEnter", function(self)
         local tc = GetThemeColor()
@@ -934,7 +934,7 @@ function DF:CreateGUI()
     -- is built further down, after the pieces it docks against exist.
     local OpenScalePopout
     local scaleBtn = GUI:CreateGlyphButton(frame, {
-        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
         width = 20, height = 20, iconSize = 15,
         color    = C_TEXT_DIM,
         tooltip  = { title = L["Scale"], lines = { L["Scale the settings window."] } },
@@ -1282,10 +1282,10 @@ function DF:CreateGUI()
                 obj.star = obj:CreateTexture(nil, "OVERLAY")
                 obj.star:SetSize(14, 14)
                 obj.star:SetPoint("TOPLEFT", 10, -9)
-                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star.png")
                 obj.chev = obj:CreateTexture(nil, "OVERLAY")
                 obj.chev:SetSize(14, 14)
-                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
                 obj.title = obj:CreateFontString(nil, "OVERLAY")
                 obj.body  = obj:CreateFontString(nil, "OVERLAY")
                 obj.by    = obj:CreateFontString(nil, "OVERLAY")
@@ -1764,7 +1764,7 @@ function DF:CreateGUI()
     btnLock:SetPoint("RIGHT", deck2, "RIGHT", SnapLen(btnLock, -33), 1)
     GUI:StyleButton(btnLock, {
         width = 80, height = 24,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock.png", size = 18, color = C_TEXT_DIM },
         text = L["Unlock"],
     })
     GUI:SetSettingsFont(btnLock.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
@@ -1787,7 +1787,7 @@ function DF:CreateGUI()
     btnTest:SetPoint("RIGHT", btnLock, "LEFT", SnapLen(btnTest, -4), 0)
     GUI:StyleButton(btnTest, {
         width = 75, height = 24,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off.png", size = 18, color = C_TEXT_DIM },
         text = L["Test"],
     })
     GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
@@ -1809,7 +1809,7 @@ function DF:CreateGUI()
     -- and the verbs need the buttons to grey themselves afterwards.
     local DoUndo, DoRedo
     local btnRedo = GUI:CreateGlyphButton(deck2, {
-        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\redo",
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\redo.png",
         width = 22, height = 22, iconSize = 16,
         color = C_TEXT_DIM,
         tooltip = { title = L["Redo"] },
@@ -1817,7 +1817,7 @@ function DF:CreateGUI()
     })
     btnRedo:SetPoint("RIGHT", btnTest, "LEFT", SnapLen(btnRedo, -12), 0)
     local btnUndo = GUI:CreateGlyphButton(deck2, {
-        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\undo",
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\undo.png",
         width = 22, height = 22, iconSize = 16,
         color = C_TEXT_DIM,
         tooltip = { title = L["Undo"] },
@@ -1997,7 +1997,7 @@ function DF:CreateGUI()
         if layoutActive and isLocked then
             btnLock.dfDisabled = true
             btnLock.Text:SetText(L["Unlock"])
-            btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock")
+            btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock.png")
             btnLock:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5)
             btnLock:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
             btnLock.Text:SetTextColor(0.4, 0.4, 0.4)
@@ -2008,7 +2008,7 @@ function DF:CreateGUI()
         btnLock.dfDisabled = false
 
         btnLock.Text:SetText(isLocked and L["Unlock"] or L["Lock"])
-        btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLocked and "lock" or "lock_open"))
+        btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLocked and "lock" or "lock_open") .. ".png")
         
         if not isLocked then
             -- Unlocked - active/selected toggle look (white text/icon like the others)
@@ -2110,7 +2110,7 @@ function DF:CreateGUI()
         scalePopout = GUI:CreatePopout({
             key      = "df.uiscale",
             title    = L["Scale"],
-            icon     = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+            icon     = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
             width    = 150,
             pinnable = true,
             build    = function(po, content)
@@ -2407,7 +2407,7 @@ function DF:CreateGUI()
         local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
         btnTest:SetActive(panelOpen)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            .. (userWants and "preview" or "preview_off"))
+            .. (userWants and "preview" or "preview_off") .. ".png")
         -- White text/icon in both states (state shown by the toggle border/fill).
         btnTest.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         btnTest.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)

@@ -22,9 +22,7 @@ local ICONS = {
     "edit",
     "expand_more",
     "filter_alt",
-    -- Extension spelled out: extensionless SetTexture resolves .blp/.tga, and this
-    -- icon's live call sites moved to the .png — the preview showed the stale art.
-    "filter_list.png",
+    "filter_list",
     "info",
     "keyboard",
     "lock",
@@ -175,7 +173,7 @@ local function CreateIconPreview()
         local icon = container:CreateTexture(nil, "ARTWORK")
         icon:SetSize(ICON_SIZE, ICON_SIZE)
         icon:SetPoint("TOP", 0, -4)
-        icon:SetTexture(ICONS_PATH .. iconName)
+        icon:SetTexture(ICONS_PATH .. iconName .. ".png")
         icon:SetVertexColor(currentColor.r, currentColor.g, currentColor.b)
         table.insert(iconTextures, icon)
         
@@ -193,7 +191,7 @@ local function CreateIconPreview()
             DF.GUI:ShowTooltip(self, {
                 title = iconName,
                 lines = {
-                    { text = ICONS_PATH .. iconName, color = { r = 0.6, g = 0.6, b = 0.6 } },
+                    { text = ICONS_PATH .. iconName .. ".png", color = { r = 0.6, g = 0.6, b = 0.6 } },
                     " ",
                     { text = DF.L["Click to copy texture path"], hint = true },
                 },
@@ -204,7 +202,7 @@ local function CreateIconPreview()
             DF.GUI:HideTooltip()
         end)
         container:SetScript("OnClick", function()
-            local path = ICONS_PATH .. iconName
+            local path = ICONS_PATH .. iconName .. ".png"
             DF:Say(DF.L["Copied: "] .. path)
         end)
     end

@@ -1288,7 +1288,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local statusDot = headerPanel:CreateTexture(nil, "OVERLAY")
     statusDot:SetSize(8, 8)
     statusDot:SetPoint("TOPLEFT", titleText, "BOTTOMLEFT", 1, -8)
-    statusDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    statusDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot.png")
 
     local statusText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     -- Anchored to the DOT, not the title: hiding the dot then leaves the text where
@@ -1423,7 +1423,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local resetBtn = CreateFrame("Button", nil, leftPanel, "BackdropTemplate")
     GUI:StyleButton(resetBtn, {
         tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh.png", size = 14 },
         text = L["Reset"],
     })
     -- Title + one scope line, matching every other Reset on the addon (see the
@@ -1487,7 +1487,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- Same glyph, same grey as the main addon search bar, via the shared helper --
     -- a search field that does not look like the addon's other search field is the
     -- kind of small inconsistency this page has been collecting.
-    GUI:AddEditBoxIcon(searchBox.EditBox, "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    GUI:AddEditBoxIcon(searchBox.EditBox, "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
 
     -- Row 3, right end: the Add-from-Database picker. Both ways of adding a spell to
     -- a custom filter now sit on one row -- type an ID on the left, browse the

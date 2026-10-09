@@ -2769,7 +2769,7 @@ function UI:CreatePopout(opts)
     -- straddles (which is ARTWORK sublevel 7). A diamond, so ONE piece of art
     -- serves all four dock sides -- it is symmetric under a quarter turn.
     local notch = f:CreateTexture(nil, "OVERLAY", nil, 2)
-    notch:SetTexture(UI.MEDIA .. "Icons\\notch")
+    notch:SetTexture(UI.MEDIA .. "Icons\\notch.png")
     notch:SetSize(NOTCH_SIZE, NOTCH_SIZE)
     notch:Hide()
     po.notch = notch
@@ -2832,7 +2832,7 @@ function UI:CreatePopout(opts)
 
     if po.pinnable then
         po.pinBtn = host:CreateGlyphButton(f, {
-            texture = UI.MEDIA .. "Icons\\pin",
+            texture = UI.MEDIA .. "Icons\\pin.png",
             size = PIN_SIZE,
             tooltip = { title = L and L["Pin"] or "Pin" },
             onClick = function() po:Pin() end,

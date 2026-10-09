@@ -289,7 +289,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- Remove ✕ (mirror the member-row remove idiom)
             local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -313,7 +313,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- btn.tooltip assigned afterwards is read by nothing.
             local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png",
                 color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
                 hoverColor = { 1, 1, 1 },
                 tooltip    = {
@@ -351,7 +351,7 @@ local function BuildLinkedFiltersSection(env, group)
     -- "+ Add Filter" button → mini-picker of unlinked presets + customs
     local addFilterLinkBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addFilterLinkBtn:SetHeight(22)
-    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
+    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add Filter"] })
     GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
     addFilterLinkBtn:SetScript("OnClick", function()
         OpenFilterPicker({
@@ -414,7 +414,7 @@ local function BuildMembersSection(env, group)
                 -- One arrow texture serves both directions via rotation.
                 local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                     rotation = math.rad(180),
                 })
                 upBtn:SetPoint("TOPLEFT", 2, -1)
@@ -429,7 +429,7 @@ local function BuildMembersSection(env, group)
             if canMoveDown then
                 local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                 })
                 downBtn:SetPoint("BOTTOMLEFT", 2, 1)
                 downBtn:SetScript("OnClick", function()
@@ -498,7 +498,7 @@ local function BuildMembersSection(env, group)
             -- Red at rest, brighter red on hover: an inline destructive remove.
             local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -566,7 +566,7 @@ local function BuildMembersSection(env, group)
     -- "+ Add aura" button
     local addMemBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addMemBtn:SetHeight(22)
-    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
+    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add aura"] })
     GUI:SetSettingsFont(addMemBtn.Text, 9, "")
     addMemBtn:SetScript("OnClick", function()
         -- Shared spell picker, group context: searchable, class/category-filterable
@@ -1127,9 +1127,9 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
         -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
             if shown() then
-                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
             else
-                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
             end
             eyeBtn:SetGlyphHover(shown())
         end
@@ -1691,9 +1691,9 @@ S.BuildDebuffGroupsTab = function()
             -- restores the state; hover is suppressed while hidden.
             local function updateEyeIcon()
                 if shown() then
-                    eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
                 else
-                    eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
                 end
                 eyeBtn:SetGlyphHover(shown())
             end

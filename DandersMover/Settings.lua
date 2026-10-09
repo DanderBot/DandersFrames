@@ -428,7 +428,7 @@ local function addRow(f, parent, y, indent, label, get, set, expandable, expande
         r.cb = UI:CreateCheckbox(r, { label = label, get = get, set = set })
         if expandable then
             r.exp = UI:CreateGlyphButton(r, {
-                texture = UI.MEDIA .. "Icons\\expand_more",
+                texture = UI.MEDIA .. "Icons\\expand_more.png",
                 size = 20, iconSize = 14,
                 onClick = function()
                     f.expanded[expandedKey] = not f.expanded[expandedKey]
@@ -450,7 +450,7 @@ local function addRow(f, parent, y, indent, label, get, set, expandable, expande
     r.cb:SetPoint("TOPLEFT", indent, CHECK_CONTENT_TOP + CHECK_CONTENT_H / 2 - LIST_ROW / 2)
     r.cb:SetWidth(f.listWidth - indent - (expandable and 28 or 8))
     if expandable then
-        r.exp:SetGlyph(UI.MEDIA .. "Icons\\" .. (f.expanded[expandedKey] and "expand_less" or "expand_more"))
+        r.exp:SetGlyph(UI.MEDIA .. "Icons\\" .. (f.expanded[expandedKey] and "expand_less" or "expand_more") .. ".png")
     end
     return r
 end

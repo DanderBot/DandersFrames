@@ -777,7 +777,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         local arrow = btn:CreateTexture(nil, "OVERLAY")
         arrow:SetPoint("RIGHT", -8, 0)
         arrow:SetSize(12, 12)
-        arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+        arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
         arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
@@ -1032,7 +1032,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local function UpdateText()
@@ -1128,7 +1128,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Placeholder text
@@ -1483,7 +1483,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local function UpdateText()
@@ -1537,7 +1537,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Placeholder text
@@ -1827,7 +1827,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function UpdateText()
@@ -1869,7 +1869,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Placeholder text
@@ -2166,7 +2166,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -2493,7 +2493,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -2799,7 +2799,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -3021,9 +3021,9 @@ local ROSTER_ROLE_COLORS = {
 }
 -- ☠ DOUBLE BACKSLASHES. Lua passes an unrecognised escape through as the bare character, so
 -- the single-backslash form is a path to nothing and the client draws an empty square.
-local ROSTER_ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
-local ROSTER_ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check"
-local ROSTER_ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close"
+local ROSTER_ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png"
+local ROSTER_ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png"
+local ROSTER_ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png"
 
 -- ★ THE GROUP, AS A SORTED LIST OF { name, fullName, class, role, group }.
 -- ⚠ ONE READER FOR BOTH WIDGETS IS THE INTENT, NOT THE STATE: only the compact one calls
@@ -3285,7 +3285,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -4751,7 +4751,7 @@ function GUI:CreatePopoutPageTools(page)
             b:SetSize(102, 20)
             GUI:StyleButton(b, {
                 ghost = true, text = text, font = "DFFontHighlightSmall",
-                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. icon, size = 12 },
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. icon .. ".png", size = 12 },
             })
             b:SetScript("OnClick", function() ApplyAll(want) end)
             return b

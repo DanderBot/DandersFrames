@@ -713,7 +713,7 @@ do
     local widgets = options_file_source("GUI/SettingsWidgets.lua")
     check(widgets:find("function GUI:InlineIcon(name, size, color)", 1, true) ~= nil,
           "glyphs: the helper takes a colour")
-    check(widgets:find("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
+    check(widgets:find("|T%s%s.png:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
           "glyphs: ...and builds the long escape, which is the only one that tints")
 end
 

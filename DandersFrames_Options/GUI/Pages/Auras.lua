@@ -78,7 +78,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             elseif selfPos == "FIRST" or selfPos == "LAST" then
                 combatBanner:SetTone("caution")
                 -- Override default warning icon with info icon for this softer state.
-                combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
+                combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info.png")
                 combatBanner:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
             else
                 combatBanner:SetTone("success")
@@ -1326,7 +1326,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
 
                 local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                 plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
                 plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
 
@@ -1354,7 +1354,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end)
 
                 local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                 minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
                 minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
 
@@ -1914,7 +1914,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     end
 
                     local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                    GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = gradIconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = gradIconPath .. "add.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                     plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
                     plus:SetScript("OnClick", function() commitTo(cur + 1) end)
 
@@ -1956,7 +1956,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     eb:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
                     local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                    GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = gradIconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = gradIconPath .. "remove.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                     minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
                     minus:SetScript("OnClick", function() commitTo(cur - 1) end)
 
