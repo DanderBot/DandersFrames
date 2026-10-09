@@ -202,7 +202,20 @@ function UI:SetSettingsFont(fontString, size, outline)
 
     local getSetting = self:Hook("getFontSetting")
     local fontName, userOutline
-    if getSetting then fontName, userOutline = getSetting() end
+    if getSetting then
+        fontName, userOutline = getSetting()
+    else
+        -- ☠ A HOST WITH NO FONT SETTING FOLLOWS THE SHARED DFFont OBJECTS. They
+        -- are library state, re-skinned by whichever host does own a setting, and
+        -- every template-built label already follows them; a sized label has to
+        -- read them too, or it alone falls back to the client font while the
+        -- buttons beside it wear the user's.
+        local shared = UI.FontObjects.DFFontHighlightSmall
+        if shared then
+            local path, _, flags = shared:GetFont()
+            fontName, userOutline = path, flags
+        end
+    end
     userOutline = userOutline or ""
     if userOutline == "NONE" then userOutline = "" end
 
@@ -218,7 +231,9 @@ function UI:SetSettingsFont(fontString, size, outline)
         SafeSet(self, fontString, fontName, size, flagsToUse)
     else
         local resolve = self:Hook("resolveFontPath")
-        local fontPath = (fontName and resolve and resolve(fontName)) or DEFAULT_FONT_PATH
+        -- Without a resolver the name already IS a path (the shared object's).
+        local fontPath = (fontName and resolve and resolve(fontName))
+            or (not resolve and fontName) or DEFAULT_FONT_PATH
         pcall(fontString.SetFont, fontString, fontPath, size, flagsToUse)
     end
 
