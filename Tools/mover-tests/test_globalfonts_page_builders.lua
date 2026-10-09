@@ -11,7 +11,7 @@ local NS = ...
 --
 --   column 1   Font Settings         the scratch pad and its Apply to All
 --              Shadow Settings       pinnable; the Shadow cross-link's target
---   column 2   Affected Elements     the reference list, as a card
+--   column 2   Affected Elements     the reference list, a plain box (not a card)
 --
 -- ☠ THE PAGE HAS TWO RULES OF ITS OWN:
 --   1. THE APPLY BUTTON IS A WIZARD, NOT A SETTING. It is hand-built, so the
@@ -277,13 +277,13 @@ do
       and PAGE:find("Add(infoGroup, nil, 2)", 1, true) ~= nil,
           "affected: classic keeps its 280 box, the pinned 235 and column 2")
 
-    local block, call = sectionBlock("Affected Elements", "local infoInner")
-    check(call:find('OpenSection(L["Affected Elements"], "fonts_affected", 2, nil)', 1, true) ~= nil,
-          "affected: a card keyed fonts_affected in column 2 -- no summary, no pin")
-    check(block:find("local infoInner = GUI:GroupInnerWidth(band)", 1, true) ~= nil
-      and block:find("band:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))", 1, true) ~= nil
-      and block:find('band:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)', 1, true) ~= nil,
-          "affected: the list is measured at the card's width, the note keeps its 40")
+    check(PAGE:find('OpenSection(L["Affected Elements"]', 1, true) == nil,
+          "affected: not a card -- it holds only text, so nothing to fold")
+    check(PAGE:find('infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)', 1, true) ~= nil
+      and PAGE:find("local infoInner = GUI:GroupInnerWidth(infoGroup)", 1, true) ~= nil
+      and PAGE:find("infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))", 1, true) ~= nil
+      and PAGE:find('infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)', 1, true) ~= nil,
+          "affected: a plain titled box, the list measured at its width, the note keeping its 40")
 end
 
 -- ============================================================
@@ -293,8 +293,8 @@ print("-- Fonts page: the cards together")
 do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Font Settings | Shadow Settings | Affected Elements",
-       "order: the three cards, in the order they stack")
+    eq(table.concat(order, " | "), "Font Settings | Shadow Settings",
+       "order: the two cards, in the order they stack")
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
@@ -303,5 +303,5 @@ do
     check(PAGE:find("hoistToggle", 1, true) == nil, "ticks: no card on this page has a header tick")
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 3, "classic: three bare 280 boxes, all the classic branch's own")
+    eq(bare, 4, "boxes: classic's three bare 280 boxes, plus Modern's Affected Elements box")
 end

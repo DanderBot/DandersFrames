@@ -367,7 +367,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- nothing until Apply to All writes ~30 per-element fonts in one press,
             -- and a second, pinned scratch pad bound to the same scratch table
             -- would only be a second copy of the same button. Column 1.
-            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
+            -- Across BOTH columns: it heads the page, and column 2's reference
+            -- box then starts level with the first card without a heading of
+            -- its own.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, "both")
             local fontCard = OpenSection(L["Font Settings"], "fonts_global", 1, nil)
             BuildFontSelectionGroup({
                 group = fontCard, parent = self.child,
@@ -427,20 +430,21 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(infoGroup, nil, 2)
         else
             -- Reference text, and no control: the list a user reads WHILE deciding
-            -- whether to press Apply to All. A card like every other group on the
-            -- page -- it folds away like them once it has been read -- but no
-            -- summary (it holds no value) and no pin (nothing it holds changes how
-            -- anything looks). Column 2, under Content.
+            -- whether to press Apply to All. A plain titled box, NOT a card: a
+            -- card is the shape of a group of SETTINGS (it folds, it has a chevron
+            -- and a kind icon), and this was the one card in the panel holding
+            -- only text. Column 2, with no heading of its own: one reference box
+            -- is not a group.
             --
-            -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the card's width several of
+            -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the column's width several of
             -- the twelve bullets stop wrapping, so classic's 235 would leave a hole
             -- under it. The note keeps its 40 -- one line at any width.
-            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 2)
-            local band = OpenSection(L["Affected Elements"], "fonts_affected", 2, nil)
-            local infoInner = GUI:GroupInnerWidth(band)
-            band:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
-            band:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
-            CloseSection(band)
+            local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
+            infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
+            local infoInner = GUI:GroupInnerWidth(infoGroup)
+            infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
+            infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
+            Add(infoGroup, nil, 2)
         end
     end)
     
