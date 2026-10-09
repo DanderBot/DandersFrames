@@ -1396,7 +1396,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             cb:SetPoint("LEFT", 0, 0)
             GUI:StyleCheckButton(cb, { themeRoot = parent })
             local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+            txt:SetPoint("LEFT", cb, "RIGHT", 12, 0)
             txt:SetText(label)
             txt:SetTextColor(0.8, 0.8, 0.8)
             if tooltip then

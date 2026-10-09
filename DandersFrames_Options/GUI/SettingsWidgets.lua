@@ -352,7 +352,9 @@ GUI.SectionCard = {
     titleGap    = 8,    -- chevron -> title (with the kind icon: chevron -> icon)
     icon        = 16,   -- the kind icon's slot, reserved on EVERY card
     iconGlyph   = 14,   -- ...and the glyph centred in it
-    iconGap     = 8,    -- icon slot -> tick / title
+    iconGap     = 8,    -- icon slot -> tick
+    titleLead   = 12,   -- icon slot or tick -> title: room for the modified dot, the
+                        -- same gap a body checkbox leaves before its label
     -- ============================================================
     -- THE KIND ICON'S COLOUR -- the one switch.
     --   false  dim (C_TEXT_DIM): the icon reads as furniture beside the title
@@ -631,10 +633,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
 
     -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
-    -- A ticked header's title moves right by the tick and one more gap; an
-    -- unticked one reserves nothing.
+    -- A card's title sits titleLead after whatever precedes it -- the icon slot,
+    -- or the tick when there is one -- so the modified dot has the same room
+    -- everywhere. A plain section reserves nothing for an unticked header.
     local TITLE_X = TICK_X
-    if toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleGap or 8) end
+    if CARD then TITLE_X = TICK_X - CARD.iconGap + CARD.titleLead end
+    if toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleLead or 8) end
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)
@@ -703,6 +707,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             self.tag:SetText("")
             self.tag:Hide()
         end
+        if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
     end
 
     -- ============================================================
@@ -967,6 +972,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             if self._dfSummaryText ~= text then
                 self._dfSummaryText = text
                 fs:SetText(text)
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
             end
             -- ⚠ NOT ON A CARD. 0.5 grey on the card's C_PANEL is ~4.2:1, under
             -- the 4.5 floor for small text; the title and chevron already say
@@ -1001,14 +1007,25 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             local w = self:GetWidth() or 0
             local free = w - TITLE_X - self.headerRightInset
             if free < 40 then return end
-            -- 55/45: the title is the identity and wins the larger share, but the
-            -- tag ("+2 triggers", "3 indicators") has to stay readable rather than
-            -- be squeezed to nothing by a long name.
+            -- The title takes the room the tag and the summary leave, sized from
+            -- what they show NOW: an open card shows no summary, so its title
+            -- gets the whole header. Beside a tag ("+2 triggers") or a summary it
+            -- never drops under 55% -- the title is the identity, so they
+            -- truncate first. Re-run whenever either text changes.
+            local function shown(fs)
+                local t = fs and fs:GetText()
+                if not t or t == "" then return 0 end
+                return (fs:GetUnboundedStringWidth() or 0) + 8
+            end
+            local tagW = shown(self.tag)
+            local sumW = (self.summary and self.pinBtn) and shown(self.summary) or 0
+            local titleW = math.max(math.floor(free * 0.55), free - tagW - sumW)
+            titleW = math.max(40, math.min(free, titleW))
             self.title:SetWordWrap(false)
             -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
             -- by default, so every bounded title drew centred in its box.
             self.title:SetJustifyH("LEFT")
-            self.title:SetWidth(math.max(40, math.floor(free * 0.55)))
+            self.title:SetWidth(titleW)
             self.tag:SetWordWrap(false)
             self.tag:SetJustifyH("LEFT")
             self.tag:ClearAllPoints()
@@ -1016,13 +1033,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             if self.summary and self.pinBtn then
                 -- The value takes the right-hand share and the tag stops short of
                 -- it; see the no-left-anchor note where the summary is built.
-                self.summary:SetWidth(math.max(20, math.floor(free * 0.45) - 8))
+                self.summary:SetWidth(math.max(20, free - titleW - tagW - 8))
                 self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
             else
                 self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
             end
         end
         self:HookScript("OnSizeChanged", apply)
+        self._dfApplyHeaderWidths = apply
         apply()
         -- Order-independent: the swatches read this inset, so if they were placed
         -- first they are re-flowed now.
@@ -1284,12 +1302,17 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         for i = n + 1, #pool do pool[i]:Hide() end
     end
 
-    -- Hover effects
-    clickArea:SetScript("OnEnter", function()
+    -- Hover effects. A title cut short to fit ("Element-Specifi...") shows in
+    -- full in a tooltip; a title that fits shows none.
+    clickArea:SetScript("OnEnter", function(self)
+        if section.title:IsTruncated() then
+            GUI:ShowTooltip(self, { title = section.title:GetText() })
+        end
         if cardHover then cardHover:Show() return end
         section:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.8)
     end)
     clickArea:SetScript("OnLeave", function()
+        GUI:HideTooltip()
         if cardHover then cardHover:Hide() return end
         section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
     end)
@@ -2820,9 +2843,9 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- section header's tick -- see opts.toggle on CreateCollapsibleSection).
     container.checkButton = cb
 
-    -- Label
+    -- Label, 12px from the box: the modified dot sits in that gap.
     local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+    txt:SetPoint("LEFT", cb, "RIGHT", 12, 0)
     txt:SetText(label)
     txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     container.label = txt  -- exposed so callers can re-font / anchor a subtitle

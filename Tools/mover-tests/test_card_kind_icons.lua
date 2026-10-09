@@ -101,11 +101,12 @@ if cardTableSrc and fnSrc then
         -- The spec numbers, so a factory missing them is measured against what
         -- it should be rather than erroring on nil arithmetic.
         local ICON, GLYPH, IGAP = CARD.icon or 16, CARD.iconGlyph or 14, CARD.iconGap or 8
+        local LEAD = CARD.titleLead or 12
 
         -- ---- metrics, named, in the card table ----
         eq(CARD.icon, 16, "metrics: the icon's slot is 16")
         eq(CARD.iconGlyph, 14, "metrics: ...the glyph inside it 14")
-        eq(CARD.iconGap, 8, "metrics: ...and 8 to the tick/title")
+        eq(CARD.iconGap, 8, "metrics: ...and 8 to the tick")
         eq(CARD.iconAccent, true, "switch: the icon colour defaults to the ACCENT")
         check(type(CARD.kinds) == "table" and CARD.kinds.layout ~= nil,
               "map: GUI.SectionCard.kinds is the one kind -> texture table")
@@ -136,8 +137,8 @@ if cardTableSrc and fnSrc then
         eq(chevX, CARD.edge, "order: the chevron keeps its edge inset")
         eq(iconX, CARD.edge + CARD.chevron + CARD.titleGap + (ICON - GLYPH) / 2,
            "order: the icon is one chevron-gap after the chevron, centred in its slot")
-        eq(titleX, CARD.edge + CARD.chevron + CARD.titleGap + ICON + IGAP,
-           "order: the title follows the icon slot and its gap")
+        eq(titleX, CARD.edge + CARD.chevron + CARD.titleGap + ICON + LEAD,
+           "order: the title follows the icon slot by the title lead, room for the dot")
         check(chevX and iconX and titleX and chevX < iconX and iconX < titleX,
               "order: chevron -> icon -> title")
 
@@ -191,7 +192,7 @@ if cardTableSrc and fnSrc then
         -- ---- an unkinded card keeps the slot, empty ----
         local u = build({})
         check(u.kindIcon == nil, "unkinded: no icon is built")
-        eq(leftX(u.title), CARD.edge + CARD.chevron + CARD.titleGap + ICON + IGAP,
+        eq(leftX(u.title), CARD.edge + CARD.chevron + CARD.titleGap + ICON + LEAD,
            "unkinded: ...but the slot is kept, so titles line up down the page")
         local bogus = build({ kind = "not_a_kind" })
         check(bogus.kindIcon == nil, "unknown kind: no icon, no error")
@@ -206,6 +207,9 @@ if cardTableSrc and fnSrc then
            "ticked: the tick sits after the icon slot")
         check(tIconX and tickX and tTitleX and tIconX < tickX and tickX < tTitleX,
               "ticked: chevron -> icon -> tick -> title")
+        eq(CARD.titleLead, 12, "metrics: a title lead of 12, room for the modified dot")
+        eq(tTitleX, (tickX or 0) + 18 + LEAD,
+           "ticked: the title sits the same lead after the 18px box")
 
         -- ---- a plain (non-card) section never grows a slot ----
         local plain = GUI:CreateCollapsibleSection(MakeFrame(500, 800), "Plain", true, 500, { kind = "layout" })

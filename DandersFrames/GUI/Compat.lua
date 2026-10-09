@@ -33,7 +33,8 @@ local select = select
 -- the card title is the label.
 -- Y is off the text box's top, and capitals start a pixel or two below it: -1
 -- centres the dot about level with the top of the capitals. X -4 leaves the
--- 6px dot 1px clear of the text and, in a checkbox's 8px gap, of the box.
+-- 6px dot 1px clear of the text and, in a checkbox's 12px gap, 5px clear of
+-- the box.
 local DOT_TL_X, DOT_TL_Y, DOT_TL_HIT = -4, -1, 8
 -- Published for the card header's own mark, which sits in the same place.
 GUI.ModifiedDotTopLeft = { x = DOT_TL_X, y = DOT_TL_Y, hit = DOT_TL_HIT, size = 6 }
