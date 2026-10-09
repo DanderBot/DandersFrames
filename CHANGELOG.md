@@ -7,13 +7,16 @@
 - (Aura Designer) New **Power Infusion Helper** for priests, on its own tab in the Aura Designer. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Triggers picks what counts — which classes, and whether trinkets, potions and racials join the cooldowns — and Effects picks how each signal looks: a border, the health bar, the background, the name colour, or an icon. Turn on icons to see what they pressed and how hard the burst is landing. Add a sound if you want one; tanks and healers are skipped unless you say otherwise. (by Maelareth and Krathe)
 - (Aura Designer) If you set up the Power Infusion Helper in an earlier 5.4.0 alpha: it has moved onto its own tab in the Aura Designer, labelled PI Helper, and its settings are now split across Triggers and Effects. Your existing setup is carried over the first time you log in — the Square signal has been retired, so anything using it becomes an icon, and a stray "PI Helper" group left behind by an earlier alpha is cleaned up. Nothing needs doing by hand. (by Krathe)
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon, and your party and raid frames, pinned sets, the personal targeted-spells block and the targeted list all move with it. Snap them to each other or onto other addons' elements, anchor one thing to another (including to individual frames and raid groups) and set a backup anchor that takes over when the main one is hidden. The editor has undo/redo, save/discard, nudge keys, a searchable anchor list, adjustable snap ranges, a grid, and a panel that jumps you to whichever element you are editing. It is the foundation for a shared positioning system across Danders addons.
-- (Settings) The settings pages have been rebuilt. Every section is now a card you open and close by clicking its header, with its settings laid out two to a row when there's room and its current value shown in the corner when it's folded. Features switch on and off right from the card's header, Expand All / Collapse All sit at the top of each page, and hovering a setting's name explains it. Sections that change how something looks can be pinned into their own window, named after their page, so you can set two pages to match side by side. Widen the window and the page splits into two columns; narrow it and it folds back to one.
+- (Settings) The settings pages have been rebuilt. Every section is now a card you open and close by clicking its header, with its settings laid out two to a row when there's room and its current value shown in the corner when it's folded. Each page groups its cards under headings. Features switch on and off right from the card's header, Expand All / Collapse All sit at the top of each page, and hovering a setting's name explains it. Sections that change how something looks can be pinned into their own window, named after their page, so you can set two pages to match side by side. Widen the window and the page splits into two columns; narrow it and it folds back to one.
 - (Aura Designer) Adding to the Aura Designer is now a guided flow right inside the designer: choose Add from a Spell or Add from a Filter, pick how it should look from pictures of your own frame, then pick where it goes. Looks the aura already has, or that a filter can't drive, are marked on their tile. Layout groups and debuff groups are added with one click on their picture.
 - (Frames) Frame Fade now has an on/off switch on its card, so you can turn fading off without touching the alpha values.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
-- (Settings) Hover the yellow dot beside a changed setting to see its default value, and hold-click the dot to reset it.
-- (Settings) Section headers show a small icon for common kinds of settings (appearance, layout, position, visibility and more) so they are easier to spot.
+- (Settings) A dot beside a setting marks it as changed: amber for a changed default, the tab's colour when an auto layout overrides it. Hover the dot to see the default, and hold-click it to reset; a ring fills while you hold.
+- (Settings) Card headers show a sharp icon for most kinds of settings (appearance, layout, position, visibility, health and more) so they are easier to spot.
 - (Dispel) The dispel type symbol can now show one symbol per dispellable debuff. Set **Max Symbols** (1 to 5) on the Dispel page; at 1 it looks exactly as before, and higher values line up a symbol for each debuff from the corner you picked. The symbols fade with the overlay when a player is out of range or dead. (by Krathe, original idea by JordanKlaers)
+- (Settings) A new **GLOBAL** tab holds the settings shared by Party and Raid: General, Fonts, Nicknames, Integrations, Colors, the Filter Designer, Profiles and the Debug Console, with its own Changed Settings page. (by Krathe)
+- (Settings) Page tips can be closed to a small icon or hidden, and a **Page Tips** setting under GLOBAL > Settings chooses for every page at once. (by Krathe)
+- (Fonts) Apply to All asks whether to apply to Party, Raid or both. (by Krathe)
 
 ### Bug Fixes
 
@@ -44,6 +47,17 @@
 - (Auras) Fix frames showing another player's buffs, debuffs and Aura Designer indicators after someone joined or left the raid. (by Krathe)
 - (Party Frames) Fix a party member's frame sometimes disappearing mid-dungeon, often after someone died, until you reloaded. (by Krathe)
 - (Tooltips) Fix the Raider.IO score appearing twice when hovering party and raid frames. (by Krathe)
+- (Auras) Fix the dispel overlay, dispel symbols and Aura Designer indicators showing the previous player's auras after a roster change mid-fight. (by Krathe)
+- (Aura Designer) Fix a disabled Aura Designer becoming usable again after switching between Party and Raid. (by Krathe)
+- (Pet Frames) Fix an error when ticking a text Shadow checkbox. (by Krathe)
+- (Test Mode) Text Designer text no longer shows while the Text Designer is disabled. (by Krathe)
+- (DandersMover) Fix the Alt peek getting stuck when the game lags. (by Krathe)
+- (DandersMover) The Mover's top bar follows the Settings Font, and its unsaved-changes prompt matches DandersFrames' dialogs. (by Krathe)
+- (Settings) Changing the Settings Font updates buttons and the window title straight away. (by Krathe)
+- (Profiles) Reset Profile to Defaults now resets everything, including the Settings Font. (by Krathe)
+- (Settings) Fix lag while resizing the settings window. (by Krathe)
+- (Settings) Fix cards drawing at the wrong width when the page folds to one column, and long checkbox labels overlapping. (by Krathe)
+- (Settings) Fix memory building up each time a texture, font or sound menu was opened. (by Krathe)
 
 ### Changes
 
@@ -51,6 +65,10 @@
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 - (Pinned Frames) The "Based on" option is now called "Size & Spacing From", and the note above it explains that auras come from the set's Aura Designer Template, not from this choice. (by Krathe)
+- (Settings) Texture, font and sound menus list DandersFrames' own media first, then MyMedia's. (by Krathe)
+- (Settings) Buff Bar, Debuff Bar and Defensive Icon cards start closed. (by Krathe)
+- (Tooltips) Aura tooltips no longer offer Game Default positioning, which the game's aura tooltip can't do. (by Krathe)
+- (Settings) Switching tabs and pages is faster. (by Krathe)
 
 ## [5.3.3]
 
