@@ -63,8 +63,8 @@ for item in REVIEWED:
 
 print("-- classic audit: it can see a gap")
 src = (audit.ROOT / "DandersFrames_Options" / "GUI" / "Pages" / "Frames.lua").read_text(encoding="utf-8")
-old = ('OpenSection(L["Shadow Settings"], "fonts_shadow", 1, ShadowSettingsSummary, nil, nil,\r\n'
-       '                BuildShadowSettingsGroup)\r\n'
+old = ('OpenSection(L["Shadow Settings"], "fonts_shadow", 1,\r\n'
+       '                function() return ShadowSettingsSummary(DF:GetDB("party")) end, nil, nil, BuildShadowSettingsGroup)\r\n'
        '            BuildShadowSettingsGroup({')
 if old not in src:
     old = old.replace("\r\n", "\n")

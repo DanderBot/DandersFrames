@@ -9,9 +9,12 @@
 local DF = DandersFrames
 local format = string.format
 function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
-    local pageGlobalFonts = CreateSubTab("general", "general_fonts", L["Global Fonts"])
+    local pageGlobalFonts = CreateSubTab("general", "general_fonts", L["Fonts"])
     BuildPage(pageGlobalFonts, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"fontShadow"}, L["Global Fonts"], "general_fonts"), 25, 2)
+        -- ⚠ OWNS NOTHING, and the call is what registers that: a GLOBAL page has
+        -- no Copy to Raid, Apply to All picks its modes itself, and the shadow
+        -- is one value for both modes (see BuildShadowSettingsGroup).
+        Add(CreateCopyButton(self.child, {}, L["Fonts"], "general_fonts"), 0, 2)
         -- Initialize temp storage for selections (persists during session)
         --
         -- ☠ IT STAYS HERE, AT PAGE SCOPE, IN BOTH LAYOUTS. The three selectors
@@ -24,6 +27,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DF.GlobalFontTemp = {
                 font = db.nameFont or "Fonts\\FRIZQT__.TTF",
                 outline = db.nameTextOutline or "OUTLINE",
+                scope = "both",
             }
         end
 
@@ -37,13 +41,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- and TWO COLUMNS when the window is wide (the rows were one column at
         -- every width):
         --
-        --   column 1   Global Font Settings -- the scratch pad and its Apply to
-        --              All button, working exactly as before (see its builder)
-        --   column 2   Shadow Settings (how a text shadow LOOKS, pinnable), then
-        --              Affected Elements, the reference list for Apply to All
+        --   column 1   Font Settings -- the scratch pad and its Apply to All
+        --              button (see its builder), then Shadow Settings
+        --   column 2   Affected Elements, the reference list for Apply to All
         --
-        -- No header ticks: nothing here is one feature's on/off. No category
-        -- headers: the tab already says "Global Fonts".
+        -- ★ A GLOBAL PAGE: everything here is how text looks across the addon.
+        -- Apply to All asks which modes to write (both by default) -- each
+        -- element's own page is where a mode's fonts are tuned apart -- and the
+        -- shadow and Crisp Font Rendering are one value for both modes anyway.
+        -- No header ticks: nothing here is one feature's on/off.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The classic branch mounts the SAME
@@ -71,7 +77,23 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The shadow group's two applies, at PAGE scope rather than inside the
         -- builder: they close over nothing group-specific, and the classic box and
         -- the card (and a pinned copy of it) must drive the same work.
+        -- ☠ ONE SHADOW FOR BOTH MODES, AND IT IS PARTY'S TABLE THAT IS READ. On
+        -- 12.0.7 a text shadow rides the shared font OBJECT (fontstring SetShadow*
+        -- is a no-op), DF builds each font once for Party and Raid frames alike,
+        -- and GetOrCreateFontFamily / RefreshFontFamilyShadows read the offset and
+        -- colour from DF:GetDB() -- the party table. So the controls bind to that
+        -- table whichever mode is under GLOBAL, and every write is copied to raid
+        -- so the two stored copies never disagree (an export, Changed Settings).
+        local function MirrorShadowToRaid()
+            local p, r = DF.db and DF.db.party, DF.db and DF.db.raid
+            if not (p and r) then return end
+            r.fontShadowOffsetX, r.fontShadowOffsetY = p.fontShadowOffsetX, p.fontShadowOffsetY
+            local c = p.fontShadowColor
+            r.fontShadowColor = c and { r = c.r, g = c.g, b = c.b, a = c.a } or nil
+        end
+
         local function UpdateShadowSettings()
+            MirrorShadowToRaid()
             -- Full update on release
             if DF.ClearFontCache then DF:ClearFontCache() end
             DF:UpdateAllFrames()
@@ -87,6 +109,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         local function LightweightShadowUpdate()
+            MirrorShadowToRaid()
             if DF.LightweightUpdateFontShadows then DF:LightweightUpdateFontShadows() end
         end
 
@@ -108,19 +131,19 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], DF.GlobalFontTemp, "outline", function() end), 55)
             group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], DF.GlobalFontTemp, "outline", function() end), 30)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Apply to"], {
+                both = L["Both"], party = L["Party"], raid = L["Raid"],
+                _order = { "both", "party", "raid" },
+            }, DF.GlobalFontTemp, "scope", function() end), 55)
 
             -- Themed Apply button
             local applyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
             GUI:StyleButton(applyBtn, { width = 120, height = 28, text = L["Apply to All"] })
             applyBtn.text = applyBtn.Text
-            applyBtn:SetScript("OnClick", function()
-                local font = DF.GlobalFontTemp.font
-                local outline = DF.GlobalFontTemp.outline
-
-                -- Clear font family cache so new fonts are created
-                if DF.ClearFontCache then DF:ClearFontCache() end
-
-                -- Apply to all font settings
+            -- ☠ ONE MODE'S WRITES, run once for each mode the "Apply to" choice names.
+            -- The body is the press as it always was, handed that mode's table as
+            -- `db` -- the Aura and Text Designer blocks read the mode off it.
+            local function ApplyFontToMode(db, font, outline)
                 db.nameFont = font; db.nameTextOutline = outline
                 db.healthFont = font; db.healthTextOutline = outline
                 db.statusTextFont = font; db.statusTextOutline = outline
@@ -242,9 +265,24 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     _tdCfg.globalDefaults.font = font
                     _tdCfg.globalDefaults.outline = outline
                 end
+            end
+
+            applyBtn:SetScript("OnClick", function()
+                local font = DF.GlobalFontTemp.font
+                local outline = DF.GlobalFontTemp.outline
+                local scope = DF.GlobalFontTemp.scope or "both"
+
+                -- Clear font family cache so new fonts are created
+                if DF.ClearFontCache then DF:ClearFontCache() end
+
+                for _, mode in ipairs({ "party", "raid" }) do
+                    if (scope == "both" or scope == mode) and DF.db and DF.db[mode] then
+                        ApplyFontToMode(DF.db[mode], font, outline)
+                    end
+                end
 
                 DF:UpdateAllFrames()
-                if GUI.SelectedMode == "raid" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
+                if scope ~= "party" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
                 if DF.ApplyPetSettings then DF:ApplyPetSettings() end
                 if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
                 if DF.UpdateTestPersonalTargetedSpells then DF:UpdateTestPersonalTargetedSpells() end
@@ -283,17 +321,18 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== SHADOW SETTINGS (a 280 box in classic, a card in Modern) =====
         local function BuildShadowSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            local shadowDB = DF:GetDB("party")
             group:AddWidget(GUI:CreateLabel(parent, L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."], 250), 40)
 
-            group:AddWidget(GUI:CreateSlider(parent, L["Shadow X Offset"], -10, 10, 0.5, db, "fontShadowOffsetX", UpdateShadowSettings, LightweightShadowUpdate), 50)
-            group:AddWidget(GUI:CreateSlider(parent, L["Shadow Y Offset"], -10, 10, 0.5, db, "fontShadowOffsetY", UpdateShadowSettings, LightweightShadowUpdate), 50)
-            group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"], db, "fontShadowColor", true, UpdateShadowSettings, LightweightShadowUpdate, true), 40)
+            group:AddWidget(GUI:CreateSlider(parent, L["Shadow X Offset"], -10, 10, 0.5, shadowDB, "fontShadowOffsetX", UpdateShadowSettings, LightweightShadowUpdate), 50)
+            group:AddWidget(GUI:CreateSlider(parent, L["Shadow Y Offset"], -10, 10, 0.5, shadowDB, "fontShadowOffsetY", UpdateShadowSettings, LightweightShadowUpdate), 50)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"], shadowDB, "fontShadowColor", true, UpdateShadowSettings, LightweightShadowUpdate, true), 40)
         end
 
         if classicLayout then
             -- ===== FONT SELECTION GROUP (Column 1) =====
             local fontSelectGroup = GUI:CreateSettingsGroup(self.child, 280)
-            fontSelectGroup:AddWidget(GUI:CreateHeader(self.child, L["Global Font Settings"]), 40)
+            fontSelectGroup:AddWidget(GUI:CreateHeader(self.child, L["Font Settings"]), 40)
             BuildFontSelectionGroup({
                 group = fontSelectGroup,
                 parent = self.child,
@@ -316,7 +355,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- columns, and "both" carries them through the one-column fold intact.
             Add(tools.SectionControls(self.child), 24, "both")
 
-            -- ---- Global Font Settings: the scratch pad, as a card ----------
+            -- ---- Font Settings: the scratch pad, as a card -----------------
             -- ☠ NO SUMMARY, AND THAT IS THE HONEST ANSWER RATHER THAN A GAP.
             -- Nothing here is applied state: the font and outline the dropdowns
             -- show live in DF.GlobalFontTemp, a SESSION SCRATCH table seeded once
@@ -329,7 +368,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- and a second, pinned scratch pad bound to the same scratch table
             -- would only be a second copy of the same button. Column 1.
             Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
-            local fontCard = OpenSection(L["Global Font Settings"], "fonts_global", 1, nil)
+            local fontCard = OpenSection(L["Font Settings"], "fonts_global", 1, nil)
             BuildFontSelectionGroup({
                 group = fontCard, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -363,9 +402,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             --
             -- No tick: the shadow STYLE is chosen by the outline dropdowns, here
             -- and on a dozen other pages. How a text shadow LOOKS, so it is
-            -- pinnable. Column 1, under Global Font Settings.
-            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 1, ShadowSettingsSummary, nil, nil,
-                BuildShadowSettingsGroup)
+            -- pinnable. Column 1, under Font Settings. Its summary reads the party
+            -- table, where the value lives (the page hands it the mode's).
+            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 1,
+                function() return ShadowSettingsSummary(DF:GetDB("party")) end, nil, nil, BuildShadowSettingsGroup)
             BuildShadowSettingsGroup({
                 group = shadowCard, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,

@@ -447,7 +447,9 @@ DF.SECTION_PREFIXES = {
     display_pets                 = { "pet" },
     display_tooltips             = { "tooltip" },
     display_visibility           = { "soloMode", "hidePlayerFrame", "restedIndicator" },
-    general_fonts                = { "fontShadow" },
+    -- The Fonts page owns nothing: Apply to All writes other pages' keys, and the
+    -- shadow (fontShadow*) is one value for both modes. It is a GLOBAL page.
+    general_fonts                = {},
     general_frame                = { "frame", "permanentMover", "border", "anchor" },
     general_labels               = { "groupLabel" },
     general_pinnedframes         = { "pinnedFrames" },
@@ -535,6 +537,7 @@ GUI.GlobalAccent = { r = 0.25, g = 0.78, b = 0.85, a = 1 }   -- teal-cyan
 GUI.GlobalPages = {
     general_settings      = true,
     general_integrations  = true,
+    general_fonts         = true,
     general_nicknames     = true,
     display_classcolors   = true,
     auras_filterdesigner  = true,

@@ -1912,15 +1912,16 @@ function UI:CreateDispelColorsPageLink(parent, width)
     })
 end
 
--- Third of the same family: a text shadow's OFFSET and COLOUR are account-wide, so any
--- per-element "Shadow" checkbox can only decide WHETHER there is one. ⚠ That is not a
+-- Third of the same family: a text shadow's OFFSET and COLOUR are one for both modes, so
+-- any per-element "Shadow" checkbox can only decide WHETHER there is one. ⚠ That is not a
 -- layering choice, it is forced — on 12.0.7 a fontstring's SetShadowColor/SetShadowOffset
 -- is a silent no-op, so the shadow rides the shared font OBJECT and every consumer of that
--- font gets the same one. Jumps to Global Fonts and flashes its Shadow Settings section.
+-- font gets the same one. Jumps to the GLOBAL tab's Fonts page and flashes its Shadow
+-- Settings section.
 function UI:CreateGlobalFontsShadowLink(parent, width)
     if not self:Hook("scrollToSection") then return nil end
     local host, L = self, self.hooks.L
-    local link = string.format("|cffffffff|HdfFonts|h%s|h|r", L["Global Fonts"])
+    local link = string.format("|cffffffff|HdfFonts|h%s|h|r", L["Shadow Settings"])
     local text = string.format(L["Shadow offset and colour are set in %s."], link)
     return host:CreateLink(parent, text, {
         width = width,

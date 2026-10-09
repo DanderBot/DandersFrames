@@ -37,7 +37,7 @@ if defs then
     check(chunk ~= nil, "global: ...and compile on their own")
     if chunk then chunk(G, function(isRaid) return isRaid and RAID or PARTY end) end
 end
-local want = { "general_settings", "general_integrations", "general_nicknames", "display_classcolors",
+local want = { "general_settings", "general_integrations", "general_nicknames", "general_fonts", "display_classcolors",
                "auras_filterdesigner", "profiles_manage", "profiles_importexport", "debug_console" }
 for _, id in ipairs(want) do
     check(G.IsGlobalPage and G.IsGlobalPage(id), "pages: " .. id .. " is on GLOBAL")
@@ -45,7 +45,7 @@ end
 local n = 0
 for _ in pairs(G.GlobalPages or {}) do n = n + 1 end
 eq(n, #want, "pages: and nothing else")
-for _, id in ipairs({ "general_fonts", "general_frame", "auras_auradesigner", "text_designer",
+for _, id in ipairs({ "general_frame", "auras_auradesigner", "text_designer",
                       "profiles_auto", "auras_buffs" }) do
     check(G.IsGlobalPage and not G.IsGlobalPage(id), "pages: " .. id .. " stays on Party/Raid")
 end
@@ -95,7 +95,8 @@ if G.IsTabInView and G.FirstTabInView and G.LastTabInView then
     check(not G:IsTabInView(G.Tabs.display_visibility), "view: a party-only page is still hidden in raid")
     G.GlobalView = true
     check(G:IsTabInView(G.Tabs.general_settings), "view: GLOBAL lists Settings")
-    check(not G:IsTabInView(G.Tabs.general_fonts), "view: ...and not Global Fonts, which is per mode")
+    check(G:IsTabInView(G.Tabs.general_fonts), "view: ...and Fonts")
+    check(not G:IsTabInView(G.Tabs.general_frame), "view: ...and not Frame, which is per mode")
     eq(G:FirstTabInView(), "general_settings", "land: GLOBAL opens on its first page, Settings")
     G._lastGlobalPage = "debug_console"
     eq(G:LastTabInView(), "debug_console", "land: GLOBAL comes back to the page it showed last")
