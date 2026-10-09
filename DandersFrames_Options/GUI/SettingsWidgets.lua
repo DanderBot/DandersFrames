@@ -17,6 +17,7 @@ local P = GUI._priv
 -- Aliases of objects the toolkit created; they add no state.
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+local C_NOTICE = GUI.Colors.notice
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local AddOverrideIndicators = P.AddOverrideIndicators
@@ -406,6 +407,87 @@ do
         order      = ICONS .. "swap_vert",
         timer      = ICONS .. "timer",
     }
+end
+
+-- ============================================================
+-- THE CARD'S MODIFIED MARK: something in this card is not the shipped
+-- default. Same dot, same place as a control's (the title's top-left), so a
+-- shut card says what its controls would.
+--
+-- The count asks every control in the body its own UpdateModifiedDot, the
+-- predicate its dot uses, so the two cannot disagree -- and a shut card
+-- whose controls have never been shown still answers. Found by walking the
+-- body's frames, because a body row can hold more than one control.
+--
+-- A changed tick shows its own dot here instead (it carries the tooltip and
+-- hold-to-reset for the tick), so the mark stands down. The mark has no
+-- hold: one press resetting a whole card is too easy to do by accident.
+--
+-- Queued, at most one count per frame: every control's dot update asks for
+-- one, and a page refresh updates them all.
+-- ============================================================
+function GUI:AttachCardModifiedMark(section, clickArea)
+    local DOT = GUI.ModifiedDotTopLeft
+    local mark = section:CreateTexture(nil, "OVERLAY")
+    mark:SetSize(DOT.size, DOT.size)
+    mark:SetTexture(GUI.MEDIA .. "Icons\\dot")
+    mark:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    mark:SetPoint("CENTER", section.title, "TOPLEFT", DOT.x, DOT.y)
+    mark:Hide()
+    section.modifiedMark = mark
+
+    local changedCount = 0
+    -- Motion only: a click on it still folds the card.
+    local markHit = CreateFrame("Frame", nil, section)
+    markHit:SetSize(DOT.hit, DOT.hit)
+    markHit:SetPoint("CENTER", mark, "CENTER", 0, 0)
+    markHit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+    markHit:EnableMouse(true)
+    markHit:SetMouseClickEnabled(false)
+    markHit:SetScript("OnEnter", function(self)
+        local line = (changedCount == 1) and L["1 setting in this section is changed."]
+            or format(L["%d settings in this section are changed."], changedCount)
+        GUI:ShowTooltip(self, { title = L["Changed from default"], lines = { line } })
+    end)
+    markHit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    markHit:Hide()
+    section.modifiedMarkHit = markHit
+
+    local walking, queued = false, false
+    local scan
+    local function each(...)
+        for i = 1, select("#", ...) do scan((select(i, ...))) end
+    end
+    scan = function(frame)
+        if rawget(frame, "UpdateModifiedDot") then
+            if frame:UpdateModifiedDot() then changedCount = changedCount + 1 end
+            return
+        end
+        each(frame:GetChildren())
+    end
+    section.RefreshModifiedMark = function(self)
+        walking = true
+        changedCount = 0
+        for _, child in ipairs(self.sectionChildren) do scan(child) end
+        local tick = rawget(self, "headerToggle")
+        local tickChanged = tick and rawget(tick, "UpdateModifiedDot") and tick:UpdateModifiedDot() or false
+        walking = false
+        local show = changedCount > 0 and not tickChanged
+        mark:SetShown(show)
+        markHit:SetShown(show)
+    end
+    -- Ignored while counting: the count's own UpdateModifiedDot calls ask too.
+    section.QueueModifiedMark = function(self)
+        if walking or queued then return end
+        queued = true
+        C_Timer.After(0, function()
+            queued = false
+            self:RefreshModifiedMark()
+        end)
+    end
+    -- The body is built after this returns; the first count waits a frame.
+    section:QueueModifiedMark()
+    section:HookScript("OnShow", function(self) self:QueueModifiedMark() end)
 end
 
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
@@ -991,7 +1073,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             table.insert(parent.ThemeListeners, box)
         end
         section.headerToggle = tick
+        -- The caption is hidden; the dot sits against the card title instead
+        -- (see GUI:PinModifiedDotTopLeft).
+        tick.dfDotTopLeftOf = section.title
+        if CARD then tick.dfCardSection = section end
+        if rawget(tick, "UpdateModifiedDot") then tick:UpdateModifiedDot() end
     end
+
+    if CARD then GUI:AttachCardModifiedMark(section, clickArea) end
 
     -- THE FOLD ITSELF, WITHOUT THE REPAINT -- the arrow and the SavedVariables
     -- slot, and nothing else.
@@ -2745,6 +2834,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             end
         end
         AddOverrideIndicators(GUI, container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, txt)
     end
     
     local function UpdateState()
@@ -3169,6 +3259,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
             end
         end
         AddOverrideIndicators(GUI, frame, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(frame, lbl)
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)

@@ -78,6 +78,8 @@ if cardTableSrc and fnSrc then
         CreateRoundedSurface = function() return RoundedStub() end,
         CreateElementBackdrop = function() end,
         GetCollapsedGroups = function() return collapsed end,
+        -- The modified mark is its own factory (test_modified_dot.lua).
+        AttachCardModifiedMark = function() end,
         CreateCheckbox = function(_, parent)
             local cb = MakeFrame(18, 18)
             cb.checkButton = MakeFrame(18, 18)

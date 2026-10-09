@@ -171,8 +171,8 @@ do
     check(kit:find("container.refreshValue = container.RefreshValue", 1, true) ~= nil,
           "kit slider: UI:CreateSlider opts into the value sweep")
     local compat = df_file_source("GUI/Compat.lua")
-    check(compat:find("return GUI.CreateDropdownNative(self, parent, {", 1, true) ~= nil,
+    check(compat:find("return GUI:PinModifiedDotTopLeft(GUI.CreateDropdownNative(self, parent, {", 1, true) ~= nil,
           "shims: GUI:CreateDropdown really is the kit's dropdown under a positional signature")
-    check(compat:find("return GUI.CreateSliderNative(self, parent, {", 1, true) ~= nil,
+    check(compat:find("return GUI:PinModifiedDotTopLeft(GUI.CreateSliderNative(self, parent, {", 1, true) ~= nil,
           "shims: ...and GUI:CreateSlider the kit's slider")
 end

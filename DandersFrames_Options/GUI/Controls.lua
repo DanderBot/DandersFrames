@@ -942,6 +942,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             end
         end
         AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, lbl)
     end
     
     -- Button - use relative anchoring so it resizes with container
@@ -1397,6 +1398,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             end
         end
         AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, lbl)
     end
     
     -- Button - use relative anchoring so it resizes with container

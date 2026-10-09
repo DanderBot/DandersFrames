@@ -2956,6 +2956,8 @@ L["This list can't be built during combat."] = true
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
+L["1 setting in this section is changed."] = true
+L["%d settings in this section are changed."] = true
 L["Current: %s"] = true
 L["Default: %s"] = true
 L["Hold click to reset"] = true

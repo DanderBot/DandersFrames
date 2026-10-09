@@ -97,6 +97,7 @@ CreateFrame = function(kind, _, parent)
     f._kind = kind
     f._children = {}
     f._parent = parent
+    f.GetChildren = function(self) return unpack(self._children) end
     f.GetParent = function(self) return self._parent end
     f.SetParent = function(self, p) self._parent = p end
     if kind == "Slider" then
@@ -492,8 +493,8 @@ end
 -- the colour picker are the real ones.
 -- ============================================================
 do
-    local db, defaults = { showX = false, tint = { r = 1, g = 0, b = 0 }, name = "x" },
-                         { showX = true,  tint = { r = 0, g = 1, b = 0 }, name = "" }
+    local db, defaults = { showX = false, tint = { r = 1, g = 0, b = 0 }, name = "x", w = 30 },
+                         { showX = true,  tint = { r = 0, g = 1, b = 0 }, name = "", w = 10 }
     local host, log = newHost(db, defaults)
     host.Colors = UI.Colors
     host.RowHeight = UI.RowHeight
@@ -503,6 +504,9 @@ do
     function DF:UpdateAll() updates = updates + 1 end
     function DF:ThrottledUpdateAll() end
     DandersFrames = DF
+    -- The DF factories re-anchor the kit's dot through GUI:PinModifiedDotTopLeft,
+    -- which lives in the resident GUI/Compat.lua.
+    load_df_file_into("GUI/Compat.lua", { GUI = host })
     load_options_file_into("GUI/SettingsWidgets.lua", ns)
     -- The box's chrome (pixel snapping, the themed check) is not under test.
     host.StyleCheckButton = function() end
@@ -511,6 +515,12 @@ do
     local clicks = 0
     local cb = host:CreateCheckbox(pane(), "Show X", db, "showX", function() clicks = clicks + 1 end)
     check(cb.modifiedDot:IsShown(), "checkbox: modified shows the dot")
+    local dp = cb.modifiedDot._points[#cb.modifiedDot._points]
+    check(dp[1] == "CENTER" and dp[2] == cb.label and dp[3] == "TOPLEFT",
+          "checkbox: the dot sits against the label's top-left")
+    local hp = cb.modifiedDotHit._points[#cb.modifiedDotHit._points]
+    check(hp[2] == cb.label and hp[3] == "TOPLEFT" and hp[4] == dp[4] and hp[5] == dp[5],
+          "checkbox: ...and its hit is centred on it")
     fire(cb.modifiedDotHit, "OnEnter")
     eq(TT.lines[1].text, "Default: On", "checkbox: the default as On/Off")
     eq(TT.lines[2].text, "Current: Off", "checkbox: ...and the current")
@@ -519,6 +529,41 @@ do
     eq(clicks, 1, "checkbox: through its click: the callback ran once")
     check(updates >= 1, "checkbox: ...and the live refresh")
     check(not cb.modifiedDot:IsShown(), "checkbox: dot out")
+
+    -- The positional slider (GUI/Compat.lua) paints its dot inside the kit's
+    -- constructor, before the shim wraps it, and a slider born visible gets no
+    -- OnShow to repaint it: the wrap has to re-place a dot that is already up.
+    print("-- Modified dot: the positional slider, painted at build")
+    local sl = host:CreateSlider(pane(), "Width", 0, 100, 1, db, "w")
+    check(sl.modifiedDot:IsShown(), "slider: modified shows the dot at build")
+    local sp = sl.modifiedDot._points[#sl.modifiedDot._points]
+    check(sp[1] == "CENTER" and sp[3] == "TOPLEFT",
+          "slider: ...already against the label's top-left, with no repaint")
+    local shp = sl.modifiedDotHit._points[#sl.modifiedDotHit._points]
+    check(shp[2] == sp[2] and shp[3] == "TOPLEFT", "slider: ...and its hit with it")
+
+    -- A card's header mark asks every control in its body, through a body row
+    -- that holds them, and hears a control's own update. settingsGroup and
+    -- parentSection are what AddWidget and RegisterChild set.
+    print("-- Modified dot: a card's header mark counts its body")
+    local section, band = pane(), pane()
+    section.title = section:CreateFontString()
+    section.sectionChildren = { band }
+    band.parentSection = section
+    host:AttachCardModifiedMark(section, pane())
+    local bodyRow = CreateFrame("Frame", nil, band)
+    local atDefault = host:CreateCheckbox(bodyRow, "Show X", db, "showX")
+    local changed = host:CreateSlider(bodyRow, "Width", 0, 100, 1, db, "w")
+    atDefault.settingsGroup, changed.settingsGroup = band, band
+    section:RefreshModifiedMark()
+    check(section.modifiedMark:IsShown(), "mark: one changed control in the body lights the header")
+    check(section.modifiedMarkHit:IsShown(), "mark: ...with its hover")
+    check(section.modifiedMarkHit._flags.mouseClick == false, "mark: ...which takes no clicks, so the header still folds")
+    fire(section.modifiedMarkHit, "OnEnter")
+    eq(TT.lines[1].text, "1 setting in this section is changed.", "mark: ...and says how many")
+    db.w = 10
+    changed:UpdateOverrideIndicators(10)
+    check(not section.modifiedMark:IsShown(), "mark: back to default puts it out, from the control's own update")
 
     print("-- Modified dot: the colour picker")
     local recolours = 0
