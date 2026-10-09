@@ -207,7 +207,10 @@ function GUI:RefreshPixelBorders()
     end
 end
 
-function GUI:CreateHeader(parent, text)
+-- opts.keepSearchSection: a heading INSIDE a card's body (AFK Icon > Timer
+-- Text) must not become the search section, or every control after it --
+-- the rest of the card -- would be indexed under it rather than the card.
+function GUI:CreateHeader(parent, text, opts)
     -- Use a frame container so we can position text at bottom (padding above)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(200, 25)
@@ -245,7 +248,7 @@ function GUI:CreateHeader(parent, text)
     container.GetText = function() return h:GetText() end
     
     -- SEARCH: Track current section
-    if DF.Search then
+    if DF.Search and not (opts and opts.keepSearchSection) then
         DF.Search:SetCurrentSection(text)
     end
 

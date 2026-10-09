@@ -783,6 +783,10 @@ end
 function DF:SetIconTextureOrAtlas(region, value, l, r, t, b)
     if not region or not value then return end
     if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(value) then
+        -- ☠ CLEAR A CROP FIRST. SetAtlas keeps a region's earlier SetTexCoord and
+        -- crops the atlas by it, so a region reused after a sheet slice (a raid
+        -- marker) drew a zoomed-in corner of the next icon, or nothing.
+        region:SetTexCoord(0, 1, 0, 1)
         region:SetAtlas(value)
     else
         region:SetTexture(value)

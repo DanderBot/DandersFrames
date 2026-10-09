@@ -303,3 +303,30 @@ if popSrc then
         eq(made and made._shown, false, "popup: hidden on request")
     end
 end
+
+-- ---- an atlas icon after a sheet slice: the crop is cleared first ----
+-- The popup's swatches are reused across cards; a raid marker leaves a
+-- SetTexCoord slice behind, and SetAtlas keeps it.
+do
+    local CORE = df_file_source("Frames/Core.lua"):gsub("\r\n", "\n")
+    local fn = cut(CORE, "function DF:SetIconTextureOrAtlas(region, value, l, r, t, b)", "\nend\n")
+    check(fn ~= nil, "atlas: DF:SetIconTextureOrAtlas can be cut out of Frames/Core.lua")
+    if fn then
+        local DF3 = {}
+        local chunk = loadstring("local DF, C_Texture = ...\n" .. fn)
+        chunk(DF3, { GetAtlasInfo = function(v) return v == "an-atlas" and {} or nil end })
+        local calls = {}
+        local region = {
+            SetTexCoord = function(_, ...) calls[#calls + 1] = { "coord", ... } end,
+            SetAtlas = function(_, v) calls[#calls + 1] = { "atlas", v } end,
+            SetTexture = function(_, v) calls[#calls + 1] = { "texture", v } end,
+        }
+        DF3:SetIconTextureOrAtlas(region, "sheet", 0.25, 0.5, 0.25, 0.5)
+        calls = {}
+        DF3:SetIconTextureOrAtlas(region, "an-atlas")
+        local c1, c2 = calls[1], calls[2]
+        check(c1 and c1[1] == "coord" and c1[2] == 0 and c1[3] == 1 and c1[4] == 0 and c1[5] == 1,
+              "atlas: the crop is reset to the whole texture...")
+        check(c2 and c2[1] == "atlas" and c2[2] == "an-atlas", "atlas: ...before the atlas is set")
+    end
+end

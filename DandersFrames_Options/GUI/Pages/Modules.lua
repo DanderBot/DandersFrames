@@ -109,12 +109,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- guarded because a profile mid-migration may be missing any of these keys.
         local function Join(parts) return table.concat(parts, " \194\183 ") end
 
-        -- The Timer Text card's title, "AFK Icon -- Timer Text": composed rather
-        -- than added as a locale string, because both halves are already
-        -- translated. The long form is what tells it apart from the AFK card
-        -- above it and what the pinned panel's title reads.
-        local function RowTitle(section, part) return format("%s \226\128\148 %s", section, part) end
-
         -- The section, in classic: the 280 header in column 1 it always had.
         -- Modern builds cards instead (MountIconCard).
         local function AddSection(label)
@@ -407,7 +401,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --   hideInCombatLabel/onHideInCombat               the Appearance extra
         --   summary         replaces the shared Settings summary (Role)
         --   summaryExtra    what this icon's Settings summary says beyond the shared part
-        --   extraGroup      a fourth box (AFK's Timer Text): a card of its own in Modern
+        --   extraGroup      a fourth box (AFK's Timer Text): in Modern, a header
+        --                   inside the icon's own card
         --   preview         WireStatusPreview's opts: the header's icon preview
         -- ============================================
         local function BuildIconSettingsGroup(tools2, spec)
@@ -533,16 +528,31 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- what the in-body checkbox ran (spec.onEnable), then the state pass that
         -- re-greys the card and a repaint of a pinned panel -- never a rebuild.
         --
-        -- ⚠ AFK'S TIMER TEXT IS A SECOND CARD, directly under the AFK card: its
-        -- Offset X / Offset Y / Font would otherwise sit in the AFK card beside
-        -- the icon's own under the same names. It keeps its box's gates -- it
-        -- hides, header and body together, unless Show Timer is on in icon mode,
-        -- and its header dims (and its body greys) while AFK is off.
+        -- ⚠ AFK'S TIMER TEXT IS IN THE AFK CARD, under its own header right
+        -- after Show Timer -- where it was switched on. It keeps its box's gate:
+        -- header and controls hide together unless Show Timer is on in icon
+        -- mode (extra.hideOn). Its Color and Offset X / Y say "Timer" there
+        -- (inIconCard), or they would repeat the icon's own names.
         -- ============================================
         local function MountIconCard(spec)
             local settingsBuild = spec.settings or BuildIconSettingsGroup
+            local extra = spec.extraGroup
+            local function BuildExtraInCard(tools2)
+                local group = tools2.group
+                local first = #(group.groupChildren or {}) + 1
+                group:AddWidget(GUI:CreateHeader(tools2.parent, extra.label, { keepSearchSection = true }),
+                    GUI.RowHeight.sectionHeader)
+                extra.build({ group = group, parent = tools2.parent,
+                              refreshStates = tools2.refreshStates, inIconCard = true }, spec)
+                for i = first, #(group.groupChildren or {}) do
+                    local w = group.groupChildren[i].widget
+                    local own = w.hideOn
+                    w.hideOn = function(d) return extra.hideOn(d) or (own and own(d)) or false end
+                end
+            end
             local function BuildIconCard(tools2)
                 settingsBuild(tools2, spec)
+                if extra then BuildExtraInCard(tools2) end
                 BuildIconAppearanceGroup(tools2, spec)
                 BuildIconPositionGroup(tools2, spec)
             end
@@ -569,18 +579,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 hoistToggle = spec.enableKey ~= nil,
             })
             CloseSection(band)
-
-            local extra = spec.extraGroup
-            if extra then
-                local function BuildExtraCard(tools2) extra.build(tools2, spec) end
-                band = OpenSection(RowTitle(spec.section, extra.label), "icons_" .. spec.key .. "_extra", spec.col,
-                    extra.summary, spec.gate, extra.hideOn, BuildExtraCard)
-                BuildExtraCard({
-                    group = band, parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                CloseSection(band)
-            end
             if spec.afterMount then spec.afterMount() end
         end
 
@@ -830,6 +828,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function AFKTimerHidden(d) return not d.afkIconShowTimer or d.afkIconShowText end
         local function BuildAFKTimerGroup(tools2, spec)
             local group, parent = tools2.group, tools2.parent
+            local inCard = tools2.inIconCard
 
             group.disableChildrenOn = spec.gate
             group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
@@ -850,20 +849,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             afkTimerShadowNote.hideOn = function(d)
                 return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
             end
-            group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
-        end
-
-        local function AFKTimerSummary(d)
-            if not d then return "" end
-            local parts = {}
-            local size = tonumber(d.afkIconTimerFontSize)
-            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
-            local x = tonumber(d.afkIconTimerX) or 0
-            local y = tonumber(d.afkIconTimerY) or 0
-            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
-            return Join(parts)
+            group:AddWidget(GUI:CreateColorPicker(parent, inCard and L["Timer Color"] or L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
+            group:AddWidget(GUI:CreateSlider(parent, inCard and L["Timer Offset X"] or L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, inCard and L["Timer Offset Y"] or L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
         end
 
         MountIcon({
@@ -879,12 +867,15 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local afkTimerInheritNote = group:AddWidget(GUI:CreateLabel(parent, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
                 afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
             end,
+            -- The timer, once: its own text size while it draws as its own text,
+            -- else just that it shows (in text mode it joins the status text).
             summaryExtra = function(d, parts)
-                if d.afkIconShowTimer then parts[#parts + 1] = L["Show Timer"] end
+                if not d.afkIconShowTimer then return end
+                local size = not AFKTimerHidden(d) and tonumber(d.afkIconTimerFontSize)
+                parts[#parts + 1] = size and format("%s %dpx", L["Timer"], math.floor(size)) or L["Show Timer"]
             end,
             extraGroup = {
-                label = L["Timer Text"], build = BuildAFKTimerGroup,
-                summary = AFKTimerSummary, hideOn = AFKTimerHidden,
+                label = L["Timer Text"], build = BuildAFKTimerGroup, hideOn = AFKTimerHidden,
             },
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } },
