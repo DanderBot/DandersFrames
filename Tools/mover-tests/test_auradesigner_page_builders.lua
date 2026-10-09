@@ -1226,13 +1226,11 @@ do
           "showing: ...and hands back its re-flow verb")
 end
 -- ============================================================
--- 12. THE WIDE-PAGE FLOOR IS GONE -- THE ACCEPTANCE TEST FOR THE WHOLE REWORK
--- Both designers were 50/50 split panels that forced a 640-wide window to 850 and
--- would not let it back down. That floor is what the conversion was FOR, so its
--- removal is the one assertion that says the rework achieved its purpose rather
--- than merely rearranging itself.
+-- 12. THE FULL-WIDTH PAGES OPEN WIDE
+-- The designers fit 640 but are drawn full width, and at 640 they read as a
+-- sliver of a tool; every full-width page shares the 850 floor.
 -- ============================================================
-print("-- Aura Designer: the wide-page floor is gone")
+print("-- Aura Designer: the full-width pages open wide")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
     -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
@@ -1240,19 +1238,12 @@ do
     -- "is this string anywhere" and never "is this page still a wide page".
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
-    check(WIDE:find("auras_auradesigner", 1, true) == nil,
-          "wide: the Aura Designer no longer forces the window to 850")
-    check(WIDE:find("text_designer", 1, true) == nil,
-          "wide: ...and neither does the Text Designer")
-    -- ☠ INVERTED DELIBERATELY, NOT DELETED. This assertion pinned the Filter
-    -- Designer's floor while it was still a two-column island; it has since been
-    -- converted, so the same line now says the opposite and the aura family owns no
-    -- entry in this table at all. Deleting it would have left the page's floor
-    -- unpinned in either direction. Its own census is in
-    -- test_filterdesigner_page_builders.lua.
-    check(WIDE:find("auras_filterdesigner", 1, true) == nil,
-          "wide: ...and neither does the Filter Designer, the last aura page here")
-    -- ⚠ The ones that are still islands must NOT have been swept out with them.
+    check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
+          "wide: the Aura Designer widens the window to 850")
+    check(WIDE:find("text_designer", 1, true) ~= nil,
+          "wide: ...as does the Text Designer")
+    check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,
+          "wide: ...and the Filter Designer")
     check(WIDE:find("general_pinnedframes", 1, true) ~= nil,
           "wide: ...as does Pinned Frames")
     check(WIDE:find("general_nicknames", 1, true) ~= nil,
@@ -1262,8 +1253,8 @@ end
 -- ============================================================
 -- 13. THE NARROW WINDOW -- WHAT 850px WAS HIDING
 -- ------------------------------------------------------------
--- Section 12 removed the floor, so this page now renders in the 640px default
--- window it always claimed it could: a band of roughly 410px, and as little as
+-- Without section 12's floor this page renders in the 640px default window: a
+-- band of roughly 410px, and as little as
 -- ~280 at the window's own minimum. Everything on this page was written when 850
 -- was guaranteed, and two whole classes of layout bug were invisible at that
 -- width.

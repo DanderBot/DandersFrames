@@ -518,12 +518,11 @@ do
 end
 
 -- ============================================================
--- 11. THE WIDE-PAGE FLOOR IS GONE
--- The Text Designer's half of the acceptance test; the Aura Designer's census
--- asserts the same thing from its own side, deliberately, because either page
--- regressing to a split layout would need its floor back.
+-- 11. THE FULL-WIDTH PAGES OPEN WIDE
+-- The Text Designer's half; the Aura Designer's census asserts the same from its
+-- own side.
 -- ============================================================
-print("-- Text Designer: the wide-page floor is gone")
+print("-- Text Designer: the full-width pages open wide")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
     -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
@@ -531,17 +530,17 @@ do
     -- "is this string anywhere" and never "is this page still a wide page".
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
-    check(WIDE:find("text_designer", 1, true) == nil,
-          "wide: the Text Designer no longer forces the window to 850")
-    check(WIDE:find("auras_auradesigner", 1, true) == nil,
-          "wide: ...and neither does the Aura Designer")
+    check(WIDE:find("text_designer", 1, true) ~= nil,
+          "wide: the Text Designer widens the window to 850")
+    check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
+          "wide: ...as does the Aura Designer")
 end
 
 -- ============================================================
 -- 12. THE NARROW WINDOW -- WHAT 850px WAS HIDING
 -- ------------------------------------------------------------
--- Section 11 removed the floor, so this page now renders in the 640px default
--- window: a band of roughly 410px, and as little as ~280 at the window's own
+-- Without section 11's floor this page renders in the 640px default window: a
+-- band of roughly 410px, and as little as ~280 at the window's own
 -- minimum. The Aura Designer's census documents the three classes of layout bug
 -- that width exposed; this is the Text Designer's half of the same sweep, because
 -- the two pages share the shell, the preset bar and the section header and would

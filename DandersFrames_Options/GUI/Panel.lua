@@ -2929,30 +2929,21 @@ function DF:CreateGUI()
     
     -- Store min width references for tab switching
     local normalMinWidth = minWidth  -- 520
-    -- Shared minimum width for the "wide" pages (Binds/Click Casting, Aura
-    -- Designer, Text Designer, Pinned Frames) — their two-panel / tab-strip
-    -- layouts squash below this.
+    -- Shared minimum width for the "wide" pages (Binds/Click Casting and every
+    -- page in WIDE_PAGES).
     local wideMinWidth = 850
 
-    -- Pages whose two-panel / tab-strip layouts squash below wideMinWidth.
+    -- Pages drawn full width rather than in card columns. They fit 640, but read
+    -- as a sliver of a tool there, so opening one widens the window to 850.
     -- ☠ Hoisted to panel scope on purpose. This lived INSIDE SelectTab, which meant
     -- (a) it was rebuilt on every tab click, and (b) ShowNormalContent could not see it --
     -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
     -- still the visible one, and it could then be dragged narrow. Any new consumer of the
     -- wide-page rule reads THIS table; do not re-declare a local copy.
-    -- ☠ NO AURA PAGE IS HERE ANY MORE, and that is the whole point of the popout
-    -- rework rather than a side effect of it. The Aura and Text Designers were
-    -- 50/50 split panels that could not be read below 850, so opening either one
-    -- yanked a 640-wide window 210px wider and refused to let it back down; the
-    -- FILTER Designer was a two-column master/detail with the same problem and the
-    -- same floor. All three are single columns of bands now and fit the default
-    -- width, so the floor they needed is gone with the layout that needed it. See
-    -- docs/superpowers/specs/2026-08-29-designer-rework.md.
-    --
-    -- ⚠ The Filter Designer did not become a designer shell to get here. It is a
-    -- master/detail rather than a preview-plus-tabs page, so its master went behind
-    -- a popout row and its detail became the page's own band.
     local WIDE_PAGES = {
+        auras_auradesigner   = true,  -- preview + tabbed bands
+        auras_filterdesigner = true,  -- filter row + spell list
+        text_designer        = true,  -- preview + tabbed bands
         general_pinnedframes = true,  -- tab strip + active-set meter
         general_nicknames    = true,  -- wide add-row (Match+Char+Nick+Add) + list columns
     }
