@@ -95,3 +95,26 @@ for _, file in ipairs(FILES) do
     end
 end
 check(pagesChecked >= 20, "the scan finds the card pages (saw " .. pagesChecked .. ")")
+
+-- ============================================================
+-- WHERE AN ON/OFF SWITCH GOES
+-- A card named after ONE thing it draws carries that thing's on/off as its
+-- header tick ("Border" -> Show Border). A switch that covers more than its
+-- own card -- a page, or a feature group -- goes first in the body of that
+-- group's "Settings" card, so a "Settings" card never has a header tick: it
+-- would read "Settings: on". The tick is OpenSection's ninth argument, a
+-- table naming the db key ("db = ..., key = ...").
+-- ============================================================
+print("-- Settings page groups: a Settings card never carries a header tick")
+local settingsCards = 0
+for _, file in ipairs(FILES) do
+    local src = SRC[file]
+    for at in src:gmatch('()OpenSection%(L%["Settings"%]') do
+        local call = src:sub(at):match("^OpenSection(%b())") or ""
+        local key = call:match('^%(L%["Settings"%], "([%w_]+)"') or "?"
+        settingsCards = settingsCards + 1
+        check(call:find("key = ", 1, true) == nil,
+              key .. ": a Settings card keeps its switch in the body, not on its header")
+    end
+end
+check(settingsCards >= 8, "the scan finds the Settings cards (saw " .. settingsCards .. ")")

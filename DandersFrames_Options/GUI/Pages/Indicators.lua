@@ -5345,8 +5345,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --   column 2   "Layout"      Size (Growth Direction at its foot).
         --              "Appearance"  Border.
         --              "Text"        Duration Text.
-        --   column 1   "Effects"     Highlight Settings, Highlight Shadow, Highlight
-        --                            Animation, Interrupt Settings and X Mark --
+        --   column 1   "Effects"     Highlight, Highlight Shadow, Highlight
+        --                            Animation, Interrupted Visual and X Mark --
         --                            what the display DOES: it rings an important
         --                            spell, tints an interrupted one and stamps it.
         --
@@ -5415,7 +5415,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local t = d or db
             return not t.personalTargetedSpellEnabled or not t.personalTargetedSpellShowInterrupted
         end
-        -- ...and the two cards split out of Highlight Settings: the ring's shadow
+        -- ...and the two cards split out of classic's Highlight Settings box: the ring's shadow
         -- and its animation grey with Highlight Important Spells, as they did
         -- inside the one box (the toolkit's disableWhen there).
         local function HighlightOffRow(d)
@@ -5970,7 +5970,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ HIGHLIGHT IMPORTANT SPELLS IS THE HEADER'S TICK; the ring's
             -- builder skips its own (hoistToggle). Same commit, and the same gate
             -- the in-body checkbox carried. The ring is how it LOOKS: pinnable.
-            local band = OpenSection(L["Highlight Settings"], "personaltargeted_highlight", 1, PersonalHighlightSummary, PersonalOffRow, nil,
+            local band = OpenSection(L["Highlight"], "personaltargeted_highlight", 1, PersonalHighlightSummary, PersonalOffRow, nil,
                 BuildPersonalHighlightRingGroup, {
                     db = db, key = "personalTargetedSpellHighlightImportant", label = L["Highlight Important Spells"],
                     disableOn = PersonalOffRow,
@@ -6065,7 +6065,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ SHOW INTERRUPTED VISUAL IS THE HEADER'S TICK; the builder skips
             -- its own (hoistToggle). Same commit and gate. The tint is how an
             -- interrupted icon LOOKS: pinnable.
-            local band = OpenSection(L["Interrupt Settings"], "personaltargeted_interrupt", 1, PersonalInterruptSummary, PersonalOffRow, nil,
+            local band = OpenSection(L["Interrupted Visual"], "personaltargeted_interrupt", 1, PersonalInterruptSummary, PersonalOffRow, nil,
                 BuildPersonalInterruptGroup, {
                     db = db, key = "personalTargetedSpellShowInterrupted", label = L["Show Interrupted Visual"],
                     disableOn = PersonalOffRow,

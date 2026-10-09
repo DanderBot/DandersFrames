@@ -2289,27 +2289,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             AddToSection(reducedGroup, nil, 1)
         else
-            -- ☠ ENABLE IS THE HEADER'S TICK; the builder skips its own
-            -- (hoistToggle). Same key and label, and the commit is what the
-            -- suppressed checkbox ran plus the state pass that re-greys the four
-            -- controls under it -- never a page rebuild. A pin: the overlay's
-            -- texture, colour and blend are how it LOOKS.
             -- Its own group under the looks, as classic gives it its own section:
-            -- an extra the bar can show, not how the bar looks.
+            -- an extra the bar can show, not how the bar looks. ☠ ITS ENABLE STAYS
+            -- IN THE BODY, first in its Settings card: a switch for a whole group
+            -- never rides a "Settings" header. A pin: the overlay's texture,
+            -- colour and blend are how it LOOKS.
             Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
             local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
-                BuildReducedMaxHealthGroup, {
-                    db = db, key = "reducedMaxHealthEnabled", label = L["Enable"],
-                    onChanged = function()
-                        DF:UpdateAllFrames()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
+                BuildReducedMaxHealthGroup)
             BuildReducedMaxHealthGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
             })
             CloseSection(band)
         end

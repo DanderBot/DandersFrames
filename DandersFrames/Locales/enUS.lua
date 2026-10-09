@@ -2962,6 +2962,7 @@ L["Markers"] = true
 L["Targeting"] = true
 L["Threat"] = true
 L["Changed in this section"] = true
+L["Interrupted Visual"] = true
 L["%d changed from default"] = true
 L["%d set by this auto layout"] = true
 L["%d set by the active auto layout"] = true

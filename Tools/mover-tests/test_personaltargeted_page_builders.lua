@@ -13,8 +13,8 @@ local NS = ...
 --   column 2   "Layout"      Size (Growth Direction at its foot).
 --              "Appearance"  Border (Show Border is the header's tick).
 --              "Text"        Duration Text.
---   column 1   "Effects"     Highlight Settings, Border Shadow, Border
---                            Animation, Interrupt Settings, X Mark.
+--   column 1   "Effects"     Highlight, Highlight Shadow, Highlight
+--                            Animation, Interrupted Visual, X Mark.
 --
 -- ☠ TWO THINGS MOVED. Growth Direction was a lone control row; it now sits at
 -- the foot of Size. Highlight Settings was one panel of twenty-eight controls;
@@ -266,7 +266,7 @@ local CARDS = {
     { label = "Duration Text", key = "personaltargeted_duration", col = 2, box = "Duration Text", classicCol = 2,
       builder = "BuildPersonalDurationGroup", golden = PT_DURATION, summary = "PersonalDurationSummary",
       dim = "PersonalOffRow", pin = true },
-    { label = "Highlight Settings", key = "personaltargeted_highlight", col = 1,
+    { label = "Highlight", key = "personaltargeted_highlight", col = 1,
       builder = "BuildPersonalHighlightRingGroup", golden = PT_HL_RING, summary = "PersonalHighlightSummary",
       dim = "PersonalOffRow", pin = true, split = true,
       tick = { key = "personalTargetedSpellHighlightImportant", name = "Highlight Important Spells", gate = "PersonalOffRow" } },
@@ -277,7 +277,7 @@ local CARDS = {
     { label = "Highlight Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
       builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "PersonalHighlightAnimationSummary",
       dim = "HighlightOffRow", pin = true, split = true },
-    { label = "Interrupt Settings", key = "personaltargeted_interrupt", col = 1, box = "Interrupt Settings", classicCol = 2,
+    { label = "Interrupted Visual", key = "personaltargeted_interrupt", col = 1, box = "Interrupt Settings", classicCol = 2,
       builder = "BuildPersonalInterruptGroup", golden = PT_INTERRUPT, summary = "PersonalInterruptSummary",
       dim = "PersonalOffRow", pin = true,
       tick = { key = "personalTargetedSpellShowInterrupted", name = "Show Interrupted Visual", gate = "PersonalOffRow" } },
@@ -403,10 +403,10 @@ do
     check(anim:find("tools2.group.disableChildrenOn = HidePersonalHighlightOptions", 1, true) ~= nil,
           "split: ...greyed by the same gate, as a group gate (the helper composes none)")
     -- The three cards open together, ring first.
-    local r = PAGE:find('OpenSection(L["Highlight Settings"]', 1, true)
+    local r = PAGE:find('OpenSection(L["Highlight"]', 1, true)
     local s = PAGE:find('OpenSection(L["Highlight Shadow"]', 1, true)
     local a = PAGE:find('OpenSection(L["Highlight Animation"]', 1, true)
-    check(r and s and a and r < s and s < a, "split: Highlight Settings, Highlight Shadow, Highlight Animation, in that order")
+    check(r and s and a and r < s and s < a, "split: Highlight, Highlight Shadow, Highlight Animation, in that order")
     -- ☠ NEVER "BORDER ..." -- the page has a real Border card, and a pinned
     -- "Personal Targeted / Border Shadow" read as that border's. The keys are
     -- the ones the cards shipped with, so a user's folds survive the rename.
@@ -430,7 +430,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Content Types | Size | Border | Duration Text | Highlight Settings | Highlight Shadow | Highlight Animation | Interrupt Settings | X Mark",
+       "Settings | Content Types | Size | Border | Duration Text | Highlight | Highlight Shadow | Highlight Animation | Interrupted Visual | X Mark",
        "order: the ten cards open in group order -- Content, Layout, Appearance, Text, Effects")
     local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
     local layAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 2)', 1, true)
@@ -440,11 +440,11 @@ do
     local textAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)', 1, true)
     local durAt     = PAGE:find('OpenSection(L["Duration Text"]', 1, true)
     local fxAt      = PAGE:find('Add(GUI:CreateHeader(self.child, L["Effects"]), 40, 1)', 1, true)
-    local hlAt      = PAGE:find('OpenSection(L["Highlight Settings"]', 1, true)
+    local hlAt      = PAGE:find('OpenSection(L["Highlight"]', 1, true)
     check(contentAt and layAt and sizeAt and contentAt < layAt and layAt < sizeAt, "order: Layout heads Size")
     check(sizeAt and appAt and borderAt and sizeAt < appAt and appAt < borderAt, "order: Appearance heads Border")
     check(borderAt and textAt and durAt and borderAt < textAt and textAt < durAt, "order: Text heads Duration Text")
-    check(fxAt and hlAt and fxAt < hlAt, "order: Effects heads Highlight Settings")
+    check(fxAt and hlAt and fxAt < hlAt, "order: Effects heads Highlight")
 
     -- ---- Growth Direction moved INTO Size -----------------------------
     -- ☠ IN THE CARD BUILDER, NOT ADDED TO THE BAND AFTER IT. The pin mounts the
