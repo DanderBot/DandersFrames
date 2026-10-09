@@ -1146,6 +1146,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- pair spans the box. No explicit accent: the tab picks up the mode accent
         -- (party purple / raid), same as the main tabs. CreateSegmentToggle stays the
         -- compact value toggle beside a control (the s/% dials in the legend below).
+        -- ⚠ EACH TAB IS ANCHORED TO ITS HALF OF THE ROW, not given a width: the box
+        -- or card sizes the row, and a wide card left fixed-width tabs in its corner.
         local tabRow = CreateFrame("Frame", nil, self.child)
         tabRow:SetSize(260, 24)
         local prevTab
@@ -1155,10 +1157,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         }) do
             local tabBtn = CreateFrame("Button", nil, tabRow, "BackdropTemplate")
             GUI:StyleButton(tabBtn, { tab = true, width = 128, height = 24, text = def.label, font = "DFFontHighlight" })
+            tabBtn:ClearAllPoints()
             if prevTab then
-                tabBtn:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
+                tabBtn:SetPoint("TOPLEFT", tabRow, "TOP", 2, 0)
+                tabBtn:SetPoint("BOTTOMRIGHT", tabRow, "BOTTOMRIGHT", 0, 0)
             else
-                tabBtn:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
+                tabBtn:SetPoint("TOPLEFT", tabRow, "TOPLEFT", 0, 0)
+                tabBtn:SetPoint("BOTTOMRIGHT", tabRow, "BOTTOM", -2, 0)
             end
             local key = def.key
             tabBtn:SetScript("OnClick", function()
@@ -1177,6 +1182,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- unit, the text preview always shows the ramp the TEXT reads. smoothMode marks
         -- the strips that render the way the duration text does (gradient while Blend
         -- Colors Smoothly is on). Low values left, high right.
+        -- ⚠ THE BANDS ARE PLACED FROM THE STRIP'S LIVE WIDTH, on every size change:
+        -- the editor strip is stretched to the box or card it sits in, and bands laid
+        -- out once at the 256 it was built at stayed that wide in a wider card.
         local previewW, stripH = 256, 18
         local strips = {}
         local function BuildStrip(w, h, smoothMode, unit)
@@ -1192,12 +1200,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
                 if hi > lo then
                     local tex = f:CreateTexture(nil, "ARTWORK")
-                    tex:SetPoint("TOPLEFT", f, "TOPLEFT", (lo / maxT) * w, 0)
-                    tex:SetSize(((hi - lo) / maxT) * w, h)
                     tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
-                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
+                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1], lo = lo, hi = hi }
                 end
             end
+            local function place(width)
+                width = (width and width > 0) and width or w
+                for _, seg in ipairs(f.segs) do
+                    seg.tex:ClearAllPoints()
+                    seg.tex:SetPoint("TOPLEFT", f, "TOPLEFT", (seg.lo / maxT) * width, 0)
+                    seg.tex:SetSize(((seg.hi - seg.lo) / maxT) * width, h)
+                end
+            end
+            place(w)
+            f:SetScript("OnSizeChanged", function(_, width) place(width) end)
             strips[#strips + 1] = f
             return f
         end
