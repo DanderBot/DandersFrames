@@ -21,6 +21,8 @@ local C_BACKGROUND = GUI.Colors.background
 -- Hoisted out of its StyleButton call because the shared underline needs to wear
 -- it too, and the two must not be able to disagree.
 local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
+-- The GLOBAL tab's: see THE GLOBAL TAB in GUI/GUI.lua.
+local C_GLOBAL = GUI.GlobalAccent
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -1710,17 +1712,21 @@ function DF:CreateGUI()
     deck2:SetFrameLevel(frame:GetFrameLevel() + 1)
     GUI.HeaderDeck2 = deck2
 
-    -- Party/Raid mode toggle buttons
-    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    -- Head of the LEFT chain (Party <- Raid <- Clicks), so this offset is what
-    -- every button along it inherits. The +1 lifts the 24px button off deck 2's
-    -- centre onto the exact row the old absolute -32 put it on, so nothing in
-    -- the header moves by a pixel.
-    btnParty:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnParty, 12), 1)
+    -- Global / Party / Raid / Binds
+    local btnGlobal = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    -- Head of the LEFT chain (Global <- Party <- Raid <- Clicks), so this offset
+    -- is what every button along it inherits. The +1 lifts the 24px button off
+    -- deck 2's centre onto the row the header has always used.
+    btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)
     -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
-    -- label colour and the cell. `tabStripe = false` on all three: the three
-    -- underlines are ONE bar that glides between them (modeUnderline below), not
-    -- three stripes switching off here and on there.
+    -- label colour and the cell. `tabStripe = false` on all four: the underlines
+    -- are ONE bar that glides between them (modeUnderline below), not stripes
+    -- switching off here and on there.
+    GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI.GlobalButton = btnGlobal
+
+    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)
     GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
 
@@ -2216,9 +2222,17 @@ function DF:CreateGUI()
     local function UpdateThemeColors()
         -- Mode buttons use the shared underline-tab style; SetActive drives the
         -- accent label + the cell (each button's per-mode accent set at creation).
-        btnParty:SetActive(GUI.SelectedMode == "party")
-        btnRaid:SetActive(GUI.SelectedMode == "raid")
-        btnClicks:SetActive(GUI.SelectedMode == "clicks")
+        -- GLOBAL showing means none of the three is: the mode under it is only
+        -- remembered, not active.
+        local globalView = GUI.GlobalView and true or false
+        btnGlobal:SetActive(globalView)
+        btnParty:SetActive(not globalView and GUI.SelectedMode == "party")
+        btnRaid:SetActive(not globalView and GUI.SelectedMode == "raid")
+        btnClicks:SetActive(not globalView and GUI.SelectedMode == "clicks")
+        -- The frame mode GLOBAL returns to when it is entered from BINDS.
+        if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then
+            GUI._lastFrameMode = GUI.SelectedMode
+        end
         -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
         -- the three is active and wearing that tab's own accent from the moment
         -- it sets off.
@@ -2226,10 +2240,12 @@ function DF:CreateGUI()
         -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
         -- the note below the function), and a glide nobody can see would only
         -- leave the bar mid-flight for the next visible one to start from.
-        local activeMode = (GUI.SelectedMode == "raid" and btnRaid)
+        local activeMode = (globalView and btnGlobal)
+            or (GUI.SelectedMode == "raid" and btnRaid)
             or (GUI.SelectedMode == "clicks" and btnClicks)
             or btnParty
-        local activeModeAccent = (activeMode == btnRaid and C_RAID)
+        local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)
+            or (activeMode == btnRaid and C_RAID)
             or (activeMode == btnClicks and C_CLICKS)
             or C_ACCENT
         modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
@@ -2363,7 +2379,18 @@ function DF:CreateGUI()
     -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
     -- to themeColor@0.5 rather than the neutral border.
 
+    -- GLOBAL: the mode under it is left exactly as it is (see THE GLOBAL TAB in
+    -- GUI/GUI.lua), so there is no test-mode or unlock hand-over to make here.
+    btnGlobal:SetScript("OnClick", function()
+        if GUI.GlobalView then return end
+        GUI:EnterView(true)
+        GUI.SelectTab(GUI:LastTabInView())
+    end)
+
     btnParty:SetScript("OnClick", function()
+        -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
+        -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
+        GUI.GlobalView = false
         -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
         -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
@@ -2433,6 +2460,8 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        -- Leaving GLOBAL, if it was up -- see the Party handler.
+        GUI.GlobalView = false
         -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
         -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
@@ -2493,6 +2522,7 @@ function DF:CreateGUI()
     
     -- Click Casting tab click handler
     btnClicks:SetScript("OnClick", function()
+        GUI.GlobalView = false
         -- Clean up any test/unlock state from previous mode
         if GUI.SelectedMode == "party" then
             local partyDb = DF:GetDB()
@@ -2976,6 +3006,67 @@ function DF:CreateGUI()
     end
     
     -- =========================================================================
+    -- WHICH TAB A PAGE IS ON -- GLOBAL, or Party/Raid (see THE GLOBAL TAB in
+    -- GUI/GUI.lua)
+    -- =========================================================================
+    -- Is this nav row in the sidebar for the tab now showing?
+    function GUI:IsTabInView(btn)
+        if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
+        return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
+    end
+
+    -- A category's pages in the order the sidebar reads them: its declared order
+    -- (SetNavOrder) first, then anything it does not name.
+    local function TabsInOrder(cat)
+        local placeable, out, taken = {}, {}, {}
+        for _, btn in ipairs(cat.children) do placeable[btn] = true end
+        for _, entry in ipairs(cat.navSpec or {}) do
+            local btn = type(entry) == "string" and GUI.Tabs[entry]
+            if btn and placeable[btn] then out[#out + 1] = btn; taken[btn] = true end
+        end
+        for _, btn in ipairs(cat.children) do
+            if not taken[btn] then out[#out + 1] = btn end
+        end
+        return out
+    end
+
+    function GUI:FirstTabInView()
+        for _, catName in ipairs(GUI.CategoryOrder or {}) do
+            local cat = GUI.Categories[catName]
+            if cat then
+                for _, btn in ipairs(TabsInOrder(cat)) do
+                    if GUI:IsTabInView(btn) then return btn.tabName end
+                end
+            end
+        end
+    end
+
+    -- The page this tab showed last, else its first.
+    function GUI:LastTabInView()
+        local last = GUI.GlobalView and GUI._lastGlobalPage or GUI._lastModePage
+        local btn = last and GUI.Tabs[last]
+        if btn and GUI:IsTabInView(btn) then return last end
+        return GUI:FirstTabInView()
+    end
+
+    -- Show GLOBAL (true) or the Party/Raid tab under it (false). From BINDS it
+    -- steps back onto the frame mode BINDS was entered from.
+    -- ⚠ IT SELECTS NO PAGE: the caller does, which is why the redirect off a page
+    -- that is not on this tab is held off around ShowNormalContent.
+    function GUI:EnterView(global)
+        if GUI.SelectedMode == "clicks" then
+            GUI.SelectedMode = GUI._lastFrameMode or "party"
+        end
+        GUI.GlobalView = global and true or false
+        GUI:SetAccent(GUI.CurrentAccent())
+        local held = GUI._redirectingTab
+        GUI._redirectingTab = true
+        GUI:ShowNormalContent()
+        GUI._redirectingTab = held
+        UpdateThemeColors()
+    end
+
+    -- =========================================================================
     -- SEARCH RESULTS PANEL (inside content area)
     -- =========================================================================
     if DF.Search then
@@ -2986,6 +3077,14 @@ function DF:CreateGUI()
     GUI.Pages = {}
     
     local function SelectTab(name)
+        -- ★ A PAGE LIVES ON ONE TAB, and asking for it goes there: search results,
+        -- cross-links and every "open in Filter Designer" land here, from either
+        -- side and from BINDS.
+        if GUI.Tabs[name] and (GUI.IsGlobalPage(name) ~= (GUI.GlobalView == true)
+                               or GUI.SelectedMode == "clicks") then
+            GUI:EnterView(GUI.IsGlobalPage(name))
+        end
+
         -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
         -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
         -- single-slot tracker) while leaving the menu's own shown flag set. Come back to
@@ -3178,6 +3277,10 @@ function DF:CreateGUI()
             end
         end
         GUI.CurrentPageName = name
+        -- What each tab comes back to.
+        if GUI.Tabs[name] then
+            if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end
+        end
         UpdateThemeColors()
     end
     GUI.SelectTab = SelectTab
@@ -3666,22 +3769,39 @@ function DF:CreateGUI()
             return rows
         end
 
+        -- What a category shows on the tab now up: its pages on this tab (see
+        -- GUI:IsTabInView -- GLOBAL's pages, or Party/Raid's, less party-only ones
+        -- in raid), and a caption only where one of those follows it. A category
+        -- left with nothing is hidden, header and all: GLOBAL has no Bars, Party
+        -- and Raid no Debug.
+        local function ViewRows(rows)
+            local out, caption = {}, nil
+            for _, btn in ipairs(rows) do
+                if btn.isNavCaption then
+                    caption = btn
+                elseif GUI:IsTabInView(btn) then
+                    if caption then out[#out + 1] = caption; caption = nil end
+                    out[#out + 1] = btn
+                end
+            end
+            return out
+        end
+
         for _, catName in ipairs(GUI.CategoryOrder) do
             local cat = GUI.Categories[catName]
             if cat then
-                cat:ClearAllPoints()
-                cat:SetPoint("TOPLEFT", 0, y)
-                cat:SetPoint("TOPRIGHT", 0, y)
-                cat:SetHeight(catStride)
-                y = y - catStride
-
                 local rows = NavRows(cat)
-                if cat.expanded then
-                    for _, btn in ipairs(rows) do
-                        -- Party-only tabs are hidden entirely in raid mode.
-                        if btn.partyOnly and GUI.SelectedMode == "raid" then
-                            btn:Hide()
-                        else
+                for _, btn in ipairs(rows) do btn:Hide() end
+                local shown = ViewRows(rows)
+                cat:SetShown(#shown > 0)
+                if #shown > 0 then
+                    cat:ClearAllPoints()
+                    cat:SetPoint("TOPLEFT", 0, y)
+                    cat:SetPoint("TOPRIGHT", 0, y)
+                    cat:SetHeight(catStride)
+                    y = y - catStride
+                    if cat.expanded then
+                        for _, btn in ipairs(shown) do
                             local stride = btn.isNavCaption and capStride or tabStride
                             btn:Show()
                             btn:ClearAllPoints()
@@ -3690,10 +3810,6 @@ function DF:CreateGUI()
                             btn:SetHeight(stride)
                             y = y - stride
                         end
-                    end
-                else
-                    for _, btn in ipairs(rows) do
-                        btn:Hide()
                     end
                 end
             end
@@ -4212,13 +4328,10 @@ function DF:CreateGUI()
     -- Apply tab availability for current mode (greys out disabled-mode tabs)
     GUI:UpdateTabAvailability()
 
-    -- Select first subtab
-    if GUI.CategoryOrder[1] then
-        local firstCat = GUI.Categories[GUI.CategoryOrder[1]]
-        if firstCat and firstCat.children[1] then
-            SelectTab(firstCat.children[1].tabName)
-        end
-    end
+    -- The first page of the tab the window opens on (Party or Raid; GLOBAL only
+    -- once the user goes there).
+    local first = GUI:FirstTabInView()
+    if first then SelectTab(first) end
 end
 
 -- ============================================================

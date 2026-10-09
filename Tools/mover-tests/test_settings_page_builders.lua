@@ -143,12 +143,14 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    -- The info banner is untouched and still first; the bulk verbs go under it.
-    local bannerAt = PAGE:find("local banner = GUI:CreateInfoBanner(self.child, {", 1, true)
+    -- No "applies globally" banner: the page is on the GLOBAL tab, which says it.
+    -- The bulk verbs come first, then the first card.
     local stripAt  = PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true)
     local firstAt  = PAGE:find('OpenSection(L["Frame Modes"]', 1, true)
-    check(bannerAt and stripAt and firstAt and bannerAt < stripAt and stripAt < firstAt,
-          "bulk: the banner, then Expand All / Collapse All spanning both columns, then the first card")
+    check(PAGE:find("GUI:CreateInfoBanner(self.child, {", 1, true) == nil,
+          "bulk: no global-settings banner -- the GLOBAL tab says it")
+    check(stripAt and firstAt and stripAt < firstAt,
+          "bulk: Expand All / Collapse All spanning both columns, then the first card")
     check(PAGE:find("if not classicLayout then\n            Add(tools.SectionControls(self.child), 24, \"both\")\n        end", 1, true) ~= nil,
           "bulk: ...and only in Modern")
 end

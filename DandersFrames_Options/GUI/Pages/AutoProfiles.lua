@@ -1769,8 +1769,9 @@ function AutoProfilesUI:RefreshEditingUI()
         end
     end
     
-    -- Disable Party button and Binds button when editing (must stay in Raid mode)
-    local buttonsToDisable = {GUI.PartyButton, GUI.ClicksButton}
+    -- Disable the Global, Party and Binds buttons when editing (must stay in Raid
+    -- mode; GLOBAL's pages are nothing a layout can change)
+    local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton, GUI.ClicksButton}
     for _, btn in ipairs(buttonsToDisable) do
         if btn then
             if self:IsEditing() then

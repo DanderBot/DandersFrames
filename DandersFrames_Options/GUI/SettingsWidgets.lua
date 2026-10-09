@@ -159,6 +159,8 @@ end
 function GUI:IsTabDisabledForCurrentMode(tabName)
     if not tabName then return false end
     if GUI.AlwaysAccessiblePages[tabName] then return false end
+    -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
+    if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
     if GUI.SelectedMode == "party" and DF.db and DF.db.partyEnabled == false then return true end
     if GUI.SelectedMode == "raid"  and DF.db and DF.db.raidEnabled  == false then return true end
     return false
@@ -183,18 +185,22 @@ function GUI:UpdateTabAvailability()
         end
     end
 
-    -- Refresh the sidebar so party-only tabs (e.g. Visibility) hide/show for
-    -- the current mode.
+    -- Refresh the sidebar for the tab now up: GLOBAL's pages or Party/Raid's,
+    -- and party-only ones (e.g. Visibility) hidden in raid.
     if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
 
-    -- If the active tab just became hidden (party-only while in raid), move to a
-    -- safe always-present tab so the user isn't left on a hidden/empty page.
-    if not GUI._redirectingTab and GUI.SelectedMode == "raid" and GUI.CurrentPageName then
+    -- If the page on screen is not in that sidebar any more (GLOBAL left for
+    -- Party or Raid, or a party-only page in raid), move to the page this tab
+    -- showed last, so the user is never left on a page they cannot see listed.
+    if not GUI._redirectingTab and GUI.CurrentPageName and GUI.IsTabInView and GUI.SelectTab then
         local cur = GUI.Tabs[GUI.CurrentPageName]
-        if cur and cur.partyOnly and GUI.SelectTab then
-            GUI._redirectingTab = true
-            GUI.SelectTab("general_settings")
-            GUI._redirectingTab = false
+        if cur and not GUI:IsTabInView(cur) then
+            local to = GUI:LastTabInView()
+            if to then
+                GUI._redirectingTab = true
+                GUI.SelectTab(to)
+                GUI._redirectingTab = false
+            end
         end
     end
 end

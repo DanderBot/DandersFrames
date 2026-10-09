@@ -524,9 +524,9 @@ do
         "the underline follows the active mode, instant while the window is hidden")
     has("navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())",
         "...and the rail follows the selected page, by the same rule")
-    -- Three tabs, three opt-outs -- plus the one in the comment that explains it.
-    eq(countOf("tabStripe = false"), 4,
-       "panel: all three mode tabs decline StyleButton's own stripe")
+    -- Four tabs, four opt-outs -- plus the one in the comment that explains it.
+    eq(countOf("tabStripe = false"), 5,
+       "panel: all four mode tabs (Global, Party, Raid, Binds) decline StyleButton's own stripe")
     check(src:find("btn.accent", 1, true) == nil,
           "panel: and no nav row builds a left accent bar of its own any more")
 

@@ -2843,18 +2843,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== INFO BANNER (global settings notice) =====
-        -- Untouched by the conversion and still the first thing on the page: it
-        -- is the sentence that explains why none of this has a party/raid split,
-        -- and a banner folded behind a click would be a warning nobody reads.
-        do
-            local banner = GUI:CreateInfoBanner(self.child, {
-                tone = "info",
-                text = L["Settings on this page apply globally — changes persist across both the Party and Raid sections."],
-            })
-            Add(banner, banner.layoutHeight, "both")
-        end
-
         -- ===== THE PAGE'S CARDS (Modern) ==================================
         -- The Debuff Bar's collapsible-card design, one card per classic box: two
         -- settings per row inside a card wide enough, dim captions, the value

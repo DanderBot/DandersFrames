@@ -4096,7 +4096,8 @@ function DF:ToggleGUI()
         else
             GUI.SelectedMode = "party"
         end
-        GUI:SetAccent(GUI.GetThemeColorFor(GUI.SelectedMode == "raid"))
+        -- GLOBAL, if the window was closed on it, reopens on it.
+        GUI:SetAccent(GUI.CurrentAccent())
         
         if GUI.UpdateThemeColors then
             GUI.UpdateThemeColors()
