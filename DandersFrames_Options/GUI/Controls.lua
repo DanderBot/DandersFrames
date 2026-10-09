@@ -4880,12 +4880,36 @@ function GUI:CreatePopoutPageTools(page)
     -- only the NUMBER is chosen here, off the band's live width, right before
     -- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
     -- or more, one below it.
+    --
+    -- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
+    -- measured against the Debuff Bar's captions; the Global Settings page has
+    -- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
+    -- caption ran under the checkbox beside it. A control that knows its one-line
+    -- width says so (NaturalWidth), and a card holding one too wide for half of
+    -- it stays one track. Hidden rows count too, so toggling one never flips the
+    -- card's shape.
+    local function WidestPairedRow(group)
+        local widest = 0
+        for _, entry in ipairs(group.groupChildren or {}) do
+            local w = entry.widget
+            local natural = w and rawget(w, "NaturalWidth")
+            if natural and not rawget(w, "fullRow") then
+                local n = natural(w) or 0
+                if n > widest then widest = n end
+            end
+        end
+        return widest
+    end
+
     local function WireTwoTrack(band)
         band.dfTwoTrack = true
         local layout = band.LayoutChildren
+        local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
         band.LayoutChildren = function(self)
             local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
-            self.innerColumns = (inner >= SECTION_TWO_TRACK_MIN) and 2 or nil
+            local fits = inner >= SECTION_TWO_TRACK_MIN
+                and (inner - gap) / 2 >= WidestPairedRow(self)
+            self.innerColumns = fits and 2 or nil
             local h = layout(self)
             if self.innerColumns then CentreShortSlots(self) end
             return h

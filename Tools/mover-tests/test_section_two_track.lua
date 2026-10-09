@@ -168,6 +168,34 @@ if HELPERS and HELPERS.WireTwoTrack then
         eq(rawget(g, "innerColumns"), 2, "re-widened: two tracks again, still without a rebuild")
     end
 
+    print("-- Two tracks: only when every caption fits its track")
+    do
+        local function box(natural)
+            local w = control(30, true)
+            w.NaturalWidth = function() return natural end
+            return w
+        end
+        -- 600 - 24 = 576 inner, so a track is (576 - 10) / 2 = 283.
+        local g = band(600)
+        g:AddWidget(box(200), 30)
+        g:AddWidget(box(283), 30)
+        HELPERS.StampFullRows(g)
+        g:LayoutChildren()
+        eq(rawget(g, "innerColumns"), 2, "fit: captions that fit their track pair up")
+
+        local wide = g:AddWidget(box(284), 30)
+        g:LayoutChildren()
+        eq(rawget(g, "innerColumns"), nil, "fit: one caption a pixel too wide keeps the card one track")
+
+        wide.hideOn = function() return true end
+        g:LayoutChildren()
+        eq(rawget(g, "innerColumns"), nil, "fit: ...even while that row is hidden, so a toggle never reshapes the card")
+
+        wide.fullRow = true
+        g:LayoutChildren()
+        eq(rawget(g, "innerColumns"), 2, "fit: a row that takes the full width anyway does not count")
+    end
+
     print("-- Two tracks: prose takes a row, bound controls share one")
     do
         local g = band(600)

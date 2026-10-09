@@ -3001,6 +3001,12 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     txt:SetText(label)
     txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     container.label = txt  -- exposed so callers can re-font / anchor a subtitle
+    -- The width this row needs to keep its caption on one line. The caption has
+    -- no right edge, so a track narrower than this runs it under whatever sits
+    -- beside it; a two-track card reads this to decide whether it can pair up.
+    container.NaturalWidth = function()
+        return cb:GetWidth() + 12 + txt:GetStringWidth()
+    end
 
     -- Determine the key to use for override indicators
     local effectiveOverrideKey = overrideKey or dbKey

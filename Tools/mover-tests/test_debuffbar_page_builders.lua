@@ -660,7 +660,8 @@ do
           "two tracks: a second track needs 160px per control plus the kit's own gutter")
     local wire = TOOLS:match("local function WireTwoTrack%(band%)(.-)\n    end\n") or ""
     check(wire:find("band.LayoutChildren = function(self)", 1, true) ~= nil
-      and wire:find("self.innerColumns = (inner >= SECTION_TWO_TRACK_MIN) and 2 or nil", 1, true) ~= nil
+      and wire:find("local fits = inner >= SECTION_TWO_TRACK_MIN", 1, true) ~= nil
+      and wire:find("self.innerColumns = fits and 2 or nil", 1, true) ~= nil
       and wire:find("local h = layout(self)", 1, true) ~= nil,
           "two tracks: decided on EVERY layout pass off the live width, then the kit's own grid lays it out")
     local nb = select(2, wire:gsub("self%.innerColumns", ""))
