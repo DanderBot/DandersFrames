@@ -1217,9 +1217,9 @@ do
           "card: ...SetExpanded reaches it only when it exists")
     check(fn:find("if self._ApplyCardFold and widget.isSettingsGroup and not self.cardBody then", 1, true) ~= nil,
           "card: ...and so does RegisterChild")
-    check(fn:find("if cardHover then cardHover:Show() return end", 1, true) ~= nil
-      and fn:find("if cardHover then cardHover:Hide() return end", 1, true) ~= nil,
-          "card: the hover wash replaces the backdrop tint only when there is a card")
+    check(fn:find("if cardHover then SetCardHover(true) return end", 1, true) ~= nil
+      and fn:find("if cardHover then SetCardHover(false) return end", 1, true) ~= nil,
+          "card: the header strip brightens instead of the backdrop tint only when there is a card")
     check(fn:find('section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)', 1, true) ~= nil
       and fn:find("local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26", 1, true) ~= nil
       and fn:find("local TITLE_X = TICK_X\n", 1, true) ~= nil,

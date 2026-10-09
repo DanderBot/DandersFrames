@@ -385,6 +385,11 @@ GUI.SectionCard = {
     -- has to stay >= 4.5:1 on the HOVERED header too, and 0.75 (the row
     -- plates' hover) takes it to ~4.4.
     hoverAlpha  = 0.6,
+    -- of C_HOVER, AT REST: the header is always its own strip, a step lighter
+    -- than the body, and hover lifts it one step more (panel 0.12 -> header
+    -- ~0.155 -> hovered ~0.18). Below hoverAlpha, so the hovered header stays
+    -- the brightest the summary's contrast was checked against.
+    headerAlpha = 0.35,
     cornersAll  = { tl = true, tr = true, bl = true, br = true },
     cornersTop  = { tl = true, tr = true },
 }
@@ -574,16 +579,17 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
             anchorTo    = cardRect,
         })
-        -- The header's hover wash: over the card's fill, UNDER its ring (the
-        -- title-strip sublevel), over the header's rect only. Top corners round
-        -- while the body shows, all four while the card is the header alone.
+        -- The header strip: over the card's fill, UNDER its ring (the
+        -- title-strip sublevel), over the header's rect only. Always drawn, at
+        -- headerAlpha so the header reads apart from the body, and at hoverAlpha
+        -- under the mouse (SetCardHover). Top corners round while the body
+        -- shows, all four while the card is the header alone.
         cardHover = GUI:CreateRoundedSurface(section, {
             radius   = CARD.radius,
             border   = false,
-            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
             sublevel = GUI.RoundStripSublevel,
         })
-        cardHover:Hide()
         -- The seam between header and body. BORDER sits above the whole of
         -- BACKGROUND, so it is inset by the ring's weight rather than drawn
         -- over it.
@@ -592,6 +598,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         cardLine:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", -bw, 0)
         cardLine:SetHeight(1)
         cardLine:Hide()
+    end
+
+    local cardHovered = false
+    local function SetCardHover(on)
+        if not cardHover then return end
+        cardHovered = on and true or false
+        cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            cardHovered and CARD.hoverAlpha or CARD.headerAlpha)
     end
 
     -- Click area
@@ -696,7 +710,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             end
             cardSurface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
             cardSurface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
-            cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+            SetCardHover(cardHovered)
             cardLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
         end
         section.title.UpdateTheme()
@@ -1309,12 +1323,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 hit:EnableMouse(true)
                 hit:SetMouseClickEnabled(false)
                 hit:SetScript("OnEnter", function(h)
-                    if cardHover then cardHover:Show() end
+                    SetCardHover(true)
                     GUI:ShowCardPreviewPopup(h, self.sectionTitleText, self._previewAll)
                 end)
                 hit:SetScript("OnLeave", function()
                     GUI:HideCardPreviewPopup()
-                    if cardHover and not clickArea:IsMouseOver() then cardHover:Hide() end
+                    if not clickArea:IsMouseOver() then SetCardHover(false) end
                 end)
                 self.previewHit = hit
             end
@@ -1400,12 +1414,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         if section.title:IsTruncated() then
             GUI:ShowTooltip(self, { title = section.title:GetText() })
         end
-        if cardHover then cardHover:Show() return end
+        if cardHover then SetCardHover(true) return end
         section:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.8)
     end)
     clickArea:SetScript("OnLeave", function()
         GUI:HideTooltip()
-        if cardHover then cardHover:Hide() return end
+        if cardHover then SetCardHover(false) return end
         section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
     end)
     clickArea:SetScript("OnClick", function()
@@ -1540,15 +1554,15 @@ function GUI:CreateCardChrome(card, header, opts)
         anchorTo    = rect,
     })
     -- Over the fill, UNDER the ring, over the header's rect only -- the section
-    -- card's own recipe (see CreateCollapsibleSection).
+    -- card's own recipe (see CreateCollapsibleSection): the header strip at
+    -- rest, brighter under the mouse.
     chrome.hover = GUI:CreateRoundedSurface(card, {
         radius   = CARD.radius,
         border   = false,
-        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
         sublevel = GUI.RoundStripSublevel,
         anchorTo = header,
     })
-    chrome.hover:Hide()
     chrome.line = card:CreateTexture(nil, "BORDER")
     chrome.line:SetPoint("TOPLEFT", header, "BOTTOMLEFT", bw, 0)
     chrome.line:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -bw, 0)
@@ -1581,7 +1595,8 @@ function GUI:CreateCardChrome(card, header, opts)
         self.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         self.surface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
         self.surface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
-        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            self.hovered and CARD.hoverAlpha or CARD.headerAlpha)
         self.line:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
     end
 
@@ -1637,8 +1652,8 @@ function GUI:CreateCardChrome(card, header, opts)
         self:Paint()
     end
 
-    header:HookScript("OnEnter", function() chrome.hover:Show() end)
-    header:HookScript("OnLeave", function() chrome.hover:Hide() end)
+    header:HookScript("OnEnter", function() chrome.hovered = true; chrome:Paint() end)
+    header:HookScript("OnLeave", function() chrome.hovered = false; chrome:Paint() end)
     header:HookScript("OnSizeChanged", function() chrome:FitSummary() end)
 
     chrome:LayoutText()
