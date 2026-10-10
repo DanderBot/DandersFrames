@@ -143,8 +143,10 @@ if cardTableSrc and fnSrc then
         eq(chevX, CARD.edge, "order: the chevron keeps its edge inset")
         eq(iconX, CARD.edge + CARD.chevron + CARD.titleGap + (ICON - GLYPH) / 2,
            "order: the icon is one chevron-gap after the chevron, centred in its slot")
-        eq(titleX, CARD.edge + CARD.chevron + CARD.titleGap + ICON + LEAD,
-           "order: the title follows the icon slot by the title lead, room for the dot")
+        -- The tick's slot (an 18px box after iconGap) is reserved on every card too.
+        local TITLE_AT = CARD.edge + CARD.chevron + CARD.titleGap + ICON + CARD.iconGap + 18 + LEAD
+        eq(titleX, TITLE_AT,
+           "order: the title follows the icon and tick slots by the title lead, room for the dot")
         check(chevX and iconX and titleX and chevX < iconX and iconX < titleX,
               "order: chevron -> icon -> title")
 
@@ -198,8 +200,11 @@ if cardTableSrc and fnSrc then
         -- ---- an unkinded card keeps the slot, empty ----
         local u = build({})
         check(u.kindIcon == nil, "unkinded: no icon is built")
-        eq(leftX(u.title), CARD.edge + CARD.chevron + CARD.titleGap + ICON + LEAD,
-           "unkinded: ...but the slot is kept, so titles line up down the page")
+        eq(leftX(u.title), TITLE_AT,
+           "unkinded: ...but the slots are kept, so titles line up down the page")
+        -- ...and a ticked card's title sits exactly where an unticked one's does.
+        local t = build({ toggle = { key = "k", db = {}, label = "On" } })
+        eq(leftX(t.title), TITLE_AT, "ticked: the title lands where an unticked card's does")
         local bogus = build({ kind = "not_a_kind" })
         check(bogus.kindIcon == nil, "unknown kind: no icon, no error")
 

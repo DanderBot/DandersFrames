@@ -676,12 +676,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
 
     -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
-    -- A card's title sits titleLead after whatever precedes it -- the icon slot,
-    -- or the tick when there is one -- so the modified dot has the same room
-    -- everywhere. A plain section reserves nothing for an unticked header.
+    -- ⚠ A CARD RESERVES THE TICK'S SLOT TOO, ticked or not, for the icon slot's
+    -- reason: titles line up down a page whether or not a card has a switch. The
+    -- modified dot sits in titleLead before the title either way. A plain section
+    -- reserves nothing for an unticked header.
     local TITLE_X = TICK_X
-    if CARD then TITLE_X = TICK_X - CARD.iconGap + CARD.titleLead end
-    if toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleLead or 8) end
+    if CARD or toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleLead or 8) end
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)

@@ -1394,8 +1394,8 @@ do
     local fn = WIDGETS:match("function GUI:CreateCollapsibleSection%(.-\nend\n") or ""
     check(fn:find('local toggleOpts = opts and type(opts.toggle) == "table" and type(opts.toggle.key) == "string"', 1, true) ~= nil,
           "tick: the factory reads opts.toggle, and a spec with no key is no spec")
-    check(fn:find("if toggleOpts then TITLE_X = TICK_X + TICK_SIZE", 1, true) ~= nil,
-          "tick: ...the title moves right only on a ticked header")
+    check(fn:find("if CARD or toggleOpts then TITLE_X = TICK_X + TICK_SIZE", 1, true) ~= nil,
+          "tick: ...a card reserves the tick's slot ticked or not, so titles line up")
     local tickAt = fn:find("\n    if toggleOpts then\n        local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,", 1, true)
     check(tickAt ~= nil, "tick: ...built only under the opt-in, from the shared checkbox factory")
     check(fn:find("tick:SetFrameLevel(clickArea:GetFrameLevel() + 2)", 1, true) ~= nil,
