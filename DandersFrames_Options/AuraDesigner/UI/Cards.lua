@@ -887,10 +887,6 @@ PIH_K.ALL_AMPLIFIERS  = { potions = true, trinkets = true, racials = true }
 -- ticks: the tick reads the list, the click edits the list, nothing in between can disagree.
 P.PIH_PI_SPELL_ID = PIH_K.PI_SPELL_ID
 
-function P.PIH_AmplifierIDs()
-    return pihAmplifierIDs(P.PIH_Settings())
-end
-
 -- ★★★ ONE PLACED EFFECT'S OWN SOURCES (2026-09-10), the same four the Cooldown Icons group
 -- got -- Krathe: "yes build the icon block the same".
 --
@@ -2335,56 +2331,6 @@ local function CreateGlobalDefaultsProxy()
     })
 end
 P.CreateGlobalDefaultsProxy = CreateGlobalDefaultsProxy
-
--- ============================================================
--- THE GLOBAL TAB'S SOUND BLOCK
--- ------------------------------------------------------------
--- soundEnabled and soundChannel are the two settings on this tab that do NOT
--- live in `adDB.defaults` -- they sit on the Aura Designer block itself, and the
--- two controls bound to them use custom get/set rather than a db table and key.
--- That is fine for the controls and useless to a row, which needs SOMETHING that
--- can answer "is either of these not the shipped value".
---
--- The rows page took this record and named the two keys through ClaimKeys'
--- `extra` door. Absent means enabled and Master, so ClearKey unsets and the
--- pair goes back to following the shipped answer.
---
--- ⚠ NO CALLER IN THE ADDON since the rows page went (2026-09-26); kept with
--- GroupActions.lua, whose designer-defaults suite drives it.
--- ============================================================
-local SOUND_DEFAULTS = { soundEnabled = true, soundChannel = "Master" }
-P.SOUND_DEFAULTS = SOUND_DEFAULTS
-
-local function CreateSoundSettingsProxy()
-    local adapter = {
-        GetDefault = function(k) return SOUND_DEFAULTS[k] end,
-        GetStored  = function(k)
-            local adDB = GetAuraDesignerDB()
-            if not adDB then return nil end
-            return rawget(adDB, k)
-        end,
-        ClearKey = function(k)
-            local adDB = GetAuraDesignerDB()
-            if not adDB then return end
-            adDB[k] = nil
-        end,
-    }
-    return setmetatable({ _skipOverrideIndicators = true,
-                          __dfDefaults = SOUND_DEFAULTS,
-                          __dfDefaultsAdapter = adapter }, {
-        __index = function(_, k)
-            local adDB = GetAuraDesignerDB()
-            local v = adDB and adDB[k]
-            if v ~= nil then return v end
-            return SOUND_DEFAULTS[k]
-        end,
-        __newindex = function(_, k, v)
-            local adDB = GetAuraDesignerDB()
-            if adDB then adDB[k] = v end
-        end,
-    })
-end
-P.CreateSoundSettingsProxy = CreateSoundSettingsProxy
 
 local function BuildGlobalView(parent)
     local defaults = CreateGlobalDefaultsProxy()

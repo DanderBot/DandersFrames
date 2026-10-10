@@ -547,7 +547,7 @@ UI.PopoutRow = {
                            -- foot: the band, a faint ring and a dark gap read as the
                            -- NEXT row's header, and rows looked like they overlapped
                            -- ("like an illusion"). A visible edge is what says where
-                           -- one plate stops. Shared with ControlRow on purpose.
+                           -- one plate stops.
     activeFill   = 0.14,   -- of the accent: a WASH, not a fill
     activeHover  = 0.20,
     activeBorder = 1,
@@ -570,8 +570,8 @@ UI.PopoutRow = {
     -- own labels ("FRAME WI...", "GROWTH DI...") and left the control 104 of the
     -- 172px cell -- 46px of live track once the slider's value box and its
     -- clearance came off. Two tiers give the name the cell's FULL width and the
-    -- control the full width under it: 172 - 50 - 8 = 114 of track, which is the
-    -- 112 ControlRow.lua settled on as "roughly a pixel per step".
+    -- control the full width under it: 172 - 50 - 8 = 114 of track, roughly a
+    -- pixel per step.
     --
     -- nameH    the name tier. A 9pt caps line, left-aligned, across the cell.
     -- controlH the control tier. 24 is the dropdown opener's own height, and it
@@ -689,9 +689,8 @@ UI.PopoutRow = {
     padCompact   = 6,
 
     -- ---- the embedded control's own metrics --------------------------
-    -- Shared with ControlRow.lua, which embeds the same two factories into the
-    -- same plate and had these as file-locals. One home, because a retune of the
-    -- slider's internals has to move both shapes or the two visibly disagree.
+    -- One home, because a retune of the slider's internals has to move every
+    -- plate that embeds it or they visibly disagree.
     --
     -- ☠ sliderBarMid IS COUPLED TO TWO NUMBERS THAT ARE FILE-LOCALS IN
     -- Widgets.lua. CreateSlider lays its track at y = -18 with a height of 8

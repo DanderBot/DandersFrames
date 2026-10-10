@@ -157,8 +157,8 @@ function FakeUIFrame(w, h, cx, cy)
     function f:GetNumPoints() return #self._points end
     -- ☠ A REAL GETTER, not the __index no-op, and the two are NOT the same thing
     -- to a caller. Real code that re-anchors relative to where a frame already is
-    -- reads its anchor back first (PopoutDemo's insetTitleButton nudges the title
-    -- cross inboard of a rounded corner that way, rather than copying the
+    -- reads its anchor back first (InsetTitleButton nudges the title cross
+    -- inboard of a rounded corner that way, rather than copying the
     -- library's private edge constant); against the no-op it gets nothing back
     -- and silently declines to move, which is a test that passes while the thing
     -- it is testing does nothing.

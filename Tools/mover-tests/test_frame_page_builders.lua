@@ -651,8 +651,6 @@ print("-- Frame page: the addon-wide strip and inline rolls")
 do
     -- ☠ EVERY POPOUT ROW ON EVERY PAGE CARRIES THE FOOTER STRIP. A row without
     -- one is a new row that forgot it or a page a later sweep missed.
-    -- ⚠ GUI/PopoutDemo.lua is deliberately not in this walk: it is the kit's own
-    -- fixture for the no-strip tether.
     local TOC = options_file_source("DandersFrames_Options.toc")
     local naked = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do

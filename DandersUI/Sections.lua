@@ -624,7 +624,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- its left and right edges land exactly where the ROW PLATES in the band
         -- above it do: those rows are the children of a chromeless group at this
         -- same inset, and a control row's plate spans its whole slot (it is
-        -- anchored TOPLEFT/TOPRIGHT at 0 -- see ControlRow.lua). Left at the
+        -- anchored TOPLEFT/TOPRIGHT at 0). Left at the
         -- group's own edges the plate overhung every row on the page by one
         -- padding on each side, which is the width mismatch this inset settles.
         --

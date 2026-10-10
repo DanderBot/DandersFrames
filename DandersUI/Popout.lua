@@ -443,8 +443,8 @@ end
 -- 85% it is well over a hundred pixels -- which is what the beam's far end
 -- stopping dead in the gutter beside its row, and the panel docking a long way
 -- clear of the window, both were (in-game, 2026-08-26). DandersFrames' settings
--- window carries a user scale slider; /df popoutdemo's window carries none,
--- which is the whole reason the demo never showed this.
+-- window carries a user scale slider, and an unscaled window is the one case
+-- where the two spaces agree -- which is why nothing else ever showed this.
 --
 -- Note which half was NOT wrong: the source outline is ANCHORED to the region
 -- rather than computed from it, so it stayed on the plate throughout. That is

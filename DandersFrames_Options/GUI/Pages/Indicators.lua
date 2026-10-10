@@ -4401,10 +4401,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ========================================
     CreateCategory("indicators", L["Indicators"])
     
-    -- (Removed) Indicators > Targeted Spells. The group-frame display it
-    -- configured is gone - Blizzard's 2026-04-07 UnitIsUnit hotfix removed the
-    -- only way to tell which group member an enemy was casting at. Personal
-    -- Targeted and the Targeted List below are unaffected.
 
     -- ============================================================
     -- Indicators > Targeted List

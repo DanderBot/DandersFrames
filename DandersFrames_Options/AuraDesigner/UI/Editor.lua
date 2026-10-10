@@ -604,10 +604,7 @@ local function GroupApply(kind)
 end
 
 -- ── PLACEMENT (every group kind) ──
--- ☠ THE CONTROLS BIND THE GROUP RECORD ITSELF, in both layouts. The popout row
--- above them takes a VIEW of the same record (P.GroupRecordView) so its modified
--- tick and its footer have something the defaults engine can answer for -- the
--- record is SavedVariables and cannot carry the adapter itself.
+-- The controls bind the group record itself, in both layouts.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
@@ -873,12 +870,7 @@ end
 -- page, the choice behind it. The Effects tab got that in phase 5 and this tab
 -- was simply missed.
 --
--- ☠ NO CHOICE CARD *GROUP* IN HERE. GUI:CreateChoiceCardGroup wraps its cards in
--- a collapsible header keyed by its TITLE TEXT in the account-wide collapsed
--- store -- a second header inside a panel that already has one, and a profile key
--- for a fold nobody can usefully close.
---
--- ☠ AND NO FAT CARDS EITHER, since spec section 26 item 6: two SEGMENTS side by
+-- ☠ NO FAT CARDS, since spec section 26 item 6: two SEGMENTS side by
 -- side, each a picture of the row of icons the group produces, drawn on one of
 -- the player's own frames. Two 60px cards stacked cost 122px of panel; two
 -- segments cost 68.
@@ -2137,10 +2129,6 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
-    -- (Removed) S.origY_framePreview and S.contentRightInset, both set to 0 here and
-    -- read nowhere -- old-layout anchors that the current layout does not use. The
-    -- second even carried "no right inset needed in new layout", i.e. a field whose
-    -- own comment said it was not needed.
     S.framePreview = CreateFramePreview(S.leftPanel, 0, nil)
 
     -- ── RIGHT PANEL (tabbed settings) ──

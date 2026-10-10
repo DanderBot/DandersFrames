@@ -72,12 +72,6 @@ GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
-# The write half of the popout footer's group verbs (Reset Group / Hold:
-# Defaults). ⚠ No caller since the footer went with the rows pages
-# (2026-09-26); kept for now -- the designer-defaults suite drives it. It reads
-# DF.Defaults at call time only, so its position is not load-bearing.
-GUI\GroupActions.lua
-
 # Settings pages -- Options.lua heads the chain, the rest follow in order
 GUI\Pages\Options.lua
 GUI\Pages\Frames.lua
@@ -125,6 +119,3 @@ Debug\MemoryTest.lua
 # Profiler window; engine and SetScript hook stay resident in Debug/Profiler.lua
 Debug\ProfilerUI.lua
 Debug\AttachmentScan.lua
-# Permanent workbench for the DandersUI popout look (/df popoutdemo). Plain lib
-# widgets over a throwaway table -- no settings page is involved.
-GUI\PopoutDemo.lua

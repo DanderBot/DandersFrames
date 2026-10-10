@@ -1305,9 +1305,6 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- (Removed) the square card's Expiring block -- the Stage 5.2 master enable
-        -- and expiring-border overrides. Same story as the icon card above: none of
-        -- those keys exist any more, so the paragraphs headed nothing.
         -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
         -- strip under/over the square. OFF by default; render fallbacks live in
         -- DF:BuildDurationBarSpec — these seed the editor.

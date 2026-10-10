@@ -4480,13 +4480,6 @@ function DF:CreateGUI()
         end
     end
 
-    -- (Removed) GUI:InvalidateSyncedPages -- the mode tabs invalidated the synced
-    -- pages' other-mode builds after every sync, because the sync REPLACED each
-    -- table-valued key it copied. It copies into the existing tables now (THE
-    -- SYNC KEEPS TABLES, bottom of this file), so every build stays bound to the
-    -- live tables and nothing needs throwing away -- which is what made each
-    -- switch rebuild (and leak) every synced page. It also only ever covered the
-    -- mode tabs, while DF:UpdateAll runs the same sync on every settings change.
 
     -- Invalidate a single page by name.
     function GUI:InvalidatePage(name)

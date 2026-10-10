@@ -1844,8 +1844,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "display_visibility", label = L["Visibility"]},
-            -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
-            -- {pageId = "text_status", label = L["Status Text"]},
         }), 30, "both")
     end)
     
@@ -5132,8 +5130,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_sorting", label = L["Sorting"]},
             {pageId = "bars_health", label = L["Health Bar"]},
-            -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
-            -- {pageId = "text_name", label = L["Name Text"]},
         }), 30, "both")
     end)
     

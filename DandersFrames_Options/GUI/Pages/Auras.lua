@@ -2362,8 +2362,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_frame", label = L["Frame"]},
-            -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
-            -- {pageId = "text_health", label = L["Health Text"]},
             {pageId = "bars_absorbs", label = L["Absorbs"]},
         }), 30, "both")
     end)
@@ -3953,12 +3951,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ========================================
     CreateCategory("text", L["Text"])
     
-    -- LEGACY-TEXT-CLEANUP (v4.4.x): Name/Health/Status built-in text settings are
-    -- replaced by the Text Designer, and their settings pages are gone. Remove this
-    -- block, the legacy text render path (see DF:IsLegacyTextHidden in
-    -- Frames/Core.lua), and the legacy *Text* defaults in Config.lua in a future
-    -- release once the Text Designer fully supersedes them.
-
     -- Text > Text Designer
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
     -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER

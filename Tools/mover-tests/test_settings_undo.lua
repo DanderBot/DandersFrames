@@ -130,7 +130,7 @@ local function depth() local s = stack(); return #s.entries end
 do
     check(type(SU) == "table", "SettingsUndo: the module loaded and installed DF.SettingsUndo")
     for _, name in ipairs({ "OnInterceptWrite", "OnSettingWritten", "OnDragStart", "OnDragStop",
-                            "BeginGesture", "EndGesture", "BeginGroup", "EndGroup",
+                            "BeginGesture", "EndGesture",
                             "Suspend", "Resume", "Undo", "Redo", "Clear",
                             "CanUndo", "CanRedo", "GetStack" }) do
         check(type(SU[name]) == "function", "SettingsUndo: " .. name .. " is there")
@@ -296,118 +296,6 @@ do
     eq(stack().entries[1].key, "frameWidth", "gesture: pushed in the order the keys first moved")
     eq(stack().entries[1].new, 170, "gesture: ...the first key carrying its LAST value")
     eq(stack().entries[2].key, "frameShowBorder", "gesture: ...and the second key after it")
-end
-
--- ============================================================
--- 5. GROUPS -- N WRITES, ONE PRESS TO PUT THEM BACK
--- What a "Reset Group" is: the user did one thing, so undoing it is one press.
--- ============================================================
-do
-    reset()
-    SU:BeginGroup("Border")
-    widgetWrite(party, "frameWidth", 150, "Frame Width")
-    widgetWrite(party, "frameShowBorder", true, "Show Border")
-    widgetWrite(party, "frameBorderColor", { r = 0, g = 1, b = 0, a = 1 }, "Colour")
-    SU:EndGroup()
-
-    eq(depth(), 1, "group: three writes collapsed into one entry")
-    eq(stack():PeekEntry().label, "Border", "group: labelled with the group's name, not the last widget's")
-
-    SU:Undo()
-    eq(party.frameWidth, 100, "group: one press restored the first key")
-    eq(party.frameShowBorder, false, "group: ...and the second")
-    check(deepsame(party.frameBorderColor, { r = 1, g = 0, b = 0, a = 1 }),
-        "group: ...and the third, table and all")
-    eq(depth(), 0, "group: and the whole group left the undo stack together")
-
-    SU:Redo()
-    eq(party.frameWidth, 150, "group: redo puts all three back")
-    check(deepsame(party.frameBorderColor, { r = 0, g = 1, b = 0, a = 1 }), "group: ...tables included")
-
-    -- A group in which nothing actually changed is not an entry at all.
-    reset()
-    SU:BeginGroup("Border")
-    widgetWrite(party, "frameWidth", 100, "Frame Width")
-    SU:EndGroup()
-    eq(depth(), 0, "group: a group whose writes all changed nothing pushes nothing")
-end
-
--- ============================================================
--- 5b. ONE APPLY FOR THE WHOLE GROUP
--- ------------------------------------------------------------
--- The writes inside a group come from GroupActions, which applies nothing of
--- its own: the popout footer's Reset button writes N keys and then runs the
--- group's apply ONCE. An undo of that reset has no button press behind it to do
--- the same, so the apply is handed to BeginGroup and the collapsed entry
--- carries it -- one for the group, not one per key.
--- ============================================================
-do
-    reset()
-    local order = {}
-    -- Reads the live table, so WHEN it ran is visible in what it saw.
-    local groupApply = function() order[#order + 1] = party.frameWidth end
-
-    SU:BeginGroup("Border", groupApply)
-    widgetWrite(party, "frameWidth", 150, "Frame Width")
-    widgetWrite(party, "frameShowBorder", true, "Show Border")
-    SU:EndGroup()
-
-    eq(depth(), 1, "group apply: still one collapsed entry")
-    local e = stack():PeekEntry()
-    eq(e.label, "Border", "group apply: ...still labelled with the group's name")
-    check(e.apply == groupApply, "group apply: ...and carrying the group's apply, by reference")
-    eq(#order, 0, "group apply: opening and closing a group does not run it")
-
-    SU:Undo()
-    eq(#order, 1, "group apply: ☠ one press, ONE apply -- not one per key")
-    eq(order[1], 100, "group apply: ☠ ...and it ran AFTER the keys were restored, not between them")
-    eq(party.frameShowBorder, false, "group apply: (both keys did go back)")
-
-    SU:Redo()
-    eq(#order, 2, "group apply: redo runs it again")
-    eq(order[2], 150, "group apply: ...after the keys went forward")
-
-    -- An EMPTY group is no entry, and its apply must not be left armed for
-    -- whatever group opens next.
-    reset()
-    SU:BeginGroup("Border", groupApply)
-    widgetWrite(party, "frameWidth", 100, "Frame Width")     -- zero delta
-    SU:EndGroup()
-    eq(depth(), 0, "group apply: a group that changed nothing is still no entry")
-
-    SU:BeginGroup("Other")
-    widgetWrite(party, "frameWidth", 150, "Frame Width")
-    SU:EndGroup()
-    eq(depth(), 1, "group apply: the next group pushed normally")
-    check(stack():PeekEntry().apply == nil,
-        "group apply: ☠ ...and the abandoned apply did not leak into it")
-
-    -- NESTED groups mirror the lib's refcount: only the outermost becomes an
-    -- entry, so only the outermost apply is the group's.
-    reset()
-    local outer = function() end
-    local inner = function() end
-    SU:BeginGroup("Outer", outer)
-    SU:BeginGroup("Inner", inner)
-    widgetWrite(party, "frameWidth", 150, "Frame Width")
-    SU:EndGroup()
-    eq(depth(), 0, "nested group apply: an inner close pushes nothing")
-    SU:EndGroup()
-    eq(depth(), 1, "nested group apply: the outer one does")
-    check(stack():PeekEntry().apply == outer,
-        "nested group apply: and the OUTER group's apply is the one that landed")
-
-    -- The fence goes through a half-open group too: a group left open across a
-    -- profile switch must not hand its apply to the next one.
-    reset()
-    SU:BeginGroup("Border", groupApply)
-    widgetWrite(party, "frameWidth", 150, "Frame Width")
-    SU:Clear()
-    SU:EndGroup()
-    eq(depth(), 0, "group apply: a group left open across the fence pushes nothing")
-    widgetWrite(party, "frameWidth", 180, "Frame Width")
-    eq(depth(), 1, "group apply: ...and the next plain write pushes immediately -- no group left open")
-    check(stack():PeekEntry().apply == nil, "group apply: ...carrying no apply of the abandoned group's")
 end
 
 -- ============================================================

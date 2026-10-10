@@ -205,10 +205,6 @@ DF.EVERYDAY_COMMANDS = {
     help = true, console = true, users = true, reset = true, resetgui = true,
     test = true, hide = true, lock = true, unlock = true, raidlock = true,
     raidunlock = true, clearoverride = true,
-    -- Dev-facing but documented as a bare command (the popout demo's own
-    -- header says "/df popoutdemo"); without this entry the gate below reads
-    -- it as an unknown word and opens the settings window instead.
-    popoutdemo = true,
 }
 
 --- The typeable path for a command word, e.g. "dispel" -> "/df debug dispel".
@@ -7191,12 +7187,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df test a silent no-op until the settings panel was opened.
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
-            elseif msg == "popoutdemo" then
-                -- The popout demo lives in the load-on-demand companion. Same
-                -- guard shape as /df test above: a deliberate dev command loads
-                -- it rather than sitting there as a silent no-op.
-                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
-                if DF.TogglePopoutDemo then DF:TogglePopoutDemo() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then

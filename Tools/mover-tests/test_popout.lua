@@ -1525,8 +1525,8 @@ end
 -- which at the window's edge is over a hundred pixels: the popout docked a long
 -- way clear of the window and the beam's far end stopped short of the row's
 -- plate, hanging in dead space to the right of it. Reported in-game 2026-08-26,
--- and invisible in /df popoutdemo for the reason it is invisible in every test
--- above -- an unscaled window is the one case where the two spaces agree.
+-- and invisible in every test above for one reason -- an unscaled window is the
+-- one case where the two spaces agree.
 --
 -- The scene below is the real one, in the real proportions: a 1000 x 700 window
 -- at 85%, and a 260-wide row whose plate stops well inside the window's right
