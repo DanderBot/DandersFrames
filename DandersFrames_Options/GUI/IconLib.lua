@@ -7,37 +7,21 @@
 local DF = DandersFrames
 
 -- Icon Library Preview
--- Use /dficons to open the preview window
+-- Use /df debug icons (or /dficons) to open the preview window.
+--
+-- ★ THE LIST IS GENERATED, NOT KEPT HERE. The client cannot list a folder, so
+-- DF.ICON_MANIFEST (GUI/IconManifest.lua) is written from both icon folders by
+-- Tools/generate-icon-manifest.py, and test_icon_manifest.py fails when it drifts.
+-- A hand-kept list here went stale at 25 of 87.
 
-local ICONS_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-
-local ICONS = {
-    "add",
-    "check",
-    "chevron_right",
-    "close",
-    "content_copy",
-    "delete",
-    "download",
-    "edit",
-    "expand_more",
-    "filter_alt",
-    "filter_list",
-    "info",
-    "keyboard",
-    "lock",
-    "lock_open",
-    "menu",
-    "mouse",
-    "refresh",
-    "save",
-    "search",
-    "settings",
-    "upload",
-    "visibility",
-    "visibility_off",
-    "warning",
-}
+-- Each manifest key's folder, as the client addresses it. The kit's icons sit in
+-- whichever host's Libs\DandersUI copy loaded, which is what GUI.MEDIA names.
+local function FoldersOf()
+    return {
+        { key = "df",  title = "DandersFrames", path = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" },
+        { key = "kit", title = DF.L["Shared UI kit"], path = DF.GUI.MEDIA .. "Icons\\" },
+    }
+end
 
 local previewFrame = nil
 
@@ -58,7 +42,7 @@ local function CreateIconPreview()
     -- Main frame
     local frame = CreateFrame("Frame", "DFIconPreview", UIParent, "BackdropTemplate")
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
-    frame:SetSize(520, 480)
+    frame:SetSize(520, 560)
     frame:SetPoint("CENTER")
     DF.GUI:CreateElementBackdrop(frame, {
         bgColor     = { C_BG.r, C_BG.g, C_BG.b, 0.95 },
@@ -80,7 +64,10 @@ local function CreateIconPreview()
     -- Subtitle
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    subtitle:SetText(DF.L["25 icons from Google Material Symbols (Apache 2.0)"])
+    local manifest = DF.ICON_MANIFEST or {}
+    local total = 0
+    for _, list in pairs(manifest) do total = total + #list end
+    subtitle:SetText(format(DF.L["%d icons, drawn from Google Material Symbols (Apache 2.0)"], total))
     subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Close button
@@ -146,52 +133,51 @@ local function CreateIconPreview()
         table.insert(colorBtns, btn)
     end
     
-    -- Icon grid
+    -- Icon grid: one section per icon folder, in a scroll frame -- the set outgrew
+    -- a fixed window long ago.
     local ICON_SIZE = 32
     local CELL_SIZE = 56
     local ICONS_PER_ROW = 8
-    local START_X = 24
-    local START_Y = -90
-    
-    for i, iconName in ipairs(ICONS) do
-        local row = math.floor((i - 1) / ICONS_PER_ROW)
-        local col = (i - 1) % ICONS_PER_ROW
-        
-        local x = START_X + col * CELL_SIZE
-        local y = START_Y - row * (CELL_SIZE + 16)
-        
-        -- Icon container
-        local container = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    local ROW_H = CELL_SIZE + 16
+    local HEADER_H = 24
+
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 16, -84)
+    scroll:SetPoint("BOTTOMRIGHT", -30, 36)
+    DF.GUI.StyleScrollBar(scroll)
+    local grid = CreateFrame("Frame", nil, scroll)
+    grid:SetSize(ICONS_PER_ROW * CELL_SIZE, 10)
+    scroll:SetScrollChild(grid)
+
+    local function BuildCell(path, iconName, x, y)
+        local container = CreateFrame("Button", nil, grid, "BackdropTemplate")
         container:SetSize(CELL_SIZE - 4, CELL_SIZE + 12)
         container:SetPoint("TOPLEFT", x, y)
         DF.GUI:CreateElementBackdrop(container, {
             bgColor     = { 0.12, 0.12, 0.12, 1 },
             borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
         })
-        
-        -- Icon texture
+
         local icon = container:CreateTexture(nil, "ARTWORK")
         icon:SetSize(ICON_SIZE, ICON_SIZE)
         icon:SetPoint("TOP", 0, -4)
-        icon:SetTexture(ICONS_PATH .. iconName .. ".png")
+        icon:SetTexture(path)
         icon:SetVertexColor(currentColor.r, currentColor.g, currentColor.b)
         table.insert(iconTextures, icon)
-        
-        -- Label
+
         local label = container:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
         label:SetPoint("BOTTOM", 0, 4)
         label:SetText(iconName)
         label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         label:SetWidth(CELL_SIZE - 8)
         label:SetWordWrap(false)
-        
-        -- Hover and click
+
         container:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
             DF.GUI:ShowTooltip(self, {
                 title = iconName,
                 lines = {
-                    { text = ICONS_PATH .. iconName .. ".png", color = { r = 0.6, g = 0.6, b = 0.6 } },
+                    { text = path, color = { r = 0.6, g = 0.6, b = 0.6 } },
                     " ",
                     { text = DF.L["Click to copy texture path"], hint = true },
                 },
@@ -202,11 +188,29 @@ local function CreateIconPreview()
             DF.GUI:HideTooltip()
         end)
         container:SetScript("OnClick", function()
-            local path = ICONS_PATH .. iconName .. ".png"
             DF:Say(DF.L["Copied: "] .. path)
         end)
     end
-    
+
+    local y = 0
+    for _, folder in ipairs(FoldersOf()) do
+        local names = manifest[folder.key] or {}
+        if #names > 0 then
+            local header = grid:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+            header:SetPoint("TOPLEFT", 4, y)
+            header:SetText(format("%s  |cff888888(%d)|r", folder.title, #names))
+            header:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+            y = y - HEADER_H
+            for i, iconName in ipairs(names) do
+                local row = math.floor((i - 1) / ICONS_PER_ROW)
+                local col = (i - 1) % ICONS_PER_ROW
+                BuildCell(folder.path .. iconName .. ".png", iconName, col * CELL_SIZE, y - row * ROW_H)
+            end
+            y = y - math.ceil(#names / ICONS_PER_ROW) * ROW_H - 8
+        end
+    end
+    grid:SetHeight(math.max(10, -y))
+
     -- Usage info at bottom
     local usage = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     usage:SetPoint("BOTTOM", 0, 12)

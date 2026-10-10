@@ -50,6 +50,9 @@ Core\ExportCategories.lua
 Changelog.lua
 
 # GUI parts used only by settings pages
+# Generated list of every GUI icon on disk, read by the icon browser below
+# (Tools/generate-icon-manifest.py writes it).
+GUI\IconManifest.lua
 # /dficons dev icon browser. Its slash registers on load; the /df debug
 # dispatcher loads the companion on an unknown word, so first use still works.
 GUI\IconLib.lua

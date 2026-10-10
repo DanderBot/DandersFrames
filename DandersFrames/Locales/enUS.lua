@@ -2379,7 +2379,7 @@ L["'?\n\nThis will copy your current settings, then apply the selected import ca
 L["(Empty)"] = true
 L["+ Drop Item"] = true
 L["..."] = true
-L["25 icons from Google Material Symbols (Apache 2.0)"] = true
+L["%d icons, drawn from Google Material Symbols (Apache 2.0)"] = true
 L["Add Trigger"] = true
 L["Add aura"] = true
 L["Assist"] = true
@@ -2419,6 +2419,7 @@ L["LAYOUT GROUPS"] = true
 L["Mac Limitation"] = true
 L["Macro: "] = true
 L["Material Icons Preview"] = true
+L["Shared UI kit"] = true
 L["Menu"] = true
 L["Middle Click"] = true
 L["Mouse 4"] = true
