@@ -278,11 +278,15 @@ if cardTableSrc and fnSrc then
               "layered: ...from the same layers and gate as classic's header swatch")
 
         -- ---- more icons than the slot: a hover lists them all ----
+        -- The hover is the HOUSE tooltip with an icon row, not a lookalike frame.
         local shownPopup
-        GUI.ShowCardPreviewPopup = function(_, owner, title, entries) shownPopup = { owner = owner, title = title, entries = entries } end
-        GUI.HideCardPreviewPopup = function() shownPopup = nil end
+        local savedShow, savedHide = GUI.ShowTooltip, GUI.HideTooltip
+        GUI.ShowTooltip = function(_, owner, opts)
+            shownPopup = { owner = owner, title = opts.title, entries = opts.icons, size = opts.iconSize }
+        end
+        GUI.HideTooltip = function() shownPopup = nil end
         local many = build({})
-        many:SetPreviewIcons({ { texture = "t", desaturate = true }, { texture = "h" }, { text = "x" }, { texture = "d" } })
+        many:SetPreviewIcons({ { texture = "t", desaturate = true }, { texture = "h", inset = 2 }, { text = "x" }, { texture = "d" } })
         local mhit = rawget(many, "previewHit")
         check(mhit ~= nil, "popup: a card with several icons gets a hover over its swatch")
         eq(mhit and mhit._shown, true, "popup: ...shown")
@@ -292,6 +296,10 @@ if cardTableSrc and fnSrc then
         eq(shownPopup and #shownPopup.entries, 3, "popup: the hover lists every icon entry")
         eq(shownPopup and shownPopup.entries[1].texture, "t", "popup: ...in order, an off one included")
         eq(shownPopup and shownPopup.title, "Title", "popup: ...under the card's title")
+        eq(shownPopup and shownPopup.size, CARD.icon, "popup: ...at the header's own icon size")
+        eq(shownPopup and shownPopup.entries[2].inset, 2,
+           "popup: ...with the header's own insets, so the row matches the swatch")
+        eq(shownPopup and shownPopup.entries[1].desaturate, true, "popup: ...an off one stays greyed")
         local onLeave = mhit and mhit:GetScript("OnLeave")
         if onLeave then onLeave(mhit) end
         eq(shownPopup, nil, "popup: leaving the swatch hides it")
@@ -300,6 +308,7 @@ if cardTableSrc and fnSrc then
         local one = build({})
         one:SetPreviewIcons({ { texture = "only" } })
         eq(rawget(one, "previewHit"), nil, "popup: a one-icon card never builds it")
+        GUI.ShowTooltip, GUI.HideTooltip = savedShow, savedHide
     end
 end
 
@@ -308,39 +317,12 @@ local open = (CTRL:match("\n    local function OpenSection%(Add, .-\n    end\n")
 check(open:find("kind = (extra and extra.kind) or GUI.SectionKindByKey[key] }", 1, true) ~= nil,
       "tools: OpenSection hands the card its kind, from the collapseKey table (never the title)")
 
--- ---- the popup itself: every icon in a row under the card's title ----
-local popSrc = cut(SW, "local previewPopup\nfunction GUI:ShowCardPreviewPopup", "\nfunction GUI:HideCardPreviewPopup()\n    if previewPopup then previewPopup:Hide() end\nend\n")
-check(popSrc ~= nil, "popup: GUI:ShowCardPreviewPopup can be cut out of SettingsWidgets.lua")
-if popSrc then
-    local made
-    local G2 = { CreatePanelBackdrop = function() end, RegisterScaledSurface = function(_, f) f._scaled = true end }
-    local DF2 = { SetIconTextureOrAtlas = function(_, tex, t) tex:SetTexture(t)
-        rawset(tex, "SetDesaturated", function(self, v) self._desat = v and true or false end) end }
-    local chunk = loadstring("local GUI, DF, C_TEXT, CreateFrame, UIParent = ...\n" .. popSrc)
-    check(chunk ~= nil, "popup: the cut parses")
-    if chunk then
-        chunk(G2, DF2, { r = 1, g = 1, b = 1 },
-              function(_, _, parent) made = FakeUIFrame(); made._parent = parent; return made end, "UIParent")
-        local owner = FakeUIFrame()
-        G2:ShowCardPreviewPopup(owner, "Ping Icon", { { texture = "a" }, { texture = "b", desaturate = true }, { texture = "c" } })
-        check(made ~= nil and made._parent == "UIParent", "popup: one frame, off UIParent so the page cannot clip it")
-        eq(made and made._scaled, true, "popup: ...registered for the GUI scale")
-        eq(made and made.title:GetText(), "Ping Icon", "popup: titled with the card's name")
-        local sw = made and made.swatches or {}
-        eq(#sw, 3, "popup: a swatch per icon")
-        eq(sw[2] and sw[2]:GetTexture(), "b", "popup: ...in order")
-        eq(sw[2] and sw[2]._desat, true, "popup: ...an off one greyed")
-        eq(sw[1] and sw[1]._desat, false, "popup: ...a live one in colour")
-        eq(made and made._shown, true, "popup: shown")
-        G2:ShowCardPreviewPopup(owner, "Raid Role", { { texture = "x" } })
-        eq(sw[2] and sw[2]._shown, false, "popup: a shorter list hides the spare swatches")
-        G2:HideCardPreviewPopup()
-        eq(made and made._shown, false, "popup: hidden on request")
-    end
-end
+-- ---- no lookalike popup is left ----
+check(SW:find("ShowCardPreviewPopup", 1, true) == nil,
+      "popup: the bespoke popup frame is gone -- the house tooltip carries the icons")
 
 -- ---- an atlas icon after a sheet slice: the crop is cleared first ----
--- The popup's swatches are reused across cards; a raid marker leaves a
+-- Swatches are reused across cards; a raid marker leaves a
 -- SetTexCoord slice behind, and SetAtlas keeps it.
 do
     local CORE = df_file_source("Frames/Core.lua"):gsub("\r\n", "\n")

@@ -4175,6 +4175,80 @@ local function SetTooltipOwner(host, owner, opts)
 end
 P.SetTooltipOwner = SetTooltipOwner
 
+-- ============================================================
+-- AN ICON ROW IN THE TOOLTIP (opts.icons)
+-- ------------------------------------------------------------
+-- A row of swatches under the title, IN the shared tooltip, so it wears the
+-- tooltip's own skin and title font rather than a lookalike frame's. The tooltip
+-- lays out LINES, so the row's room is reserved by a line holding one transparent
+-- texture the row's size (Media/spacer.png); the swatches draw over that line,
+-- where a texture can be desaturated, tinted and atlas-backed as an inline |T
+-- cannot. Taken down with the tooltip.
+--   opts.icons     { { texture = path or atlas, coords = {l,r,t,b}, inset = n,
+--                      color = {r,g,b,a}, desaturate = bool }, ... }
+--   opts.iconSize  each swatch's slot (24)
+-- ============================================================
+local TIP_ICON_GAP = 6
+local tipIconRow
+local function HideTooltipIcons()
+    if tipIconRow then tipIconRow:Hide() end
+end
+local function AddTooltipIcons(icons, size)
+    size = size or 24
+    local n = #icons
+    -- A NEGATIVE inset draws an icon past its slot (art that is mostly padding).
+    -- The row still starts flush with the title -- a first icon's overhang spills
+    -- into the tooltip's own padding -- but the LAST icon's overhang is reserved,
+    -- or its art runs off the tooltip's right edge.
+    local padR = math.max(0, -(icons[n].inset or 0))
+    local rowW = n * size + (n - 1) * TIP_ICON_GAP
+    GameTooltip:AddLine(format("|T%sspacer.png:%d:%d|t", MEDIA, size, math.ceil(rowW + padR)))
+    local line = _G["GameTooltipTextLeft" .. GameTooltip:NumLines()]
+    if not line then return end
+    if not tipIconRow then
+        tipIconRow = CreateFrame("Frame", nil, GameTooltip)
+        tipIconRow.tex = {}
+        GameTooltip:HookScript("OnTooltipCleared", HideTooltipIcons)
+        GameTooltip:HookScript("OnHide", HideTooltipIcons)
+    end
+    local row = tipIconRow
+    row:SetFrameLevel(GameTooltip:GetFrameLevel() + 2)
+    row:ClearAllPoints()
+    row:SetPoint("LEFT", line, "LEFT", 0, 0)
+    row:SetSize(rowW, size)
+    for i, e in ipairs(icons) do
+        local t = row.tex[i]
+        if not t then
+            t = row:CreateTexture(nil, "ARTWORK")
+            row.tex[i] = t
+        end
+        local s = size - 2 * (e.inset or 0)
+        t:SetSize(s, s)
+        t:ClearAllPoints()
+        t:SetPoint("CENTER", row, "LEFT", size / 2 + (i - 1) * (size + TIP_ICON_GAP), 0)
+        local co = e.coords
+        if C_Texture and C_Texture.GetAtlasInfo and e.texture and C_Texture.GetAtlasInfo(e.texture) then
+            t:SetTexCoord(0, 1, 0, 1)           -- SetAtlas keeps an earlier crop
+            t:SetAtlas(e.texture)
+        else
+            t:SetTexture(e.texture)
+            if co then t:SetTexCoord(co[1], co[2], co[3], co[4]) else t:SetTexCoord(0, 1, 0, 1) end
+        end
+        local dim = e.desaturate and true or false
+        t:SetDesaturated(dim)
+        -- After the texture call, which resets the vertex colour.
+        local c = (not dim) and e.color
+        if c then
+            t:SetVertexColor(c.r or c[1] or 1, c.g or c[2] or 1, c.b or c[3] or 1, c.a or c[4] or 1)
+        else
+            t:SetVertexColor(1, 1, 1, 1)
+        end
+        t:Show()
+    end
+    for i = n + 1, #row.tex do row.tex[i]:Hide() end
+    row:Show()
+end
+
 function UI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     SetTooltipOwner(self, owner, opts)
@@ -4187,6 +4261,7 @@ function UI:ShowTooltip(owner, opts)
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
+    if type(opts.icons) == "table" and #opts.icons > 0 then AddTooltipIcons(opts.icons, opts.iconSize) end
     AddTooltipLines(self, opts.lines)
     GameTooltip:Show()
 end

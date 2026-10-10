@@ -694,10 +694,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Header preview: the four most-used markers (square / cross / triangle / circle),
             -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
             preview = { enableKey = "raidTargetIconEnabled", icons = {
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 1.5 },  -- square   (6)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 1.5 },  -- cross    (7)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 1.5 },  -- triangle (4)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 1.5 },  -- circle   (2)
             } },
         })
 
@@ -732,7 +732,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:UpdateAllFrames()
             end,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
-            preview = { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } },
+            -- NEGATIVE insets: the ping atlases are about half padding, so they draw
+            -- larger to show the same amount of icon as the other cards' (~18 of a
+            -- 24 slot). Measured per atlas in game -- the three are not padded alike.
+            preview = { enableKey = "pingIconEnabled", icons = {
+                { texture = "Ping_Frame_Warning", inset = -5.5 },
+                { texture = "Ping_Frame_Attack",  inset = -3.5 },
+                { texture = "Ping_Frame_Assist",  inset = -3 },
+            } },
         })
 
         -- ============================================
