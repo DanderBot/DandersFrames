@@ -92,11 +92,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its two
-        -- opt-ins, which every card here takes.
+        -- ONE CARD: the Debuff Bar's helper (tools.OpenSection) and its opt-ins,
+        -- which every card here takes. Shut on a first run: fifteen cards read
+        -- as a gallery of headers, each with its icon's preview.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
-                { twoTrack = true, quietLabels = true })
+                { twoTrack = true, quietLabels = true, collapsed = true })
         end
         -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL -- see tools.CloseSection.
         local function CloseSection(band)
@@ -107,12 +108,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- "\194\183" between them, WORDS localised and numbers raw, every read
         -- guarded because a profile mid-migration may be missing any of these keys.
         local function Join(parts) return table.concat(parts, " \194\183 ") end
-
-        -- The Timer Text card's title, "AFK Icon -- Timer Text": composed rather
-        -- than added as a locale string, because both halves are already
-        -- translated. The long form is what tells it apart from the AFK card
-        -- above it and what the pinned panel's title reads.
-        local function RowTitle(section, part) return format("%s \226\128\148 %s", section, part) end
 
         -- The section, in classic: the 280 header in column 1 it always had.
         -- Modern builds cards instead (MountIconCard).
@@ -192,6 +187,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- link are not settings, so each takes a row of its own; the four
             -- controls between them lay out 2 x 2 when the card is wide enough.
             -- It decides how status text LOOKS, so it pins.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
             local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,
                 nil, nil, BuildIconTextGroup)
             BuildIconTextGroup({
@@ -252,7 +248,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             end
             roleSection:SetPreviewIcons(icons)
-            if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
+            -- A card's title never greys (its corner says Off); classic's did.
+            if roleSection.SetPreviewDimmed and not roleSection.isCard then
+                roleSection:SetPreviewDimmed(not anyShown)
+            end
         end
 
         local function RoleSettingsCB() DF:UpdateAllRoleIcons(); UpdateRolePreview() end
@@ -338,7 +337,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local colorKey = opts.enableKey and opts.enableKey:gsub("Enabled$", "TextColor")
                 local textColor = colorKey and db[colorKey]
                 local entries = {}
-                if opts.showTextKey and db[opts.showTextKey] then
+                -- A card's preview is one icon in its header's icon slot, with no
+                -- room for text (see SetPreviewIcons), so it stays the icon.
+                if opts.showTextKey and db[opts.showTextKey] and not section.isCard then
                     for _, key in ipairs(opts.texts or {}) do
                         if type(key) == "table" then
                             -- table form: { key = <text key>, colorKey = <colour key> },
@@ -369,7 +370,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
                 for _, e in ipairs(entries) do e.desaturate = not enabled end
                 section:SetPreviewIcons(entries)
-                section:SetPreviewDimmed(not enabled)
+                if not section.isCard then section:SetPreviewDimmed(not enabled) end
             end
             if DF.iconPreviewRefreshers then table.insert(DF.iconPreviewRefreshers, refresh) end
             refresh(true)
@@ -400,8 +401,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --   hideInCombatLabel/onHideInCombat               the Appearance extra
         --   summary         replaces the shared Settings summary (Role)
         --   summaryExtra    what this icon's Settings summary says beyond the shared part
-        --   extraGroup      a fourth box (AFK's Timer Text): a card of its own in Modern
-        --   preview         WireStatusPreview's opts (classic only)
+        --   extraGroup      a fourth box (AFK's Timer Text): in Modern, a header
+        --                   inside the icon's own card
+        --   preview         WireStatusPreview's opts: the header's icon preview
         -- ============================================
         local function BuildIconSettingsGroup(tools2, spec)
             local group, parent = tools2.group, tools2.parent
@@ -526,16 +528,31 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- what the in-body checkbox ran (spec.onEnable), then the state pass that
         -- re-greys the card and a repaint of a pinned panel -- never a rebuild.
         --
-        -- ⚠ AFK'S TIMER TEXT IS A SECOND CARD, directly under the AFK card: its
-        -- Offset X / Offset Y / Font would otherwise sit in the AFK card beside
-        -- the icon's own under the same names. It keeps its box's gates -- it
-        -- hides, header and body together, unless Show Timer is on in icon mode,
-        -- and its header dims (and its body greys) while AFK is off.
+        -- ⚠ AFK'S TIMER TEXT IS IN THE AFK CARD, under its own header right
+        -- after Show Timer -- where it was switched on. It keeps its box's gate:
+        -- header and controls hide together unless Show Timer is on in icon
+        -- mode (extra.hideOn). Its Color and Offset X / Y say "Timer" there
+        -- (inIconCard), or they would repeat the icon's own names.
         -- ============================================
         local function MountIconCard(spec)
             local settingsBuild = spec.settings or BuildIconSettingsGroup
+            local extra = spec.extraGroup
+            local function BuildExtraInCard(tools2)
+                local group = tools2.group
+                local first = #(group.groupChildren or {}) + 1
+                group:AddWidget(GUI:CreateHeader(tools2.parent, extra.label, { keepSearchSection = true }),
+                    GUI.RowHeight.sectionHeader)
+                extra.build({ group = group, parent = tools2.parent,
+                              refreshStates = tools2.refreshStates, inIconCard = true }, spec)
+                for i = first, #(group.groupChildren or {}) do
+                    local w = group.groupChildren[i].widget
+                    local own = w.hideOn
+                    w.hideOn = function(d) return extra.hideOn(d) or (own and own(d)) or false end
+                end
+            end
             local function BuildIconCard(tools2)
                 settingsBuild(tools2, spec)
+                if extra then BuildExtraInCard(tools2) end
                 BuildIconAppearanceGroup(tools2, spec)
                 BuildIconPositionGroup(tools2, spec)
             end
@@ -553,24 +570,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec),
                 nil, nil, BuildIconCard, toggle)
+            local section = band.collapsibleSection
+            if spec.onSection then spec.onSection(section) end
+            if spec.preview then WireStatusPreview(section, spec.preview) end
             BuildIconCard({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
                 hoistToggle = spec.enableKey ~= nil,
             })
             CloseSection(band)
-
-            local extra = spec.extraGroup
-            if extra then
-                local function BuildExtraCard(tools2) extra.build(tools2, spec) end
-                band = OpenSection(RowTitle(spec.section, extra.label), "icons_" .. spec.key .. "_extra", spec.col,
-                    extra.summary, spec.gate, extra.hideOn, BuildExtraCard)
-                BuildExtraCard({
-                    group = band, parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                CloseSection(band)
-            end
+            if spec.afterMount then spec.afterMount() end
         end
 
         -- ============================================
@@ -579,6 +588,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Driven off the same spec. Classic builds the boxes it always built, in
         -- column 1, registered to the section; Modern builds the icon's card.
         -- ============================================
+        -- Modern mounts the icon cards by subject group once every spec is in
+        -- (the loop after the last MountIcon); classic mounts each box as it is
+        -- declared, in declaration order.
+        local queuedIcons = {}
         local function MountIcon(spec)
             spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil
             if spec.id then
@@ -590,7 +603,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
 
             if not classicLayout then
-                MountIconCard(spec)
+                queuedIcons[#queuedIcons + 1] = spec
                 return
             end
 
@@ -681,10 +694,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Header preview: the four most-used markers (square / cross / triangle / circle),
             -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
             preview = { enableKey = "raidTargetIconEnabled", icons = {
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
-                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 1.5 },  -- square   (6)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 1.5 },  -- cross    (7)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 1.5 },  -- triangle (4)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 1.5 },  -- circle   (2)
             } },
         })
 
@@ -719,7 +732,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:UpdateAllFrames()
             end,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
-            preview = { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } },
+            -- NEGATIVE insets: the ping atlases are about half padding, so they draw
+            -- larger to show the same amount of icon as the other cards' (~18 of a
+            -- 24 slot). Measured per atlas in game -- the three are not padded alike.
+            preview = { enableKey = "pingIconEnabled", icons = {
+                { texture = "Ping_Frame_Warning", inset = -5.5 },
+                { texture = "Ping_Frame_Attack",  inset = -3.5 },
+                { texture = "Ping_Frame_Assist",  inset = -3 },
+            } },
         })
 
         -- ============================================
@@ -815,6 +835,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function AFKTimerHidden(d) return not d.afkIconShowTimer or d.afkIconShowText end
         local function BuildAFKTimerGroup(tools2, spec)
             local group, parent = tools2.group, tools2.parent
+            local inCard = tools2.inIconCard
 
             group.disableChildrenOn = spec.gate
             group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
@@ -835,20 +856,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             afkTimerShadowNote.hideOn = function(d)
                 return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
             end
-            group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
-            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
-        end
-
-        local function AFKTimerSummary(d)
-            if not d then return "" end
-            local parts = {}
-            local size = tonumber(d.afkIconTimerFontSize)
-            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
-            local x = tonumber(d.afkIconTimerX) or 0
-            local y = tonumber(d.afkIconTimerY) or 0
-            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
-            return Join(parts)
+            group:AddWidget(GUI:CreateColorPicker(parent, inCard and L["Timer Color"] or L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
+            group:AddWidget(GUI:CreateSlider(parent, inCard and L["Timer Offset X"] or L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, inCard and L["Timer Offset Y"] or L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
         end
 
         MountIcon({
@@ -864,12 +874,15 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local afkTimerInheritNote = group:AddWidget(GUI:CreateLabel(parent, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
                 afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
             end,
+            -- The timer, once: its own text size while it draws as its own text,
+            -- else just that it shows (in text mode it joins the status text).
             summaryExtra = function(d, parts)
-                if d.afkIconShowTimer then parts[#parts + 1] = L["Show Timer"] end
+                if not d.afkIconShowTimer then return end
+                local size = not AFKTimerHidden(d) and tonumber(d.afkIconTimerFontSize)
+                parts[#parts + 1] = size and format("%s %dpx", L["Timer"], math.floor(size)) or L["Show Timer"]
             end,
             extraGroup = {
-                label = L["Timer Text"], build = BuildAFKTimerGroup,
-                summary = AFKTimerSummary, hideOn = AFKTimerHidden,
+                label = L["Timer Text"], build = BuildAFKTimerGroup, hideOn = AFKTimerHidden,
             },
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } },
@@ -918,6 +931,35 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
             preview = { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } },
         })
+
+        -- Modern: the icon cards by subject, each group under its header in its
+        -- column. An icon in no group still mounts, after the groups, so a new
+        -- one cannot silently drop off the page.
+        if not classicLayout then
+            local ICON_GROUPS = {
+                { label = L["Group Roles"], col = 1, keys = { "roleIcon", "leaderIcon", "raidRoleIcon" } },
+                { label = L["Markers"],     col = 1, keys = { "raidTargetIcon", "pingIcon" } },
+                { label = L["Status"],      col = 2, keys = { "readyCheckIcon", "summonIcon", "resurrectionIcon",
+                                                              "phasedIcon", "afkIcon", "vehicleIcon" } },
+                { label = L["Combat"],      col = 2, keys = { "combatIcon", "bgCarrierIcon" } },
+            }
+            local byKey, mounted = {}, {}
+            for _, spec in ipairs(queuedIcons) do byKey[spec.key] = spec end
+            for _, grp in ipairs(ICON_GROUPS) do
+                Add(GUI:CreateHeader(self.child, grp.label), 40, grp.col)
+                for _, key in ipairs(grp.keys) do
+                    local spec = byKey[key]
+                    if spec then
+                        spec.col = grp.col
+                        MountIconCard(spec)
+                        mounted[key] = true
+                    end
+                end
+            end
+            for _, spec in ipairs(queuedIcons) do
+                if not mounted[spec.key] then MountIconCard(spec) end
+            end
+        end
     end)
     
     -- Indicators > Highlights
@@ -1086,18 +1128,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- The one thing three swatches cannot say for themselves: whether they
-        -- are being used at all. Silent on the shipped profile, which takes the
-        -- game's own threat palette.
+        -- are being used at all. "Default" on the shipped profile, which takes
+        -- the game's own threat palette.
         local function ThreatColorsSummary(d)
             if not d then return "" end
-            local parts = {}
-            if d.aggroUseCustomColors then
-                parts[#parts + 1] = L["Use Custom Colors"]
-                -- With Only Show When Tanking on, two of the three swatches are
-                -- out of reach -- the highlight only ever appears at tanking
-                -- threat -- so the row names the one that is left.
-                if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
-            end
+            if not d.aggroUseCustomColors then return L["Default"] end
+            local parts = { L["Use Custom Colors"] }
+            -- With Only Show When Tanking on, two of the three swatches are out
+            -- of reach -- the highlight only ever appears at tanking threat --
+            -- so the row names the one that is left.
+            if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
             return Join(parts)
         end
 
@@ -1152,6 +1192,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is one dropdown tall until a mode is picked. Column 2, and the
             -- first card added, so the one-column fold still reads in the order
             -- the three sections had.
+            Add(GUI:CreateHeader(self.child, L["Targeting"]), 40, 2)
             local band = OpenSection(L["Selection Highlight"], "highlights_selection", 2, SelectionSettingsSummary,
                 nil, nil, BuildSelectionHighlightGroup)
             BuildSelectionHighlightGroup({
@@ -1303,6 +1344,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- highlight with behaviour of its own (Only Show When Tanking, Hide on
             -- Tanks). With Threat Colors under it that is also the balanced
             -- split -- two cards against Selection and Hover's two.
+            Add(GUI:CreateHeader(self.child, L["Threat"]), 40, 1)
             local band = OpenSection(L["Aggro Highlight"], "highlights_aggro", 1, AggroSettingsSummary,
                 nil, nil, BuildAggroHighlightGroup)
             BuildAggroHighlightGroup({
@@ -1575,6 +1617,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(tools.SectionControls(self.child), 24, "both")
             -- Holds the page gate, so it never greys and never dims; decides
             -- what SHOWS, so no pin.
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
             local band = OpenSection(L["Settings"], "dispel_settings", 1, DispelSettingsSummary)
             BuildDispelSettingsGroup({
                 group = band, parent = self.child,
@@ -1699,6 +1742,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- own (hoistToggle). The key keeps its classic reading (off only when
             -- explicitly false), and the tick greys with the page gate, as the
             -- header dims. A pin: it decides how the symbol LOOKS.
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
             local band = OpenSection(L["Dispel Symbol"], "dispel_symbol", 2, DispelIconSummary, DispelOffRow, nil,
                 BuildDispelIconGroup, {
                     db = db, key = "dispelShowIcon", label = L["Show Dispel Symbol"],
@@ -1900,7 +1944,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- pin. Column 1, under Settings: see the essay at the top. It is
             -- added last, so the one-column fold reads Settings, Dispel Symbol,
             -- Border, Gradient -- the order the page always had.
-            local band = OpenSection(L["Gradient"], "dispel_gradient", 1, DispelGradientSummary, DispelOffRow, nil,
+            local band = OpenSection(L["Gradient"], "dispel_gradient", 2, DispelGradientSummary, DispelOffRow, nil,
                 BuildDispelGradientGroup, {
                     db = db, key = "dispelShowGradient", label = L["Show Gradient"],
                     isOn = function(d) return d.dispelShowGradient ~= false end,
@@ -2109,7 +2153,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "refresh", L["Reset Profile to Defaults"], 240, 26, function()
             DF:ShowPopupAlert({
                 title   = L["Reset Profile to Defaults"],
-                message = L["Reset current profile to defaults?\nThis will reset BOTH Party and Raid settings."],
+                message = L["Reset current profile to defaults?\nEverything in it goes back to how a new profile starts, including Party, Raid, colours and auto layouts."],
                 buttons = {
                     {
                         label = L["Reset"],
@@ -2236,7 +2280,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- NOT scoped by the party/raid tab -- exports and imports operate on the
         -- whole profile, gated only by the Export for / Import for rows.
         local scopeBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "importexport_scope",
             text = L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."],
         })
         Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")
@@ -2674,24 +2718,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- differs from the shipped default, grouped by the page that owns it, one
     -- click from the setting itself. The diff walk, the grouping and the value
     -- formatting all live in Features/ChangedSettings.lua so they can be
-    -- asserted headlessly; everything here is the drawing.
-    local pageChangedSettings = CreateSubTab("profiles", DF.ChangedSettings.PAGE_ID, L["Changed Settings"])
-    -- ☠ NOT INDEXED BY SEARCH, and this flag is the mechanism (read in
-    -- Search:BuildFullRegistry). Building the registry re-runs every page's
-    -- builder and this builder ASKS for the registry, so without the skip the
-    -- two call each other forever; and even one level deep is wrong, because a
-    -- nested Refresh on this page retires the widgets the outer Refresh already
-    -- placed. See the header of Features/ChangedSettings.lua.
-    if pageChangedSettings then pageChangedSettings.skipSearchIndex = true end
-    BuildPage(pageChangedSettings, function(self, db, Add, AddSpace, AddSyncPoint)
+    -- asserted headlessly; everything here is the drawing. Two pages draw it:
+    -- Party/Raid's for the mode, GLOBAL's (scope "global") for the account-wide
+    -- settings.
+    local function BuildChangedSettings(self, Add, AddSpace, scope)
         local CS = DF.ChangedSettings
         -- ⚠ FIRST, BEFORE ANY WIDGET IS ADDED. BuildReport may build the search
         -- registry, which re-runs every other page's builder and ends by calling
         -- RefreshStates on whatever page is on screen -- this one. With nothing
         -- added yet that pass runs over an empty children list and is a no-op;
         -- move this below the first Add() and it re-lays a half-built page.
-        local report, reason = CS:BuildReport(GUI)
-        local modeLabel = (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
+        local report, reason = CS:BuildReport(GUI, scope)
+        local isGlobal = (scope == "global")
+        local modeLabel = isGlobal and L["Global"]
+            or (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
 
         -- Dim hex for the "-> default" half of a value cell. Built from the
         -- palette rather than typed, so the ledger follows a theme change like
@@ -2749,8 +2789,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return
         end
 
-        headerGroup:AddWidget(GUI:CreateLabel(self.child,
-            format(L["Showing %s settings in the current profile. Click a row to jump to the setting."],
+        headerGroup:AddWidget(GUI:CreateLabel(self.child, isGlobal
+            and L["Showing the settings on the Global tab: account-wide ones, and those shared by Party and Raid. Click a row to jump to the setting."]
+            or format(L["Showing %s settings in the current profile. Click a row to jump to the setting."],
                 modeLabel)), nil)
 
         if report.count == 0 then
@@ -2768,7 +2809,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- debug-log export use -- a singleton, so no frame is leaked per
             -- click. Rebuilt on the click rather than captured at page build:
             -- the user may have changed something since.
-            local fresh = CS:BuildReport(GUI)
+            local fresh = CS:BuildReport(GUI, scope)
             DF:ShowPopupInput({
                 title       = L["Changed Settings"],
                 message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
@@ -2866,6 +2907,24 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         AddFootnote()
+    end
+
+    -- ☠ NOT INDEXED BY SEARCH, and this flag is the mechanism (read in
+    -- Search:BuildFullRegistry). Building the registry re-runs every page's
+    -- builder and this builder ASKS for the registry, so without the skip the
+    -- two call each other forever; and even one level deep is wrong, because a
+    -- nested Refresh on this page retires the widgets the outer Refresh already
+    -- placed. See the header of Features/ChangedSettings.lua.
+    local pageChangedSettings = CreateSubTab("profiles", DF.ChangedSettings.PAGE_ID, L["Changed Settings"])
+    if pageChangedSettings then pageChangedSettings.skipSearchIndex = true end
+    BuildPage(pageChangedSettings, function(self, db, Add, AddSpace, AddSyncPoint)
+        BuildChangedSettings(self, Add, AddSpace)
+    end)
+
+    local pageChangedGlobal = CreateSubTab("profiles", DF.ChangedSettings.GLOBAL_PAGE_ID, L["Changed Settings"])
+    if pageChangedGlobal then pageChangedGlobal.skipSearchIndex = true end
+    BuildPage(pageChangedGlobal, function(self, db, Add, AddSpace, AddSyncPoint)
+        BuildChangedSettings(self, Add, AddSpace, "global")
     end)
 
     -- ========================================

@@ -125,7 +125,7 @@ local function CreateImportPopup()
     -- Warning text panel (shared caution/warning banner; auto-resizes to its text).
     -- frame.warning keeps a SetText interface (the banner exposes :SetText), so the
     -- later PopulateImportPopup calls work unchanged.
-    local warningPanel = DF.GUI:CreateInfoBanner(frame, { tone = "caution" })
+    local warningPanel = DF.GUI:CreateInfoBanner(frame, { dismissKey = "clickcast_warning", notice = true, tone = "caution" })
     warningPanel:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)
     warningPanel:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", -10, -10)
     frame.warning = warningPanel
@@ -148,7 +148,7 @@ local function CreateImportPopup()
     local validIcon = validPanel:CreateTexture(nil, "OVERLAY")
     validIcon:SetPoint("TOPLEFT", 10, -8)
     validIcon:SetSize(14, 14)
-    validIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+    validIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
     validIcon:SetVertexColor(POPUP_COLORS.green.r, POPUP_COLORS.green.g, POPUP_COLORS.green.b)
     
     local validLabel = validPanel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
@@ -179,7 +179,7 @@ local function CreateImportPopup()
     local invalidIcon = invalidPanel:CreateTexture(nil, "OVERLAY")
     invalidIcon:SetPoint("TOPLEFT", 10, -8)
     invalidIcon:SetSize(14, 14)
-    invalidIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    invalidIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     invalidIcon:SetVertexColor(POPUP_COLORS.red.r, POPUP_COLORS.red.g, POPUP_COLORS.red.b)
     
     local invalidLabel = invalidPanel:CreateFontString(nil, "OVERLAY", "DFFontNormal")

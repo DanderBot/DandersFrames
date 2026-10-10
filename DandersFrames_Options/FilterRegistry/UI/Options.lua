@@ -786,8 +786,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- a |c…|r spanning two words dies at the split: the opener lands on "Buff", the
     -- |r lands on "Filters", and word two falls back to the body grey. That is not a
     -- theory, it is what shipped for one revision (Krathe, 2026-08-10): the banner
-    -- drew a green "Buff" beside a grey "Filters" while the popup -- ONE FontString,
-    -- no splitting -- drew the whole phrase green off the identical string.
+    -- drew a green "Buff" beside a grey "Filters", where a single FontString -- no
+    -- splitting -- draws the whole phrase green off the identical string.
     --
     -- Wrapping each word is correct in both renderers, because the gaps between the
     -- tokens are spaces and a space has no ink to colour. Anything that formats text
@@ -819,6 +819,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local banner = GUI:CreateInfoBanner(parent, {
         tone = "info",
         html = true,
+        dismissKey = "filterdesigner_intro",
         text = BUFF_BANNER,
         onLinkClick = fdBannerLinkClick,
     })
@@ -944,20 +945,17 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- chip here would claim a relationship that does not exist.
     local CHIP_POOL_N = #CHIP_DEFS_BUFF
     local chipRow = CreateFrame("Frame", nil, parent)
+    -- Both corners off the banner's BOTTOM edge. A "RIGHT" point is the banner's
+    -- vertical middle, which moves with its height -- and with Page Tips hidden
+    -- the banner is a pixel tall.
     chipRow:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -10)
-    chipRow:SetPoint("RIGHT", banner, "RIGHT", 0, 0)
+    chipRow:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -10)
     chipRow:SetHeight(CHIP_H)
 
-    -- ⚠ The chips are SIZED FROM THE ROW, not given a fixed width. They were fixed
-    -- at 170 and it was wrong twice over: the help button is pinned to the row's
-    -- right edge, so on a narrower window the third chip ran underneath it, and a
-    -- label like "Defensive Icon  2 filters" overflows 170px and spills into its
-    -- neighbour, which is what made the chips look merged. Both are the same bug --
-    -- a constant standing in for a measurement.
+    -- ⚠ The chips are SIZED FROM THE ROW, not given a fixed width: a label like
+    -- "Defensive Icon  2 filters" overflows a fixed 170px and spills into its
+    -- neighbour, which reads as the chips merging.
     local CHIP_GAP  = 6
-    -- Square: the help control is the "?" glyph alone, so the row's width goes to the
-    -- chips, which have to fit three variable-length labels.
-    local CHIP_HELP_W = CHIP_H
     local CHIP_MIN_W  = 92
 
     -- A POOL, bound per refresh, not one button per definition: every handler reads
@@ -1089,8 +1087,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         end
         local n = #shown
         if n == 0 then return end
-        -- What the chips have, once the help glyph and its gutter are taken out.
-        local avail = rowW - CHIP_HELP_W - CHIP_GAP
+        local avail = rowW
         -- How many fit at the floor. mmax(1, ...) rather than a guard: one chip per
         -- row is the honest answer at a width that cannot hold two, and a zero here
         -- would divide by nothing below.
@@ -1133,80 +1130,6 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- label length feed the widths.
         LayoutChips()
     end
-
-    -- ========== "HOW THIS WORKS" ==========
-    -- The one thing banner copy cannot carry: the SHAPE. A sentence can define what
-    -- a filter is. It cannot show that three different displays each pick their
-    -- filters in a different place, or that Blizzard's debuff categories are a
-    -- separate system -- and those two facts are what the page is actually
-    -- confusing about.
-    --
-    -- A labelled LIST rather than drawn art, on purpose: it wraps at any locale
-    -- length, needs no textures or layout maths, and carries the same claim. The
-    -- addon's singleton alert takes one message string, so the newlines are the
-    -- layout.
-    --
-    -- ⚠ The three destination names are format slots filled from the PAGES' own
-    -- L[] strings, not written into the sentence. Rename a page and this follows;
-    -- spell one out here and it silently disagrees with the chip next to it.
-    --
-    -- No buttons table: ShowPopupAlert supplies a single OK when none is given, and
-    -- this dialog asks nothing of the reader.
-    -- ☠ ".png" IS PART OF THE PATH. Unlike .tga and .blp, whose extension the client
-    -- infers, a PNG does not resolve without it -- drop it and this silently renders
-    -- nothing. Icons/question.png is the first PNG icon in the addon, shipped
-    -- unconverted on purpose to find out how PNG icons behave.
-    --
-    -- Untinted: the source glyph is #E3E3E3, near enough to the label's own colour
-    -- that a SetVertexColor would only be guessing. If it reads dim next to the .tga
-    -- icons, the fix is to normalise the ART to white -- a tint multiplies, so it can
-    -- darken this glyph but never brighten it.
-    --
-    -- ⚠ ICON ONLY, so it MUST carry a tooltip: a glyph with no label and no hover
-    -- text is a control the reader has to click to identify. StyleButton omits the
-    -- label fontstring entirely when no text is passed, and centres the icon.
-    local function ShowFilterHelp()
-        -- TWO colour languages in this one popup, and they mean different things:
-        --   hl (gold)          -- a DESTINATION, i.e. a page you can go to. Three of
-        --                         them, listed. Not a link -- a popup cannot dispatch
-        --                         one -- so gold is all that marks them.
-        --   EMPH_BUFF/DEBUFF   -- which KIND of aura. The same two colours, on the
-        --                         same two strings, as the info banner behind this
-        --                         popup, so the reader meets one green/red pair on
-        --                         this page rather than two unrelated ones.
-        -- ⚠ Do not fold them together. Gold on "Debuff Filters" would promise a page
-        -- that the popup has no way to open.
-        local hl = "|cffffd200%s|r"
-        DF:ShowPopupAlert({
-            title   = L["How the Filter Designer works"],
-            message = format(
-                L["%s are lists of auras. You build them on this page; each display then picks the ones it wants, on its own page:\n\n%s\n%s\n%s — inside a filter group\n\n%s work differently: those categories are Blizzard's, they are fixed, and you pick them on the Debuff Bar page. Aura Designer debuff groups use the same categories.\n\nEditing a filter changes it everywhere it is used."],
-                fdEmph(L["Buff Filters"], EMPH_BUFF),
-                format(hl, L["Buff Bar"]),
-                format(hl, L["Defensive Icon"]),
-                format(hl, L["Aura Designer"]),
-                fdEmph(L["Debuff Filters"], EMPH_DEBUFF)),
-        })
-    end
-
-    local helpBtn = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
-    GUI:StyleButton(helpBtn, {
-        width  = CHIP_HELP_W,
-        height = CHIP_H,
-        icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
-    })
-    -- ⚠ TOPRIGHT, not RIGHT. The row GROWS DOWNWARD when the chips wrap, and a
-    -- centre anchor would slide the glyph down with it, away from the first row of
-    -- chips it belongs beside.
-    helpBtn:SetPoint("TOPRIGHT", 0, 0)
-    helpBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = L["How this works"],
-            lines = { L["A short guide to filters and the displays that use them."] },
-        })
-    end)
-    helpBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-    helpBtn:SetScript("OnClick", ShowFilterHelp)
 
     -- ========== LEFT COLUMN: FILTER LIST ==========
     local leftPanel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -1365,7 +1288,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local statusDot = headerPanel:CreateTexture(nil, "OVERLAY")
     statusDot:SetSize(8, 8)
     statusDot:SetPoint("TOPLEFT", titleText, "BOTTOMLEFT", 1, -8)
-    statusDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    statusDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot.png")
 
     local statusText = headerPanel:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     -- Anchored to the DOT, not the title: hiding the dot then leaves the text where
@@ -1500,7 +1423,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local resetBtn = CreateFrame("Button", nil, leftPanel, "BackdropTemplate")
     GUI:StyleButton(resetBtn, {
         tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh.png", size = 14 },
         text = L["Reset"],
     })
     -- Title + one scope line, matching every other Reset on the addon (see the
@@ -1564,7 +1487,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- Same glyph, same grey as the main addon search bar, via the shared helper --
     -- a search field that does not look like the addon's other search field is the
     -- kind of small inconsistency this page has been collecting.
-    GUI:AddEditBoxIcon(searchBox.EditBox, "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    GUI:AddEditBoxIcon(searchBox.EditBox, "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
 
     -- Row 3, right end: the Add-from-Database picker. Both ways of adding a spell to
     -- a custom filter now sit on one row -- type an ID on the left, browse the
@@ -2146,12 +2069,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.count:SetJustifyH("RIGHT")
         row.count:SetTextColor(0.5, 0.5, 0.5)
 
-        -- "Modified" override marker (preset has per-profile enable/disable
-        -- overrides). Shared filled-dot marker used for overrides addon-wide;
-        -- it propagates clicks so it doesn't swallow the row's select handler.
+        -- "Changed from defaults" marker (the built-in filter has per-profile
+        -- enable/disable changes). The shared filled-dot marker, in the amber a
+        -- setting's changed-from-default dot uses; it propagates clicks so it
+        -- doesn't swallow the row's select handler.
         row.dot = GUI:CreateOverrideMarker(row, 8)
+        row.dot.icon:SetVertexColor(GUI.Colors.notice.r, GUI.Colors.notice.g, GUI.Colors.notice.b)
         row.dot:SetPoint("RIGHT", row.count, "LEFT", -3, 0)
-        row.dot.tooltipText = L["Override active"]
+        row.dot.tooltipText = L["Changed from default"]
         row.dot.tooltipSubText = L["This built-in filter has been changed from its defaults."]
 
         -- The filter's own on/off switch. Created here but hidden on every bind by
@@ -2687,12 +2612,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         --
         -- The rule: any button in this file whose PARENT is not the page child needs
         -- re-theming here. That is leftContent (addRow, importRow), leftPanel
-        -- (resetBtn) and chipRow (the consumer chips and the help button) — every
+        -- (resetBtn) and chipRow (the consumer chips) — every
         -- container on this page is anchored absolutely rather than Add()ed, so none
         -- of them is on the walk. UpdateTheme is guarded, so listing a button that
         -- does not need it costs nothing; omitting one costs a wrong colour nobody
         -- notices until they switch modes.
-        for _, b in ipairs({ addRow, importRow, resetBtn, helpBtn }) do
+        for _, b in ipairs({ addRow, importRow, resetBtn }) do
             if b and b.UpdateTheme then b.UpdateTheme() end
         end
         for _, b in ipairs(chipButtons) do

@@ -887,10 +887,6 @@ PIH_K.ALL_AMPLIFIERS  = { potions = true, trinkets = true, racials = true }
 -- ticks: the tick reads the list, the click edits the list, nothing in between can disagree.
 P.PIH_PI_SPELL_ID = PIH_K.PI_SPELL_ID
 
-function P.PIH_AmplifierIDs()
-    return pihAmplifierIDs(P.PIH_Settings())
-end
-
 -- ★★★ ONE PLACED EFFECT'S OWN SOURCES (2026-09-10), the same four the Cooldown Icons group
 -- got -- Krathe: "yes build the icon block the same".
 --
@@ -2336,56 +2332,6 @@ local function CreateGlobalDefaultsProxy()
 end
 P.CreateGlobalDefaultsProxy = CreateGlobalDefaultsProxy
 
--- ============================================================
--- THE GLOBAL TAB'S SOUND BLOCK
--- ------------------------------------------------------------
--- soundEnabled and soundChannel are the two settings on this tab that do NOT
--- live in `adDB.defaults` -- they sit on the Aura Designer block itself, and the
--- two controls bound to them use custom get/set rather than a db table and key.
--- That is fine for the controls and useless to a row, which needs SOMETHING that
--- can answer "is either of these not the shipped value".
---
--- The rows page took this record and named the two keys through ClaimKeys'
--- `extra` door. Absent means enabled and Master, so ClearKey unsets and the
--- pair goes back to following the shipped answer.
---
--- ⚠ NO CALLER IN THE ADDON since the rows page went (2026-09-26); kept with
--- GroupActions.lua, whose designer-defaults suite drives it.
--- ============================================================
-local SOUND_DEFAULTS = { soundEnabled = true, soundChannel = "Master" }
-P.SOUND_DEFAULTS = SOUND_DEFAULTS
-
-local function CreateSoundSettingsProxy()
-    local adapter = {
-        GetDefault = function(k) return SOUND_DEFAULTS[k] end,
-        GetStored  = function(k)
-            local adDB = GetAuraDesignerDB()
-            if not adDB then return nil end
-            return rawget(adDB, k)
-        end,
-        ClearKey = function(k)
-            local adDB = GetAuraDesignerDB()
-            if not adDB then return end
-            adDB[k] = nil
-        end,
-    }
-    return setmetatable({ _skipOverrideIndicators = true,
-                          __dfDefaults = SOUND_DEFAULTS,
-                          __dfDefaultsAdapter = adapter }, {
-        __index = function(_, k)
-            local adDB = GetAuraDesignerDB()
-            local v = adDB and adDB[k]
-            if v ~= nil then return v end
-            return SOUND_DEFAULTS[k]
-        end,
-        __newindex = function(_, k, v)
-            local adDB = GetAuraDesignerDB()
-            if adDB then adDB[k] = v end
-        end,
-    })
-end
-P.CreateSoundSettingsProxy = CreateSoundSettingsProxy
-
 local function BuildGlobalView(parent)
     local defaults = CreateGlobalDefaultsProxy()
 
@@ -3524,7 +3470,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
 
         local scaleBtn = GUI:CreateGlyphButton(container, {
             size = 20, iconSize = 13,
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
             tooltip = { title = L["Preview Scale"],
                         lines = { L["How large the mock frame is drawn here. Changes nothing in game."] } },
         })
@@ -3541,7 +3487,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
             pop = GUI:CreatePopout({
                 key   = popKey,
                 title = L["Preview Scale"],
-                icon  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+                icon  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
                 width = 190,
                 build = function(po, content)
                     local sl = GUI:CreateSlider(content, L["Preview Scale"], 0.75, 2.5, 0.05,
@@ -4619,7 +4565,7 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
                     editBtn:SetPoint("RIGHT", -2, 0)
                 end
                 local ei = editBtn:CreateTexture(nil, "OVERLAY")
-                ei:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
+                ei:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png")
                 ei:SetSize(11, 11)
                 ei:SetPoint("CENTER")
                 ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -4665,7 +4611,7 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
         tagY = tagY - (TAG_H + TAG_ROW_GAP)
         local addTrigBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
         addTrigBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-        GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Trigger"] })
+        GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add Trigger"] })
         GUI:SetSettingsFont(addTrigBtn.Text, 9, "")
         addTrigBtn.Text:SetTextColor(0.5, 0.8, 0.5)
         addTrigBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
@@ -4810,7 +4756,7 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
             addGroupBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
             GUI:StyleButton(addGroupBtn, { width = 110, height = TAG_H, primary = true,
                 accent = { r = 0.25, g = 0.40, b = 0.25 },
-                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 },
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 },
                 text = L["Condition"] })
             GUI:SetSettingsFont(addGroupBtn.Text, 9, "")
             addGroupBtn.Text:SetTextColor(0.5, 0.8, 0.5)
@@ -5188,11 +5134,11 @@ S.CreateEffectCard = function(parent, yPos, effect)
         local function updateEyeIcon()
             local dead = tracksNothing()
             if dead then
-                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.3, 0.3, 0.3 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.3, 0.3, 0.3 })
             elseif shown() then
-                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
             else
-                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
             end
             eyeBtn:SetGlyphHover(shown() and not dead)
             -- Only in the dead state: a tooltip on a working eye would explain a problem
@@ -5312,7 +5258,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
         local barIcon = collapseBar:CreateTexture(nil, "OVERLAY")
         barIcon:SetSize(8, 8)
         barIcon:SetPoint("CENTER", 0, 0)
-        barIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        barIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         barIcon:SetVertexColor(1, 1, 1, 0.3)
 
         collapseBar:SetScript("OnEnter", function()
@@ -5561,7 +5507,7 @@ local function PaintEffectOnThumb(pv, typeKey, staticSpellID)
         local note = mock:CreateTexture(nil, "OVERLAY", nil, 2)
         note:SetSize(size, size)
         note:SetPoint("CENTER", plate, "CENTER", 0, 0)
-        note:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\music_note")
+        note:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\music_note.png")
         note:SetVertexColor(c.r, c.g, c.b, 1)
 
     end
@@ -5846,7 +5792,7 @@ local function CreateNumberedHeading(parent, number, caption, y, width, x)
     local tick = head:CreateTexture(nil, "OVERLAY")
     tick:SetSize(12, 12)
     tick:SetPoint("RIGHT", head, "RIGHT", 0, 0)
-    tick:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+    tick:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
     tick:SetVertexColor(tc.r, tc.g, tc.b, 1)
     tick:Hide()
     head.tick = tick
@@ -6305,7 +6251,7 @@ S.BuildAddIndicatorPane = function(host, opts)
         GUI:StyleButton(spellBtn, {
             width = srcOnly and CW or SRC_W, height = 30, primary = true, align = "left",
             fitText = false,
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png", size = 14 },
             text = L["Select a spell"], font = "DFFontHighlight",
         })
         spellBtn:SetScript("OnClick", OpenSpellStep)
@@ -6317,7 +6263,7 @@ S.BuildAddIndicatorPane = function(host, opts)
         GUI:StyleButton(filterBtn, {
             width = srcOnly and CW or (CW - SRC_W - SRC_GAP), height = 30, primary = true,
             align = "left", fitText = false,
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list", size = 14 },
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list.png", size = 14 },
             text = L["Select a filter"], font = "DFFontHighlight",
         })
         filterBtn:SetScript("OnClick", OpenFilterStep)
@@ -6509,7 +6455,7 @@ S.BuildAddIndicatorPane = function(host, opts)
     local ptrArrow = pointer:CreateTexture(nil, "OVERLAY")
     ptrArrow:SetSize(12, 12)
     ptrArrow:SetPoint("LEFT", ptrText, "RIGHT", 4, 0)
-    ptrArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    ptrArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     ptrArrow:SetVertexColor(tc.r, tc.g, tc.b, 1)
     MakeMouseInert(pointer)
     pointer:Hide()
@@ -7990,7 +7936,7 @@ end
                 -- edit-this affordance in the addon uses (Rename, the nickname rows).
                 -- ☠ DOUBLE BACKSLASHES -- Lua 5.1 passes an unrecognised escape through as
                 -- the bare character, so a single-backslash path draws nothing at all.
-                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png",
                 color   = C_TEXT_DIM,
                 tooltip = { title = L["Edit this list"], lines = { L["Open it in the Filter Designer."] } },
                 onClick = link,
@@ -8809,7 +8755,7 @@ S.BuildClassicAddFlow = function(parent, kind)
     back:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
     GUI:StyleButton(back, {
         width = 170, height = 24, ghost = true, align = "left",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left", size = 14 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left.png", size = 14 },
         text = backLabel,
     })
     back:SetScript("OnClick", function() S.EndClassicAddFlow(true, kind) end)

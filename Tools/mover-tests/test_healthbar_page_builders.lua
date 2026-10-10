@@ -355,9 +355,9 @@ local REDUCED_MAX = {
 
 print("-- Health Bar page: Reduced Max Health")
 do
-    local g = { builder = "BuildReducedMaxHealthGroup", label = "Reduced Max Health",
+    local g = { builder = "BuildReducedMaxHealthGroup", label = "Settings",
                 boxHeader = "Settings", box = "reducedGroup", column = "1",
-                key = "health_reduced", col = 2, summary = "ReducedMaxHealthSummary", tick = true }
+                key = "health_reduced", col = 1, summary = "ReducedMaxHealthSummary" }
     local body = builderBody(g.builder)
     checkCensus(census(body), REDUCED_MAX, "reduced max health")
     local _, call = checkShared(g)
@@ -371,17 +371,13 @@ do
     check(body:find("group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end", 1, true) ~= nil,
           "reduced max health: the group's grey-while-off gate is inside the builder")
 
-    check(call:find('db = db, key = "reducedMaxHealthEnabled", label = L["Enable"]', 1, true) ~= nil,
-          "reduced max health: the header tick is bound to the group's own enable key, under its own label")
-    check(call:find("onChanged = function()", 1, true) ~= nil
-      and call:find("DF:UpdateAllFrames()", 1, true) ~= nil
-      and call:find("self:RefreshStates()", 1, true) ~= nil
-      and call:find("tools.ReflowMounted()", 1, true) ~= nil
-      and call:find("RefreshCurrentPage", 1, true) == nil,
-          "reduced max health: ...committing what the checkbox ran plus a state pass, never a page rebuild")
+    -- ☠ THE ENABLE STAYS IN THE BODY: the card is its group's "Settings", and a
+    -- switch for a whole group never rides a Settings header.
+    check(call:find("key = ", 1, true) == nil,
+          "reduced max health: no header tick -- the enable is the first control in the card")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
-    eq(hoists, 1, "reduced max health: the only mount on the page that skips its in-body toggle")
+    eq(hoists, 0, "reduced max health: ...so no mount on the page skips its in-body toggle")
 end
 
 -- ============================================================
@@ -420,12 +416,13 @@ do
     -- ---- the cards open in the same order -- the one-column fold's --------
     local order = {}
     for at, name in PAGE:gmatch('()OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
-    eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Reduced Max Health",
+    eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Settings",
        "order: the five boxes' cards, in source order (the gradient builder's title is chosen per ramp -- section 7)")
     local function at(needle) return PAGE:find(needle, 1, true) end
     local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)\n\n            local band = OpenSection(L["Background"]',
                   'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)\n        end',
-                  'OpenSection(L["Reduced Max Health"]' }
+                  'Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")',
+                  'OpenSection(L["Settings"]' }
     local prev = 0
     for _, n in ipairs(seq) do
         local p = PAGE:find(n, prev + 1, true)

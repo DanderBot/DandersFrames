@@ -143,12 +143,14 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    -- The info banner is untouched and still first; the bulk verbs go under it.
-    local bannerAt = PAGE:find("local banner = GUI:CreateInfoBanner(self.child, {", 1, true)
+    -- No "applies globally" banner: the page is on the GLOBAL tab, which says it.
+    -- The bulk verbs come first, then the first card.
     local stripAt  = PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true)
     local firstAt  = PAGE:find('OpenSection(L["Frame Modes"]', 1, true)
-    check(bannerAt and stripAt and firstAt and bannerAt < stripAt and stripAt < firstAt,
-          "bulk: the banner, then Expand All / Collapse All spanning both columns, then the first card")
+    check(PAGE:find("GUI:CreateInfoBanner(self.child, {", 1, true) == nil,
+          "bulk: no global-settings banner -- the GLOBAL tab says it")
+    check(stripAt and firstAt and stripAt < firstAt,
+          "bulk: Expand All / Collapse All spanning both columns, then the first card")
     check(PAGE:find("if not classicLayout then\n            Add(tools.SectionControls(self.child), 24, \"both\")\n        end", 1, true) ~= nil,
           "bulk: ...and only in Modern")
 end
@@ -180,6 +182,8 @@ local PANEL_APPEARANCE = {
     { "fontdropdown",    "Settings Font",         "DF.db.settingsFont",        55 },
     { "outlinedropdown", "Settings Font Outline", "DF.db.settingsFontOutline", 55 },
     { "label", "Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those.", "(none)", 60 },
+    { "dropdown", "Page Tips", "DF:GetGlobalDB().pageTips", 55 },
+    { "label", "Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them.", "(none)", 46 },
     { "checkbox",        "Use classic settings layout", "(none)",              30 },
 }
 local NOTIFICATIONS = {
@@ -194,15 +198,17 @@ local CARDS = {
       builder = "BuildFrameModesGroup", golden = FRAME_MODES,
       summary = "function() return FrameModesSummary(DF.db) end" },
     { label = "Blizzard Frames", key = "general_blizzard", col = 1, classicCol = 1,
-      builder = "BuildBlizzardFramesGroup", golden = BLIZZARD_FRAMES, summary = "nil" },
-    { label = "Rendering", key = "general_rendering", col = 2, classicCol = 1,
+      builder = "BuildBlizzardFramesGroup", golden = BLIZZARD_FRAMES,
+      summary = "function() return BlizzardFramesSummary(DF.db.party) end" },
+    { label = "Rendering", key = "general_rendering", col = 1, classicCol = 1,
       builder = "BuildRenderingGroup", golden = RENDERING,
-      summary = "function() return RenderingSummary(DF:GetGlobalDB()) end", pin = true },
+      summary = "function() return RenderingSummary(DF:GetGlobalDB(), DF.db.party) end", pin = true },
     { label = "Settings Panel Appearance", key = "general_panelappearance", col = 2, classicCol = 2,
       builder = "BuildPanelAppearanceGroup", golden = PANEL_APPEARANCE,
       summary = "function() return PanelAppearanceSummary(DF.db) end", pin = true },
-    { label = "Notifications", key = "general_notifications", col = 1, classicCol = 2,
-      builder = "BuildNotificationsGroup", golden = NOTIFICATIONS, summary = "nil" },
+    { label = "Notifications", key = "general_notifications", col = 2, classicCol = 2,
+      builder = "BuildNotificationsGroup", golden = NOTIFICATIONS,
+      summary = "function() return NotificationsSummary(DF:GetGlobalDB()) end" },
 }
 
 for _, g in ipairs(CARDS) do
@@ -235,8 +241,8 @@ do
       and modes:find('function() PromptReloadAfterModeToggle("raid") end', 1, true) ~= nil,
           "frame modes: both ticks still raise the contextual reload prompt")
     local sum = PAGE:match("local function FrameModesSummary%(d%)(.-)\n            end")
-    check(sum ~= nil and sum:find("d.partyEnabled == false", 1, true) ~= nil
-      and sum:find("d.raidEnabled  == false", 1, true) ~= nil and sum:find("not d.partyEnabled", 1, true) == nil,
+    check(sum ~= nil and sum:find("d.partyEnabled ~= false", 1, true) ~= nil
+      and sum:find("d.raidEnabled ~= false", 1, true) ~= nil and sum:find("not d.partyEnabled", 1, true) == nil,
           "frame modes: the summary tests presence, never truthiness -- absent means enabled")
 
     local bliz = builderBody("BuildBlizzardFramesGroup")
@@ -254,13 +260,23 @@ do
     check(render:find("scaleHint.refreshContent = function()", 1, true) ~= nil
       and render:find("group:AddWidget(scaleHint, 72)", 1, true) ~= nil,
           "rendering: the live scale hint keeps its refreshContent and its slot height")
-    local rsum = PAGE:match("local function RenderingSummary%(d%)(.-)\n            end")
-    check(rsum ~= nil and rsum:find('rate == "SMOOTH"', 1, true) ~= nil and rsum:find("pixelPerfect", 1, true) == nil,
-          "rendering: the summary names a non-default rate and nothing about the other store")
+    local rsum = PAGE:match("local function RenderingSummary%(g, p%)(.-)\n            end")
+    check(rsum ~= nil and rsum:find('rate == "SMOOTH"', 1, true) ~= nil and rsum:find('L["Normal"]', 1, true) ~= nil
+      and rsum:find("p.pixelPerfect", 1, true) ~= nil,
+          "rendering: the summary names Pixel-Perfect from party and the rate, Normal included")
 
     local psum = PAGE:match("local function PanelAppearanceSummary%(d%)(.-)\n            end")
-    check(psum ~= nil and psum:find("DF:GetFontNameFromPath(d.settingsFont)", 1, true) ~= nil,
-          "panel appearance: the summary is the font's name, through the dropdown's own resolver")
+    check(psum ~= nil and psum:find("DF:GetFontNameFromPath(d.settingsFont)", 1, true) ~= nil
+      and psum:find("GUI:OutlineName(d.settingsFontOutline)", 1, true) ~= nil,
+          "panel appearance: the font's name and outline, through the dropdowns' own resolvers")
+
+    local bsum = PAGE:match("local function BlizzardFramesSummary%(p%)(.-)\n            end")
+    check(bsum ~= nil and bsum:find('L["%s hidden"]', 1, true) ~= nil and bsum:find('L["Shown"]', 1, true) ~= nil,
+          "blizzard frames: the summary says which frames are hidden, or Shown")
+
+    local nsum = PAGE:match("local function NotificationsSummary%(g%)(.-)\n            end")
+    check(nsum ~= nil and nsum:find('return ""', 1, true) ~= nil,
+          "notifications: blank while both are on -- it names only what is off")
 end
 
 -- ============================================================
@@ -279,14 +295,15 @@ do
           "language: classic keeps its box, its dropdown and column 2")
 
     local mblock, mcall = sectionBlock("Minimap", "minimapCard:AddWidget(")
-    check(mcall:find('OpenSection(L["Minimap"], "general_minimap", 2, nil)', 1, true) ~= nil,
-          "minimap: a card keyed general_minimap in column 2 -- no tick, no pin")
+    check(mcall:find('OpenSection(L["Minimap"], "general_minimap", 2,', 1, true) ~= nil
+      and mcall:find('DF.db.party.showMinimapButton and L["Shown"] or L["Hidden"] end)', 1, true) ~= nil,
+          "minimap: a card keyed general_minimap in column 2, saying Shown / Hidden -- no tick, no pin")
     check(mblock:find("minimapCard:AddWidget(" .. MINIMAP, 1, true) ~= nil,
           "minimap: ...holding the SAME call classic makes -- party-canonical read, write to both")
 
     local lblock, lcall = sectionBlock("Language", "languageCard:AddWidget(")
-    check(lcall:find('OpenSection(L["Language"], "general_language", 2, nil)', 1, true) ~= nil,
-          "language: a card keyed general_language in column 2 -- no tick, no pin")
+    check(lcall:find('OpenSection(L["Language"], "general_language", 2, LanguageSummary)', 1, true) ~= nil,
+          "language: a card keyed general_language in column 2, naming the language -- no tick, no pin")
     check(lblock:find("languageCard:AddWidget(" .. LANGUAGE, 1, true) ~= nil,
           "language: ...holding the SAME dropdown classic builds, on the per-character store")
     check(lblock:find("Translations are community-contributed and may be incomplete.\"], GUI:GroupInnerWidth(languageCard)))", 1, true) ~= nil,

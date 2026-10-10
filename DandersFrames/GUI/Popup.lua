@@ -9,21 +9,8 @@ local addonName, DF = ...
 -- ============================================================
 
 local ipairs, tinsert, tremove, wipe = ipairs, table.insert, table.remove, table.wipe
-local L = DF.L
 local CreateFrame = CreateFrame
 local UIParent = UIParent
-local BackdropTemplateMixin = BackdropTemplateMixin
-local Mixin = Mixin
-
--- ============================================================
--- THEME COLORS (matching GUI/GUI.lua)
--- ============================================================
-
--- The shared dialog palette (GUI.lua loads first). Neutrals are the same tables
--- as GUI.Colors so they theme-track in lockstep; the dialog-specific tones
--- (denser background, selected, green, red) live there too, so there is exactly
--- one copy in the addon.
-local C = DF.GUI.DialogColors
 
 -- ============================================================
 -- BACKDROP HELPERS
@@ -149,28 +136,6 @@ function DF:HighlightWidget(widget)
     if not widget or not widget.GetFrameLevel then return end
     ApplyHighlightOverlay(widget)
 end
-
--- (Removed) DF:HighlightSettings — the dbKey-matched variant of the highlight
--- system. It had no callers: only DF:HighlightWidget (above) is used, from
--- FilterRegistry/Options.lua. The shared machinery it used — CreateHighlightOverlay,
--- GetHighlightOverlay, ApplyHighlightOverlay, DF:ClearSettingHighlights and the
--- highlightPool / activeHighlights pools — all STAYS for HighlightWidget.
-
--- (Removed) SETTINGS PICKER MODE — DF:EnterSettingsPickerMode,
--- DF:ApplyPickerOverlaysToCurrentPage, DF:ClearSettingsPicker,
--- DF:CancelSettingsPickerMode, the CreatePickerOverlay / CreatePickerBanner
--- builders and the pickerOverlays / pickerBanner / PICKER_COLOR /
--- DF.settingsPickerMode / DF.settingsPickerCallback state.
---
--- It let the wizard builder capture a setting by clicking it in the live GUI, so
--- its only entry point died with WizardBuilder.lua.
---
--- ☠ WHY IT SURVIVED THE WIZARD-RUNTIME COMMIT, AND THE LESSON. GUI.lua still
--- referenced ApplyPickerOverlaysToCurrentPage, which read like a live external
--- caller. But that reference was gated on DF.settingsPickerMode, and the ONLY
--- writer of that flag was EnterSettingsPickerMode — which nothing called. An
--- uncalled writer makes every reader unreachable no matter how live the call
--- site looks: when a reference is behind a flag, check what SETS the flag.
 
 -- ============================================================
 -- POPUP DELEGATES

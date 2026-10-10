@@ -222,15 +222,18 @@ local function BuildLinkedFiltersSection(env, group)
     lfEditText:SetPoint("RIGHT", 0, 0)
     lfEditText:SetJustifyH("RIGHT")
     lfEditText:SetText(L["Manage Filters"])
-    local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
-    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
-    lfEdit:SetScript("OnLeave", function()
-        -- Re-read the accent rather than restoring lfTC: a party/raid switch can
-        -- repaint the card while the cursor is still on this.
-        local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
+    local function PaintLink()
+        local c = GUI.GetThemeColor()
         lfEditText:SetTextColor(c.r, c.g, c.b)
-    end)
+    end
+    PaintLink()
+    -- On the host's repaint list, so a tab switch re-tints it rather than a hover.
+    host.ThemeListeners = host.ThemeListeners or {}
+    table.insert(host.ThemeListeners, { UpdateTheme = function()
+        if not lfEdit:IsMouseOver() then PaintLink() end
+    end })
+    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
+    lfEdit:SetScript("OnLeave", PaintLink)
     lfEdit:SetScript("OnClick", function()
         if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
     end)
@@ -289,7 +292,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- Remove ✕ (mirror the member-row remove idiom)
             local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -313,7 +316,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- btn.tooltip assigned afterwards is read by nothing.
             local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png",
                 color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
                 hoverColor = { 1, 1, 1 },
                 tooltip    = {
@@ -351,7 +354,7 @@ local function BuildLinkedFiltersSection(env, group)
     -- "+ Add Filter" button → mini-picker of unlinked presets + customs
     local addFilterLinkBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addFilterLinkBtn:SetHeight(22)
-    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
+    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add Filter"] })
     GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
     addFilterLinkBtn:SetScript("OnClick", function()
         OpenFilterPicker({
@@ -414,7 +417,7 @@ local function BuildMembersSection(env, group)
                 -- One arrow texture serves both directions via rotation.
                 local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                     rotation = math.rad(180),
                 })
                 upBtn:SetPoint("TOPLEFT", 2, -1)
@@ -429,7 +432,7 @@ local function BuildMembersSection(env, group)
             if canMoveDown then
                 local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                 })
                 downBtn:SetPoint("BOTTOMLEFT", 2, 1)
                 downBtn:SetScript("OnClick", function()
@@ -498,7 +501,7 @@ local function BuildMembersSection(env, group)
             -- Red at rest, brighter red on hover: an inline destructive remove.
             local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -523,13 +526,14 @@ local function BuildMembersSection(env, group)
             -- Customise button (navigates to Effects tab for this indicator)
             -- Accent-tinted action button: persistent accent fill + accent border
             -- + accent label at rest, accent-wash hover.
+            -- ⚠ No opts.accent: a passed accent is treated as FIXED and never repainted,
+            -- so the live theme handed in froze at whichever tab built the row.
             local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
             custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
             GUI:StyleButton(custBtn, {
                 width = 56, height = 18,
                 text = L["Customise"],
                 tinted = true,
-                accent = GetThemeColor(),
             })
             local capturedAuraName = member.auraName
             local capturedIndID = member.indicatorID
@@ -566,7 +570,7 @@ local function BuildMembersSection(env, group)
     -- "+ Add aura" button
     local addMemBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addMemBtn:SetHeight(22)
-    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
+    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add aura"] })
     GUI:SetSettingsFont(addMemBtn.Text, 9, "")
     addMemBtn:SetScript("OnClick", function()
         -- Shared spell picker, group context: searchable, class/category-filterable
@@ -600,10 +604,7 @@ local function GroupApply(kind)
 end
 
 -- ── PLACEMENT (every group kind) ──
--- ☠ THE CONTROLS BIND THE GROUP RECORD ITSELF, in both layouts. The popout row
--- above them takes a VIEW of the same record (P.GroupRecordView) so its modified
--- tick and its footer have something the defaults engine can answer for -- the
--- record is SavedVariables and cannot carry the adapter itself.
+-- The controls bind the group record itself, in both layouts.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
@@ -869,12 +870,7 @@ end
 -- page, the choice behind it. The Effects tab got that in phase 5 and this tab
 -- was simply missed.
 --
--- ☠ NO CHOICE CARD *GROUP* IN HERE. GUI:CreateChoiceCardGroup wraps its cards in
--- a collapsible header keyed by its TITLE TEXT in the account-wide collapsed
--- store -- a second header inside a panel that already has one, and a profile key
--- for a fold nobody can usefully close.
---
--- ☠ AND NO FAT CARDS EITHER, since spec section 26 item 6: two SEGMENTS side by
+-- ☠ NO FAT CARDS, since spec section 26 item 6: two SEGMENTS side by
 -- side, each a picture of the row of icons the group produces, drawn on one of
 -- the player's own frames. Two 60px cards stacked cost 122px of panel; two
 -- segments cost 68.
@@ -1127,9 +1123,9 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
         -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
             if shown() then
-                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
             else
-                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
             end
             eyeBtn:SetGlyphHover(shown())
         end
@@ -1691,9 +1687,9 @@ S.BuildDebuffGroupsTab = function()
             -- restores the state; hover is suppressed while hidden.
             local function updateEyeIcon()
                 if shown() then
-                    eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
                 else
-                    eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
                 end
                 eyeBtn:SetGlyphHover(shown())
             end
@@ -1792,6 +1788,42 @@ end
 -- ============================================================
 -- MAIN PAGE BUILD
 -- ============================================================
+
+-- ============================================================
+-- THE ENABLE STATE -- the banner's tick and the disabled cover
+-- ------------------------------------------------------------
+-- ☠ EVERY FULL BUILD ENDS HERE, NOT ONLY THE REFRESH. A full build makes a new
+-- S.mainFrame and the cover belongs to the frame it was made on, so the rebuild
+-- every party/raid switch runs would come up with NO cover -- and the page's
+-- RefreshStates skips the refresh at an unchanged size, so nothing else puts
+-- one back: a disabled designer whose preview and tabs all still work.
+-- ☠ FROM THE MODE, NOT THE PRESET: the enable click writes the mode, and a read
+-- of the preset field it no longer writes would untick the box under the user.
+-- ============================================================
+local function ApplyEnabledState()
+    if not S.mainFrame then return end
+    local adEnabled = DF.IsAuraDesignerEnabledForMode
+        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
+    if S.enableBanner then
+        S.enableBanner.checkbox:SetChecked(adEnabled)
+    end
+    local split = S.mainFrame.splitContainer
+    if not split then return end
+    if not adEnabled then
+        if not S.mainFrame.disabledOverlay then
+            -- Shared with the Text Designer and Raid Auto Layouts; this page only
+            -- owns the extent (the whole split container) and the label.
+            local overlay = GUI:CreateDisabledOverlay(split, {
+                label = L["Aura Designer is disabled"],
+            })
+            overlay:SetAllPoints()
+            S.mainFrame.disabledOverlay = overlay
+        end
+        S.mainFrame.disabledOverlay:Show()
+    elseif S.mainFrame.disabledOverlay then
+        S.mainFrame.disabledOverlay:Hide()
+    end
+end
 
 -- ============================================================
 -- THE SPLIT-PANEL PAGE
@@ -2097,10 +2129,6 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
-    -- (Removed) S.origY_framePreview and S.contentRightInset, both set to 0 here and
-    -- read nowhere -- old-layout anchors that the current layout does not use. The
-    -- second even carried "no right inset needed in new layout", i.e. a field whose
-    -- own comment said it was not needed.
     S.framePreview = CreateFramePreview(S.leftPanel, 0, nil)
 
     -- ── RIGHT PANEL (tabbed settings) ──
@@ -2263,6 +2291,8 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     end)
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
+    -- The cover lives on S.mainFrame, which this build has just replaced.
+    ApplyEnabledState()
 end
 
 -- ============================================================
@@ -2347,43 +2377,10 @@ function DF:AuraDesigner_RefreshPage()
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
 
-    -- Update enable state.
-    -- ☠ FROM THE MODE, NOT THE PRESET. These two reads are what broke the enable click
-    -- when the switch moved to the mode db: the click writes the mode, then calls THIS
-    -- refresh, and this re-synced the checkbox and the overlay from the preset field
-    -- the click no longer writes -- so the box unticked itself and the disabled overlay
-    -- stayed up until a page revisit ran the full build (whose reads were updated).
-    -- "when I click enable the toggle does not stick and AD does not activate" (Krathe,
-    -- 2026-08-22) was exactly these two lines. They read GetAuraDesignerDB().enabled
-    -- INLINE, which is why the sweep that fixed every named `adDB.enabled` missed them.
-    local adEnabled = DF.IsAuraDesignerEnabledForMode
-        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
-    if S.enableBanner then
-        S.enableBanner.checkbox:SetChecked(adEnabled)
-    end
+    ApplyEnabledState()
     -- Spec dropdown lives on the main tab strip (B2): refresh its text on
     -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
     UpdateSpecDropdownState()
-
-    -- Show/hide disabled overlay on the split container
-    if S.mainFrame.splitContainer then
-        if not adEnabled then
-            if not S.mainFrame.disabledOverlay then
-                -- Shared with the Text Designer and Raid Auto Layouts; this S.page
-                -- only owns the extent (the whole split container) and the label.
-                local overlay = GUI:CreateDisabledOverlay(S.mainFrame.splitContainer, {
-                    label = L["Aura Designer is disabled"],
-                })
-                overlay:SetAllPoints()
-                S.mainFrame.disabledOverlay = overlay
-            end
-            S.mainFrame.disabledOverlay:Show()
-        else
-            if S.mainFrame.disabledOverlay then
-                S.mainFrame.disabledOverlay:Hide()
-            end
-        end
-    end
 
     -- Refresh buffs tab banner state if visible
     local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]

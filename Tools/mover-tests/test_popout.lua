@@ -605,7 +605,7 @@ do
     check(not p.notch:IsShown(), "notch: a built popout has no connection point yet")
     p:Follow(src)
     check(p.notch:IsShown(), "notch: following, the point is up")
-    eq(p.notch:GetTexture(), "Icons\\notch", "notch: it wears the diamond")
+    eq(p.notch:GetTexture(), "Icons\\notch.png", "notch: it wears the diamond")
     eq(p.notch._vertex.r, ACCENT.r, "notch: tinted with the accent")
     eq(p.notch:GetWidth(), 10, "notch: ~10px")
     local pt = p.notch._points[#p.notch._points]
@@ -1016,7 +1016,7 @@ end
 -- the shell adds no locale file of its own.
 do
     local p = popout({ key = "pinglyph" })
-    eq(p.pinBtn._opts.texture, "Icons\\pin", "glyph: the pin button uses the pin art")
+    eq(p.pinBtn._opts.texture, "Icons\\pin.png", "glyph: the pin button uses the pin art")
     eq(p.pinBtn._opts.tooltip.title, "Pin", "glyph: with a tooltip read from the host locale")
     p:Close()
 end
@@ -1525,8 +1525,8 @@ end
 -- which at the window's edge is over a hundred pixels: the popout docked a long
 -- way clear of the window and the beam's far end stopped short of the row's
 -- plate, hanging in dead space to the right of it. Reported in-game 2026-08-26,
--- and invisible in /df popoutdemo for the reason it is invisible in every test
--- above -- an unscaled window is the one case where the two spaces agree.
+-- and invisible in every test above for one reason -- an unscaled window is the
+-- one case where the two spaces agree.
 --
 -- The scene below is the real one, in the real proportions: a 1000 x 700 window
 -- at 85%, and a 260-wide row whose plate stops well inside the window's right

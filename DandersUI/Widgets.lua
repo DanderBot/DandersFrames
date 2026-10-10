@@ -23,6 +23,9 @@ local ipairs, pairs, type, format, unpack, wipe = ipairs, pairs, type, string.fo
 local math, tinsert, tostring, tonumber = math, table.insert, tostring, tonumber
 local PlaySound, SOUNDKIT, InCombatLockdown, C_Timer = PlaySound, SOUNDKIT, InCombatLockdown, C_Timer
 local strtrim, _G = strtrim, _G
+-- The modified dot's hold ring is the one caller. Stubbed rather than assumed so
+-- the file stays loadable outside the game, as Core.lua does for its own.
+local GetTime = GetTime or function() return 0 end
 
 -- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE. A host stamps `RefreshStates` on
 -- whatever a control was parented to -- a settings page's scroll child, or the
@@ -406,10 +409,19 @@ function UI:StyleButton(btn, opts)
         btn.dfTabStripe = stripe
     end
 
+    -- The colour the rest state was last painted in. Undoing a hover on HIDE restores
+    -- this rather than reading the live accent: a page is hidden AFTER the accent has
+    -- moved to the tab being entered, so a live read re-themed the page being left
+    -- (half of it -- the border, not the label) while its repaint stamp still said
+    -- it was in its own colour, and it came back that way.
+    local a0 = accent or host:GetAccent()
+    local restColor = { r = a0.r, g = a0.g, b = a0.b }
+
     -- The resting backdrop the button returns to on mouse-out (and that primary
     -- buttons also wear permanently): accent-tinted for primary, the active-tab
     -- panel colour for active tabs, otherwise the neutral element colour.
     local function restBackdrop(self, a)
+        restColor.r, restColor.g, restColor.b = a.r, a.g, a.b
         if isTabStyle then
             -- Underline tab: a faint neutral cell when inactive (so every tab's
             -- bounds stay visible and the active one doesn't appear to "grow"),
@@ -485,6 +497,15 @@ function UI:StyleButton(btn, opts)
     end
 
     btn.ApplyThemeColor = function(c)
+        -- A greyed button keeps its greyed rest through a repaint: the wash stays
+        -- killed (SetDisabled) and the dim backdrop stays. Only the label takes
+        -- the colour, at the alpha SetDisabled left it.
+        if btn.dfDisabled then
+            hl:SetVertexColor(c.r, c.g, c.b, 0)
+            if (ghost or tinted) and btn.Text then btn.Text:SetTextColor(c.r, c.g, c.b) end
+            if (ghost or tinted) and btn.Icon then btn.Icon:SetVertexColor(c.r, c.g, c.b) end
+            return
+        end
         applyWash(c)
         if isTabStyle then
             restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)
@@ -617,11 +638,11 @@ function UI:StyleButton(btn, opts)
     -- cannot just Show() the texture. The real mouseover is unaffected either
     -- way: locking an already-hovered button is a no-op, and unlocking one still
     -- under the mouse leaves the client's own highlight up.
-    local function applyHoverState(self, hovered)
+    local function applyHoverState(self, hovered, rest)
         if not hovered then
             if isTabStyle or ghost then return end
             if self:IsEnabled() and not self.dfDisabled then
-                restBackdrop(self, accent or host:GetAccent())
+                restBackdrop(self, rest or accent or host:GetAccent())
             end
             return
         end
@@ -678,241 +699,8 @@ function UI:StyleButton(btn, opts)
     -- ⚠ HookScript, not SetScript: OnHide is a script a CALLER may already own (unlike
     -- OnEnter/OnLeave, which StyleButton owns by contract) — this composes instead of
     -- silently replacing theirs.
-    btn:HookScript("OnHide", function(self) applyHoverState(self, false) end)
-    return btn
-end
-
--- ============================================================
--- A FOLDER TAB -- A TAB THAT BELONGS TO THE PANEL UNDER IT
--- ------------------------------------------------------------
--- StyleButton's `tab = true` draws the kit's UNDERLINE tab: a transparent cell
--- with an accent stripe along its bottom. That is the right shape for a strip
--- that switches which VIEW of a page you are looking at, and it is what the
--- designers' Effects / Layout Groups / Global strip wears.
---
--- This is the other kind. A folder tab sits directly ON TOP of a panel and says
--- what that panel is SHOWING, so it has to read as part of it: the selected tab
--- is the same fill as the panel, joined to it with no seam, carrying the accent
--- along its top edge, and the ones that are not selected are set BACK -- shorter,
--- outlined, dim-labelled, so they read as sheets behind the front one. That is a
--- different sentence from an underline tab, and the two can then stand on the
--- same page without reading as "tabs inside tabs", which is the complaint that
--- produced this helper.
---
--- ☠ "SET BACK" IS NOT "DARKER", AND ON A DARK GROUND IT CANNOT BE. Work the
--- composites out over the ground these actually stand on -- a consumer's content
--- panel, C_PANEL at 0.3 over C_BACKGROUND at 0.95, about 0.089:
---
---     page ground                             0.089
---     selected == panel   C_PANEL  @ 0.80  -> 0.114
---     unselected          C_ELEMENT@ 0.85  -> 0.166
---
--- The selected tab's fill is PINNED to the panel's by the join, and the panel is
--- only 0.025 above the ground. So "unselected sits between the ground and the
--- panel" is a 0.025-wide window: any value in it is invisible, and anything below
--- the ground is near-black. There is no legible third step underneath. The
--- unselected tab therefore sits ABOVE the panel, exactly where a dark-theme
--- editor puts an inactive tab, and the front sheet is marked by the ACCENT rather
--- than by being the brightest thing in the strip. Height, label brightness and
--- that accent carry "selected"; fill luminance cannot and was never going to.
---
--- ☠ THE SELECTED TAB HAS NO RING, and that is the whole of "joined". A ring is
--- a closed loop -- the baked `top` shape rounds the two upper corners but still
--- strokes all four sides -- so a selected tab wearing one draws a 1px line along
--- exactly the edge that is supposed to have disappeared into the panel. This is
--- the same bargain UI:ApplyRoundedStrip already strikes for a popout's title
--- strip (`border = false`), and for the same reason: a top-rounded piece that
--- joins something below it is a FILL, not a box.
---
--- ⚠ NO HIGHLIGHT TEXTURE, either. The native HIGHLIGHT layer is a rectangle and
--- would paint square corners back over the two arcs on every mouseover. Hover is
--- a fill/label lift applied through the surface instead, which follows the shape.
---
--- ⚠ HONEST LIMIT, UNVERIFIED IN GAME. The tab drops its OWN bottom edge, but a
--- bordered panel underneath still draws its own top edge, so a hairline may
--- remain along the join. Covering it needs either a 1px patch painted in the
--- panel's fill -- which is translucent, so it lightens the line rather than
--- removing it -- or raising this strip above the panel's frame level so the patch
--- wins, which is sibling draw-order guesswork that cannot be checked headlessly.
--- Neither was taken. If the join reads as a line in game, the fix belongs on the
--- PANEL (drop its top edge under a joined strip), not here.
---
--- opts:
---   text        the label
---   font        font object name (default DFFontHighlightSmall)
---   radius      corner radius, 4 | 6 | 8 (default 6)
---   setBack     how much shorter an UNSELECTED tab is (default 6). It is
---               anchored to the strip's BOTTOM, so this is also how far its top
---               edge sits below the selected one's.
---   activeFill / inactiveFill / border   {r,g,b,a}, defaulted from the theme
---   accent      a fixed {r,g,b} for the selected tab's top edge. Omit and it
---               follows the host's accent, and keeps following it.
---   accentHeight  that edge's thickness (default 2)
---   onClick     fn(btn)
---   tooltip     a ShowTooltip spec { title=, lines= }
---
--- The caller anchors it (both a TOPLEFT and a BOTTOMLEFT are re-issued by
--- SetActive, so anchor by LEFT/RIGHT or by width and let this own the vertical)
--- and drives it with btn:SetActive(bool) -- the same verb StyleButton's tabs
--- take, so a strip can be swapped between the two languages without rewiring.
-function UI:StyleFolderTab(btn, opts)
-    local host = self
-    opts = opts or {}
-    local radius  = opts.radius or 6
-    local setBack = opts.setBack or 6
-
-    -- Panel colour for the selected tab so it composites to EXACTLY what the
-    -- band below it composites to -- both are C_PANEL at the same alpha over the
-    -- same page ground, so the join is invisible rather than nearly invisible.
-    local activeFill   = opts.activeFill   or { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 }
-    local inactiveFill = opts.inactiveFill or { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.85 }
-    -- ☠ THE EDGE ALPHA IS DERIVED, NOT EYEBALLED, and 0.5 was too low BECAUSE of
-    -- the fill it sits on. A ring composites over its OWN fill, not over the page:
-    -- C_BORDER at 0.5 over the panel's 0.114 gives 0.182 -- a 0.068 step, which is
-    -- what makes a panel's edge legible -- but the same 0.5 over this tab's
-    -- LIGHTER 0.166 fill gives 0.208, a 0.042 step, and the outline that is
-    -- supposed to say "this is a sheet behind the front one" is most of the way to
-    -- invisible. Solving C_BORDER*a + (1-a)*0.166 = 0.166 + 0.068 gives a = 0.81,
-    -- so an unselected tab's edge reads exactly as far off its fill as the panel's
-    -- own does off its.
-    local EDGE_ALPHA   = 0.8
-    local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, EDGE_ALPHA }
-
-    if opts.text ~= nil then
-        if not btn.Text then
-            btn.Text = btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
-            if btn.SetFontString then btn:SetFontString(btn.Text) end
-        end
-        btn.Text:SetText(opts.text)
-        btn.Text:ClearAllPoints()
-        btn.Text:SetPoint("CENTER", 0, 0)
-    end
-
-    -- ☠ THE SELECTED TAB CANNOT SAY SO WITH ITS FILL, so it says so with the
-    -- accent. Its fill is PINNED to the panel's -- that is the whole of "joined"
-    -- and it is not negotiable -- and a panel is only ~0.025 off the page ground
-    -- it stands on, so the front sheet has, on its own, no edge and almost no
-    -- contrast. Height and a brighter label were carrying the entire "which one am
-    -- I on" question. A coloured top edge is the folder tab's own idiom for it,
-    -- and it is the edge FURTHEST from the join, so nothing about it re-draws the
-    -- seam the selected tab exists to lose.
-    --
-    -- ⚠ INSET BY THE RADIUS AT BOTH ENDS, which is exactly the span of straight
-    -- top edge a top-rounded rect has. A bar run corner to corner would put two
-    -- square ends back over the two arcs -- the same trap the native hover layer
-    -- sets, and the reason this factory does not use one.
-    --
-    -- ARTWORK, so it clears BOTH of the rounded surface's layers (the fill and the
-    -- ring live at negative BACKGROUND sublevels) without competing with the
-    -- OVERLAY label, which does not overlap it anyway.
-    local accentH = opts.accentHeight or 2
-    local accentBar = btn.dfFolderAccent
-    if not accentBar then
-        accentBar = btn:CreateTexture(nil, "ARTWORK")
-        accentBar:SetTexture("Interface\\Buttons\\WHITE8x8")
-        btn.dfFolderAccent = accentBar
-    end
-    accentBar:SetHeight(accentH)
-    accentBar:ClearAllPoints()
-    accentBar:SetPoint("TOPLEFT", btn, "TOPLEFT", radius, 0)
-    accentBar:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -radius, 0)
-    accentBar:Hide()
-
-    -- The accent is per host and changes for the session (a consumer flips it on a
-    -- mode switch), so the bar follows it rather than freezing on whatever was
-    -- live when the strip was built.
-    --
-    -- ⚠ REGISTERED AGAINST THE BUTTON, and only once. A bare closure is something
-    -- nothing can ever take back off the list, and a tab strip is rebuilt on every
-    -- page refresh -- naming the owner makes the entry droppable, and the guard
-    -- stops a re-style of the same button stacking a second one.
-    local function paintAccent(c)
-        c = c or opts.accent or host:GetAccent()
-        accentBar:SetColorTexture(c.r, c.g, c.b, 1)
-    end
-    paintAccent()
-    if not opts.accent and not btn._folderAccentListener then
-        btn._folderAccentListener = function(c) paintAccent(c) end
-        host:RegisterAccentListener(btn._folderAccentListener, btn)
-    end
-
-    -- ☠ THE SQUARE BACKDROP HAS TO COME DOWN, and ApplyRoundedChrome is the one
-    -- call that does it: a rounded fill lives at a NEGATIVE background sublevel,
-    -- UNDER a backdrop's bgFile, so a frame that keeps its backdrop renders the
-    -- square in front of a surface that is drawing perfectly. See Round.lua.
-    local function paint(self)
-        local on = self.dfActive
-        host:ApplyRoundedChrome(self, {
-            radius  = radius,
-            corners = { tl = true, tr = true },
-            fill    = on and activeFill or inactiveFill,
-            border  = (not on) and edge or false,
-        })
-        accentBar:SetShown(on)
-    end
-
-    -- Selected: full height, top-anchored, so its bottom edge IS the strip's
-    -- bottom edge and therefore the top edge of whatever band follows. Not
-    -- selected: `setBack` shorter and bottom-anchored, which puts its top edge
-    -- that far down and reads as a sheet behind the front one.
-    local function reseat(self)
-        local p = self:GetParent()
-        if not p then return end
-        local x = self.dfFolderX or 0
-        self:ClearAllPoints()
-        self:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 0)
-        self:SetPoint("TOPLEFT", p, "TOPLEFT", x, self.dfActive and 0 or -setBack)
-    end
-
-    -- The caller's x within the strip, remembered so reseat can re-issue both
-    -- points on every state change without the caller re-anchoring.
-    function btn:SetFolderX(x)
-        self.dfFolderX = x or 0
-        reseat(self)
-    end
-
-    function btn:SetActive(active)
-        self.dfActive = active and true or false
-        reseat(self)
-        paint(self)
-        if self.Text then
-            if self.dfActive then
-                self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            else
-                self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            end
-        end
-    end
-
-    btn:SetScript("OnEnter", function(self)
-        if not self.dfActive then
-            host:ApplyRoundedChrome(self, {
-                radius  = radius,
-                corners = { tl = true, tr = true },
-                fill    = { C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.9 },
-                border  = edge,
-            })
-            if self.Text then self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
-        end
-        if opts.tooltip then host:ShowTooltip(self, opts.tooltip) end
-    end)
-    local function leave(self)
-        if not self.dfActive then
-            paint(self)
-            if self.Text then self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end
-        end
-        if opts.tooltip then host:HideTooltip() end
-    end
-    btn:SetScript("OnLeave", leave)
-    -- OnLeave does not fire for a button hidden under the cursor -- the same trap
-    -- StyleButton's own OnHide hook exists for, and a tab strip is rebuilt under
-    -- a stationary mouse every time the page refreshes.
-    btn:HookScript("OnHide", leave)
-    if opts.onClick then
-        btn:SetScript("OnClick", function(self) opts.onClick(self) end)
-    end
-
-    btn:SetActive(btn.dfActive)
+    -- ⚠ In the colour it was last painted in, never the live accent -- see restColor.
+    btn:HookScript("OnHide", function(self) applyHoverState(self, false, restColor) end)
     return btn
 end
 
@@ -1065,7 +853,7 @@ function UI:CreateCloseButton(parent, opts)
         width = size, height = size,
         tone = "danger",
         icon = {
-            texture = MEDIA .. "Icons\\close",
+            texture = MEDIA .. "Icons\\close.png",
             size = math.max(8, math.floor(size * 0.55)),
             color = restColor,
         },
@@ -1223,47 +1011,6 @@ function UI:CreatePanelBackdrop(frame, opts)
                                bc.a or bc[4] or 1 }
                           or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
     })
-end
-
--- Mover chrome: the translucent tinted plate a drag surface wears while the frames
--- are unlocked. This is a SEPARATE helper from CreateElementBackdrop, not a flag on
--- it, because a mover has the opposite job from settings chrome -- it is meant to
--- shout. Giving movers the neutral element look would be a bug, not consistency.
---
--- The hue comes from the host accent (or hooks.accentFor for a pinned pole)
--- instead of a hardcoded literal, so retheming moves the movers too.
---
--- ⚠ Which POLE is the caller choice, not the host accent, because a mover
--- belongs to the thing it moves: the raid mover must stay orange even while the
--- options window happens to be showing a party page. Pass isRaid where the site
--- knows; omit it only where the mover genuinely has no mode, and it will follow
--- the selected mode.
---
--- opts:
---   isRaid       true/false pins the pole via hooks.accentFor; omit to follow the host accent
---   color        {r,g,b} or {[1],[2],[3]} -- explicit override, for a mover whose
---                colour is a user setting rather than the theme
---   fillAlpha    default 0.30      borderAlpha  default 0.80
---   fill = false outline only      edgeSize     default 2
---
--- ⚠ NO :RefreshMoverTint(). Movers are rebuilt through CreateMoverBackdrop on a
--- mode change instead. opts.color / opts.fill / opts.edgeSize are not passed by
--- any call site; the defaults below are what every mover actually gets.
-function UI:CreateMoverBackdrop(frame, opts)
-    opts = opts or {}
-    local c = opts.color
-    if not c then
-        if opts.isRaid ~= nil then local f = self:Hook("accentFor"); c = (f and f(opts.isRaid)) or self:GetAccent()
-        else                       c = self:GetAccent() end
-    end
-    local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
-    CreateElementBackdrop(frame, {
-        fill        = opts.fill,
-        edgeSize    = opts.edgeSize or 2,
-        bgColor     = { r, g, b, opts.fillAlpha or 0.30 },
-        borderColor = { r, g, b, opts.borderAlpha or 0.80 },
-    })
-    return frame
 end
 
 -- The element backdrop, exposed to consumer files (the stylers in this file use
@@ -1428,7 +1175,7 @@ function UI:CreateOverrideMarker(parent, size)
     local icon = btn:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("CENTER")
     icon:SetSize(size, size)
-    icon:SetTexture(MEDIA .. "Icons\\dot")
+    icon:SetTexture(MEDIA .. "Icons\\dot.png")
     icon:SetVertexColor(c[1], c[2], c[3])
     btn.icon = icon
     btn:SetScript("OnEnter", function(s)
@@ -1453,7 +1200,7 @@ function UI:CreateOverrideResetButton(parent, opts)
     host:StyleButton(btn, {
         width = size, height = size,
         tone = "danger",
-        icon = { texture = MEDIA .. "Icons\\refresh", size = size - 6 },
+        icon = { texture = MEDIA .. "Icons\\refresh.png", size = size - 6 },
     })
     btn:Hide()
     -- StyleButton owns OnEnter (hover wash); hook the tooltip on top.
@@ -1468,27 +1215,30 @@ function UI:CreateOverrideResetButton(parent, opts)
 end
 
 -- ============================================================
--- THE MODIFIED-DEFAULT DOT
--- A SECOND indicator kind, and it answers a different question from the star
--- above. The star compares the stored value against the auto-layout GLOBAL; the
--- dot compares it against the value the addon SHIPS. Either can be up without
--- the other, and on a raid control both can be up at once -- which is why they
--- are drawn on opposite sides of the widget, at different sizes, in different
--- colours.
+-- THE MODIFIED DOT
+-- The one indicator for "this setting is not what it would otherwise be". Two
+-- colours, one place:
+--   * the RAID ACCENT (host hook accentFor) while an auto layout's value
+--     differs from the global one -- "overridden" while that layout is being
+--     edited, "runtime" while it is running. Layouts are raid only.
+--   * AMBER (C_NOTICE) otherwise, while the value differs from the shipped
+--     default.
+-- An override wins when both hold: it is the layer a hold removes first.
+-- The override star, reset button and inline "(Global: x)" text it replaced
+-- are built for debug mode only (see AddOverrideIndicators).
 --
--- WHERE IT GOES, AND WHY NOT BESIDE THE STAR. The star and the red reset button
--- own the container's TOP-RIGHT and read as one cluster. A third glyph there
--- would join that cluster visually while meaning something unrelated to it, and
--- on a control with all three up nobody could say which was which. So the dot
--- sits at the END OF THE LABEL'S VISIBLE TEXT: it belongs to the NAME of the
--- setting the way a modified-mark belongs beside a filename. 6px against the
--- star's 12, because it reads as information first.
+-- It sits at the END OF THE LABEL'S VISIBLE TEXT, belonging to the setting's
+-- name. A consumer may re-anchor it (DandersFrames puts it at the label's
+-- top-left); every re-anchor runs after this placement.
 --
--- ...BUT IT ANSWERS WHEN ASKED. Hovering it names the shipped default and the
--- current value; pressing and HOLDING it (DOT_HOLD_TIME) puts the default back.
+-- ...BUT IT ANSWERS WHEN ASKED. Hovering it names the shipped default, the
+-- global value when a layout is involved, and the current (or layout) value.
+-- Pressing and HOLDING it (DOT_HOLD_TIME) removes one layer: an override goes
+-- back to the global (the control's own override reset), anything else back to
+-- the default. A running layout's value has no hold -- the layout owns it.
 -- The drawn dot stays 6px -- the thing the mouse finds is an invisible
 -- DOT_HIT-square frame centred on it, built the first time the dot is ever
--- shown (a host with no isModifiedDefault hook never gets one) and shown only
+-- shown (a host with neither dot hook never gets one) and shown only
 -- while the dot is. A HOLD rather than a click because the dot sits beside the
 -- words a user points at to read a tooltip, and a stray click there must not
 -- throw away a setting; while held the dot grows toward DOT_HOLD_SIZE so the
@@ -1534,18 +1284,17 @@ end
 -- number because only the consumer knows the rect the dot has to stay inside;
 -- the kit only knows to obey it.
 --
--- ⚠ AND IT DISPLACES THE "(Global: x)" TEXT. That text anchors to the label's
--- ANCHOR right edge. For a label pinned only on its left (a slider's, a
--- dropdown's) that edge IS the end of the text -- exactly where the dot now
--- sits -- so the two would overlap in the raid editing state. When the dot is up
--- the global text starts after the DOT instead. A stretched label (a checkbox's,
--- pinned to both container edges) never collided, and moving its global text in
--- beside the dot rather than out at the container edge is an improvement, not a
--- change of meaning.
---
--- Installs container.UpdateModifiedDot(self) -> shown. Returns the texture.
+-- Installs container.UpdateModifiedDot(self) -> shown, kind. Returns the texture.
 local DOT_SIZE, DOT_HOLD_SIZE, DOT_HIT = 6, 10, 16
 local DOT_HOLD_TIME = 0.6
+-- ☠ THE HOLD SHOWS AS A RING THAT FILLS, not only as the dot growing. The dot
+-- sits under the pointer while it is held, and 6px -> 10px under a cursor is
+-- barely noticeable. A ring wider than the hit square is visible
+-- around the pointer, and filling clockwise says "keep holding" and "how long".
+-- Drawn by a Cooldown frame's radial swipe over the ring art, so nothing runs
+-- per frame for it; a faint full ring underneath is the track it fills.
+local DOT_RING = 22
+local DOT_RING_TRACK_ALPHA = 0.25
 
 -- The flat white texture a colour value's swatch is drawn from, tinted inline
 -- by the |T escape's own RGB arguments. A texture rather than a block glyph:
@@ -1580,10 +1329,10 @@ local function DotSameValue(a, b)
     return true
 end
 
-local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
+local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideReset)
     local dot = container:CreateTexture(nil, "OVERLAY")
     dot:SetSize(DOT_SIZE, DOT_SIZE)
-    dot:SetTexture(MEDIA .. "Icons\\dot")
+    dot:SetTexture(MEDIA .. "Icons\\dot.png")
     dot:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     dot:Hide()
     container.modifiedDot = dot
@@ -1620,20 +1369,62 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         return write
     end
 
-    -- Built on ENTER, never per frame. The default is re-asked every time: the
-    -- mode, the profile or the layout being edited can all have moved since.
+    -- What a hold does, one layer at a time: a layout override goes back to the
+    -- global value (the control's own override reset); anything else goes back
+    -- to the shipped default. A running layout's value is not the control's to
+    -- reset. Returns write, its argument, and the tooltip's hint.
+    local function HoldPlan()
+        local L = host.hooks.L
+        local kind = rawget(container, "modifiedDotKind")
+        if kind == "overridden" then
+            if onOverrideReset and not rawget(container, "dotLocked") then
+                return onOverrideReset, nil, L["Click and hold to reset to your global value"]
+            end
+            return nil
+        elseif kind == "runtime" then
+            return nil
+        end
+        local def = host:Call("getDefaultValue", dbTable, dbKey)
+        local write = ResetWriter(def)
+        if write then return write, def, L["Click and hold to reset to the default"] end
+        return nil
+    end
+
+    -- Built on ENTER, never per frame. Every value is re-asked: the mode, the
+    -- profile or the layout being edited can all have moved since.
     local function ShowDotTooltip()
         if not hit then return end
         local L = host.hooks.L
+        local kind = rawget(container, "modifiedDotKind")
+        local ov, globalValue = host:Call("getOverrideState", dbTable, dbKey)
+        local inLayout = ov ~= nil and ov ~= "none"
         local def = host:Call("getDefaultValue", dbTable, dbKey)
         local lines = {}
         if def ~= nil then lines[#lines + 1] = format(L["Default: %s"], FormatValue(def)) end
-        lines[#lines + 1] = format(L["Current: %s"], FormatValue(dbTable and dbTable[dbKey]))
-        if ResetWriter(def) then
-            lines[#lines + 1] = { text = L["Hold click to reset"], hint = true }
+        if inLayout then lines[#lines + 1] = format(L["Global: %s"], FormatValue(globalValue)) end
+        -- A control with no table of its own (an override key into a sub-table)
+        -- reports what it displays.
+        local current
+        if dbTable then
+            current = dbTable[dbKey]
+        else
+            local read = rawget(container, "DotReadValue")
+            if type(read) == "function" then current = read() end
         end
-        host:ShowTooltip(hit, { title = L["Changed from default"], lines = lines })
+        lines[#lines + 1] = format(inLayout and L["This layout: %s"] or L["Current: %s"], FormatValue(current))
+        local _, _, hint = HoldPlan()
+        if hint then
+            lines[#lines + 1] = { text = hint, hint = true }
+        elseif kind == "runtime" then
+            lines[#lines + 1] = { text = L["To change this, edit the layout in Auto Layouts."], hint = true }
+        end
+        local title = (kind == "overridden" and L["Set by this auto layout"])
+            or (kind == "runtime" and L["Set by the active auto layout"])
+            or L["Changed from default"]
+        host:ShowTooltip(hit, { title = title, lines = lines })
     end
+
+    local ringTrack, ringFill   -- built with the hit frame
 
     local HoldUpdate
     local function CancelHold()
@@ -1641,6 +1432,8 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         holding, holdElapsed, holdDefault, holdWrite = false, 0, nil, nil
         hit:SetScript("OnUpdate", nil)
         dot:SetSize(DOT_SIZE, DOT_SIZE)
+        if ringTrack then ringTrack:Hide() end
+        if ringFill then ringFill:Hide() end
     end
 
     -- ⚠ NO ALLOCATION IN HERE: it runs every rendered frame of a hold. Numbers
@@ -1661,7 +1454,8 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         write(def)
         container:UpdateModifiedDot()
         if dot:IsShown() then
-            -- Still modified: the write was redirected (a running raid layout)
+            -- Still marked: a layer remains (an override reset back to a
+            -- global that is not the default), or the write was redirected
             -- or landed on something that is not the default. Say so.
             ShowDotTooltip()
         else
@@ -1671,11 +1465,22 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
 
     local function StartHold()
         if holding or InCombatLockdown() then return end
-        local def = host:Call("getDefaultValue", dbTable, dbKey)
-        local write = ResetWriter(def)
+        local write, arg = HoldPlan()
         if not write then return end
-        holding, holdElapsed, holdDefault, holdWrite = true, 0, def, write
+        holding, holdElapsed, holdDefault, holdWrite = true, 0, arg, write
         hit:SetScript("OnUpdate", HoldUpdate)
+        -- The ring takes the dot's own colour: amber for a default, the raid
+        -- accent for a layout override.
+        local r, g, b = dot:GetVertexColor()
+        if ringTrack then
+            ringTrack:SetVertexColor(r, g, b, DOT_RING_TRACK_ALPHA)
+            ringTrack:Show()
+        end
+        if ringFill then
+            if ringFill.SetSwipeColor then ringFill:SetSwipeColor(r, g, b, 1) end
+            ringFill:Show()
+            ringFill:SetCooldown(GetTime(), DOT_HOLD_TIME)
+        end
     end
 
     local function EnsureHit()
@@ -1697,18 +1502,51 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         end)
         hit:SetScript("OnMouseUp", function() CancelHold() end)
         hit:SetScript("OnHide", function() CancelHold() end)
+
+        -- The hold's ring, centred on the dot and hidden until a hold starts.
+        -- Children of the hit, so they go wherever it goes.
+        ringTrack = hit:CreateTexture(nil, "ARTWORK")
+        ringTrack:SetTexture(MEDIA .. "DF_Ring")
+        ringTrack:SetSize(DOT_RING, DOT_RING)
+        ringTrack:SetPoint("CENTER", dot, "CENTER", 0, 0)
+        ringTrack:Hide()
+        ringFill = CreateFrame("Cooldown", nil, hit)
+        ringFill:SetSize(DOT_RING, DOT_RING)
+        ringFill:SetPoint("CENTER", dot, "CENTER", 0, 0)
+        if ringFill.SetSwipeTexture then ringFill:SetSwipeTexture(MEDIA .. "DF_Ring") end
+        -- Reverse: the swipe covers the ELAPSED part, so the ring grows.
+        if ringFill.SetReverse then ringFill:SetReverse(true) end
+        if ringFill.SetDrawEdge then ringFill:SetDrawEdge(false) end
+        if ringFill.SetDrawBling then ringFill:SetDrawBling(false) end
+        if ringFill.SetHideCountdownNumbers then ringFill:SetHideCountdownNumbers(true) end
+        ringFill:Hide()
+        hit.ringTrack, hit.ringFill = ringTrack, ringFill
+
         hit:Hide()
         container.modifiedDotHit = hit
         return hit
     end
 
+    -- Returns shown, and the kind: "overridden" / "runtime" (an auto layout's
+    -- value differs from the global one -- the raid accent, since layouts are
+    -- raid only) or "default" (differs from the shipped value -- amber). An
+    -- override wins: it is the layer a hold removes first.
     container.UpdateModifiedDot = function(self)
-        -- host:Call answers nil when the hook is absent, which is every consumer
+        -- host:Call answers nil when a hook is absent, which is every consumer
         -- that has not opted in: no dot, ever, and nothing to configure. The
-        -- engine behind the hook is the consumer's -- this library knows only
-        -- that some (db, key) pairs are "not the shipped value".
-        local on = host:Call("isModifiedDefault", dbTable, dbKey) and true or false
+        -- engines behind the hooks are the consumer's.
+        local ov = host:Call("getOverrideState", dbTable, dbKey)
+        local kind
+        if ov == "overridden" or ov == "runtime" then
+            kind = ov
+        elseif host:Call("isModifiedDefault", dbTable, dbKey) then
+            kind = "default"
+        end
+        container.modifiedDotKind = kind
+        local on = kind ~= nil
         if on then
+            local c = (kind ~= "default") and host:Call("accentFor", true) or C_NOTICE
+            dot:SetVertexColor(c.r, c.g, c.b)
             -- rawget for both, the convention this file already uses for an
             -- optional private field (see the _skipOverrideIndicators probe
             -- below): a headless frame answers an unset key with a truthy no-op
@@ -1729,7 +1567,7 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         end
         dot:SetShown(on)
         if hit then hit:SetShown(on) end
-        return on
+        return on, kind
     end
     return dot
 end
@@ -1766,7 +1604,7 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
     -- Checkmark icon for matching global value
     local checkIcon = container:CreateTexture(nil, "OVERLAY")
     checkIcon:SetSize(8, 8)
-    checkIcon:SetTexture(MEDIA .. "Icons\\check")
+    checkIcon:SetTexture(MEDIA .. "Icons\\check.png")
     checkIcon:SetVertexColor(0.3, 0.7, 0.3)
     checkIcon:Hide()
     container.overrideCheckIcon = checkIcon
@@ -1784,96 +1622,23 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
     -- engine is handed nil and answers "not modified" -- the honest answer for a
     -- value that is not a top-level setting. If a caller ever pairs a real
     -- dbTable with a differing override key, split the two keys apart here.
-    AddModifiedDot(host, container, lbl, dbTable, dbKey)
+    AddModifiedDot(host, container, lbl, dbTable, dbKey, onReset)
 
-    -- Function to update override indicators
+    -- The dot is the one indicator: an auto-layout override and a changed
+    -- default are its two colours, and its tooltip carries the default, the
+    -- global and the layout's value (see AddModifiedDot). The star, the reset
+    -- button and the inline global text are built for debug mode only.
     container.UpdateOverrideIndicators = function(self, currentValue)
-        -- ☠ THE DOT IS PAINTED FIRST, ABOVE EVERY EARLY RETURN BELOW. The
-        -- override state answers "none" for the whole of party mode by design
-        -- (the consumer's getOverrideState gates on raid), and returning there
-        -- without touching the dot would mean modified-marks appeared in raid
-        -- only -- half the panel, and the half nobody would think to check.
-        local modified = self.UpdateModifiedDot and self:UpdateModifiedDot() or false
-
-        -- Debug mode shows all buttons
-        if S.overrideDebugMode then
-            self.overrideStar:Show()
-            self.overrideResetBtn:Show()
+        if self.UpdateModifiedDot then self:UpdateModifiedDot() end
+        local debug = S.overrideDebugMode and true or false
+        self.overrideStar:SetShown(debug)
+        self.overrideResetBtn:SetShown(debug)
+        self.overrideCheckIcon:Hide()
+        if debug then
             self.overrideGlobalText:SetText("(debug)")
             self.overrideGlobalText:SetTextColor(1, 0.8, 0.2)
-            self.overrideGlobalText:Show()
-            self.overrideCheckIcon:Hide()
-            return
         end
-
-        local state, globalValue = host:Call("getOverrideState", dbTable, dbKey)
-        if not state or state == "none" then
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideGlobalText:Hide()
-            self.overrideCheckIcon:Hide()
-            return
-        end
-
-        -- "runtime" is an overlay the user cannot reset from the control (the
-        -- owning profile has to be edited), so it gets the star and the value
-        -- but no reset button.
-        if state == "runtime" then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
-            self.overrideStar:Show()
-            self.overrideResetBtn:Hide()
-        elseif state == "overridden" then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
-            self.overrideStar:Show()
-            self.overrideResetBtn:Show()
-        else   -- "editing", value matches the global
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-        end
-
-        local globalDisplay
-        if type(globalValue) == "boolean" then
-            globalDisplay = globalValue and L["Yes"] or L["No"]
-        elseif type(globalValue) == "number" then
-            if globalValue == math.floor(globalValue) then
-                globalDisplay = tostring(globalValue)
-            else
-                globalDisplay = format("%.2f", globalValue)
-            end
-        elseif type(globalValue) == "table" then
-            globalDisplay = globalValue.r and L["Color"] or "..."
-        elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
-            local mapped = self.overrideOptionsMap[globalValue]
-            globalDisplay = (type(mapped) == "table" and (mapped.text or mapped.label or globalValue)) or tostring(mapped)
-        else
-            globalDisplay = tostring(globalValue or L["None"])
-        end
-
-        self.overrideGlobalText:SetText(format(L["(Global: %s)"], globalDisplay))
-        self.overrideGlobalText:ClearAllPoints()
-        -- Start after the DOT when one is up -- on a left-anchored label the
-        -- label's right edge and the end of its text are the same point, which
-        -- is where the dot now sits. See AddModifiedDot.
-        if modified and self.modifiedDot then
-            self.overrideGlobalText:SetPoint("LEFT", self.modifiedDot, "RIGHT", 4, 0)
-        else
-            self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
-        end
-
-        -- The check icon marks "matches the global", which is only meaningful
-        -- while editing: a runtime overlay is by definition a difference.
-        if state == "editing" then
-            self.overrideGlobalText:SetTextColor(0.3, 0.6, 0.3)
-            self.overrideCheckIcon:ClearAllPoints()
-            self.overrideCheckIcon:SetPoint("LEFT", self.overrideGlobalText, "RIGHT", 2, 0)
-            self.overrideCheckIcon:Show()
-        else
-            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
-            self.overrideCheckIcon:Hide()
-        end
-        self.overrideGlobalText:Show()
+        self.overrideGlobalText:SetShown(debug)
     end
     
     -- Register this widget for refresh tracking
@@ -1927,9 +1692,15 @@ local function AddOrderListOverrideIndicators(host, container, dbKey, onReset, d
         self.overrideStar:SetShown(on)
         self.overrideResetBtn:SetShown(on)
         self.overrideModifiedText:SetShown(on)
+        -- The auto-layout colour, as on every control's dot (AddModifiedDot).
+        local c = on and host:Call("accentFor", true)
+        if c then
+            self.overrideStar.icon:SetVertexColor(c.r, c.g, c.b)
+            self.overrideModifiedText:SetTextColor(c.r, c.g, c.b, 0.8)
+        end
         if on then
-            self.overrideStar.tooltipText = L["Override active"]
-            self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
+            self.overrideStar.tooltipText = L["Set by this auto layout"]
+            self.overrideStar.tooltipSubText = L["This layout changes the order. Use the reset button to go back to your global order."]
         end
     end
 
@@ -2435,11 +2206,12 @@ function UI:CreateSlider(parent, opts)
     container.SetEnabled = function(self, enabled)
         self.dotLocked = not enabled
         slider:SetEnabled(enabled)
-        -- Grey the numeric value box too: it was only EnableMouse'd (clicks blocked
-        -- but still full-bright + typeable), so it stayed lit while the track dimmed.
+        -- The whole widget fades, as every other control's SetEnabled does -- a slider
+        -- that only dimmed its caption read as less disabled than the dropdown beside
+        -- it. The value box goes with it, so it cannot stay lit while the track dims.
+        self:SetAlpha(enabled and 1 or 0.4)
         input:EnableMouse(enabled)
         input:SetEnabled(enabled)
-        input:SetAlpha(enabled and 1 or 0.4)
         local tc = accentColor or host:GetAccent()
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -3546,7 +3318,7 @@ function UI:CreateDropdown(parent, opts)
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture(MEDIA .. "Icons\\expand_more")
+    arrow:SetTexture(MEDIA .. "Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- SetDisplayOverride: a fixed opener caption that wins over the selected
@@ -3649,7 +3421,7 @@ function UI:CreateDropdown(parent, opts)
         local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
         searchIcon:SetPoint("LEFT", 6, 0)
         searchIcon:SetSize(12, 12)
-        searchIcon:SetTexture(MEDIA .. "Icons\\search")
+        searchIcon:SetTexture(MEDIA .. "Icons\\search.png")
         searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4291,6 +4063,35 @@ P.INFO_BANNER_TONES = INFO_BANNER_TONES
 
 -- The line grammar, shared by ShowTooltip and ShowGameTooltip so a toolkit
 -- line appended under a spell tooltip reads exactly like one under a plain title.
+-- A HINT LINE (what a click does, why something is off) is set a step smaller
+-- and darker than the text, so it reads as an aside and not as more of it.
+-- ⚠ GameTooltip's line font strings are SHARED by every tooltip in the game, so
+-- a shrunk one is put back the moment the tooltip clears -- left alone, the
+-- next tooltip to reach that line number would draw it small. The original is
+-- restored as it was found: the font object if there was one, then the exact
+-- face, size and flags on top, so a UI addon that styled the lines keeps them.
+local HINT_STEP = 2
+local shrunkLines = {}
+local function RestoreShrunkLines()
+    for fs, s in pairs(shrunkLines) do
+        if s.obj then fs:SetFontObject(s.obj) end
+        fs:SetFont(s.file, s.size, s.flags)
+        shrunkLines[fs] = nil
+    end
+end
+if GameTooltip and GameTooltip.HookScript then
+    GameTooltip:HookScript("OnTooltipCleared", RestoreShrunkLines)
+end
+local function ShrinkLastTooltipLine()
+    if not GameTooltip.NumLines then return end
+    local fs = _G["GameTooltipTextLeft" .. GameTooltip:NumLines()]
+    if not fs or shrunkLines[fs] then return end
+    local file, size, flags = fs:GetFont()
+    if not file or not size then return end
+    shrunkLines[fs] = { obj = fs:GetFontObject(), file = file, size = size, flags = flags }
+    fs:SetFont(file, size - HINT_STEP, flags)
+end
+
 local function AddTooltipLines(host, lines)
     if not lines then return end
     local acc
@@ -4302,7 +4103,7 @@ local function AddTooltipLines(host, lines)
         elseif type(line) == "table" and (line.text or line.left) then
             local r, g, b = 0.7, 0.7, 0.7
             if line.hint then
-                r, g, b = 0.55, 0.55, 0.55
+                r, g, b = 0.48, 0.48, 0.48
             elseif line.accent then
                 acc = acc or host:GetAccent()
                 r, g, b = acc.r, acc.g, acc.b
@@ -4318,6 +4119,7 @@ local function AddTooltipLines(host, lines)
                 GameTooltip:AddDoubleLine(line.left, line.right, r, g, b, 1, 1, 1)
             else
                 GameTooltip:AddLine(line.text, r, g, b, true)
+                if line.hint then ShrinkLastTooltipLine() end
             end
         end
     end
@@ -4373,6 +4175,80 @@ local function SetTooltipOwner(host, owner, opts)
 end
 P.SetTooltipOwner = SetTooltipOwner
 
+-- ============================================================
+-- AN ICON ROW IN THE TOOLTIP (opts.icons)
+-- ------------------------------------------------------------
+-- A row of swatches under the title, IN the shared tooltip, so it wears the
+-- tooltip's own skin and title font rather than a lookalike frame's. The tooltip
+-- lays out LINES, so the row's room is reserved by a line holding one transparent
+-- texture the row's size (Media/spacer.png); the swatches draw over that line,
+-- where a texture can be desaturated, tinted and atlas-backed as an inline |T
+-- cannot. Taken down with the tooltip.
+--   opts.icons     { { texture = path or atlas, coords = {l,r,t,b}, inset = n,
+--                      color = {r,g,b,a}, desaturate = bool }, ... }
+--   opts.iconSize  each swatch's slot (24)
+-- ============================================================
+local TIP_ICON_GAP = 6
+local tipIconRow
+local function HideTooltipIcons()
+    if tipIconRow then tipIconRow:Hide() end
+end
+local function AddTooltipIcons(icons, size)
+    size = size or 24
+    local n = #icons
+    -- A NEGATIVE inset draws an icon past its slot (art that is mostly padding).
+    -- The row still starts flush with the title -- a first icon's overhang spills
+    -- into the tooltip's own padding -- but the LAST icon's overhang is reserved,
+    -- or its art runs off the tooltip's right edge.
+    local padR = math.max(0, -(icons[n].inset or 0))
+    local rowW = n * size + (n - 1) * TIP_ICON_GAP
+    GameTooltip:AddLine(format("|T%sspacer.png:%d:%d|t", MEDIA, size, math.ceil(rowW + padR)))
+    local line = _G["GameTooltipTextLeft" .. GameTooltip:NumLines()]
+    if not line then return end
+    if not tipIconRow then
+        tipIconRow = CreateFrame("Frame", nil, GameTooltip)
+        tipIconRow.tex = {}
+        GameTooltip:HookScript("OnTooltipCleared", HideTooltipIcons)
+        GameTooltip:HookScript("OnHide", HideTooltipIcons)
+    end
+    local row = tipIconRow
+    row:SetFrameLevel(GameTooltip:GetFrameLevel() + 2)
+    row:ClearAllPoints()
+    row:SetPoint("LEFT", line, "LEFT", 0, 0)
+    row:SetSize(rowW, size)
+    for i, e in ipairs(icons) do
+        local t = row.tex[i]
+        if not t then
+            t = row:CreateTexture(nil, "ARTWORK")
+            row.tex[i] = t
+        end
+        local s = size - 2 * (e.inset or 0)
+        t:SetSize(s, s)
+        t:ClearAllPoints()
+        t:SetPoint("CENTER", row, "LEFT", size / 2 + (i - 1) * (size + TIP_ICON_GAP), 0)
+        local co = e.coords
+        if C_Texture and C_Texture.GetAtlasInfo and e.texture and C_Texture.GetAtlasInfo(e.texture) then
+            t:SetTexCoord(0, 1, 0, 1)           -- SetAtlas keeps an earlier crop
+            t:SetAtlas(e.texture)
+        else
+            t:SetTexture(e.texture)
+            if co then t:SetTexCoord(co[1], co[2], co[3], co[4]) else t:SetTexCoord(0, 1, 0, 1) end
+        end
+        local dim = e.desaturate and true or false
+        t:SetDesaturated(dim)
+        -- After the texture call, which resets the vertex colour.
+        local c = (not dim) and e.color
+        if c then
+            t:SetVertexColor(c.r or c[1] or 1, c.g or c[2] or 1, c.b or c[3] or 1, c.a or c[4] or 1)
+        else
+            t:SetVertexColor(1, 1, 1, 1)
+        end
+        t:Show()
+    end
+    for i = n + 1, #row.tex do row.tex[i]:Hide() end
+    row:Show()
+end
+
 function UI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     SetTooltipOwner(self, owner, opts)
@@ -4385,6 +4261,7 @@ function UI:ShowTooltip(owner, opts)
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
+    if type(opts.icons) == "table" and #opts.icons > 0 then AddTooltipIcons(opts.icons, opts.iconSize) end
     AddTooltipLines(self, opts.lines)
     GameTooltip:Show()
 end

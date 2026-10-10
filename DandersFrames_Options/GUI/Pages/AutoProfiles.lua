@@ -188,7 +188,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     local infoArrow = infoHeader:CreateTexture(nil, "OVERLAY")
     infoArrow:SetPoint("LEFT", 10, 0)
     infoArrow:SetSize(12, 12)
-    infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (infoCollapsed and "chevron_right" or "expand_more"))
+    infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (infoCollapsed and "chevron_right" or "expand_more") .. ".png")
     infoArrow:SetVertexColor(0.6, 0.6, 0.6)
     
     local howTitle = infoHeader:CreateFontString(nil, "OVERLAY", "DFFontNormal")
@@ -210,10 +210,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     infoHeader:SetScript("OnClick", function()
         autoDb.howItWorksCollapsed = not autoDb.howItWorksCollapsed
         if autoDb.howItWorksCollapsed then
-            infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             infoBody:Hide()
         else
-            infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            infoArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             infoBody:Show()
         end
         -- Refresh page to recalculate layout
@@ -257,7 +257,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     local ex1Check = exRow1:CreateTexture(nil, "OVERLAY")
     ex1Check:SetPoint("LEFT", 0, 0)
     ex1Check:SetSize(10, 10)
-    ex1Check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+    ex1Check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
     ex1Check:SetVertexColor(0.3, 0.7, 0.3)
     
     local ex1Text = exRow1:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -273,7 +273,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     local ex2Star = exRow2:CreateTexture(nil, "OVERLAY")
     ex2Star:SetPoint("LEFT", 0, 0)
     ex2Star:SetSize(12, 12)
-    ex2Star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    ex2Star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot.png")
     ex2Star:SetVertexColor(1, 0.8, 0.2)
     
     local ex2ResetBg = exRow2:CreateTexture(nil, "ARTWORK")
@@ -284,7 +284,7 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     local ex2Reset = exRow2:CreateTexture(nil, "OVERLAY")
     ex2Reset:SetPoint("CENTER", ex2ResetBg, "CENTER", 0, 0)
     ex2Reset:SetSize(10, 10)
-    ex2Reset:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
+    ex2Reset:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh.png")
     ex2Reset:SetVertexColor(0.9, 0.45, 0.45)  -- danger red, matches the live reset button
     
     local ex2Text = exRow2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -404,7 +404,7 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     section.arrow = header:CreateTexture(nil, "OVERLAY")
     section.arrow:SetPoint("LEFT", 10, 0)
     section.arrow:SetSize(12, 12)
-    section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     section.arrow:SetVertexColor(0.6, 0.6, 0.6)
     
     -- Title
@@ -429,11 +429,11 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     header:SetScript("OnClick", function()
         section.expanded = not section.expanded
         if section.expanded then
-            section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             section.body:Show()
             section.totalHeight = headerHeight + bodyHeight
         else
-            section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             section.body:Hide()
             section.totalHeight = headerHeight
         end
@@ -735,7 +735,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         local function RefreshUnlockBtn()
             local locked = DF:GetRaidDB().raidLocked
             unlockText:SetText(locked and L["Unlock"] or L["Lock"])
-            unlockIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (locked and "lock" or "lock_open"))
+            unlockIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (locked and "lock" or "lock_open") .. ".png")
             unlockIcon:SetVertexColor(0.9, 0.9, 0.9)
             unlockBtn:SetActive(not locked)  -- accent fill/border while unlocked (editing)
         end
@@ -832,7 +832,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     GUI:StyleButton(deleteBtn, {
         accent = { r = 0.8, g = 0.2, b = 0.2 },
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png",
             size = 12,
             color = { r = 0.6, g = 0.6, b = 0.6 },
         },
@@ -873,7 +873,7 @@ function AutoProfilesUI:CreateAddButton(GUI, pageFrame, parent, contentType)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     btn:SetHeight(24)
 
-    GUI:StyleButton(btn, { height = 24, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Layout"] })
+    GUI:StyleButton(btn, { height = 24, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 }, text = L["Add Layout"] })
 
     btn:SetScript("OnClick", function()
         if contentType.key == "mythic" then
@@ -1179,12 +1179,12 @@ function AutoProfilesUI:ValidateDialog()
 
     -- Update validation display
     if isValid then
-        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
         dialog.validationIcon:SetVertexColor(0.3, 0.85, 0.3)
         dialog.validationMsg:SetText(L["Valid range"])
         dialog.validationMsg:SetTextColor(0.3, 0.85, 0.3)
     elseif errorMsg then
-        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
         dialog.validationIcon:SetVertexColor(0.85, 0.3, 0.3)
         dialog.validationMsg:SetText(errorMsg)
         dialog.validationMsg:SetTextColor(0.85, 0.3, 0.3)
@@ -1232,7 +1232,7 @@ function AutoProfilesUI:SubmitDialog()
         -- Re-evaluate which profile should be active after range change
         self:EvaluateAndApply()
     else
-        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
         dialog.validationIcon:SetVertexColor(0.85, 0.3, 0.3)
         dialog.validationMsg:SetText(err or L["Unknown error"])
         dialog.validationMsg:SetTextColor(0.85, 0.3, 0.3)
@@ -1571,7 +1571,7 @@ function AutoProfilesUI:ValidateCopyDialog()
 
     -- Update validation display
     if isValid then
-        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
         dialog.validationIcon:SetVertexColor(0.3, 0.85, 0.3)
         if destKey == "mythic" and DF.db.raidAutoProfiles.mythic.profile then
             dialog.validationMsg:SetText(L["Will replace existing Mythic layout"])
@@ -1581,7 +1581,7 @@ function AutoProfilesUI:ValidateCopyDialog()
             dialog.validationMsg:SetTextColor(0.3, 0.85, 0.3)
         end
     elseif errorMsg then
-        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+        dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
         dialog.validationIcon:SetVertexColor(0.85, 0.3, 0.3)
         dialog.validationMsg:SetText(errorMsg)
         dialog.validationMsg:SetTextColor(0.85, 0.3, 0.3)
@@ -1626,7 +1626,7 @@ function AutoProfilesUI:SubmitCopyDialog()
         local maxVal = dialog.currentMax or 40
         local success, err = self:CreateProfile(destKey, name, minVal, maxVal)
         if not success then
-            dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+            dialog.validationIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
             dialog.validationIcon:SetVertexColor(0.85, 0.3, 0.3)
             dialog.validationMsg:SetText(err or L["Unknown error"])
             dialog.validationMsg:SetTextColor(0.85, 0.3, 0.3)
@@ -1672,7 +1672,7 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     local icon = banner:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("LEFT", 12, 0)
     icon:SetSize(20, 20)
-    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit_square")
+    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit_square.png")
     icon:SetVertexColor(1, 0.5, 0.2)
     
     -- "Editing:" label
@@ -1769,8 +1769,9 @@ function AutoProfilesUI:RefreshEditingUI()
         end
     end
     
-    -- Disable Party button and Binds button when editing (must stay in Raid mode)
-    local buttonsToDisable = {GUI.PartyButton, GUI.ClicksButton}
+    -- Disable the Global, Party and Binds buttons when editing (must stay in Raid
+    -- mode; GLOBAL's pages are nothing a layout can change)
+    local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton, GUI.ClicksButton}
     for _, btn in ipairs(buttonsToDisable) do
         if btn then
             if self:IsEditing() then
@@ -1881,16 +1882,15 @@ function AutoProfilesUI:SetupEditingBanner()
 
     -- =============================================
     -- OVERRIDE MARKERS ON NAV TABS / CATEGORIES
-    -- A small dot (shared GUI:CreateOverrideMarker — same size, colour and
-    -- hover tooltip as every other override marker) on tabs/categories that
-    -- carry an override. Clicks fall through to the tab (the marker propagates).
+    -- A small dot (shared GUI:CreateOverrideMarker, in the auto-layout colour --
+    -- see GUI:ShowLayoutOverrideMarker) on tabs/categories that carry an
+    -- override. Clicks fall through to the tab (the marker propagates).
     -- =============================================
     for tabName, tab in pairs(GUI.Tabs) do
         if not tab.overrideStar then
             local m = GUI:CreateOverrideMarker(tab, 8)
             m:SetPoint("LEFT", 12, 0)
-            m.tooltipText = L["Override active"]
-            m.tooltipSubText = L["This page has an overridden setting."]
+            m.tooltipSubText = L["This page has settings the layout changes."]
             tab.overrideStar = m
         end
     end
@@ -1900,8 +1900,7 @@ function AutoProfilesUI:SetupEditingBanner()
         if not cat.overrideStar then
             local m = GUI:CreateOverrideMarker(cat, 8)
             m:SetPoint("RIGHT", -6, 0)
-            m.tooltipText = L["Override active"]
-            m.tooltipSubText = L["A page in this category has an overridden setting."]
+            m.tooltipSubText = L["A page in this category has settings the layout changes."]
             cat.overrideStar = m
         end
     end
@@ -1975,8 +1974,8 @@ function AutoProfilesUI:HideSidebarHint()
     end
 end
 
--- Refresh orange star indicators on sidebar tabs/categories
--- Shows stars on tabs that contain overridden settings
+-- Refresh the override markers on sidebar tabs/categories (the raid accent):
+-- shown on tabs that contain overridden settings
 function AutoProfilesUI:RefreshTabOverrideStars()
     local GUI = DF.GUI
     if not GUI or not GUI.Tabs then return end
@@ -2000,14 +1999,14 @@ function AutoProfilesUI:RefreshTabOverrideStars()
         end
     end
 
+    -- The title says which layout: the one being edited, or the one running.
+    local title = self:IsEditing() and L["Set by this auto layout"] or L["Set by the active auto layout"]
+
     -- Update tab stars
     for tabName, tab in pairs(GUI.Tabs) do
         if tab.overrideStar then
-            if tabsWithOverrides[tabName] then
-                tab.overrideStar:Show()
-            else
-                tab.overrideStar:Hide()
-            end
+            tab.overrideStar.tooltipText = title
+            GUI:ShowLayoutOverrideMarker(tab.overrideStar, tabsWithOverrides[tabName])
         end
     end
 
@@ -2015,6 +2014,7 @@ function AutoProfilesUI:RefreshTabOverrideStars()
     if GUI.Categories then
         for catName, cat in pairs(GUI.Categories) do
             if cat.overrideStar then
+                cat.overrideStar.tooltipText = title
                 local hasOverride = false
                 if cat.children then
                     for _, childBtn in ipairs(cat.children) do
@@ -2024,11 +2024,7 @@ function AutoProfilesUI:RefreshTabOverrideStars()
                         end
                     end
                 end
-                if hasOverride then
-                    cat.overrideStar:Show()
-                else
-                    cat.overrideStar:Hide()
-                end
+                GUI:ShowLayoutOverrideMarker(cat.overrideStar, hasOverride)
             end
         end
     end

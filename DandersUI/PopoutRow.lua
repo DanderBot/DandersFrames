@@ -100,9 +100,6 @@ local PLATE_H = M.plate
 --     (row._padX) ALWAYS, tick or not -- they are the box's contents, and a
 --     tick on the title line is no reason to push them in.
 --
--- ControlRow.lua still computes the old expression at its own LABEL_X; that is
--- a different widget (a single setting on a plate) and was not part of this.
-
 -- The hoist half's metrics, all from the same table for the reason above it.
 -- LINE_H is the whole CELL and the two tiers inside it are NAME_H above
 -- CONTROL_H -- the name is over the control, not beside it, so a cell's control
@@ -1194,7 +1191,7 @@ function UI:CreatePopoutRow(parent, opts)
     local chevron = plate:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(M.chevron, M.chevron)
     chevron:SetPoint("RIGHT", plate, "RIGHT", -PAD_X, 0)
-    chevron:SetTexture(ICON_PATH .. "chevron_right")
+    chevron:SetTexture(ICON_PATH .. "chevron_right.png")
     chevron:SetVertexColor(1, 1, 1, 0.5)
     row.chevron = chevron
 
@@ -1236,7 +1233,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- text columns would read as part of the label or the summary.
     local modTick = badgePill:CreateTexture(nil, "OVERLAY")
     modTick:SetSize(M.modTick, M.modTick)
-    modTick:SetTexture(ICON_PATH .. "dot")
+    modTick:SetTexture(ICON_PATH .. "dot.png")
     modTick:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
     modTick:SetPoint("CENTER", badgePill, "TOPRIGHT", 0, 0)
     modTick:Hide()
@@ -1251,7 +1248,7 @@ function UI:CreatePopoutRow(parent, opts)
     local gear = plate:CreateTexture(nil, "OVERLAY")
     gear:SetSize(M.gear, M.gear)
     gear:SetPoint("RIGHT", badgePill, "LEFT", -M.colGap, 0)
-    gear:SetTexture(ICON_PATH .. "settings")
+    gear:SetTexture(ICON_PATH .. "settings.png")
     gear:SetVertexColor(1, 1, 1, 0.6)
     row.gear = gear
 
@@ -1295,9 +1292,8 @@ function UI:CreatePopoutRow(parent, opts)
     -- and a page needs both -- test_frame_page_builders.lua fails now if any
     -- popout row on any page is missing this one.
     --
-    -- The opt-in itself stays, because GUI/PopoutDemo.lua still exercises the
-    -- no-strip tether (a rounded source RING instead of this band), and so may
-    -- any other host embedding the kit.
+    -- The opt-in itself stays: a host embedding the kit may still want the
+    -- no-strip tether (a rounded source RING instead of this band).
     --
     -- WHAT THE STRIP IS FOR. Every setting went behind a row in the popout sweep,
     -- so every setting is invisible until a panel opens; the answer is to put a
@@ -2331,8 +2327,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- ⚠ THE SELF GOES IN. The kit's own factories alias their private
         -- repaints onto `refreshValue` and at least one of them USES its self
         -- (the anchor grid's is `function(self) self:Refresh() end`), so a bare
-        -- call would error on the day this row hoists one -- the same fallback
-        -- chain ControlRow.lua spells out at its own RefreshValue.
+        -- call would error on the day this row hoists one.
         for _, h in ipairs(hoists or {}) do
             local w = h.control
             if w then
@@ -2509,8 +2504,7 @@ function UI:CreatePopoutRow(parent, opts)
                 -- ⚠ dbRef OR get/set, NEVER BOTH -- Widgets.lua's slider and
                 -- dropdown fire interceptWrite / onSettingWritten themselves
                 -- whenever a dbKey is present, so passing both runs the host's
-                -- setting hooks twice for one edit. ControlRow.lua states the
-                -- same rule at its own binding.
+                -- setting hooks twice for one edit.
                 local dbRef = (type(h.db) == "table" and type(h.key) == "string")
                               and { db = h.db, key = h.key } or nil
 
@@ -2578,7 +2572,7 @@ function UI:CreatePopoutRow(parent, opts)
                         noTooltipHit = (hitBox == nil),
                     })
                     -- The factory has no `inline`, so its caption is hidden
-                    -- after the fact -- ControlRow's move, for its reason.
+                    -- after the fact.
                     if c.label then c.label:Hide() end
                     -- ☠ CENTRED BY THE BAR, NOT BY THE CONTAINER, and centred on
                     -- the CONTROL TIER rather than on the cell. See

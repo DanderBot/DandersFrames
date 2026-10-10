@@ -216,7 +216,7 @@ local function RefreshOverrideTabMap()
     {"offline",             "display_fading",       L["Fading"]},
     {"pet",                 "display_pets",         L["Pet Frames"]},
     -- General (specific before generic)
-    {"fontShadow",          "general_fonts",        L["Global Fonts"]},
+    {"fontShadow",          "general_fonts",        L["Fonts"]},
     {"groupLabel",          "general_labels",       L["Group Labels"]},
     {"raidTestFrameCount",  "general_frame",        L["Frame"]},
     {"raidUseGroups",       "general_frame",        L["Frame"]},

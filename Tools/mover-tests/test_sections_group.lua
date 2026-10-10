@@ -713,7 +713,7 @@ end
 -- Both objects are top-level page children added "both", so the page layout
 -- gives them the same x and the same width -- which is what makes this a fair
 -- comparison at one width here. A control row's plate spans its whole slot
--- (ControlRow.lua anchors it TOPLEFT/TOPRIGHT at 0), so the ROW WIDGET's own
+-- (anchored TOPLEFT/TOPRIGHT at 0), so the ROW WIDGET's own
 -- edges are the row plate's edges.
 --
 -- ☠ THIS IS THE ACCEPTANCE CONDITION. Revert either half of the inset in

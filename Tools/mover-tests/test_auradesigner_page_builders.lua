@@ -118,7 +118,7 @@ local function typeBranch(key, nextKey)
     check(a ~= nil, "source: BuildTypeContent has a branch for " .. key)
     if not a then return "" end
     local b = nextKey and IND:find('elseif typeKey == "' .. nextKey .. '" then', a, true)
-                       or IND:find("-- 12.1 AURA-SYSTEM STATUS OVERLAYS", a, true)
+                       or IND:find("-- What the effect settings above deliberately do NOT offer", a, true)
     check(b ~= nil and b > a, "source: ...and it closes before " .. tostring(nextKey))
     return IND:sub(a, b or a)
 end
@@ -712,19 +712,11 @@ do
     for _ in EDIT:gmatch("%.disableOn = function%(%) return not sel%.") do dis = dis + 1 end
     eq(dis, 3, "binding: the three gated debuff controls carry a disableOn, not just a build-time grey")
 
-    -- ☠ TWO HALVES OF ONE NUMBER. sortOrder is OPTIONAL on a group record, so the
-    -- dropdown reads it through a customGet with a family fallback -- and the row's
-    -- modified tick measures the same key against the record view's default. If
-    -- those two disagree the control displays one answer and the tick reports the
-    -- other, with nothing on screen to say which is right. The families genuinely
-    -- differ: a filter group's pre-Wave-2 behaviour was Blizzard slot order, a
-    -- debuff group's was soonest-to-expire.
+    -- sortOrder is OPTIONAL on a group record, so the dropdown reads it through a
+    -- customGet with a family fallback. The families genuinely differ: a filter
+    -- group's behaviour was Blizzard slot order, a debuff group's soonest-to-expire.
     check(EDIT:find('local famSort = (kind == "debuff") and "TIME" or "DEFAULT"', 1, true) ~= nil,
           "binding: the sort dropdown's family fallback names both families")
-    check(GROUPS:find('sortOrder = "TIME", sortMineFirst = false, sortReverse = false,', 1, true) ~= nil,
-          "binding: ...and the debuff record's default is the same TIME")
-    check(GROUPS:find('sortOrder = "DEFAULT", sortMineFirst = false, sortReverse = false,', 1, true) ~= nil,
-          "binding: ...and the filter record's is the same DEFAULT")
 end
 
 -- ============================================================
@@ -832,58 +824,33 @@ do
 end
 
 -- ============================================================
--- 8f. EVERY PHASE-3 ROW ANSWERS THROUGH A RECORD THAT CARRIES AN ADAPTER
--- Phase 0 gave the defaults engine an adapter hook so a designer record can
--- answer "is this modified" for itself. It only ever sees one if the ROW hands it
--- a table that has one -- and until this phase the Global tab's proxy, the group
--- style proxy and the group records had none, so every row on these two tabs
--- would have had a permanently dark tick and a Reset Group that wrote nothing.
--- Silently, with no error either way.
+-- 8f. THE GLOBAL TAB'S AND A GROUP'S STYLE PROXIES CARRY THE DEFAULTS ADAPTER
+-- The defaults engine only answers "is this modified" for a designer record that
+-- carries an adapter, so these two proxies' controls would otherwise have a
+-- permanently dark modified tick -- silently, with no error either way.
 -- ============================================================
-print("-- Aura Designer: the phase-3 records carry the defaults adapter")
+print("-- Aura Designer: the Global and group-style proxies carry the defaults adapter")
 do
-    for _, name in ipairs({ "CreateGlobalDefaultsProxy", "CreateSoundSettingsProxy" }) do
-        check(CARDS:find("local function " .. name .. "()", 1, true) ~= nil,
-              "record: " .. name .. " exists")
-        check(CARDS:find("P." .. name .. " = " .. name, 1, true) ~= nil,
-              "record: ...and is published")
-    end
-    check(GROUPS:find("local function CreateRecordView(target, defaults)", 1, true) ~= nil,
-          "record: the group records get a VIEW, not an adapter of their own")
-    -- ☠ AND IT HAS TO BE A VIEW. A layout group IS SavedVariables and goes through
-    -- LibSerialize on profile export, which cannot carry a function -- the same
-    -- wall the Text Designer's elements hit in phase 0.
-    check(GROUPS:find("__dfDefaultsAdapter = adapter,", 1, true) ~= nil,
-          "record: ...whose view carries the hook")
-    for _, name in ipairs({ "GroupRecordView", "DebuffGroupRecordView", "DebuffSelectionView" }) do
-        check(GROUPS:find("P." .. name .. " = " .. name, 1, true) ~= nil,
-              "record: " .. name .. " is published")
-    end
+    check(CARDS:find("local function CreateGlobalDefaultsProxy()", 1, true) ~= nil,
+          "record: CreateGlobalDefaultsProxy exists")
+    check(CARDS:find("P.CreateGlobalDefaultsProxy = CreateGlobalDefaultsProxy", 1, true) ~= nil,
+          "record: ...and is published")
 
-    -- ☠ GetStored IS A rawget EVERYWHERE. Through any of these proxies __index
-    -- answers with the fallback for an unset key, so an adapter reading back
-    -- through its own proxy would find every key set and light the whole tab up.
+    -- ☠ GetStored IS A rawget. Through these proxies __index answers with the
+    -- fallback for an unset key, so an adapter reading back through its own proxy
+    -- would find every key set and light the whole tab up.
     local rawgets = 0
     for _ in CARDS:gmatch("GetStored%s*=%s*function") do rawgets = rawgets + 1 end
-    eq(rawgets, 3, "record: the card file mints three adapters")
+    eq(rawgets, 2, "record: the card file mints two adapters")
     check(CARDS:find("return rawget(t, k)", 1, true) ~= nil,
           "record: the Global tab's GetStored reads the stored block RAW")
-    check(CARDS:find("return rawget(adDB, k)", 1, true) ~= nil,
-          "record: ...the sound block's too")
     check(CARDS:find("GetStored  = function(k) return rawget(s, k) end", 1, true) ~= nil,
           "record: ...and the group style's, which is the one with copy-on-read")
-    check(GROUPS:find("GetStored  = function(k) return rawget(target, k) end", 1, true) ~= nil,
-          "record: ...and the group record view's")
 
-    -- ⚠ AND THE FRAME LEVEL FINALLY HAS A DEFAULT. The General block has bound a
-    -- slider to indicatorFrameLevel since it was wired, with no entry in the
-    -- fallback table -- so the diff engine read "no default" as "not a setting
-    -- here" and the row's tick could not have answered for it.
+    -- The General block binds a slider to indicatorFrameLevel, so the fallback
+    -- table has to name its default or the tick cannot answer for it.
     check(CARDS:find("indicatorFrameLevel = 40,", 1, true) ~= nil,
           "record: the Global tab's frame-level default is named -- and it is 40, the render's no-op")
-
-
-
 end
 
 -- ============================================================
@@ -1036,160 +1003,6 @@ do
 end
 
 -- ============================================================
--- 11a. THE FOLDER TAB -- A TAB THAT BELONGS TO THE PANEL UNDER IT
--- ------------------------------------------------------------
--- Two languages, deliberately different: an UNDERLINE tab switches which view of
--- a page you are looking at; a FOLDER tab sits on a panel and says what that
--- panel is showing. The pool and the sub-tabs can then stand on one page without
--- reading as one block. It lives in the kit because nothing about it is an aura.
--- ============================================================
-print("-- DandersUI: the folder tab")
-do
-    local W = ui_file_source("Widgets.lua")
-    check(W:find("function UI:StyleFolderTab(btn, opts)", 1, true) ~= nil,
-          "folder: the folder tab is a kit factory")
-    local body = W:match("function UI:StyleFolderTab%(btn, opts%)(.-)\n    btn:SetActive%(btn%.dfActive%)")
-    check(body ~= nil, "folder: ...whose body can be read")
-    body = body or ""
-    -- ☠ IT KNOWS NOTHING ABOUT A DESIGNER. A kit factory that named one would
-    -- have to be forked for the second caller. ⚠ Scoped to the FOLDER TAB'S OWN
-    -- BODY, not the file: Widgets.lua already cites an AuraDesigner page in an
-    -- unrelated comment, so a file-wide find answers "is this name anywhere" and
-    -- fails on a factory that is perfectly host-agnostic.
-    check(body:find("AuraDesigner", 1, true) == nil,
-          "folder: the factory names no consumer")
-    check(body:find("DandersFrames", 1, true) == nil,
-          "folder: ...and no host either")
-
-    -- ☠ THE SELECTED TAB HAS NO RING, AND THAT IS THE WHOLE OF "JOINED". The
-    -- baked `top` shape rounds the two upper corners but still strokes all four
-    -- sides, so a ring on the selected tab draws a line along exactly the edge
-    -- that is supposed to have disappeared into the panel.
-    -- ⚠ SCOPED TO paint()'S OWN BODY. The hover arm repaints through the same
-    -- three lines, so a body-wide find answers "is this anywhere in the factory"
-    -- and stays green with the RESTING paint gutted -- which is the state a tab
-    -- spends almost all of its life in.
-    local paint = body:match("local function paint%(self%)(.-)\n    end")
-    check(paint ~= nil, "folder: the resting paint can be read on its own")
-    paint = paint or ""
-    check(paint:find("border  = (not on) and edge or false", 1, true) ~= nil,
-          "folder: the selected tab drops its ring, so it joins the panel below")
-    check(paint:find("corners = { tl = true, tr = true }", 1, true) ~= nil,
-          "folder: ...and rounds only its top corners, which is the baked shape")
-    -- ☠ ApplyRoundedChrome, NOT CreateRoundedSurface: a rounded fill sits at a
-    -- negative BACKGROUND sublevel, UNDER a backdrop's bgFile, so a frame that
-    -- keeps its square backdrop renders the square in front of a surface that is
-    -- drawing perfectly. Both paints, because either one leaving it out is a tab
-    -- that goes square the moment the mouse crosses it.
-    check(paint:find("host:ApplyRoundedChrome(self, {", 1, true) ~= nil,
-          "folder: the square backdrop comes down through the one call that does it")
-    check(select(2, body:gsub("host:ApplyRoundedChrome", "")) == 2,
-          "folder: ...on the hover repaint too, not only at rest")
-    -- The selected fill is the PANEL's, so it composites to what the band below
-    -- composites to rather than to something close to it.
-    check(body:find("local activeFill   = opts.activeFill   or { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 }", 1, true) ~= nil,
-          "folder: the selected tab wears the panel's own fill")
-    -- Set back: shorter and bottom-anchored, so its top edge sits below the
-    -- selected one's -- the sheets-behind-the-front-one read.
-    check(body:find([[self:SetPoint("TOPLEFT", p, "TOPLEFT", x, self.dfActive and 0 or -setBack)]], 1, true) ~= nil,
-          "folder: an unselected tab is set back by its own top edge")
-    check(body:find([[self:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 0)]], 1, true) ~= nil,
-          "folder: ...while the selected one reaches the band's bottom edge")
-
-    -- ⚠ NO HIGHLIGHT TEXTURE. The native HIGHLIGHT layer is a rectangle and
-    -- would paint square corners back over the two arcs on every mouseover.
-    check(body:find("HIGHLIGHT", 1, true) == nil,
-          "folder: hover follows the shape rather than a square highlight layer")
-    -- SetActive is the same verb StyleButton's tabs take, so a strip can be
-    -- swapped between the two languages without rewiring.
-    check(body:find("function btn:SetActive(active)", 1, true) ~= nil,
-          "folder: it is driven by SetActive, like every other tab in the kit")
-    -- OnLeave does not fire for a button hidden under the cursor, and a tab strip
-    -- is rebuilt under a stationary mouse on every page refresh.
-    check(body:find([[btn:HookScript("OnHide", leave)]], 1, true) ~= nil,
-          "folder: a tab hidden under the cursor does not come back stuck lit")
-
-    -- ============================================================
-    -- THE THREE FILLS, AND WHY THE SELECTED ONE NEEDS THE ACCENT
-    -- ------------------------------------------------------------
-    -- "The three tabs at the top kinda blend in to the background now." The
-    -- diagnosis that came with it -- that the unselected tabs are drawn DARKER
-    -- than the panel -- is the opposite of what the palette actually says, and
-    -- these numbers are read out of Theme.lua so nobody has to take that on
-    -- trust or re-derive it by eye.
-    -- ============================================================
-    local TH = ui_file_source("Theme.lua")
-    local function themeGrey(name)
-        return tonumber(TH:match("local " .. name .. "%s*=%s*{r = ([%d%.]+)"))
-    end
-    local bg, panel, element = themeGrey("C_BACKGROUND"), themeGrey("C_PANEL"), themeGrey("C_ELEMENT")
-    check(bg and panel and element, "folder: the three theme greys can be read out of Theme.lua")
-    bg, panel, element = bg or 0, panel or 0, element or 0
-    -- C_ELEMENT is LIGHTER than C_PANEL. That single fact is what makes "set the
-    -- unselected tab back by darkening it" impossible here: the tab already sits
-    -- above the panel, and putting it below would put it under the page ground.
-    check(element > panel, "folder: the element grey is LIGHTER than the panel grey...")
-    check(panel > bg, "folder: ...and the panel grey lighter than the page background")
-    -- The ground the strip stands on: a consumer's content panel, C_PANEL at 0.3
-    -- over C_BACKGROUND at 0.95.
-    local ground     = 0.3 * panel + 0.7 * (0.95 * bg)
-    local selected   = 0.8 * panel + 0.2 * ground
-    local unselected = 0.85 * element + 0.15 * ground
-    check(ground < selected, "folder: the selected tab composites above the page ground")
-    check(selected < unselected, "folder: ...and the unselected one above the selected/panel")
-    -- THE WINDOW BETWEEN THE GROUND AND THE PANEL IS 0.025 WIDE, which is the
-    -- whole argument for marking the selected tab with an accent instead of with
-    -- a third fill. If the palette ever opens that gap up, this fails and the
-    -- design decision is worth taking again.
-    check(selected - ground < 0.03,
-          "folder: there is no legible third step between the ground and the panel")
-
-    -- The accent, on the selected tab only, on the edge FURTHEST from the join.
-    check(body:find([[accentBar = btn:CreateTexture(nil, "ARTWORK")]], 1, true) ~= nil,
-          "folder: the selected tab carries an accent bar")
-    check(body:find([[accentBar:SetPoint("TOPLEFT", btn, "TOPLEFT", radius, 0)]], 1, true) ~= nil,
-          "folder: ...on its TOP edge, which is the one the join does not use")
-    -- INSET BY THE RADIUS. Run corner to corner it would put two square ends back
-    -- over the two arcs -- the same trap that keeps a native hover layer off this
-    -- factory.
-    check(body:find([[accentBar:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -radius, 0)]], 1, true) ~= nil,
-          "folder: ...inset by the radius, so it never reaches the two arcs")
-    -- SCOPED TO paint()'S OWN BODY, not the factory's. `accentBar` is declared,
-    -- anchored and coloured elsewhere in the same body, so a body-wide find
-    -- answers "is this name anywhere" and stays green with the show/hide gutted --
-    -- which would leave the bar painted on all three tabs at once.
-    check(paint:find("accentBar:SetShown(on)", 1, true) ~= nil,
-          "folder: ...and the resting paint is what turns it on and off")
-
-    -- The accent is per host and changes on a mode switch, so the bar follows it
-    -- rather than freezing on whatever was live when the strip was built.
-    check(body:find("host:RegisterAccentListener(btn._folderAccentListener, btn)", 1, true) ~= nil,
-          "folder: the bar follows the host accent...")
-    -- OWNED BY THE BUTTON, AND REGISTERED ONCE. A bare closure is something
-    -- nothing can take back off the list, and a tab strip is rebuilt on every page
-    -- refresh; the guard also stops a re-style of the same button stacking a
-    -- second entry on it.
-    check(body:find("if not opts.accent and not btn._folderAccentListener then", 1, true) ~= nil,
-          "folder: ...registered once, and owned by the button so it can be dropped")
-
-    -- THE UNSELECTED EDGE IS DERIVED FROM THE FILL IT SITS ON. A ring composites
-    -- over its OWN fill: C_BORDER at 0.5 reads as a 0.068 step off the panel and
-    -- only 0.042 off this tab's lighter one, so the outline that says "sheet
-    -- behind the front one" was most of the way to gone.
-    check(body:find("local EDGE_ALPHA   = 0.8", 1, true) ~= nil,
-          "folder: the unselected tab's edge alpha is raised to match the panel's")
-    check(body:find("local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, EDGE_ALPHA }", 1, true) ~= nil,
-          "folder: ...and the edge is built from it")
-    check(body:find("C_BORDER.b, 0.5 }", 1, true) == nil,
-          "folder: ...not from the 0.5 that was too low for this fill")
-    -- The derivation itself, so the number cannot drift back without the reason
-    -- going with it: C_BORDER at EDGE_ALPHA over the unselected fill must land a
-    -- panel's-worth of step (0.068) above that fill.
-    local border = themeGrey("C_BORDER") or 0
-    check(math.abs((0.8 * border + 0.2 * unselected) - (unselected + 0.068)) < 0.01,
-          "folder: 0.8 is the alpha that puts the tab's edge a panel's-step off its fill")
-end
--- ============================================================
 -- 11b. THE ACTIVE INDICATORS FILTER CHIPS
 -- ------------------------------------------------------------
 -- A wrapping row of eight chips under the ACTIVE INDICATORS caption. (The rows
@@ -1226,13 +1039,11 @@ do
           "showing: ...and hands back its re-flow verb")
 end
 -- ============================================================
--- 12. THE WIDE-PAGE FLOOR IS GONE -- THE ACCEPTANCE TEST FOR THE WHOLE REWORK
--- Both designers were 50/50 split panels that forced a 640-wide window to 850 and
--- would not let it back down. That floor is what the conversion was FOR, so its
--- removal is the one assertion that says the rework achieved its purpose rather
--- than merely rearranging itself.
+-- 12. THE FULL-WIDTH PAGES OPEN WIDE
+-- The designers fit 640 but are drawn full width, and at 640 they read as a
+-- sliver of a tool; every full-width page shares the 850 floor.
 -- ============================================================
-print("-- Aura Designer: the wide-page floor is gone")
+print("-- Aura Designer: the full-width pages open wide")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
     -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
@@ -1240,19 +1051,12 @@ do
     -- "is this string anywhere" and never "is this page still a wide page".
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
-    check(WIDE:find("auras_auradesigner", 1, true) == nil,
-          "wide: the Aura Designer no longer forces the window to 850")
-    check(WIDE:find("text_designer", 1, true) == nil,
-          "wide: ...and neither does the Text Designer")
-    -- ☠ INVERTED DELIBERATELY, NOT DELETED. This assertion pinned the Filter
-    -- Designer's floor while it was still a two-column island; it has since been
-    -- converted, so the same line now says the opposite and the aura family owns no
-    -- entry in this table at all. Deleting it would have left the page's floor
-    -- unpinned in either direction. Its own census is in
-    -- test_filterdesigner_page_builders.lua.
-    check(WIDE:find("auras_filterdesigner", 1, true) == nil,
-          "wide: ...and neither does the Filter Designer, the last aura page here")
-    -- ⚠ The ones that are still islands must NOT have been swept out with them.
+    check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
+          "wide: the Aura Designer widens the window to 850")
+    check(WIDE:find("text_designer", 1, true) ~= nil,
+          "wide: ...as does the Text Designer")
+    check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,
+          "wide: ...and the Filter Designer")
     check(WIDE:find("general_pinnedframes", 1, true) ~= nil,
           "wide: ...as does Pinned Frames")
     check(WIDE:find("general_nicknames", 1, true) ~= nil,
@@ -1262,8 +1066,8 @@ end
 -- ============================================================
 -- 13. THE NARROW WINDOW -- WHAT 850px WAS HIDING
 -- ------------------------------------------------------------
--- Section 12 removed the floor, so this page now renders in the 640px default
--- window it always claimed it could: a band of roughly 410px, and as little as
+-- Without section 12's floor this page renders in the 640px default window: a
+-- band of roughly 410px, and as little as
 -- ~280 at the window's own minimum. Everything on this page was written when 850
 -- was guaranteed, and two whole classes of layout bug were invisible at that
 -- width.
@@ -1329,21 +1133,9 @@ do
     check(HEAD:find([[obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT"]], 1, true) ~= nil,
           "narrow: what follows the chips is anchored TO them, so a re-wrap carries it")
 
-    -- ---- class one: the choice cards ------------------------------------
-    -- A card's description WRAPS inside a fixed 58px card. Two lines at 850,
-    -- three in a 640px window -- out through the bottom and into the card below.
-    check(SW:find("if opts.width and opts.width > 40 then group:SetWidth(opts.width) end", 1, true) ~= nil,
-          "narrow: a choice-card block takes an explicit width when its caller knows one")
-    check(SW:find("cardH = math.max(cardH, 12 + (title:GetStringHeight() or 0) + 3", 1, true) ~= nil,
-          "narrow: ...and a card grows to the height its wrapped description took")
-    check(SW:find("card.layoutHeight = cardH", 1, true) ~= nil,
-          "narrow: ...reporting THAT height, not the constant, to whatever stacks it")
-    check(SW:find("card.layoutHeight = CHOICE_CARD_H", 1, true) == nil,
-          "narrow: ...and the constant is no longer what a caller advances by")
-    -- ☠ NO CHOICE-CARD BLOCK IS LEFT IN EITHER DESIGNER HEAD AREA (2026-09-22):
-    -- the split panel's add blocks became one button each, opening the Modern
-    -- panes in a popout. The width rule above still holds for the kit's cards;
-    -- the head areas simply no longer build any.
+    -- ---- the choice cards are gone ---------------------------------------
+    -- The split panel's add blocks are one button each, opening the Modern panes in
+    -- a popout; the choice-card factory itself was deleted with its last caller.
     check(HEAD:find("CreateChoiceCard", 1, true) == nil,
           "narrow: the Effects head area builds no choice cards any more")
     check(EDIT:find("GUI:CreateChoiceCardGroup(parent", 1, true) == nil,

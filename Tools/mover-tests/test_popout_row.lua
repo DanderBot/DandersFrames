@@ -2624,8 +2624,7 @@ do
                            window = win, footerStrip = true })
     row:SetHoistedControls(twoSliders(db, seen))
 
-    -- A 401 plate is the shipped default window's (DandersUI/ControlRow.lua
-    -- carries the arithmetic). Two cells fit.
+    -- A 401 plate is the shipped default window's. Two cells fit.
     widen(row, 401)
     local lineW = 401 - LINE_X - M.padX
     local cellW = math.floor((lineW - CELL_GAP) / 2)
@@ -2677,7 +2676,7 @@ do
     eq(cellW - SLIDER_BOX - SLIDER_BOX_GAP, 127,
         "track: so a control in a PAIR gets 127px of live track, not 46")
     check(cellW - SLIDER_BOX - SLIDER_BOX_GAP >= 112,
-        "track: ...at least the 112 ControlRow.lua sized its own slider for")
+        "track: ...at least 112, roughly a pixel per step")
 
     -- THE SPLIT. Narrow the plate until two cells no longer fit and the pair
     -- becomes two ONE-cell lines -- the tracks get longer, not shorter.

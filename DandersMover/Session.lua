@@ -127,7 +127,16 @@ end
 
 function Sess:Lock()
     if not self.active then return end
-    if self.dirty then StaticPopup_Show("DANDERSMOVER_EXIT") else self:Finish("save") end
+    if not self.dirty then self:Finish("save") return end
+    NS.UI:ShowPopupAlert({
+        title   = L["Unsaved changes"],
+        message = L["You have unsaved mover changes."],
+        buttons = {
+            { label = L["Save"],    onClick = function() Sess:Finish("save") end },
+            { label = L["Cancel"] },
+            { label = L["Discard"], onClick = function() Sess:Finish("discard") end },
+        },
+    })
 end
 
 function Sess:Finish(mode)
@@ -227,14 +236,6 @@ function Sess:Select(id)
     Proxy:Highlight(id)
     panel("Refresh")
 end
-
-StaticPopupDialogs["DANDERSMOVER_EXIT"] = {
-    text = L["You have unsaved mover changes."],
-    button1 = L["Save"], button2 = L["Cancel"], button3 = L["Discard"],
-    OnAccept = function() Sess:Finish("save") end,
-    OnAlt = function() Sess:Finish("discard") end,
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
 
 -- ============================================================
 -- MUTATIONS (each = one undo step)
@@ -714,8 +715,10 @@ function Sess:EnableKeyboard(on)
             -- follows), then the session itself. Ending the whole session out
             -- from under an open gesture or a selected mover would be a
             -- surprise -- and with the overlay no longer taking clicks, this is
-            -- the only way to deselect.
-            if Sess.linking then Sess:CancelLink()
+            -- the only way to deselect. The exit prompt, when it is up, is the
+            -- innermost of all: Escape closes it as Cancel would.
+            if NS.UI:DismissPopup() then -- closed the prompt
+            elseif Sess.linking then Sess:CancelLink()
             elseif Sess.selected then Sess:Select(nil)
             else Sess:Lock() end
             handled = true

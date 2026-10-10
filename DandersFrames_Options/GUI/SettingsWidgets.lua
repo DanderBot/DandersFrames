@@ -17,6 +17,7 @@ local P = GUI._priv
 -- Aliases of objects the toolkit created; they add no state.
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+local C_NOTICE = GUI.Colors.notice
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local AddOverrideIndicators = P.AddOverrideIndicators
@@ -158,6 +159,8 @@ end
 function GUI:IsTabDisabledForCurrentMode(tabName)
     if not tabName then return false end
     if GUI.AlwaysAccessiblePages[tabName] then return false end
+    -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
+    if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
     if GUI.SelectedMode == "party" and DF.db and DF.db.partyEnabled == false then return true end
     if GUI.SelectedMode == "raid"  and DF.db and DF.db.raidEnabled  == false then return true end
     return false
@@ -182,18 +185,22 @@ function GUI:UpdateTabAvailability()
         end
     end
 
-    -- Refresh the sidebar so party-only tabs (e.g. Visibility) hide/show for
-    -- the current mode.
+    -- Refresh the sidebar for the tab now up: GLOBAL's pages or Party/Raid's,
+    -- and party-only ones (e.g. Visibility) hidden in raid.
     if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
 
-    -- If the active tab just became hidden (party-only while in raid), move to a
-    -- safe always-present tab so the user isn't left on a hidden/empty page.
-    if not GUI._redirectingTab and GUI.SelectedMode == "raid" and GUI.CurrentPageName then
+    -- If the page on screen is not in that sidebar any more (GLOBAL left for
+    -- Party or Raid, or a party-only page in raid), move to the page this tab
+    -- showed last, so the user is never left on a page they cannot see listed.
+    if not GUI._redirectingTab and GUI.CurrentPageName and GUI.IsTabInView and GUI.SelectTab then
         local cur = GUI.Tabs[GUI.CurrentPageName]
-        if cur and cur.partyOnly and GUI.SelectTab then
-            GUI._redirectingTab = true
-            GUI.SelectTab("general_settings")
-            GUI._redirectingTab = false
+        if cur and not GUI:IsTabInView(cur) then
+            local to = GUI:LastTabInView()
+            if to then
+                GUI._redirectingTab = true
+                GUI.SelectTab(to)
+                GUI._redirectingTab = false
+            end
         end
     end
 end
@@ -206,7 +213,10 @@ function GUI:RefreshPixelBorders()
     end
 end
 
-function GUI:CreateHeader(parent, text)
+-- opts.keepSearchSection: a heading INSIDE a card's body (AFK Icon > Timer
+-- Text) must not become the search section, or every control after it --
+-- the rest of the card -- would be indexed under it rather than the card.
+function GUI:CreateHeader(parent, text, opts)
     -- Use a frame container so we can position text at bottom (padding above)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(200, 25)
@@ -244,7 +254,7 @@ function GUI:CreateHeader(parent, text)
     container.GetText = function() return h:GetText() end
     
     -- SEARCH: Track current section
-    if DF.Search then
+    if DF.Search and not (opts and opts.keepSearchSection) then
         DF.Search:SetCurrentSection(text)
     end
 
@@ -351,7 +361,9 @@ GUI.SectionCard = {
     titleGap    = 8,    -- chevron -> title (with the kind icon: chevron -> icon)
     icon        = 16,   -- the kind icon's slot, reserved on EVERY card
     iconGlyph   = 14,   -- ...and the glyph centred in it
-    iconGap     = 8,    -- icon slot -> tick / title
+    iconGap     = 8,    -- icon slot -> tick
+    titleLead   = 12,   -- icon slot or tick -> title: room for the modified dot, the
+                        -- same gap a body checkbox leaves before its label
     -- ============================================================
     -- THE KIND ICON'S COLOUR -- the one switch.
     --   false  dim (C_TEXT_DIM): the icon reads as furniture beside the title
@@ -373,6 +385,11 @@ GUI.SectionCard = {
     -- has to stay >= 4.5:1 on the HOVERED header too, and 0.75 (the row
     -- plates' hover) takes it to ~4.4.
     hoverAlpha  = 0.6,
+    -- of C_HOVER, AT REST: the header is always its own strip, a step lighter
+    -- than the body, and hover lifts it one step more (panel 0.12 -> header
+    -- ~0.155 -> hovered ~0.18). Below hoverAlpha, so the hovered header stays
+    -- the brightest the summary's contrast was checked against.
+    headerAlpha = 0.35,
     cornersAll  = { tl = true, tr = true, bl = true, br = true },
     cornersTop  = { tl = true, tr = true },
 }
@@ -383,29 +400,146 @@ GUI.SectionCard = {
 -- A card names the KIND of section it is (opts.kind = "layout") and gets the
 -- glyph here between its chevron and its title. The kind is set by the caller
 -- per section -- ☠ NEVER derived from the title, which is localised. A kind not
--- in this table draws no icon. White 32px glyphs, tinted at runtime; the new
--- ones come from Tools/generate_header_icons.py.
+-- in this table draws no icon. White 64x64 PNG glyphs, tinted at runtime --
+-- named WITH ".png": an extensionless path resolves to .blp/.tga only.
 --
--- ⚠ filter_header, NOT filter_alt: the old filter_alt.tga is drawn smaller and
+-- ⚠ filter_header, NOT filter_alt: the old filter_alt is drawn smaller and
 -- fainter than its siblings and is used elsewhere, so the headers get a copy
 -- refitted to the same ink box as the rest.
 do
     local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
     GUI.SectionCard.kinds = {
-        appearance = ICONS .. "palette",
-        layout     = ICONS .. "grid_view",
-        size       = ICONS .. "open_in_full",
-        position   = ICONS .. "open_with",
-        visibility = ICONS .. "visibility",
-        text       = ICONS .. "text_fields",
-        colours    = ICONS .. "format_color_fill",
-        filters    = ICONS .. "filter_header",
-        tooltips   = ICONS .. "chat_info",
-        effects    = ICONS .. "auto_awesome",
-        border     = ICONS .. "border_style",
-        order      = ICONS .. "swap_vert",
-        timer      = ICONS .. "timer",
+        appearance = ICONS .. "palette.png",
+        layout     = ICONS .. "grid_view.png",
+        size       = ICONS .. "open_in_full.png",
+        position   = ICONS .. "open_with.png",
+        visibility = ICONS .. "visibility.png",
+        text       = ICONS .. "text_fields.png",
+        colours    = ICONS .. "format_color_fill.png",
+        filters    = ICONS .. "filter_header.png",
+        tooltips   = ICONS .. "chat_info.png",
+        effects    = ICONS .. "auto_awesome.png",
+        border     = ICONS .. "border_style.png",
+        order      = ICONS .. "swap_vert.png",
+        timer      = ICONS .. "timer.png",
+        settings   = ICONS .. "tune.png",
+        language   = ICONS .. "language.png",
+        notifications = ICONS .. "notifications.png",
+        colorpicker = ICONS .. "colorize.png",
+        shield     = ICONS .. "shield.png",
+        important  = ICONS .. "priority_high.png",
+        minimap    = ICONS .. "map.png",
+        framemodes = ICONS .. "dashboard.png",
+        rendering  = ICONS .. "display_settings.png",
+        autopopulate = ICONS .. "group_add.png",
+        health     = ICONS .. "favorite.png",
+        missinghealth = ICONS .. "heart_minus.png",
+        healabsorb = ICONS .. "shield_with_heart.png",
+        alpha      = ICONS .. "transition_fade.png",
+        range      = ICONS .. "social_distance.png",
+        interrupt  = ICONS .. "flash_off.png",
+        -- The plain outline skull: a slashed or badged one blurs to a blob at
+        -- card size.
+        dead       = ICONS .. "skull.png",
     }
+end
+
+-- ============================================================
+-- THE CARD'S MODIFIED MARK: something in this card is not what it would
+-- otherwise be. Same dot, same place as a control's (the title's top-left), so
+-- a shut card says what its controls would: the raid accent when any control
+-- in it is an auto-layout override, amber when only defaults are changed.
+--
+-- The count asks every control in the body its own UpdateModifiedDot, the
+-- predicate its dot uses, so the two cannot disagree -- and a shut card
+-- whose controls have never been shown still answers. Found by walking the
+-- body's frames, because a body row can hold more than one control.
+--
+-- A changed tick shows its own dot here instead (it carries the tooltip and
+-- hold-to-reset for the tick), so the mark stands down. The mark has no
+-- hold: one press resetting a whole card is too easy to do by accident.
+--
+-- Queued, at most one count per frame: every control's dot update asks for
+-- one, and a page refresh updates them all.
+-- ============================================================
+function GUI:AttachCardModifiedMark(section, clickArea)
+    local DOT = GUI.ModifiedDotTopLeft
+    local mark = section:CreateTexture(nil, "OVERLAY")
+    mark:SetSize(DOT.size, DOT.size)
+    mark:SetTexture(GUI.MEDIA .. "Icons\\dot.png")
+    mark:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    mark:SetPoint("CENTER", section.title, "TOPLEFT", DOT.x, DOT.y)
+    mark:Hide()
+    section.modifiedMark = mark
+
+    local changedCount, overrideCount, runtimeCount = 0, 0, 0
+    -- Motion only: a click on it still folds the card.
+    local markHit = CreateFrame("Frame", nil, section)
+    markHit:SetSize(DOT.hit, DOT.hit)
+    markHit:SetPoint("CENTER", mark, "CENTER", 0, 0)
+    markHit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+    markHit:EnableMouse(true)
+    markHit:SetMouseClickEnabled(false)
+    markHit:SetScript("OnEnter", function(self)
+        -- One line per kind, in the words each control's own dot uses.
+        local lines = {}
+        local defaultCount = changedCount - overrideCount - runtimeCount
+        if defaultCount > 0 then lines[#lines + 1] = format(L["%d changed from default"], defaultCount) end
+        if overrideCount > 0 then lines[#lines + 1] = format(L["%d set by this auto layout"], overrideCount) end
+        if runtimeCount > 0 then lines[#lines + 1] = format(L["%d set by the active auto layout"], runtimeCount) end
+        GUI:ShowTooltip(self, { title = L["Changed in this section"], lines = lines })
+    end)
+    markHit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    markHit:Hide()
+    section.modifiedMarkHit = markHit
+
+    local walking, queued = false, false
+    local scan
+    local function each(...)
+        for i = 1, select("#", ...) do scan((select(i, ...))) end
+    end
+    scan = function(frame)
+        if rawget(frame, "UpdateModifiedDot") then
+            local on, kind = frame:UpdateModifiedDot()
+            if on then
+                changedCount = changedCount + 1
+                if kind == "overridden" then
+                    overrideCount = overrideCount + 1
+                elseif kind == "runtime" then
+                    runtimeCount = runtimeCount + 1
+                end
+            end
+            return
+        end
+        each(frame:GetChildren())
+    end
+    section.RefreshModifiedMark = function(self)
+        walking = true
+        changedCount, overrideCount, runtimeCount = 0, 0, 0
+        for _, child in ipairs(self.sectionChildren) do scan(child) end
+        local tick = rawget(self, "headerToggle")
+        local tickChanged = tick and rawget(tick, "UpdateModifiedDot") and tick:UpdateModifiedDot() or false
+        walking = false
+        local show = changedCount > 0 and not tickChanged
+        if show then
+            local c = (overrideCount + runtimeCount > 0) and GUI:Call("accentFor", true) or C_NOTICE
+            mark:SetVertexColor(c.r, c.g, c.b)
+        end
+        mark:SetShown(show)
+        markHit:SetShown(show)
+    end
+    -- Ignored while counting: the count's own UpdateModifiedDot calls ask too.
+    section.QueueModifiedMark = function(self)
+        if walking or queued then return end
+        queued = true
+        C_Timer.After(0, function()
+            queued = false
+            self:RefreshModifiedMark()
+        end)
+    end
+    -- The body is built after this returns; the first count waits a frame.
+    section:QueueModifiedMark()
+    section:HookScript("OnShow", function(self) self:QueueModifiedMark() end)
 end
 
 function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
@@ -464,16 +598,17 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
             anchorTo    = cardRect,
         })
-        -- The header's hover wash: over the card's fill, UNDER its ring (the
-        -- title-strip sublevel), over the header's rect only. Top corners round
-        -- while the body shows, all four while the card is the header alone.
+        -- The header strip: over the card's fill, UNDER its ring (the
+        -- title-strip sublevel), over the header's rect only. Always drawn, at
+        -- headerAlpha so the header reads apart from the body, and at hoverAlpha
+        -- under the mouse (SetCardHover). Top corners round while the body
+        -- shows, all four while the card is the header alone.
         cardHover = GUI:CreateRoundedSurface(section, {
             radius   = CARD.radius,
             border   = false,
-            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
             sublevel = GUI.RoundStripSublevel,
         })
-        cardHover:Hide()
         -- The seam between header and body. BORDER sits above the whole of
         -- BACKGROUND, so it is inset by the ring's weight rather than drawn
         -- over it.
@@ -482,6 +617,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         cardLine:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", -bw, 0)
         cardLine:SetHeight(1)
         cardLine:Hide()
+    end
+
+    local cardHovered = false
+    local function SetCardHover(on)
+        if not cardHover then return end
+        cardHovered = on and true or false
+        cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            cardHovered and CARD.hoverAlpha or CARD.headerAlpha)
     end
 
     -- Click area
@@ -494,9 +637,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)
     section.arrow:SetSize(CARD and CARD.chevron or 12, CARD and CARD.chevron or 12)
     if section.expanded then
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     else
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
     end
     section.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
@@ -520,6 +663,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- painted with the chevron's (title.UpdateTheme, below).
     if CARD then
         local iconX = TICK_X
+        section._dfIconSlotX = iconX
         TICK_X = iconX + CARD.icon + CARD.iconGap
         local tex = opts.kind and CARD.kinds and CARD.kinds[opts.kind]
         if tex then
@@ -532,10 +676,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     end
 
     -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
-    -- A ticked header's title moves right by the tick and one more gap; an
-    -- unticked one reserves nothing.
+    -- ⚠ A CARD RESERVES THE TICK'S SLOT TOO, ticked or not, for the icon slot's
+    -- reason: titles line up down a page whether or not a card has a switch. The
+    -- modified dot sits in titleLead before the title either way. A plain section
+    -- reserves nothing for an unticked header.
     local TITLE_X = TICK_X
-    if toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleGap or 8) end
+    if CARD or toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleLead or 8) end
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)
@@ -583,7 +729,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             end
             cardSurface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
             cardSurface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
-            cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+            SetCardHover(cardHovered)
             cardLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
         end
         section.title.UpdateTheme()
@@ -604,6 +750,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             self.tag:SetText("")
             self.tag:Hide()
         end
+        if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
     end
 
     -- ============================================================
@@ -717,7 +864,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         local pinBtn = GUI:CreateGlyphButton(section, {
             -- The pin lives in the KIT's media, not DandersFrames' own: the old
             -- Media\Icons\pin path does not exist and drew nothing.
-            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin",
+            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin.png",
             size    = PIN_SIZE,
             iconSize = CARD and CARD.pinIcon or nil,
             tooltip = { title = L["Pin settings in popout"] },
@@ -868,6 +1015,7 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             if self._dfSummaryText ~= text then
                 self._dfSummaryText = text
                 fs:SetText(text)
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
             end
             -- ⚠ NOT ON A CARD. 0.5 grey on the card's C_PANEL is ~4.2:1, under
             -- the 4.5 floor for small text; the title and chevron already say
@@ -902,14 +1050,33 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             local w = self:GetWidth() or 0
             local free = w - TITLE_X - self.headerRightInset
             if free < 40 then return end
-            -- 55/45: the title is the identity and wins the larger share, but the
-            -- tag ("+2 triggers", "3 indicators") has to stay readable rather than
-            -- be squeezed to nothing by a long name.
+            -- The title takes the room the tag and the summary leave, sized from
+            -- what they show NOW: an open card shows no summary, so its title
+            -- gets the whole header. When all three fit, the title's box runs
+            -- to the tag, so the tag and the summary stay packed against the
+            -- right end. When they do not, the title keeps its own width up to
+            -- 55% -- it is the identity, so they truncate first -- but never
+            -- claims more than its words need: a short title left the summary
+            -- truncating beside an empty gap.
+            local function shown(fs)
+                local t = fs and fs:GetText()
+                if not t or t == "" then return 0 end
+                return (fs:GetUnboundedStringWidth() or 0) + 8
+            end
+            local tagW = shown(self.tag)
+            local sumW = (self.summary and self.pinBtn) and shown(self.summary) or 0
+            local titleNat = math.ceil(self.title:GetUnboundedStringWidth() or 0)
+            local avail = free - tagW - sumW
+            local titleW = avail
+            if avail < titleNat then
+                titleW = math.max(math.min(titleNat, math.floor(free * 0.55)), avail)
+            end
+            titleW = math.max(40, math.min(free, titleW))
             self.title:SetWordWrap(false)
             -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
             -- by default, so every bounded title drew centred in its box.
             self.title:SetJustifyH("LEFT")
-            self.title:SetWidth(math.max(40, math.floor(free * 0.55)))
+            self.title:SetWidth(titleW)
             self.tag:SetWordWrap(false)
             self.tag:SetJustifyH("LEFT")
             self.tag:ClearAllPoints()
@@ -917,13 +1084,27 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             if self.summary and self.pinBtn then
                 -- The value takes the right-hand share and the tag stops short of
                 -- it; see the no-left-anchor note where the summary is built.
-                self.summary:SetWidth(math.max(20, math.floor(free * 0.45) - 8))
+                self.summary:SetWidth(math.max(20, free - titleW - tagW - 8))
                 self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
             else
                 self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
             end
         end
         self:HookScript("OnSizeChanged", apply)
+        self._dfApplyHeaderWidths = apply
+        -- ⚠ RE-SPLIT ON ANY TEXT WRITE, a font change included: the split is
+        -- measured from the strings, and a Settings Font change re-sets every
+        -- string's text (DandersUI Fonts.lua's Nudge) without resizing the
+        -- header. Hooked once; the hook calls whichever apply is current.
+        if not self._dfWidthTextHooked then
+            self._dfWidthTextHooked = true
+            local function reapply()
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
+            end
+            for _, fs in ipairs({ self.title, self.tag, self.summary }) do
+                hooksecurefunc(fs, "SetText", reapply)
+            end
+        end
         apply()
         -- Order-independent: the swatches read this inset, so if they were placed
         -- first they are re-flowed now.
@@ -991,7 +1172,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
             table.insert(parent.ThemeListeners, box)
         end
         section.headerToggle = tick
+        -- The caption is hidden; the dot sits against the card title instead
+        -- (see GUI:PinModifiedDotTopLeft).
+        tick.dfDotTopLeftOf = section.title
+        if CARD then tick.dfCardSection = section end
+        if rawget(tick, "UpdateModifiedDot") then tick:UpdateModifiedDot() end
     end
+
+    if CARD then GUI:AttachCardModifiedMark(section, clickArea) end
 
     -- THE FOLD ITSELF, WITHOUT THE REPAINT -- the arrow and the SavedVariables
     -- slot, and nothing else.
@@ -1010,9 +1198,9 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         if self.expanded == want then return false end
         self.expanded = want
         if self.expanded then
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
         else
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         end
         -- Persist collapsed state to SavedVariables (only store true, remove when
         -- expanded). The caller's stable key wins over the title -- see the header.
@@ -1105,6 +1293,97 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         -- right end, and whichever is called second has to be able to correct the
         -- first.
         self._previewIconData = icons
+        -- ☠ ON A CARD THE PREVIEW IS THE HEADER'S ICON. The right end belongs to
+        -- the summary and the pin, so the swatch takes the icon slot instead,
+        -- which every card reserves -- titles still line up. ONE entry fits: the
+        -- first that is live, else the first; a hover on it shows them all.
+        -- Text entries have no room there; the card's summary already says when
+        -- an icon shows as text.
+        --
+        -- An entry may be LAYERED -- { layers = { {texture, color}, ... },
+        -- size = n } -- drawn bottom to top in one slot: the Important Debuffs
+        -- marker is a tinted disc with a tinted glyph over it. Greyed, each
+        -- tinted layer keeps its own brightness in grey, so the glyph still
+        -- reads on its disc.
+        if CARD then
+            local pick
+            for _, e in ipairs(icons or {}) do
+                local drawable = e.texture or e.layers
+                if drawable and not pick then pick = e end
+                if drawable and not e.desaturate then pick = e break end
+            end
+            local layers = pick and (pick.layers or { pick }) or {}
+            local pool = self.previewLayers or {}
+            self.previewLayers = pool
+            local dim = pick and pick.desaturate and true or false
+            for i, layer in ipairs(layers) do
+                local tex = pool[i]
+                if not tex then
+                    -- Ascending sublevel: layer 2 draws over layer 1.
+                    tex = self:CreateTexture(nil, "OVERLAY", nil, i)
+                    pool[i] = tex
+                end
+                local size = (pick.size or CARD.icon) - 2 * (pick.inset or 0)
+                tex:SetSize(size, size)
+                tex:ClearAllPoints()
+                tex:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                local co = layer.coords
+                DF:SetIconTextureOrAtlas(tex, layer.texture, co and co[1], co and co[2], co and co[3], co and co[4])
+                tex:SetDesaturated(dim)
+                -- After the texture call, which resets the vertex colour.
+                local c = layer.color
+                if c and dim then
+                    local grey = 0.3 * (c.r or 1) + 0.59 * (c.g or 1) + 0.11 * (c.b or 1)
+                    tex:SetVertexColor(grey, grey, grey, c.a or 1)
+                elseif c then
+                    tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                else
+                    tex:SetVertexColor(1, 1, 1, 1)
+                end
+                tex:Show()
+            end
+            for i = #layers + 1, #pool do pool[i]:Hide() end
+            self.previewSlot = pool[1]
+            if self.kindIcon then self.kindIcon:SetShown(not pick) end
+
+            -- More than the slot shows: a hover lists every one. Motion only, so
+            -- a click on the swatch still folds the card, and the header keeps
+            -- its hover wash while the pointer is on it.
+            -- Shown in the house tooltip EXACTLY as the header draws them: the same
+            -- slot (CARD.icon) and the same insets. Atlases carry different amounts
+            -- of padding and the client cannot measure it, so a magnified row exposed
+            -- every difference the header's size hides; at header size the row
+            -- matches the swatch the user already sees.
+            local TIP_ICON = CARD.icon
+            local all = {}
+            for _, e in ipairs(icons or {}) do
+                if e.texture then
+                    all[#all + 1] = { texture = e.texture, coords = e.coords, color = e.color,
+                                      desaturate = e.desaturate, inset = e.inset }
+                end
+            end
+            self._previewAll = all
+            local hit = self.previewHit
+            if #all > 1 and not hit then
+                hit = CreateFrame("Frame", nil, self)
+                hit:SetSize(CARD.icon + 4, CARD.icon + 4)
+                hit:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                hit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+                hit:EnableMouse(true)
+                hit:SetMouseClickEnabled(false)
+                hit:SetScript("OnEnter", function(h)
+                    SetCardHover(true)
+                    GUI:ShowTooltip(h, { title = self.sectionTitleText, icons = self._previewAll, iconSize = TIP_ICON })
+                end)
+                hit:SetScript("OnLeave", function()
+                    GUI:HideTooltip()
+                    if not clickArea:IsMouseOver() then SetCardHover(false) end
+                end)
+                self.previewHit = hit
+            end
+            if hit then hit:SetShown(#all > 1) end
+            return
+        end
         local n = icons and #icons or 0
         local SIZE, GAP, RIGHT_INSET = 18, 4, -10
         -- ⚠ THE SWATCHES SHARE THE RIGHT END WITH THE CALLER'S OWN FURNITURE. A
@@ -1178,13 +1457,18 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
         for i = n + 1, #pool do pool[i]:Hide() end
     end
 
-    -- Hover effects
-    clickArea:SetScript("OnEnter", function()
-        if cardHover then cardHover:Show() return end
+    -- Hover effects. A title cut short to fit ("Element-Specifi...") shows in
+    -- full in a tooltip; a title that fits shows none.
+    clickArea:SetScript("OnEnter", function(self)
+        if section.title:IsTruncated() then
+            GUI:ShowTooltip(self, { title = section.title:GetText() })
+        end
+        if cardHover then SetCardHover(true) return end
         section:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.8)
     end)
     clickArea:SetScript("OnLeave", function()
-        if cardHover then cardHover:Hide() return end
+        GUI:HideTooltip()
+        if cardHover then SetCardHover(false) return end
         section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
     end)
     clickArea:SetScript("OnClick", function()
@@ -1259,15 +1543,15 @@ function GUI:CreateCardChrome(card, header, opts)
         anchorTo    = rect,
     })
     -- Over the fill, UNDER the ring, over the header's rect only -- the section
-    -- card's own recipe (see CreateCollapsibleSection).
+    -- card's own recipe (see CreateCollapsibleSection): the header strip at
+    -- rest, brighter under the mouse.
     chrome.hover = GUI:CreateRoundedSurface(card, {
         radius   = CARD.radius,
         border   = false,
-        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha },
+        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
         sublevel = GUI.RoundStripSublevel,
         anchorTo = header,
     })
-    chrome.hover:Hide()
     chrome.line = card:CreateTexture(nil, "BORDER")
     chrome.line:SetPoint("TOPLEFT", header, "BOTTOMLEFT", bw, 0)
     chrome.line:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -bw, 0)
@@ -1300,7 +1584,8 @@ function GUI:CreateCardChrome(card, header, opts)
         self.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         self.surface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
         self.surface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
-        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.hoverAlpha)
+        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            self.hovered and CARD.hoverAlpha or CARD.headerAlpha)
         self.line:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
     end
 
@@ -1342,8 +1627,8 @@ function GUI:CreateCardChrome(card, header, opts)
     function chrome:SetExpanded(open, body)
         self.expanded = open and true or false
         self.chevron:SetTexture(self.expanded
-            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png"
+            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         local withBody = (self.expanded and body) and true or false
         rect:ClearAllPoints()
         rect:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
@@ -1356,8 +1641,8 @@ function GUI:CreateCardChrome(card, header, opts)
         self:Paint()
     end
 
-    header:HookScript("OnEnter", function() chrome.hover:Show() end)
-    header:HookScript("OnLeave", function() chrome.hover:Hide() end)
+    header:HookScript("OnEnter", function() chrome.hovered = true; chrome:Paint() end)
+    header:HookScript("OnLeave", function() chrome.hovered = false; chrome:Paint() end)
     header:HookScript("OnSizeChanged", function() chrome:FitSummary() end)
 
     chrome:LayoutText()
@@ -1371,7 +1656,7 @@ function GUI:CreateButton(parent, text, width, height, func, iconName)
     local opts = { width = width or 120, height = height or 22, text = text }
     -- Optional leading icon by Media\Icons name (14px to suit the small buttons).
     if iconName then
-        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName, size = 14 }
+        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png", size = 14 }
     end
     GUI:StyleButton(btn, opts)
     btn:SetScript("OnClick", function(self)
@@ -1475,7 +1760,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local arrow = ddBtn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -4, 0)
     arrow:SetSize(10, 10)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local menu = CreateFrame("Frame", nil, ddBtn, "BackdropTemplate")
@@ -1561,7 +1846,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
     shareIcon:SetSize(12, 12)
     shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
-    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync")
+    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync.png")
     shareIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     shareIcon:Hide()
 
@@ -1622,7 +1907,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             GUI:StyleButton(b, {
                 width = 22, height = 22,
                 icon = {
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
                     size = 14, color = C_TEXT,
                 },
             })
@@ -1699,7 +1984,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             -- bare character, so "Interface\AddOns\..." silently becomes
             -- "InterfaceAddOns..." -- a path to nothing, which the client draws as an
             -- empty square. It does not error, which is why it shipped.
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu.png",
             tooltip = { title = L["Templates"],
                         lines = { L["Create, duplicate, rename or delete a template."] } },
         })
@@ -1899,7 +2184,7 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
         text = text,
         align = align,
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
             size = iconSize or 18,
             color = C_TEXT,
         },
@@ -1938,10 +2223,10 @@ end
 --   size   rendered height AND width in pixels (default 12, the body text size)
 --   color  {r,g,b} 0-1, default the panel's body text colour
 --
--- Every icon in Media\Icons is a 32x32 tga, which is what the texel arguments
+-- Every icon in Media\Icons is a 64x64 png, which is what the texel arguments
 -- describe; a future icon at another size needs its own call, not a change here.
 local ICON_ESCAPE_PATH   = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-local ICON_ESCAPE_TEXELS = 32
+local ICON_ESCAPE_TEXELS = 64
 
 function GUI:InlineIcon(name, size, color)
     size = size or 12
@@ -1951,7 +2236,7 @@ function GUI:InlineIcon(name, size, color)
         if v < 0 then return 0 elseif v > 255 then return 255 end
         return v
     end
-    return format("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
+    return format("|T%s%s.png:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
         ICON_ESCAPE_PATH, name, size, size,
         ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
         ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
@@ -1986,372 +2271,6 @@ function GUI:CreateSeparator(parent, opts)
     tex:SetHeight(1)
     f.Texture = tex   -- exposed so a caller can re-tint without rebuilding
     return f
-end
-
--- ============================================================
--- CHOICE CARDS
--- ============================================================
--- A create action drawn as a small picture of what it produces, its name, and
--- one line saying where its contents come from.
---
--- A card REPLACES the compact "+ Add" button it stands in for rather than sitting
--- above it -- it is itself the create action, so running both would be two paths
--- to the same thing. Cards are pinned, not shown only while a list is empty; see
--- GUI:CreateChoiceCardGroup for the collapse that keeps a permanent block
--- affordable in a column this narrow.
---
--- The thumbnail is SYNTHETIC on purpose rather than a render of the player's own
--- config: an illustration that reads identically for everyone is what makes it
--- teachable, and it has to work before anything is configured. So it needs none
--- of the frame preview's rendering machinery.
---
---   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
---   opts.title    card heading (localised)
---   opts.desc     one short line -- roughly 24 characters before it wraps
---   opts.accent   border / hover tint, defaults to the mode theme
---   opts.onClick  fired on click
---
--- ⚠ CARD HEIGHT IS FIXED, so it has to clear the TALLEST card, not the average
--- one: the desc wraps and nothing re-measures it. 58 = 2 top + 13 title + 3 gap
--- + 3 wrapped desc lines at 10px. It was 54, which cleared the 8px text with
--- room to spare and would have clipped a third line at the larger size -- and a
--- clipped line is invisible until someone writes a longer desc or plays in a
--- language whose translation runs long. Raising the text is what pulled this
--- number up; if the text ever grows again, do this arithmetic again.
-local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 58, 62, 38
-
--- A unit frame in miniature. The name line and health bar are what make the
--- icons above them read as "on a frame" rather than as loose squares.
-local function BuildChoiceThumb(parent, art)
-    local thumb = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    thumb:SetSize(CHOICE_THUMB_W, CHOICE_THUMB_H)
-    CreateElementBackdrop(thumb, {
-        bgColor     = { 0.14, 0.14, 0.14, 1 },
-        borderColor = { 0.23, 0.23, 0.23, 1 },
-    })
-
-    local name = thumb:CreateTexture(nil, "ARTWORK")
-    name:SetColorTexture(0.43, 0.43, 0.43, 1)
-    name:SetPoint("TOPLEFT", 4, -4)
-    name:SetSize(20, 3)
-
-    local hpBg = thumb:CreateTexture(nil, "ARTWORK")
-    hpBg:SetColorTexture(0.17, 0.17, 0.17, 1)
-    hpBg:SetPoint("BOTTOMLEFT", 4, 4)
-    hpBg:SetPoint("BOTTOMRIGHT", -4, 4)
-    hpBg:SetHeight(8)
-
-    local hp = thumb:CreateTexture(nil, "OVERLAY")
-    hp:SetColorTexture(0.25, 0.48, 0.29, 1)
-    hp:SetPoint("TOPLEFT", hpBg, "TOPLEFT")
-    hp:SetPoint("BOTTOMLEFT", hpBg, "BOTTOMLEFT")
-    hp:SetWidth(36)
-
-    local kind = art and art.kind
-    local c = (art and art.color) or { 0.45, 0.45, 0.95 }
-
-    if kind == "iconRow" then
-        local x = 4
-        for _, col in ipairs(art.colors or {}) do
-            local ico = thumb:CreateTexture(nil, "OVERLAY")
-            ico:SetColorTexture(col[1], col[2], col[3], 1)
-            ico:SetPoint("TOPLEFT", x, -11)
-            ico:SetSize(8, 8)
-            x = x + 10
-        end
-        -- One unfilled slot. A layout group's row grows and shrinks with what is
-        -- actually up, and an empty space says that faster than a sentence can.
-        if art.ghost then
-            local ghost = thumb:CreateTexture(nil, "OVERLAY")
-            ghost:SetColorTexture(1, 1, 1, 0.07)
-            ghost:SetPoint("TOPLEFT", x, -11)
-            ghost:SetSize(8, 8)
-        end
-
-    elseif kind == "icon" then
-        -- Sits ON the frame at a corner.
-        local box = thumb:CreateTexture(nil, "OVERLAY")
-        box:SetColorTexture(c[1], c[2], c[3], 1)
-        box:SetPoint("TOPLEFT", 5, -11)
-        box:SetSize(13, 13)
-
-    elseif kind == "border" then
-        -- Drawn as four edges rather than a backdrop swap: the thumb's own border
-        -- is the "no effect" state, and this has to read as sitting on top of it.
-        for _, e in ipairs({ {"TOPLEFT","TOPRIGHT",0,0,nil,2}, {"BOTTOMLEFT","BOTTOMRIGHT",0,0,nil,2},
-                             {"TOPLEFT","BOTTOMLEFT",0,0,2,nil}, {"TOPRIGHT","BOTTOMRIGHT",0,0,2,nil} }) do
-            local t = thumb:CreateTexture(nil, "OVERLAY")
-            t:SetColorTexture(c[1], c[2], c[3], 1)
-            t:SetPoint(e[1], e[3], e[4])
-            t:SetPoint(e[2], e[3], e[4])
-            if e[5] then t:SetWidth(e[5]) end
-            if e[6] then t:SetHeight(e[6]) end
-        end
-
-    end
-    -- ☠ (Removed) the "square", "bar", "healthbar", "background", "nametext" and
-    -- "healthtext" arms. Every art.kind in the codebase is a string LITERAL -- there
-    -- is no computed `kind =` anywhere -- and across the six call sites only three
-    -- values are ever passed: "iconRow" (3), "border" (2) and "icon" (1). The other
-    -- six could not be reached.
-    --
-    -- ⚠ `name` and `hp` above are still built for every thumb and are NOT dead: they
-    -- draw the little name line and health bar that make the thumbnail read as a unit
-    -- frame at all. Only the arms that RE-TINTED them are gone.
-
-    return thumb
-end
-
--- A titled, collapsible block of choice cards.
---
--- Collapse state persists through GUI:GetCollapsedGroups() -- the same
--- account-wide store the settings pages' collapsible sections use -- keyed by
--- opts.title. Give every block a DISTINCT title or two of them share one state.
--- (Keying by display text means the state resets if the player changes language.
--- That is pre-existing behaviour for every collapsible section in the panel.)
---
--- ⚠ Toggling does not relayout by itself. The host is expected to rebuild from
--- opts.onToggle -- which suits the Aura Designer, where every edit already
--- rebuilds the tab. Without onToggle the state is saved but nothing moves.
-local CHOICE_GROUP_HEADER_H, CHOICE_CARD_GAP = 22, 6
-
-function GUI:CreateChoiceCardGroup(parent, opts)
-    opts = opts or {}
-    local accent = opts.accent or GetThemeColor()
-    local key = opts.title
-    local saved = GUI:GetCollapsedGroups()
-    local expanded = not (key and saved[key])
-
-    local group = CreateFrame("Frame", nil, parent)
-
-    local header = CreateFrame("Button", nil, group)
-    header:SetHeight(CHOICE_GROUP_HEADER_H)
-    header:SetPoint("TOPLEFT")
-    header:SetPoint("TOPRIGHT")
-
-    local arrow = header:CreateTexture(nil, "OVERLAY")
-    arrow:SetPoint("LEFT", 0, 0)
-    arrow:SetSize(12, 12)
-    arrow:SetTexture(expanded
-        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local label = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(label, 9, "")
-    label:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
-    label:SetText(opts.title or "")
-    label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    header:SetScript("OnEnter", function()
-        label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    end)
-    header:SetScript("OnLeave", function()
-        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end)
-    header:SetScript("OnClick", function()
-        if key then
-            -- Store only the collapsed state, matching CreateCollapsibleSection:
-            -- an expanded block leaves no key behind at all.
-            GUI:GetCollapsedGroups()[key] = expanded or nil
-        end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if opts.onToggle then opts.onToggle() end
-    end)
-
-    -- ☠ THE BLOCK'S WIDTH, WHEN THE CALLER KNOWS IT. A card's description wraps,
-    -- and a wrapped description is only measurable once something has said how
-    -- wide the card is -- which its two anchors cannot answer before the layout
-    -- pass has run. The head areas that build these blocks DO know: they are
-    -- handed a host that was sized to the band a line earlier. Passed down, the
-    -- card can size its own description and grow to fit it; omitted, everything
-    -- behaves exactly as it did.
-    if opts.width and opts.width > 40 then group:SetWidth(opts.width) end
-
-    local h = CHOICE_GROUP_HEADER_H
-    if expanded then
-        local y = -h
-        for _, def in ipairs(opts.cards or {}) do
-            -- ⚠ This is a WHITELIST, not a pass-through: a field not named here never
-            -- reaches the card, and does so silently. `action` had to be added when
-            -- the filter cards grew a corner button.
-            local card = GUI:CreateChoiceCard(group, {
-                title = def.title, desc = def.desc, art = def.art,
-                accent = accent, onClick = def.onClick, action = def.action,
-                width = opts.width,
-            })
-            card:SetPoint("TOPLEFT", 0, y)
-            card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
-            y = y - (card.layoutHeight + CHOICE_CARD_GAP)
-            h = h + card.layoutHeight + CHOICE_CARD_GAP
-        end
-    end
-
-    group:SetHeight(h)
-    group.layoutHeight = h
-    group.expanded = expanded
-    return group
-end
-
-function GUI:CreateChoiceCard(parent, opts)
-    opts = opts or {}
-    local accent = opts.accent or GetThemeColor()
-    local idleBorder = { accent.r * 0.45, accent.g * 0.45, accent.b * 0.45, 0.8 }
-
-    local card = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    card:SetHeight(CHOICE_CARD_H)
-    -- See CreateChoiceCardGroup's note: an explicit width from the caller is what
-    -- makes the description below measurable at build time.
-    local knownW = (opts.width and opts.width > 40) and opts.width or nil
-    if knownW then card:SetWidth(knownW) end
-    CreateElementBackdrop(card, {
-        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
-        borderColor = idleBorder,
-    })
-
-    local thumb = BuildChoiceThumb(card, opts.art)
-    thumb:SetPoint("LEFT", 8, 0)
-
-    -- 11px, up from DFFontHighlightSmall's 10. Outline left nil so the user's
-    -- Settings Font Outline choice still wins -- that is what the font object this
-    -- replaces did, and passing "" would force the outline off for this string
-    -- alone. (The desc below passes "" deliberately: dim supporting text.)
-    -- The text stops short when this card carries a corner action, so a wrapped
-    -- description cannot run under the button.
-    local textRightPad = opts.action and 32 or 10
-
-    local title = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(title, 11)
-    title:SetPoint("TOPLEFT", thumb, "TOPRIGHT", 9, -2)
-    title:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
-    title:SetJustifyH("LEFT")
-    title:SetText(opts.title or "")
-    title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    -- 10px, up from 8. 8 was the smallest text anywhere in the settings UI and it
-    -- read as unfinished next to the card it explains (Krathe, 2026-08-10).
-    local desc = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 10, "")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
-    desc:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetWordWrap(true)
-    desc:SetText(opts.desc or "")
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    card:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-        self:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
-    end)
-    card:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        self:SetBackdropBorderColor(unpack(idleBorder))
-    end)
-    card:SetScript("OnClick", function(self)
-        if opts.onClick then opts.onClick(self) end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end)
-
-    -- opts.action = { icon, tooltip, onClick } -- an optional second action in the
-    -- card's bottom-right corner, for a card whose SUBJECT has somewhere else to be
-    -- managed. Only "From a Filter" / "Filter Group" pass one; the block header would
-    -- have been the cheaper place to put it, but a header spans every card in the
-    -- block and only one of them is about filters, so it would claim a scope it does
-    -- not have.
-    --
-    -- ☠ A BUTTON INSIDE A BUTTON. The card is itself the create action, over its
-    -- whole area, so this control has to be unmissable about which of the two you are
-    -- about to fire:
-    --
-    --   * The child takes the click. A moused-over child Button captures the input
-    --     and the card's OnClick does not run, so there is no double-fire -- the risk
-    --     is purely one of AIM, which is why this is a 20px target with real padding
-    --     and not a 12px glyph.
-    --   * The card's hover is SUPPRESSED while the cursor is on the child, and the
-    --     child lights instead. Without that the card stays lit saying "click here to
-    --     create", which is a promise it will not keep for this click. That swap is
-    --     the entire reason this is safe to nest.
-    --   * Miss it and you create an effect -- recoverable, but an object you did not
-    --     want, so the padding is not cosmetic.
-    if opts.action then
-        -- Sized to be FOUND, not to be tidy. At 20px with a 13px dim glyph this read
-        -- as decoration on the card rather than a control -- and a control nobody
-        -- sees is the same as one that is not there. It also has to hold its own
-        -- against a 62px thumbnail and two lines of text on the same card.
-        local ACT = 24
-        local actionBtn = CreateFrame("Button", nil, card)
-        actionBtn:SetSize(ACT, ACT)
-        actionBtn:SetPoint("BOTTOMRIGHT", -4, 4)
-        actionBtn:SetFrameLevel(card:GetFrameLevel() + 2)
-
-        local ai = actionBtn:CreateTexture(nil, "OVERLAY")
-        ai:SetSize(16, 16)
-        ai:SetPoint("CENTER")
-        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit"))
-        -- Full text colour at REST, accent on hover. Dim-at-rest is the idiom for a
-        -- glyph sitting beside a label that already names it; this one has no label.
-        ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        actionBtn:SetScript("OnEnter", function(self)
-            -- Card back to REST, child lit: one of the two is always the live target
-            -- and the highlight says which.
-            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            card:SetBackdropBorderColor(unpack(idleBorder))
-            ai:SetVertexColor(accent.r, accent.g, accent.b)
-            -- Same contract as CreateGlyphButton's: a full ShowTooltip spec, or a
-            -- bare string for a title-only tooltip. Prefer the spec -- this button
-            -- has no label, so a title alone would just name the glyph again.
-            local t = opts.action.tooltip
-            if type(t) == "table" then
-                GUI:ShowTooltip(self, t)
-            elseif type(t) == "string" and t ~= "" then
-                GUI:ShowTooltip(self, { title = t })
-            end
-        end)
-        actionBtn:SetScript("OnLeave", function()
-            ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            if opts.action.tooltip then GUI:HideTooltip() end
-            -- The cursor is still inside the CARD on the way out, and leaving a child
-            -- does not re-fire the parent's OnEnter -- so restore the hover by hand or
-            -- the card sits at rest under a cursor that is still on it.
-            if card:IsMouseOver() then
-                card:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-                card:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
-            end
-        end)
-        actionBtn:SetScript("OnClick", function(self)
-            if opts.action.onClick then opts.action.onClick(self) end
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        end)
-        card.ActionButton = actionBtn
-    end
-
-    -- ☠ AND THE CARD GROWS TO WHAT THE DESCRIPTION ACTUALLY TOOK. 58px held two
-    -- lines, which is all the description ever needed at the 850px width these
-    -- cards were written for. In a 640px window the text column is a little over
-    -- half that and the same sentence runs to three, out through the bottom of the
-    -- card and into the one below it.
-    --
-    -- ⚠ FLOORED AT CHOICE_CARD_H, deliberately. Without a known width the strings
-    -- cannot be measured before layout and GetStringHeight answers 0 -- so a
-    -- failed measurement lands on exactly the height this always used, and can
-    -- only ever make things better than they are.
-    local cardH = CHOICE_CARD_H
-    if knownW then
-        local textW = knownW - (8 + CHOICE_THUMB_W + 9) - textRightPad
-        if textW > 20 then
-            title:SetWidth(textW)
-            desc:SetWidth(textW)
-            -- 12 = the title's own top offset (the thumb is centred in the card and
-            -- the title starts 2px above its top); 3 = the gap the desc is anchored
-            -- at; 10 = the bottom breathing room, matching the top.
-            cardH = math.max(cardH, 12 + (title:GetStringHeight() or 0) + 3
-                                       + (desc:GetStringHeight() or 0) + 10)
-        end
-    end
-    card:SetHeight(cardH)
-    card.layoutHeight = cardH
-    return card
 end
 
 -- Creates a \"See Also:\" section with clickable links to related pages
@@ -2714,12 +2633,18 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- section header's tick -- see opts.toggle on CreateCollapsibleSection).
     container.checkButton = cb
 
-    -- Label
+    -- Label, 12px from the box: the modified dot sits in that gap.
     local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+    txt:SetPoint("LEFT", cb, "RIGHT", 12, 0)
     txt:SetText(label)
     txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     container.label = txt  -- exposed so callers can re-font / anchor a subtitle
+    -- The width this row needs to keep its caption on one line. The caption has
+    -- no right edge, so a track narrower than this runs it under whatever sits
+    -- beside it; a two-track card reads this to decide whether it can pair up.
+    container.NaturalWidth = function()
+        return cb:GetWidth() + 12 + txt:GetStringWidth()
+    end
 
     -- Determine the key to use for override indicators
     local effectiveOverrideKey = overrideKey or dbKey
@@ -2745,6 +2670,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             end
         end
         AddOverrideIndicators(GUI, container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, txt)
     end
     
     local function UpdateState()
@@ -2789,8 +2715,14 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         -- two keys differ, or a customSet puts the value somewhere else, the undo
         -- engine's "did it land plainly in db[key]" test fails and it records
         -- nothing -- which is right, because db[key] is then not the store.
-        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, val) then
-            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+        --
+        -- opts.storedValue maps the tick to what customSet stores under that key,
+        -- for a box whose key does not hold a boolean (Shadow). The bracket records
+        -- that value, or a layout override would store the bare tick.
+        local stored = val
+        if opts and opts.storedValue then stored = opts.storedValue(val) end
+        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, stored) then
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(stored) end
             return
         end
 
@@ -2800,11 +2732,11 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         -- edited (what the removed SetProfileSetting call did) and commits the
         -- undo entry -- carrying `callback`, this checkbox's own commit, so the
         -- undo replays the apply and not only the write.
-        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, val, label, callback)
+        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, stored, label, callback)
 
         -- Update override indicators
         if container.UpdateOverrideIndicators then
-            container:UpdateOverrideIndicators(val)
+            container:UpdateOverrideIndicators(stored)
         end
         
         -- ☠ (Removed) three "calling X" entry traces, one immediately above each call.
@@ -3003,7 +2935,7 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noi
         noisyIcon:SetFrameLevel(row:GetFrameLevel() + 2)
         local tex = noisyIcon:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints()
-        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
+        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png")
         -- The caution tone's ICON colour, read straight from the shared tone table
         -- so this stays in step with every banner and note that uses it.
         -- ☠ Read at CALL time, not through a file-scope alias. INFO_BANNER_TONES
@@ -3163,6 +3095,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
             end
         end
         AddOverrideIndicators(GUI, frame, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(frame, lbl)
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)
@@ -3316,8 +3249,8 @@ end
 --
 -- ⚠ IT EXISTS BECAUSE A CONTROL ROW HAS NO CONTAINER TO STAMP. SetFrameLevelTooltip below
 -- writes tooltipText / tooltipSubText onto the slider container, and a control row's
--- embedded slider hangs its tooltip on the caption the row HIDES (see DandersUI/ControlRow's
--- interaction block) -- so a row has to be handed the spec and show it off its own plate.
+-- embedded slider hangs its tooltip on the caption the row HIDES -- so a row has to be
+-- handed the spec and show it off its own plate.
 -- Two copies of the sentence would be exactly the drift this helper was written to stop, so
 -- there is one copy and both shapes read it.
 function GUI:FrameLevelTooltip()
@@ -3869,16 +3802,27 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
-    local options = {
+-- A fresh table each call: the dropdown takes ownership of the one it is handed.
+local function OutlineNames()
+    return {
         NONE = L["None"],
         OUTLINE = L["Outline"],
         THICKOUTLINE = L["Thick Outline"],
         MONOCHROME = L["Monochrome"],
         ["MONOCHROME, OUTLINE"] = L["Monochrome Outline"],
         ["MONOCHROME, THICKOUTLINE"] = L["Monochrome Thick Outline"],
-        _order = OUTLINE_FLAG_ORDER,
     }
+end
+
+-- The words the outline dropdown prints for a stored value, so a card summary
+-- names an outline exactly as the control does.
+function GUI:OutlineName(stored)
+    return OutlineNames()[DF:OutlineFlag(stored)]
+end
+
+function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
+    local options = OutlineNames()
+    options._order = OUTLINE_FLAG_ORDER
     local get = function() return DF:OutlineFlag(dbTable[dbKey] or (inheritKey and dbTable[inheritKey])) end
     local set = function(flag) dbTable[dbKey] = DF:ComposeOutline(flag, DF:OutlineHasShadow(dbTable[dbKey] or (inheritKey and dbTable[inheritKey]))) end
     return GUI:CreateDropdown(parent, label or L["Outline"], options, dbTable, dbKey, callback, get, set)
@@ -3895,8 +3839,10 @@ end
 function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inheritKey)
     local function effective() return dbTable[dbKey] or (inheritKey and dbTable[inheritKey]) end
     local get = function() return DF:OutlineHasShadow(effective()) end
-    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
-    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
+    local function compose(val) return DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
+    local set = function(val) dbTable[dbKey] = compose(val) end
+    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set, nil,
+        { storedValue = compose })
 end
 
 -- The border animations' display names, keyed by the saved type value -- the
@@ -4017,7 +3963,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -- overflows (text spills past the box) on narrow windows until a manual
         -- drag forces a relayout.
         local reflowingHost = parent and parent.dfAD_ReflowWidgets ~= nil
-        local perfBanner = GUI:CreateInfoBanner(parent, {
+        local perfBanner = GUI:CreateInfoBanner(parent, { dismissKey = "border_animation_perf",
             tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = reflowingHost or nil,

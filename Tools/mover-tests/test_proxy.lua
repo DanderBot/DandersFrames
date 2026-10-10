@@ -133,6 +133,7 @@ NS.UI = {
     -- test_mover_tooltips.lua can read what it was handed.
     ShowTooltip = function(_, owner, spec) NS.UI._lastTip = { owner = owner, spec = spec } end,
     HideTooltip = function() NS.UI._lastTip = nil end,
+    AddFontRoot = function() end,
     CreateLabel = function(_, _, opts)
         local f = stubFontString()
         if opts and opts.text then f:SetText(opts.text) end
@@ -779,12 +780,11 @@ do
     local wasReady = R.ready
     R.ready = true
     NS.db = { showHiddenMovers = true, keyboardNudge = true, addons = {} }
-    -- Two file-scope side effects a headless run has to stand in for: the
-    -- registry callback the session subscribes to, and the exit popup it
-    -- declares. The callback stub is put straight back so no later suite sees it.
+    -- The one file-scope side effect a headless run has to stand in for: the
+    -- registry callback the session subscribes to. The stub is put straight back
+    -- so no later suite sees it.
     local prevRegister = NS.Lib.RegisterCallback
     NS.Lib.RegisterCallback = prevRegister or function() end
-    StaticPopupDialogs = StaticPopupDialogs or {}
     load_addon_file("Session.lua")
     NS.Lib.RegisterCallback = prevRegister
     local Sess = NS.Session
@@ -804,8 +804,21 @@ do
     local onKey = uf:GetScript("OnKeyDown")
     check(onKey ~= nil, "esc: the session installs a key handler on the unlock frame")
 
-    -- (a) mid-gesture: the link is cancelled and nothing else happens.
+    -- (0) the exit prompt is up: Esc closes it and nothing else happens.
+    local prevDismiss = rawget(NS.UI, "DismissPopup")
+    local promptOpen = true
+    NS.UI.DismissPopup = function()
+        local was = promptOpen
+        promptOpen = false
+        return was
+    end
     Sess.selected = "E:one"
+    onKey(uf, "ESCAPE")
+    check(not promptOpen, "esc: an open exit prompt is closed first")
+    eq(Sess.selected, "E:one", "esc: ...and the selection survives it")
+    eq(locks, 0, "esc: ...and the session does not end")
+
+    -- (a) mid-gesture: the link is cancelled and nothing else happens.
     Sess.linking = { id = "E:one", mode = "primary" }
     onKey(uf, "ESCAPE")
     check(Sess.linking == nil, "esc: a live link gesture is cancelled first")
@@ -820,6 +833,7 @@ do
     -- (c) nothing left to back out of: NOW it locks.
     onKey(uf, "ESCAPE")
     eq(locks, 1, "esc: with nothing selected, Esc locks the session")
+    NS.UI.DismissPopup = prevDismiss
 
     Sess:EnableKeyboard(false)
     check(uf:GetScript("OnKeyDown") == nil, "esc: disabling the keyboard takes the handler off")
@@ -945,12 +959,12 @@ do
 end
 
 -- ============================================================
--- ALT-PEEK: PAYLOAD FIRST, THEN A POLL WHILE PEEKING
+-- ALT-PEEK: THE EVENTS DECIDE, THEN A POLL WHILE PEEKING
 -- The release can go missing (an alt-tab out on a held Alt; a burst of fast
--- presses), and the equality guard in SetPeek then swallowed the NEXT press too,
--- so the overlay sat faded until a press AND a release had both arrived. The
--- handler now reads the event's own payload for the direction, and while
--- peeking a ticker asks the client whether Alt is really still down.
+-- presses), and the client's own Alt state can lag a real release by a second
+-- or two. Each Alt is tracked from its own events, so a release restores
+-- whatever the client says; while peeking a ticker clears a peek whose release
+-- never arrived.
 -- ============================================================
 do
     local wasReady = R.ready
@@ -992,6 +1006,18 @@ do
     onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 0)
     check(P.peeking == false, "peek: the last release restores")
     check(tickers[#tickers].cancelled, "peek: ...and cancels that peek's poll")
+
+    -- Back from an alt-tab the client still reports Alt down. A tap's release
+    -- must restore anyway: the event is the truth, the client state is stale.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    tickers[#tickers].fn()
+    check(P.peeking == true, "peek: a stale 'down' from the client keeps the poll from clearing it...")
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 0)
+    check(P.peeking == false, "peek: ...but one tap's release restores, whatever the client says")
+    eq(uf._alpha, 1, "peek: ...at full alpha")
+    altDown = false
 
     -- Other keys are ignored outright.
     onEvent(uf, "MODIFIER_STATE_CHANGED", "LSHIFT", 1)

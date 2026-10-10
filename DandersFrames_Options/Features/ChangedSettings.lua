@@ -71,6 +71,75 @@ DF.ChangedSettings = ChangedSettings
 -- spelling.
 ChangedSettings.PAGE_ID = "profiles_changed"
 
+-- The GLOBAL tab's ledger: every setting on a Global-tab page, and the mode
+-- ledgers list every setting on the OTHER pages. Split by PAGE, not by store,
+-- because a ledger answers "what did I change on the pages in front of me":
+-- ☠ split by store, the Global ledger read only the account-wide table and said
+-- "Everything is at its defaults" over a Global Settings page showing a
+-- changed Blizzard toggle, which is stored in the party table.
+ChangedSettings.GLOBAL_PAGE_ID = "profiles_changed_global"
+
+-- The profile ROOT's shipped values (the panel font, the frame-mode switches):
+-- the scalars a new profile is created with. Built once -- the constructor deep
+-- copies both modes' defaults -- and they cannot change within a session.
+local rootDefaults
+local function RootDefaults()
+    if rootDefaults == nil then
+        rootDefaults = {}
+        local fresh = DF.NewProfileTable and DF:NewProfileTable()
+        for k, v in pairs(type(fresh) == "table" and fresh or {}) do
+            -- Scalars only, and not the one-time migration stamps.
+            if type(k) == "string" and type(v) ~= "table" and k:sub(1, 1) ~= "_" then
+                rootDefaults[k] = v
+            end
+        end
+    end
+    return rootDefaults
+end
+
+-- The Global tab's settings, each read where it is STORED, through DF.Defaults'
+-- adapter seam so the comparison is the engine's own. Global pages edit three
+-- stores, asked in this order: the account-wide one, the profile root, and the
+-- party table -- where the settings both modes share are read from.
+-- The account-wide read is RAW: GetGlobalDB seeds every missing key.
+local function GlobalTabStore()
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    local gdefs = DF.GlobalDefaults
+    local root = DF.db
+    local party = root and root.party
+    local pdefs = DF.PartyDefaults
+    local rdefs = RootDefaults()
+    local function Where(key)
+        if type(g) == "table" and type(gdefs) == "table" and gdefs[key] ~= nil then
+            return function() return rawget(g, key) end, gdefs[key]
+        end
+        if type(root) == "table" and rdefs[key] ~= nil then
+            return function() return root[key] end, rdefs[key]
+        end
+        if type(party) == "table" and type(pdefs) == "table" and pdefs[key] ~= nil then
+            return function() return party[key] end, pdefs[key]
+        end
+    end
+    return { __dfDefaultsAdapter = {
+        GetStored  = function(key) local read = Where(key); return read and read() end,
+        GetDefault = function(key) local _, def = Where(key); return def end,
+    } }
+end
+
+-- The registry entries one ledger covers: the Global tab's pages, or the rest.
+-- A host without IsGlobalPage (the headless tests' bare GUI) has no Global tab,
+-- so every entry is a mode entry.
+local function ScopeRegistry(registry, GUI, global)
+    local isGlobalPage = GUI and GUI.IsGlobalPage
+    if not isGlobalPage then return global and {} or registry end
+    local out = {}
+    for i = 1, #registry do
+        local e = registry[i]
+        if (isGlobalPage(e.tab) and true or false) == global then out[#out + 1] = e end
+    end
+    return out
+end
+
 -- ============================================================
 -- VALUE FORMATTING
 -- ============================================================
@@ -408,7 +477,8 @@ function ChangedSettings:PageOrder(GUI)
     return order
 end
 
--- The whole report for the mode currently selected in the settings window.
+-- The whole report for the mode currently selected in the settings window, or
+-- for the Global tab's pages when scope is "global".
 --
 -- Returns `nil, reason` when it cannot answer, and the page renders the reason
 -- as a one-line hint rather than as "nothing changed" -- an empty ledger and an
@@ -417,8 +487,9 @@ end
 --   "building" a budgeted build is under way; the page refreshes itself when it
 --              lands (see the waiter below)
 --   "unbuilt"  the panel cannot produce a registry at all yet
-function ChangedSettings:BuildReport(GUI)
+function ChangedSettings:BuildReport(GUI, scope)
     local Search = DF.Search
+    local pageId = (scope == "global") and ChangedSettings.GLOBAL_PAGE_ID or ChangedSettings.PAGE_ID
     if not Search then return nil, "unbuilt" end
 
     -- An index that can be put together from the pages' retained builds is,
@@ -453,8 +524,8 @@ function ChangedSettings:BuildReport(GUI)
         -- RefreshCurrentPage would rebuild the WRONG one.
         Search:EnsureRegistryAsync(function(ok)
             if not ok then return end
-            if not (GUI and GUI.CurrentPageName == ChangedSettings.PAGE_ID) then return end
-            local page = GUI.Pages and GUI.Pages[ChangedSettings.PAGE_ID]
+            if not (GUI and GUI.CurrentPageName == pageId) then return end
+            local page = GUI.Pages and GUI.Pages[pageId]
             -- Through the cache: the key it was drawn under ("!building") has
             -- moved, so this rebuilds -- without Refresh()'s invalidation of the
             -- page's other-mode build, which nothing here touched.
@@ -470,9 +541,15 @@ function ChangedSettings:BuildReport(GUI)
 
     local registry = Search.Registry
     if not registry or #registry == 0 then return nil, "unbuilt" end
+    registry = ScopeRegistry(registry, GUI, scope == "global")
 
-    local mode = (GUI and GUI.SelectedMode) or "party"
-    local db = DF.db and DF.db[mode]
+    local db
+    if scope == "global" then
+        db = GlobalTabStore()
+    else
+        local mode = (GUI and GUI.SelectedMode) or "party"
+        db = DF.db and DF.db[mode]
+    end
     if not db then return nil, "unbuilt" end
 
     -- ☠ DiffKeys, not a per-key IsModified plus a db read. It is the same
@@ -531,7 +608,7 @@ end
 -- on a page), and the key is the real report's. "!stale" is left only for an
 -- index that cannot be had without building a page.
 -- ============================================================
-function ChangedSettings:CacheKey(GUI)
+function ChangedSettings:CacheKey(GUI, scope)
     local Search = DF.Search
     if not Search then return "!unbuilt" end
     if Search.RegistryBuilding then return "!building" end
@@ -539,7 +616,7 @@ function ChangedSettings:CacheKey(GUI)
     if Search:RegistryIsStale() then
         return InCombatLockdown() and "!combat" or "!stale"
     end
-    return ChangedSettings.Signature(self:BuildReport(GUI))
+    return ChangedSettings.Signature(self:BuildReport(GUI, scope))
 end
 
 -- Read by BuildPage's DoBuild / RefreshCached (GUI/Panel.lua), keyed by page id
@@ -550,5 +627,8 @@ if DF.GUI then
     DF.GUI.PageCacheKeys = DF.GUI.PageCacheKeys or {}
     DF.GUI.PageCacheKeys[ChangedSettings.PAGE_ID] = function()
         return ChangedSettings:CacheKey(DF.GUI)
+    end
+    DF.GUI.PageCacheKeys[ChangedSettings.GLOBAL_PAGE_ID] = function()
+        return ChangedSettings:CacheKey(DF.GUI, "global")
     end
 end

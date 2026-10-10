@@ -295,10 +295,17 @@ do
     has("GUI._pageDock:Hide()", "...and is hidden")
     has("page:SetParent(GUI._pageDock)", "ParkPage moves the page into the dock")
     has("page:SetParent(content)", "AdoptPage brings it back under the content frame")
+    -- Pinned in the dock at its last size, not left anchored to `content`: anchored,
+    -- every step of a resize-grip drag re-resolved every built page.
+    has('GUI._pageDock:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)', "the dock has a rect of its own")
+    has('page:SetPoint("TOPLEFT", GUI._pageDock, "TOPLEFT", 0, 0)', "ParkPage pins the page to the dock")
+    has("page:SetSize(w, h)", "...at a fixed size")
+    has("if resized then GUI.Pages[name]:RefreshStates() end",
+        "a page back at a new width gets the second layout pass")
 
-    -- ---- anchors survive the round trip -----------------------------
-    -- `content` is named EXPLICITLY in both CreateSubTab and AdoptPage: a parked
-    -- page has to keep measuring at full size, because search builds it there.
+    -- ---- anchors come back on adoption ------------------------------
+    -- `content` is named EXPLICITLY in both CreateSubTab and AdoptPage, and
+    -- AdoptPage re-asserts both corners: the pin in the dock replaced them.
     eq(countOf('page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)'), 2,
        "panel: the top-left anchor names content in both CreateSubTab and AdoptPage")
     -- The RIGHT offset is the scrollbar GUTTER, not the inset -- see THE CONTENT
@@ -473,39 +480,33 @@ do
     check(adoptAt and showAt and adoptAt < showAt,
           "panel: ...and adopts it BEFORE showing it, never while detached")
 
-    -- ---- THE PAGE CROSSFADE, and its four safety rails ---------------
-    -- Pages cross-fade on a tab switch: they occupy the identical rect, so both
-    -- can be visible for ~90ms with no layout to jump. That puts a page in a
-    -- state the parking work was built to prevent -- shown, parented, and NOT the
-    -- current one -- so every way out of it is pinned here.
+    -- ---- THE PAGE FADE -----------------------------------------------
+    -- The old page is hidden and parked at once like any other, and the new one
+    -- is shown under a cover in the empty panel's colours that fades away. No
+    -- page is ever animated: starting an alpha animation on a big page cost up to
+    -- ~200ms a switch, and the old page's fade-out alone ~80-95ms (GUI trace).
     --
-    -- 1. It only happens when there is something to cross-fade FROM: a visible
-    --    outgoing page, a different one arriving, and a window already on screen.
-    --    The first page of a window-open gets none of it.
-    has("local fading = frame:IsShown()", "the crossfade needs a window already on screen")
-    has("and leavingTab and leavingTab ~= name", "...a DIFFERENT page to arrive at")
-    has("if fading and not fading:IsShown() then fading = nil end",
-        "...and an outgoing page that is actually visible")
-    -- 2. The fading page is the ONE page the hide/park loop skips.
-    has("if page ~= fading then", "the loop leaves the fading page shown, and only that one")
-    -- 3. The fades start AFTER the incoming page is adopted, shown and rebuilt --
-    --    the expensive part of a tab switch -- so nothing stalls mid-animation and
-    --    no half-laid-out page is ever rendered.
+    -- 1. Only when there is something to fade FROM: a visible outgoing page, a
+    --    different one arriving, and a window already on screen.
+    has("local crossfade = frame:IsShown() and leavingTab ~= name", "the fade needs a window already on screen and a DIFFERENT page")
+    has("and leaving and leaving:IsShown() and true or false", "...and an outgoing page that is actually visible")
+    -- 2. No page is left shown by the hide/park loop, and none is faded.
+    check(src:find("if page ~= fading then", 1, true) == nil,
+          "panel: the hide/park loop leaves no page shown for a fade")
+    check(src:find("GUI.Fx.FadeIn(GUI.Pages[name]", 1, true) == nil
+      and src:find("GUI.Fx.FadeOut(fading", 1, true) == nil,
+          "panel: no page is faded -- only the cover")
+    -- 3. The cover starts AFTER the incoming page is adopted, shown and rebuilt.
     local buildAt = src:find("GUI.Pages[name]:RefreshCached()", 1, true)
-    local fadeAt  = src:find("GUI.Fx.FadeOut(fading, 0.09", 1, true)
-    local fadeInAt = src:find("GUI.Fx.FadeIn(GUI.Pages[name], 0.12)", 1, true)
-    check(buildAt and fadeAt and buildAt < fadeAt,
-          "panel: the crossfade starts after the incoming page is built, not before")
-    check(fadeInAt and fadeAt < fadeInAt, "panel: out and in are started together")
-    -- 4. Three ways the fade can be interrupted, and none of them may strand a
-    --    page: the deferred park asks again before firing, the window's close
-    --    finishes the job the stopped animation cannot, and PARKING ITSELF
-    --    cancels -- which is what makes "a parked page is at alpha 1" true for
-    --    every caller, search's index pass included.
-    has("if GUI.Pages[GUI.CurrentPageName] == fading then return end",
-        "the deferred park re-checks, so spamming two tabs cannot park the visible one")
-    has("if GUI.ParkPage and GUI._fadingPage then",
-        "closing the window inside a fade still parks the page that was leaving")
+    local coverAt = src:find("            PlayPageCover()", 1, true)
+    check(buildAt and coverAt and buildAt < coverAt,
+          "panel: the cover starts after the incoming page is built, not before")
+    -- 4. The cover takes no clicks, hides itself when its fade ends, and the
+    --    window's close hides it if that fade was cut short.
+    has("pageCover:EnableMouse(false)", "the cover takes no clicks")
+    has("GUI.Fx.FadeOut(pageCover, 0.12, function() pageCover:Hide() end)", "the cover hides itself when its fade ends")
+    has("if GUI._pageCover then GUI._pageCover:Hide() end", "closing the window inside a fade hides the cover")
+    has("if frame.GetBackdropColor then", "the cover asks the window's backdrop only when it has one (rounded chrome has none)")
     local parkAt = src:find("function GUI:ParkPage(page)", 1, true)
     local cancelAt = src:find("if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end", 1, true)
     check(parkAt and cancelAt and cancelAt > parkAt and cancelAt - parkAt < 400,
@@ -524,9 +525,9 @@ do
         "the underline follows the active mode, instant while the window is hidden")
     has("navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())",
         "...and the rail follows the selected page, by the same rule")
-    -- Three tabs, three opt-outs -- plus the one in the comment that explains it.
-    eq(countOf("tabStripe = false"), 4,
-       "panel: all three mode tabs decline StyleButton's own stripe")
+    -- Four tabs, four opt-outs -- plus the one in the comment that explains it.
+    eq(countOf("tabStripe = false"), 5,
+       "panel: all four mode tabs (Global, Party, Raid, Binds) decline StyleButton's own stripe")
     check(src:find("btn.accent", 1, true) == nil,
           "panel: and no nav row builds a left accent bar of its own any more")
 
@@ -602,7 +603,10 @@ do
         SetParent = function(self, f) self._parent = f; self._parents = self._parents + 1 end,
         GetParent = function(self) return self._parent end,
         ClearAllPoints = function(self) self._points = 0 end,
-        SetPoint = function(self) self._points = self._points + 1; self._anchors = self._anchors + 1 end,
+        SetPoint = function(self, _, rel) self._points = self._points + 1; self._anchors = self._anchors + 1; self._rel = rel end,
+        GetWidth = function() return 600 end,
+        GetHeight = function() return 400 end,
+        SetSize = function(self, w, h) self._size = { w, h } end,
     }
 
     local NS = { DF = DF }
@@ -619,6 +623,9 @@ do
     Search:_ParkResultsPanel()
     eq(panel:GetParent(), dock, "results: hiding parks the panel in the dock")
     eq(panel._parked, true,     "results: ...and marks it parked")
+    -- Pinned to the dock at its size, so a resize of the window does not re-resolve it.
+    eq(panel._rel, dock,        "results: ...pinned to the dock, not left anchored into the window")
+    eq(panel._size and panel._size[1], 600, "results: ...at the size it had")
 
     -- Idempotent: a second hide must not re-park or disturb anything. HideResults
     -- runs on every close, and ShowResults on every keystroke, so a park/adopt
@@ -639,8 +646,9 @@ do
     -- Adopting an unparked panel is free and must not re-anchor again. ⚠ Asserted
     -- on the CUMULATIVE count, not on _points -- ClearAllPoints + two SetPoints
     -- lands back on 2 and would hide a redundant round trip completely.
+    local anchorsAfterAdopt = panel._anchors
     Search:_AdoptResultsPanel()
-    eq(panel._anchors, 2,  "results: adopting twice re-anchors nothing")
+    eq(panel._anchors, anchorsAfterAdopt, "results: adopting twice re-anchors nothing")
     eq(panel._parents, parentsAfterPark + 1, "results: ...and never re-parents")
 
     -- ---- an older Panel.lua with no dock ---------------------------

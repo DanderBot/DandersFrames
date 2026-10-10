@@ -202,7 +202,20 @@ function UI:SetSettingsFont(fontString, size, outline)
 
     local getSetting = self:Hook("getFontSetting")
     local fontName, userOutline
-    if getSetting then fontName, userOutline = getSetting() end
+    if getSetting then
+        fontName, userOutline = getSetting()
+    else
+        -- ☠ A HOST WITH NO FONT SETTING FOLLOWS THE SHARED DFFont OBJECTS. They
+        -- are library state, re-skinned by whichever host does own a setting, and
+        -- every template-built label already follows them; a sized label has to
+        -- read them too, or it alone falls back to the client font while the
+        -- buttons beside it wear the user's.
+        local shared = UI.FontObjects.DFFontHighlightSmall
+        if shared then
+            local path, _, flags = shared:GetFont()
+            fontName, userOutline = path, flags
+        end
+    end
     userOutline = userOutline or ""
     if userOutline == "NONE" then userOutline = "" end
 
@@ -218,7 +231,9 @@ function UI:SetSettingsFont(fontString, size, outline)
         SafeSet(self, fontString, fontName, size, flagsToUse)
     else
         local resolve = self:Hook("resolveFontPath")
-        local fontPath = (fontName and resolve and resolve(fontName)) or DEFAULT_FONT_PATH
+        -- Without a resolver the name already IS a path (the shared object's).
+        local fontPath = (fontName and resolve and resolve(fontName))
+            or (not resolve and fontName) or DEFAULT_FONT_PATH
         pcall(fontString.SetFont, fontString, fontPath, size, flagsToUse)
     end
 
@@ -232,8 +247,72 @@ end
 -- Called by the settings font/outline dropdown callbacks.
 -- Re-applies the user's font to every registered FontString (the
 -- inline-SetFont widgets) and nudges every FontString across every
--- settings page so template-inherited widgets re-render immediately.
+-- settings page and every registered root so template-inherited
+-- widgets re-render immediately.
 -- ============================================================
+
+-- Frames whose whole tree is refreshed with the pages: a consumer's window
+-- chrome (tabs, header), wherever it parks pages it is not showing, the popup.
+-- Weak-keyed, so a root that goes away drops out on its own.
+UI._fontRoots = UI._fontRoots or setmetatable({}, { __mode = "k" })
+function UI:AddFontRoot(frame)
+    if frame then UI._fontRoots[frame] = true end
+end
+
+-- ☠ A BUTTON'S LABEL DOES NOT FOLLOW ITS FONT OBJECT ON ITS OWN. Plain labels
+-- re-render when the DFFont they inherit is re-skinned; a FontString a Button
+-- has registered (SetFontString -- every StyleButton label) kept the old face
+-- until the page was rebuilt, and re-setting its text did not move it. So a
+-- FontString inheriting one of OUR font objects has that object re-applied.
+-- SetFontObject also copies the object's colour, justification, shadow and
+-- spacing, any of which a widget may have set for itself, so those are put
+-- back. Our own objects only: anything else was styled on purpose.
+local function OwnFontObjects()
+    local set = {}
+    for _, obj in pairs(UI.FontObjects) do set[obj] = true end
+    return set
+end
+
+local function Reapply(fs, own)
+    local fo = fs.GetFontObject and fs:GetFontObject()
+    if not (fo and own[fo]) then return end
+    local r, g, b, a = fs:GetTextColor()
+    local jh, jv = fs:GetJustifyH(), fs:GetJustifyV()
+    local sr, sg, sb, sa = fs:GetShadowColor()
+    local sx, sy = fs:GetShadowOffset()
+    local spacing = fs:GetSpacing()
+    fs:SetFontObject(fo)
+    fs:SetTextColor(r, g, b, a)
+    fs:SetJustifyH(jh)
+    fs:SetJustifyV(jv)
+    fs:SetShadowColor(sr, sg, sb, sa)
+    fs:SetShadowOffset(sx, sy)
+    fs:SetSpacing(spacing)
+end
+
+local function Nudge(frame, own, seen)
+    if not frame or seen[frame] then return end
+    seen[frame] = true
+    local objType = frame.GetObjectType and frame:GetObjectType()
+    if objType == "FontString" then
+        Reapply(frame, own)
+        -- Setting the same text back forces a layout pass.
+        local t = frame:GetText()
+        if t and t ~= "" then
+            frame:SetText("")
+            frame:SetText(t)
+        end
+        return  -- FontStrings are leaf nodes; no children or sub-regions
+    end
+    -- Only Frames have GetChildren / GetRegions
+    if frame.GetChildren then
+        for _, child in ipairs({ frame:GetChildren() }) do Nudge(child, own, seen) end
+    end
+    if frame.GetRegions then
+        for _, region in ipairs({ frame:GetRegions() }) do Nudge(region, own, seen) end
+    end
+end
+
 function UI:RefreshSettingsFont()
     self:ApplySettingsFont()
 
@@ -251,36 +330,11 @@ function UI:RefreshSettingsFont()
         end
     end
 
-    -- Force FontStrings to re-evaluate their inherited font.
-    -- Setting the same text back forces a layout pass.
+    local own, seen = OwnFontObjects(), {}
+    for root in pairs(UI._fontRoots) do Nudge(root, own, seen) end
     if self.Pages then
         for _, page in pairs(self.Pages) do
-            if page.child then
-                local function nudge(frame)
-                    if not frame then return end
-                    local objType = frame.GetObjectType and frame:GetObjectType()
-                    if objType == "FontString" then
-                        local t = frame:GetText()
-                        if t and t ~= "" then
-                            frame:SetText("")
-                            frame:SetText(t)
-                        end
-                        return  -- FontStrings are leaf nodes; no children or sub-regions
-                    end
-                    -- Only Frames have GetChildren / GetRegions
-                    if frame.GetChildren then
-                        for _, child in ipairs({frame:GetChildren()}) do
-                            nudge(child)
-                        end
-                    end
-                    if frame.GetRegions then
-                        for _, region in ipairs({frame:GetRegions()}) do
-                            nudge(region)
-                        end
-                    end
-                end
-                nudge(page.child)
-            end
+            if page.child then Nudge(page.child, own, seen) end
         end
     end
 end

@@ -57,11 +57,6 @@ local CONTENT_PADDING = 20
 -- Mode tracking
 local popupMode = nil  -- "alert" or "input"
 
--- ============================================================
--- (Removed) TEST MODE & GUI INTEGRATION HELPERS plus the wizard step engine:
--- FlashContainer, CleanupTestMode, CleanupGUI, ProcessStepIntegration,
--- GetStepById, EvaluateBranches, GetNextStepId and CompleteWizard. All were
--- wizard-mode only; the alert and input paths never called any of them.
 local function HideInputWidgets(f)
     if f.InputBox then f.InputBox:Hide() end
     if f.InputAreaBox then f.InputAreaBox:Hide() end
@@ -189,17 +184,9 @@ local function CreatePopupFrame(host)
     tinsert(UISpecialFrames, "DFPopupFrame")
 
     PopupFrame = f
+    host:AddFontRoot(f)
     return f
 end
-
--- (Removed) UpdateNavButtons — the wizard's Back/Next/Finish row. Its body went
--- with the wizard runtime, leaving an empty stub with zero callers.
---
--- ☠ It had also lost its forward `local` declaration in that cut, so `function()`
--- assigned to a BARE GLOBAL named UpdateNavButtons — a very collidable name in
--- the shared _G namespace. Same class as the highlightPool / activeHighlights /
--- alertConfig declarations that commit repaired; this was the instance it missed,
--- and it is invisible to the parser because Lua accepts undeclared globals.
 
 -- ============================================================
 -- CONFIGURE FOR ALERT
@@ -358,6 +345,16 @@ function UI:ShowPopupAlert(config)
         return
     end
     ConfigureForAlert(self, config)
+end
+
+-- Close the open dialog, as its close button would; true when one was open. For
+-- a consumer that takes the keyboard itself: its Escape is consumed before the
+-- client's UISpecialFrames sweep, so the dialog would otherwise never close on it.
+function UI:DismissPopup()
+    if not (PopupFrame and PopupFrame:IsShown()) then return false end
+    self:Call("onPopupOpen")
+    PopupFrame:Hide()
+    return true
 end
 
 -- ============================================================

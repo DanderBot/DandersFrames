@@ -1255,23 +1255,32 @@ do
     eq(moved[4], s.label:GetStringWidth() + 4, "anchor: re-measured on every update, not pinned at build")
 end
 
--- ...and it DISPLACES the "(Global: x)" text rather than sitting under it. That
--- text anchors to the label's ANCHOR right edge, which on a left-anchored label
--- IS the end of the words -- exactly where the dot now is.
+-- AN AUTO-LAYOUT OVERRIDE IS THE SAME DOT, in the raid accent, and it wins
+-- over a changed default: it is the layer a hold removes first. The star, reset
+-- button and inline "(Global: x)" text it replaced stay hidden outside debug.
 do
-    local modified = true
+    local modified, ov = true, "overridden"
+    local ACCENT = { r = 0.2, g = 0.4, b = 0.9 }
     local host = dotHost(function() return modified end)
-    host.hooks.getOverrideState = function() return "overridden", 5 end
+    host.hooks.getOverrideState = function() return ov, 5 end
+    host.hooks.accentFor = function(isRaid) return isRaid and ACCENT or nil end
     local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
-    check(s.modifiedDot:IsShown() and s.overrideGlobalText:IsShown(),
-        "global text: both indicators are up at once")
-    local gp = s.overrideGlobalText._points
-    check(gp[#gp][2] == s.modifiedDot, "global text: it starts after the DOT while the dot is up")
+    check(s.modifiedDot:IsShown(), "override: the dot is up")
+    eq(s.modifiedDot._vertex.r, ACCENT.r, "override: ...in the raid accent, over a changed default's amber")
+    check(not s.overrideStar:IsShown() and not s.overrideResetBtn:IsShown()
+        and not s.overrideGlobalText:IsShown(), "override: no star, reset button or inline global text")
 
     modified = false
     s:UpdateOverrideIndicators(3)
-    gp = s.overrideGlobalText._points
-    check(gp[#gp][2] == s.label, "global text: and back to the label the moment the dot goes")
+    check(s.modifiedDot:IsShown(), "override: a layout value at the default still differs from the global")
+
+    ov, modified = "editing", true
+    s:UpdateOverrideIndicators(3)
+    eq(s.modifiedDot._vertex.r, UI.Colors.notice.r, "override: matching the global, a changed default is amber")
+
+    modified = false
+    s:UpdateOverrideIndicators(3)
+    check(not s.modifiedDot:IsShown(), "override: matching both, no dot")
 end
 
 -- ...AND THE LABEL IT HANGS OFF IS OVERRIDABLE, via `container.modifiedDotLabel`.

@@ -585,6 +585,74 @@ do
 end
 
 -- ============================================================
+-- THE GLOBAL LEDGER
+-- Split by PAGE: the Global ledger lists every setting on a Global-tab page,
+-- whichever store holds it -- the account-wide table, the profile root, or the
+-- party table both modes read shared settings from -- and the mode ledgers list
+-- everything else. ☠ Reading the account-wide table alone would say
+-- "Everything is at its defaults" over a changed Blizzard toggle.
+-- ============================================================
+print("-- Changed Settings: the Global tab's ledger")
+do
+    eq(CS.GLOBAL_PAGE_ID, "profiles_changed_global", "global: its own page id")
+    local savedGet, savedDefs, savedNew = DF.GetGlobalDB, DF.GlobalDefaults, DF.NewProfileTable
+    DF.GlobalDefaults = { pageTips = "show", notifyOutdated = true, colorPickerOverride = true }
+    local store = { pageTips = "fold", notifyOutdated = true, colorPickerOverride = true }
+    DF.GetGlobalDB = function() return store end
+    function DF:NewProfileTable()
+        return { party = {}, raid = {}, settingsFont = "DF Roboto SemiBold", partyEnabled = true,
+                 _someMigrationV1 = true }
+    end
+    DF.db.settingsFont = "MoK"
+    DF.db.partyEnabled = true
+    DF.db.party.hideBlizzardPartyFrames = not DF.PartyDefaults.hideBlizzardPartyFrames
+    DF.Search = {
+        Registry = {
+            { dbKey = "pageTips", label = "Page Tips", tab = "general_settings", tabLabel = "Settings" },
+            { dbKey = "notifyOutdated", label = "Outdated", tab = "general_settings", tabLabel = "Settings" },
+            { dbKey = "hideBlizzardPartyFrames", label = "Disable Blizzard Party Frames",
+              tab = "general_settings", tabLabel = "Settings" },
+            { dbKey = "settingsFont", label = "Settings Font", tab = "general_settings", tabLabel = "Settings" },
+            { dbKey = "partyEnabled", label = "Enable Party Frames", tab = "general_settings", tabLabel = "Settings" },
+            { dbKey = "absorbBarHeight", label = "Height", tab = "bars_absorb", tabLabel = "Absorbs" },
+        },
+    }
+    function DF.Search:RegistryIsStale() return false end
+    DF.db.party.absorbBarHeight = DF.PartyDefaults.absorbBarHeight + 2
+
+    local GLOBAL_PAGES = { general_settings = true, profiles_changed_global = true }
+    local GUI = { SelectedMode = "party", CategoryOrder = {}, Categories = {},
+                  IsGlobalPage = function(name) return GLOBAL_PAGES[name] == true end }
+    local report = CS:BuildReport(GUI, "global")
+    local listed = {}
+    for _, row in ipairs(report and report.groups[1] and report.groups[1].rows or {}) do listed[row.key] = row end
+    eq(report and report.count, 3, "global: three changed settings on the Global pages")
+    check(listed.pageTips ~= nil, "global: an account-wide one (Page Tips)")
+    eq(listed.pageTips and listed.pageTips.default, "show", "global: ...against its shipped default")
+    check(listed.hideBlizzardPartyFrames ~= nil,
+          "global: a shared one stored in the party table (the reported Blizzard toggle)")
+    check(listed.settingsFont ~= nil, "global: a profile-root one (the Settings Font)")
+    eq(listed.settingsFont and listed.settingsFont.default, "DF Roboto SemiBold",
+       "global: ...against what a new profile starts with")
+    check(listed.partyEnabled == nil, "global: an unchanged root setting is not listed")
+
+    local mode = CS:BuildReport(GUI)
+    eq(mode and mode.count, 1, "global: the mode ledger lists only its own pages' setting")
+    eq(mode and mode.groups[1].rows[1].key, "absorbBarHeight",
+       "global: ...not the Global pages' ones, so nothing is listed twice")
+
+    store.pageTips = "show"
+    DF.db.settingsFont = "DF Roboto SemiBold"
+    DF.db.party.hideBlizzardPartyFrames = DF.PartyDefaults.hideBlizzardPartyFrames
+    eq(CS:BuildReport(GUI, "global").count, 0, "global: back at the defaults, nothing is listed")
+    check(CS:CacheKey(GUI, "global") ~= CS:CacheKey(GUI), "global: its page cache key is its own")
+
+    DF.GetGlobalDB, DF.GlobalDefaults, DF.NewProfileTable = savedGet, savedDefs, savedNew
+    DF.db.settingsFont, DF.db.partyEnabled = nil, nil
+    DF.Search = nil
+end
+
+-- ============================================================
 -- NO BARE GLYPHS ON THE SURFACES THIS PAGE DRAWS
 -- ------------------------------------------------------------
 -- ☠ WOW FONTS DO NOT HAVE ARROWS. The settings panel renders in the user's
@@ -645,7 +713,7 @@ do
     local widgets = options_file_source("GUI/SettingsWidgets.lua")
     check(widgets:find("function GUI:InlineIcon(name, size, color)", 1, true) ~= nil,
           "glyphs: the helper takes a colour")
-    check(widgets:find("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
+    check(widgets:find("|T%s%s.png:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
           "glyphs: ...and builds the long escape, which is the only one that tints")
 end
 
@@ -741,7 +809,8 @@ do
     DandersFrames = host
     load_options_file_into("Features/ChangedSettings.lua", NS)
     check(type(host.GUI.PageCacheKeys) == "table"
-          and type(host.GUI.PageCacheKeys["profiles_changed"]) == "function",
+          and type(host.GUI.PageCacheKeys["profiles_changed"]) == "function"
+          and type(host.GUI.PageCacheKeys["profiles_changed_global"]) == "function",
           "cachekey: the ledger registers its key under its page id")
     DandersFrames = DF
 

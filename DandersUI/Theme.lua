@@ -24,6 +24,9 @@ local C_RAID       = {r = 1.0, g = 0.5, b = 0.2, a = 1}        -- Raid Orange
 local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
+-- A setting's caption inside a card: a step under C_TEXT so it does not read as the
+-- card's title, but well clear of C_TEXT_DIM, which is what a disabled one wears.
+local C_TEXT_CAPTION = {r = 0.78, g = 0.78, b = 0.78, a = 1}
 local C_WARNING    = {r = 0.95, g = 0.35, b = 0.35, a = 1}     -- Soft red: behaviour-change / caution notes
 -- Amber: "configured, but this will not render" notes in the Aura Designer — a state the
 -- user can fix, so it reads softer than the red above, which marks a behaviour change.
@@ -60,6 +63,7 @@ UI.Colors = {
     hover      = C_HOVER,
     text       = C_TEXT,
     textDim    = C_TEXT_DIM,
+    textCaption = C_TEXT_CAPTION,
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
     notice     = C_NOTICE,   -- amber for "configured but will not render" notes
     anchorRoot = C_ANCHOR_ROOT, -- green for a mover other movers are anchored to
@@ -543,7 +547,7 @@ UI.PopoutRow = {
                            -- foot: the band, a faint ring and a dark gap read as the
                            -- NEXT row's header, and rows looked like they overlapped
                            -- ("like an illusion"). A visible edge is what says where
-                           -- one plate stops. Shared with ControlRow on purpose.
+                           -- one plate stops.
     activeFill   = 0.14,   -- of the accent: a WASH, not a fill
     activeHover  = 0.20,
     activeBorder = 1,
@@ -566,8 +570,8 @@ UI.PopoutRow = {
     -- own labels ("FRAME WI...", "GROWTH DI...") and left the control 104 of the
     -- 172px cell -- 46px of live track once the slider's value box and its
     -- clearance came off. Two tiers give the name the cell's FULL width and the
-    -- control the full width under it: 172 - 50 - 8 = 114 of track, which is the
-    -- 112 ControlRow.lua settled on as "roughly a pixel per step".
+    -- control the full width under it: 172 - 50 - 8 = 114 of track, roughly a
+    -- pixel per step.
     --
     -- nameH    the name tier. A 9pt caps line, left-aligned, across the cell.
     -- controlH the control tier. 24 is the dropdown opener's own height, and it
@@ -685,9 +689,8 @@ UI.PopoutRow = {
     padCompact   = 6,
 
     -- ---- the embedded control's own metrics --------------------------
-    -- Shared with ControlRow.lua, which embeds the same two factories into the
-    -- same plate and had these as file-locals. One home, because a retune of the
-    -- slider's internals has to move both shapes or the two visibly disagree.
+    -- One home, because a retune of the slider's internals has to move every
+    -- plate that embeds it or they visibly disagree.
     --
     -- ☠ sliderBarMid IS COUPLED TO TWO NUMBERS THAT ARE FILE-LOCALS IN
     -- Widgets.lua. CreateSlider lays its track at y = -18 with a height of 8

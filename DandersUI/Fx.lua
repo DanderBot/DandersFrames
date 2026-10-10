@@ -14,7 +14,7 @@ if not UI then return end
 -- call plain Hide() and, if a fade might be running, Fx.Cancel.
 --
 -- Library-level, not per host: the helpers keep their state on the TARGET
--- (fxIn/fxOut/fxPop/fxPopOut/fxTo/fxScale animation groups), so there is nothing
+-- (fxIn/fxInFade/fxOut/fxPop/fxPopOut/fxTo/fxScale animation groups), so there is nothing
 -- host-specific to shadow.
 -- ============================================================
 local Fx = {}
@@ -26,23 +26,34 @@ UI.Fx = Fx
 -- position slides from (ox, oy) back onto the anchor -- and when it finishes
 -- the animation state reverts, leaving the target at its true point and alpha.
 -- The anchor itself is never touched, so mid-animation Refreshes stay correct.
+--
+-- ☠ NO TRANSLATION WHEN THERE IS NO SLIDE, even one of (0, 0). Measured on the
+-- settings window's Frame page: starting the cross-fade's fade-in (alpha AND
+-- translation) took ~200ms, the alpha-only fade-out of the same page ~40ms.
+-- A plain fade gets its own alpha-only group, so only callers that slide pay.
 function Fx.FadeIn(target, dur, ox, oy)
     if not target then return end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     target:Show()
     target:SetAlpha(1)
-    local g = target.fxIn
+    local slide = (ox and ox ~= 0) or (oy and oy ~= 0)
+    local key = slide and "fxIn" or "fxInFade"
+    -- The other kind may be mid-play from an earlier call.
+    local other = rawget(target, slide and "fxInFade" or "fxIn")
+    if other and other:IsPlaying() then other:Stop() end
+    local g = rawget(target, key)
     if not g then
         g = target:CreateAnimationGroup()
         if not g then return end                    -- headless stub: shown, done
         g.alpha = g:CreateAnimation("Alpha")
-        g.move  = g:CreateAnimation("Translation")
-        target.fxIn = g
+        if slide then g.move = g:CreateAnimation("Translation") end
+        target[key] = g
     end
     if g:IsPlaying() then g:Stop() end
     g.alpha:SetFromAlpha(1); g.alpha:SetToAlpha(0); g.alpha:SetDuration(dur or 0.12)
-    g.move:SetOffset(ox or 0, oy or 0); g.move:SetDuration(dur or 0.12)
+    local move = rawget(g, "move")
+    if move then move:SetOffset(ox or 0, oy or 0); move:SetDuration(dur or 0.12) end
     g:Play(true)
 end
 
@@ -59,6 +70,8 @@ function Fx.PopIn(target, dur, ox, oy, fromScale, origin)
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    local fade = rawget(target, "fxInFade")
+    if fade and fade:IsPlaying() then fade:Stop() end
     target:Show()
     target:SetAlpha(1)
     local g = target.fxPop
@@ -102,6 +115,8 @@ function Fx.PopOut(target, dur, ox, oy, toScale, origin, onDone)
         return
     end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    local fade = rawget(target, "fxInFade")
+    if fade and fade:IsPlaying() then fade:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     local g = target.fxPopOut
@@ -150,6 +165,8 @@ function Fx.FadeOut(target, dur, onDone)
         return
     end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    local fade = rawget(target, "fxInFade")
+    if fade and fade:IsPlaying() then fade:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     local g = target.fxOut
@@ -184,6 +201,8 @@ end
 function Fx.FadeTo(target, alpha, dur)
     if not target then return end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    local fade = rawget(target, "fxInFade")
+    if fade and fade:IsPlaying() then fade:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
@@ -292,6 +311,8 @@ end
 function Fx.Cancel(target)
     if not target then return end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    local fade = rawget(target, "fxInFade")
+    if fade and fade:IsPlaying() then fade:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end

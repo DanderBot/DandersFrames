@@ -60,6 +60,23 @@ function DF:GetWindowState()
 end
 
 -- ============================================================
+-- SETTINGS PANEL FONT
+-- ============================================================
+-- The panel's font and outline live at the profile root, and every path that
+-- swaps or rewrites the profile (switch, import, reset) ends in
+-- FullProfileRefresh, which calls this. It re-skins only when the pair actually
+-- moved: auto layouts run that refresh on every group change, and a re-skin
+-- walks the whole settings window.
+function DF:SyncSettingsFont()
+    local db = DF.db
+    if not (db and DF.GUI and DF.GUI.RefreshSettingsFont) then return end
+    local key = tostring(db.settingsFont) .. "\0" .. tostring(db.settingsFontOutline)
+    if key == DF._settingsFontKey then return end
+    DF._settingsFontKey = key
+    DF.GUI:RefreshSettingsFont()
+end
+
+-- ============================================================
 -- PROFILE MANAGEMENT
 -- ============================================================
 
@@ -79,45 +96,28 @@ function DF:ResetProfile(mode)
     DF:Say(format(L["%s settings reset to defaults."], modeLabel))
 end
 
--- Full profile reset: both modes PLUS the profile-level designer preset
--- libraries. DF:ResetProfile only replaces DF.db[mode]; the Aura/Text Designer
--- store their configs in the shared, profile-level auraDesignerPresets/
--- textDesignerPresets libraries, which those per-mode resets never touch — so
--- without this, edited AD/TD presets survive a "Reset Profile to Defaults".
--- Used by the GUI "Reset Profile to Defaults" button and /df reset.
+-- Full profile reset: the current profile becomes exactly what a NEW profile
+-- is, under the same name. Used by the GUI "Reset Profile to Defaults" button
+-- and /df reset.
+--
+-- ☠ REPLACED, NOT RESET KEY BY KEY. Resetting the two modes misses the
+-- profile-ROOT state they never reach -- designer preset libraries, filter
+-- overrides, sync links, the settings font, class and power colours, auto
+-- layouts, the Party/Raid switches -- and every new root key would be one more
+-- to chase. A fresh table from the constructor a new profile uses cannot miss
+-- anything it seeds, and ActivateProfile then runs the same migrations,
+-- refresh and reload check a profile switch does.
+--
+-- ⚠ NOT SAVED FIRST. SetProfile saves the outgoing profile before switching;
+-- here that would write the old settings straight back over the new table.
 function DF:ResetFullProfile()
-    -- ★ UNLINK FIRST. Party/Raid sync state lives at the PROFILE ROOT, so neither
-    -- per-mode ResetProfile reached it and a "Reset Profile to Defaults" left every
-    -- synced page still synced — a state a freshly created profile can never be in
-    -- (Profile.lua seeds linkedSections = {}), which is the yardstick for this function.
-    -- ⚠ BEFORE the mode resets, not after: each ResetProfile ends in FullProfileRefresh,
-    -- which runs DF:SyncLinkedSections. Clearing afterwards would let three refreshes
-    -- fire against link state we are about to discard.
-    -- `{}` rather than nil to match the fresh-profile shape exactly; readers are
-    -- nil-guarded either way.
-    DF.db.linkedSections = {}
-    -- Fenced HERE as well as inside the two ResetProfile calls below, and not
-    -- redundantly: this function also discards profile-ROOT tables the per-mode
-    -- resets never reach (the designer preset libraries, the filter overrides),
-    -- so the stack is stale from this line onwards rather than from the first
-    -- mode reset. Clear is idempotent, so the overlap costs nothing.
-    local SU = DF.SettingsUndo
-    if SU then SU:Clear() end
-    self:ResetProfile("party")
-    self:ResetProfile("raid")
-    if self.ResetDesignerPresets then self:ResetDesignerPresets() end
-    -- Filter Designer per-spell preset overrides live at profile root
-    -- (DF.db.filterPresetOverrides), like the AD/TD preset libraries above —
-    -- neither per-mode ResetProfile nor ResetDesignerPresets touches them.
-    -- filterMutedSpellIDs is its sibling (per-spell-ID narrowing within a record)
-    -- and travels with it everywhere: reset, export, payload keys, new-profile
-    -- copy, import.
-    DF.db.filterPresetOverrides = nil
-    DF.db.filterMutedSpellIDs = nil
-    -- FullProfileRefresh re-applies the Aura Designer engine to live frames
-    -- (Core.lua), so the reset AD presets take effect immediately. It does NOT
-    -- touch the Text Designer, so nudge that separately below.
-    self:FullProfileRefresh()
+    local L = DF.L
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local name = DF:GetCurrentProfile()
+    DandersFramesDB_v2.profiles[name] = DF:NewProfileTable()
+    DF:ActivateProfile(name, format(L["Profile reset to defaults: %s"], name))
+    -- FullProfileRefresh (inside ActivateProfile) re-applies the Aura Designer
+    -- engine to live frames but not the Text Designer, so nudge that here.
     if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
         DF.TextDesigner.Preview:RefreshAll()
     end
@@ -331,6 +331,34 @@ function DF:SaveCurrentProfile()
     DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
 end
 
+-- A brand-new profile table: current defaults for both modes and the profile
+-- root, with every one-time migration already marked done. The one
+-- constructor, shared by creating a profile and resetting one.
+function DF:NewProfileTable()
+    local profile = {
+        party = DF:DeepCopy(DF.PartyDefaults),
+        raid = DF:DeepCopy(DF.RaidDefaults),
+        raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
+        classColors = {},
+        powerColors = {},
+        linkedSections = {},
+        partyEnabled = true,
+        raidEnabled = true,
+        -- Must match the CURRENT default (and ActivateProfile's nil-backfill).
+        -- Seeding the pre-Roboto face here meant a freshly created profile kept
+        -- Friz -- the backfill skips a non-nil value -- until the
+        -- _settingsFontRobotoDefaultV1 migration flipped it on the next reload,
+        -- so the settings font appeared to change by itself.
+        settingsFont = "DF Roboto SemiBold",
+        settingsFontOutline = "NONE",
+    }
+    -- Born from current defaults => every one-time migration is already done.
+    -- Without this, the unconditional frame-level / container-position shifts
+    -- fired on the new profile and moved values that were already correct.
+    DF:StampFreshProfileMigrations(profile)
+    return profile
+end
+
 -- Set/create a profile
 function DF:SetProfile(name)
     local L = DF.L
@@ -343,6 +371,20 @@ function DF:SetProfile(name)
     -- Save current profile before switching (strips runtime overrides)
     DF:SaveCurrentProfile()
 
+    -- Create new profile if doesn't exist
+    if not DandersFramesDB_v2.profiles[name] then
+        DandersFramesDB_v2.profiles[name] = DF:NewProfileTable()
+        DF:Say(format(L["Created new profile: %s"], name))
+    end
+
+    DF:ActivateProfile(name, format(L["Switched to profile: %s"], name))
+end
+
+-- Make the stored profile `name` the live one: clear the runtime state that
+-- belongs to the outgoing profile, point DF.db at it, run the per-profile
+-- migrations and the full refresh, announce `message`, and check whether the
+-- frame-mode switches now need a reload. SetProfile and ResetFullProfile.
+function DF:ActivateProfile(name, message)
     -- Clear auto-profile runtime state and overlay BEFORE switching profiles
     -- so FullProfileRefresh reads the clean new profile with no stale overlay
     if DF.AutoProfilesUI then
@@ -360,33 +402,7 @@ function DF:SetProfile(name)
     -- the new profile's font settings rather than showing the old profile's
     -- last-used font until the next /reload.
     DF.GlobalFontTemp = nil
-    DF:Debug("PROFILE", "SetProfile: cleared runtime state before switching to " .. name)
-
-    -- Create new profile if doesn't exist
-    if not DandersFramesDB_v2.profiles[name] then
-        DandersFramesDB_v2.profiles[name] = {
-            party = DF:DeepCopy(DF.PartyDefaults),
-            raid = DF:DeepCopy(DF.RaidDefaults),
-            raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
-            classColors = {},
-            powerColors = {},
-            linkedSections = {},
-            partyEnabled = true,
-            raidEnabled = true,
-            -- Must match the CURRENT default (and the nil-backfill just below).
-            -- Seeding the pre-Roboto face here meant a freshly created profile kept
-            -- Friz -- the backfill skips a non-nil value -- until the
-            -- _settingsFontRobotoDefaultV1 migration flipped it on the next reload,
-            -- so the settings font appeared to change by itself.
-            settingsFont = "DF Roboto SemiBold",
-            settingsFontOutline = "NONE",
-        }
-        -- Born from current defaults => every one-time migration is already done.
-        -- Without this, the unconditional frame-level / container-position shifts
-        -- fired on the new profile and moved values that were already correct.
-        DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles[name])
-        DF:Say(format(L["Created new profile: %s"], name))
-    end
+    DF:Debug("PROFILE", "ActivateProfile: cleared runtime state before switching to " .. name)
 
     -- Backfill defaults on older profiles
     local p = DandersFramesDB_v2.profiles[name]
@@ -480,9 +496,9 @@ function DF:SetProfile(name)
     -- "cleared runtime state before switching" and then nothing was indistinguishable from
     -- a switch that half-applied and threw. That is precisely the failure worth catching
     -- here, and it was the one state the category could not describe.
-    DF:Debug("PROFILE", "SetProfile: switch to %s complete", tostring(name))
+    DF:Debug("PROFILE", "ActivateProfile: switch to %s complete", tostring(name))
 
-    DF:Say(format(L["Switched to profile: %s"], name))
+    DF:Say(message)
 
     -- If the new profile has a different enable-flag state, prompt to reload
     -- so headers can be (re)created. Frames cannot be added/removed at runtime.

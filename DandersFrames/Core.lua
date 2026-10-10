@@ -205,10 +205,6 @@ DF.EVERYDAY_COMMANDS = {
     help = true, console = true, users = true, reset = true, resetgui = true,
     test = true, hide = true, lock = true, unlock = true, raidlock = true,
     raidunlock = true, clearoverride = true,
-    -- Dev-facing but documented as a bare command (the popout demo's own
-    -- header says "/df popoutdemo"); without this entry the gate below reads
-    -- it as an unknown word and opens the settings window instead.
-    popoutdemo = true,
 }
 
 --- The typeable path for a command word, e.g. "dispel" -> "/df debug dispel".
@@ -5170,10 +5166,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
 
         -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
-        -- loaded; the Settings Font dropdowns re-apply it via GUI:RefreshSettingsFont)
-        if DF.GUI and DF.GUI.ApplySettingsFont then
-            DF.GUI:ApplySettingsFont()
-        end
+        -- loaded; the Settings Font dropdowns re-apply it through the same call)
+        DF:SyncSettingsFont()
 
         -- Ensure auraBlacklist table exists (profile-level, shared across party/raid)
         if not DF.db.auraBlacklist then
@@ -7193,12 +7187,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df test a silent no-op until the settings panel was opened.
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
-            elseif msg == "popoutdemo" then
-                -- The popout demo lives in the load-on-demand companion. Same
-                -- guard shape as /df test above: a deliberate dev command loads
-                -- it rather than sitting there as a silent no-op.
-                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
-                if DF.TogglePopoutDemo then DF:TogglePopoutDemo() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then
@@ -8625,6 +8613,8 @@ end
 -- ============================================================
 
 function DF:FullProfileRefresh()
+    -- Before the combat gate: the panel font is chrome, not protected frames.
+    DF:SyncSettingsFont()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return

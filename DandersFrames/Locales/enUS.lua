@@ -62,7 +62,6 @@ L["Auto-create profiles enabled."] = true
 -- rest of the chat line. The caller wraps the substituted name instead.
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
-L["Classic Layout"] = true
 L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
 L["Indicator Info"] = true
 L["Cannot delete the default profile"] = true
@@ -127,7 +126,6 @@ L["Reset bindings to defaults (Target + Menu). %d custom binding(s) removed."] =
 L["Role icon show/hide decisions and combat transitions"] = true
 L["Secure header creation, attributes and re-anchoring"] = true
 L["Secure position handler trigger and snippet runs"] = true
-L["Secure sort handler, snippets and frame registration"] = true
 L["Settings window internals — slider drag paths, relayout"] = true
 L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."] = true
 L["Switched to profile: %s (%s)"] = true
@@ -355,7 +353,6 @@ L["Reset to Defaults"] = true
 L["Res + Mass"] = true
 L["Res + Mass + Combat"] = true
 L["Save"] = true
-L["Screen (Free)"] = true
 L["Selecting an option will disable the other addon(s)\nand reload your UI."] = true
 L["Show:"] = true
 L["Smart Res:"] = true
@@ -480,6 +477,7 @@ L["%ds and above"] = true
 L["%s (Copy)"] = true
 L["%s or %s"] = true
 L["%s settings reset to defaults."] = true
+L["Profile reset to defaults: %s"] = true
 L["(offline)"] = true
 L["+ Import Filter"] = true
 L["+ New Buff Filter"] = true
@@ -503,7 +501,6 @@ L["Add"] = true
 L["active"] = true
 L["Remove this pinned set? Its members and settings will be lost."] = true
 L["Add Color Stop"] = true
-L["Add Debuff Group"] = true
 L["Add from a Filter"] = true
 L["Add from a Spell"] = true
 L["Add from Database"] = true
@@ -511,7 +508,6 @@ L["Add Group"] = true
 L["Add Indicator"] = true
 L["Add Item"] = true
 L["Add Layout"] = true
-L["Add Layout Group"] = true
 L["Add Offline Player"] = true
 L["Add players from the roster\nor use quick add buttons"] = true
 L["Add Text Element"] = true
@@ -648,6 +644,7 @@ L["Below Party"] = true
 L["Below Raid"] = true
 L["Binding Tooltips"] = true
 L["BINDS"] = true
+L["GLOBAL"] = true
 L["Bleed / Enrage"] = true
 L["Blend Mode"] = true
 L["Blessing of the Bronze (Evoker)"] = true
@@ -670,7 +667,6 @@ L["Border Thickness"] = true
 L["Boss Debuffs"] = true
 L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."] = true
 L["Clock"] = true
-L["Color by Aura Type"] = true
 L["Color this stop by each unit's own class."] = true
 L["Classic"] = true
 L["DF Smooth"] = true
@@ -873,7 +869,6 @@ L["Discovered"] = true
 L["Display"] = true
 L["Display labels above or beside each raid group."] = true
 L["Display Mode"] = true
-L["DND"] = true
 L["Down"] = true
 L["DPS"] = true
 L["Drag to reorder groups. Top = first."] = true
@@ -893,7 +888,6 @@ L["Duration Text"] = true
 L["Echo to Chat"] = true
 L["Edge Glow (All Sides)"] = true
 L["Edit Layout"] = true
-L["Edit Layout Range"] = true
 L["Edit Settings"] = true
 L["Editing"] = true
 L["Editing:"] = true
@@ -1048,8 +1042,7 @@ L["Generate Export String"] = true
 L["Ghost"] = true
 L["Gaining Aggro Text"] = true
 L["Global Defaults"] = true
-L["Global Font Settings"] = true
-L["Global Fonts"] = true
+L["Fonts"] = true
 L["Global Frame Fade"] = true
 L["Glow"] = true
 L["Glow (ADD)"] = true
@@ -1175,7 +1168,6 @@ L["Hides and unregisters all events on the default Blizzard party frames so they
 L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."] = true
 L["Hides the default Blizzard player portrait and health bar."] = true
 L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."] = true
-L["High Health (100%)"] = true
 L["High Threat (Yellow)"] = true
 L["Highest Threat (Orange)"] = true
 L["Highlight"] = true
@@ -1186,7 +1178,6 @@ L["Highlight the bar when the enemy is casting at you."] = true
 L["Highlight Settings"] = true
 L["Highlight Shadow"] = true
 L["Highlights"] = true
-L["Hold: Defaults"] = true
 L["Horizontal"] = true
 L["Horizontal Spacing"] = true
 L["Hover Applies To"] = true
@@ -1279,7 +1270,6 @@ L["Logged Categories"] = true
 L["Noisy category"] = true
 L["This category can fill the log very quickly, burying the entries you are looking for."] = true
 L["Turn it on only while reproducing the bug it relates to."] = true
-L["Low Health (0%)"] = true
 L["Lunar Power"] = true
 L["Maelstrom"] = true
 L["Mage"] = true
@@ -1313,7 +1303,6 @@ L["Clear Log After (Days, 0 = Never)"] = true
 L["Max Name Length"] = true
 L["Max Text Width"] = true
 L["Medium"] = true
-L["Medium Health (50%)"] = true
 L["Minimal"] = true
 L["Minimap"] = true
 L["Minimum Log Level"] = true
@@ -1393,10 +1382,6 @@ L["OR"] = true
 L["Offset X"] = true
 L["Offset Y"] = true
 L["Override Border"] = true
-L["Override active"] = true
-L["This page has an overridden setting."] = true
-L["A page in this category has an overridden setting."] = true
-L["The frame position is overridden in this layout."] = true
 L["This built-in filter has been changed from its defaults."] = true
 L["Oldest First"] = true
 L["Only changed settings will be saved"] = true
@@ -1485,7 +1470,6 @@ L["Prefix"] = true
 L["Template Name"] = true
 L["Templates"] = true
 L["Built-in filters are curated"] = true
-L["Press and hold to preview this group at its default values. Release to restore your settings."] = true
 L["Press Ctrl+A to select all, then Ctrl+C to copy"] = true
 L["Press Ctrl+C to copy, then Escape to close"] = true
 L["Priest"] = true
@@ -1571,9 +1555,7 @@ L["Restore this filter's spell list to its defaults. Other filters are not affec
 L["Reset All to Default"] = true
 L["Reset Border to Inherited"] = true
 L["Reset Colors to Default"] = true
-L["Reset every setting in this group to its default value."] = true
-L["Reset Group"] = true
-L["Reset current profile to defaults?\nThis will reset BOTH Party and Raid settings."] = true
+L["Reset current profile to defaults?\nEverything in it goes back to how a new profile starts, including Party, Raid, colours and auto layouts."] = true
 L["Reset Page"] = true
 L["Reset Position"] = true
 L["Reset Profile to Defaults"] = true
@@ -1646,7 +1628,6 @@ L["Settings"] = true
 L["Settings Font"] = true
 L["Settings Font Outline"] = true
 L["Settings Panel Appearance"] = true
-L["Settings on this page apply globally — changes persist across both the Party and Raid sections."] = true
 L["Shadow"] = true
 L["Shadow Color"] = true
 L["Shadow offset and colour are set in %s."] = true
@@ -1714,6 +1695,14 @@ L["Show Untargeted Casts"] = true
 L["Show the animated ZZZ icon on the player frame."] = true
 L["Show the DF color picker when any addon opens a color picker."] = true
 L["Show Timer"] = true
+L["Click to show the full banner on the page again."] = true
+L["Hide tip"] = true
+L["Hide notice"] = true
+L["Hide warning"] = true
+L["It shrinks to an icon you can hover or click to bring back."] = true
+L["Page Tips"] = true
+L["Closed"] = true
+L["Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them."] = true
 L["Show X Mark"] = true
 L["Shows a bar on each icon that drains with the aura's remaining time."] = true
 L["Shows a glow at max health when absorb exceeds the clamp limit."] = true
@@ -1829,8 +1818,6 @@ L["Thickness"] = true
 L["Thin"] = true
 L["This filter is empty."] = true
 L["This filter was exported by a newer version of DandersFrames."] = true
-L["This setting differs from the global profile value. Click the reset button to revert."] = true
-L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."] = true
 L["This spell has %d spell IDs. Click to choose which ones to track."] = true
 L["This will capture %s everywhere — even away from the frames — and replace its current action:"] = true
 L["Threat & Range"] = true
@@ -1856,11 +1843,9 @@ L["Top to Bottom"] = true
 L["Total:"] = true
 -- The Aura Designer row page's name for the block the card captions "TRIGGERED
 -- BY". Sentence case, like every other row label on the page.
-L["Triggered By"] = true
 L["Trinkets & Items"] = true
 L["Truncate Mode"] = true
 L["Turn on Others Only for an effect to ignore your own casts."] = true
-L["Unavailable while an auto layout is active or being edited."] = true
 L["Undid: %s"] = true
 L["under %d%%"] = true
 L["under %ds"] = true
@@ -1968,7 +1953,6 @@ L[" indicator"] = true
 L[" indicators"] = true
 L["A bar that drains as it expires"] = true
 L["ACTIVE INDICATORS"] = true
-L["Active"] = true
 L["A condition group is empty and is being ignored."] = true
 L["A row of icons that arranges itself as auras come and go."] = true
 L["AND"] = true
@@ -1990,7 +1974,6 @@ L["Click"] = true
 -- The Aura Designer row page's name for the block the card captions "COPY
 -- APPEARANCE FROM". A row's label is a NAME, in sentence case like every other
 -- one on the page; the caption inside it stays as it is.
-L["Copy Appearance"] = true
 L["Copy Settings to %s"] = true
 L["Custom Sound Path"] = true
 L["Customise"] = true
@@ -2066,7 +2049,6 @@ L["PLACEMENT"] = true
 L["Per-aura overrides"] = true
 L["Percent"] = true
 L["Place %s at %s"] = true
-L["Placed"] = true
 L["Placement"] = true
 L["Position & anchors"] = true
 L["Position managed by: %s"] = true
@@ -2129,8 +2111,6 @@ L["Select indicator..."] = true
 L["Select trigger for %s"] = true
 L["Show Stacks"] = true
 L["Show When Missing"] = true
-L["Showing"] = true
-L["Showing: %s"] = true
 L["Size & Orientation"] = true
 L["Sound"] = true
 L["Sound Alert"] = true
@@ -2167,29 +2147,24 @@ L["ADD A DEBUFF GROUP"] = true
 L["ADD A LAYOUT GROUP"] = true
 L["ADD AN INDICATOR"] = true
 L["Add to my frames"] = true
-L["An icon, square or bar, wherever you put it"] = true
 L["Any look, driven by one spell"] = true
 L["an indicator on the frame to expand its settings"] = true
 L["Choose an aura first."] = true
-L["Frame-Level Effect"] = true
 L["From a Filter"] = true
 L["HOW SHOULD IT SHOW?"] = true
 L["item"] = true
 L["items"] = true
 L["No effects configured yet.\nAdd one from a spell or a filter above."] = true
 L["No effects configured yet.\nPick a style above to get started."] = true
-L["No effects configured yet.\nUse Add Indicator above to place your first one."] = true
 L["No sound file selected. Choose a sound from the dropdown or enter a custom path."] = true
 L["Next"] = true
 L["Not for filters"] = true
 L["Not needed"] = true
 L["Outlines the whole frame"] = true
 L["Pick a look above."] = true
-L["Placed on the Frame"] = true
 L["Plays a sound. Nothing changes on the frame."] = true
 L["Ready to add"] = true
 L["Recolours the frame background"] = true
-L["Recolours the frame itself"] = true
 L["Recolours the health bar"] = true
 L["Recolours the health numbers"] = true
 L["Recolours the player's name"] = true
@@ -2203,11 +2178,9 @@ L["WHERE?"] = true
 L["WHICH AURA?"] = true
 L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."] = true
 L["WHICH KIND OF GROUP?"] = true
-L["Which kinds of indicator are listed below."] = true
 -- The Text Designer's filter glyph says the same thing about its own list. Kept
 -- BESIDE its twin rather than filed under the Text Designer, so a translator sees
 -- the pair together and cannot render one of them differently by accident.
-L["Which kinds of text are listed below."] = true
 L["Which incoming heals the bar shows: all sources, only yours, or only from others."] = true
 L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."] = true
 L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."] = true
@@ -2365,7 +2338,6 @@ L["Preview placeholder (visual mockup)"] = true
 L["+%d triggers"] = true
 L["Group %d"] = true
 L["Changelog"] = true
-L["(Global: %s)"] = true
 L["Tank Icon Path"] = true
 L["Healer Icon Path"] = true
 L["DPS Icon Path"] = true
@@ -2407,7 +2379,7 @@ L["'?\n\nThis will copy your current settings, then apply the selected import ca
 L["(Empty)"] = true
 L["+ Drop Item"] = true
 L["..."] = true
-L["25 icons from Google Material Symbols (Apache 2.0)"] = true
+L["%d icons, drawn from Google Material Symbols (Apache 2.0)"] = true
 L["Add Trigger"] = true
 L["Add aura"] = true
 L["Assist"] = true
@@ -2418,7 +2390,6 @@ L["Click icon to copy path • Icons are white and can be tinted with SetVertexC
 L["Click to assign a profile that activates"] = true
 L["Click to assign a specific profile"] = true
 L["Click to change assignment"] = true
-L["Click to open the position panel"] = true
 L["Click-Cast Profiles"] = true
 L["Command + Left Click bindings do not work on macOS. "] = true
 L["Consumables (Drag items here)"] = true
@@ -2431,7 +2402,6 @@ L["Custom name, health and status text"] = true
 L["Customize role colors used by any border whose Color Source is set to Role. Applies to Tank, Healer, and Damager assignments."] = true
 L["Delete binding for %s?"] = true
 L["Disable this if you want to use the same profile"] = true
-L["Drag to move"] = true
 L["Equipment Slots"] = true
 L["Follow"] = true
 L["General Imports"] = true
@@ -2449,6 +2419,7 @@ L["LAYOUT GROUPS"] = true
 L["Mac Limitation"] = true
 L["Macro: "] = true
 L["Material Icons Preview"] = true
+L["Shared UI kit"] = true
 L["Menu"] = true
 L["Middle Click"] = true
 L["Mouse 4"] = true
@@ -2476,6 +2447,9 @@ L["The binding will be saved, but it will not trigger in-game."] = true
 L["Theme Color:"] = true
 L["This is a World of Warcraft client limitation, not an addon bug."] = true
 L["Timer Text"] = true
+L["Timer Color"] = true
+L["Timer Offset X"] = true
+L["Timer Offset Y"] = true
 L["Tip: Check 'Create New Profile' to import without affecting your current settings."] = true
 L["Use "] = true
 L["WARNING: This will permanently overwrite settings in your '"] = true
@@ -2563,6 +2537,8 @@ L["Which part of the element the text is pinned to. Offset X and Y then nudge it
 L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."] = true
 L["What the tooltip attaches to. Game Default hands it back to Blizzard's own placement; Cursor follows the mouse; Unit Frame pins it to the frame you are hovering."] = true
 L["Which point of the thing above the tooltip hangs from. Greyed out under Game Default, because Blizzard is placing it."] = true
+L["What the tooltip attaches to. Aura tooltips are drawn by the game and can only attach to the icon or follow the cursor."] = true
+L["Which point of the icon the tooltip hangs from. Under Cursor, it picks which side of the cursor the tooltip opens on."] = true
 L["Attached puts each pet beside its owner's frame, so you read them together. Separate Pet Group collects every pet into one block you can place anywhere. The rest of this page changes to match your choice."] = true
 L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."] = true
 L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."] = true
@@ -2704,7 +2680,6 @@ L["Editing custom filter"] = true
 -- ellipsise their own counts away. This is the label on that row. Its SUMMARY is
 -- the names of the consumers in use, joined — and "Not in use" below doubles as
 -- the empty state there, rather than a second way of saying nothing uses this.
-L["Used By"] = true
 L["Not in use"] = true
 L["1 filter"] = true
 L["%d filters"] = true
@@ -2743,8 +2718,7 @@ L["Edit this filter"] = true
 -- ⚠ The DESCRIPTION half, and it is not optional. A house tooltip is a title plus a
 -- line saying what happens; these two shipped title-only for one revision and drew a
 -- lone bold word, which on an icon-only control just names the glyph back at you
--- (Krathe, 2026-08-10). Anything added to CreateGlyphButton or a choice card's corner
--- action needs both halves.
+-- (Krathe, 2026-08-10). Anything added to CreateGlyphButton needs both halves.
 --
 -- Says where it goes AND what you can do there, because "edit" on a control that
 -- navigates is otherwise ambiguous -- it could mean rename, or edit in place.
@@ -2786,45 +2760,6 @@ L["Build and edit your buff filters in the Filter Designer."] = true
 L["FILTERS"] = true
 L["DISPLAYS"] = true
 L["ADVANCED"] = true
-
--- The "How this works" map, opened from the button at the end of the chip row. It
--- exists because banner copy can define a filter but cannot carry the SHAPE: that
--- three displays each pick their filters somewhere different, and that the Debuffs
--- tab is a separate system wearing the same controls.
---
--- ⚠ The three %s are the destination PAGES' own names, filled in at runtime — do
--- not spell them out in the sentence, or a page rename leaves this disagreeing with
--- the chip beside it. They arrive already colour-coded; keep them as bare slots.
---
--- ⚠ Newlines are the layout. The popup takes one message string, so \n\n between
--- blocks and \n between the three rows is what makes it read as a list.
---
--- ⚠ "use", never "play" — Krathe's call, 2026-08-09. An Aura Designer group USES a
--- filter. The word has to match the chip hovers and the filter-group card; if one
--- surface drifts back to "play", the vocabulary has to be learned twice.
---
--- ⚠ The debuff paragraph names the Aura Designer too, and must keep doing so.
--- Debuff categories are not only the debuff bar's source — an Aura Designer DEBUFF
--- group uses the same Blizzard categories. An earlier draft stopped that paragraph
--- at "picked here", which read as though the debuff path ended at the bar.
--- ⚠ L["How this works"] is now the HOVER TITLE of a "?" icon button, not a button
--- label — the labelled button was 128px of a row whose three chips need the width
--- more, and the glyph says the same thing. An icon-only control has to carry a
--- tooltip or it cannot be identified without clicking it, so both strings below are
--- load-bearing rather than decoration.
-L["How this works"] = true
-L["A short guide to filters and the displays that use them."] = true
-L["How the Filter Designer works"] = true
--- ⚠ FIVE %s, two kinds, same split as the info banner: %1 and %5 are the coloured
--- category phrases (Buff Filters green, Debuff Filters red) and %2-%4 are the three
--- gold destination names. Both %1 and %5 reuse the banner's own strings, so the page
--- teaches ONE green/red pair rather than two.
---
--- Opened "Filters are lists of auras" until 2026-08-10. Bare "Filters" could not take
--- the green without breaking the mapping the banner sets up (green = buff, red =
--- debuff), so the subject became explicit -- which the page had wanted anyway, since
--- everything built here is a buff filter.
-L["%s are lists of auras. You build them on this page; each display then picks the ones it wants, on its own page:\n\n%s\n%s\n%s — inside a filter group\n\n%s work differently: those categories are Blizzard's, they are fixed, and you pick them on the Debuff Bar page. Aura Designer debuff groups use the same categories.\n\nEditing a filter changes it everywhere it is used."] = true
 
 -- Heads the filter list on BOTH tabs, paired with "Custom Buff Filters" on the Buffs
 -- tab. It replaces a bare "Filters", which repeated the Buffs/Debuffs tab strip
@@ -2947,15 +2882,45 @@ L["Indexing settings..."] = true
 L["Not everything is listed: a few controls and ordered lists are not tracked here."] = true
 L["On"] = true
 L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
+L["Showing the settings on the Global tab: account-wide ones, and those shared by Party and Raid. Click a row to jump to the setting."] = true
 L["This list can't be built during combat."] = true
 
 -- The yellow "changed from default" dot beside a setting's name: its hover
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
+-- Settings page group headers (the Modern layout card groups).
+L["Frames"] = true
+L["Interface"] = true
+L["Unit Colors"] = true
+L["Aura Colors"] = true
+L["Range"] = true
+L["Unit State"] = true
+L["Group Roles"] = true
+L["Markers"] = true
+L["Targeting"] = true
+L["Threat"] = true
+L["Changed in this section"] = true
+L["Interrupted Visual"] = true
+L["%d changed from default"] = true
+L["%d set by this auto layout"] = true
+L["%d set by the active auto layout"] = true
+L["This page has settings the layout changes."] = true
+L["A page in this category has settings the layout changes."] = true
+L["Layout: %s"] = true
+L["This layout moves the frames."] = true
+L["This layout changes the order. Use the reset button to go back to your global order."] = true
+L["Use the reset button to go back to your global value."] = true
+L["Set for this pinned set"] = true
+L["Global: %s"] = true
+L["This layout: %s"] = true
+L["Set by this auto layout"] = true
+L["Set by the active auto layout"] = true
+L["Click and hold to reset to your global value"] = true
+L["Click and hold to reset to the default"] = true
+L["To change this, edit the layout in Auto Layouts."] = true
 L["Current: %s"] = true
 L["Default: %s"] = true
-L["Hold click to reset"] = true
 
 -- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
 -- These are seen in normal play, not in the settings panel.
@@ -3212,8 +3177,6 @@ L["Every indicator is already in use. Remove one below to add it again."] = true
 -- Shown under a signal that has no colour and no icons -- a state the panel can reach and
 -- could not previously explain. Names both remedies; the second form is for a signal with no
 -- icons row of its own, where the menu is the only door.
-L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."] = true
-L["Move and size the icons under Layout Groups."] = true
 -- Row labels, so a signal names itself in the effects list rather than reading as its
 -- spell list. Resolved at render from the mark; never stored.
 -- ⚠ THE FIRST ONE NAMES THE FEATURE, NOT THE TRIGGER. It was "PI Helper — Big cooldown",
@@ -3238,4 +3201,21 @@ L["No built-in spell list on WoW Forever yet. Create a custom filter, then add s
 L["Profiles From Another Game Version"] = true
 L["Some of your profiles came from retail. Their Aura Designer setup has been put aside because spell IDs differ on WoW Forever, and comes back if you use them on retail again.\n\nWoW Forever has no built-in spell list yet: create a custom filter in the Filter Designer and add spells by ID."] = true
 L["Some of your profiles came from WoW Forever. Their Aura Designer setup has been put aside because spell IDs differ on retail, and comes back if you use them on WoW Forever again."] = true
+-- Settings card summaries: the short words a shut card prints in its corner.
+-- "%s only" and "%s hidden" take one or more frame names ("Party", "Party · Raid").
+L["%s only"] = true
+L["%s hidden"] = true
+L["%s shown"] = true
+L["%d custom"] = true
+L["Sized as %s"] = true
+L["All Addons"] = true
+L["All Content"] = true
+L["All Spells"] = true
+L["Auto"] = true
+L["Login Message"] = true
+L["Pixel-Perfect"] = true
+L["Player"] = true
+L["Shown"] = true
+L["Side Menu"] = true
+L["Updates"] = true
 --@end-do-not-package@

@@ -241,60 +241,42 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Stripes_Sparse.tga",
     "DF_Stripes_Very_Dense.tga",
     "DF_Tank.tga",
-    "Icons\\add.tga",
-    "Icons\\check.tga",
-    "Icons\\chevron_right.tga",
-    "Icons\\close.tga",
-    "Icons\\content_copy.tga",
-    "Icons\\delete.tga",
-    "Icons\\dot.tga",
-    "Icons\\download.tga",
-    "Icons\\edit.tga",
-    "Icons\\edit_square.tga",
-    "Icons\\expand_more.tga",
-    "Icons\\filter_alt.tga",
-    -- ⚠ BOTH filter_list files ship, and the .png is the live one -- it is the
-    -- heavier weight, which is what reads at 11-13px. They differ only in that, so
-    -- the trap is real: a call site written as ...\filter_list, with no extension,
-    -- silently resolves to the LIGHT .tga and looks like the icon simply did not
-    -- take. Every live reference spells out ".png".
+    "Icons\\add.png",
+    "Icons\\check.png",
+    "Icons\\chevron_right.png",
+    "Icons\\close.png",
+    "Icons\\content_copy.png",
+    "Icons\\delete.png",
+    "Icons\\dot.png",
+    "Icons\\download.png",
+    "Icons\\edit.png",
+    "Icons\\edit_square.png",
+    "Icons\\expand_more.png",
+    "Icons\\filter_alt.png",
     "Icons\\filter_list.png",
-    "Icons\\filter_list.tga",
-    "Icons\\info.tga",
-    "Icons\\keyboard.tga",
-    "Icons\\lock.tga",
-    "Icons\\lock_open.tga",
-    "Icons\\menu.tga",
-    "Icons\\mouse.tga",
-    "Icons\\notes.tga",
-    "Icons\\preview.tga",
-    "Icons\\preview_off.tga",
-    -- The first .png ICON we ship (the absorb bar textures were the first PNGs of any
-    -- kind). Deliberately left unconverted, to learn whether PNG icons behave.
-    --
-    -- ⚠ Listed here only because this manifest is GENERATED FROM THE FOLDER and has
-    -- to match it. Icons/ entries are INERT: the healing repair walks
-    -- TEXTURE_REPAIR_KEYS -- an explicit list of user-selectable PROFILE keys -- and
-    -- never enumerates this table, while GUI icons are hardcoded at their call sites
-    -- and go through a raw SetTexture rather than DF:SafeSetTexture. Nothing can heal
-    -- a GUI icon and nothing should try; a user cannot pick one, so a wrong one is a
-    -- bug in our source rather than a stale profile. That is true of every Icons\\
-    -- line above this one too.
-    "Icons\\question.png",
-    "Icons\\refresh.tga",
-    "Icons\\remove.tga",
-    "Icons\\reorder.tga",
-    "Icons\\save.tga",
-    "Icons\\search.tga",
-    "Icons\\settings.tga",
-    "Icons\\star.tga",
-    "Icons\\sync.tga",
-    "Icons\\sync_disabled.tga",
-    "Icons\\upload.tga",
-    "Icons\\visibility.tga",
-    "Icons\\visibility_off.tga",
-    "Icons\\warning.tga",
-    "Icons\\widget_small.tga",
+    "Icons\\info.png",
+    "Icons\\keyboard.png",
+    "Icons\\lock.png",
+    "Icons\\lock_open.png",
+    "Icons\\menu.png",
+    "Icons\\mouse.png",
+    "Icons\\notes.png",
+    "Icons\\preview.png",
+    "Icons\\preview_off.png",
+    "Icons\\refresh.png",
+    "Icons\\remove.png",
+    "Icons\\reorder.png",
+    "Icons\\save.png",
+    "Icons\\search.png",
+    "Icons\\settings.png",
+    "Icons\\star.png",
+    "Icons\\sync.png",
+    "Icons\\sync_disabled.png",
+    "Icons\\upload.png",
+    "Icons\\visibility.png",
+    "Icons\\visibility_off.png",
+    "Icons\\warning.png",
+    "Icons\\widget_small.png",
 }
 
 -- Lookup keyed BOTH ways: with the extension (how .png must be referenced) and
@@ -929,9 +911,11 @@ local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
 -- flag). These let the GUI bind a flag dropdown and a shadow checkbox to a single
 -- stored value without a destructive migration of existing profiles.
 
+-- A boolean is a Shadow tick that reached a store raw (a layout override or an
+-- old profile): true reads as shadow with no outline, false as none.
 -- Returns the flag portion (always "NONE" rather than "" for dropdown matching).
 function DF:OutlineFlag(stored)
-    stored = stored or "NONE"
+    if type(stored) ~= "string" then return "NONE" end
     local rest = stored:match("^SHADOW;(.*)$")
     if rest then stored = rest end
     if stored == "" or stored == "SHADOW" then return "NONE" end
@@ -940,7 +924,7 @@ end
 
 -- Returns true if the stored value includes a drop shadow.
 function DF:OutlineHasShadow(stored)
-    if not stored then return false end
+    if type(stored) ~= "string" then return stored == true end
     return stored == "SHADOW" or stored:match("^SHADOW;") ~= nil
 end
 
@@ -966,11 +950,15 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     -- every caller, and a corrupted import can store a boolean/number/table in
     -- a font key. Coerce instead of crashing (a bad outline once broke frame
     -- layout addon-wide on login): bad font name -> fallback font, bad size ->
-    -- default, bad outline -> no flags.
+    -- default, bad outline -> no flags (true -> shadow, as DF:OutlineHasShadow reads it).
     if type(fontNameOrPath) ~= "string" then fontNameOrPath = nil end
     fontSize = tonumber(fontSize) or 10
     if fontSize <= 0 then fontSize = 10 end
-    if type(outline) ~= "string" then outline = "" end
+    if outline == true then
+        outline = "SHADOW"
+    elseif type(outline) ~= "string" then
+        outline = ""
+    end
 
     -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
@@ -1144,6 +1132,10 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- How the settings pages' explainer banners start: "show", "fold" (as their
+    -- icon chip) or "off". Account-wide: it is about learning the window, not a
+    -- profile's look. Shown by default so a new user meets them.
+    pageTips = "show",
     -- The one-line greeting printed at login. Account-wide like its Notifications
     -- sibling above: it is chat chrome, not a per-profile visual. Default ON so a
     -- new user still learns `/df` exists; anyone who already knows can silence it.

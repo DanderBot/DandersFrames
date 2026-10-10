@@ -175,8 +175,8 @@ do
     if sum then
         check(sum:find("local g = DF:GetGlobalDB()", 1, true) ~= nil,
               "color picker: ...reading the account-wide table itself")
-        check(sum:find('L%["All"%]') ~= nil,
-              "color picker: ...naming the every-other-addon state from the locale")
+        check(sum:find('L%["All Addons"%]') ~= nil and sum:find('L%["Blizzard"%]') ~= nil,
+              "color picker: ...naming all three states: every addon, this one only, Blizzard's")
         check(sum:find('return ""', 1, true) ~= nil,
               "color picker: ...and saying nothing when there is no existing word for the state")
     end
