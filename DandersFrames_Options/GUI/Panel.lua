@@ -1595,11 +1595,32 @@ function DF:CreateGUI()
     -- nothing is allocated while dragging. Never takes the mouse -- it lies over the
     -- page the user is sizing.
     local splitGuide, splitLine
+    -- Whether the visible page puts anything in column 2. The designers and Nicknames
+    -- draw full width, so the width has no split on them to show. Asked of the
+    -- widgets rather than a page list so a page that gains or drops a second column
+    -- needs no edit here. The same skips as the layout pass: a right-aligned Copy
+    -- button is added as column 2 but sits above the columns, and a page with nothing
+    -- to copy (the Filter Designer) adds an empty zero-height frame there instead.
+    local function PageUsesColumn2()
+        local page = GUI.CurrentPageName and GUI.Pages and GUI.Pages[GUI.CurrentPageName]
+        if not (page and page.children) then return false end
+        for _, widget in ipairs(page.children) do
+            if widget.layoutCol == 2 and not widget.rightAlign
+               and not widget.settingsGroup and widget:IsShown() then
+                local h = widget.layoutHeight or 0
+                if widget.isSettingsGroup and widget.calculatedHeight then
+                    h = widget.calculatedHeight
+                end
+                if h > 0 then return true end
+            end
+        end
+        return false
+    end
     local function UpdateSplitGuide()
         local content = GUI.contentFrame
         -- Click casting draws its own panel in place of the page, with no columns.
         local x = content and GUI.SelectedMode ~= "clicks" and GUI.ColumnSplitX
-                  and GUI.ColumnSplitX() or nil
+                  and PageUsesColumn2() and GUI.ColumnSplitX() or nil
         if not x then
             if splitGuide then splitGuide:Hide() end
             return
