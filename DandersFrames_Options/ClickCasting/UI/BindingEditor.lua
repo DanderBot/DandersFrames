@@ -19,6 +19,8 @@ local TARGET_INFO = CC.TARGET_INFO
 local FRAME_INFO = CC.FRAME_INFO
 local FALLBACK_INFO = CC.FALLBACK_INFO
 local COMBAT_INFO = CC.COMBAT_INFO
+-- A new binding's priority (10 = highest, 1 = lowest). Anything else opens Advanced.
+local DEFAULT_PRIORITY = 5
 
 -- Local alias for shared UI tables (defined in UI/Main.lua)
 -- spellCells is now accessed via CC.spellCells
@@ -840,7 +842,7 @@ function CC:CreateEditBindingPanel()
         function()                  -- customGet: return stored priority
             -- Guard: the panel is built once (cached) and CreateSlider reads its
             -- initial value here BEFORE ShowEditBindingPanel assigns pendingBinding.
-            return (panel.pendingBinding and panel.pendingBinding.priority) or 5
+            return (panel.pendingBinding and panel.pendingBinding.priority) or DEFAULT_PRIORITY
         end,
         function(v)                 -- customSet: store priority unchanged
             if panel.pendingBinding then panel.pendingBinding.priority = v end
@@ -1129,7 +1131,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
-            priority = 5,  -- Default priority (10=highest, 1=lowest)
+            priority = DEFAULT_PRIORITY,
         }
         self:ApplySpellRank(panel.pendingBinding, spellData)
         
@@ -1234,8 +1236,8 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     local fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
     local hasAdvancedOptions = fallback.mouseover or fallback.target or fallback.selfCast or fallback.stopSpellTarget
         or fallback.alwaysCast or panel.pendingBinding.targetOnCast ~= nil
-    local currentPriority = panel.pendingBinding.priority or 5
-    if currentPriority ~= 5 then
+    local currentPriority = panel.pendingBinding.priority or DEFAULT_PRIORITY
+    if currentPriority ~= DEFAULT_PRIORITY then
         hasAdvancedOptions = true
     end
     
@@ -1638,7 +1640,7 @@ function CC:ProcessKeybind(bindType, key)
         modifiers = mods,
         scope = defaultScope,
         combat = defaultCombat,
-        priority = 5,  -- Default priority (10=highest, 1=lowest)
+        priority = DEFAULT_PRIORITY,
         -- Default to all frames
         frames = {
             dandersFrames = true,

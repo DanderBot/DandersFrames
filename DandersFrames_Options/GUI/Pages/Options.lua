@@ -5137,6 +5137,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         }), 30, "both")
     end)
     
-    -- General > Global Fonts
-    DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
+    -- General > Global Fonts. The last three of the chain's page hand-offs are created
+    -- further down it, so nothing is passed for them here.
+    DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton)
 end

@@ -1483,20 +1483,6 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
             container.Refresh = function()
                 cb:SetChecked(GetCurrentSet()[dbKey])
-                -- Optional disabled state: when container.enabledWhen() is false the
-                -- checkbox is greyed and can't be toggled (used where one toggle is
-                -- only meaningful while another option is in a particular state).
-                if container.enabledWhen then
-                    if container.enabledWhen() then
-                        cb:Enable()
-                        txt:SetTextColor(0.8, 0.8, 0.8)
-                        cb.Check:SetVertexColor(tc.r, tc.g, tc.b)
-                    else
-                        cb:Disable()
-                        txt:SetTextColor(0.4, 0.4, 0.4)
-                        cb.Check:SetVertexColor(0.4, 0.4, 0.4)
-                    end
-                end
                 if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
             end
             
