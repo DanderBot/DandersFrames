@@ -222,15 +222,18 @@ local function BuildLinkedFiltersSection(env, group)
     lfEditText:SetPoint("RIGHT", 0, 0)
     lfEditText:SetJustifyH("RIGHT")
     lfEditText:SetText(L["Manage Filters"])
-    local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
-    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
-    lfEdit:SetScript("OnLeave", function()
-        -- Re-read the accent rather than restoring lfTC: a party/raid switch can
-        -- repaint the card while the cursor is still on this.
-        local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
+    local function PaintLink()
+        local c = GUI.GetThemeColor()
         lfEditText:SetTextColor(c.r, c.g, c.b)
-    end)
+    end
+    PaintLink()
+    -- On the host's repaint list, so a tab switch re-tints it rather than a hover.
+    host.ThemeListeners = host.ThemeListeners or {}
+    table.insert(host.ThemeListeners, { UpdateTheme = function()
+        if not lfEdit:IsMouseOver() then PaintLink() end
+    end })
+    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
+    lfEdit:SetScript("OnLeave", PaintLink)
     lfEdit:SetScript("OnClick", function()
         if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
     end)
@@ -523,13 +526,14 @@ local function BuildMembersSection(env, group)
             -- Customise button (navigates to Effects tab for this indicator)
             -- Accent-tinted action button: persistent accent fill + accent border
             -- + accent label at rest, accent-wash hover.
+            -- ⚠ No opts.accent: a passed accent is treated as FIXED and never repainted,
+            -- so the live theme handed in froze at whichever tab built the row.
             local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
             custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
             GUI:StyleButton(custBtn, {
                 width = 56, height = 18,
                 text = L["Customise"],
                 tinted = true,
-                accent = GetThemeColor(),
             })
             local capturedAuraName = member.auraName
             local capturedIndID = member.indicatorID

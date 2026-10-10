@@ -26,13 +26,6 @@ local C_TEXT_DIM   = DF.GUI.Colors.textDim
 local C_RIGHT_PANEL_BG     = {r = 0.10, g = 0.10, b = 0.10, a = 1}
 local C_RIGHT_PANEL_BORDER = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}
 
--- Primary-CTA backdrop multipliers (applied to the theme accent color).
--- Mirrors AuraDesigner/UI/Cards.lua's "+ Add Indicator" button.
-local CTA_BG_RESTING     = 0.10
-local CTA_BORDER_RESTING = 0.50
-local CTA_BG_HOVER       = 0.20
-local CTA_BORDER_HOVER   = 0.80
-
 -- Row-height constant for GUI:CreateEditBox (label-above style).
 local EDIT_BOX_ROW_H = 56
 
@@ -938,8 +931,14 @@ function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, ySta
     -- Add Item button — opens a picker that excludes the "group" type
     -- (no nested groups). The picker is cached on the card so repeated
     -- clicks reuse the same frame instead of spawning new offscreen ones.
-    local addItemBtn
-    addItemBtn = GUI:CreateButton(parent, L["Add Item"], 100, 22, function()
+    -- The shared primary CTA, like the Aura Designer's "+ Add aura": the styler repaints
+    -- it on a tab switch. A hand-mixed tint here was painted once at build, and the
+    -- styler's own rest (grey, for a plain button) replaced it on every hide.
+    local addItemBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    GUI:StyleButton(addItemBtn, { width = 100, height = 22, primary = true, text = L["Add Item"],
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 } })
+    addItemBtn:SetScript("OnClick", function()
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
         if not BuildPicker then return end
         if card and not card._addItemPicker then
             card._addItemPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
@@ -958,28 +957,8 @@ function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, ySta
             -- of the card body, so the dropdown extends RIGHT and DOWN.
             picker:Open(addItemBtn, "left")
         end
-    end, "add")
-    -- Full-width CTA (matches AuraDesigner's "+ Add aura" button).
+    end)
     placeWide(addItemBtn, 0, 22)
-
-    -- Theme-tint the button to match AuraDesigner's CTA pattern.
-    do
-        local tc = GUI:GetThemeColor()
-        if addItemBtn.SetBackdropColor then
-            addItemBtn:SetBackdropColor(tc.r * CTA_BG_RESTING, tc.g * CTA_BG_RESTING, tc.b * CTA_BG_RESTING, 1)
-            addItemBtn:SetBackdropBorderColor(tc.r * CTA_BORDER_RESTING, tc.g * CTA_BORDER_RESTING, tc.b * CTA_BORDER_RESTING, 1)
-            addItemBtn:HookScript("OnEnter", function(self)
-                local c = GUI:GetThemeColor()
-                self:SetBackdropColor(c.r * CTA_BG_HOVER, c.g * CTA_BG_HOVER, c.b * CTA_BG_HOVER, 1)
-                self:SetBackdropBorderColor(c.r * CTA_BORDER_HOVER, c.g * CTA_BORDER_HOVER, c.b * CTA_BORDER_HOVER, 1)
-            end)
-            addItemBtn:HookScript("OnLeave", function(self)
-                local c = GUI:GetThemeColor()
-                self:SetBackdropColor(c.r * CTA_BG_RESTING, c.g * CTA_BG_RESTING, c.b * CTA_BG_RESTING, 1)
-                self:SetBackdropBorderColor(c.r * CTA_BORDER_RESTING, c.g * CTA_BORDER_RESTING, c.b * CTA_BORDER_RESTING, 1)
-            end)
-        end
-    end
     y = y - 32
     return y
 end

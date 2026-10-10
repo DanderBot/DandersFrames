@@ -24,6 +24,9 @@ local C_RAID       = {r = 1.0, g = 0.5, b = 0.2, a = 1}        -- Raid Orange
 local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
+-- A setting's caption inside a card: a step under C_TEXT so it does not read as the
+-- card's title, but well clear of C_TEXT_DIM, which is what a disabled one wears.
+local C_TEXT_CAPTION = {r = 0.78, g = 0.78, b = 0.78, a = 1}
 local C_WARNING    = {r = 0.95, g = 0.35, b = 0.35, a = 1}     -- Soft red: behaviour-change / caution notes
 -- Amber: "configured, but this will not render" notes in the Aura Designer — a state the
 -- user can fix, so it reads softer than the red above, which marks a behaviour change.
@@ -60,6 +63,7 @@ UI.Colors = {
     hover      = C_HOVER,
     text       = C_TEXT,
     textDim    = C_TEXT_DIM,
+    textCaption = C_TEXT_CAPTION,
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
     notice     = C_NOTICE,   -- amber for "configured but will not render" notes
     anchorRoot = C_ANCHOR_ROOT, -- green for a mover other movers are anchored to

@@ -231,9 +231,16 @@ do
         { "checkbox", "Use Class Color",  "capturedItem", "useClassColor" },
         { "checkbox", "Custom Color",     "capturedItem", "useColor" },
         { "colorpicker", "Color",         "capturedItem", "color" },
-        { "button",   "Add Item",         "(none)",       "(none)" },
     }, "items")
-    checkPlaced(funcBody(TD, "function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, yStart, group)"), "items")
+    local itemsBody = funcBody(TD, "function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, yStart, group)")
+    checkPlaced(itemsBody, "items")
+    -- Add Item is the shared primary CTA (not GUI:Create*, so outside the census): the
+    -- styler repaints it on a tab switch, which a hand-mixed tint never was.
+    local addItem = itemsBody:match("GUI:StyleButton%(addItemBtn, (%b{})%)") or ""
+    check(addItem:find("primary = true", 1, true) and addItem:find('L["Add Item"]', 1, true),
+          "items: Add Item is a primary styled button")
+    check(not addItem:find("accent", 1, true), "items: ...on the live accent, not a pinned one")
+    check(itemsBody:find("placeWide(addItemBtn", 1, true) ~= nil, "items: ...and it is placed")
 
     -- ☠ THE PER-ITEM EDITOR RECURSES, and in a pane its fields belong to the SAME
     -- group -- a nested call that dropped `group` would build them onto the pane's

@@ -11,8 +11,9 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 local S = GUI._state
-local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM =
-      GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM, C_TEXT_CAPTION =
+      GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim,
+      GUI.Colors.textCaption
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
@@ -5007,24 +5008,26 @@ function GUI:CreatePopoutPageTools(page)
     -- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
     -- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
     -- DFFontHighlightSmall in the SAME colour, and one step of size was all that
-    -- told the two apart. So on an opted-in band the caption takes the dim text
-    -- colour instead -- GUI.Colors.textDim, ~5.8:1 on the card's panel fill,
-    -- above the 4.5 floor for small text. The value it labels (the slider's
-    -- number, the dropdown's choice, the swatch) keeps its full brightness.
+    -- told the two apart. So on an opted-in band the caption takes the caption
+    -- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
+    -- value it labels (the slider's number, the dropdown's choice, the swatch)
+    -- keeps its full brightness.
+    -- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
+    -- in it too the card read as greyed out while every control in it was on.
     --
     -- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
     -- repaints its caption in SetEnabled -- text when on, textDim when off -- on
     -- every state pass, so a one-off paint would be undone the first time the
-    -- page refreshed. Mapped instead: the "on" colour becomes the dim one, and
-    -- the "off" colour stays dim at half alpha so a greyed setting still reads
-    -- as greyed beside a live one. Any other colour (an override marker's) passes
-    -- straight through. No factory changes, and a caption on any other page is
-    -- never touched.
+    -- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
+    -- and the "off" colour passes through as it is. Any other colour (an override
+    -- marker's) passes straight through. No factory changes, and a caption on any
+    -- other page is never touched.
+    -- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
+    -- whole widget to 0.4, so a second fade on the caption stacked differently per
+    -- control and greyed some settings far more than their neighbours.
     --
-    -- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint "on" with no alpha,
-    -- and greyed is painted at half alpha here; an "on" that passed the nil along
-    -- left nothing promising the half alpha would ever be undone, so a caption
-    -- could stay faded after its card was switched back on.
+    -- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
+    -- repaint that passed the nil along would keep whatever alpha the caption had.
     --
     -- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
     -- one.
@@ -5035,9 +5038,7 @@ function GUI:CreatePopoutPageTools(page)
         local set = fs.SetTextColor
         fs.SetTextColor = function(self, r, g, b, a)
             if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
-                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a or 1)
-            elseif near(r, C_TEXT_DIM.r) and near(g, C_TEXT_DIM.g) and near(b, C_TEXT_DIM.b) then
-                return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
+                return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
             end
             return set(self, r, g, b, a or 1)
         end

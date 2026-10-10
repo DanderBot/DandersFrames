@@ -680,10 +680,10 @@ do
 
     -- ---- quiet captions ---------------------------------------------------
     local quiet = TOOLS:match("local function QuietLabel%(fs%)(.-)\n    end\n") or ""
-    check(quiet:find("return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, a or 1)", 1, true) ~= nil,
-          "quiet: a live caption draws in the theme's dim text colour")
-    check(quiet:find("return set(self, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)", 1, true) ~= nil,
-          "quiet: ...a greyed one stays dim at half alpha, so off still reads as off")
+    check(quiet:find("return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)", 1, true) ~= nil,
+          "quiet: a live caption draws in the theme's caption tone")
+    check(quiet:find("C_TEXT_DIM", 1, true) == nil and quiet:find("0.5", 1, true) == nil,
+          "quiet: ...and a greyed one gets no second fade on top of its widget's own")
     check(quiet:find("return set(self, r, g, b, a or 1)", 1, true) ~= nil,
           "quiet: ...and any other colour passes straight through")
     check(quiet:find("SetFont", 1, true) == nil and quiet:find("upper", 1, true) == nil,
@@ -703,13 +703,16 @@ do
         local function ch(c) return (c <= 0.03928) and c / 12.92 or ((c + 0.055) / 1.055) ^ 2.4 end
         return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
     end
-    local dr, dg, db2 = rgb("C_TEXT_DIM")
-    local pr, pg, pb = rgb("C_PANEL")
-    check(dr and pr, "quiet: the palette is readable from Theme.lua")
-    if dr and pr then
-        local L1, L2 = lum(dr, dg, db2), lum(pr, pg, pb)
-        local ratio = (math.max(L1, L2) + 0.05) / (math.min(L1, L2) + 0.05)
-        check(ratio >= 4.5, string.format("quiet: the dim caption is %.2f:1 on the card's fill -- at least 4.5:1", ratio))
+    local function ratio(a, b)
+        local L1, L2 = lum(a[1], a[2], a[3]), lum(b[1], b[2], b[3])
+        return (math.max(L1, L2) + 0.05) / (math.min(L1, L2) + 0.05)
+    end
+    local cap, dim, txt, panel = { rgb("C_TEXT_CAPTION") }, { rgb("C_TEXT_DIM") }, { rgb("C_TEXT") }, { rgb("C_PANEL") }
+    check(cap[1] and dim[1] and txt[1] and panel[1], "quiet: the palette is readable from Theme.lua")
+    if cap[1] and dim[1] and txt[1] and panel[1] then
+        check(ratio(cap, panel) >= 4.5, string.format("quiet: the caption is %.2f:1 on the card's fill -- at least 4.5:1", ratio(cap, panel)))
+        -- A step under the title and value colour, and clear of what a greyed caption wears.
+        check(cap[1] < txt[1] and cap[1] > dim[1], "quiet: the caption tone sits between the text and dim colours")
     end
 
     -- ---- NO HEADER PREVIEWS -------------------------------------------

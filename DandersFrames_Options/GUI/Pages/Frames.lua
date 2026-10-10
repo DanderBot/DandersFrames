@@ -2460,12 +2460,18 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         unitSelTitle:SetPoint("LEFT", 0, 0)
         unitSelTitle:SetText(L["Unit Selection"])
         -- Match the GUI:CreateHeader norm: theme-colored + auto theme listener
+        local function PaintUnitSelCount()
+            local tc = GUI.GetThemeColor()
+            unitSelCount:SetTextColor(tc.r, tc.g, tc.b)
+        end
         -- (every sibling section title uses CreateHeader; replicate it here since
         --  this header is composite with a count badge + override indicator).
         local _utc = GUI.GetThemeColor()
         unitSelTitle:SetTextColor(_utc.r, _utc.g, _utc.b)
         unitSelTitle.UpdateTheme = function()
             local nc = GUI.GetThemeColor()
+        -- Repainted with the title: a roster change was the only thing that re-tinted it.
+        table.insert(self.child.ThemeListeners, { UpdateTheme = PaintUnitSelCount })
             unitSelTitle:SetTextColor(nc.r, nc.g, nc.b)
         end
         if not self.child.ThemeListeners then self.child.ThemeListeners = {} end
@@ -2477,8 +2483,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function UpdateUnitSelCount()
             local n = #((GetCurrentSet() and GetCurrentSet().players) or {})
             unitSelCount:SetText(n .. " " .. L["pinned"])
-            local tc = GUI.GetThemeColor()
-            unitSelCount:SetTextColor(tc.r, tc.g, tc.b)
+            PaintUnitSelCount()
         end
         UpdateUnitSelCount()
 

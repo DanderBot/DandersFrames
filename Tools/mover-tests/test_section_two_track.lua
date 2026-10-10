@@ -32,6 +32,7 @@ local UI = {
         background = { r = 0.08, g = 0.08, b = 0.08, a = 0.95 },
         text       = { r = 0.9,  g = 0.9,  b = 0.9 },
         textDim    = { r = 0.6,  g = 0.6,  b = 0.6 },
+        textCaption = { r = 0.78, g = 0.78, b = 0.78 },
         element    = { r = 0.20, g = 0.21, b = 0.22 },
         border     = { r = 0.31, g = 0.32, b = 0.33 },
     },
@@ -106,6 +107,7 @@ do
         setfenv(f, setmetatable({
             GUI = { SettingsBox = UI.SettingsBox },
             C_TEXT = UI.Colors.text, C_TEXT_DIM = UI.Colors.textDim,
+            C_TEXT_CAPTION = UI.Colors.textCaption,
             SnapLen = function(_, n) return n end,
         }, { __index = _G }))
         HELPERS = f()
@@ -241,7 +243,7 @@ if HELPERS and HELPERS.WireTwoTrack then
         eq(cy1, sy1 - 55, "centre: in one track the checkbox is simply the next row")
     end
 
-    print("-- Quiet captions: dim when live, dimmer when greyed, everything else untouched")
+    print("-- Quiet captions: the caption tone when live, plain dim when greyed, everything else untouched")
     do
         local function fontString()
             local fs = { _c = { 0.9, 0.9, 0.9, 1 } }
@@ -262,15 +264,16 @@ if HELPERS and HELPERS.WireTwoTrack then
         HELPERS.QuietLabels(g)
 
         local c = slider.label._c
-        eq(c[1], 0.6, "quiet: a slider's caption is repainted dim at once")
+        eq(c[1], 0.78, "quiet: a slider's caption is repainted in the caption tone at once")
         -- The factory's own SetEnabled repaints, on every state pass:
         slider.label:SetTextColor(0.9, 0.9, 0.9)
-        eq(slider.label._c[1], 0.6, "quiet: ...and stays dim when the factory repaints it 'on'")
+        eq(slider.label._c[1], 0.78, "quiet: ...and keeps it when the factory repaints it 'on'")
         slider.label:SetTextColor(0.6, 0.6, 0.6)
-        eq(slider.label._c[1], 0.6, "quiet: greyed, it keeps the dim colour...")
-        eq(slider.label._c[4], 0.5, "quiet: ...at half alpha, so a greyed setting still reads as greyed")
+        eq(slider.label._c[1], 0.6, "quiet: greyed, it takes the plain dim colour...")
+        eq(slider.label._c[4], 1, "quiet: ...with no extra fade -- the widget's own 0.4 does that, for every control alike")
         slider.label:SetTextColor(0.9, 0.9, 0.9)
-        eq(slider.label._c[4], 1, "quiet: switched back on, the caption is at full alpha again, not left faded")
+        eq(slider.label._c[1], 0.78, "quiet: switched back on, the caption tone returns")
+        eq(slider.label._c[4], 1, "quiet: ...at full alpha")
         slider.label:SetTextColor(1, 0.5, 0, 1)
         eq(slider.label._c[1], 1, "quiet: any other colour (an override marker's) passes straight through")
         eq(box.label._c[1], 0.9, "quiet: a checkbox's caption is the control, and keeps its colour")

@@ -409,10 +409,19 @@ function UI:StyleButton(btn, opts)
         btn.dfTabStripe = stripe
     end
 
+    -- The colour the rest state was last painted in. Undoing a hover on HIDE restores
+    -- this rather than reading the live accent: a page is hidden AFTER the accent has
+    -- moved to the tab being entered, so a live read re-themed the page being left
+    -- (half of it -- the border, not the label) while its repaint stamp still said
+    -- it was in its own colour, and it came back that way.
+    local a0 = accent or host:GetAccent()
+    local restColor = { r = a0.r, g = a0.g, b = a0.b }
+
     -- The resting backdrop the button returns to on mouse-out (and that primary
     -- buttons also wear permanently): accent-tinted for primary, the active-tab
     -- panel colour for active tabs, otherwise the neutral element colour.
     local function restBackdrop(self, a)
+        restColor.r, restColor.g, restColor.b = a.r, a.g, a.b
         if isTabStyle then
             -- Underline tab: a faint neutral cell when inactive (so every tab's
             -- bounds stay visible and the active one doesn't appear to "grow"),
@@ -629,11 +638,11 @@ function UI:StyleButton(btn, opts)
     -- cannot just Show() the texture. The real mouseover is unaffected either
     -- way: locking an already-hovered button is a no-op, and unlocking one still
     -- under the mouse leaves the client's own highlight up.
-    local function applyHoverState(self, hovered)
+    local function applyHoverState(self, hovered, rest)
         if not hovered then
             if isTabStyle or ghost then return end
             if self:IsEnabled() and not self.dfDisabled then
-                restBackdrop(self, accent or host:GetAccent())
+                restBackdrop(self, rest or accent or host:GetAccent())
             end
             return
         end
@@ -690,7 +699,8 @@ function UI:StyleButton(btn, opts)
     -- ⚠ HookScript, not SetScript: OnHide is a script a CALLER may already own (unlike
     -- OnEnter/OnLeave, which StyleButton owns by contract) — this composes instead of
     -- silently replacing theirs.
-    btn:HookScript("OnHide", function(self) applyHoverState(self, false) end)
+    -- ⚠ In the colour it was last painted in, never the live accent -- see restColor.
+    btn:HookScript("OnHide", function(self) applyHoverState(self, false, restColor) end)
     return btn
 end
 
@@ -2471,11 +2481,12 @@ function UI:CreateSlider(parent, opts)
     container.SetEnabled = function(self, enabled)
         self.dotLocked = not enabled
         slider:SetEnabled(enabled)
-        -- Grey the numeric value box too: it was only EnableMouse'd (clicks blocked
-        -- but still full-bright + typeable), so it stayed lit while the track dimmed.
+        -- The whole widget fades, as every other control's SetEnabled does -- a slider
+        -- that only dimmed its caption read as less disabled than the dropdown beside
+        -- it. The value box goes with it, so it cannot stay lit while the track dims.
+        self:SetAlpha(enabled and 1 or 0.4)
         input:EnableMouse(enabled)
         input:SetEnabled(enabled)
-        input:SetAlpha(enabled and 1 or 0.4)
         local tc = accentColor or host:GetAccent()
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
