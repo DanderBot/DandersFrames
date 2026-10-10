@@ -62,6 +62,8 @@
 - (Settings) Setting names on cards are easier to read, and switching a card off now greys all its settings evenly. (by Krathe)
 - (Settings) The column guide shown while resizing the window no longer appears on full-width pages such as the Filter Designer. (by Krathe)
 - (Click Casting) Fix the binding editor opening its Advanced section for every binding instead of only those with a changed priority. (by Krathe)
+- (Settings) Card titles now line up whether or not the card has an on/off switch. (by Krathe)
+- (Settings) Hovering a card's icon now shows all its icons in the usual tooltip, evenly sized. (by Krathe)
 
 ### Changes
 
