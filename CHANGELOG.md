@@ -58,6 +58,10 @@
 - (Settings) Fix lag while resizing the settings window. (by Krathe)
 - (Settings) Fix cards drawing at the wrong width when the page folds to one column, and long checkbox labels overlapping. (by Krathe)
 - (Settings) Fix memory building up each time a texture, font or sound menu was opened. (by Krathe)
+- (Settings) Fix buttons keeping the previous tab's colour after switching from GLOBAL to Party or Raid, until you hovered them. (by Krathe)
+- (Settings) Setting names on cards are easier to read, and switching a card off now greys all its settings evenly. (by Krathe)
+- (Settings) The column guide shown while resizing the window no longer appears on full-width pages such as the Filter Designer. (by Krathe)
+- (Click Casting) Fix the binding editor opening its Advanced section for every binding instead of only those with a changed priority. (by Krathe)
 
 ### Changes
 
