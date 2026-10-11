@@ -787,8 +787,8 @@ local function samplePoolGrowth()
                         .. " this one group at once%s. Latched for the session — this line is proof"
                         .. " the overflow happened even if a kick has already healed the display.",
                         tostring(unit), tostring(key), base, n, base,
-                        gated and " — and this is a GATED group (HELPFUL + spell-ID pool), so that"
-                            .. " is the identity-gate fail-open flood" or "")
+                        gated and " — and this group's HELPFUL exclude list is skipped when the"
+                            .. " identity gate declines, so this is likely that flood" or "")
                 end
             end
         end
@@ -1271,8 +1271,10 @@ regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- token-shaped, but that is a DOC-STRING claim never verified live; if the C side has
 -- any state-dependent window during loading/roster sync, zone-in is where it is. One
 -- full re-parse after the world settles re-runs the gate against settled state and
--- unlatches any aura parsed during the window. Cheap either way: one test-exit-sized
--- kick per loading screen.
+-- unlatches any aura parsed during the window. On 12.1.5 that wrong verdict BLANKS an
+-- include pool for the aura's lifetime instead of flooding it, which is harder to spot,
+-- so the kick matters more there, not less. Cheap either way: one test-exit-sized kick
+-- per loading screen.
 regenFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 regenFrame:SetScript("OnEvent", function(_, event)
     local delay = (event == "PLAYER_ENTERING_WORLD") and 8 or 2
@@ -1549,13 +1551,9 @@ end
 -- borders carried on showing on his allowed players while Power Infusion was on cooldown.
 -- The gate flipped, the push landed, the filter did not blank the slot.
 --
--- ☠ BECAUSE includeSpellIDs CAN FAIL OPEN. It is evaluated INSIDE
--- CanApplyIdentityCandidateFilters, and when the identity gate declines -- range,
--- visibility, a cinematic, any of the reasons the latch work exists -- the include map is
--- skipped entirely and EVERY helpful aura passes (see the IDENTITY-GATE EXPOSURE note
--- below, and memory §15: "gate decline => include AND exclude maps SKIPPED"). A "dead"
--- filter built on it is dead only while the gate happens to be applied, which in a raid
--- is intermittently -- and every report of this bug was intermittent.
+-- ☠ BECAUSE 12.1.0 SKIPPED includeSpellIDs WHEN THE IDENTITY GATE DECLINED, and every
+-- helpful aura passed. 12.1.5 rejects instead, so the old map would hold there too, but
+-- this lever does not depend on the gate at all.
 --
 -- ✅ maxDuration = 0 IS EVALUATED OUTSIDE THAT GATE, in readable Lua
 -- (DoesAuraPassCandidateFilters), and excludes every aura unconditionally: a timed one
@@ -1850,45 +1848,18 @@ local function recordCandidateFilters(rec, config)
     return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
 end
 
--- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
--- include/excludeSpellIDs are only evaluated inside
--- CanApplyIdentityCandidateFilters, which for HELPFUL auras requires
--- UnitCanAssist("player", unit) — and a FAILED gate SKIPS the checks entirely
--- (fail-open: every helpful aura passes). UnitCanAssist flips FALSE for a
--- CROSS-FACTION group member outside instanced content — and for a duel
--- partner — so an "only these spells" pool silently degrades to "every buff"
--- (food buffs flooding the defensive row; caught live via a cross-faction
--- party + duel, DF_AuraLab probe 38). A pool whose SELECTION rides identity
--- filtering renders garbage under a failed gate, so the handle hides itself
--- until the gate holds again (HISTORICAL — the DF-side gate was demolished after
--- build 69465's exit A2; see the demolition note above SetUnitDeathLatched. The
--- classification below survives as inert bookkeeping for the dump). Vulnerable =
--- HELPFUL pool with ANY of:
---   * includeSpellIDs — REGARDLESS of tokens. "HELPFUL|PLAYER" is NOT immune
---     (field-caught 2026-07-18): the PLAYER token still narrows the pool at
---     the query level, but the spell-ID whitelist is skipped — so a My Buffs
---     slot degrades to "anything I cast", and buffs persisting from instanced
---     content (Fortitude on a cross-faction ally) render in it. The earlier
---     "PLAYER pools are immune" note was a probe artifact (no other
---     player-cast aura on the test target, so the failed-open pool was empty).
---   * excludeSpellIDs — "everything except X" degrades to "everything",
---     re-showing buffs the user chose to hide; gated for a uniform blackout
---     on non-assistable units (Krathe's call, 2026-07-18).
---   * a spell-CATEGORY token (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE, negated or
---     not — the defensive row's empty-selection fallback): the category is
---     spell-identity-derived, same fail-open family.
--- NOT gated: genuinely unfiltered pools (plain HELPFUL, no selection) — their
--- data is CORRECT on a non-assistable unit (probe: the ALL row showed the real
--- buffs), so hiding them would hide truth, not garbage. HARMFUL pools are out
--- of scope (their gate is UnitCanAttack — owned by the debuff-filtering work).
---
--- ★★ 69465 (hotfix 2026-08-24): the ENGINE added exit A2 — HELPFUL filters are now
--- ALWAYS applied for group-member tokens (UnitIsPlayerControlledOrGroupMember,
--- token-shape, immune to MC/death/cinematics/vehicles/phasing). The vulnerability
--- CLASSIFICATION here is unchanged — it describes the filters a pool carries — but
--- the VERDICT mirrors the exemption (see UnitExemptFromHelpfulGate): on 69465+ the
--- assist-side gate effectively applies only to non-group tokens (pinned bossN,
--- target/focus dynamics).
+-- IDENTITY-GATE EXPOSURE, as 12.1.5 evaluates it. include/excludeSpellIDs are tested only
+-- inside CanApplyIdentityCandidateFilters. Helpful auras on group-member tokens always pass
+-- it (exit A2); anywhere else it needs UnitCanAssist, which fails for a cross-faction unit
+-- outside instances, a duel partner or a mind-controlled pinned unit. When it declines:
+--   * an include list REJECTS the aura, so the pool renders blank rather than flooding.
+--     Not counted as vulnerable: nothing wrong can show.
+--   * an exclude list is SKIPPED, so "everything except X" shows everything.
+--   * a spell-CATEGORY token (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE, the defensive row's
+--     empty-selection fallback) is decided in C where we cannot see it, so it is treated
+--     as the exclude case.
+-- Plain HELPFUL pools carry no selection and are correct on any unit. Nothing acts on
+-- this classification any more; it feeds the dump and the POOL GREW warning.
 local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true }
 
 -- ★ THE NeverSecret EXEMPTION, and why it is EXCLUDE-ONLY. The engine's identity gate has
@@ -1901,10 +1872,8 @@ local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true 
 --     output in both trust states ⇒ genuinely not vulnerable ⇒ parking it would hide
 --     correct data for nothing. This also honours the 2026-07-18 uniform-blackout call
 --     better than the blackout did: the buffs the user chose to hide STAY hidden.
---   * ☠ An includeSpellIDs pool can NEVER take this exemption, whatever its map holds.
---     The leak is not the mapped spells — it is every OTHER secret helpful aura on the
---     unit skipping the include test and pouring in. The exemption is a property of the
---     AURA being tested, not of our map. Do not "symmetrise" this.
+--   * An includeSpellIDs pool needs no exemption: a declined gate rejects every aura it
+--     does not exempt, so the pool can only lose auras, never gain them.
 -- Secrecy is a static DB2 property, so one session cache; pcall + guards because the
 -- C_Secrets surface is 12.x-only and a probe failure must degrade to "vulnerable"
 -- (park too much, never leak).
@@ -1928,7 +1897,7 @@ end
 
 local function filterVulnerableToIdentityGate(filterString, cf)
     if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
-    if cf and cf.includeSpellIDs then return true end
+    if cf and cf.includeSpellIDs then return false end
     if cf and cf.excludeSpellIDs and not excludeSetAllNeverSecret(cf.excludeSpellIDs) then
         return true
     end
@@ -4679,7 +4648,7 @@ function NativeBackend:build()
                     -- token records stay live while the identity-dependent ones park.
                     -- ☠ THE PREDICATE IS `filterVulnerableToIdentityGate`, i.e. exactly the
                     -- records whose filters the ENGINE can skip: HELPFUL pools carrying
-                    -- include/excludeSpellIDs. It used to be RecordIdentityGated -- four
+                    -- an exclude list or a category token. It used to be RecordIdentityGated -- four
                     -- category booleans on the DEBUFF row -- which the engine applies
                     -- unconditionally (Blizzard_AuraContainerUtil: only the two spell-ID
                     -- keys sit inside CanApplyIdentityCandidateFilters). Those booleans
