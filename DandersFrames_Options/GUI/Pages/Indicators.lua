@@ -1530,9 +1530,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- old map-based ALL instead of underneath it, and once ALL moved onto the
         -- token (the secrecy fix in Features/Auras.lua) they were byte-identical.
         -- Every peer offers exactly two modes, as does DF's own dispel overlay.
+        -- Read as one phrase under the label: "Dispellable: By Me".
         local dispelModeOptions = {
-            PLAYER = L["Dispellable By Me"],
-            ALL    = L["All Dispellable"],
+            PLAYER = L["By Me"],
+            ALL    = L["All"],
             _order = { "PLAYER", "ALL" },
         }
         -- Blizzard's fixed categories, in the order the old page listed them.
@@ -1541,7 +1542,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { key = "debuffFilterRole",         name = "Role Debuffs",        desc = "Debuffs Blizzard flags as important for your role." },
             { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
             { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
-            { key = "debuffFilterRaid",         name = "Raid Debuffs",        desc = "Other debuffs Blizzard flags for raid frames." },
             -- ⚠ Inserted BEFORE Dispellable, not appended: the entry below claims the
             -- dispel-mode dropdown is "just below", which is only true while it is the
             -- last row in this group.
@@ -1549,7 +1549,85 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ⚠ "just below" stays true on this page: the dispel-mode dropdown
             -- is the next widget in this same group.
             { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },
+            { key = "debuffFilterImportant",        name = "Important",                 desc = "Debuffs Blizzard flags as important (its IMPORTANT filter). Not the same set as the Highlight card, which marks boss, role and priority debuffs." },
+            { key = "debuffFilterRaidInCombat",     name = "Raid In Combat",            desc = "Debuffs Blizzard flags to show on raid frames in combat." },
+            { key = "debuffFilterMagic",   name = "Magic",   desc = "Magic debuffs, whoever can dispel them." },
+            { key = "debuffFilterCurse",   name = "Curse",   desc = "Curse debuffs, whoever can dispel them." },
+            { key = "debuffFilterPoison",  name = "Poison",  desc = "Poison debuffs, whoever can dispel them." },
+            { key = "debuffFilterDisease", name = "Disease", desc = "Disease debuffs, whoever can dispel them." },
+            { key = "debuffFilterBleed",   name = "Bleed",   desc = "Bleed effects." },
+            { key = "debuffFilterPlayer",  name = "From Any Player", desc = "Debuffs a player or their pet applied, including you: Sated, Forbearance and the like. Show adds them; Hide removes them." },
+            { key = "debuffFilterMine",    name = "Cast By You",     desc = "Debuffs you or your pet applied. Show adds them; Hide removes them." },
         }
+        -- Every Hide-column key, for the summary's count. Each maps to a filter
+        -- Blizzard applies on every unit (DebuffHideSpec in Features/Auras.lua), so
+        -- these hold on friendly frames too.
+        local DEBUFF_HIDES = {
+            { key = "debuffHideBoss" },
+            { key = "debuffHideRole" },
+            { key = "debuffHidePriority" },
+            { key = "debuffHideCrowdControl" },
+            { key = "debuffHideDispellable" },
+            { key = "debuffHideNonPlayer" },
+            { key = "debuffHidePlayer" },
+            { key = "debuffHideImportant" },
+            { key = "debuffHideRaidInCombat" },
+            { key = "debuffHideMagic" },
+            { key = "debuffHideMine" },
+            { key = "debuffHideCurse" },
+            { key = "debuffHidePoison" },
+            { key = "debuffHideDisease" },
+            { key = "debuffHideBleed" },
+        }
+
+        -- The Debuff Filters card's rows: a Show box and a Hide box per category, in
+        -- three short groups. Tooltips come from the category list above.
+        local function DescFor(showKey)
+            for _, c in ipairs(DEBUFF_CATEGORIES) do if c.key == showKey then return c.desc end end
+        end
+        local function Row(name, show, hide, desc, byAll, extra)
+            local r = { name = name, show = show, hide = hide, desc = desc or DescFor(show), byAll = byAll }
+            for k, v in pairs(extra or {}) do r[k] = v end
+            return r
+        end
+        -- Combinations that cannot work. Hiding both non-player and player-cast debuffs
+        -- hides everything, so each Hide box leaves while the other is ticked (unless
+        -- both already are, so either can be cleared). Cast By You is a part of From Any
+        -- Player, so hiding that leaves the row nothing to do.
+        local function NonPlayerHideOff(d) return d.debuffHidePlayer and not d.debuffHideNonPlayer end
+        local function PlayerHideOff(d) return d.debuffHideNonPlayer and not d.debuffHidePlayer end
+        local function MineOff(d) return d.debuffHidePlayer and true or false end
+        local DEBUFF_ROW_SECTIONS = {
+            { caption = "Blizzard Flags", rows = {
+                Row("Boss",                    "debuffFilterBoss",         "debuffHideBoss"),
+                Row("Role",                    "debuffFilterRole",         "debuffHideRole"),
+                Row("Priority",                "debuffFilterPriority",     "debuffHidePriority"),
+                Row("Important",               "debuffFilterImportant",    "debuffHideImportant"),
+                Row("Raid In Combat",          "debuffFilterRaidInCombat", "debuffHideRaidInCombat"),
+                Row("Crowd Control",           "debuffFilterCrowdControl", "debuffHideCrowdControl"),
+            } },
+            { caption = "Dispels", rows = {
+                Row("Dispellable", "debuffFilterDispellable", "debuffHideDispellable"),
+            } },
+            -- `byAll`: every type is already shown when Dispellable is shown as All
+            -- Dispellable (Blizzard's own list of dispellable types includes Bleed), so
+            -- the group's Show column would add nothing then.
+            { caption = "Dispel Type", byAll = true, rows = {
+                Row("Magic",   "debuffFilterMagic",   "debuffHideMagic",   nil, true),
+                Row("Curse",   "debuffFilterCurse",   "debuffHideCurse",   nil, true),
+                Row("Poison",  "debuffFilterPoison",  "debuffHidePoison",  nil, true),
+                Row("Disease", "debuffFilterDisease", "debuffHideDisease", nil, true),
+                Row("Bleed",   "debuffFilterBleed",   "debuffHideBleed",   nil, true),
+            } },
+            { caption = "Who Cast It", rows = {
+                Row("Non-Player",      "debuffFilterNonPlayer", "debuffHideNonPlayer",
+                    "Debuffs no player or pet applied: from bosses, mobs and the environment. Show adds them; Hide removes them, leaving only player-cast debuffs.",
+                    nil, { hideOffWhen = NonPlayerHideOff }),
+                Row("From Any Player", "debuffFilterPlayer",    "debuffHidePlayer", nil, nil, { hideOffWhen = PlayerHideOff }),
+                Row("Cast By You",     "debuffFilterMine",      "debuffHideMine",   nil, nil, { offWhen = MineOff }),
+            } },
+        }
+
         -- The blacklist's catalog, read once for the page: the row's COUNT and its
         -- summary are both arithmetic over it, and both are written outside the
         -- builder that lists it.
@@ -1722,18 +1800,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- opposite of what a row's tick means. This is a WAY IN.
         local function BuildDebuffFilterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            local function Changed()
+                tools2.refreshStates()
+                DebuffFilterChanged()
+            end
 
             group:AddWidget(GUI:CreateLabel(parent,
                 "|cff888888" .. L["These categories are Blizzard's and cannot be edited."] .. "|r", 250), 35)
 
-            local showAllCb = group:AddWidget(GUI:CreateCheckbox(parent, L["All Debuffs"], db, "directDebuffShowAll", function()
-                tools2.refreshStates()
-                DebuffFilterChanged()
-            end), 30)
-            showAllCb.tooltip = L["Show every debuff with no filtering."]
+            local showAllCb = group:AddWidget(GUI:CreateCheckbox(parent, L["All Debuffs"], db, "directDebuffShowAll", Changed), 30)
+            showAllCb.tooltip = L["Show every debuff. Tick Hide on a category to take it away."]
             -- A row of its own when the card lays out two per row: it overrides the
-            -- whole list below it, so it must not read as the list's first entry.
-            -- Inert on a one-track group (classic, a pinned panel).
+            -- whole Show column, so it must not read as the list's first entry.
             showAllCb.fullRow = true
 
             -- The only real warning here, and it is about the COMBINATION: any single
@@ -1784,18 +1862,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             catCaution.hideOn = function(d) return (d.directDebuffShowAll and true) or false end
             group:AddWidget(catCaution, catCaution.layoutHeight or 45)
 
-            for _, cat in ipairs(DEBUFF_CATEGORIES) do
-                local cb = group:AddWidget(GUI:CreateCheckbox(parent, L[cat.name], db, cat.key, function()
-                    tools2.refreshStates()
-                    DebuffFilterChanged()
-                end), 30)
-                -- Body only; the title comes from the checkbox label automatically.
-                cb.tooltip = L[cat.desc]
-                -- All Debuffs overrides the whole list.
-                cb.disableOn = function(d) return d.directDebuffShowAll end
-            end
-
-            -- Which dispels count: a sub-option of the Dispellable Debuffs row above.
+            -- With All Debuffs as the base every category already shows, so only the
+            -- Show segment greys; Hide still applies.
+            -- Which dispels count: a sub-option of the Dispellable row.
             -- ⚠ BOTH its gates live in this group now, so unlike its previous home it
             -- can never be greyed with nothing on the page able to lift it.
             --
@@ -1813,19 +1882,55 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if db.directDebuffDispellableMode == "ANY" then
                 db.directDebuffDispellableMode = "ALL"
             end
-            local dispelDD = group:AddWidget(GUI:CreateDropdown(parent, L["Dispellable Debuffs"], dispelModeOptions, db, "directDebuffDispellableMode", function()
-                DebuffFilterChanged()
-            end), 55)
-            dispelDD.disableOn = function(d)
-                return d.directDebuffShowAll or not d.debuffFilterDispellable
+            -- Two columns: Show adds a category, Hide takes it away, in either
+            -- base; ticking both hides it. With All Debuffs everything already shows,
+            -- so the Show column is hidden.
+            local function InAll(d) return d.directDebuffShowAll and true or false end
+            local function AllDispelShown(d)
+                local m = d.directDebuffDispellableMode
+                return d.debuffFilterDispellable and (m == "ALL" or m == "ANY")
             end
-            dispelDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
+            local function TypeShowMoot(d) return InAll(d) or AllDispelShown(d) end
+            -- Hiding every dispellable leaves the per-type rows nothing to show or hide.
+            local function AllDispelHidden(d)
+                local m = d.directDebuffDispellableMode
+                return d.debuffHideDispellable and (m == "ALL" or m == "ANY") and true or false
+            end
+            for i, section in ipairs(DEBUFF_ROW_SECTIONS) do
+                if i > 1 then
+                    local sep = group:AddWidget(GUI:CreateSeparator(parent), 14)
+                    sep.fullRow = true
+                end
+                local head = group:AddWidget(GUI:CreateShowHideHeader(parent, L[section.caption], db,
+                    { showOffWhen = section.byAll and TypeShowMoot or InAll }), 24)
+                head.fullRow = true
+                for _, r in ipairs(section.rows) do
+                    local row = group:AddWidget(GUI:CreateShowHideRow(parent, L[r.name], db, r.show, r.hide, Changed,
+                        { showOffWhen = r.byAll and TypeShowMoot or InAll, hideOffWhen = r.hideOffWhen,
+                          offWhen = r.offWhen or (r.byAll and AllDispelHidden) or nil }), 26)
+                    row.tooltip = L[r.desc]
+                    row.fullRow = true
+                    if r.show == "debuffFilterDispellable" then
+                        -- Changed, not just the filter rebuild: the mode also decides whether
+                        -- the Dispel Type rows' Show boxes mean anything.
+                        local dispelDD = group:AddWidget(GUI:CreateDropdown(parent, L["Dispellable"], dispelModeOptions, db, "directDebuffDispellableMode", Changed), 55)
+                        -- Which dispels the Dispellable row means, for Show and Hide alike;
+                        -- idle while that row changes nothing.
+                        dispelDD.disableOn = function(d)
+                            return not ((not d.directDebuffShowAll and d.debuffFilterDispellable) or d.debuffHideDispellable)
+                        end
+                        dispelDD.tooltip = L["Which debuffs the Dispellable row means."]
+                            .. "\n|cffffffff" .. L["By Me"] .. ":|r " .. L["ones you can dispel."]
+                            .. "\n|cffffffff" .. L["All"] .. ":|r " .. L["any debuff with a dispel type."]
+                    end
+                end
+            end
         end
 
         -- Hide Duplicate Debuffs' tooltip. Declared here, above Debuff Filters,
         -- because in Modern the checkbox sits at the foot of that section; classic
         -- still builds it in its own Deduplication box further down.
-        local DEDUP_TIP = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
+        local DEDUP_TIP = L["Hides a category from the bar when an Aura Designer group shows all of it. If a group narrows a category (with Hide ticks, Hide Long Debuffs or Hide Permanent Auras), its debuffs can appear in both places."]
 
         -- What the row says with the panel shut: how much of Blizzard's list is
         -- switched on, in the "3/7" shape the Buff Filters row uses, plus which
@@ -1842,9 +1947,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     if d[cat.key] then on = on + 1 end
                 end
                 parts[#parts + 1] = format("%d/%d", on, #DEBUFF_CATEGORIES)
-                local mode = d.debuffFilterDispellable and dispelModeOptions[d.directDebuffDispellableMode]
-                if mode then parts[#parts + 1] = mode end
             end
+            local hidden = 0
+            for _, h in ipairs(DEBUFF_HIDES) do
+                if d[h.key] then hidden = hidden + 1 end
+            end
+            if hidden > 0 then parts[#parts + 1] = format(L["Hiding %d"], hidden) end
             return Join(parts)
         end
 
@@ -2029,6 +2137,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function HideDebuffMaxDurControls(d)
             return not DF:FactoryOwnsDebuffRow(d)
         end
+        local maxDurUnitOptions = {
+            MINUTES = L["Minutes"],
+            SECONDS = L["Seconds"],
+            _order = { "MINUTES", "SECONDS" },
+        }
 
         local function BuildDebuffOrderGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -2057,16 +2170,39 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 30)
             dfMaxDur.hideOn = HideDebuffMaxDurControls
             dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+            -- Seconds are for short encounter mechanics; Minutes is the original slider
+            -- and the default, so existing profiles read exactly what they always did.
+            local dfMaxDurUnit = group:AddWidget(GUI:CreateDropdown(parent, L["Threshold Unit"], maxDurUnitOptions, db, "debuffMaxDurationUnit", function()
+                DebuffFilterChanged()
+                tools2.refreshStates()
+            end), 55)
+            dfMaxDurUnit.hideOn = HideDebuffMaxDurControls
+            dfMaxDurUnit.disableOn = function(d) return not d.debuffMaxDurationEnabled end
             local dfMaxDurSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DebuffFilterChanged), 55)
-            dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
+            dfMaxDurSlider.hideOn = function(d)
+                return HideDebuffMaxDurControls(d) or d.debuffMaxDurationUnit == "SECONDS"
+            end
             dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
+            local dfMaxDurSecSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Longer Than (seconds)"], 1, 60, 1, db, "debuffMaxDurationSeconds", nil, DebuffFilterChanged), 55)
+            dfMaxDurSecSlider.hideOn = function(d)
+                return HideDebuffMaxDurControls(d) or d.debuffMaxDurationUnit ~= "SECONDS"
+            end
+            dfMaxDurSecSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
 
             local dfKeepImportant = group:AddWidget(GUI:CreateCheckbox(parent, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DebuffFilterChanged), 30)
             dfKeepImportant.hideOn = HideDebuffMaxDurControls
+            -- It only protects the Boss, Role and Priority rows' debuffs, so it needs one shown.
             dfKeepImportant.disableOn = function(d)
                 return d.directDebuffShowAll or not d.debuffMaxDurationEnabled
+                    or not (d.debuffFilterBoss or d.debuffFilterRole or d.debuffFilterPriority)
             end
             dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
+
+            local dfHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Permanent Auras"], db, "debuffHidePermanent", DebuffFilterChanged), 30)
+            dfHidePerm.hideOn = HideDebuffMaxDurControls
+            -- A duration threshold already drops permanent debuffs, so this does nothing then.
+            dfHidePerm.disableOn = function(d) return d.debuffMaxDurationEnabled end
+            dfHidePerm.tooltip = L["Hide debuffs with no duration, such as auras that last until cancelled. Hide Long Debuffs also hides these while it is on."]
         end
 
         -- What sorting is doing, in the dropdown's own words, plus the one refinement
@@ -2077,6 +2213,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local sort = debuffSortOptions[d.directDebuffSortOrder]
             if sort then parts[#parts + 1] = sort end
             if d.directDebuffSortReverse then parts[#parts + 1] = L["Reverse Order"] end
+            if d.debuffMaxDurationEnabled then
+                if d.debuffMaxDurationUnit == "SECONDS" then
+                    parts[#parts + 1] = format(L["Under %ds"], tonumber(d.debuffMaxDurationSeconds) or 0)
+                else
+                    parts[#parts + 1] = format(L["Under %dm"], tonumber(d.debuffMaxDurationMinutes) or 0)
+                end
+            end
             return Join(parts)
         end
 
@@ -2534,7 +2677,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         if classicLayout then
             local impGroup = GUI:CreateSettingsGroup(self.child, 280)
-            local impHeader = GUI:CreateHeader(self.child, L["Important Debuffs"])
+            local impHeader = GUI:CreateHeader(self.child, L["Highlight"])
             impGroup:AddWidget(impHeader, 40)
             -- 13px: the marker art is a filled disc, so it reads heavier than the padded
             -- icon atlases the section previews use — matched to the header text rather
@@ -2569,7 +2712,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 --
                 -- A pin: it decides how the important ones LOOK (size, marker), not
                 -- which debuffs show -- those were already chosen by the filters.
-                local band = OpenSection(L["Important Debuffs"], "debuffs_important", 2, ImportantDebuffsSummary, DebuffsOffRow, nil,
+                local band = OpenSection(L["Highlight"], "debuffs_important", 2, ImportantDebuffsSummary, DebuffsOffRow, nil,
                     BuildImportantDebuffsGroup, {
                         db = db, key = "debuffImportantHighlight", label = L["Highlight Important Debuffs"],
                         tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."],

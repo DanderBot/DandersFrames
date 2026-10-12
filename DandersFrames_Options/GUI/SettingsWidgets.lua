@@ -2892,6 +2892,130 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     return container
 end
 
+-- A settings write through the host bracket, the same two hooks CreateCheckbox
+-- uses: a running auto layout can redirect it, and the undo/override records hang
+-- off onSettingWritten. `plain` writes straight in, for a table that is not a
+-- settings db (an Aura Designer group's selection).
+local function BracketWrite(dbTable, key, value, label, callback, plain)
+    if plain then
+        dbTable[key] = value
+        return
+    end
+    if GUI:Call("interceptWrite", dbTable, key, value) then return end
+    dbTable[key] = value
+    GUI:Call("onSettingWritten", dbTable, key, value, label, callback)
+end
+
+-- THE SHOW AND HIDE COLUMNS: a caption, then a Show box and a
+-- Hide box at fixed distances from the right edge, so every row lines up under
+-- CreateShowHideHeader. Each box is its own boolean, and ticking one clears the
+-- other: a category is shown, hidden or left alone, never both. showKey nil leaves
+-- the Show box out (a hide-only row).
+-- opts.showOffWhen(db) hides the Show box (All Debuffs already shows everything);
+-- opts.hideOffWhen(db) hides the Hide box (another Hide already removes the rest);
+-- opts.offWhen(db) greys the whole row (another setting makes it do nothing);
+-- opts.plain writes straight into the table (an Aura Designer group's selection).
+local SHOWHIDE_HIDE_X, SHOWHIDE_SHOW_X = 14, 60   -- box centres, px in from the right
+
+function GUI:CreateShowHideRow(parent, label, dbTable, showKey, hideKey, callback, opts)
+    opts = opts or {}
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(260, 22)
+    row.preferredHeight = 26
+    row.fixedRowHeight = true
+    row.rowKind = "showhide"
+
+    local txt = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    txt:SetPoint("LEFT", 0, 0)
+    txt:SetText(label)
+    txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    row.label = txt
+
+    local function Box(key, otherKey, x)
+        local cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
+        GUI:StyleCheckButton(cb, { themeRoot = parent })
+        cb:SetPoint("CENTER", row, "RIGHT", -x, 0)
+        cb:SetScript("OnClick", function(self)
+            local on = self:GetChecked() and true or false
+            BracketWrite(dbTable, key, on, label, callback, opts.plain)
+            if on and otherKey and dbTable[otherKey] then
+                BracketWrite(dbTable, otherKey, false, label, callback, opts.plain)
+            end
+            row:Refresh()
+            if callback then callback() end
+        end)
+        return cb
+    end
+    local hideBox = Box(hideKey, showKey, SHOWHIDE_HIDE_X)
+    local showBox = showKey and Box(showKey, hideKey, SHOWHIDE_SHOW_X) or nil
+    row.showBox, row.hideBox = showBox, hideBox
+
+    local function PaintShow()
+        if showBox and opts.showOffWhen then showBox:SetShown(not opts.showOffWhen(dbTable)) end
+        if opts.hideOffWhen then hideBox:SetShown(not opts.hideOffWhen(dbTable)) end
+    end
+    row.Refresh = function()
+        if showBox then showBox:SetChecked(dbTable[showKey] and true or false) end
+        hideBox:SetChecked(dbTable[hideKey] and true or false)
+        PaintShow()
+    end
+    row.refreshValue = row.Refresh
+    -- Evaluated on every state pass, which is when All Debuffs can have moved.
+    row.disableOn = function()
+        PaintShow()
+        return opts.offWhen and opts.offWhen(dbTable) and true or false
+    end
+    row.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        hideBox:EnableMouse(enabled)
+        if showBox then showBox:EnableMouse(enabled) end
+        if enabled then PaintShow() end
+    end
+    row.NaturalWidth = function() return txt:GetStringWidth() + 12 + SHOWHIDE_SHOW_X + 8 end
+    row:SetScript("OnShow", row.Refresh)
+    GUI:AttachTooltip(row, label, txt)
+    row:Refresh()
+    if opts.offWhen and opts.offWhen(dbTable) then row:SetEnabled(false) end
+    return row
+end
+
+-- A section caption on the left and the Show / Hide column titles on the right,
+-- over the boxes of the CreateShowHideRow rows below it. opts.showOffWhen(db) hides
+-- the Show title along with the rows' Show boxes.
+function GUI:CreateShowHideHeader(parent, caption, dbTable, opts)
+    opts = opts or {}
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(260, 18)
+    row.preferredHeight = 22
+    row.fixedRowHeight = true
+    row.rowKind = "showhideheader"
+    local function Cap(text, point, x)
+        local title = point == "LEFT"
+        local fs = row:CreateFontString(nil, "OVERLAY", title and "DFFontNormal" or "DFFontHighlightSmall")
+        if title then
+            fs:SetPoint("LEFT", row, "LEFT", 0, 0)
+        else
+            fs:SetPoint("CENTER", row, "RIGHT", -x, 0)
+        end
+        fs:SetText(text)
+        local c = title and C_TEXT or C_TEXT_DIM
+        fs:SetTextColor(c.r, c.g, c.b)
+        return fs
+    end
+    if caption then row.label = Cap(caption, "LEFT") end
+    local showCap = Cap(L["Show"], nil, SHOWHIDE_SHOW_X)
+    Cap(L["Hide"], nil, SHOWHIDE_HIDE_X)
+    local function PaintShow()
+        if dbTable and opts.showOffWhen then showCap:SetShown(not opts.showOffWhen(dbTable)) end
+    end
+    -- refreshContent, not the rows' disableOn: the state pass only asks disableOn of
+    -- a widget that has SetEnabled, and a header has nothing to enable.
+    row.refreshContent = function() PaintShow() end
+    row:SetScript("OnShow", PaintShow)
+    PaintShow()
+    return row
+end
+
 -- opts.noisy marks a firehose category: one user action can produce dozens of
 -- lines, which evicts the trace the log was opened to capture. It renders as the
 -- shared caution icon with its own tooltip rather than a "(noisy)" suffix baked

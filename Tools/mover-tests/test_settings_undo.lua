@@ -778,9 +778,10 @@ do
     -- NOT one of them -- it has no redirect gate to route through and never
     -- had; the reset is a one-off commit and takes the bracket every other
     -- control's commit takes.
-    eq(countOf(widgets, 'GUI:Call("interceptWrite"'), 3,
+    -- A fourth: BracketWrite, which the segment and show/hide rows share.
+    eq(countOf(widgets, 'GUI:Call("interceptWrite"'), 4,
        "companion: the checkbox, the edit box and the picker's dot reset ask the host before they write")
-    eq(countOf(widgets, 'GUI:Call("onSettingWritten"'), 3,
+    eq(countOf(widgets, 'GUI:Call("onSettingWritten"'), 4,
        "companion: ...and tell it afterwards")
     eq(countOf(controls, 'GUI:Call("interceptWrite"'), 2,
        "companion: the texture and font dropdowns ask too")
@@ -819,7 +820,7 @@ do
     -- Six in SettingsWidgets: the checkbox, the edit box, the colour picker's
     -- three mutation sites and its dot reset. Two in Controls: the texture and
     -- font dropdowns.
-    eq(countOf(widgets, ", label, callback)"), 6,
+    eq(countOf(widgets, ", label, callback)"), 7,
        "companion: every announcing site in SettingsWidgets hands over its commit callback")
     eq(countOf(controls, ", label, callback)"), 2,
        "companion: ...and both of Controls' media dropdowns do too")

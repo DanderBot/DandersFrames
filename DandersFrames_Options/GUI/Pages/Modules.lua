@@ -1480,7 +1480,15 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
         -- captures the upvalue that exists when it is created — so one declared
         -- above these lines would see nil rather than the table.
-        local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
+        -- Read as one phrase under the label, as on the Debuff Bar: "Dispellable By: Me".
+        local dispelIndicatorOptions = { [1]= L["By Me"], [2]= L["All"] }
+        local DISPEL_OVERLAY_TYPES = {
+            { name = "Magic",   key = "dispelOverlayHideMagic",   desc = "Never light the overlay for Magic debuffs." },
+            { name = "Curse",   key = "dispelOverlayHideCurse",   desc = "Never light the overlay for Curse debuffs." },
+            { name = "Poison",  key = "dispelOverlayHidePoison",  desc = "Never light the overlay for Poison debuffs." },
+            { name = "Disease", key = "dispelOverlayHideDisease", desc = "Never light the overlay for Disease debuffs." },
+            { name = "Bleed",   key = "dispelOverlayHideBleed",   desc = "Never light the overlay for Bleed effects, including a Dwarf's own Stoneform bleeds." },
+        }
         local iconPositions = {
             ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
             ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
@@ -1576,11 +1584,25 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- classic, whose box carries no group gate.
             enableCb.keepEnabled = true
             GreyWithPage(tools2)
-            local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
+            local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Dispellable"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
                 OnDispelTypeChanged()
             end), 55)
             GateHide(tools2, dispelIndicatorDropdown)
-            dispelIndicatorDropdown.tooltip = L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."]
+            dispelIndicatorDropdown.tooltip = "|cffffffff" .. L["By Me"] .. ":|r " .. L["debuffs your current spec can remove."]
+                .. "\n|cffffffff" .. L["All"] .. ":|r " .. L["every debuff that can be dispelled, including ones you can't remove."]
+
+            -- Per-type Hide, the Debuff Bar's Dispel Type rows with only their Hide box:
+            -- the mode above already decides what can light the overlay up.
+            local typeHead = group:AddWidget(GUI:CreateShowHideHeader(parent, L["Dispel Type"], db,
+                { showOffWhen = function() return true end }), 24)
+            typeHead.fullRow = true
+            GateHide(tools2, typeHead)
+            for _, t in ipairs(DISPEL_OVERLAY_TYPES) do
+                local row = group:AddWidget(GUI:CreateShowHideRow(parent, L[t.name], db, nil, t.key, OnDispelTypeChanged), 26)
+                row.tooltip = L[t.desc]
+                row.fullRow = true
+                GateHide(tools2, row)
+            end
             -- Dispel-type colours come from the shared account palette on the Colors page
             -- (defaults = the game palette; Reset restores it). The overlay always follows
             -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
@@ -1598,6 +1620,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local parts = {}
             local which = dispelIndicatorOptions[d.dispelOverlayDispelType]
             if which then parts[#parts + 1] = which end
+            local hidden = 0
+            for _, t in ipairs(DISPEL_OVERLAY_TYPES) do
+                if d[t.key] then hidden = hidden + 1 end
+            end
+            if hidden > 0 then parts[#parts + 1] = format(L["Hiding %d"], hidden) end
             return Join(parts)
         end
 

@@ -765,7 +765,74 @@ end
 -- whatever mode either side runs — simplest rule). NO CYCLE by construction:
 -- this reads group.selection tables only — it never calls the record resolver,
 -- and the AD facade path (buildDebuffGroupRecords below) never consults claims.
-local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" }
+local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable",
+    "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed" }
+
+-- ☠ A GROUP CLAIMS A CATEGORY ONLY WHEN IT SHOWS ALL OF IT. A claim takes the whole
+-- category off the bar (or a later group), so a group that narrows it -- any Hide tick,
+-- Hide Permanent, or Hide Long on a category Keep Important does not protect -- would
+-- leave the narrowed-out debuffs shown nowhere (a Boss + Hide Permanent group dropped
+-- every permanent boss debuff from the bar). The exact remainder is not expressible:
+-- candidate filters have maxDuration but no minimum, so "longer than X" cannot be kept.
+-- A narrowed group therefore claims nothing and its debuffs may show in both places.
+local KEEP_IMPORTANT_CATEGORIES = { boss = true, role = true, priority = true }
+local GROUP_HIDE_KEYS = {
+    "hideBoss", "hideRole", "hidePriority", "hideImportant", "hideRaidInCombat",
+    "hideCrowdControl", "hideRaid", "hideDispellable",
+    "hideMagic", "hideCurse", "hidePoison", "hideDisease", "hideBleed",
+    "hideNonPlayer", "hidePlayer", "hideMine",
+}
+local MATCH_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable",
+    "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed",
+    "nonPlayer", "fromPlayer", "mine" }
+local function groupShowsAllOf(sel, k)
+    if sel.hidePermanent then return false end
+    -- Match All with two or more categories shows their intersection: it narrows each.
+    -- (Dispel types OR into one term, so they count once between them.)
+    if sel.matchAll then
+        local n, typed = 0, false
+        for i = 1, #MATCH_CATEGORIES do
+            local c = MATCH_CATEGORIES[i]
+            if sel[c] then
+                local isType = c == "magic" or c == "curse" or c == "poison" or c == "disease" or c == "bleed"
+                if not (isType and typed) then n = n + 1 end
+                if isType then typed = true end
+            end
+        end
+        if n > 1 then return false end
+    end
+    for i = 1, #GROUP_HIDE_KEYS do
+        if sel[GROUP_HIDE_KEYS[i]] then return false end
+    end
+    if sel.hideLong and not (KEEP_IMPORTANT_CATEGORIES[k] and sel.keepImportant ~= false) then
+        return false
+    end
+    return true
+end
+
+-- Fold one group's claims into `claimed` (created on first claim); returns it.
+local function foldGroupClaims(sel, claimed)
+    for i = 1, #CLAIMABLE_CATEGORIES do
+        local k = CLAIMABLE_CATEGORIES[i]
+        if sel[k] and groupShowsAllOf(sel, k) then
+            claimed = claimed or {}
+            claimed[k] = true
+        end
+    end
+    -- ★ DISPEL MODE rides along with the claim (2026-08-30). The consumer has to know
+    -- WHICH TOKEN to subtract: a PLAYER-mode group shows only what you can dispel, a
+    -- strict subset of DISPELLABLE, so negating the superset would delete every
+    -- dispellable-by-someone-else debuff from the row and leave it displayed nowhere.
+    -- Set only when a group runs ALL/ANY -- it renders the whole superset.
+    -- ⚠ "ANY" is a retired stored value that imported profiles still carry (see the
+    -- dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
+    if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY")
+        and groupShowsAllOf(sel, "dispellable") then
+        claimed = claimed or {}
+        claimed.dispellableAll = true
+    end
+    return claimed
+end
 function DF:GetClaimedDebuffCategories(frame, db)
     if not frame then return nil end
     if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
@@ -789,28 +856,7 @@ function DF:GetClaimedDebuffCategories(frame, db)
     local claimed
     for _, group in ipairs(groups) do
         if type(group) == "table" and group.enabled ~= false and type(group.selection) == "table" then
-            local sel = group.selection
-            for i = 1, #CLAIMABLE_CATEGORIES do
-                local k = CLAIMABLE_CATEGORIES[i]
-                if sel[k] then
-                    claimed = claimed or {}
-                    claimed[k] = true
-                end
-            end
-            -- ★ DISPEL MODE rides along with the claim (2026-08-30). The claim
-            -- itself stays mode-AGNOSTIC as documented above, but the consumer has
-            -- to know WHICH TOKEN to subtract: a PLAYER-mode group shows only what
-            -- you can dispel, a strict subset of DISPELLABLE, so negating the
-            -- superset would delete every dispellable-by-someone-else debuff from
-            -- the row and leave it displayed nowhere at all. Set when ANY claiming
-            -- group runs ALL/ANY — that group renders the whole superset, so the
-            -- superset becomes safe to negate.
-            -- ⚠ "ANY" is a retired stored value that imported profiles still carry
-            -- (see the dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
-            if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
-                claimed = claimed or {}
-                claimed.dispellableAll = true
-            end
+            claimed = foldGroupClaims(group.selection, claimed)
         end
     end
     return claimed   -- nil when no group claims anything -> row builds untouched
@@ -3647,9 +3693,34 @@ end
 -- the row's semantics. Field driver: one debuff rendered once per overlapping group
 -- ("the same 1 debuff x 4/5", Drasvin, 5.3.1).
 local dgroupFacade = {}
-local function buildDebuffGroupRecords(group, claimed)
+-- Selection key -> the row's flat key, for the categories past the first six and
+-- the Hide column. A missing selection key reads false, so a group saved before
+-- these existed builds exactly as it did.
+local DGROUP_FLAG_KEYS = {
+    important = "debuffFilterImportant", raidInCombat = "debuffFilterRaidInCombat",
+    magic = "debuffFilterMagic", curse = "debuffFilterCurse", poison = "debuffFilterPoison",
+    disease = "debuffFilterDisease", bleed = "debuffFilterBleed",
+    -- Who Cast It shows. Not claimable (CLAIMABLE_CATEGORIES), so the bar keeps
+    -- showing these too: a group usually narrows them (Hide Boss, Hide Long), and
+    -- claiming the whole category would drop the rest from the bar with nothing
+    -- left to show them.
+    nonPlayer = "debuffFilterNonPlayer", fromPlayer = "debuffFilterPlayer", mine = "debuffFilterMine",
+    hideBoss = "debuffHideBoss", hideRole = "debuffHideRole", hidePriority = "debuffHidePriority",
+    hideImportant = "debuffHideImportant", hideRaidInCombat = "debuffHideRaidInCombat",
+    hideCrowdControl = "debuffHideCrowdControl", hideRaid = "debuffHideRaid",
+    hideDispellable = "debuffHideDispellable",
+    hideMagic = "debuffHideMagic", hideCurse = "debuffHideCurse", hidePoison = "debuffHidePoison",
+    hideDisease = "debuffHideDisease", hideBleed = "debuffHideBleed",
+    hideNonPlayer = "debuffHideNonPlayer", hidePlayer = "debuffHidePlayer", hideMine = "debuffHideMine",
+    hidePermanent = "debuffHidePermanent",
+}
+local function buildDebuffGroupRecords(group, claimed, selfOnly)
     local sel = group.selection
     if type(sel) ~= "table" then return nil end
+    -- Lazy, like the other AD migrations: groups have no startup walk. Same result
+    -- either way (the builder reads a stray Raid tick as By Me); this clears it so the
+    -- editor, which no longer has a Raid row, never holds an invisible tick.
+    if DF.MigrateRaidDebuffRow and (sel.raid or sel.hideRaid) then DF:MigrateRaidDebuffRow(sel, true) end
     wipe(dgroupFacade)
     dgroupFacade.directDebuffShowAll          = false
     dgroupFacade.debuffFilterBoss             = sel.boss and true or false
@@ -3664,11 +3735,20 @@ local function buildDebuffGroupRecords(group, claimed)
     -- minutes -> maxDur nil, exactly as on the row (no duplicate guard here).
     dgroupFacade.debuffMaxDurationMinutes     = sel.hideLongMinutes or 5
     dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
+    dgroupFacade.debuffMaxDurationUnit        = sel.hideLongUnit or "MINUTES"
+    dgroupFacade.debuffMaxDurationSeconds     = sel.hideLongSeconds or 5
+    for selKey, rowKey in pairs(DGROUP_FLAG_KEYS) do
+        dgroupFacade[rowKey] = sel[selKey] and true or false
+    end
+    -- A group with nothing picked renders nothing, whatever it hides (the row would
+    -- fall back to show-all).
+    dgroupFacade.debuffEmptyShowsNothing      = true
+    dgroupFacade.debuffMatchAll               = sel.matchAll and true or false
     -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the resolver's own
     -- `== false` opt-out can never fire here — the CALLER gates: the sync loop passes
     -- claimed only while adDB.debuffGroupDedup (the Debuff Groups tab's own toggle,
     -- independent of the row's) is on.
-    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed) or nil
+    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed, selfOnly) or nil
 end
 
 -- Version-keyed record cache (mirror of fgroupResCache): building records walks
@@ -3696,17 +3776,26 @@ local function claimCtx(claimed)
     if claimed.dispellableAll then s = s .. "dispellableAll," end
     return s
 end
-local function resolveDebuffGroup(group, claimed)
+local function resolveDebuffGroup(group, claimed, selfOnly)
     local ver = DF.auraLayoutVersion or 0
     -- Claims join the cache key: a group's records now depend on the groups ABOVE it.
     -- The fold derives purely from adDB (groups list + the preset-level
     -- debuffGroupDedup toggle), so within one auraLayoutVersion it is deterministic
     -- for every frame and mode; the ctx guard covers the one edit the version bump
     -- can miss (a toggle write racing a sync before its refresh chain lands).
+    -- selfOnly (a Dwarf's own frame: Stoneform bleeds count as By Me) is the other
+    -- input, kept in its own slot so the player's frame and everyone else's don't evict
+    -- each other on every sync pass.
     local ctx = claimCtx(claimed)
-    local c = dgroupResCache[group]
-    if c and c.version == ver and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
-    local records = buildDebuffGroupRecords(group, claimed)
+    local slot = selfOnly and "self" or "other"
+    local byGroup = dgroupResCache[group]
+    if not byGroup or byGroup.version ~= ver then
+        byGroup = { version = ver }
+        dgroupResCache[group] = byGroup
+    end
+    local c = byGroup[slot]
+    if c and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
+    local records = buildDebuffGroupRecords(group, claimed, selfOnly)
     -- ☠ EMPTY IS NOT NIL DOWNSTREAM. When claims swallow a non-empty selection the
     -- resolver returns an EMPTY ARRAY (render nothing) — but cfg.filter = {} would be
     -- mapped back to show-all by normalizeFilters, the exact fail-open the row parks
@@ -3715,7 +3804,7 @@ local function resolveDebuffGroup(group, claimed)
     if records and #records == 0 then records = nil end
     local structSig = records and DF.DebuffFilterRecordsStructSig and DF:DebuffFilterRecordsStructSig(records) or ""
     local tuningSig = records and DF.DebuffFilterRecordsTuningSig and DF:DebuffFilterRecordsTuningSig(records) or ""
-    dgroupResCache[group] = { version = ver, ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
+    byGroup[slot] = { ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
     return records, structSig, tuningSig
 end
 
@@ -6203,28 +6292,18 @@ function Factory:SyncFrame(frame)
             -- exactly (enabled + selection table, records not required).
             local dedupOn = adDB.debuffGroupDedup ~= false
             local claimedSoFar
+            -- Asked every sync: the frame may have been reassigned to or from the player.
+            -- The records differ, so the struct/tuning sigs below carry the change.
+            local racialSelf = DF.IsRacialDispelSelf and DF:IsRacialDispelSelf(frame.unit) or false
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.enabled ~= false then
                     -- Version-cached: within one auraLayoutVersion this is a table
                     -- lookup; the resolve + record serialization run once per version.
                     local records, recStructSig, recTuningSig =
-                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil)
+                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil, racialSelf)
                     -- Fold AFTER resolving: a group is never claimed against itself.
                     if dedupOn and type(group.selection) == "table" then
-                        local sel = group.selection
-                        for ci = 1, #CLAIMABLE_CATEGORIES do
-                            local ck = CLAIMABLE_CATEGORIES[ci]
-                            if sel[ck] then
-                                claimedSoFar = claimedSoFar or {}
-                                claimedSoFar[ck] = true
-                            end
-                        end
-                        -- Mode travels with the claim here too — see the same fold in
-                        -- GetClaimedDebuffCategories for why the token must match.
-                        if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
-                            claimedSoFar = claimedSoFar or {}
-                            claimedSoFar.dispellableAll = true
-                        end
+                        claimedSoFar = foldGroupClaims(group.selection, claimedSoFar)
                     end
                     if records then
                         local key = "dgroup:" .. tostring(group.id)

@@ -297,7 +297,7 @@ end
 -- ============================================================
 local DISPEL_SETTINGS = {
     { "checkbox", "Enable Dispel Overlay", "dispelOverlayEnabled",    30 },
-    { "dropdown", "Show Overlay For",      "dispelOverlayDispelType", 55 },
+    { "dropdown", "Dispellable",           "dispelOverlayDispelType", 55 },
     -- The Colors-page cross-link. No L label of its own (its text is built by
     -- the shared factory) and its slot height is an expression, so the reader
     -- sees neither.

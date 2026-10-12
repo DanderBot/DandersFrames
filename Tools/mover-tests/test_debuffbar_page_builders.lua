@@ -62,6 +62,7 @@ local KIND = {
     CreateInfoBanner = "banner", CreateFontDropdown = "fontdropdown",
     CreateOutlineDropdown = "outlinedropdown", CreateShadowCheckbox = "shadowcheckbox",
     CreateDispelColorsPageLink = "dispelcolorslink",
+    CreateShowHideHeader = "showhideheader", CreateShowHideRow = "showhide",
 }
 
 -- The body of a `local function <name>(tools2)` at the page builder's own
@@ -248,7 +249,7 @@ do
     end
     check(PAGE:find('DEFAULT = L["Default (Slot Order)"]', 1, true) ~= nil
       and PAGE:find('TIMER = L["Timer"]', 1, true) ~= nil
-      and PAGE:find('ALL    = L["All Dispellable"]', 1, true) ~= nil,
+      and PAGE:find('ALL    = L["All"]', 1, true) ~= nil,
           "vocab: ...and they are the same tables the dropdowns have always offered")
     check(PAGE:find("local blacklistCatalog = (DF.AuraBlacklist and DF.AuraBlacklist.DebuffSpells) or {}", 1, true) ~= nil,
           "vocab: the blacklist catalog is read once, at page scope")
@@ -304,14 +305,16 @@ local VISIBILITY = {
     { "slider",   "Max Debuffs",  "debuffMax",   55 },
 }
 -- The category list is DATA: the caption, the All Debuffs switch, the caution
--- banner, ONE checkbox factory (which the loop over DEBUFF_CATEGORIES goes
--- through) and the dispel-mode dropdown.
+-- banner, then per group ONE Show/Hide header and ONE row factory (the loop over
+-- DEBUFF_ROW_SECTIONS), with the dispel-mode dropdown under the Dispellable row.
 local DEBUFF_FILTERS = {
-    { "label",    "(none)",              "(none)",                      35 },
-    { "checkbox", "All Debuffs",         "directDebuffShowAll",         30 },
-    { "banner",   "(none)",              "(none)",                      nil },
-    { "checkbox", "(none)",              "(none)",                      30 },
-    { "dropdown", "Dispellable Debuffs", "directDebuffDispellableMode", 55 },
+    { "label",          "(none)",              "(none)",                      35 },
+    { "checkbox",       "All Debuffs",         "directDebuffShowAll",         30 },
+    { "banner",         "(none)",              "(none)",                      nil },
+    { "separator",      "(none)",              "(none)",                      14 },
+    { "showhideheader", "(none)",              "(none)",                      24 },
+    { "showhide",       "(none)",              "(none)",                      26 },
+    { "dropdown",       "Dispellable",         "directDebuffDispellableMode", 55 },
 }
 -- The blacklist is DATA too: the caption, ONE checkbox factory (the loop over
 -- the shipped catalog) and the group's own Reset.
@@ -325,8 +328,11 @@ local DEBUFF_ORDER = {
     { "checkbox", "My Auras First",             "directDebuffSortMineFirst",      30 },
     { "checkbox", "Reverse Order",              "directDebuffSortReverse",        30 },
     { "checkbox", "Hide Long Debuffs",          "debuffMaxDurationEnabled",       30 },
+    { "dropdown", "Threshold Unit",             "debuffMaxDurationUnit",          55 },
     { "slider",   "Hide Longer Than (minutes)", "debuffMaxDurationMinutes",       55 },
+    { "slider",   "Hide Longer Than (seconds)", "debuffMaxDurationSeconds",       55 },
     { "checkbox", "Keep important debuffs",     "debuffMaxDurationKeepImportant", 30 },
+    { "checkbox", "Hide Permanent Auras",       "debuffHidePermanent",            30 },
 }
 local DEBUFF_APPEARANCE = {
     { "slider", "Icon Size", "debuffSize",  55 },
@@ -441,7 +447,7 @@ local CARDS = {
       builder = "BuildDebuffBorderGroup",     golden = DEBUFF_BORDER,     summary = "DebuffBorderSummary",
       dim = true, pin = true,
       tick = { key = "debuffShowBorder", name = "Show Border" }, composite = true },
-    { label = "Important Debuffs", key = "debuffs_important",   col = 2, box = nil,                classicCol = 2,
+    { label = "Highlight",         key = "debuffs_important",   col = 2, box = nil,                classicCol = 2,
       builder = "BuildImportantDebuffsGroup", golden = DEBUFF_IMPORTANT,  summary = "ImportantDebuffsSummary",
       dim = true, pin = true, tick = { key = "debuffImportantHighlight", name = "Highlight Important Debuffs" } },
     { label = "Duration Text",     key = "debuffs_duration",    col = 1, box = "Duration Text",    classicCol = 2,
@@ -546,7 +552,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Important Debuffs | Duration Text | Stack Count | Dispel Text | Duration Bar",
+       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Highlight | Duration Text | Stack Count | Dispel Text | Duration Bar",
        "order: the thirteen cards are declared in classic's order")
 
     -- ---- one checkbox per setting --------------------------------------

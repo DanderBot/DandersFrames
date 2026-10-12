@@ -5742,6 +5742,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if modeDb and modeDb.directDebuffDispellableMode == "ANY" then
                         modeDb.directDebuffDispellableMode = "ALL"
                     end
+                    -- The Raid row is gone: on a debuff Blizzard's RAID flag is "the
+                    -- player can dispel it", so once talent-corrected it was exactly
+                    -- Dispellable By Me. EQUALITY-gated (its default is false, so only a
+                    -- user's tick moves), and each login for the same reason as above.
+                    if modeDb and DF.MigrateRaidDebuffRow then DF:MigrateRaidDebuffRow(modeDb) end
                     -- ☠ THE TOOLTIP VISIBILITY MIGRATION MOVED OUT OF HERE, and the
                     -- page-wide Hold To Show fan-out went with it (it produces what
                     -- the conversion consumes) — see DF:MigrateTooltipVisibility,

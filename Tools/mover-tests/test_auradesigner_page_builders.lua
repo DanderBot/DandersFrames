@@ -681,19 +681,34 @@ do
     -- ⚠ THE SIX CATEGORY CHECKBOXES ARE ONE LOOP, so the census sees one entry
     -- bound to `sel, def.key`. Which six they are is asserted off the defs table
     -- below, which is the only place that decides.
-    checkCensus(bodyCensus(fnBody(EDIT, "BuildDebuffCategories", "-- The ordered section list for one debuff"), "sel"), {
-        { "checkbox", "(none)",                      "def.key"         },
-        { "dropdown", "Mode",                        "dispellableMode" },
+    -- Match is bound through a proxy (matchDB -> sel.matchAll), which the census cannot
+    -- read a key from, so it is checked on its own and left out of the list.
+    local catBody = fnBody(EDIT, "BuildDebuffCategories", "-- The ordered section list for one debuff")
+    check(catBody:find('GUI:CreateDropdown(host, L["Match"], matchOptions, matchDB, "match"', 1, true) ~= nil
+          and catBody:find('sel.matchAll = (v == "ALL") or nil', 1, true) ~= nil,
+          "debuff/Categories: Match writes sel.matchAll through its proxy")
+    local catCensus = {}
+    for _, e in ipairs(bodyCensus(catBody, "sel")) do
+        if e.label ~= "Match" then catCensus[#catCensus + 1] = e end
+    end
+    checkCensus(catCensus, {
+        { "dropdown", "Dispellable",                 "dispellableMode" },
         { "checkbox", "Hide Long Debuffs",           "hideLong"        },
+        { "dropdown", "Threshold Unit",              "hideLongUnit"    },
+        { "slider",   "Hide Longer Than (seconds)",  "hideLongSeconds" },
         { "slider",   "Hide Longer Than (minutes)",  "hideLongMinutes" },
         { "checkbox", "Keep important debuffs",      "keepImportant"   },
+        { "checkbox", "Hide Permanent Auras",        "hidePermanent"   },
     }, "debuff/Categories")
 
     local defs = fnBody(EDIT, "DebuffCategoryDefs", "P.DebuffCategoryDefs =")
     local catKeys = {}
     for k in defs:gmatch('key = "([%w_]+)"') do catKeys[#catKeys + 1] = k end
-    eqList(catKeys, { "boss", "role", "priority", "crowdControl", "raid", "dispellable" },
-           "debuff/Categories: the six category keys")
+    eqList(catKeys, { "boss", "role", "priority", "crowdControl", "dispellable",
+                      "important", "raidInCombat",
+                      "magic", "curse", "poison", "disease", "bleed",
+                      "nonPlayer", "fromPlayer", "mine" },
+           "debuff/Categories: the category keys")
 
     -- ☠ THE SWEEP. Nothing in the shared section bodies reaches for the page db.
     local shared = EDIT:sub(EDIT:find("-- ── LINKED FILTERS (filter groups) ──", 1, true),
@@ -710,7 +725,13 @@ do
     -- made once at build.
     local dis = 0
     for _ in EDIT:gmatch("%.disableOn = function%(%) return not sel%.") do dis = dis + 1 end
-    eq(dis, 3, "binding: the three gated debuff controls carry a disableOn, not just a build-time grey")
+    eq(dis, 2, "binding: the unit and threshold controls carry a disableOn, not just a build-time grey")
+    check(EDIT:find("keepCb.disableOn = KeepOff", 1, true) ~= nil,
+          "binding: ...and Keep important carries one too")
+    check(EDIT:find("modeDrop.disableOn = function() return not (sel.dispellable or sel.hideDispellable) end", 1, true) ~= nil,
+          "binding: ...and the dispel mode stays live while the group shows OR hides dispellables")
+    check(EDIT:find("GUI:CreateShowHideRow(host, r.label, sel, r.show, r.hide, StructuralDebuffGroupRefresh,", 1, true) ~= nil,
+          "binding: the category rows are the Debuff Bar's Show/Hide rows, on the group's selection")
 
     -- sortOrder is OPTIONAL on a group record, so the dropdown reads it through a
     -- customGet with a family fallback. The families genuinely differ: a filter

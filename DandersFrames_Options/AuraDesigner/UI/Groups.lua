@@ -2131,9 +2131,20 @@ local DEBUFF_CATEGORY_SAMPLES = {
     role         = { -6343, -113746 },        -- Thunder Clap, Mystic Touch
     priority     = { -980, -34914 },          -- Agony, Vampiric Touch
     crowdControl = { -118, -6770, -5782 },    -- Polymorph, Sap, Fear
-    raid         = { -589, -1943 },           -- Shadow Word: Pain, Rupture
     dispellable  = { -339, -51514 },          -- Entangling Roots, Hex
-    _order = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" },
+    important        = { -8122 },             -- Psychic Scream
+    raidInCombat     = { -589 },              -- Shadow Word: Pain
+    magic            = { -118 },              -- Polymorph
+    curse            = { -980 },              -- Agony
+    poison           = { -2818 },             -- Deadly Poison
+    disease          = { -55095 },            -- Frost Fever
+    bleed            = { -1943 },             -- Rupture
+    nonPlayer        = { "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8" },   -- skull marker
+    fromPlayer       = { -57724 },            -- Sated
+    mine             = { -589 },              -- Shadow Word: Pain
+    _order = { "boss", "role", "priority", "crowdControl", "dispellable",
+               "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed",
+               "nonPlayer", "fromPlayer", "mine" },
 }
 
 -- Example icons for a container-backed group's placeholder block, or nil when

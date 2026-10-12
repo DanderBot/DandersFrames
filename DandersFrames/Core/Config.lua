@@ -1581,6 +1581,37 @@ DF.PartyDefaults = {
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
+    debuffMaxDurationUnit = "MINUTES",        -- ... "SECONDS" reads debuffMaxDurationSeconds instead
+    debuffMaxDurationSeconds = 5,
+    debuffHidePermanent = false,              -- Hide debuffs with no duration
+    -- Hide column: never show these, whatever the categories (or All Debuffs) pick.
+    debuffHideBoss = false,
+    debuffHideRole = false,
+    debuffHidePriority = false,
+    debuffHideCrowdControl = false,
+    debuffHideRaid = false,
+    debuffHideDispellable = false,            -- follows directDebuffDispellableMode
+    debuffHideNonPlayer = false,              -- keeps only debuffs a player or pet cast
+    debuffHidePlayer = false,                 -- hides debuffs any player or pet cast
+    debuffFilterPlayer = false,               -- From Any Player (isFromPlayerOrPlayerPet = true)
+    debuffFilterMine = false,                 -- Cast By You (PLAYER token)
+    debuffHideMine = false,
+    -- Later Show categories (IMPORTANT, RAID_IN_COMBAT, RAID_PLAYER_DISPELLABLE tokens,
+    -- then per-type dispel picks) and their Hide twins. All off: no change.
+    debuffFilterImportant = false,
+    debuffFilterRaidInCombat = false,
+    debuffFilterMagic = false,
+    debuffFilterCurse = false,
+    debuffFilterPoison = false,
+    debuffFilterDisease = false,
+    debuffFilterBleed = false,
+    debuffHideImportant = false,
+    debuffHideRaidInCombat = false,
+    debuffHideMagic = false,
+    debuffHideCurse = false,
+    debuffHidePoison = false,
+    debuffHideDisease = false,
+    debuffHideBleed = false,
     directDebuffSortOrder = "TIME",           -- "DEFAULT" / "TIME" / "NAME"
     directDebuffSortMineFirst = false,        -- Own auras before others' (TIME/NAME sorts; DEFAULT is already mine-first)
     directDebuffSortReverse = false,          -- Reverse the sort direction
@@ -1860,8 +1891,14 @@ DF.PartyDefaults = {
 
     -- Unified dispel overlay (12.1 container-slot driven, Features/Dispel.lua)
     dispelOverlayEnabled = true,
-    -- "Show Overlay For": 1 = Dispellable By Me, 2 = All Dispellable (Blizzard convention)
+    -- "Dispellable": 1 = By Me, 2 = All (Blizzard convention)
     dispelOverlayDispelType = 2,
+    -- Per-type Hide: never light the overlay for these, whatever the mode (all off).
+    dispelOverlayHideMagic = false,
+    dispelOverlayHideCurse = false,
+    dispelOverlayHidePoison = false,
+    dispelOverlayHideDisease = false,
+    dispelOverlayHideBleed = false,
 
     -- External Defensive
 
