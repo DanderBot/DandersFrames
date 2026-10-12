@@ -9285,17 +9285,19 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,
-            -- Re-evaluate this section's own hideOn, then slide the sections
-            -- below it (and the sibling cards) to the new height. No
-            -- RefreshChildStates: this section never applies disableOn at build
-            -- either, so adding it here would grey on toggle and un-grey on the
-            -- next rebuild. Matches the placed icon card's border exactly.
+            -- Re-evaluate this section's hideOn and greys, then slide the
+            -- sections below it (and the sibling cards) to the new height.
             refreshStates = function()
                 g:LayoutChildren()
+                g:RefreshChildStates()
                 ReflowSections()
             end,
             sizeMin = 1, sizeMax = 5, sizeStep = 1,
         })
+        -- A group border is OFF by default, and the factory draws neither ring nor
+        -- animation without it, so the controls must grey under Show Border at build
+        -- too or an animation picked with the border off silently renders nothing.
+        g:RefreshChildStates()
     end)
 
     -- ── DURATION TEXT ── (shared text controls; keys mirror the placed cards')
