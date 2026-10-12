@@ -17,6 +17,10 @@
 - (Settings) A new **GLOBAL** tab holds the settings shared by Party and Raid: General, Fonts, Nicknames, Integrations, Colors, the Filter Designer, Profiles and the Debug Console, with its own Changed Settings page. (by Krathe)
 - (Settings) Page tips can be closed to a small icon or hidden, and a **Page Tips** setting under GLOBAL > Settings chooses for every page at once. (by Krathe)
 - (Fonts) Apply to All asks whether to apply to Party, Raid or both. (by Krathe)
+- (Debuffs) The Debuff Bar's filters now have a Show and a Hide box for every category, so you can add some debuffs and take others away, even with All Debuffs on. New categories: Important, Raid In Combat, each dispel type (Magic, Curse, Poison, Disease, Bleed), From Any Player and Cast By You. (by Krathe)
+- (Debuffs) Hide Long Debuffs can be set in seconds as well as minutes, and Hide Permanent Auras drops debuffs with no duration. (by Krathe)
+- (Aura Designer) Debuff groups get the same Show and Hide filters, can show debuffs by who cast them, and have a Match setting: Any, or All so a group shows only debuffs that fit every ticked row (for example short non-boss mechanics as big click targets). (by Krathe)
+- (Dispel) The dispel overlay can hide individual dispel types, such as bleeds. (by Krathe)
 
 ### Bug Fixes
 
@@ -64,10 +68,16 @@
 - (Click Casting) Fix the binding editor opening its Advanced section for every binding instead of only those with a changed priority. (by Krathe)
 - (Settings) Card titles now line up whether or not the card has an on/off switch. (by Krathe)
 - (Settings) Hovering a card's icon now shows all its icons in the usual tooltip, evenly sized. (by Krathe)
+- (Debuffs) Dispellable By Me now allows for dispel talents you haven't taken, the Shaman poison totem and a Dwarf's Stoneform on their own frame, and debuffs you can't dispel no longer go missing from your other ticked categories. (by Krathe)
+- (Aura Designer) Hide Duplicate Debuffs no longer hides debuffs that a debuff group doesn't actually show. (by Krathe)
+- (Debuffs) With All Debuffs off, the Highlight now marks boss, role and priority debuffs that come in through other categories. (by Krathe)
+- (Defensive Icon) The border animation settings are back, so an animation carried over from an older version can be changed or turned off. (by Krathe)
 
 ### Changes
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
+- (Debuffs) The Raid debuff category is gone: on debuffs it was the same as Dispellable By Me, so if you had it ticked you'll find Dispellable By Me ticked instead. (by Krathe)
+- (Dispel) The dispel dropdowns now read "Dispellable: By Me / All". (by Krathe)
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 - (Pinned Frames) The "Based on" option is now called "Size & Spacing From", and the note above it explains that auras come from the set's Aura Designer Template, not from this choice. (by Krathe)
