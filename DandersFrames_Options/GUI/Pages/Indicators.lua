@@ -3932,13 +3932,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 parent       = tools2.parent,
                 -- Class/Role colour makes sense here: at a glance, the border
                 -- communicates WHO is using the defensive cooldown (their class
-                -- or role) without the user having to read the icon. (Animation is
-                -- not offered: the defensive icon is a container button, and 12.1
-                -- forbids driving its border while auras are secret — see
-                -- AuraContainer's animation chokepoint.)
+                -- or role) without the user having to read the icon.
+                -- Animation: the defensive row opts into the declarative button
+                -- animations (config.adBorderAnim), and any animation edit rebuilds
+                -- the row (rowBorderAnimTok in Features/Auras.lua).
                 include      = { inset = true, offset = true, blendMode = true,
                                  gradient = true, shadow = true, alpha = true,
-                                 classColor = true, roleColor = true },
+                                 classColor = true, roleColor = true, animate = true },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 fullUpdate   = function() ApplyDefensive() end,
                 lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
                 lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,
@@ -3965,6 +3966,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local c = d.defensiveIconBorderColor
             local a = type(c) == "table" and tonumber(c.a) or nil
             if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            local anim = d.defensiveIconBorderAnimationType
+            if anim and anim ~= "NONE" then parts[#parts + 1] = GUI:AnimationTypeNames()[anim] end
             return Join(parts)
         end
 

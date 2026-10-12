@@ -3092,6 +3092,30 @@ end
 --     (HELPFUL <-> HELPFUL|PLAYER) and the dispel row's All/By-Me token swap free:
 --     same key, different string, no container recreated.
 -- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
+-- Border animation on a row that opted in (config.adBorderAnim — the defensive row).
+-- The effect is built once in the button's secure init and cannot be retuned on a live
+-- button, so every animation key is STRUCTURAL: a change must hand over fresh buttons.
+-- Empty when no animation is set, so rows without one keep their signature unchanged.
+-- Same key set as the Aura Designer's rawBorderAnimStructTok.
+local function rowBorderAnimTok(cfg)
+    local b = cfg.adBorderAnim and cfg.style and cfg.style.border
+    local d, p = b and b.db, b and b.prefix
+    if not d or not p then return "" end
+    p = p .. "BorderAnimation"
+    local ty = d[p .. "Type"]
+    if not ty or ty == "NONE" then return "" end
+    local c = d[p .. "Color"]
+    return "|an=" .. tostring(ty)
+        .. "," .. tostring(d[p .. "Frequency"]) .. "," .. tostring(d[p .. "Particles"])
+        .. "," .. tostring(d[p .. "Length"]) .. "," .. tostring(d[p .. "Thickness"])
+        .. "," .. tostring(d[p .. "Scale"]) .. "," .. tostring(d[p .. "Inset"])
+        .. "," .. tostring(d[p .. "OffsetX"]) .. "," .. tostring(d[p .. "OffsetY"])
+        .. "," .. tostring(d[p .. "Mask"]) .. "," .. tostring(d[p .. "SidesAxis"])
+        .. "," .. tostring(d[p .. "CornerLength"]) .. "," .. tostring(d[p .. "ProcStart"])
+        .. "," .. tostring(d[p .. "BlendMode"])
+        .. "," .. (type(c) == "table" and (tostring(c.r) .. "/" .. tostring(c.g) .. "/" .. tostring(c.b) .. "/" .. tostring(c.a)) or "-")
+end
+
 local function rowStructSig(cfg)
     local s = cfg.style
     return table.concat({
@@ -3137,7 +3161,7 @@ local function rowStructSig(cfg)
         -- unsupported client (no spec) sigs identically to the feature being off.
         tostring(s.pandemic and s.pandemic.mode),
         tostring(s.pandemic and s.pandemic.flash),
-    }, "|")
+    }, "|") .. rowBorderAnimTok(cfg)
 end
 
 local function rowTuningSig(cfg)
