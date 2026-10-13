@@ -310,7 +310,7 @@ local function AcquireRow(inst, i)
     row.check = row:CreateTexture(nil, "OVERLAY")
     row.check:SetSize(14, 14)
     row.check:SetPoint("RIGHT", -8, 0)
-    row.check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+    row.check:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
     row.check:SetVertexColor(0.4, 0.85, 0.5)
 
     -- Blocked caption (consumer-provided text, e.g. which tab a spell
@@ -1116,7 +1116,7 @@ RefreshFilterInstance = function(inst)
             row:SetPoint("TOPLEFT", 0, -y)
             row:SetPoint("TOPRIGHT", 0, -y)
             row._entry, row._label = e, label
-            row.chevron:SetTexture(ICON_PATH .. (open and "expand_less" or "expand_more"))
+            row.chevron:SetTexture(ICON_PATH .. (open and "expand_less" or "expand_more") .. ".png")
             row.name:SetText(label)
             row.name:SetTextColor(0.90, 0.90, 0.90)
             -- A preset says how much of itself is switched on; a custom filter is

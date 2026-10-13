@@ -80,7 +80,7 @@ function CC:CreateProfilesPanelContent()
     -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(newBtn, {
         text = L["New"], accent = themeColor, tinted = true,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 12, color = C.text },
     })
     newBtn:SetScript("OnClick", function()
         CC:ShowNewProfileDialog()
@@ -91,7 +91,7 @@ function CC:CreateProfilesPanelContent()
     copyBtn:SetPoint("RIGHT", 0, 0)
     DF.GUI:StyleButton(copyBtn, {
         text = L["Copy"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy.png", size = 12, color = C.text },
     })
     copyBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
@@ -111,7 +111,7 @@ function CC:CreateProfilesPanelContent()
     renameBtn:SetPoint("RIGHT", btnRow2, "CENTER", -2, 0)
     DF.GUI:StyleButton(renameBtn, {
         text = L["Rename"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png", size = 12, color = C.text },
     })
     renameBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
@@ -128,7 +128,7 @@ function CC:CreateProfilesPanelContent()
     -- border + hover scripts and the hand-attached icon texture.
     DF.GUI:StyleButton(deleteBtn, {
         text = L["Delete"], tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 12, color = { r = 1, g = 0.5, b = 0.5 } },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png", size = 12, color = { r = 1, g = 0.5, b = 0.5 } },
     })
     deleteBtn.text:SetTextColor(1, 0.5, 0.5)
     deleteBtn:SetScript("OnClick", function()
@@ -155,7 +155,7 @@ function CC:CreateProfilesPanelContent()
     -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(exportBtn, {
         text = L["Export"], accent = themeColor, tinted = true,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload.png", size = 12, color = C.text },
     })
     exportBtn:SetScript("OnClick", function()
         CC:ShowExportDialog()
@@ -166,7 +166,7 @@ function CC:CreateProfilesPanelContent()
     importBtn:SetPoint("RIGHT", 0, 0)
     DF.GUI:StyleButton(importBtn, {
         text = L["Import"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download.png", size = 12, color = C.text },
     })
     importBtn:SetScript("OnClick", function()
         CC:ShowImportDialog()

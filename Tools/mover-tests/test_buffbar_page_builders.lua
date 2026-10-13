@@ -14,14 +14,12 @@ local NS = ...
 -- page, and a shut header keeps the row's old summary string in its right
 -- corner. The twelfth, a lone checkbox, is still a CONTROL ROW.
 --
---   column 1   "Content"  Visibility, Buff Filters, Order & Limits and the
---                         Hide Duplicate Buffs control row.
---              ...then    Duration Bar and Pandemic, the two 12.1-factory
---                         extras, under NO category header: both carry the same
---                         hideOn, so a header there would be a title standing
---                         over nothing on a client with no factory row.
---   column 2   "Icon"     Appearance, Layout, Position, Border.
---              "Text"     Duration Text, Stack Count.
+--   column 1   "Content"     Visibility, Buff Filters (Hide Duplicate Buffs at
+--                            its foot), Order & Limits.
+--              "Text"        Duration Text, Stack Count.
+--              "Effects"     Pandemic.
+--   column 2   "Layout"      Layout, Position.
+--              "Appearance"  Icon Style, Border, Duration Bar.
 --
 -- ☠ THE DEBUFF BAR USES THE SAME CARDS (the section helper was lifted into the
 -- page tools for it), and this page now takes its two opt-ins as well -- two
@@ -239,15 +237,15 @@ do
     -- ...each a forward to the shared helper, now with the Debuff Bar's two
     -- opt-ins (two tracks, quiet captions), so the twin pages match.
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
-          "sections: ...the page's OpenSection forwards to the shared one, asking for two per row and dim captions")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
+          "sections: ...the page's OpenSection forwards to the shared one, asking for two per row, dim captions, shut on a first run")
     -- The moved dedup takes a row of its own on a two-track card.
     check(sectionBlock("Buff Filters"):find("dedupCb.fullRow = true", 1, true) ~= nil,
           "sections: Hide Duplicate Buffs sits on a row of its own at the foot of Buff Filters")
     check(PAGE:find("tools.CloseSection(Add, band)", 1, true) ~= nil,
           "sections: ...and so does its CloseSection")
     local open = OPEN
-    check(open:find("GUI:CreateCollapsibleSection(page.child, label, true, BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
+    check(open:find("GUI:CreateCollapsibleSection(page.child, label, not (extra and extra.collapsed), BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle, kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })", 1, true) ~= nil,
           "sections: ...built from the kit's own section, at its column's width")
     check(open:find("Add(section, 36, col)", 1, true) ~= nil,
           "sections: ...the header is a page child, so the state pass can reach it")
@@ -255,26 +253,36 @@ do
           "sections: ...the band is chromeless, at the width the layout pass will give it")
     check(open:find("section:RegisterChild(band)", 1, true) ~= nil,
           "sections: ...and registered to the section, which is what makes the fold hide it")
-    -- ☠ EXPANDED ON A FIRST RUN. This is a test of FOLDING, so nothing may start
-    -- hidden; the user's own folds are what persist after that.
-    check(open:find("label, true,", 1, true) ~= nil,
-          "sections: ...and every section starts expanded, so nothing is hidden by default")
+    -- SHUT ON A FIRST RUN: this page asks for it (one of the heaviest pages, read
+    -- best as a list of headers); the user's own folds are what persist after that.
+    check(open:find("label, not (extra and extra.collapsed),", 1, true) ~= nil
+          and PAGE:find("collapsed = true", 1, true) ~= nil,
+          "sections: ...and every section starts shut on a first run")
     -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL. `Add` resolves a widget's slot
     -- height on the spot, so a band Add'd while still empty gets no room.
     local close = CLOSE
     check(close ~= nil and close:find("Add(band, nil, band.dfSectionCol)", 1, true) ~= nil,
           "sections: the band is added in its own right, in the column its section is in")
 
-    -- ---- the three category headers -----------------------------------
-    -- ⚠ ADDED STRAIGHT TO A COLUMN, not into a band: there is no band spanning a
-    -- whole category any more, so the header that names one is a page child like
-    -- the sections under it.
-    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" }, { "Text", "2" } }) do
-        check(PAGE:find('Add(GUI:CreateHeader(self.child, L["' .. pair[1] .. '"]), 40, ' .. pair[2] .. ')', 1, true) ~= nil,
-              "bands: the " .. pair[1] .. " category header opens column " .. pair[2])
+    -- ---- the groups: one table, mounted in order (tools.MountCardGroups) ----
+    -- The page's Add order is what a one-column window stacks, so the cards
+    -- register with tools.DeferCard and mount group by group, each group
+    -- under its header.
+    local groupsSrc = PAGE:match("tools%.MountCardGroups%(Add, (%b{})%)")
+    check(groupsSrc ~= nil, "groups: the cards mount by group from one table")
+    local gotGroups = {}
+    for label, col, keys in (groupsSrc or ""):gmatch('label = L%["([^"]+)"%], col = (%d), keys = {(.-)}') do
+        local ks = {}
+        for k in keys:gmatch('"([%w_]+)"') do ks[#ks + 1] = k end
+        gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
-    -- ☠ AND THE FACTORY PAIR HAS NO HEADER. Both carry HideDurationBar, so a
-    -- header there would be a section title left standing over nothing.
+    eq(table.concat(gotGroups, " | "),
+       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack | Effects@1: buffs_pandemic",
+       "groups: Content, Layout, Appearance, Text, Effects, each over its cards")
+    for _, key in ipairs({ "buffs_visibility", "buffs_filters", "buffs_order", "buffs_appearance", "buffs_layout", "buffs_position", "buffs_border", "buffs_duration", "buffs_stack", "buffs_durationbar", "buffs_pandemic" }) do
+        check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
+              "groups: " .. key .. " registers its card for the group mount")
+    end
     for _, band in ipairs({ "contentBand", "iconBand", "textBand", "factoryBand" }) do
         check(PAGE:find(band, 1, true) == nil,
               "bands: the old " .. band .. " is gone -- every section carries a band of its own")
@@ -330,7 +338,7 @@ do
     -- which are exactly the groups classic dims. `dimOn` is the header half:
     -- the kit greys the section title, the band's own disableOn/disableChildrenOn
     -- greys the controls under it, exactly as they did inside a pane.
-    for _, name in ipairs({ "Order & Limits", "Appearance", "Layout", "Position",
+    for _, name in ipairs({ "Order & Limits", "Icon Style", "Layout", "Position",
                             "Border", "Duration Text", "Stack Count", "Duration Bar" }) do
         check(sectionBlock(name):find("BuffsOffRow", 1, true) ~= nil,
               "gate: the " .. name .. " section greys while the bar is off")
@@ -510,7 +518,7 @@ local SECTIONS = {
     { builder = "BuildBuffOrderGroup", label = "Order & Limits", boxHeader = "Order & Limits",
       golden = BUFF_ORDER, classicColumn = "1", key = "buffs_order", column = "1",
       summary = "BuffOrderSummary" },
-    { builder = "BuildBuffAppearanceGroup", label = "Appearance", boxHeader = "Appearance",
+    { builder = "BuildBuffAppearanceGroup", label = "Icon Style", boxHeader = "Appearance",
       golden = BUFF_APPEARANCE, classicColumn = "2", key = "buffs_appearance", column = "2",
       summary = "BuffAppearanceSummary" },
     { builder = "BuildBuffLayoutGroup", label = "Layout", boxHeader = "Layout",
@@ -524,14 +532,14 @@ local SECTIONS = {
       summary = "BuffBorderSummary", hoistedIn = 0,
       tick = { key = "buffShowBorder", label = "Show Border" } },
     { builder = "BuildBuffDurationGroup", label = "Duration Text", boxHeader = "Duration Text",
-      golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "2",
+      golden = BUFF_DURATION, classicColumn = "2", key = "buffs_duration", column = "1",
       summary = "BuffDurationSummary", hoistedIn = 1,
       tick = { key = "buffShowDuration", label = "Show Duration" } },
     { builder = "BuildBuffStackGroup", label = "Stack Count", boxHeader = "Stack Count",
-      golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "2",
+      golden = BUFF_STACK, classicColumn = "2", key = "buffs_stack", column = "1",
       summary = "BuffStackSummary" },
     { builder = "BuildBuffDurationBarGroup", label = "Duration Bar", boxHeader = "Duration Bar",
-      golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "1",
+      golden = BUFF_DURBAR, classicColumn = "2", key = "buffs_durationbar", column = "2",
       summary = "BuffDurationBarSummary", hoistedIn = 1, hide = true,
       tick = { key = "buffDurationBarEnabled", label = "Enable Duration Bar" } },
     { builder = "BuildBuffPandemicGroup", label = "Pandemic", boxHeader = "Pandemic",
@@ -677,6 +685,13 @@ do
     -- or it is left a zero-width slot and draws nothing.
     check(WIDGETS:find('self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)', 1, true) ~= nil,
           "summary: beside a pin, the tag stops at the summary rather than squeezing it out")
+    -- A short title must not hold 55% of the header while the summary truncates
+    -- beside an empty gap: the floor applies only when the words compete.
+    check(WIDGETS:find("if avail < titleNat then", inset or 1, true) ~= nil
+      and WIDGETS:find("titleW = math.max(math.min(titleNat, math.floor(free * 0.55)), avail)", inset or 1, true) ~= nil,
+          "summary: the title's 55% floor never exceeds what its own words need")
+    check(WIDGETS:find('hooksecurefunc(fs, "SetText", reapply)', inset or 1, true) ~= nil,
+          "summary: the split is re-measured on any text write, a font change included")
 end
 
 -- ============================================================
@@ -735,15 +750,14 @@ do
     check(PAGE:find("bandStyle", 1, true) == nil,
           "boxes: the band skin is never restated as a literal (this page needs none)")
 
-    -- ---- the two-column split, and the order inside each column ------
-    -- Content and the factory pair left, Icon and Text right -- the same split
-    -- the four bands had. Within a column the Add order IS the layout order, so
-    -- the sections are asserted in sequence rather than merely present.
+    -- ---- the source order -----------------------------------------
+    -- The order the cards are declared in, which is classic's; the order they
+    -- mount in is the group table's (section 1).
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Buff Filters | Order & Limits | Appearance | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
-       "order: the eleven sections are opened in the order the page reads in one column")
+       "Visibility | Buff Filters | Order & Limits | Icon Style | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
+       "order: the eleven sections are declared in classic's order")
 
     -- ☠ AND BOTH HALVES FILL THEIR COLUMN. The layout pass only resizes an
     -- indented widget otherwise, so a header or a band placed in a column without
@@ -829,7 +843,7 @@ print("-- Buff Bar page: the pin")
 
 -- The eight that decide how the bar LOOKS...
 local PINNED = {
-    { label = "Appearance",   builder = "BuildBuffAppearanceGroup" },
+    { label = "Icon Style",   builder = "BuildBuffAppearanceGroup" },
     { label = "Layout",       builder = "BuildBuffLayoutGroup" },
     { label = "Position",     builder = "BuildBuffPositionGroup" },
     { label = "Border",       builder = "BuildBuffBorderGroup" },
@@ -1057,9 +1071,9 @@ do
     -- point, which costs nothing at the top of a page where both columns are at
     -- zero.
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    check(stripAt ~= nil and contentAt ~= nil and stripAt < contentAt,
-          "bulk: ...above the first category header, because it acts on the whole page")
+    local mountAt = PAGE:find("tools.MountCardGroups(Add,", 1, true)
+    check(stripAt ~= nil and mountAt ~= nil and stripAt < mountAt,
+          "bulk: ...above the first group header, because it acts on the whole page")
     local mounts = 0
     for _ in PAGE:gmatch("tools%.SectionControls%(") do mounts = mounts + 1 end
     eq(mounts, 1, "bulk: ...and exactly once")
@@ -1127,7 +1141,7 @@ do
           "bulk: Collapse All greys when every visible section is already shut")
     -- Driven from the page's state pass -- the pass that has just decided which
     -- sections are shown -- so the verdict is never a frame stale.
-    check(CTRL_RAW:find("strip.refreshContent = function()", 1, true) ~= nil,
+    check(CTRL_RAW:find("strip.refreshContent = function(_, d)", 1, true) ~= nil,
           "bulk: ...re-judged on every page state pass, like every other gated control")
 
     -- ---- (e) the store, written the way a manual fold writes it ----------
@@ -1210,9 +1224,9 @@ do
           "card: ...SetExpanded reaches it only when it exists")
     check(fn:find("if self._ApplyCardFold and widget.isSettingsGroup and not self.cardBody then", 1, true) ~= nil,
           "card: ...and so does RegisterChild")
-    check(fn:find("if cardHover then cardHover:Show() return end", 1, true) ~= nil
-      and fn:find("if cardHover then cardHover:Hide() return end", 1, true) ~= nil,
-          "card: the hover wash replaces the backdrop tint only when there is a card")
+    check(fn:find("if cardHover then SetCardHover(true) return end", 1, true) ~= nil
+      and fn:find("if cardHover then SetCardHover(false) return end", 1, true) ~= nil,
+          "card: the header strip brightens instead of the backdrop tint only when there is a card")
     check(fn:find('section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)', 1, true) ~= nil
       and fn:find("local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26", 1, true) ~= nil
       and fn:find("local TITLE_X = TICK_X\n", 1, true) ~= nil,
@@ -1322,7 +1336,7 @@ do
         { label = "Duration Bar",  key = "buffDurationBarEnabled", name = "Enable Duration Bar" },
         { label = "Pandemic",      key = "buffPandemicEnabled",    name = "Enable" },
     }
-    local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Appearance",
+    local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Icon Style",
                        "Layout", "Position", "Stack Count" }
     for _, t in ipairs(TICKED) do
         local block = sectionBlock(t.label)
@@ -1380,8 +1394,8 @@ do
     local fn = WIDGETS:match("function GUI:CreateCollapsibleSection%(.-\nend\n") or ""
     check(fn:find('local toggleOpts = opts and type(opts.toggle) == "table" and type(opts.toggle.key) == "string"', 1, true) ~= nil,
           "tick: the factory reads opts.toggle, and a spec with no key is no spec")
-    check(fn:find("if toggleOpts then TITLE_X = TICK_X + TICK_SIZE", 1, true) ~= nil,
-          "tick: ...the title moves right only on a ticked header")
+    check(fn:find("if CARD or toggleOpts then TITLE_X = TICK_X + TICK_SIZE", 1, true) ~= nil,
+          "tick: ...a card reserves the tick's slot ticked or not, so titles line up")
     local tickAt = fn:find("\n    if toggleOpts then\n        local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,", 1, true)
     check(tickAt ~= nil, "tick: ...built only under the opt-in, from the shared checkbox factory")
     check(fn:find("tick:SetFrameLevel(clickArea:GetFrameLevel() + 2)", 1, true) ~= nil,

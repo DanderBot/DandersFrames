@@ -78,6 +78,8 @@ if cardTableSrc and fnSrc then
         CreateRoundedSurface = function() return RoundedStub() end,
         CreateElementBackdrop = function() end,
         GetCollapsedGroups = function() return collapsed end,
+        -- The modified mark is its own factory (test_modified_dot.lua).
+        AttachCardModifiedMark = function() end,
         CreateCheckbox = function(_, parent)
             local cb = MakeFrame(18, 18)
             cb.checkButton = MakeFrame(18, 18)
@@ -89,8 +91,14 @@ if cardTableSrc and fnSrc then
         "local GUI, DF, L, C_PANEL, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM, GetThemeColor, CreateFrame = ...\n"
         .. cardTableSrc .. "\n" .. (kindsSrc or "") .. "\n" .. fnSrc)
     check(chunk ~= nil, "kind: the cut parses (" .. tostring(err) .. ")")
+    -- The atlas-or-path setter, recording what it was handed and the swatch's
+    -- desaturation (the fake texture answers SetDesaturated with a no-op).
+    local DFt = { SetIconTextureOrAtlas = function(_, tex, t)
+        tex:SetTexture(t)
+        rawset(tex, "SetDesaturated", function(self, v) self._desat = v and true or false end)
+    end }
     if chunk then
-        chunk(GUI, {}, setmetatable({}, { __index = function(_, k) return k end }),
+        chunk(GUI, DFt, setmetatable({}, { __index = function(_, k) return k end }),
               C_PANEL, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM,
               function() return ACCENT end,
               function(_, _, parent) return MakeFrame() end)
@@ -99,11 +107,12 @@ if cardTableSrc and fnSrc then
         -- The spec numbers, so a factory missing them is measured against what
         -- it should be rather than erroring on nil arithmetic.
         local ICON, GLYPH, IGAP = CARD.icon or 16, CARD.iconGlyph or 14, CARD.iconGap or 8
+        local LEAD = CARD.titleLead or 12
 
         -- ---- metrics, named, in the card table ----
         eq(CARD.icon, 16, "metrics: the icon's slot is 16")
         eq(CARD.iconGlyph, 14, "metrics: ...the glyph inside it 14")
-        eq(CARD.iconGap, 8, "metrics: ...and 8 to the tick/title")
+        eq(CARD.iconGap, 8, "metrics: ...and 8 to the tick")
         eq(CARD.iconAccent, true, "switch: the icon colour defaults to the ACCENT")
         check(type(CARD.kinds) == "table" and CARD.kinds.layout ~= nil,
               "map: GUI.SectionCard.kinds is the one kind -> texture table")
@@ -134,8 +143,10 @@ if cardTableSrc and fnSrc then
         eq(chevX, CARD.edge, "order: the chevron keeps its edge inset")
         eq(iconX, CARD.edge + CARD.chevron + CARD.titleGap + (ICON - GLYPH) / 2,
            "order: the icon is one chevron-gap after the chevron, centred in its slot")
-        eq(titleX, CARD.edge + CARD.chevron + CARD.titleGap + ICON + IGAP,
-           "order: the title follows the icon slot and its gap")
+        -- The tick's slot (an 18px box after iconGap) is reserved on every card too.
+        local TITLE_AT = CARD.edge + CARD.chevron + CARD.titleGap + ICON + CARD.iconGap + 18 + LEAD
+        eq(titleX, TITLE_AT,
+           "order: the title follows the icon and tick slots by the title lead, room for the dot")
         check(chevX and iconX and titleX and chevX < iconX and iconX < titleX,
               "order: chevron -> icon -> title")
 
@@ -189,8 +200,11 @@ if cardTableSrc and fnSrc then
         -- ---- an unkinded card keeps the slot, empty ----
         local u = build({})
         check(u.kindIcon == nil, "unkinded: no icon is built")
-        eq(leftX(u.title), CARD.edge + CARD.chevron + CARD.titleGap + ICON + IGAP,
-           "unkinded: ...but the slot is kept, so titles line up down the page")
+        eq(leftX(u.title), TITLE_AT,
+           "unkinded: ...but the slots are kept, so titles line up down the page")
+        -- ...and a ticked card's title sits exactly where an unticked one's does.
+        local t = build({ toggle = { key = "k", db = {}, label = "On" } })
+        eq(leftX(t.title), TITLE_AT, "ticked: the title lands where an unticked card's does")
         local bogus = build({ kind = "not_a_kind" })
         check(bogus.kindIcon == nil, "unknown kind: no icon, no error")
 
@@ -204,11 +218,97 @@ if cardTableSrc and fnSrc then
            "ticked: the tick sits after the icon slot")
         check(tIconX and tickX and tTitleX and tIconX < tickX and tickX < tTitleX,
               "ticked: chevron -> icon -> tick -> title")
+        eq(CARD.titleLead, 12, "metrics: a title lead of 12, room for the modified dot")
+        eq(tTitleX, (tickX or 0) + 18 + LEAD,
+           "ticked: the title sits the same lead after the 18px box")
 
         -- ---- a plain (non-card) section never grows a slot ----
         local plain = GUI:CreateCollapsibleSection(MakeFrame(500, 800), "Plain", true, 500, { kind = "layout" })
         check(plain.kindIcon == nil, "plain: a non-card section ignores kind")
         eq(leftX(plain.title), 26, "plain: ...and its title stays at 26")
+
+        -- ---- a card's PREVIEW takes the icon slot (the Icons page) ----
+        local pv = build({ kind = "layout" })
+        pv:SetPreviewIcons({ { texture = "off", desaturate = true }, { text = "MT" }, { texture = "live" } })
+        local slot = rawget(pv, "previewSlot")
+        check(slot ~= nil, "preview: a card draws its preview in the header's icon slot")
+        eq(slot and slot:GetTexture(), "live", "preview: ...ONE swatch, the first live entry")
+        eq(slot and slot:GetWidth(), ICON, "preview: ...at the slot's size")
+        local sp = slot and slot._points[1]
+        eq(sp and sp[4], CARD.edge + CARD.chevron + CARD.titleGap + ICON / 2,
+           "preview: ...centred in the slot, so the title does not move")
+        eq(pv.kindIcon and pv.kindIcon._shown, false, "preview: ...in place of the kind icon")
+        eq(slot and slot._desat, false, "preview: a live entry is in colour")
+        pv:SetPreviewIcons({ { texture = "a", desaturate = true }, { texture = "b", desaturate = true } })
+        eq(slot and slot:GetTexture(), "a", "preview: nothing live -- the first entry, ...")
+        eq(slot and slot._desat, true, "preview: ...greyed")
+        pv:SetPreviewIcons({ { text = "AFK" } })
+        eq(slot and slot._shown, false, "preview: text only -- no swatch")
+        eq(pv.kindIcon and pv.kindIcon._shown, true, "preview: ...and the kind icon is back")
+        eq(#pv.previewIcons, 0, "preview: a card never builds the right-end swatches")
+
+        -- ---- a LAYERED entry: the Important Debuffs marker, disc then glyph ----
+        local lay = build({})
+        local function marker(off)
+            return { { size = 14, desaturate = off, layers = {
+                { texture = "disc", color = { r = 1, g = 0.5, b = 0 } },
+                { texture = "mark", color = { r = 1, g = 1, b = 1 } } } } }
+        end
+        lay:SetPreviewIcons(marker(false))
+        local ly = rawget(lay, "previewLayers") or {}
+        eq(#ly, 2, "layered: one texture per layer, in the one slot")
+        eq(ly[1] and ly[1]:GetTexture(), "disc", "layered: ...the disc first")
+        eq(ly[2] and ly[2]:GetTexture(), "mark", "layered: ...the glyph over it")
+        eq(ly[1] and ly[1]:GetWidth(), 14, "layered: ...at the entry's own size")
+        local v1 = ly[1] and ly[1]._vertex
+        check(v1 and v1.r == 1 and v1.g == 0.5 and v1.b == 0, "layered: each layer takes its own tint")
+        lay:SetPreviewIcons(marker(true))
+        v1 = ly[1] and ly[1]._vertex
+        local v2 = ly[2] and ly[2]._vertex
+        check(v1 and v2 and v1.r == v1.g and v1.g == v1.b and v1.r < v2.r,
+              "layered: greyed, each layer keeps its brightness in grey, so the glyph still reads on its disc")
+        lay:SetPreviewIcons({ { texture = "single" } })
+        eq(ly[2] and ly[2]._shown, false, "layered: a plain entry after it hides the extra layer")
+
+        -- ---- the Debuff Bar's Important Debuffs card uses it ----
+        local IND = options_file_source("GUI/Pages/Indicators.lua")
+        check(IND:find("section:SetPreviewIcons({ { size = 14, layers = ImportantMarkerLayers(d),", 1, true) ~= nil,
+              "layered: the Important Debuffs card previews its marker in the icon slot")
+        check(IND:find("impSwatch:SetSwatch(ImportantMarkerLayers(d), ImportantMarkerOff(d))", 1, true) ~= nil,
+              "layered: ...from the same layers and gate as classic's header swatch")
+
+        -- ---- more icons than the slot: a hover lists them all ----
+        -- The hover is the HOUSE tooltip with an icon row, not a lookalike frame.
+        local shownPopup
+        local savedShow, savedHide = GUI.ShowTooltip, GUI.HideTooltip
+        GUI.ShowTooltip = function(_, owner, opts)
+            shownPopup = { owner = owner, title = opts.title, entries = opts.icons, size = opts.iconSize }
+        end
+        GUI.HideTooltip = function() shownPopup = nil end
+        local many = build({})
+        many:SetPreviewIcons({ { texture = "t", desaturate = true }, { texture = "h", inset = 2 }, { text = "x" }, { texture = "d" } })
+        local mhit = rawget(many, "previewHit")
+        check(mhit ~= nil, "popup: a card with several icons gets a hover over its swatch")
+        eq(mhit and mhit._shown, true, "popup: ...shown")
+        eq(mhit and mhit._flags and mhit._flags.mouseClick, false, "popup: ...that takes motion, never clicks (the swatch still folds the card)")
+        local onEnter = mhit and mhit:GetScript("OnEnter")
+        if onEnter then onEnter(mhit) end
+        eq(shownPopup and #shownPopup.entries, 3, "popup: the hover lists every icon entry")
+        eq(shownPopup and shownPopup.entries[1].texture, "t", "popup: ...in order, an off one included")
+        eq(shownPopup and shownPopup.title, "Title", "popup: ...under the card's title")
+        eq(shownPopup and shownPopup.size, CARD.icon, "popup: ...at the header's own icon size")
+        eq(shownPopup and shownPopup.entries[2].inset, 2,
+           "popup: ...with the header's own insets, so the row matches the swatch")
+        eq(shownPopup and shownPopup.entries[1].desaturate, true, "popup: ...an off one stays greyed")
+        local onLeave = mhit and mhit:GetScript("OnLeave")
+        if onLeave then onLeave(mhit) end
+        eq(shownPopup, nil, "popup: leaving the swatch hides it")
+        many:SetPreviewIcons({ { texture = "only" } })
+        eq(mhit and mhit._shown, false, "popup: one icon -- no hover")
+        local one = build({})
+        one:SetPreviewIcons({ { texture = "only" } })
+        eq(rawget(one, "previewHit"), nil, "popup: a one-icon card never builds it")
+        GUI.ShowTooltip, GUI.HideTooltip = savedShow, savedHide
     end
 end
 
@@ -216,3 +316,34 @@ end
 local open = (CTRL:match("\n    local function OpenSection%(Add, .-\n    end\n") or ""):gsub("%s+", " ")
 check(open:find("kind = (extra and extra.kind) or GUI.SectionKindByKey[key] }", 1, true) ~= nil,
       "tools: OpenSection hands the card its kind, from the collapseKey table (never the title)")
+
+-- ---- no lookalike popup is left ----
+check(SW:find("ShowCardPreviewPopup", 1, true) == nil,
+      "popup: the bespoke popup frame is gone -- the house tooltip carries the icons")
+
+-- ---- an atlas icon after a sheet slice: the crop is cleared first ----
+-- Swatches are reused across cards; a raid marker leaves a
+-- SetTexCoord slice behind, and SetAtlas keeps it.
+do
+    local CORE = df_file_source("Frames/Core.lua"):gsub("\r\n", "\n")
+    local fn = cut(CORE, "function DF:SetIconTextureOrAtlas(region, value, l, r, t, b)", "\nend\n")
+    check(fn ~= nil, "atlas: DF:SetIconTextureOrAtlas can be cut out of Frames/Core.lua")
+    if fn then
+        local DF3 = {}
+        local chunk = loadstring("local DF, C_Texture = ...\n" .. fn)
+        chunk(DF3, { GetAtlasInfo = function(v) return v == "an-atlas" and {} or nil end })
+        local calls = {}
+        local region = {
+            SetTexCoord = function(_, ...) calls[#calls + 1] = { "coord", ... } end,
+            SetAtlas = function(_, v) calls[#calls + 1] = { "atlas", v } end,
+            SetTexture = function(_, v) calls[#calls + 1] = { "texture", v } end,
+        }
+        DF3:SetIconTextureOrAtlas(region, "sheet", 0.25, 0.5, 0.25, 0.5)
+        calls = {}
+        DF3:SetIconTextureOrAtlas(region, "an-atlas")
+        local c1, c2 = calls[1], calls[2]
+        check(c1 and c1[1] == "coord" and c1[2] == 0 and c1[3] == 1 and c1[4] == 0 and c1[5] == 1,
+              "atlas: the crop is reset to the whole texture...")
+        check(c2 and c2[1] == "atlas" and c2[2] == "an-atlas", "atlas: ...before the atlas is set")
+    end
+end

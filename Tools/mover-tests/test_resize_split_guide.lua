@@ -101,6 +101,26 @@ content._level = 5
 content.GetWidth = function() return contentW end
 GUIt.contentFrame = content
 GUIt.SelectedMode = "party"
+-- A card page: a box in each column, plus the right-aligned Copy button.
+local function widget(col, extra)
+    local w = { layoutCol = col, layoutHeight = 30, _shown = true }
+    function w:IsShown() return self._shown end
+    for k, v in pairs(extra or {}) do w[k] = v end
+    return w
+end
+local col2Card = widget(2)
+GUIt.Pages = {
+    cards = { children = { widget(2, { rightAlign = true }), widget(1), col2Card } },
+    -- The designers: everything full width, and the Copy button still added as column 2.
+    designer = { children = { widget(2, { rightAlign = true }), widget("both"), widget(1) } },
+    -- The Filter Designer has nothing to copy: an empty zero-height frame stands in.
+    filterdesigner = { children = { widget(2, { layoutHeight = 0 }), widget("both") } },
+    -- A group's own rows are added at the page's column but placed by the group.
+    grouped = { children = { widget(1), widget(2, { settingsGroup = {} }) } },
+    -- A settings group in column 2 is measured by its calculated height.
+    group2 = { children = { widget(2, { isSettingsGroup = true, layoutHeight = 0, calculatedHeight = 120 }) } },
+}
+GUIt.CurrentPageName = "cards"
 GUIt._priv = { PixelsPerUnit = function() return 2 end }   -- a 2x screen: one pixel is 0.5 units
 local ACCENT = { r = 0.6, g = 0.3, b = 0.9 }
 local function snap(_, v) return math.floor(v * 2 + 0.5) / 2 end
@@ -171,6 +191,27 @@ Update()
 check(not guide:IsShown(), "guide: never over the click-casting panel")
 GUIt.SelectedMode = "party"
 Update()
+check(guide:IsShown(), "guide: (back on the card page)")
+-- A full-width page has no split to show, however wide the window.
+GUIt.CurrentPageName = "designer"
+Update()
+check(not guide:IsShown(), "guide: never over a full-width page (the Copy button is not column 2)")
+GUIt.CurrentPageName = "filterdesigner"
+Update()
+check(not guide:IsShown(), "guide: ...nor the empty Copy stand-in, which takes no height")
+GUIt.CurrentPageName = "group2"
+Update()
+check(guide:IsShown(), "guide: a column-2 settings group counts by its calculated height")
+GUIt.CurrentPageName = "grouped"
+Update()
+check(not guide:IsShown(), "guide: a group's own rows are not the page's column 2")
+GUIt.CurrentPageName = "cards"
+col2Card._shown = false
+Update()
+check(not guide:IsShown(), "guide: a hidden column-2 box leaves the page one column")
+col2Card._shown = true
+Update()
+check(guide:IsShown(), "guide: ...and it returns with the box")
 Hide()
 check(not guide:IsShown(), "guide: HideSplitGuide takes it down")
 

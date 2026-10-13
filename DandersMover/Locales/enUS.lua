@@ -113,6 +113,7 @@ L["Typing in or clicking a mover's panel pins it in place. Off: only the pin but
 L["Redid: %s"] = true
 L["Undid: %s"] = true
 L["Undo"] = true
+L["Unsaved changes"] = true
 L["Usage: /mover [unlock|lock|config|reset|demo]"] = true
 L["Usage: /mover reset all | <addon> — registered: %s"] = true
 L["What this element is anchored to. Picking one does not move it."] = true

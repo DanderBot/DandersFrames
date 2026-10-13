@@ -4528,19 +4528,16 @@ function NativeBackend:setUnit(unit)
     local c = self.container
     if c and type(unit) == "string" then
         pcall(function() c:SetUnit(unit) end)
-        -- ★ PARTITION KICK (same mechanism as applyLayout/refresh, live-confirmed
-        -- 2026-07-09): the inbound SetUnit writes the token + MarkDirty(FullAuraRebuild)
-        -- but cannot ARM the private-side dirty processor, so the retarget sits
-        -- unprocessed — the container keeps DISPLAYING the old unit's last parse on a
-        -- frame that now shows someone else (roster churn: stale AD bars/tints on the
-        -- wrong player; the native-bound fill empties when the old aura instance dies,
-        -- leaving a stuck empty rectangle). The Hide/Show bounce runs the intrinsic
-        -- OnShow SECURE-side -> UpdateEventRegistrations + UpdateAllAuras from inside
-        -- the partition -> re-registers events for the NEW unit + arms + processes.
-        -- OOC only (Handle:SetUnit defers to regen in combat, but guard anyway; in
-        -- combat the marked flags flush on the next combat aura event).
+        -- An addon-side SetUnit marks the rebuild but cannot arm the private-side dirty
+        -- processor, so the container would keep showing the previous unit's parse. The
+        -- Hide/Show bounce runs the intrinsic OnShow secure-side, which re-registers for
+        -- the new unit and arms the parse. The bounce is OOC-only; in combat mark the
+        -- rebuild and let the new unit's next UNIT_AURA process it (the post-combat heal
+        -- bounces everything after regen).
         if not InCombatLockdown() then
             pcall(function() c:Hide(); c:Show() end)
+        elseif type(c.UpdateAllAuras) == "function" then
+            pcall(c.UpdateAllAuras, c)
         end
     end
 end
@@ -6251,7 +6248,7 @@ function Handle:SetBadgeSpill(sp)
         self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", sp, -sp)
     end
 end
--- Returns the DESIRED unit; while in combat the backend retarget may still be deferred to regen.
+-- Returns the configured unit; the container's own binding is backend.container:GetUnit().
 function Handle:GetUnit()  return self.config.unit end
 
 -- Proxy positioning to the plain (non-secure) anchor frame. NOTE: Create SetAllPoints
@@ -6424,15 +6421,11 @@ function Handle:_applyEnabled(on)
     if self.backend then self.backend:setEnabled(on) end
 end
 
--- Retarget the container's unit. ★ 68914 re-verified: SetUnit is NOT combat-locked
--- (plain mixin state; Blizzard's own TargetFrame.lua retargets its container on
--- every target change, i.e. constantly in combat; /al combatops ran it clean). The
--- deferral is KEPT for DISPLAY correctness: the partition kick that makes a retarget
--- actually render (the Hide/Show bounce in NativeBackend:setUnit) is OOC-only, so a
--- combat retarget would keep DISPLAYING the old unit's parse until the next aura
--- event — the drives hide the row till regen instead, which beats showing the wrong
--- player's auras. (If show-with-brief-staleness is ever preferred over hide-till-regen,
--- this deferral + the drives' hidden-flag logic is the seam to change — Krathe's call.)
+-- Retarget the container's unit. SetUnit is not combat-locked (Blizzard's TargetFrame
+-- retargets its container on every target change), so this applies in combat too: the
+-- container listens to the new unit at once and shows its auras from that unit's next
+-- UNIT_AURA. Deferring to regen instead left lanes that do not hide themselves showing
+-- the previous occupant's auras for the rest of the fight.
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
@@ -6454,9 +6447,6 @@ function Handle:SetUnit(unit)
     if self.config.dfGate and self.backend and self.backend.applyGroupTuning then
         pcall(self.backend.applyGroupTuning, self.backend)
     end
-    -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
-    -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
-    if InCombatLockdown() then self:_queueOp("retarget"); return end
     if self.backend then self.backend:setUnit(unit) end
 end
 
@@ -8750,53 +8740,6 @@ function SlotHandle:SetUnit(unit)
     return AuraContainer:SetSlotOwnerUnit(self.owner.frame, unit)
 end
 
--- Owners whose retarget was blocked by combat. Weak-keyed, like the handle list: if the
--- frame and its owner go away, the entry goes with them rather than pinning them alive.
-local function registerOwnerRegen(owner)
-    if not AuraContainer._ownerRegen then
-        AuraContainer._ownerRegen = CreateFrame("Frame")
-        AuraContainer._ownerRegen._owners = setmetatable({}, { __mode = "k" })
-        AuraContainer._ownerRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
-        AuraContainer._ownerRegen:SetScript("OnEvent", function(self)
-            -- ☠ Same commit-only-on-success rule as SetSlotOwnerUnit — read its note for
-            -- why an optimistic o.unit write is permanent. It is WORSE here: this drain
-            -- clears pendingUnit and drops the owner from the registry up front, so a
-            -- refusal used to lose the retarget outright with nothing left to retry it.
-            -- ⚠ Failures are re-queued AFTER the loop, never inside it: setting an
-            -- existing key to nil during a pairs() traversal is legal, ADDING one is not.
-            local requeue
-            for o in pairs(self._owners) do
-                self._owners[o] = nil
-                local u = o.pendingUnit
-                o.pendingUnit = nil
-                -- Re-check: the owner may have been retargeted again, or torn down,
-                -- between the defer and now.
-                if u and o.container and o.unit ~= u then
-                    if pcall(o.container.SetUnit, o.container, u) then
-                        o.unit = u
-                        -- The deferred retarget needs the same partition kick the immediate one
-                        -- does, for the same reason. We are here on PLAYER_REGEN_ENABLED, so
-                        -- reparseContainer takes its OOC branch and the bounce is real.
-                        if not AuraContainer._testMode then reparseContainer(o.container) end
-                    else
-                        -- o.unit stays on the OLD token, so the Factory's own per-pass
-                        -- retarget walk will retry on its next sync — that is the fast
-                        -- path back. This re-queue is the backstop for a frame the walk
-                        -- does not reach.
-                        requeue = requeue or {}
-                        requeue[#requeue + 1] = o
-                        o.pendingUnit = u
-                    end
-                end
-            end
-            if requeue then
-                for i = 1, #requeue do self._owners[requeue[i]] = true end
-            end
-        end)
-    end
-    AuraContainer._ownerRegen._owners[owner] = true
-end
-
 -- Retarget the whole owner. One container, one unit — cheaper than the per-indicator
 -- containers it replaces, which each carried their own.
 function AuraContainer:SetSlotOwnerUnit(frame, unit)
@@ -8805,36 +8748,13 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     if owner.unit == unit then return true end
     -- One line per AD slot-owner retarget (roster changes only, not per event).
     DF:Debug("AURACONTAINER", "AD slots: retarget %s -> %s%s", tostring(owner.unit), unit,
-        InCombatLockdown() and " (in combat: deferred to regen)" or "")
-    -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on
-    -- the OLD token deliberately, so GetUnit stays truthful about what is on screen and
-    -- a repeat call simply re-queues rather than reporting a retarget that has not
-    -- happened. The regen drain applies it.
-    if InCombatLockdown() then
-        owner.pendingUnit = unit
-        registerOwnerRegen(owner)
-        return false
-    end
-    -- ☠☠ COMMIT owner.unit ONLY IF THE ENGINE TOOK THE RETARGET. This used to write it
-    -- BEFORE the call and ignore the result, which turns any transient SetUnit failure
-    -- into a PERMANENT desync — and the equality guard at the top of this function is
-    -- what makes it permanent. owner.unit already reads as the new token, so every later
-    -- call returns true without ever retrying, while the container is still bound to the
-    -- PREVIOUS occupant. It then renders that player's auras on this frame forever, and
-    -- misses this player's own, until a /reload.
-    -- ☠ Field shape, and it survived the 5.4.0 alpha: "happens every time I join raid,
-    -- to fix have to reload after everyone has joined" — Earth Shield drawn on a third
-    -- player who never had it, and a Riptide indicator not lighting for the player who
-    -- did (Beans, v5.4.0-alpha.3). Raid formation is a burst of retargets, so it only
-    -- takes one refusal to strand a frame, and out of combat a long-lived buff nobody
-    -- re-casts fires no UNIT_AURA to correct it.
-    -- ★ THE COMBAT BRANCH ABOVE ALREADY STATES THE RULE — "owner.unit is left on the OLD
-    -- token deliberately, so GetUnit stays truthful about what is on screen and a repeat
-    -- call simply re-queues rather than reporting a retarget that has not happened." That
-    -- is exactly right, and this path was the one place that did not honour it.
-    -- ⚠ Everything below is deliberately skipped on failure: the latch re-seed and the
-    -- reparse are both FOR THE NEW UNIT, and running them against a container still bound
-    -- to the old one would re-parse the wrong player and stamp the wrong latch state.
+        InCombatLockdown() and " (in combat)" or "")
+    -- Applies in combat too, like Handle:SetUnit; reparseContainer below falls back to a
+    -- mark-only UpdateAllAuras there.
+    -- Commit owner.unit only if the engine took the retarget: the equality guard above
+    -- would otherwise make a failed SetUnit permanent, leaving the frame on the previous
+    -- occupant's auras until a reload. The latch re-seed and re-parse below are for the
+    -- new unit, so they are skipped on failure too.
     local ok = pcall(owner.container.SetUnit, owner.container, unit)
     if not ok then
         DF:DebugWarn(DBG, "slot owner retarget REFUSED: %s -> %s (owner left on the old"
@@ -8884,17 +8804,8 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
         -- retargets the whole roster at once.
         if h.config and h.config.dfGate then pcall(h._applyHelperGate, h) end
     end
-    -- ☠ SetUnit ALONE DOES NOT RENDER THE RETARGET — it writes the token and marks
-    -- FullAuraRebuild, but it cannot ARM the private-side dirty processor, so the
-    -- container keeps PAINTING THE PREVIOUS OCCUPANT'S PARSE. NativeBackend:setUnit has
-    -- carried the Hide/Show bounce for exactly this since 2026-07-09; the slot path was
-    -- given GetUnit/SetUnit (see the retarget-contract note above) but never the kick, so
-    -- every Aura Designer PLACED indicator, bar and alert could still show another
-    -- player's auras after roster churn. Combat traffic usually masked it — out of combat,
-    -- a long-lived buff nobody re-casts (Earth Shield, Fortitude, Atonement) fires no
-    -- UNIT_AURA on the new unit, so nothing ever corrected it short of a reload.
-    -- ★ reparseContainer carries the combat contract already (OOC bounce, mark-only
-    -- UpdateAllAuras under lockdown) and this site is OOC anyway — lockdown returned above.
+    -- SetUnit alone does not render the retarget (see NativeBackend:setUnit), so re-parse:
+    -- reparseContainer bounces out of combat and marks UpdateAllAuras in combat.
     -- ⚠ One bounce per ACTUAL unit change: the equality guard at the top of this function
     -- means the Factory's per-pass retarget walk cannot re-enter it.
     -- ⚠ AFTER the latch re-seed, mirroring Handle:SetUnit's own order (latch first,

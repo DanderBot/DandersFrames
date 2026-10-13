@@ -53,7 +53,6 @@ end
 -- 5. OK/Cancel click Blizzard's buttons (proper callback execution)
 -- ============================================================
 
-local originalOpenColorPicker = nil
 local originalSetupColorPickerAndShow = nil
 local blizzardPickerHidden = false
 
@@ -426,47 +425,6 @@ local function HookedSetupColorPickerAndShow(self, info)
     end
 end
 
--- Legacy hooked OpenColorPicker function (pre-Midnight)
-local function HookedOpenColorPicker(info)
-    if not originalOpenColorPicker then
-        return
-    end
-
-    -- Account-wide settings, NOT db.party -- see HookedSetupColorPickerAndShow.
-    local dfGlobal = DandersFrames
-    local db = dfGlobal and dfGlobal.GetGlobalDB and dfGlobal:GetGlobalDB()
-    if not db then
-        return originalOpenColorPicker(info)
-    end
-
-    local isFromDF = IsFromDandersFrames()
-
-    -- Hide our picker if it's showing (to prevent overlap)
-    local picker = PickerFrame()
-    if picker and picker:IsShown() then
-        picker.appliedColor = true
-        picker:Hide()
-    end
-
-    if isFromDF and db.colorPickerOverride then
-        -- DandersFrames internal call: use our picker directly (no Blizzard backend)
-        OpenDFColorPickerWithBlizzard(info, false)
-    elseif db.colorPickerGlobalOverride then
-        -- Global override: let Blizzard open, then hide it and show ours
-        -- Pre-scale to tiny size BEFORE Blizzard opens (minimizes flicker)
-        if ColorPickerFrame then
-            ColorPickerFrame:SetScale(0.001)
-        end
-        -- Let Blizzard set up (it opens but is tiny)
-        originalOpenColorPicker(info)
-        -- Now open our picker with Blizzard as hidden backend
-        OpenDFColorPickerWithBlizzard(info, true)
-    else
-        -- No override: just use Blizzard normally
-        originalOpenColorPicker(info)
-    end
-end
-
 -- Install/uninstall hooks
 function GUI:InstallColorPickerHook()
     local installed = false
@@ -480,15 +438,6 @@ function GUI:InstallColorPickerHook()
         end
     end
 
-    -- Also try legacy API (OpenColorPicker) for compatibility
-    if type(OpenColorPicker) == "function" then
-        if OpenColorPicker ~= HookedOpenColorPicker then
-            originalOpenColorPicker = OpenColorPicker
-            OpenColorPicker = HookedOpenColorPicker
-            installed = true
-        end
-    end
-
     return installed
 end
 
@@ -498,19 +447,11 @@ function GUI:UninstallColorPickerHook()
         ColorPickerFrame.SetupColorPickerAndShow = originalSetupColorPickerAndShow
         originalSetupColorPickerAndShow = nil
     end
-
-    -- Restore legacy API
-    if OpenColorPicker == HookedOpenColorPicker and originalOpenColorPicker then
-        OpenColorPicker = originalOpenColorPicker
-        originalOpenColorPicker = nil
-    end
 end
 
 -- Check if hook is installed
 function GUI:IsColorPickerHookInstalled()
-    local midnightHooked = ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow == HookedSetupColorPickerAndShow
-    local legacyHooked = type(OpenColorPicker) == "function" and OpenColorPicker == HookedOpenColorPicker
-    return midnightHooked or legacyHooked
+    return ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow == HookedSetupColorPickerAndShow or false
 end
 
 -- Always install the hook - the hook itself checks settings when invoked.
@@ -539,12 +480,11 @@ SlashCmdList["DFCOLORHOOK"] = function(arg)
     elseif arg == "api" then
         local o = DF:Out("Colour Picker", "API surface")
         -- A missing function is a real fault here: the hook cannot install without
-        -- one of the two entry points, so absence is BAD rather than merely off.
+        -- its entry point, so absence is BAD rather than merely off.
         local function api(label, v)
             o:Field(label, type(v), type(v) == "function" and "good" or "bad")
         end
         o:Section("Globals")
-        api("OpenColorPicker", OpenColorPicker)
         o:Field("ColorPickerFrame", type(ColorPickerFrame),
             ColorPickerFrame and "good" or "bad")
         if ColorPickerFrame then
@@ -575,14 +515,11 @@ SlashCmdList["DFCOLORHOOK"] = function(arg)
         o:Field("Hook installed", isInstalled and "yes" or "no", isInstalled and "good" or "neutral")
         o:Field("Midnight API (SetupColorPickerAndShow)",
             ColorPickerFrame and type(ColorPickerFrame.SetupColorPickerAndShow) or "n/a")
-        o:Field("Legacy API (OpenColorPicker)", type(OpenColorPicker))
         o:Section("Captured originals")
         -- Only a fault while the hook IS installed - uninstalled, nil is correct.
         local capStatus = isInstalled and "bad" or "neutral"
         o:Field("SetupColorPickerAndShow", originalSetupColorPickerAndShow and "captured" or "nil",
             originalSetupColorPickerAndShow and "good" or capStatus)
-        o:Field("OpenColorPicker", originalOpenColorPicker and "captured" or "nil",
-            originalOpenColorPicker and "good" or capStatus)
         o:Section("Settings")
         o:Field("DB available", db and "yes" or "no", db and "good" or "bad")
         if db then

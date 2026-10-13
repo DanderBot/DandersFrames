@@ -7,10 +7,10 @@ local NS = ...
 -- collapsible CARDS, one per box, in two page columns under the three category
 -- headers the popout bands had:
 --
---   column 1   "General"  Resource Bar Settings, Class Filter
---              "Layout"   Size, Position (+ Frame Level)
---   column 2   "Style"    Appearance, Background (header tick), Border (header
---                         tick), Resource Colors
+--   column 1   "Content"     Settings, Class Filter
+--              "Layout"      Size, Position (+ Frame Level)
+--   column 2   "Appearance"  Bar Style, Background (header tick), Border (header
+--                            tick), Resource Colors
 --
 -- ☠ FOUR THINGS THIS SUITE IS HERE TO PIN:
 --
@@ -151,11 +151,11 @@ do
     for _ in PAGE:gmatch('Add%(tools%.SectionControls%(self%.child%), 24, "both"%)') do n = n + 1 end
     eq(n, 1, "bulk: the page adds the Expand/Collapse pair once, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    local generalAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["General"]), 40, 1)', 1, true)
+    local generalAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
     check(stripAt and generalAt and stripAt < generalAt, "bulk: ...above the first category header")
 
     -- The three category headers, straight onto a column, once each.
-    for _, pair in ipairs({ { "General", "1" }, { "Layout", "1" }, { "Style", "2" } }) do
+    for _, pair in ipairs({ { "Content", "1" }, { "Layout", "1" }, { "Appearance", "2" } }) do
         local c = 0
         for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do c = c + 1 end
         eq(c, 1, "headers: the " .. pair[1] .. " category header opens column " .. pair[2] .. ", once")
@@ -226,7 +226,7 @@ local RESOURCE_COLORS = {
 -- `dim` = header greys with the page gate, `pin` = passes its builder (decides
 -- how the bar LOOKS), `tick` = its on/off moved into the header.
 local CARDS = {
-    { label = "Resource Bar Settings", key = "resource_settings", col = 1, box = "settingsGroup", classicCol = 1,
+    { label = "Settings", classicLabel = "Resource Bar Settings", key = "resource_settings", col = 1, box = "settingsGroup", classicCol = 1,
       builder = "BuildResourceSettingsGroup", golden = RESOURCE_SETTINGS, summary = "ResourceSettingsCardSummary" },
     { label = "Class Filter", key = "resource_classfilter", col = 1, box = "classFilterGroup", classicCol = 1,
       builder = "BuildResourceClassFilterGroup", golden = RESOURCE_CLASS_FILTER,
@@ -236,11 +236,11 @@ local CARDS = {
     { label = "Position", key = "resource_position", col = 1, box = "positionGroup", classicCol = 1,
       builder = "BuildResourcePositionGroup", golden = RESOURCE_POSITION, summary = "ResourcePositionSummary",
       dim = true, pin = true, cardBuilder = "BuildResourcePositionCardGroup" },
-    { label = "Appearance", key = "resource_appearance", col = 2, box = "appearanceGroup", classicCol = 2,
+    { label = "Bar Style", classicLabel = "Appearance", key = "resource_appearance", col = 2, box = "appearanceGroup", classicCol = 2,
       builder = "BuildResourceAppearanceGroup", golden = RESOURCE_APPEARANCE, summary = "ResourceAppearanceSummary",
       dim = true, pin = true },
     { label = "Background", key = "resource_background", col = 2, box = "bgGroup", classicCol = 2,
-      builder = "BuildResourceBackgroundGroup", golden = RESOURCE_BACKGROUND, summary = "nil",
+      builder = "BuildResourceBackgroundGroup", golden = RESOURCE_BACKGROUND, summary = "ResourceBackgroundSummary",
       dim = true, pin = true, tick = { key = "resourceBarBackgroundEnabled", name = "Show Background" } },
     { label = "Border", key = "resource_border", col = 2, box = "borderGroup", classicCol = 2,
       builder = "BuildResourceBorderGroup", golden = RESOURCE_BORDER, summary = "ResourceBorderSummary",
@@ -261,7 +261,7 @@ for _, g in ipairs(CARDS) do
 
     check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
           g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"]), 40)', 1, true) ~= nil,
+    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"]), 40)', 1, true) ~= nil,
           g.label .. ": ...under the header it always had")
     check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
           g.label .. ": ...and still goes to column " .. g.classicCol)
@@ -319,7 +319,7 @@ do
     check(body:find('GUI:CreateCheckbox(parent, L["Enable Resource Bar"], db, "resourceBarEnabled"', 1, true) ~= nil
       and body:find("resourceBarEnable.keepEnabled = true", 1, true) ~= nil,
           "gate: the builder still builds Enable Resource Bar, live under its own grey")
-    check((sectionBlock("Resource Bar Settings")):find("hoistToggle", 1, true) == nil,
+    check((sectionBlock("Settings")):find("hoistToggle", 1, true) == nil,
           "gate: ...and its card never hoists it")
     local s = PAGE:match("local function ResourceSettingsCardSummary%(d%)(.-)\n        end")
     check(s ~= nil and s:find('if d and not d.resourceBarEnabled then return L["Off"] end', 1, true) ~= nil,
@@ -401,7 +401,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Resource Bar Settings | Class Filter | Size | Position | Appearance | Background | Border | Resource Colors",
+       "Settings | Class Filter | Size | Position | Bar Style | Background | Border | Resource Colors",
        "order: the cards open in classic's order, which is the one-column fold's")
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end

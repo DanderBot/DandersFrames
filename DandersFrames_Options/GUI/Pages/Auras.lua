@@ -60,7 +60,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local roleOrderWidget = nil
         
         -- ===== COMBAT STATUS BANNER (full width) =====
-        local combatBanner = GUI:CreateInfoBanner(self.child, { fontTemplate = "DFFontNormal" })
+        local combatBanner = GUI:CreateInfoBanner(self.child, { dismissKey = "combat_lockout", notice = true, fontTemplate = "DFFontNormal" })
 
         local function UpdateCombatBanner()
             if not db.sortEnabled then
@@ -78,7 +78,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             elseif selfPos == "FIRST" or selfPos == "LAST" then
                 combatBanner:SetTone("caution")
                 -- Override default warning icon with info icon for this softer state.
-                combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info")
+                combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info.png")
                 combatBanner:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
             else
                 combatBanner:SetTone("success")
@@ -270,6 +270,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(tools.SectionControls(self.child), 24, "both")
             -- ☠ NO TICK: Enable Custom Sorting is the page gate and stays in the
             -- body, built by the builder exactly as classic builds it. No pin.
+            Add(GUI:CreateHeader(self.child, L["Sorting"]), 40, 1)
             local band = OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)
             BuildSortOptionsGroup({
                 group = band, parent = self.child,
@@ -331,6 +332,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             else
                 -- ☠ USE FRAMESORT ADDON IS THE HEADER'S TICK; the builder skips
                 -- its own (hoistToggle). Same key, label and commit. No pin.
+                -- ⚠ NO SUMMARY, by decision: the tick is the whole card, and shut
+                -- and off the corner already reads "Off".
                 local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
                     db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
                     onChanged = UseFrameSortChanged,
@@ -577,20 +580,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(colorPickerGroup, nil, 1)
         else
-            -- One word, and only for the state worth a word. Replacing every
-            -- OTHER addon's picker is the setting a user will want confirmed at a
-            -- glance, and L["All"] says it in a word the locale already ships.
-            -- The this-addon-only state gets nothing: there is no existing word
-            -- for it that is not either vague or a brand name standing in for a
-            -- sentence -- and a summary is not worth inventing a string for.
+            -- Whose pickers are DF's: every addon's, this addon's only, or none
+            -- (Blizzard's everywhere). The global tick wins -- it installs the
+            -- hook whatever the other says.
             --
             -- ⚠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S `db`. The card's corner is
             -- handed the per-mode table by the page pass; these two keys live in
             -- the global db, so the summary reads that instead.
             local function ColorPickerSummary()
                 local g = DF:GetGlobalDB()
-                if g and g.colorPickerGlobalOverride then return L["All"] end
-                return ""
+                if not g then return "" end
+                if g.colorPickerGlobalOverride then return L["All Addons"] end
+                if g.colorPickerOverride then return format(L["%s only"], "DandersFrames") end
+                return L["Blizzard"]
             end
 
             -- ☠ THE PAGE'S TWO BULK VERBS, at col "both" -- the Debuff Bar's
@@ -718,6 +720,35 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
         end
 
+        -- A palette card's summary: "Default", or how many swatches differ from
+        -- the colour their own Reset All writes back. An unseeded swatch is
+        -- still the default.
+        local function PaletteSummary(store, list, keyField, defaultOf)
+            local n = 0
+            for _, info in ipairs(list) do
+                local c, d = store[info[keyField]], defaultOf(info[keyField])
+                if type(c) == "table" and type(d) == "table"
+                    and (math.abs((c.r or 0) - (d.r or 0)) > 0.005
+                      or math.abs((c.g or 0) - (d.g or 0)) > 0.005
+                      or math.abs((c.b or 0) - (d.b or 0)) > 0.005) then
+                    n = n + 1
+                end
+            end
+            if n == 0 then return L["Default"] end
+            return format(L["%d custom"], n)
+        end
+        -- Each default is what that palette's own Reset All writes back.
+        local function ClassColorsSummary()
+            return PaletteSummary(classColorsDB, CLASS_LIST, "token",
+                function(t) return RAID_CLASS_COLORS and RAID_CLASS_COLORS[t] end)
+        end
+        local function RoleColorsSummary()
+            return PaletteSummary(roleColorsDB, ROLE_LIST, "token", function(t) return ROLE_DEFAULTS[t] end)
+        end
+        local function DispelColorsSummary()
+            return PaletteSummary(dispelColorsDB, DISPEL_LIST, "key", function(k) return dispelGamePalette[k] end)
+        end
+
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: four 280 boxes -- Class Colors
         -- then Dispel Type Colors down column 1, Role Colors then the Color by
@@ -736,8 +767,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- set per profile, shared by party and raid -- and each group's own "Reset
         -- All to Default" button IS the reset story; it stays inside its card.
         --
-        -- ⚠ NO SUMMARIES, AND NOTHING IS INVENTED TO MAKE ONE. A palette of
-        -- swatches has no four of anything to name; a shut card is just its title.
+        -- A palette's summary is "Default" or "N custom" (PaletteSummary); Color
+        -- by Time has none -- see its card.
         --
         -- ⚠ THE PALETTES ARE PINNABLE (they decide how frames look); Color by Time
         -- is NOT, because every structural edit in it rebuilds the page, which
@@ -875,8 +906,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
-            -- Column 1, pinnable, no summary (see the page note).
-            local band = OpenSection(L["Class Colors"], "colors_class", 1, nil, nil, nil, BuildClassColorsGroup)
+            Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)
+            -- Column 1, pinnable.
+            local band = OpenSection(L["Class Colors"], "colors_class", 1, ClassColorsSummary, nil, nil, BuildClassColorsGroup)
             BuildClassColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -929,8 +961,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(col2, nil, 2)
         else
-            -- Column 2, pinnable, no summary.
-            local band = OpenSection(L["Role Colors"], "colors_role", 2, nil, nil, nil, BuildRoleColorsGroup)
+            -- Column 1 under Class Colors, pinnable.
+            local band = OpenSection(L["Role Colors"], "colors_role", 1, RoleColorsSummary, nil, nil, BuildRoleColorsGroup)
             BuildRoleColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -977,10 +1009,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(dispelCol, nil, 1)
         else
-            -- Column 1 under Class Colors, pinnable, no summary. Its title is the
+            -- Column 2, opening Aura Colors, pinnable. Its title is the
             -- cross-link anchor the debuff Border and Dispel Overlay pages jump to
             -- (see the page note) -- keep it in step with theirs.
-            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 1, nil, nil, nil, BuildDispelColorsGroup)
+            Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)
+            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, DispelColorsSummary, nil, nil, BuildDispelColorsGroup)
             BuildDispelColorsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -1133,6 +1166,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- nothing below has to know which layout it is building into. The card's
         -- band re-sizes its rows on every layout pass; the 260px rows inside were
         -- laid out for the box and sit left-aligned in a wider card.
+        --
+        -- ⚠ NO SUMMARY, by decision: the card is a breakpoint editor over two
+        -- ramps, and neither a count nor a list of thresholds says anything a
+        -- glance can use.
         local cbtGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
             or OpenSection(L["Color by Time"], "colors_bytime", cbtColumn)
@@ -1143,6 +1180,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- pair spans the box. No explicit accent: the tab picks up the mode accent
         -- (party purple / raid), same as the main tabs. CreateSegmentToggle stays the
         -- compact value toggle beside a control (the s/% dials in the legend below).
+        -- ⚠ EACH TAB IS ANCHORED TO ITS HALF OF THE ROW, not given a width: the box
+        -- or card sizes the row, and a wide card left fixed-width tabs in its corner.
         local tabRow = CreateFrame("Frame", nil, self.child)
         tabRow:SetSize(260, 24)
         local prevTab
@@ -1152,10 +1191,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         }) do
             local tabBtn = CreateFrame("Button", nil, tabRow, "BackdropTemplate")
             GUI:StyleButton(tabBtn, { tab = true, width = 128, height = 24, text = def.label, font = "DFFontHighlight" })
+            tabBtn:ClearAllPoints()
             if prevTab then
-                tabBtn:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
+                tabBtn:SetPoint("TOPLEFT", tabRow, "TOP", 2, 0)
+                tabBtn:SetPoint("BOTTOMRIGHT", tabRow, "BOTTOMRIGHT", 0, 0)
             else
-                tabBtn:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
+                tabBtn:SetPoint("TOPLEFT", tabRow, "TOPLEFT", 0, 0)
+                tabBtn:SetPoint("BOTTOMRIGHT", tabRow, "BOTTOM", -2, 0)
             end
             local key = def.key
             tabBtn:SetScript("OnClick", function()
@@ -1174,6 +1216,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- unit, the text preview always shows the ramp the TEXT reads. smoothMode marks
         -- the strips that render the way the duration text does (gradient while Blend
         -- Colors Smoothly is on). Low values left, high right.
+        -- ⚠ THE BANDS ARE PLACED FROM THE STRIP'S LIVE WIDTH, on every size change:
+        -- the editor strip is stretched to the box or card it sits in, and bands laid
+        -- out once at the 256 it is built at would stay that wide in a wider card.
         local previewW, stripH = 256, 18
         local strips = {}
         local function BuildStrip(w, h, smoothMode, unit)
@@ -1189,12 +1234,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local hi = (k < #asc) and cbtT(asc[k + 1]) or maxT
                 if hi > lo then
                     local tex = f:CreateTexture(nil, "ARTWORK")
-                    tex:SetPoint("TOPLEFT", f, "TOPLEFT", (lo / maxT) * w, 0)
-                    tex:SetSize(((hi - lo) / maxT) * w, h)
                     tex:SetColorTexture(1, 1, 1, 1)   -- white base; the gradient tints it
-                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1] }
+                    f.segs[#f.segs + 1] = { tex = tex, from = asc[k], to = asc[k + 1], lo = lo, hi = hi }
                 end
             end
+            local function place(width)
+                width = (width and width > 0) and width or w
+                for _, seg in ipairs(f.segs) do
+                    seg.tex:ClearAllPoints()
+                    seg.tex:SetPoint("TOPLEFT", f, "TOPLEFT", (seg.lo / maxT) * width, 0)
+                    seg.tex:SetSize(((seg.hi - seg.lo) / maxT) * width, h)
+                end
+            end
+            place(w)
+            f:SetScript("OnSizeChanged", function(_, width) place(width) end)
             strips[#strips + 1] = f
             return f
         end
@@ -1307,7 +1360,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
 
                 local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = iconPath .. "add.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                 plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
                 plus:SetScript("OnClick", function() commitTo(cbtT(bp) + 1) end)
 
@@ -1335,7 +1388,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end)
 
                 local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = iconPath .. "remove.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                 minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
                 minus:SetScript("OnClick", function() commitTo(cbtT(bp) - 1) end)
 
@@ -1719,6 +1772,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- names its ramp ("Health Gradient" / "Missing Health Gradient"): two
         -- cards both titled "Gradient" in one column could not be told apart.
         -- The keys are the ones they shipped with, so folds survive the rename.
+        -- ⚠ NO SUMMARY, by decision: a gradient stop list has no value to name,
+        -- and the card only shows while its colour mode is Gradient anyway.
         local gradGroup = classicLayout
             and GUI:CreateSettingsGroup(self.child, 280)
             or OpenSection((prefix == "healthColor") and L["Health Gradient"] or L["Missing Health Gradient"],
@@ -1895,7 +1950,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     end
 
                     local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                    GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = gradIconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = gradIconPath .. "add.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                     plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
                     plus:SetScript("OnClick", function() commitTo(cur + 1) end)
 
@@ -1937,7 +1992,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     eb:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
                     local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
-                    GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = gradIconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = gradIconPath .. "remove.png", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
                     minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
                     minus:SetScript("OnClick", function() commitTo(cur - 1) end)
 
@@ -2094,6 +2149,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
+
+            -- The four looks, across both columns.
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, "both")
 
             -- Pins on all three: they are what the bar is drawn IN and ON.
             local band = OpenSection(L["Color"], "health_color", 1, HealthColorSummary, nil, nil,
@@ -2283,24 +2341,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             AddToSection(reducedGroup, nil, 1)
         else
-            -- ☠ ENABLE IS THE HEADER'S TICK; the builder skips its own
-            -- (hoistToggle). Same key and label, and the commit is what the
-            -- suppressed checkbox ran plus the state pass that re-greys the four
-            -- controls under it -- never a page rebuild. A pin: the overlay's
-            -- texture, colour and blend are how it LOOKS.
-            local band = OpenSection(L["Reduced Max Health"], "health_reduced", 2, ReducedMaxHealthSummary, nil, nil,
-                BuildReducedMaxHealthGroup, {
-                    db = db, key = "reducedMaxHealthEnabled", label = L["Enable"],
-                    onChanged = function()
-                        DF:UpdateAllFrames()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
+            -- Its own group under the looks, as classic gives it its own section:
+            -- an extra the bar can show, not how the bar looks. ☠ ITS ENABLE STAYS
+            -- IN THE BODY, first in its Settings card: a switch for a whole group
+            -- never rides a "Settings" header. A pin: the overlay's texture,
+            -- colour and blend are how it LOOKS.
+            Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
+            local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
+                BuildReducedMaxHealthGroup)
             BuildReducedMaxHealthGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
             })
             CloseSection(band)
         end
@@ -2311,8 +2362,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "general_frame", label = L["Frame"]},
-            -- LEGACY-TEXT-CLEANUP: legacy text page hidden; link removed
-            -- {pageId = "text_health", label = L["Health Text"]},
             {pageId = "bars_absorbs", label = L["Absorbs"]},
         }), 30, "both")
     end)
@@ -2938,11 +2987,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Debuff Bar's placement: they act on cards in both columns.
             Add(tools.SectionControls(self.child), 24, "both")
             -- The category header the two General cards sit under.
-            Add(GUI:CreateHeader(self.child, L["General"]), 40, 1)
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
             -- ☠ NO TICK: Enable Resource Bar is the page gate and stays in the body
             -- (see the page note), built by the builder exactly as classic builds
             -- it. No pin: which roles get a bar is behaviour, not looks.
-            local band = OpenSection(L["Resource Bar Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
+            local band = OpenSection(L["Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
             BuildResourceSettingsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -3023,8 +3072,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(appearanceGroup, nil, 2)
         else
             -- The category header the four Style cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Style"]), 40, 2)
-            local band = OpenSection(L["Appearance"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
+            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+            local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
                 BuildResourceAppearanceGroup)
             BuildResourceAppearanceGroup({
                 group = band, parent = self.child,
@@ -3046,9 +3095,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ SHOW BACKGROUND IS THE HEADER'S TICK; the builder skips its own
             -- (hoistToggle). The commit is what the in-body checkbox ran, plus a
             -- reflow for a pinned copy -- never a page rebuild. It greys with the
-            -- page gate. No summary: the tick's Off is the whole of what a shut
-            -- card has to say.
-            local band = OpenSection(L["Background"], "resource_background", 2, nil, ResourceOffRow, nil,
+            -- page gate. Shown and shut, the corner gives the colour's alpha --
+            -- the one number in a card whose other control is a swatch.
+            local function ResourceBackgroundSummary(d)
+                local c = d and d.resourceBarBackgroundColor
+                if type(c) ~= "table" then return "" end
+                return format("%s %.2f", L["Alpha"], tonumber(c.a) or 1)
+            end
+            local band = OpenSection(L["Background"], "resource_background", 2, ResourceBackgroundSummary, ResourceOffRow, nil,
                 BuildResourceBackgroundGroup, {
                     db = db, key = "resourceBarBackgroundEnabled", label = L["Show Background"],
                     disableOn = ResourceOffRow,
@@ -3758,7 +3812,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- mode and the source.
             --
             -- A pin: the texture, the colours and the blend are how the bar LOOKS.
-            local band = OpenSection(L["Heal Prediction"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
+            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+            local band = OpenSection(L["Settings"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
                 BuildHealPredictionSettingsGroup)
             BuildHealPredictionSettingsGroup({
                 group = band, parent = self.child,
@@ -3815,6 +3870,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ☠ COLUMN 2, HIDDEN UNLESS THE BAR FLOATS -- header and band together.
             -- Greys its header with the page gate; its controls grey themselves.
             -- A pin: size and fill direction are how the bar LOOKS.
+            -- Layout heads column 2 and hides with its two cards unless the bar floats.
+            local layoutHeader = GUI:CreateHeader(self.child, L["Layout"])
+            layoutHeader.hideOn = HealPredFloatingHiddenOn
+            Add(layoutHeader, 40, 2)
             local band = OpenSection(L["Floating Bar Position"], "healpred_floating", 2, HealPredictionFloatingSummary,
                 HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionFloatingGroup)
             BuildHealPredictionFloatingGroup({
@@ -3892,12 +3951,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ========================================
     CreateCategory("text", L["Text"])
     
-    -- LEGACY-TEXT-CLEANUP (v4.4.x): Name/Health/Status built-in text settings are
-    -- replaced by the Text Designer, and their settings pages are gone. Remove this
-    -- block, the legacy text render path (see DF:IsLegacyTextHidden in
-    -- Frames/Core.lua), and the legacy *Text* defaults in Config.lua in a future
-    -- release once the Text Designer fully supersedes them.
-
     -- Text > Text Designer
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
     -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER

@@ -109,8 +109,8 @@ do
           "narrow: ...and the row takes the height of the rows it wrapped to")
     check(SRC:find('chipRow:SetScript("OnSizeChanged", LayoutChips)', 1, true) ~= nil,
           "narrow: ...re-taken whenever the band changes width")
-    check(SRC:find('helpBtn:SetPoint("TOPRIGHT", 0, 0)', 1, true) ~= nil,
-          "narrow: ...and the help glyph stays beside the FIRST row of chips")
+    check(SRC:find("helpBtn", 1, true) == nil and SRC:find("ShowFilterHelp", 1, true) == nil,
+          "narrow: no help glyph -- the banner already says what its popup said")
 
     -- ---- CLASS TWO: header row 3, a row of fixed-width children ----
     -- The island's Spell ID box, Add button and Add-from-Database button are all
@@ -165,23 +165,19 @@ do
 end
 
 -- ============================================================
--- 4. THE FLOOR IS GONE -- THE ACCEPTANCE TEST
+-- 4. IT OPENS WIDE, WITH THE OTHER FULL-WIDTH PAGES
 -- ============================================================
-print("-- Filter Designer: the wide-page floor is gone")
+print("-- Filter Designer: the full-width pages open wide")
 do
     -- THE TABLE'S BODY, NOT THE FILE. The page id also appears in Panel.lua's
     -- slash-command alias map, so a file-wide find answers "is this string
     -- anywhere" and never "is this page still a wide page".
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
-    check((WIDE or ""):find("auras_filterdesigner", 1, true) == nil,
-          "wide: the Filter Designer no longer forces the window to 850")
-    -- The aura family is out entirely; the two pages that have not had their own
-    -- pass must NOT have been swept out with it.
-    check((WIDE or ""):find("auras", 1, true) == nil,
-          "wide: ...and no aura page is left in the table at all")
+    check((WIDE or ""):find("auras_filterdesigner", 1, true) ~= nil,
+          "wide: the Filter Designer widens the window to 850")
     check((WIDE or ""):find("general_pinnedframes", 1, true) ~= nil,
-          "wide: Pinned Frames keeps its floor until its own pass")
+          "wide: ...as does Pinned Frames")
     check((WIDE or ""):find("general_nicknames", 1, true) ~= nil,
           "wide: ...and so does Nicknames")
 end

@@ -749,15 +749,17 @@ function DF:RenderTextDesignerNow(frame, hint)
             tdDB.elements and #tdDB.elements or -1)
     end
 
-    -- Test frames: use the per-unit Test data source and gate on the test-mode
-    -- toggle (db.testShowTextDesigner) rather than the live master toggle. Like
-    -- the preview, ignore the master toggle so designers can see their layout
-    -- while building. When the test toggle is off, hide any TD text on the frame.
+    -- Test frames: use the per-unit Test data source, and hide the text when
+    -- EITHER the master toggle or the test-mode toggle (db.testShowTextDesigner)
+    -- is off. Test frames preview what the live frames will show, and a disabled
+    -- Text Designer shows nothing live; the designer page has its own preview
+    -- for building a layout with it switched off.
     if frame.dfIsTestFrame then
-        if db.testShowTextDesigner == false then
+        if db.testShowTextDesigner == false or not tdDB.enabled then
             if frame._tdFontStrings then
                 for _, fs in pairs(frame._tdFontStrings) do fs:Hide() end
             end
+            syncMirrors(frame)
             return
         end
         local source = DF.TextDesigner.DataSource.Test(frame)

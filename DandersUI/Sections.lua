@@ -164,6 +164,9 @@ local function EntryVisible(group, entry, index, layoutDB, ignoreHostHidden)
     -- announcement, same way back.
     if entry.hostHidden and not ignoreHostHidden then return false end
     if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
+    -- A widget that has folded itself away (a closed banner with nothing left to
+    -- show) takes no row and no gap.
+    if rawget(w, "layoutSkip") then return false end
     return true
 end
 
@@ -385,7 +388,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         barIcon:SetPoint("CENTER", 0, 0)
         -- "expand_more" is a down chevron; rotate 180° so it points UP — this bar
         -- collapses the (expanded) section, so an up arrow reads correctly.
-        barIcon:SetTexture(ICON_PATH .. "expand_more")
+        barIcon:SetTexture(ICON_PATH .. "expand_more.png")
         barIcon:SetRotation(math.pi)
         barIcon:SetVertexColor(1, 1, 1, 0.5)
 
@@ -406,7 +409,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 if saved then saved[stateKey] = true end
             end
             if group.collapseArrow then
-                group.collapseArrow:SetTexture(ICON_PATH .. "chevron_right")
+                group.collapseArrow:SetTexture(ICON_PATH .. "chevron_right.png")
             end
             -- A page that owns its own layout (rather than re-flowing itself off
             -- RefreshStates below) re-runs it from this hook.
@@ -543,7 +546,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
             local arrow = widget:CreateTexture(nil, "OVERLAY")
             arrow:SetSize(10, 10)
             arrow:SetPoint("RIGHT", widget.text, "LEFT", -2, 0)
-            arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right") or (ICON_PATH .. "expand_more"))
+            arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right.png") or (ICON_PATH .. "expand_more.png"))
             local c = host:GetAccent()
             arrow:SetVertexColor(c.r, c.g, c.b)
             self.collapseArrow = arrow
@@ -573,7 +576,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
                     -- only store true, remove when expanded
                     if saved then saved[stateKey] = self.collapsed or nil end
                 end
-                arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right") or (ICON_PATH .. "expand_more"))
+                arrow:SetTexture(self.collapsed and (ICON_PATH .. "chevron_right.png") or (ICON_PATH .. "expand_more.png"))
                 -- Refresh the page to recalculate layout. A page that owns its own
                 -- layout re-runs it from the hook; pages built by the standard page
                 -- builder expose RefreshStates on the group's parent.
@@ -621,7 +624,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- its left and right edges land exactly where the ROW PLATES in the band
         -- above it do: those rows are the children of a chromeless group at this
         -- same inset, and a control row's plate spans its whole slot (it is
-        -- anchored TOPLEFT/TOPRIGHT at 0 -- see ControlRow.lua). Left at the
+        -- anchored TOPLEFT/TOPRIGHT at 0). Left at the
         -- group's own edges the plate overhung every row on the page by one
         -- padding on each side, which is the width mismatch this inset settles.
         --
@@ -1214,6 +1217,15 @@ end
 function UI:CreateInfoBanner(parent, opts)
     opts = opts or {}
     local host = self
+    -- opts.dismissKey: a x that folds the banner to its icon chip in its own place,
+    -- remembered in the host's tipStore (absent = no x). The x takes the top-right
+    -- corner, so the text stops short of it (closeRoom).
+    -- opts.notice: the banner reports live STATE (combat, a mode off, a feature
+    -- taken over) rather than explaining; the host's tipMode -- "start every tip
+    -- closed / hidden" -- does not apply to it, only the user's own x does.
+    local tipFn = opts.dismissKey and host:Hook("tipStore")
+    local tipStore = tipFn and tipFn() or nil
+    local closeRoom = tipStore and 22 or 0
 
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     -- SetTone overwrites both colours, and opts.tone is applied at the bottom of
@@ -1244,7 +1256,7 @@ function UI:CreateInfoBanner(parent, opts)
     -- text sits a few px below the icon's top so its centre lines up with the
     -- icon's centre.
     body:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -5)
-    body:SetPoint("RIGHT", banner, "RIGHT", -12, 0)
+    body:SetPoint("RIGHT", banner, "RIGHT", -12 - closeRoom, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
     body:SetWordWrap(true)
@@ -1284,6 +1296,8 @@ function UI:CreateInfoBanner(parent, opts)
     local function DoRecomputeHeight()
         pending = false
         if recomputing then return end
+        -- Folded to its chip: ApplyTipState owns the height, there is no text to measure.
+        if banner._folded then return end
         -- Skip when the banner is hidden — GetStringHeight on a hidden
         -- FontString returns an unreliable value (width depends on the
         -- parent's layout having run, and LayoutChildren doesn't SetWidth
@@ -1393,15 +1407,26 @@ function UI:CreateInfoBanner(parent, opts)
         local tone = INFO_BANNER_TONES[toneName]
         if not tone then return end
         self._tone = toneName
+        -- Folded, the box is not drawn; unfolding re-applies the remembered tone.
+        if self._folded then return end
         if tone.bg then self:SetBackdropColor(tone.bg[1], tone.bg[2], tone.bg[3], tone.bg[4] or 1) end
         if tone.useThemeBorder then
             local tc = host:GetAccent() or {r = 1, g = 1, b = 1}
             self:SetBackdropBorderColor(tc.r, tc.g, tc.b, tone.borderAlpha or 1)
+            -- The border is the accent's, so a change of accent has to reach it.
+            if not self._themeRegistered then
+                self._themeRegistered = true
+                local p = self:GetParent()
+                if p then
+                    p.ThemeListeners = p.ThemeListeners or {}
+                    table.insert(p.ThemeListeners, self)
+                end
+            end
         elseif tone.border then
             self:SetBackdropBorderColor(tone.border[1], tone.border[2], tone.border[3], tone.border[4] or 1)
         end
         if tone.icon then
-            self:SetIconTexture(ICON_PATH .. tone.icon)
+            self:SetIconTexture(ICON_PATH .. tone.icon .. ".png")
         end
         if tone.iconColor then
             self:SetIconColor(tone.iconColor[1], tone.iconColor[2], tone.iconColor[3])
@@ -1435,7 +1460,7 @@ function UI:CreateInfoBanner(parent, opts)
             for _, w in ipairs(self._flowWidgets) do w:Hide() end
         end
         self._isHTML = false
-        self.body:Show()
+        self.body:SetShown(not self._folded)
         self.body:SetText(text)
         if color then
             local r = color[1] or color.r
@@ -1498,7 +1523,7 @@ function UI:CreateInfoBanner(parent, opts)
     local flowSpaceW = FlowSpaceWidth(host, fontTemplate, (not opts.fontTemplate) and 11 or nil)
     local function DoFlowLayout()
         if not banner._flowSegs then return 0 end
-        local availW = banner:GetWidth() - (12 + 18 + 8) - 12
+        local availW = banner:GetWidth() - (12 + 18 + 8) - 12 - closeRoom
         if availW < 20 then return FLOW_LINE_H end
         local x, lineY = 0, -3
         for _, seg in ipairs(banner._flowSegs) do
@@ -1617,6 +1642,9 @@ function UI:CreateInfoBanner(parent, opts)
         end
 
         DoFlowLayout()
+        if self._folded then
+            for _, w in ipairs(self._flowWidgets) do w:Hide() end
+        end
         cachedH = nil
         banner._secondPassDone = false
         RecomputeHeight()
@@ -1632,7 +1660,168 @@ function UI:CreateInfoBanner(parent, opts)
         banner:SetText(opts.text, opts.textColor)
     end
 
+    -- ---- the x, and the chip it folds to ---------------------------------
+    -- ONE STATE, from two inputs: the host's tipMode() -- "show" (the default),
+    -- "fold" (every tip starts as its chip) or "off" (tips are not drawn at all;
+    -- never for an opts.notice banner) -- and this banner's own last choice in
+    -- tipStore: true = the user closed it, false = the user opened it, nil =
+    -- follow the mode. ApplyTipState is the only writer of the fold, so the x,
+    -- the chip and a mode change cannot disagree.
+    if tipStore then
+        local L = host.hooks.L
+        local key = opts.dismissKey
+        local modeFn = host:Hook("tipMode")
+        local CHIP_H = 24
+        local staticH, staticLayoutH
+        local ownFixed, ownPreferred = banner.fixedRowHeight, banner.preferredHeight
+
+        -- What KIND of text the banner is, for both hovers. Asked at hover time:
+        -- a banner can change its tone after it is built.
+        local function Kind()
+            local tone = banner._tone
+            if opts.notice then return "notice" end
+            if tone == "caution" or tone == "warning" or tone == "danger" then return "warning" end
+            return "tip"
+        end
+
+        local close = host:CreateCloseButton(banner, {
+            size = 18,
+            onClick = function()
+                tipStore[key] = true
+                banner:ApplyTipState()
+            end,
+        })
+        close:SetPoint("TOPRIGHT", banner, "TOPRIGHT", -6, -6)
+        -- The hover says the text is not lost: closing reads as deleting unless
+        -- something says where it went.
+        close:HookScript("OnEnter", function(self)
+            local kind = Kind()
+            host:ShowTooltip(self, {
+                title = (kind == "notice" and L["Hide notice"]) or (kind == "warning" and L["Hide warning"])
+                    or L["Hide tip"],
+                lines = { { text = L["It shrinks to an icon you can hover or click to bring back."], hint = true } },
+            })
+        end)
+        close:HookScript("OnLeave", function() host:HideTooltip() end)
+        banner.closeButton = close
+
+        -- The banner's own tone glyph, alone, on the page's ghost-button look: the
+        -- glyph is what the reader already knows the banner by, and it is drawn at
+        -- 18 because at the label's 12 it smudged. The hover names it.
+        local toneDef = INFO_BANNER_TONES[banner._tone or "info"] or {}
+        local chip = CreateFrame("Button", nil, banner, "BackdropTemplate")
+        chip:SetSize(CHIP_H, CHIP_H)
+        host:StyleButton(chip, {
+            ghost = true, width = CHIP_H, height = CHIP_H,
+            icon = toneDef.icon and { texture = ICON_PATH .. toneDef.icon .. ".png", size = 18 } or nil,
+        })
+        -- Where the x was, so the hand that closed it finds it again.
+        chip:SetPoint("TOPRIGHT", banner, "TOPRIGHT", 0, 0)
+        chip:Hide()
+        -- The banner itself on the hover, markup stripped, so it can be read
+        -- without bringing the banner back. Titled by what KIND of text it is,
+        -- and the click goes last and dimmed, apart from the text, so it does
+        -- not read as part of it.
+        chip:HookScript("OnEnter", function(self)
+            local t = banner._isHTML and banner._htmlText or banner._plainText or ""
+            t = t:gsub("|H.-|h(.-)|h", "%1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            local kind = Kind()
+            local title = (kind == "notice" and L["Notice"]) or (kind == "warning" and L["Warning"])
+                or L["Tip"]
+            host:ShowTooltip(self, { title = title, lines = {
+                t, " ", { text = L["Click to show the full banner on the page again."], hint = true },
+            } })
+        end)
+        chip:HookScript("OnLeave", function() host:HideTooltip() end)
+        chip:SetScript("OnClick", function()
+            tipStore[key] = false
+            banner:ApplyTipState()
+        end)
+        banner.tipChip = chip
+
+        -- ⚠ _chipAway: a page that shows the chip on a row of its own (the Expand
+        -- All strip) has taken it; the banner then leaves the chip's visibility to
+        -- that row and takes no height while folded. onFoldChanged tells the page.
+        function banner:ApplyTipState()
+            local mode = (not opts.notice and modeFn) and modeFn() or "show"
+            local choice = tipStore[key]
+            local off = (mode == "off")
+            local folded = off or choice == true or (mode == "fold" and choice ~= false)
+            if self._folded == folded and self._tipsOff == off then return end
+            self._folded, self._tipsOff = folded, off
+            self.icon:SetShown(not folded)
+            close:SetShown(not folded)
+            if not self._chipAway then chip:SetShown(folded and not off) end
+            if self._isHTML then
+                for _, w in ipairs(self._flowWidgets or {}) do w:SetShown(not folded) end
+            else
+                self.body:SetShown(not folded)
+            end
+            if folded then
+                -- The box goes with the text: a chip inside an empty tinted frame
+                -- would still read as a banner.
+                self:SetBackdropColor(0, 0, 0, 0)
+                self:SetBackdropBorderColor(0, 0, 0, 0)
+                local h = (off or self._chipAway) and 0 or CHIP_H
+                -- ☠ NEVER A HEIGHT OF 0: the client reads it as "no height", and a
+                -- frame hung off this one's bottom (the Filter Designer's panels)
+                -- loses its place. One pixel, and no slot for it.
+                self:SetHeight(math.max(h, 1))
+                self.layoutHeight = (h > 0) and (h + 6) or 0
+                -- ⚠ THE FOLD'S SLOT BEATS THE CALL SITE'S. A page adds the banner
+                -- AFTER it is built -- already folded when it was closed last session
+                -- or Page Tips says so -- and an explicit row height there would
+                -- keep the open banner's room for a banner that is not drawn.
+                self.fixedRowHeight, self.preferredHeight = true, self.layoutHeight
+                -- Nothing left to draw: a card drops the row and its gap too.
+                self.layoutSkip = (h == 0) or nil
+                cachedH = nil
+                TriggerHostRelayout()
+            else
+                self.fixedRowHeight, self.preferredHeight = ownFixed, ownPreferred
+                -- A skipped row was HIDDEN by its card, and a hidden banner defers
+                -- its measuring to OnShow -- so the card is asked to show it first.
+                local wasSkipped = self.layoutSkip
+                self.layoutSkip = nil
+                if wasSkipped then TriggerHostRelayout() end
+                -- SetTone also resets the glyph to the tone's; a caller that set its
+                -- own (the Buff Bar's promo) keeps it.
+                local iconTex = self.icon:GetTexture()
+                local ir, ig, ib = self.icon:GetVertexColor()
+                if self._tone then self:SetTone(self._tone) end
+                self.icon:SetTexture(iconTex)
+                self.icon:SetVertexColor(ir, ig, ib)
+                if self._isHTML then DoFlowLayout() end
+                if staticH then
+                    -- A fixed-height banner never measures (opts.staticHeight).
+                    self:SetHeight(staticH)
+                    self.layoutHeight = staticLayoutH
+                    TriggerHostRelayout()
+                else
+                    cachedH = nil
+                    self._secondPassDone = false
+                    RecomputeHeight()
+                end
+            end
+            if self.onFoldChanged then self:onFoldChanged(folded) end
+        end
+
+        if opts.staticHeight then
+            staticH, staticLayoutH = banner:GetHeight(), banner.layoutHeight
+        end
+        host._tipBanners = host._tipBanners or setmetatable({}, { __mode = "k" })
+        host._tipBanners[banner] = true
+        banner:ApplyTipState()
+    end
+
     return banner
+end
+
+-- Re-apply every dismissible banner's state, after the host's tipMode changed.
+function UI:RefreshTips()
+    for banner in pairs(self._tipBanners or {}) do
+        if banner.ApplyTipState then banner:ApplyTipState() end
+    end
 end
 
 -- ============================================================
@@ -1912,15 +2101,16 @@ function UI:CreateDispelColorsPageLink(parent, width)
     })
 end
 
--- Third of the same family: a text shadow's OFFSET and COLOUR are account-wide, so any
--- per-element "Shadow" checkbox can only decide WHETHER there is one. ⚠ That is not a
+-- Third of the same family: a text shadow's OFFSET and COLOUR are one for both modes, so
+-- any per-element "Shadow" checkbox can only decide WHETHER there is one. ⚠ That is not a
 -- layering choice, it is forced — on 12.0.7 a fontstring's SetShadowColor/SetShadowOffset
 -- is a silent no-op, so the shadow rides the shared font OBJECT and every consumer of that
--- font gets the same one. Jumps to Global Fonts and flashes its Shadow Settings section.
+-- font gets the same one. Jumps to the GLOBAL tab's Fonts page and flashes its Shadow
+-- Settings section.
 function UI:CreateGlobalFontsShadowLink(parent, width)
     if not self:Hook("scrollToSection") then return nil end
     local host, L = self, self.hooks.L
-    local link = string.format("|cffffffff|HdfFonts|h%s|h|r", L["Global Fonts"])
+    local link = string.format("|cffffffff|HdfFonts|h%s|h|r", L["Shadow Settings"])
     local text = string.format(L["Shadow offset and colour are set in %s."], link)
     return host:CreateLink(parent, text, {
         width = width,

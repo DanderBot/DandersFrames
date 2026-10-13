@@ -9,9 +9,12 @@
 local DF = DandersFrames
 local format = string.format
 function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
-    local pageGlobalFonts = CreateSubTab("general", "general_fonts", L["Global Fonts"])
+    local pageGlobalFonts = CreateSubTab("general", "general_fonts", L["Fonts"])
     BuildPage(pageGlobalFonts, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"fontShadow"}, L["Global Fonts"], "general_fonts"), 25, 2)
+        -- ⚠ OWNS NOTHING, and the call is what registers that: a GLOBAL page has
+        -- no Copy to Raid, Apply to All picks its modes itself, and the shadow
+        -- is one value for both modes (see BuildShadowSettingsGroup).
+        Add(CreateCopyButton(self.child, {}, L["Fonts"], "general_fonts"), 0, 2)
         -- Initialize temp storage for selections (persists during session)
         --
         -- ☠ IT STAYS HERE, AT PAGE SCOPE, IN BOTH LAYOUTS. The three selectors
@@ -24,6 +27,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DF.GlobalFontTemp = {
                 font = db.nameFont or "Fonts\\FRIZQT__.TTF",
                 outline = db.nameTextOutline or "OUTLINE",
+                scope = "both",
             }
         end
 
@@ -37,13 +41,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- and TWO COLUMNS when the window is wide (the rows were one column at
         -- every width):
         --
-        --   column 1   Global Font Settings -- the scratch pad and its Apply to
-        --              All button, working exactly as before (see its builder)
-        --   column 2   Shadow Settings (how a text shadow LOOKS, pinnable), then
-        --              Affected Elements, the reference list for Apply to All
+        --   column 1   Font Settings -- the scratch pad and its Apply to All
+        --              button (see its builder), then Shadow Settings
+        --   column 2   Affected Elements, the reference list for Apply to All
         --
-        -- No header ticks: nothing here is one feature's on/off. No category
-        -- headers: the tab already says "Global Fonts".
+        -- ★ A GLOBAL PAGE: everything here is how text looks across the addon.
+        -- Apply to All asks which modes to write (both by default) -- each
+        -- element's own page is where a mode's fonts are tuned apart -- and the
+        -- shadow and Crisp Font Rendering are one value for both modes anyway.
+        -- No header ticks: nothing here is one feature's on/off.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The classic branch mounts the SAME
@@ -71,7 +77,23 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The shadow group's two applies, at PAGE scope rather than inside the
         -- builder: they close over nothing group-specific, and the classic box and
         -- the card (and a pinned copy of it) must drive the same work.
+        -- ☠ ONE SHADOW FOR BOTH MODES, AND IT IS PARTY'S TABLE THAT IS READ. On
+        -- 12.0.7 a text shadow rides the shared font OBJECT (fontstring SetShadow*
+        -- is a no-op), DF builds each font once for Party and Raid frames alike,
+        -- and GetOrCreateFontFamily / RefreshFontFamilyShadows read the offset and
+        -- colour from DF:GetDB() -- the party table. So the controls bind to that
+        -- table whichever mode is under GLOBAL, and every write is copied to raid
+        -- so the two stored copies never disagree (an export, Changed Settings).
+        local function MirrorShadowToRaid()
+            local p, r = DF.db and DF.db.party, DF.db and DF.db.raid
+            if not (p and r) then return end
+            r.fontShadowOffsetX, r.fontShadowOffsetY = p.fontShadowOffsetX, p.fontShadowOffsetY
+            local c = p.fontShadowColor
+            r.fontShadowColor = c and { r = c.r, g = c.g, b = c.b, a = c.a } or nil
+        end
+
         local function UpdateShadowSettings()
+            MirrorShadowToRaid()
             -- Full update on release
             if DF.ClearFontCache then DF:ClearFontCache() end
             DF:UpdateAllFrames()
@@ -87,6 +109,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         local function LightweightShadowUpdate()
+            MirrorShadowToRaid()
             if DF.LightweightUpdateFontShadows then DF:LightweightUpdateFontShadows() end
         end
 
@@ -108,19 +131,19 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], DF.GlobalFontTemp, "outline", function() end), 55)
             group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], DF.GlobalFontTemp, "outline", function() end), 30)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Apply to"], {
+                both = L["Both"], party = L["Party"], raid = L["Raid"],
+                _order = { "both", "party", "raid" },
+            }, DF.GlobalFontTemp, "scope", function() end), 55)
 
             -- Themed Apply button
             local applyBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
             GUI:StyleButton(applyBtn, { width = 120, height = 28, text = L["Apply to All"] })
             applyBtn.text = applyBtn.Text
-            applyBtn:SetScript("OnClick", function()
-                local font = DF.GlobalFontTemp.font
-                local outline = DF.GlobalFontTemp.outline
-
-                -- Clear font family cache so new fonts are created
-                if DF.ClearFontCache then DF:ClearFontCache() end
-
-                -- Apply to all font settings
+            -- ☠ ONE MODE'S WRITES, run once for each mode the "Apply to" choice names.
+            -- The body is the press as it always was, handed that mode's table as
+            -- `db` -- the Aura and Text Designer blocks read the mode off it.
+            local function ApplyFontToMode(db, font, outline)
                 db.nameFont = font; db.nameTextOutline = outline
                 db.healthFont = font; db.healthTextOutline = outline
                 db.statusTextFont = font; db.statusTextOutline = outline
@@ -242,9 +265,24 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     _tdCfg.globalDefaults.font = font
                     _tdCfg.globalDefaults.outline = outline
                 end
+            end
+
+            applyBtn:SetScript("OnClick", function()
+                local font = DF.GlobalFontTemp.font
+                local outline = DF.GlobalFontTemp.outline
+                local scope = DF.GlobalFontTemp.scope or "both"
+
+                -- Clear font family cache so new fonts are created
+                if DF.ClearFontCache then DF:ClearFontCache() end
+
+                for _, mode in ipairs({ "party", "raid" }) do
+                    if (scope == "both" or scope == mode) and DF.db and DF.db[mode] then
+                        ApplyFontToMode(DF.db[mode], font, outline)
+                    end
+                end
 
                 DF:UpdateAllFrames()
-                if GUI.SelectedMode == "raid" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
+                if scope ~= "party" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
                 if DF.ApplyPetSettings then DF:ApplyPetSettings() end
                 if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
                 if DF.UpdateTestPersonalTargetedSpells then DF:UpdateTestPersonalTargetedSpells() end
@@ -283,17 +321,18 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== SHADOW SETTINGS (a 280 box in classic, a card in Modern) =====
         local function BuildShadowSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            local shadowDB = DF:GetDB("party")
             group:AddWidget(GUI:CreateLabel(parent, L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."], 250), 40)
 
-            group:AddWidget(GUI:CreateSlider(parent, L["Shadow X Offset"], -10, 10, 0.5, db, "fontShadowOffsetX", UpdateShadowSettings, LightweightShadowUpdate), 50)
-            group:AddWidget(GUI:CreateSlider(parent, L["Shadow Y Offset"], -10, 10, 0.5, db, "fontShadowOffsetY", UpdateShadowSettings, LightweightShadowUpdate), 50)
-            group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"], db, "fontShadowColor", true, UpdateShadowSettings, LightweightShadowUpdate, true), 40)
+            group:AddWidget(GUI:CreateSlider(parent, L["Shadow X Offset"], -10, 10, 0.5, shadowDB, "fontShadowOffsetX", UpdateShadowSettings, LightweightShadowUpdate), 50)
+            group:AddWidget(GUI:CreateSlider(parent, L["Shadow Y Offset"], -10, 10, 0.5, shadowDB, "fontShadowOffsetY", UpdateShadowSettings, LightweightShadowUpdate), 50)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"], shadowDB, "fontShadowColor", true, UpdateShadowSettings, LightweightShadowUpdate, true), 40)
         end
 
         if classicLayout then
             -- ===== FONT SELECTION GROUP (Column 1) =====
             local fontSelectGroup = GUI:CreateSettingsGroup(self.child, 280)
-            fontSelectGroup:AddWidget(GUI:CreateHeader(self.child, L["Global Font Settings"]), 40)
+            fontSelectGroup:AddWidget(GUI:CreateHeader(self.child, L["Font Settings"]), 40)
             BuildFontSelectionGroup({
                 group = fontSelectGroup,
                 parent = self.child,
@@ -316,7 +355,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- columns, and "both" carries them through the one-column fold intact.
             Add(tools.SectionControls(self.child), 24, "both")
 
-            -- ---- Global Font Settings: the scratch pad, as a card ----------
+            -- ---- Font Settings: the scratch pad, as a card -----------------
             -- ☠ NO SUMMARY, AND THAT IS THE HONEST ANSWER RATHER THAN A GAP.
             -- Nothing here is applied state: the font and outline the dropdowns
             -- show live in DF.GlobalFontTemp, a SESSION SCRATCH table seeded once
@@ -328,7 +367,17 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- nothing until Apply to All writes ~30 per-element fonts in one press,
             -- and a second, pinned scratch pad bound to the same scratch table
             -- would only be a second copy of the same button. Column 1.
-            local fontCard = OpenSection(L["Global Font Settings"], "fonts_global", 1, nil)
+            -- Across BOTH columns: it heads the page, and column 2's reference
+            -- box then starts level with the first card without a heading of
+            -- its own.
+            Add(GUI:CreateHeader(self.child, L["Text"]), 40, "both")
+            -- ⚠ ONLY THE SDF TICK: the font and outline here are a one-shot Apply,
+            -- not a stored setting, so there is no value to name for them.
+            -- ☠ THE PROFILE ROOT -- fontSlug sits at DF.db.
+            local function GlobalFontSummary()
+                return format("SDF %s", DF.db.fontSlug and L["On"] or L["Off"])
+            end
+            local fontCard = OpenSection(L["Font Settings"], "fonts_global", 1, GlobalFontSummary)
             BuildFontSelectionGroup({
                 group = fontCard, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -362,9 +411,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             --
             -- No tick: the shadow STYLE is chosen by the outline dropdowns, here
             -- and on a dozen other pages. How a text shadow LOOKS, so it is
-            -- pinnable. Column 2.
-            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 2, ShadowSettingsSummary, nil, nil,
-                BuildShadowSettingsGroup)
+            -- pinnable. Column 1, under Font Settings. Its summary reads the party
+            -- table, where the value lives (the page hands it the mode's).
+            local shadowCard = OpenSection(L["Shadow Settings"], "fonts_shadow", 1,
+                function() return ShadowSettingsSummary(DF:GetDB("party")) end, nil, nil, BuildShadowSettingsGroup)
             BuildShadowSettingsGroup({
                 group = shadowCard, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -386,19 +436,21 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(infoGroup, nil, 2)
         else
             -- Reference text, and no control: the list a user reads WHILE deciding
-            -- whether to press Apply to All. A card like every other group on the
-            -- page -- it folds away like them once it has been read -- but no
-            -- summary (it holds no value) and no pin (nothing it holds changes how
-            -- anything looks). Column 2, under Shadow Settings.
+            -- whether to press Apply to All. A plain titled box, NOT a card: a
+            -- card is the shape of a group of SETTINGS (it folds, it has a chevron
+            -- and a kind icon), and this was the one card in the panel holding
+            -- only text. Column 2, with no heading of its own: one reference box
+            -- is not a group.
             --
-            -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the card's width several of
+            -- ⚠ THE LIST IS MEASURED, NOT PINNED: at the column's width several of
             -- the twelve bullets stop wrapping, so classic's 235 would leave a hole
             -- under it. The note keeps its 40 -- one line at any width.
-            local band = OpenSection(L["Affected Elements"], "fonts_affected", 2, nil)
-            local infoInner = GUI:GroupInnerWidth(band)
-            band:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
-            band:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
-            CloseSection(band)
+            local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
+            infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
+            local infoInner = GUI:GroupInnerWidth(infoGroup)
+            infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
+            infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
+            Add(infoGroup, nil, 2)
         end
     end)
     
@@ -530,7 +582,16 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Buff Bar: it is the PAGE's master switch, a fold is not a switch, and
             -- the other three cards grey with it. So this card never greys itself.
             -- Behaviour, so no pin. Raid + groups only, header and band together.
-            local band = OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, nil, nil, HideGroupLabelOptions)
+            do
+                local header = GUI:CreateHeader(self.child, L["Content"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 1)
+            end
+            local function GroupLabelsSummary(d)
+                if not d then return "" end
+                return d.groupLabelEnabled and L["On"] or L["Off"]
+            end
+            local band = OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, GroupLabelsSummary, nil, HideGroupLabelOptions)
             BuildLabelSettingsGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
@@ -569,7 +630,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- on the same key with the same two gates: raid + groups (header and
             -- band together) and the page's enable (the card greys with it). How
             -- the label READS is how it LOOKS, so it is pinnable. Column 2.
-            local band = OpenSection(L["Text Format"], "grouplabels_format", 2, nil,
+            do
+                local header = GUI:CreateHeader(self.child, L["Text"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 2)
+            end
+            local function LabelFormatSummary(d)
+                return d and formatOptions[d.groupLabelFormat] or ""
+            end
+            local band = OpenSection(L["Text Format"], "grouplabels_format", 2, LabelFormatSummary,
                 DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)
             BuildTextFormatGroup({
                 group = band, parent = self.child,
@@ -658,6 +727,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Where the label sits is how it LOOKS, so it is pinnable. Raid +
             -- groups only, greying with the page's enable. Column 1, under Raid
             -- Group Labels, as classic's box.
+            do
+                local header = GUI:CreateHeader(self.child, L["Layout"])
+                header.hideOn = HideGroupLabelOptions
+                Add(header, 40, 1)
+            end
             local positionBand = OpenSection(L["Position"], "grouplabels_position", 1, PositionSummary,
                 DisableGroupLabelOptions, HideGroupLabelOptions, BuildPositionGroup)
             BuildPositionGroup({
@@ -1040,7 +1114,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is: the same sentence, without a box titled with the tab's own name.
             -- The classic box (and its deferred height-measuring) is untouched above.
             local pinnedIntro = GUI:CreateInfoBanner(self.child, {
-                tone = "info",
+                tone = "info", dismissKey = "pinned_intro",
                 text = L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."],
             })
             Add(pinnedIntro, pinnedIntro.layoutHeight, "both")
@@ -1133,7 +1207,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         addSetBtn:SetSize(64, 28)
         -- Ghost action: a faint cell (matching the tabs) with an accent "+ Add"
         -- that brightens on hover — consistent with the strip, quiet add action.
-        GUI:StyleButton(addSetBtn, { ghost = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add"], font = "DFFontHighlight" })
+        GUI:StyleButton(addSetBtn, { ghost = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 14 }, text = L["Add"], font = "DFFontHighlight" })
         addSetBtn:SetScript("OnClick", DoAddSet)
 
         -- Count / active-set meter, right of the strip (each enabled set is a live
@@ -1246,7 +1320,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Checkmark icon
             local checkIcon = container:CreateTexture(nil, "OVERLAY")
             checkIcon:SetSize(8, 8)
-            checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+            checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png")
             checkIcon:SetVertexColor(0.3, 0.7, 0.3)
             checkIcon:Hide()
             container.overrideCheckIcon = checkIcon
@@ -1292,9 +1366,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
                 -- Runtime override mode: show star + global value, no reset button
                 if isRuntimeOverridden and not isEditing then
-                    self.overrideStar.tooltipText = L["Override active"]
-                    self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
-                    self.overrideStar:Show()
+                    self.overrideStar.tooltipText = L["Set by the active auto layout"]
+                    self.overrideStar.tooltipSubText = L["To change this, edit the layout in Auto Layouts."]
+                    GUI:ShowLayoutOverrideMarker(self.overrideStar, true)
                     self.overrideResetBtn:Hide()
                     self.overrideCheckIcon:Hide()
 
@@ -1325,9 +1399,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local globalValue = AutoProfilesUI:GetGlobalValue(pinnedKey)
 
                 if isOverridden then
-                    self.overrideStar.tooltipText = L["Override active"]
-                    self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
-                    self.overrideStar:Show()
+                    self.overrideStar.tooltipText = L["Set by this auto layout"]
+                    self.overrideStar.tooltipSubText = L["Use the reset button to go back to your global value."]
+                    GUI:ShowLayoutOverrideMarker(self.overrideStar, true)
                     self.overrideResetBtn:Show()
                 else
                     self.overrideStar:Hide()
@@ -1379,7 +1453,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             cb:SetPoint("LEFT", 0, 0)
             GUI:StyleCheckButton(cb, { themeRoot = parent })
             local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+            txt:SetPoint("LEFT", cb, "RIGHT", 12, 0)
             txt:SetText(label)
             txt:SetTextColor(0.8, 0.8, 0.8)
             if tooltip then
@@ -1409,20 +1483,6 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
             container.Refresh = function()
                 cb:SetChecked(GetCurrentSet()[dbKey])
-                -- Optional disabled state: when container.enabledWhen() is false the
-                -- checkbox is greyed and can't be toggled (used where one toggle is
-                -- only meaningful while another option is in a particular state).
-                if container.enabledWhen then
-                    if container.enabledWhen() then
-                        cb:Enable()
-                        txt:SetTextColor(0.8, 0.8, 0.8)
-                        cb.Check:SetVertexColor(tc.r, tc.g, tc.b)
-                    else
-                        cb:Disable()
-                        txt:SetTextColor(0.4, 0.4, 0.4)
-                        cb.Check:SetVertexColor(0.4, 0.4, 0.4)
-                    end
-                end
                 if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators() end
             end
             
@@ -1589,7 +1649,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             starFrame:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
             starFrame:SetScript("OnEnter", function(s)
                 GUI:ShowTooltip(s, {
-                    title = L["Override active"],
+                    title = L["Set for this pinned set"],
                     lines = { string.format(L["Inherited value: %s"], FmtVal(MatchValue())) },
                 })
             end)
@@ -1774,7 +1834,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
             settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
         else
-            settingsGroup = OpenSection(L["Settings"], "pinned_settings", 1, nil, nil,
+            -- ☠ THE SELECTED SET, NOT THE PAGE'S TABLE -- every pinned card's
+            -- summary reads GetCurrentSet(), so it follows the set tab.
+            settingsGroup = OpenSection(L["Settings"], "pinned_settings", 1, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                return set.enabled and L["On"] or L["Off"]
+            end, nil,
                 function() return activeSubTab ~= "setup" end)
         end
 
@@ -1782,7 +1848,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- banner: only the per-set Enable flag can differ per layout; everything
         -- else is shared. Hidden unless editing a raid layout.
         local pinnedLayoutNote = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "pinned_layoutnote",
             text = L["Auto layouts can only change whether pinned frames are shown (Enable). All other pinned frame settings are shared across layouts."],
         })
         pinnedLayoutNote.hideOn = function()
@@ -2050,7 +2116,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- A card on the Setup sub-tab, greying (header and body) while the
             -- set is disabled, as the box's body does. (The New badge's section
             -- is long out of GUI.NewSections, so there is no badge to carry.)
-            frameTypeGroup = OpenSection(L["Frame Type"], "pinned_frametype", 2, nil,
+            -- The dropdown's words written out here: frameTypeOptions is declared
+            -- below this call, out of the closure's reach.
+            frameTypeGroup = OpenSection(L["Frame Type"], "pinned_frametype", 2, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                return set.frameType == "friendlyBoss" and L["Friendly Boss NPCs"] or L["Player Frames"]
+            end,
                 function() return PinnedSetDisabled() end,
                 function() return activeSubTab ~= "setup" end)
         end
@@ -2115,7 +2187,14 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Style"]), 40)
         else
             -- A card on the Appearance sub-tab.
-            layoutGroup = OpenSection(L["Frame Style"], "pinned_framestyle", 1, nil, nil,
+            -- Which frames the size follows. An unset matchMode follows the
+            -- set's own mode (PinnedFrames.lua GetSetBaselineDB), i.e. this page's.
+            layoutGroup = OpenSection(L["Frame Style"], "pinned_framestyle", 1, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local m = set.matchMode or ((db == DF.db.raid) and "raid" or "party")
+                return format(L["Sized as %s"], m == "raid" and L["Raid"] or L["Party"])
+            end, nil,
                 function() return activeSubTab ~= "appearance" end)
         end
 
@@ -2123,7 +2202,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- The match drives only size, scale, spacing and border (GetSetBaselineDB); auras come
         -- from the set's Aura Designer template. The banner names both so neither is assumed.
         local matchInfoBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "info",
+            tone = "info", dismissKey = "pinned_matchsize",
             text = L["Width, height, scale, spacing and border follow your Party or Raid frames — choose which below. Change any of them to override it for these frames; use the reset button beside an overridden setting to revert it. Auras are not affected: they come from the Aura Designer Template below, or from the group you are in when it is left on Inherit."],
         })
         layoutGroup:AddWidget(matchInfoBanner, matchInfoBanner.layoutHeight or 44)
@@ -2271,7 +2350,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             arrangeGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         else
             -- A card on the Appearance sub-tab.
-            arrangeGroup = OpenSection(L["Layout"], "pinned_layout", 2, nil, nil,
+            -- Direction, then where it wraps -- the Flat Grid card's "Wrap 5".
+            arrangeGroup = OpenSection(L["Layout"], "pinned_layout", 2, function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local dir = set.growDirection == "VERTICAL" and L["Vertical"] or L["Horizontal"]
+                local per = tonumber(set.unitsPerRow)
+                if not per then return dir end
+                return format("%s \194\183 %s %d", dir, L["Wrap"], math.floor(per))
+            end, nil,
                 function() return activeSubTab ~= "appearance" end)
         end
 
@@ -2373,13 +2460,18 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- "N pinned" count beside the title, themed. Updated on any roster change.
         local unitSelCount = unitSelHeader:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         unitSelCount:SetPoint("LEFT", unitSelTitle, "RIGHT", 8, 0)
-        local function UpdateUnitSelCount()
-            local n = #((GetCurrentSet() and GetCurrentSet().players) or {})
-            unitSelCount:SetText(n .. " " .. L["pinned"])
+        local function PaintUnitSelCount()
             local tc = GUI.GetThemeColor()
             unitSelCount:SetTextColor(tc.r, tc.g, tc.b)
         end
+        local function UpdateUnitSelCount()
+            local n = #((GetCurrentSet() and GetCurrentSet().players) or {})
+            unitSelCount:SetText(n .. " " .. L["pinned"])
+            PaintUnitSelCount()
+        end
         UpdateUnitSelCount()
+        -- Repainted with the title: a roster change was the only thing that re-tinted it.
+        table.insert(self.child.ThemeListeners, { UpdateTheme = PaintUnitSelCount })
 
         -- Override indicator for players list (header-level)
         AddPinnedOverrideIndicators(unitSelHeader, unitSelTitle, "players", function()
@@ -2451,7 +2543,17 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
         else
             -- A full-width card on the Members sub-tab, under the roster.
-            autoPopGroup = OpenSection(L["Auto-Populate"], "pinned_autopopulate", "both", nil, nil, membersHideOn)
+            -- The roles it adds, or Off with none.
+            autoPopGroup = OpenSection(L["Auto-Populate"], "pinned_autopopulate", "both", function()
+                local set = GetCurrentSet()
+                if not set then return "" end
+                local parts = {}
+                if set.autoAddTanks then parts[#parts + 1] = L["Tanks"] end
+                if set.autoAddHealers then parts[#parts + 1] = L["Healers"] end
+                if set.autoAddDPS then parts[#parts + 1] = L["DPS"] end
+                if #parts == 0 then return L["Off"] end
+                return table.concat(parts, " \194\183 ")
+            end, nil, membersHideOn)
         end
         autoPopGroup:AddWidget(GUI:CreateLabel(self.child, L["Automatically add players by role when they join your group."], 510), 20)
 

@@ -231,9 +231,16 @@ do
         { "checkbox", "Use Class Color",  "capturedItem", "useClassColor" },
         { "checkbox", "Custom Color",     "capturedItem", "useColor" },
         { "colorpicker", "Color",         "capturedItem", "color" },
-        { "button",   "Add Item",         "(none)",       "(none)" },
     }, "items")
-    checkPlaced(funcBody(TD, "function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, yStart, group)"), "items")
+    local itemsBody = funcBody(TD, "function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, yStart, group)")
+    checkPlaced(itemsBody, "items")
+    -- Add Item is the shared primary CTA (not GUI:Create*, so outside the census): the
+    -- styler repaints it on a tab switch, which a hand-mixed tint never was.
+    local addItem = itemsBody:match("GUI:StyleButton%(addItemBtn, (%b{})%)") or ""
+    check(addItem:find("primary = true", 1, true) and addItem:find('L["Add Item"]', 1, true),
+          "items: Add Item is a primary styled button")
+    check(not addItem:find("accent", 1, true), "items: ...on the live accent, not a pinned one")
+    check(itemsBody:find("placeWide(addItemBtn", 1, true) ~= nil, "items: ...and it is placed")
 
     -- ☠ THE PER-ITEM EDITOR RECURSES, and in a pane its fields belong to the SAME
     -- group -- a nested call that dropped `group` would build them onto the pane's
@@ -310,101 +317,10 @@ do
 end
 
 -- ============================================================
--- 5. THE SHIPPED DEFAULTS AGREE WITH THE LITERALS THEY WERE COLLECTED FROM
--- ------------------------------------------------------------
--- Phase 0 concluded that Content and Position "cannot get a working modified tick
--- without a schema change", because only five fields have an override flag. That
--- was wrong: shipped defaults for the rest DO exist, as inline literals in the
--- builders. TD_SHIPPED is those literals gathered so the adapter can answer from
--- them -- which means TD_SHIPPED and the builders are TWO SPELLINGS OF ONE
--- NUMBER, and the moment they disagree the tick lies in a way nothing else here
--- would catch. So both sides are read out of the source and compared.
+-- 6. THE CARD'S FOLD KEY
 -- ============================================================
-print("-- Text Designer: the shipped defaults are the builders' own literals")
+print("-- Text Designer: the card's fold key")
 do
-    local block = TD:match("local TD_SHIPPED = {(.-)\n}")
-    check(block ~= nil, "defaults: the shipped-defaults table can be read from the source")
-    block = block or ""
-
-    local shipped, order = {}, {}
-    for line in block:gmatch("[^\n]+") do
-        local key, value = line:match("^%s*([%w_]+)%s*=%s*(.-),%s*$")
-        if key then
-            shipped[key] = value
-            order[#order + 1] = key
-        end
-    end
-    check(#order >= 19, "defaults: ...and it has every field (" .. #order .. ")")
-
-    -- What the builders actually seed, in either of the two shapes they use.
-    local function seedOf(key)
-        for line in TD:gmatch("[^\n]+") do
-            if not line:match("^%s*%-%-") then
-                local v = line:match("^%s*elem%." .. key .. " = elem%." .. key .. " or (.+)$")
-                if v then return (v:gsub("%s+$", "")) end
-                v = line:match("^%s*if elem%." .. key .. " == nil then elem%." .. key .. " = (.-) end%s*$")
-                if v then return v end
-            end
-        end
-    end
-
-    -- The two fields with NO seed at all. Their absence is the whole reason the
-    -- shipped value is `false`: an unticked checkbox writes nothing, so nil is
-    -- what an untouched element holds and false is what it means.
-    local UNSEEDED = { hidePercent = true, useColor = true }
-
-    for _, key in ipairs(order) do
-        local want = shipped[key]
-        local got = seedOf(key)
-        if UNSEEDED[key] then
-            eq(want, "false", "defaults: " .. key .. " ships false")
-            check(got == nil, "defaults: ...and nothing seeds it, which is why")
-        else
-            check(got ~= nil, "defaults: " .. key .. " is seeded by a builder")
-            eq(got or "(none)", want, "defaults: " .. key .. " matches the literal it was collected from")
-        end
-    end
-
-    -- ⚠ `label` IS NOT IN THE TABLE, and must not be: creation writes
-    -- ComputeAutoLabel's answer, which is not a static value, so a "" default
-    -- would report every auto-numbered element's own name as a user edit.
-    check(shipped.label == nil, "defaults: label is deliberately absent")
-    check(TD:find("label       = ComputeAutoLabel(tdDB, ct),", 1, true) ~= nil,
-          "defaults: ...because creation writes a computed one")
-
-    -- The adapter answers from both chains, and compares the second by VALUE --
-    -- the builders MATERIALISE these defaults onto the element as a pane builds,
-    -- so presence proves nothing. (ValuesEqual is Core/Defaults.lua's, asserted
-    -- there; here we pin that the adapter goes through it rather than presence.)
-    check(TD:find("if TD_SHIPPED[k] == nil then return nil end", 1, true) ~= nil,
-          "defaults: GetStored answers only for keys that are settings here")
-    check(TD:find("return rawget(elem, k)", 1, true) ~= nil,
-          "defaults: ...and reads RAW, never back through anything that resolves")
-    check(TD:find("return TD_SHIPPED[k]", 1, true) ~= nil,
-          "defaults: GetDefault falls back to the shipped literal")
-
-    -- Reset: the five follow the Global tab again; the rest are WRITTEN, because
-    -- there is no global for them to follow and a widget on screen needs a value.
-    check(TD:find("elseif TD_SHIPPED[k] ~= nil then\n                elem[k] = TD_SHIPPED[k]", 1, true) ~= nil,
-          "defaults: reset writes the shipped value for a field with no global")
-    check(TD:find("if ovr then ovr[k] = nil end", 1, true) ~= nil,
-          "defaults: ...and clears the override for one that has")
-    -- Every shipped value is a SCALAR, so ClearKey's write cannot leak a shared
-    -- table onto a profile the way a table default would.
-    for _, key in ipairs(order) do
-        local v = shipped[key] or ""
-        check(v:find("{", 1, true) == nil,
-              "defaults: " .. key .. "'s shipped value is a scalar, so reset cannot alias it")
-    end
-end
-
--- ============================================================
--- 6. THE RECORD AND THE CARD'S FOLD KEY
--- ============================================================
-print("-- Text Designer: the element record and the card's fold key")
-do
-    check(TD:find("if TD_OVERRIDABLE[k] then\n                elem.overrides = elem.overrides or {}", 1, true) ~= nil,
-          "wiring: the record's own __newindex marks an override")
     check(TD:find('local cardKey = "td_elem_" .. tostring(elem.id)', 1, true) ~= nil,
           "expand: the card folds under a key built from the element's id")
 end
@@ -518,12 +434,11 @@ do
 end
 
 -- ============================================================
--- 11. THE WIDE-PAGE FLOOR IS GONE
--- The Text Designer's half of the acceptance test; the Aura Designer's census
--- asserts the same thing from its own side, deliberately, because either page
--- regressing to a split layout would need its floor back.
+-- 11. THE FULL-WIDTH PAGES OPEN WIDE
+-- The Text Designer's half; the Aura Designer's census asserts the same from its
+-- own side.
 -- ============================================================
-print("-- Text Designer: the wide-page floor is gone")
+print("-- Text Designer: the full-width pages open wide")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
     -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
@@ -531,17 +446,17 @@ do
     -- "is this string anywhere" and never "is this page still a wide page".
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
-    check(WIDE:find("text_designer", 1, true) == nil,
-          "wide: the Text Designer no longer forces the window to 850")
-    check(WIDE:find("auras_auradesigner", 1, true) == nil,
-          "wide: ...and neither does the Aura Designer")
+    check(WIDE:find("text_designer", 1, true) ~= nil,
+          "wide: the Text Designer widens the window to 850")
+    check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
+          "wide: ...as does the Aura Designer")
 end
 
 -- ============================================================
 -- 12. THE NARROW WINDOW -- WHAT 850px WAS HIDING
 -- ------------------------------------------------------------
--- Section 11 removed the floor, so this page now renders in the 640px default
--- window: a band of roughly 410px, and as little as ~280 at the window's own
+-- Without section 11's floor this page renders in the 640px default window: a
+-- band of roughly 410px, and as little as ~280 at the window's own
 -- minimum. The Aura Designer's census documents the three classes of layout bug
 -- that width exposed; this is the Text Designer's half of the same sweep, because
 -- the two pages share the shell, the preset bar and the section header and would

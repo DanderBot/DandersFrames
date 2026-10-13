@@ -596,8 +596,18 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Frame Size | Border | Border Shadow | Frame Fade | Layout Direction | Raid Layout Mode | Group Layout Settings | Group Visibility | Group Display Order | Flat Grid Settings | Permanent Mover",
-       "order: the cards open in the order they stack -- column 1's layout chain in classic's order")
+       "Group Visibility | Frame Size | Border | Border Shadow | Frame Fade | Layout Direction | Raid Layout Mode | Group Layout Settings | Group Display Order | Flat Grid Settings | Permanent Mover",
+       "order: the cards open in the order they stack -- Group Visibility under Content, then column 1's layout chain")
+
+    -- Content holds the one raid-only card, so its header hides with it.
+    local contentAt = PAGE:find('local contentHeader = GUI:CreateHeader(self.child, L["Content"])', 1, true)
+    check(contentAt and PAGE:find('contentHeader.hideOn = function() return GUI.SelectedMode ~= "raid" end', contentAt, true) ~= nil
+      and PAGE:find("Add(contentHeader, 40, 1)", contentAt, true) ~= nil,
+          "headers: Content in column 1, hidden outside raid like its one card")
+    local visAt = PAGE:find('OpenSection(L["Group Visibility"]', 1, true)
+    local layoutHdrAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)', 1, true)
+    check(contentAt and visAt and layoutHdrAt and contentAt < visAt and visAt < layoutHdrAt,
+          "headers: ...heading Group Visibility, above the Layout header")
 
     -- The three category headers, each once, each opening its run.
     for _, pair in ipairs({ { "Layout", "1", "Frame Size" }, { "Appearance", "2", "Border" }, { "Movement", "1", "Permanent Mover" } }) do
@@ -641,8 +651,6 @@ print("-- Frame page: the addon-wide strip and inline rolls")
 do
     -- ☠ EVERY POPOUT ROW ON EVERY PAGE CARRIES THE FOOTER STRIP. A row without
     -- one is a new row that forgot it or a page a later sweep missed.
-    -- ⚠ GUI/PopoutDemo.lua is deliberately not in this walk: it is the kit's own
-    -- fixture for the no-strip tether.
     local TOC = options_file_source("DandersFrames_Options.toc")
     local naked = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do

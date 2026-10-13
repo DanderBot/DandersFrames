@@ -83,11 +83,6 @@ local gestureByDB  = setmetatable({}, { __mode = "k" })
 
 local suspendDepth = 0
 
--- The open GROUP, mirroring the lib's own refcount. Only the OUTERMOST group
--- carries an apply, because only the outermost one becomes an entry.
-local groupDepth = 0
-local groupApply
-
 -- ============================================================
 -- HELPERS
 -- ============================================================
@@ -95,7 +90,7 @@ local groupApply
 -- DF:DeepCopy is resident and loads before this file, so it is always there in
 -- game -- but a headless load of this module alone is not. The local fallback is
 -- the same shape without the proxy unwrap; the values copied here are stored
--- settings, never a db proxy. (Same pattern, same reason, as GroupActions.lua.)
+-- settings, never a db proxy.
 local function DeepCopy(v)
     if type(v) ~= "table" then return v end
     if DF.DeepCopy then return DF:DeepCopy(v) end
@@ -161,8 +156,7 @@ end
 -- records the undo as the override edit it is. Recording is suspended across it:
 -- an undo that pushed an entry would be un-undoable by construction.
 --
--- Value REPLACEMENT, not a field merge -- the same semantics
--- GroupActions:ResetKeys already ships. The copy is what lands, so a later edit
+-- Value REPLACEMENT, not a field merge. The copy is what lands, so a later edit
 -- of the setting cannot reach back into the stored entry.
 --
 -- ☠ AND THE WRITE IS ONLY HALF OF WHAT THE USER'S EDIT DID. For a great many
@@ -358,58 +352,6 @@ SettingsUndo.BeginGesture = SettingsUndo.OnDragStart
 SettingsUndo.EndGesture   = SettingsUndo.OnDragStop
 
 -- ============================================================
--- GROUPS
--- Straight through to the lib, which collapses everything pushed between the
--- two calls into ONE entry carrying the group's label. Commits still run every
--- rule above on the way in, so a group of writes that all changed nothing is an
--- empty group -- and the lib drops those.
---
--- ONE APPLY FOR THE WHOLE GROUP, not one per key. The writes inside a group
--- come from GroupActions, which does no applying of its own -- the caller (the
--- popout footer's Reset button) runs the group's apply ONCE after the loop, and
--- undoing a reset has to do the same. Passing it here rather than letting the
--- N collapsed child entries each carry their own is the same decision the
--- caller already made: thirteen keys is one apply, not thirteen.
--- ============================================================
-
-function SettingsUndo:BeginGroup(label, applyFn)
-    groupDepth = groupDepth + 1
-    if groupDepth == 1 and type(applyFn) == "function" then groupApply = applyFn end
-    local s = GetStack()
-    if s then s:BeginGroup(label) end
-end
-
-function SettingsUndo:EndGroup()
-    if groupDepth > 0 then groupDepth = groupDepth - 1 end
-    local s = GetStack()
-    if not s then
-        if groupDepth == 0 then groupApply = nil end
-        return
-    end
-
-    -- Read BEFORE closing: the lib pushes the collapsed entry from inside
-    -- EndGroup, so "is the top of the stack a new entry" is the only way to tell
-    -- a group that collapsed to something from one the lib dropped as empty.
-    local before = s.PeekEntry and s:PeekEntry() or nil
-    s:EndGroup()
-    if groupDepth > 0 then return end          -- an inner group closed, not ours
-
-    local applyFn = groupApply
-    groupApply = nil
-    if not applyFn then return end
-    local entry = s.PeekEntry and s:PeekEntry() or nil
-    if not entry or entry == before then return end   -- empty group: nothing pushed
-
-    -- The lib's group closures walk the child entries; the apply runs once
-    -- AFTER them, in both directions, so the frames are told about the finished
-    -- state rather than about each key on the way through.
-    entry.apply = applyFn
-    local undo, redo = entry.undo, entry.redo
-    entry.undo = function() undo(); RunApply(applyFn) end
-    entry.redo = function() redo(); RunApply(applyFn) end
-end
-
--- ============================================================
 -- SUSPENSION
 -- Refcounted, because the reasons to suspend nest: an undo apply inside a
 -- press-and-hold restore is not a case we ship, but a Resume that undid an outer
@@ -470,8 +412,6 @@ function SettingsUndo:Clear()
     gestureDepth = 0
     wipe(gestureOrder)
     wipe(gestureByDB)
-    groupDepth = 0
-    groupApply = nil
     if stack then stack:Clear() end
 end
 

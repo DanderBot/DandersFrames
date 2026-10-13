@@ -166,8 +166,8 @@ do
 
     -- ---- the section helpers: forwards to the shared ones, with both opt-ins
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
-          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions, shut on a first run")
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
@@ -212,10 +212,28 @@ do
     -- classic arm is reached only in classic and no Modern card is ever a
     -- classic section with a preview.
     local mount = builderBody("MountIcon")
-    local early = mount:find("if not classicLayout then\n                MountIconCard(spec)\n                return\n            end", 1, true)
+    local early = mount:find("if not classicLayout then\n                queuedIcons[#queuedIcons + 1] = spec\n                return\n            end", 1, true)
     local sectionAt = mount:find("local section = AddSection(spec.section)", 1, true)
     check(early and sectionAt and early < sectionAt,
-          "classic: Modern returns into MountIconCard before the classic section and preview are built")
+          "classic: Modern queues the spec and returns before the classic section and preview are built")
+
+    -- ...and the queue is mounted by subject group, every icon in exactly one
+    -- group, with a fallback so an icon left out of the groups still mounts.
+    local groupsSrc = PAGE:match("local ICON_GROUPS = (%b{})")
+    check(groupsSrc ~= nil, "groups: the Modern icon groups are one table")
+    local seen, dup = {}, false
+    for key in (groupsSrc or ""):gmatch('"(%w+Icon)"') do
+        if seen[key] then dup = true end
+        seen[key] = true
+    end
+    check(not dup, "groups: no icon is in two groups")
+    for _, key in ipairs({ "roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon",
+                           "summonIcon", "bgCarrierIcon", "combatIcon", "resurrectionIcon", "phasedIcon",
+                           "afkIcon", "vehicleIcon", "raidRoleIcon" }) do
+        check(seen[key], "groups: " .. key .. " is in a group")
+    end
+    check(PAGE:find("if not mounted[spec.key] then MountIconCard(spec) end", 1, true) ~= nil,
+          "groups: an icon in no group still mounts")
 end
 
 -- ============================================================
@@ -228,8 +246,8 @@ do
     -- ---- the card is the icon's three builders, in classic's box order ----
     check(card:find("local settingsBuild = spec.settings or BuildIconSettingsGroup", 1, true) ~= nil,
           "card: Role's own Settings builder still replaces the shared one")
-    check(card:find("local function BuildIconCard(tools2) settingsBuild(tools2, spec) BuildIconAppearanceGroup(tools2, spec) BuildIconPositionGroup(tools2, spec) end", 1, true) ~= nil,
-          "card: the three builders, reused with the icon's spec, in the order the boxes stand")
+    check(card:find("local function BuildIconCard(tools2) settingsBuild(tools2, spec) if extra then BuildExtraInCard(tools2) end BuildIconAppearanceGroup(tools2, spec) BuildIconPositionGroup(tools2, spec) end", 1, true) ~= nil,
+          "card: the three builders, reused with the icon's spec, in the order the boxes stand -- a fourth box right after Settings")
 
     -- ---- key, column, summary, pin, tick ---------------------------------
     check(card:find('local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec), nil, nil, BuildIconCard, toggle)', 1, true) ~= nil,
@@ -252,15 +270,15 @@ do
     for _ in PAGE:gmatch("group%.disableChildrenOn = spec%.gate") do gates = gates + 1 end
     eq(gates, 4, "grey: the group gate lives inside the builders (settings, appearance, position, timer), so a card greys as its boxes did")
 
-    -- ---- AFK's Timer Text, a card of its own -------------------------------
-    check(card:find("local function BuildExtraCard(tools2) extra.build(tools2, spec) end", 1, true) ~= nil,
-          "extra: the fourth box's own builder is reused, handed the icon's spec")
-    check(card:find('band = OpenSection(RowTitle(spec.section, extra.label), "icons_" .. spec.key .. "_extra", spec.col, extra.summary, spec.gate, extra.hideOn, BuildExtraCard)', 1, true) ~= nil,
-          "extra: titled <Icon> -- <box>, in the icon's column, printing its own summary, dimming with the icon, hiding on the box's own gate, pinnable")
-    check(PAGE:find('local function RowTitle(section, part) return format("%s \\226\\128\\148 %s", section, part) end', 1, true) ~= nil,
-          "extra: the long title is composed from two strings that are already translated")
-    local cardAt  = card:find("CloseSection(band) local extra", 1, true)
-    check(cardAt ~= nil, "extra: ...and it opens after the icon's own card is closed, so it sits right under it")
+    -- ---- AFK's Timer Text, inside the AFK card -----------------------------
+    check(card:find("group:AddWidget(GUI:CreateHeader(tools2.parent, extra.label, { keepSearchSection = true }), GUI.RowHeight.sectionHeader)", 1, true) ~= nil,
+          "extra: the fourth box sits in the icon's own card, under a header that leaves search on the card")
+    check(card:find("extra.build({ group = group, parent = tools2.parent, refreshStates = tools2.refreshStates, inIconCard = true }, spec)", 1, true) ~= nil,
+          "extra: ...its own builder reused, told it is inside the icon's card")
+    check(card:find("w.hideOn = function(d) return extra.hideOn(d) or (own and own(d)) or false end", 1, true) ~= nil,
+          "extra: ...header and controls hide on the box's own gate, on top of their own")
+    check(card:find("_extra", 1, true) == nil and PAGE:find("RowTitle", 1, true) == nil,
+          "extra: no second card, and no composed title left over")
 
     -- ---- Icon Text Settings ---------------------------------------------
     check(PAGE:find('local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,\n                nil, nil, BuildIconTextGroup)', 1, true) ~= nil,
@@ -277,10 +295,14 @@ do
     check(stripAt and textAt and firstIcon and stripAt < textAt and textAt < firstIcon,
           "order: Expand All / Collapse All first, spanning both columns, then Icon Text, then the icons")
 
-    -- ☠ NO HEADER PREVIEWS ON A CARD. The preview wiring is classic's alone.
-    check(card:find("WireStatusPreview", 1, true) == nil and card:find("onSection", 1, true) == nil
-          and card:find("afterMount", 1, true) == nil,
-          "preview: a card never wires a header preview")
+    -- ★ EVERY ICON CARD PREVIEWS ITS ICON, as classic's headers always did: the
+    -- same spec.preview, through the same wiring, onto the card's own section.
+    check(card:find("local section = band.collapsibleSection", 1, true) ~= nil
+          and card:find("if spec.preview then WireStatusPreview(section, spec.preview) end", 1, true) ~= nil,
+          "preview: an icon card wires its header preview")
+    check(card:find("if spec.onSection then spec.onSection(section) end", 1, true) ~= nil
+          and card:find("if spec.afterMount then spec.afterMount() end", 1, true) ~= nil,
+          "preview: ...and Role's card is handed to its own preview (onSection, afterMount)")
 end
 
 -- ============================================================
@@ -351,10 +373,17 @@ do
         { "outlinedropdown", "Outline",  "afkIconTimerOutline",  55 },
         { "shadowcheckbox",  "Shadow",   "afkIconTimerOutline",  30 },
         { "shadowlink",      "(none)",   "(none)",               nil },
-        { "colorpicker",     "Color",    "afkIconTimerColor",    30 },
-        { "slider",          "Offset X", "afkIconTimerX",        55 },
-        { "slider",          "Offset Y", "afkIconTimerY",        55 },
+        { "colorpicker",     "(none)",   "afkIconTimerColor",    30 },
+        { "slider",          "(none)",   "afkIconTimerX",        55 },
+        { "slider",          "(none)",   "afkIconTimerY",        55 },
     }, "afk timer text")
+    -- Those three name themselves inside the AFK card, beside the icon's own
+    -- Text Color and Offset X / Y; classic's box keeps the short names.
+    local timerBody = builderBody("BuildAFKTimerGroup")
+    for _, pair in ipairs({ { "Timer Color", "Color" }, { "Timer Offset X", "Offset X" }, { "Timer Offset Y", "Offset Y" } }) do
+        check(timerBody:find('inCard and L["' .. pair[1] .. '"] or L["' .. pair[2] .. '"]', 1, true) ~= nil,
+              "afk timer text: " .. pair[1] .. " in the card, " .. pair[2] .. " in classic's box")
+    end
 end
 
 -- ============================================================
@@ -410,8 +439,7 @@ local ICONS = {
       texts = { { "Status Text", "afkIconText" } },
       after = { { "checkbox", "Show Timer", "afkIconShowTimer", 30 },
                 { "label", "In Text mode the timer joins the status text and uses its font, colour and position.", "(none)", 40 } },
-      extra = { label = "Timer Text", builder = "BuildAFKTimerGroup",
-                summary = "AFKTimerSummary", hideOn = "AFKTimerHidden" } },
+      extra = { label = "Timer Text", builder = "BuildAFKTimerGroup", hideOn = "AFKTimerHidden" } },
     { section = "Vehicle Icon", key = "vehicleIcon", id = "vehicle", col = 2,
       enableKey = "vehicleIconEnabled", enableLabel = "Enable Vehicle Icon",
       showTextKey = "vehicleIconShowText", hideInCombat = "Hide in Combat",
@@ -524,8 +552,6 @@ for i, want in ipairs(ICONS) do
     if want.extra then
         check(spec:find('label = L["' .. want.extra.label .. '"], build = ' .. want.extra.builder .. ",", 1, true) ~= nil,
               tag .. ": its fourth box is asked for by name")
-        check(spec:find("summary = " .. want.extra.summary, 1, true) ~= nil,
-              tag .. ": ...with a summary of its own")
         check(spec:find("hideOn = " .. want.extra.hideOn, 1, true) ~= nil,
               tag .. ": ...and the gate the box always carried")
     end
@@ -568,7 +594,7 @@ print("-- Icons page: the summaries")
 do
     check(PAGE:find('local function Join(parts) return table.concat(parts, " \\194\\183 ") end', 1, true) ~= nil,
           "summary: the sweep's separator is named once")
-    for _, s in ipairs({ "IconTextSummary", "RoleSettingsSummary", "AFKTimerSummary" }) do
+    for _, s in ipairs({ "IconTextSummary", "RoleSettingsSummary" }) do
         local body = PAGE:match("local function " .. s .. "%(.-%)(.-)\n        end")
         check(body ~= nil and body:find("Join(parts)", 1, true) ~= nil,
               "summary: " .. s .. " joins with the shared separator")

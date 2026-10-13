@@ -6,17 +6,17 @@ local NS = ...
 -- Auras > Defensive Icon: NINE groups. In Modern they are the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top --
--- in the columns and the order the old bands had:
+-- mounted by group (tools.MountCardGroups):
 --
---   column 1   "Content"  Settings (holds the PAGE gate, Enable Defensive Icon,
---                         in its body -- as Show Buffs does) and Defensive
---                         Filters.
---   column 2   "Icon"     Layout, Appearance, Position, Border (Show Border is
---                         the header's tick, through the toolkit's noShowToggle).
---   column 1   "Text"     Duration Text (Show Duration is the header's tick),
---                         Stack Count (hides with the factory gate).
---              ...then    Duration Bar (Enable Duration Bar is the header's tick),
---                         the 12.1-factory extra, under NO category header.
+--   column 1   "Content"     Settings (holds the PAGE gate, Enable Defensive Icon,
+--                            in its body -- as Show Buffs does) and Defensive
+--                            Filters.
+--              "Text"        Duration Text (Show Duration is the header's tick),
+--                            Stack Count (hides with the factory gate).
+--   column 2   "Layout"      Layout, Position.
+--              "Appearance"  Icon Style, Border (Show Border is the header's tick,
+--                            through the toolkit's noShowToggle), Duration Bar
+--                            (Enable Duration Bar is the header's tick).
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE
 -- and asserts against it, as the other census files do.
@@ -150,15 +150,29 @@ do
     end
 
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
-    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true, collapsed = true })", 1, true) ~= nil,
           "sections: every card goes through the shared helper, two per row and dim captions")
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" }, { "Text", "1" } }) do
-        local n = 0
-        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
-        eq(n, 1, "headers: the " .. pair[1] .. " category header sits in column " .. pair[2] .. ", once")
+    -- ---- the groups: one table, mounted in order (tools.MountCardGroups) ----
+    -- The page's Add order is what a one-column window stacks, so the cards
+    -- register with tools.DeferCard and mount group by group, each group
+    -- under its header.
+    local groupsSrc = PAGE:match("tools%.MountCardGroups%(Add, (%b{})%)")
+    check(groupsSrc ~= nil, "groups: the cards mount by group from one table")
+    local gotGroups = {}
+    for label, col, keys in (groupsSrc or ""):gmatch('label = L%["([^"]+)"%], col = (%d), keys = {(.-)}') do
+        local ks = {}
+        for k in keys:gmatch('"([%w_]+)"') do ks[#ks + 1] = k end
+        gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
+    end
+    eq(table.concat(gotGroups, " | "),
+       "Content@1: defensiveicon_settings, defensiveicon_filters | Layout@2: defensiveicon_layout, defensiveicon_position | Appearance@2: defensiveicon_appearance, defensiveicon_border, defensiveicon_durationbar | Text@1: defensiveicon_duration, defensiveicon_stack",
+       "groups: Content, Layout, Appearance, Text, each over its cards")
+    for _, key in ipairs({ "defensiveicon_settings", "defensiveicon_filters", "defensiveicon_layout", "defensiveicon_appearance", "defensiveicon_position", "defensiveicon_border", "defensiveicon_duration", "defensiveicon_stack", "defensiveicon_durationbar" }) do
+        check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
+              "groups: " .. key .. " registers its card for the group mount")
     end
 
     for _, name in ipairs({ "anchorOptions", "defSortOptions", "defDurFormatOptions",
@@ -276,7 +290,7 @@ local CARDS = {
     { label = "Layout", key = "defensiveicon_layout", col = 2, box = "Layout", classicCol = 1,
       builder = "BuildDefensiveLayoutGroup", golden = DEFENSIVE_LAYOUT, summary = "DefensiveLayoutSummary",
       dim = true, pin = true },
-    { label = "Appearance", key = "defensiveicon_appearance", col = 2, box = "Appearance", classicCol = 2,
+    { label = "Icon Style", key = "defensiveicon_appearance", col = 2, box = "Appearance", classicCol = 2,
       builder = "BuildDefensiveAppearanceGroup", golden = DEFENSIVE_APPEARANCE, summary = "DefensiveAppearanceSummary",
       dim = true, pin = true },
     { label = "Position", key = "defensiveicon_position", col = 2, box = "Position", classicCol = 1,
@@ -293,7 +307,7 @@ local CARDS = {
     { label = "Stack Count", key = "defensiveicon_stack", col = 1, box = "Stack Count", classicCol = 1,
       builder = "BuildDefensiveStackGroup", golden = DEFENSIVE_STACK, summary = "DefensiveStackSummary",
       dim = true, hide = true, pin = true },
-    { label = "Duration Bar", key = "defensiveicon_durationbar", col = 1, box = "Duration Bar", classicCol = 1,
+    { label = "Duration Bar", key = "defensiveicon_durationbar", col = 2, box = "Duration Bar", classicCol = 1,
       builder = "BuildDefensiveDurationBarGroup", golden = DEFENSIVE_DURBAR, summary = "DefensiveDurationBarSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "defensiveDurationBarEnabled", name = "Enable Duration Bar", commit = "DefBarChanged()" } },
@@ -367,26 +381,12 @@ end
 -- ============================================================
 print("-- Defensive Icon page: the cards together")
 do
-    -- ☠ THE ADD ORDER IS THE ONE-COLUMN FOLD'S ORDER, so it has to read as the
-    -- old bands did: Content, Icon, Text, Duration Bar. Defensive Filters is
-    -- opened in the first mount for exactly this reason.
+    -- The source order is classic's; the cards MOUNT in the group table's.
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Defensive Filters | Layout | Appearance | Position | Border | Duration Text | Stack Count | Duration Bar",
-       "order: the nine cards open in the old bands' order -- Content, Icon, Text, Duration Bar")
-    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    local setAt     = PAGE:find('OpenSection(L["Settings"]', 1, true)
-    local filtAt    = PAGE:find('OpenSection(L["Defensive Filters"]', 1, true)
-    local iconAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)', 1, true)
-    local layAt     = PAGE:find('OpenSection(L["Layout"]', 1, true)
-    local textAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)', 1, true)
-    local durAt     = PAGE:find('OpenSection(L["Duration Text"]', 1, true)
-    check(contentAt and setAt and filtAt and contentAt < setAt and setAt < filtAt,
-          "order: Content heads Settings and Defensive Filters")
-    check(filtAt and iconAt and layAt and filtAt < iconAt and iconAt < layAt,
-          "order: ...then Icon heads Layout")
-    check(textAt and durAt and textAt < durAt, "order: Text heads Duration Text")
+       "Settings | Defensive Filters | Layout | Icon Style | Position | Border | Duration Text | Stack Count | Duration Bar",
+       "order: the nine cards are declared in classic's order")
     -- The classic Filters arm keeps its else, holding only a pointer to the card.
     check(PAGE:find("Add(filterGroup, nil, 2)\n        else\n            -- Modern opened this card above", 1, true) ~= nil,
           "order: the classic Defensive Filters arm is untouched, its Modern half a pointer")
@@ -410,8 +410,9 @@ do
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: the page adds the pair at the top, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
-    check(stripAt and contentAt and stripAt < contentAt,
-          "bulk: ...above the first category header, because it acts on the whole page")
+    local mountAt = PAGE:find("tools.MountCardGroups(Add,", 1, true)
+    check(stripAt and mountAt and stripAt < mountAt,
+          "bulk: ...above the first group header, because it acts on the whole page")
 
     -- ---- nine classic boxes, in the order they always had ---------------
     local bare = 0

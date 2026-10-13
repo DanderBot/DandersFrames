@@ -16,7 +16,7 @@ local addonName, DF = ...
 --   ENGINE-UNIT     the container's own GetUnit() differs from the frame's unit, so it
 --                   shows another player's auras
 --   SHOWN-DISABLED  window shown but container disabled, so UNIT_AURA is unregistered
---   STUCK-PENDING-OP / REBUILD-UPGRADE / STUCK-HIDDEN / STUCK-AD-SLOTS / WRONG-AD-SLOTS
+--   STUCK-PENDING-OP / REBUILD-UPGRADE / WRONG-AD-SLOTS
 --                   DF-side states that lead into a stale container
 -- Not checkable:
 --   * UNIT_AURA registration: IsEventRegistered is forbidden on containers.
@@ -37,9 +37,10 @@ local COMBAT_INTERVAL, IDLE_INTERVAL = 1, 2
 local SESSION = date("%Y-%m-%d %H:%M:%S")
 
 local LANES = {
-    { field = "buffFactory",      label = "buff",      hidden = "dfBuffFactoryHidden" },
-    { field = "debuffFactory",    label = "debuff",    hidden = "dfDebuffFactoryHidden" },
-    { field = "defensiveFactory", label = "defensive", hidden = "dfDefFactoryHidden" },
+    -- No lane hides itself for a combat retarget any more (it applies at once).
+    { field = "buffFactory",      label = "buff",      hidden = nil },
+    { field = "debuffFactory",    label = "debuff",    hidden = nil },
+    { field = "defensiveFactory", label = "defensive", hidden = nil },
     { field = "dispelFactory",    label = "dispel",    hidden = nil },
     { field = "dispelIconRow",    label = "dispelicons", hidden = nil },
 }
@@ -217,10 +218,6 @@ local function sample(postCombat)
                             "pendingOp=" .. tostring(op) .. " still set after combat -- drain never ran")
                     end
                 end
-                if postCombat and lane.hidden and frame[lane.hidden] then
-                    record("STUCK-HIDDEN", unit, lane.label,
-                        "row hidden for a deferred retarget, still hidden after combat")
-                end
                 checkHandle(h, unit, lane.label, frame, lane.hidden)
             end
         end
@@ -247,20 +244,15 @@ local function sample(postCombat)
             local bound, enabled = engineState(owner.container)
             if bound and bound ~= unit then
                 record("ENGINE-UNIT", unit, "AD slots", format(
-                    "slot owner container bound to %s, frame is %s | owner.unit=%s pending=%s enabled=%s lastSync=%s",
-                    tostring(bound), tostring(unit), tostring(owner.unit), tostring(owner.pendingUnit),
+                    "slot owner container bound to %s, frame is %s | owner.unit=%s enabled=%s lastSync=%s",
+                    tostring(bound), tostring(unit), tostring(owner.unit),
                     tostring(enabled), syncAge(frame)))
             end
             if owner.unit ~= unit then
-                if owner.pendingUnit then
-                    if postCombat then
-                        record("STUCK-AD-SLOTS", unit, "AD slots",
-                            "owner still on " .. tostring(owner.unit) .. ", pending "
-                            .. tostring(owner.pendingUnit) .. " after combat")
-                    end
-                else
-                    -- Nothing pending: record the conditions the Factory's retarget walk
-                    -- needs, so the log shows which one failed.
+                do
+                    -- A retarget applies at once, so nothing is ever pending: record the
+                    -- conditions the Factory's retarget walk needs, so the log shows which
+                    -- one failed.
                     local placed = adStore and adStore.placed
                     local nPlaced, nMine, nParked = 0, 0, 0
                     if placed then
@@ -330,9 +322,8 @@ function DF:MarkAuraFault(note)
         local owner = frame.dfSlotOwner
         if owner then
             local bound, enabled = engineState(owner.container)
-            parts[#parts + 1] = format("ADslots(owner=%s,engine=%s,en=%s,pending=%s,sync=%s)",
-                tostring(owner.unit), tostring(bound), tostring(enabled),
-                tostring(owner.pendingUnit), syncAge(frame))
+            parts[#parts + 1] = format("ADslots(owner=%s,engine=%s,en=%s,sync=%s)",
+                tostring(owner.unit), tostring(bound), tostring(enabled), syncAge(frame))
         end
         rows[#rows + 1] = table.concat(parts, " ")
     end

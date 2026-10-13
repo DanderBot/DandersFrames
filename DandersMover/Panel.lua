@@ -761,7 +761,7 @@ local function buildPanel(po, content)
     for i, a in ipairs(ARROWS) do
         local icon, dx, dy, col, rowi = a[1], a[2], a[3], a[4], a[5]
         local b = UI:CreateGlyphButton(ui.nudge, {
-            texture = UI.MEDIA .. "Icons\\" .. icon, size = NUDGE_CELL, iconSize = NUDGE_ICON,
+            texture = UI.MEDIA .. "Icons\\" .. icon .. ".png", size = NUDGE_CELL, iconSize = NUDGE_ICON,
             onClick = function()
                 local el = po.el
                 if not el then return end

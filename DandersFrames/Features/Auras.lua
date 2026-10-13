@@ -627,6 +627,91 @@ function DF:GetEngineDispelFlagGaps(selfOnly)
     return nil
 end
 
+-- The retired Raid row, onto Dispellable By Me (the same set once talent-corrected).
+-- Works on the Debuff Bar's flat keys and, with `sel`, an Aura Designer group's
+-- selection. Show: a Raid tick becomes a By Me tick unless Dispellable is already
+-- shown (By Me is the same set, All a superset) or hidden. Hide: a Raid tick becomes a
+-- Hide on Dispellable unless that row is shown or already hidden -- Show and Hide share
+-- one By Me / All dropdown, so "show All, hide mine" cannot survive and shows All.
+-- The engine still reads a stray Raid tick as By Me (BuildDirectDebuffFilters).
+function DF:MigrateRaidDebuffRow(t, sel)
+    local showRaid, hideRaid = sel and "raid" or "debuffFilterRaid", sel and "hideRaid" or "debuffHideRaid"
+    local showDisp, hideDisp = sel and "dispellable" or "debuffFilterDispellable", sel and "hideDispellable" or "debuffHideDispellable"
+    local modeKey = sel and "dispellableMode" or "directDebuffDispellableMode"
+    local cleared = false          -- the bar keeps the key at its default; a group drops it
+    if sel then cleared = nil end
+    local showR, hideR = t[showRaid] == true, t[hideRaid] == true
+    if not (showR or hideR) then return end
+    -- A tick already on the Dispellable row wins: a Hide there already removed
+    -- everything this row added. Both Raid boxes ticked meant Hide, since Hide holds.
+    if not t[showDisp] and not t[hideDisp] then
+        if hideR then t[hideDisp] = true else t[showDisp] = true end
+        t[modeKey] = "PLAYER"
+    end
+    if showR then t[showRaid] = cleared end
+    if hideR then t[hideRaid] = cleared end
+end
+
+-- The same move for raid auto-layout overrides. An override only holds what differs
+-- from the base, so migrating it alone is wrong both ways: a layout overriding Raid
+-- off on a base with Raid on would inherit the base's new Dispellable tick. Each
+-- layout's effective row is migrated against the base's own result instead, and the
+-- override keeps whatever still differs. ⚠ Must run BEFORE the base is migrated.
+local RAID_ROW_KEYS = {
+    "debuffFilterRaid", "debuffHideRaid", "debuffFilterDispellable",
+    "debuffHideDispellable", "directDebuffDispellableMode",
+}
+function DF:MigrateRaidDebuffOverrides(baseDb, autoDb)
+    if type(baseDb) ~= "table" or type(autoDb) ~= "table" then return end
+    local function snapshot(ov)
+        local s = {}
+        for _, k in ipairs(RAID_ROW_KEYS) do
+            local v = baseDb[k]
+            if ov and ov[k] ~= nil then v = ov[k] end
+            s[k] = v
+        end
+        return s
+    end
+    local baseAfter = snapshot(nil)
+    DF:MigrateRaidDebuffRow(baseAfter)
+    local function migrateLayout(layout)
+        local ov = layout and layout.overrides
+        if type(ov) ~= "table" then return end
+        if ov.debuffFilterRaid == nil and ov.debuffHideRaid == nil
+            and baseDb.debuffFilterRaid ~= true and baseDb.debuffHideRaid ~= true then
+            return
+        end
+        local eff = snapshot(ov)
+        DF:MigrateRaidDebuffRow(eff)
+        for _, k in ipairs(RAID_ROW_KEYS) do
+            if eff[k] ~= baseAfter[k] or ov[k] ~= nil then ov[k] = eff[k] end
+        end
+        -- The row is gone; the base's cleared value is what a layout inherits.
+        ov.debuffFilterRaid, ov.debuffHideRaid = nil, nil
+    end
+    for _, ctKey in ipairs({ "instanced", "openWorld" }) do
+        local ct = autoDb[ctKey]
+        if type(ct) == "table" and type(ct.profiles) == "table" then
+            for _, layout in pairs(ct.profiles) do migrateLayout(layout) end
+        end
+    end
+    if type(autoDb.mythic) == "table" then migrateLayout(autoDb.mythic.profile) end
+end
+
+-- Whether a frame showing `unit` gets the racial (self-only) gap: the player is a Dwarf
+-- and the unit is the player. Asked per drive, never stored on the frame as the answer --
+-- header children are reassigned to other units without a layout bump. Non-Dwarves
+-- short-circuit before UnitIsUnit (this runs on the per-UNIT_AURA paths).
+local racialDispelRace
+function DF:IsRacialDispelSelf(unit)
+    if racialDispelRace == nil then
+        local _, race = UnitRace("player")
+        if race == nil then return false end
+        racialDispelRace = race == "Dwarf"
+    end
+    return racialDispelRace and unit ~= nil and UnitIsUnit(unit, "player") and true or false
+end
+
 -- ☠☠ A TALENT EDIT DOES NOT FIRE A SPEC EVENT, AND THE SPELLBOOK GRANT LANDS LATE.
 -- PLAYER_TALENT_UPDATE is not the signal: talent edits do not necessarily raise it, and
 -- even when something does fire, the spell is not KNOWN yet when we probe — the grant
@@ -726,12 +811,418 @@ end
 -- nothing) — distinct from nil (show all); normalizeFilters would map {} back
 -- to show-all, so DriveDebuffFactory intercepts the empty list and parks the
 -- row instead of building a container from it.
-local function BuildDirectDebuffFilters(db, claimed)
+-- A maxDuration no aura reaches: rejects permanent debuffs (duration 0 fails the
+-- engine's `> 0` half) and nothing else.
+local PERMANENT_DEBUFF_CAP = 2147483647
+
+-- The row's Hide Long Debuffs cap in seconds, or nil. Seconds exist for short
+-- encounter mechanics; any other unit value reads the original minutes slider, so
+-- a profile that never touched the unit behaves exactly as before.
+local function DebuffMaxDuration(db)
+    if not db.debuffMaxDurationEnabled then return nil end
+    if db.debuffMaxDurationUnit == "SECONDS" then
+        local sec = tonumber(db.debuffMaxDurationSeconds) or 0
+        return sec > 0 and sec or nil
+    end
+    local min = tonumber(db.debuffMaxDurationMinutes) or 0
+    return min > 0 and min * 60 or nil
+end
+
+local function filterHasToken(filter, token)
+    for own in filter:gmatch("[^|]+") do
+        if own == token then return true end
+    end
+    return false
+end
+
+-- The token-backed categories past the original five, in declaration order. Each
+-- record negates every enabled one above it, so they tile instead of repeating.
+-- `claim` is the Aura Designer selection key that takes a category off the row.
+local EXTRA_TOKEN_CATEGORIES = {
+    { flag = "Important",        claim = "important",        token = "Important",             key = "important" },
+    { flag = "RaidInCombat",     claim = "raidInCombat",     token = "RaidInCombat",          key = "raidcombat" },
+    -- Cast By You. Its record also gets isFromPlayerOrPlayerPet = true from the
+    -- container's caster lock (applyCasterLock), so a caster the client cannot
+    -- resolve fails closed.
+    { flag = "Mine",             claim = "mine",             token = "Player",                key = "mine" },
+}
+-- Per-type picks: db suffix -> dispelName as the engine compares it.
+local DISPEL_TYPE_CATEGORIES = {
+    { flag = "Magic",   claim = "magic",   type = "Magic" },
+    { flag = "Curse",   claim = "curse",   type = "Curse" },
+    { flag = "Poison",  claim = "poison",  type = "Poison" },
+    { flag = "Disease", claim = "disease", type = "Disease" },
+    { flag = "Bleed",   claim = "bleed",   type = "Bleed" },
+}
+
+-- The Hide column: debuffs that must not show, in either base and whatever the
+-- Show column picked. Returns the candidate booleans to AND onto every record, the
+-- tokens to negate in every filter string, and whether the two together exclude
+-- everything. Every key here is applied by the engine outside the identity gate,
+-- so it holds on friendly units. Nil when nothing is hidden, which leaves the
+-- builder's output untouched.
+local function DebuffHideSpec(db, uncleansable, gap)
+    local cf, tokens = {}, {}
+    -- Hide Dispellable By Me hides RAID minus the uncleansable types. A record built on
+    -- the positive RAID token is narrowed to that band instead of dropped (see
+    -- applyDebuffHides). Hide Raid is the same set: on a debuff, Blizzard's RAID flag
+    -- means "your class can dispel it", so the Raid row is talent-corrected like By Me.
+    local byMeBand
+    local function addToken(t)
+        if t and not filterHasToken(table.concat(tokens, "|"), t) then tokens[#tokens + 1] = t end
+    end
+    -- isFromPlayerOrPlayerPet means "a player cast it" (any player), so hiding
+    -- non-player debuffs keeps only player-cast ones, and vice versa.
+    if db.debuffHideNonPlayer then cf.isFromPlayerOrPlayerPet = true end
+    if db.debuffHidePlayer then cf.isFromPlayerOrPlayerPet = false end
+    local nothing = (db.debuffHideNonPlayer and db.debuffHidePlayer) and true or false
+    if db.debuffHideBoss then cf.isBossAura = false end
+    if db.debuffHideRole then cf.isRoleAura = false end
+    if db.debuffHidePriority then cf.isPriorityAura = false end
+    if db.debuffHideCrowdControl then addToken(AuraFilters.CrowdControl) end
+    -- Follows the same dispel-mode dropdown the Show side uses.
+    local mode = db.directDebuffDispellableMode
+    local hideAll = db.debuffHideDispellable and (mode == "ALL" or mode == "ANY")
+    if hideAll then
+        if AuraFilters.Dispellable then
+            addToken(AuraFilters.Dispellable)
+        else
+            cf.excludeDispelTypes = DISPEL_TYPES
+        end
+    end
+    if db.debuffHideRaid or (db.debuffHideDispellable and not hideAll) then
+        addToken(AuraFilters.Raid or "RAID")
+        if uncleansable and next(uncleansable) then byMeBand = uncleansable end
+        -- The types the engine flag misses but this character cleanses (Shaman poison
+        -- via totem) are by-me too: the Show side adds them back, so Hide removes them.
+        if gap then
+            local ex = {}
+            for k in pairs(cf.excludeDispelTypes or {}) do ex[k] = true end
+            for k in pairs(gap) do ex[k] = true end
+            cf.excludeDispelTypes = ex
+        end
+    end
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do
+        if db["debuffHide" .. c.flag] then addToken(AuraFilters[c.token]) end
+    end
+    local types
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do
+        if db["debuffHide" .. c.flag] then
+            types = types or {}
+            types[c.type] = true
+        end
+    end
+    if types then
+        local ex = {}
+        for k in pairs(cf.excludeDispelTypes or {}) do ex[k] = true end
+        for k in pairs(types) do ex[k] = true end
+        cf.excludeDispelTypes = ex
+    end
+    if next(cf) == nil and #tokens == 0 and not nothing then return nil end
+    return { cf = cf, tokens = tokens, nothing = nothing, byMeBand = byMeBand }
+end
+
+-- AND a hide spec onto each record. A record that positively asserts what is
+-- hidden (a boss record under Hide Boss, HARMFUL|RAID under Hide Raid) can match
+-- nothing and is dropped rather than given a self-contradicting filter. Dispel
+-- types merge: a record that includes types loses the hidden ones (and goes when
+-- none are left), any other record excludes them. Never mutates a shared table.
+-- Returns a new list; an empty one tells the drive to park the row.
+local function applyDebuffHides(list, hide)
+    if not hide then return list end
+    if hide.nothing then return {} end
+    local exTypes = hide.cf.excludeDispelTypes
+    local out = {}
+    for _, rec in ipairs(list) do
+        local keep = true
+        local narrowTo   -- set when a positive-RAID record survives Hide By Me as its band
+        for _, tok in ipairs(hide.tokens) do
+            if filterHasToken(rec.filter, tok) then
+                if tok == "RAID" and hide.byMeBand then
+                    narrowTo = hide.byMeBand
+                else
+                    keep = false; break
+                end
+            end
+        end
+        local cf = rec.candidateFilters
+        if keep and narrowTo then
+            local inc = {}
+            for t in pairs(narrowTo) do
+                local okInc = not (cf and cf.includeDispelTypes) or cf.includeDispelTypes[t]
+                local okEx = not (cf and cf.excludeDispelTypes and cf.excludeDispelTypes[t])
+                if okInc and okEx then inc[t] = true end
+            end
+            if next(inc) == nil then
+                keep = false
+            else
+                local ncf = {}
+                for k, v in pairs(cf or {}) do
+                    if k ~= "includeDispelTypes" and k ~= "excludeDispelTypes" then ncf[k] = v end
+                end
+                ncf.includeDispelTypes = inc
+                cf = ncf
+                rec.candidateFilters = ncf
+            end
+        end
+        if keep and cf then
+            for k, v in pairs(hide.cf) do
+                if k ~= "excludeDispelTypes" and cf[k] ~= nil and cf[k] ~= v then keep = false; break end
+            end
+        end
+        local newInc, newEx
+        if keep and exTypes then
+            if cf and cf.includeDispelTypes then
+                newInc = {}
+                for t in pairs(cf.includeDispelTypes) do
+                    if not exTypes[t] then newInc[t] = true end
+                end
+                if next(newInc) == nil then keep = false end
+            else
+                newEx = {}
+                for t in pairs(cf and cf.excludeDispelTypes or {}) do newEx[t] = true end
+                for t in pairs(exTypes) do newEx[t] = true end
+            end
+        end
+        if keep then
+            for _, tok in ipairs(hide.tokens) do
+                if not (narrowTo and tok == "RAID") and not filterHasToken(rec.filter, "!" .. tok) then
+                    rec.filter = rec.filter .. "|!" .. tok
+                end
+            end
+            if next(hide.cf) then
+                cf = cf or {}
+                for k, v in pairs(hide.cf) do
+                    if k ~= "excludeDispelTypes" then cf[k] = v end
+                end
+                if newInc then cf.includeDispelTypes = newInc end
+                if newEx then cf.excludeDispelTypes = newEx end
+                rec.candidateFilters = cf
+            end
+            out[#out + 1] = rec
+        end
+    end
+    return out
+end
+
+-- ☠ "NOT BY ME" IS NOT "!RAID" WHEN THE ENGINE OVER-REPORTS. The by-me set is RAID minus
+-- the types this character cannot really cleanse (GetDispelTypesToExclude: an untalented
+-- dispel the engine still flags). A record that subtracts by-me with "!RAID" therefore also
+-- loses RAID-flagged debuffs of those types -- which the by-me record excludes too, so they
+-- showed nowhere (a priest without Improved Purify lost every mob disease from Non-Player).
+-- Each such record gets a twin restricted to exactly that band: the same filter with the
+-- positive token, includeDispelTypes = the uncleansable types. Not built when a Hide on
+-- every dispellable removes the band anyway.
+local function addUncleansableTwins(list, uncleansable)
+    if not uncleansable or next(uncleansable) == nil then return list end
+    local out = {}
+    for _, rec in ipairs(list) do
+        out[#out + 1] = rec
+        if filterHasToken(rec.filter, "!RAID") and not filterHasToken(rec.filter, "RAID") then
+            local cf = rec.candidateFilters
+            local inc = {}
+            for t in pairs(uncleansable) do
+                local okInc = not (cf and cf.includeDispelTypes) or cf.includeDispelTypes[t]
+                local okEx = not (cf and cf.excludeDispelTypes and cf.excludeDispelTypes[t])
+                if okInc and okEx then inc[t] = true end
+            end
+            if next(inc) then
+                local twinCF = {}
+                for k, v in pairs(cf or {}) do
+                    if k ~= "includeDispelTypes" and k ~= "excludeDispelTypes" then twinCF[k] = v end
+                end
+                twinCF.includeDispelTypes = inc
+                -- Token by token: a pattern swap would also bite "!RAID_IN_COMBAT".
+                local parts = {}
+                for own in rec.filter:gmatch("[^|]+") do
+                    parts[#parts + 1] = (own == "!RAID") and "RAID" or own
+                end
+                out[#out + 1] = { filter = table.concat(parts, "|"), key = rec.key .. "+u",
+                                  candidateFilters = twinCF, style = rec.style }
+            end
+        end
+    end
+    return out
+end
+
+-- The Aura Designer claims on the new categories, as a hide spec: a claimed token
+-- category is negated off every row record and claimed dispel types are excluded,
+-- the same subtraction the original five get through claimNegStr/claimNegCF.
+local function DebuffExtraClaimSpec(claimed)
+    if not claimed then return nil end
+    local tokens, types = {}, nil
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do
+        local t = claimed[c.claim] and AuraFilters[c.token]
+        if t then tokens[#tokens + 1] = t end
+    end
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do
+        if claimed[c.claim] then
+            types = types or {}
+            types[c.type] = true
+        end
+    end
+    if #tokens == 0 and not types then return nil end
+    return { tokens = tokens, cf = { excludeDispelTypes = types }, nothing = false }
+end
+
+-- MATCH ALL (Aura Designer debuff groups): a debuff shows only if it fits EVERY ticked
+-- Show category, so the categories AND into one record instead of tiling into many.
+-- Dispel-type picks OR into one term (a debuff has a single type). By Me is two disjoint
+-- variants -- the engine flag minus the uncleansable types, and the types the flag
+-- misses -- each ANDed with the rest. Claims from earlier groups are subtracted the way
+-- a Hide is (a record wholly inside a claimed category goes), then the group's own
+-- hides, then the uncleansable twins.
+local function BuildMatchAllDebuffRecords(db, claimed, hide, uncleansable, cantCleanseAll, engineGap)
+    local tokens, cf, any, possible = { "HARMFUL" }, {}, false, true
+    local function tok(t)
+        if t and not filterHasToken(table.concat(tokens, "|"), t) then tokens[#tokens + 1] = t end
+    end
+    local function flag(k, v)
+        if cf[k] ~= nil and cf[k] ~= v then possible = false end
+        cf[k] = v
+    end
+    if db.debuffFilterBoss then any = true; flag("isBossAura", true) end
+    if db.debuffFilterRole then any = true; flag("isRoleAura", true) end
+    if db.debuffFilterPriority then any = true; flag("isPriorityAura", true) end
+    if db.debuffFilterCrowdControl then any = true; tok(AuraFilters.CrowdControl) end
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do
+        if db["debuffFilter" .. c.flag] then any = true; tok(AuraFilters[c.token]) end
+    end
+    if db.debuffFilterMine then flag("isFromPlayerOrPlayerPet", true) end
+    if db.debuffFilterNonPlayer then any = true; flag("isFromPlayerOrPlayerPet", false) end
+    if db.debuffFilterPlayer then any = true; flag("isFromPlayerOrPlayerPet", true) end
+    local showTypes
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do
+        if db["debuffFilter" .. c.flag] then
+            any = true
+            showTypes = showTypes or {}
+            showTypes[c.type] = true
+        end
+    end
+    if showTypes then cf.includeDispelTypes = showTypes end
+
+    local variants = { {} }
+    -- The Raid row is By Me (see BuildDirectDebuffFilters); ANDed with All it is By Me too.
+    if db.debuffFilterDispellable or db.debuffFilterRaid then
+        any = true
+        local mode = db.directDebuffDispellableMode
+        if not db.debuffFilterRaid and (mode == "ALL" or mode == "ANY") then
+            if AuraFilters.Dispellable then
+                variants = { { tok = AuraFilters.Dispellable } }
+            else
+                variants = { { include = DISPEL_TYPES } }
+            end
+        else
+            variants = { { tok = AuraFilters.Raid or "RAID", exclude = cantCleanseAll } }
+            if engineGap then variants[2] = { tok = "!" .. (AuraFilters.Raid or "RAID"), include = engineGap } end
+        end
+    end
+    if not any then return nil end
+    if not possible then return {} end
+
+    local maxDur = DebuffMaxDuration(db)
+    local important = db.debuffFilterBoss or db.debuffFilterRole or db.debuffFilterPriority
+    if maxDur and not (important and db.debuffMaxDurationKeepImportant) then cf.maxDuration = maxDur end
+    if db.debuffHidePermanent and not maxDur then cf.maxDuration = PERMANENT_DEBUFF_CAP end
+
+    local base = table.concat(tokens, "|")
+    local list = {}
+    for i, v in ipairs(variants) do
+        local f = base
+        local ok = true
+        if v.tok then
+            local neg = v.tok:sub(1, 1) == "!"
+            if neg and filterHasToken(base, v.tok:sub(2)) then ok = false
+            elseif not filterHasToken(base, v.tok) then f = f .. "|" .. v.tok end
+        end
+        local rcf = {}
+        for k, val in pairs(cf) do rcf[k] = val end
+        if ok and v.include then
+            local inc = {}
+            for t in pairs(v.include) do
+                if not rcf.includeDispelTypes or rcf.includeDispelTypes[t] then inc[t] = true end
+            end
+            rcf.includeDispelTypes = inc
+        end
+        if ok and v.exclude then
+            if rcf.includeDispelTypes then
+                local inc = {}
+                for t in pairs(rcf.includeDispelTypes) do
+                    if not v.exclude[t] then inc[t] = true end
+                end
+                rcf.includeDispelTypes = inc
+            else
+                rcf.excludeDispelTypes = v.exclude
+            end
+        end
+        if rcf.includeDispelTypes and next(rcf.includeDispelTypes) == nil then ok = false end
+        if ok then
+            list[#list + 1] = { filter = f, key = "matchall" .. i, candidateFilters = next(rcf) and rcf or nil }
+        end
+    end
+
+    if claimed then
+        local claimHide = DebuffHideSpec({
+            debuffHideBoss = claimed.boss, debuffHideRole = claimed.role, debuffHidePriority = claimed.priority,
+            debuffHideCrowdControl = claimed.crowdControl,
+            debuffHideDispellable = claimed.dispellable,
+            directDebuffDispellableMode = claimed.dispellableAll and "ALL" or "PLAYER",
+            debuffHideImportant = claimed.important, debuffHideRaidInCombat = claimed.raidInCombat,
+            debuffHideMagic = claimed.magic, debuffHideCurse = claimed.curse, debuffHidePoison = claimed.poison,
+            debuffHideDisease = claimed.disease, debuffHideBleed = claimed.bleed,
+        }, cantCleanseAll, engineGap)
+        list = applyDebuffHides(list, claimHide)
+    end
+    return addUncleansableTwins(applyDebuffHides(list, hide), uncleansable)
+end
+
+-- `selfOnly`: the frame shows the player, so a racial dispel (Dwarf Stoneform: bleeds)
+-- counts as By Me here and nowhere else -- the overlay's own-frame rule.
+local function BuildDirectDebuffFilters(db, claimed, selfOnly)
     -- One toggle owns EVERY claim path — the record-drop below AND the ALL-mode
     -- subtraction. Pre-5.0 the claim was silent and unconditional, which meant
     -- nobody could see why a category had vanished from their bar, and nobody
     -- could keep the duplicate if they wanted it.
     if db.debuffDeduplicateDesigner == false then claimed = nil end
+    -- ★ THE RAID ROW IS DISPELLABLE BY ME. On a debuff, Blizzard's RAID flag is "harmful
+    -- auras the player can dispel" (its own token table; its "show dispellable debuffs"
+    -- option rides it), so the row is talent-corrected exactly like By Me instead of
+    -- showing the dispels the character has not talented (a priest without Improved
+    -- Purify saw diseases through it). Folded in here, once, for every path: a shown Raid
+    -- row reads as a shown By Me row (below), a claimed Raid category as a By Me claim.
+    if claimed and claimed.raid then
+        local c = {}
+        for k, v in pairs(claimed) do c[k] = v end
+        c.raid = nil
+        c.dispellable = true
+        claimed = c
+    end
+    local cantCleanseAll = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude() or nil
+    local engineGap = DF.GetEngineDispelFlagGaps and DF:GetEngineDispelFlagGaps(selfOnly) or nil
+    local hide = DebuffHideSpec(db, cantCleanseAll, engineGap)
+    -- Inert under a length cap, which already drops permanent debuffs (the box greys);
+    -- otherwise a stale tick would undo Keep Important for permanent important debuffs.
+    local hidePermanent = (db.debuffHidePermanent and not DebuffMaxDuration(db)) and true or false
+    local extraClaims = DebuffExtraClaimSpec(claimed)
+    -- The uncleansable band for addUncleansableTwins, or nil when a Hide on every
+    -- dispellable removes it anyway.
+    local hideAllDispel = db.debuffHideDispellable
+        and (db.directDebuffDispellableMode == "ALL" or db.directDebuffDispellableMode == "ANY")
+    local uncleansable = not hideAllDispel and cantCleanseAll or nil
+    -- A shown Raid row = a shown By Me row (see the claim fold above). Already inside a
+    -- shown Dispellable row of either mode (By Me is the same set, All a superset).
+    -- After the hide spec, which reads the Raid Hide box itself, so the shared mode
+    -- dropdown is only re-read for the Show side.
+    if db.debuffFilterRaid and not db.debuffMatchAll then
+        db = setmetatable({
+            debuffFilterRaid = false,
+            debuffFilterDispellable = true,
+            directDebuffDispellableMode = db.debuffFilterDispellable and db.directDebuffDispellableMode or "PLAYER",
+        }, { __index = db })
+    end
+    if db.debuffMatchAll and not db.directDebuffShowAll then
+        return BuildMatchAllDebuffRecords(db, claimed, hide, uncleansable, cantCleanseAll, engineGap)
+    end
 
     -- IMPORTANT HIGHLIGHT: the per-record button style handed to whichever records
     -- hold boss/role and priority auras. Declared HERE, above the Show All branch,
@@ -761,14 +1252,20 @@ local function BuildDirectDebuffFilters(db, claimed)
         }
     end
 
-    if db.directDebuffShowAll then
+    -- Nothing picked in the Show column reads as All Debuffs on the bar, so the claims,
+    -- the length cap and the highlight still apply (an Aura Designer group shows nothing).
+    local anyShown = db.debuffFilterBoss or db.debuffFilterRole or db.debuffFilterPriority
+        or db.debuffFilterCrowdControl or db.debuffFilterRaid or db.debuffFilterDispellable
+        or db.debuffFilterNonPlayer or db.debuffFilterPlayer
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
+    if db.directDebuffShowAll or (not anyShown and not db.debuffEmptyShowsNothing) then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
         -- exempting boss/role/priority needs a second un-capped record, and the
         -- ALL record can't negate those boolean flags — importants would render
         -- twice. The GUI hides the toggle in ALL mode.
-        local allMaxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0
-            and (db.debuffMaxDurationMinutes or 0) * 60 or nil
+        local allMaxDur = DebuffMaxDuration(db) or (hidePermanent and PERMANENT_DEBUFF_CAP) or nil
 
         -- Claims SUBTRACT here rather than dropping a record: ALL mode is one
         -- blanket HARMFUL group, so there is no per-category record to remove.
@@ -790,7 +1287,6 @@ local function BuildDirectDebuffFilters(db, claimed)
             if claimed.crowdControl and AuraFilters.CrowdControl then
                 filterStr = filterStr .. "|!" .. AuraFilters.CrowdControl
             end
-            if claimed.raid then filterStr = filterStr .. "|!RAID" end
             if claimed.dispellable then
                 -- Mirrors the category-mode split: the token when the build has
                 -- it, else the dispel-type map (same semantics, no token).
@@ -811,6 +1307,15 @@ local function BuildDirectDebuffFilters(db, claimed)
                     filterStr = filterStr .. "|!" .. claimTok
                 else
                     need().excludeDispelTypes = DISPEL_TYPES
+                end
+                -- A By Me group also shows the types the engine flag misses (Shaman
+                -- poison via totem) through its gap record.
+                local gap = not claimed.dispellableAll and engineGap
+                if gap then
+                    local ex = {}
+                    for t in pairs(need().excludeDispelTypes or {}) do ex[t] = true end
+                    for t in pairs(gap) do ex[t] = true end
+                    need().excludeDispelTypes = ex
                 end
             end
         end
@@ -853,11 +1358,12 @@ local function BuildDirectDebuffFilters(db, claimed)
             end
             out[#out + 1] = { filter = filterStr, key = "all",
                               candidateFilters = withCf({ isBossOrRoleAura = false, isPriorityAura = false }) }
-            return out
+            return addUncleansableTwins(applyDebuffHides(applyDebuffHides(out, extraClaims), hide), uncleansable)
         end
 
-        if cf or filterStr ~= "HARMFUL" then
-            return { { filter = filterStr, key = "all", candidateFilters = cf } }
+        if cf or filterStr ~= "HARMFUL" or hide or extraClaims then
+            return addUncleansableTwins(applyDebuffHides(applyDebuffHides(
+                { { filter = filterStr, key = "all", candidateFilters = cf } }, extraClaims), hide), uncleansable)
         end
         return nil
     end
@@ -889,8 +1395,7 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- query. It stays accepted here because an imported profile or shared
     -- template can carry it forever; Core.lua rewrites it in profiles and the
     -- editors self-heal group copies, but the engine must never depend on that.
-    local dispelTypeToken = dispelOn and (dispelMode == "ALL" or dispelMode == "ANY")
-        and AuraFilters.Dispellable or nil
+    local dispelTypeToken = dispelOn and (dispelMode == "ALL" or dispelMode == "ANY") and AuraFilters.Dispellable or nil
     local playerMode = dispelOn and dispelMode ~= "ALL" and dispelMode ~= "ANY"
     -- Engine-flag gap (Shaman poison via totem): resolved once per build, consumed
     -- by the by-me repair record below AND the non-player record's dedup exclude.
@@ -898,68 +1403,35 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- in its AD group (whose facade builds its own repair record), and the row's
     -- other records must keep excluding what the group displays -- same rule as
     -- every other claim-kept negation in this function.
-    local dispelGap = dispelOn and playerMode
-        and DF.GetEngineDispelFlagGaps and DF:GetEngineDispelFlagGaps() or nil
+    local dispelGap = dispelOn and playerMode and engineGap or nil
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
-    local raidOn = db.debuffFilterRaid
     -- ☠ By-me rides "RAID" — "harmful auras the player can dispel" per Blizzard's own
-    -- token table. It shipped on RaidPlayerDispellable, which despite our "observed
-    -- player-scoped" note is documented AND field-confirmed raid-scoped: a priest in a
-    -- raid with poison-dispellers had poison lit as dispellable-by-me (2026-08-27, the
-    -- overlay's twin of this record — see Features/Dispel.lua for the full account).
-    -- The solo observations that justified the old token are the one setting where the
-    -- two tokens are indistinguishable.
-    -- ⚠ This makes the by-me dispel record and the "raid" category record (both
-    -- HARMFUL|RAID) the SAME SET by construction. That is not new overlap: player-
-    -- dispellable was already a subset of raid-dispellable, so the raid record was
-    -- already emptied by its dispel negation whenever both were on. neg() below just
-    -- avoids emitting the now-identical component twice.
+    -- token table, and what Blizzard's own "show dispellable debuffs" option uses.
+    -- RAID_PLAYER_DISPELLABLE is NOT a group set despite its comment: in game it matched
+    -- only the player's own dispels, in a party and in a raid (its real job is purgeable
+    -- buffs on enemies, which RAID cannot express on HELPFUL).
+    -- ⚠ So the Raid row was the same set; it is folded into By Me at the top of this
+    -- function and its tick migrated (DF:MigrateRaidDebuffRow).
     local dispelToken = AuraFilters.Raid or "RAID"
-    local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0 and (db.debuffMaxDurationMinutes or 0) * 60 or nil
+    local maxDur = DebuffMaxDuration(db)
     local keepImportant = db.debuffMaxDurationKeepImportant
 
     -- Negation suffix for a group, given which higher-priority token filters
     -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
-    -- Token precedence among the NON-important records is dispel > CC > raid >
-    -- non-player, so each record excludes the ones above it.
-    -- ☠ THE RAID EXCLUSION IS NOT OPTIONAL ANY MORE, and the comment that used to sit
-    -- here said it was ("raid is the last token record, so nothing needs to exclude
-    -- it"). That was true when it was written and stopped being true the moment the
-    -- NON-PLAYER record was added below it — see that record's own note. Every
-    -- exclusion is keyed on the CONFIG flag, not on the record existing: a category
-    -- claimed by an Aura Designer group is shown there instead, so subtracting it
-    -- here is the dedup working, not a leak.
-    local function neg(excludeDispel, excludeCC, excludeRaid)
+    -- Token precedence among the NON-important records is dispel > CC > non-player >
+    -- the later categories, so each record excludes the ones above it. Every exclusion
+    -- is keyed on the CONFIG flag, not on the record existing: a category claimed by an
+    -- Aura Designer group is shown there instead, so subtracting it here is the dedup
+    -- working, not a leak.
+    local function neg(excludeDispel, excludeCC)
         local s = ""
-        -- Tracks whether the dispel negation already emitted "!RAID" — since by-me's
-        -- token IS "RAID" now, emitting it again for excludeRaid would duplicate the
-        -- component in the filter string.
-        local negatedRaid = false
         if excludeDispel then
             if playerMode then
                 s = s .. "|!" .. dispelToken
-                negatedRaid = (dispelToken == "RAID")
             elseif dispelTypeToken then s = s .. "|!" .. dispelTypeToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
-        -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
-        -- AuraUtil.AuraFilters / IsValidFilterString).
-        --
-        -- ⚠ 2026-08-26: this line briefly dropped the negation while the player was dead
-        -- (c46e4771, reverted here). Blizzard's comment on the token is "harmful auras THE
-        -- PLAYER CAN DISPEL", and the guess was that a dead player therefore matches
-        -- nothing, so the records deduping against it had to stop at the same moment.
-        -- ☠ THE GUESS WAS UNVERIFIED AND MAY BE BACKWARDS. The token is evaluated
-        -- engine-side (C_UnitAuras.IsAuraFilteredOutByInstanceID) and is not readable from
-        -- the Lua dump, so "empties" and "fails open" are equally consistent with the
-        -- source — and only ONE of this row's records negates RAID for a typical config
-        -- (nonplayer), which makes the empties case a straight TRANSFER that cannot add
-        -- icons. The field report is that dying ADDS them. Do not re-apply either
-        -- direction without a capture: /dfauras now prints the per-group counts
-        -- (raid=N nonplayer=N) beside the player's dead state, and running it once alive
-        -- and once dead on the same unit distinguishes the two outright.
-        if excludeRaid and raidOn and not negatedRaid then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -971,6 +1443,8 @@ local function BuildDirectDebuffFilters(db, claimed)
         -- only on a token-less client, and they are exact complements there.
         if dispelOn and not playerMode and not dispelTypeToken then cf.excludeDispelTypes = DISPEL_TYPES end
         if maxDur and not (important and keepImportant) then cf.maxDuration = maxDur end
+        -- Keep Important exempts from the length cap only, not from Hide Permanent.
+        if hidePermanent and not cf.maxDuration then cf.maxDuration = PERMANENT_DEBUFF_CAP end
         if next(cf) == nil then return nil end
         return cf
     end
@@ -981,7 +1455,7 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- Dropping a claimed category's RECORD is only half the job. The row's SURVIVING
     -- records still match auras the AD group displays whenever the ROW does not
     -- itself enable that category, because every exclusion neg() emits is keyed on
-    -- the row's OWN flag (dispelOn / ccToken / raidOn) — a category the row never
+    -- the row's OWN flag (dispelOn / ccToken) — a category the row never
     -- ticked contributes no negation at all, so there is nothing to "keep".
     -- ☠ Field shape: row = boss + role + raid, group = dispels + CC + priority, with
     -- Hide Duplicate Debuffs ON. A boss debuff that is also dispellable rendered in
@@ -1011,7 +1485,6 @@ local function BuildDirectDebuffFilters(db, claimed)
         if claimed.crowdControl and AuraFilters.CrowdControl then
             s = s .. "|!" .. AuraFilters.CrowdControl
         end
-        if claimed.raid then s = s .. "|!RAID" end
         -- Boolean categories invert through candidateFilters (the group ANDs them).
         -- Boss/role narrowing on the row's OWN important record is already handled by
         -- effBoss/effRole below; these cover every OTHER record, where a claimed
@@ -1034,15 +1507,31 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- already asserts POSITIVELY.
     -- ☠☠ THE SKIP IS NOT AN OPTIMISATION — it is the whole safety of this pass.
     -- By-me dispel rides the "RAID" token (see the dispelToken note above), so the
-    -- dispel record's own string is "HARMFUL|RAID". A raid claim would append
-    -- "|!RAID" to it and the record would then match NOTHING — the row would lose
-    -- every dispellable debuff rather than one duplicate.
-    -- ⚠ RESIDUAL, deliberately left: that same token identity means a PLAYER-mode
-    -- dispel claim cannot be subtracted from the row's own raid record either (it
-    -- includes RAID positively), so a by-me-dispellable raid debuff still renders
-    -- twice in that one pairing. Emptying the record is strictly worse than the
-    -- duplicate, and there is no third token that separates them.
+    -- dispel record's own string is "HARMFUL|RAID". Appending a By Me claim's "|!RAID"
+    -- to it would make it match NOTHING — the row would lose every dispellable debuff
+    -- rather than one duplicate.
+    -- A By Me claim also covers the types the engine flag misses (Shaman poison via
+    -- totem): the group's own gap record shows them, so the row drops them too.
+    local claimGap = claimed and claimed.dispellable and not claimed.dispellableAll
+        and engineGap or nil
     local function applyClaimSubtraction(rec)
+        if claimGap then
+            local cf = rec.candidateFilters or {}
+            rec.candidateFilters = cf
+            if cf.includeDispelTypes then
+                local inc = {}
+                for t in pairs(cf.includeDispelTypes) do
+                    if not claimGap[t] then inc[t] = true end
+                end
+                if next(inc) == nil then rec.dead = true end
+                cf.includeDispelTypes = inc
+            else
+                local ex = {}
+                for t in pairs(cf.excludeDispelTypes or {}) do ex[t] = true end
+                for t in pairs(claimGap) do ex[t] = true end
+                cf.excludeDispelTypes = ex
+            end
+        end
         if claimNegStr then
             local add = ""
             for component in claimNegStr:gmatch("[^|]+") do
@@ -1076,7 +1565,7 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- machinery above deliberately keeps reading the RAW enabled flags).
     local effBoss = boss and not (claimed and claimed.boss)
     local effRole = role and not (claimed and claimed.role)
-    -- IMPORTANT-FIRST PRECEDENCE. These records must NOT carry neg(true, true, true):
+    -- IMPORTANT-FIRST PRECEDENCE. These records must NOT carry neg(true, true):
     -- excluding dispellable/CC/raid here makes the important categories the LOWEST
     -- precedence, and most boss/priority debuffs in group content DO carry RAID, so a
     -- priority debuff would be pushed out of this styled record into the unstyled
@@ -1117,46 +1606,6 @@ local function BuildDirectDebuffFilters(db, claimed)
     if ccToken and not (claimed and claimed.crowdControl) then
         filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false),
                                   key = "cc", candidateFilters = cfFor(false, notImportant()) }
-    end
-    if raidOn and not (claimed and claimed.raid) then
-        -- ☠ NO SELF-CONTRADICTING STRING, EVER. This record's base is the positive RAID
-        -- token, and in playerMode the dispel negation neg() emits is "|!RAID" — the SAME
-        -- token — so neg(true, ...) here would build "HARMFUL|RAID|!RAID", a record that
-        -- matches nothing. That is not dedup, it is deletion: with the by-me dispel record
-        -- excluding the types the player cannot actually cleanse (excludeDispelTypes),
-        -- the engine-flagged-but-uncleansable raid debuffs would render NOWHERE in the row.
-        -- In playerMode the by-me dispel record and this record share the identical base
-        -- set (both HARMFUL|RAID), so exclusivity has to run through candidateFilters, not
-        -- the token string:
-        --   * dispel record = HARMFUL|RAID minus cantCleanse types (its own exclude);
-        --   * this record   = HARMFUL|RAID restricted TO cantCleanse types — the exact
-        --     complement, so together they tile the set with no double-render.
-        --   * no cantCleanse exclusions -> the dispel record already IS this whole set, so
-        --     the record is skipped outright (every raid-flagged debuff still renders,
-        --     just via the dispel record).
-        --   * dispel absent from the ROW (off, or covered by an AD claim) -> nothing to
-        --     dedup against here: keep the plain record. For the claim case this is a
-        --     documented, accepted double-render — same residual as the one recorded at
-        --     applyClaimSubtraction, and for the same reason: emptying the record is
-        --     strictly worse than the duplicate, and no third token separates the sets.
-        if playerMode then
-            local rowHasDispelRecord = not (claimed and claimed.dispellable
-                and (playerMode or claimed.dispellableAll))
-            if rowHasDispelRecord then
-                local cantCleanse = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
-                if cantCleanse then
-                    filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(false, true),
-                                              key = "raid",
-                                              candidateFilters = cfFor(false, notImportant({ includeDispelTypes = cantCleanse })) }
-                end
-            else
-                filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(false, true),
-                                          key = "raid", candidateFilters = cfFor(false, notImportant()) }
-            end
-        else
-            filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true),
-                                      key = "raid", candidateFilters = cfFor(false, notImportant()) }
-        end
     end
     -- ★★ DROP ONLY WHEN THE CLAIM COVERS THE ROW (2026-08-30). A dispellable claim
     -- used to drop this record whatever mode either side ran — the "simplest rule"
@@ -1206,10 +1655,7 @@ local function BuildDirectDebuffFilters(db, claimed)
             -- excludes these types while a gap is active), so the include here
             -- and the exclude there are exact complements.
             if dispelGap then
-                -- excludeRaid dropped from the neg() call: the record's own base already
-                -- negates the token, and the token IS "RAID" now — the raid-precedence
-                -- exclusion the old excludeRaid=true bought is the base negation itself.
-                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, false),
+                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true),
                                           key = "dispelgap",
                                           candidateFilters = cfFor(false, notImportant({ includeDispelTypes = dispelGap })) }
             end
@@ -1228,7 +1674,7 @@ local function BuildDirectDebuffFilters(db, claimed)
             -- Blizzard's own canonical filter component, with no local copy of the
             -- type list to keep in step.
             local cf = notImportant({ includeDispelTypes = DISPEL_TYPES })
-            if maxDur then cf.maxDuration = maxDur end
+            cf.maxDuration = maxDur or (hidePermanent and PERMANENT_DEBUFF_CAP) or nil
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
         end
     end
@@ -1263,27 +1709,145 @@ local function BuildDirectDebuffFilters(db, claimed)
         -- the by-me repair is active, the types it covers are ITS overlap to own,
         -- so this record excludes them -- the exact complement of that include.
         if dispelGap then npCf.excludeDispelTypes = dispelGap end
-        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true), key = "nonplayer",
                                   candidateFilters = cfFor(false, npCf) }
     end
+    -- ★ THE LATER CATEGORIES: Important, Relevant for your class, Dispellable by the
+    -- group, then the per-type picks. Lowest precedence, so each negates everything
+    -- enabled above it -- the five original token records, the important flags, each
+    -- other -- and leaves non-player and gap-repair overlap to those records. Keyed on
+    -- the CONFIG flag, like neg(): a claimed category is shown by its Aura Designer
+    -- group, so subtracting it here is the dedup working.
+    local laterNeg = ""
+    local function laterCF(extra)
+        extra = notImportant(extra)
+        if db.debuffFilterNonPlayer then extra.isFromPlayerOrPlayerPet = true end
+        if dispelGap then extra.excludeDispelTypes = dispelGap end
+        return extra
+    end
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do
+        local tok = db["debuffFilter" .. c.flag] and AuraFilters[c.token]
+        if tok then
+            if not (claimed and claimed[c.claim]) then
+                filters[#filters + 1] = { filter = "HARMFUL|" .. tok .. neg(true, true) .. laterNeg,
+                                          key = c.key, candidateFilters = cfFor(false, laterCF()) }
+            end
+            laterNeg = laterNeg .. "|!" .. tok
+        end
+    end
+    local showTypes
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do
+        if db["debuffFilter" .. c.flag] and not (claimed and claimed[c.claim]) then
+            showTypes = showTypes or {}
+            showTypes[c.type] = true
+        end
+    end
+    if showTypes then
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true) .. laterNeg, key = "types",
+                                  candidateFilters = cfFor(false, laterCF({ includeDispelTypes = showTypes })) }
+    end
+    -- From Any Player: the complement of Non-Player, last of all. It also leaves the
+    -- picked dispel types to their own record, so a player-cast Magic debuff is not
+    -- in both.
+    if db.debuffFilterPlayer then
+        local cf = laterCF({ isFromPlayerOrPlayerPet = true })
+        if showTypes then
+            local ex = {}
+            for t in pairs(cf.excludeDispelTypes or {}) do ex[t] = true end
+            for t in pairs(showTypes) do ex[t] = true end
+            cf.excludeDispelTypes = ex
+        end
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true) .. laterNeg, key = "anyplayer",
+                                  candidateFilters = cfFor(false, cf) }
+    end
+    -- ★ HIGHLIGHT FOR IMPORTANT DEBUFFS THE IMPORTANT ROWS DO NOT SHOW. The highlight
+    -- styles the boss/role and priority records, but a boss debuff that arrives through
+    -- another row (Non-Player, Crowd Control...) because the Boss row is off went
+    -- unmarked. Each other record splits like Show All's three: the not-yet-covered
+    -- important flags first (styled, leading the row), then the rest. Same set of
+    -- debuffs, disjoint by construction.
+    if importantStyle then
+        local unshownBR = (importantFlag == nil and "isBossOrRoleAura")
+            or (importantFlag == "isBossAura" and "isRoleAura")
+            or (importantFlag == "isRoleAura" and "isBossAura") or nil
+        local unshownPrio = not priorityDeclared
+        if unshownBR or unshownPrio then
+            local lead, rest = {}, {}
+            for _, rec in ipairs(filters) do
+                if rec.key == "bossrole" or rec.key == "priority" then
+                    lead[#lead + 1] = rec
+                else
+                    local function variant(extra, key, style)
+                        local vcf = {}
+                        for k, v in pairs(rec.candidateFilters or {}) do vcf[k] = v end
+                        for k, v in pairs(extra) do
+                            if vcf[k] ~= nil and vcf[k] ~= v then return nil end
+                            vcf[k] = v
+                        end
+                        return { filter = rec.filter, key = key, candidateFilters = vcf, style = style }
+                    end
+                    local brOff = unshownBR and { [unshownBR] = false } or {}
+                    local v1 = unshownBR and variant({ [unshownBR] = true }, rec.key .. "+hl", importantStyle)
+                    if v1 then lead[#lead + 1] = v1 end
+                    if unshownPrio then
+                        local p = { isPriorityAura = true }
+                        for k, v in pairs(brOff) do p[k] = v end
+                        local v2 = variant(p, rec.key .. "+hp", importantStyle)
+                        if v2 then lead[#lead + 1] = v2 end
+                    end
+                    local b = {}
+                    for k, v in pairs(brOff) do b[k] = v end
+                    if unshownPrio then b.isPriorityAura = false end
+                    local v3 = variant(b, rec.key, rec.style)
+                    if v3 then rest[#rest + 1] = v3 end
+                end
+            end
+            filters = lead
+            for i = 1, #rest do filters[#filters + 1] = rest[i] end
+        end
+    end
+
     -- Subtract everything the Aura Designer groups claim from every record that
     -- survived the drop above. Runs LAST so each record's own tokens are already in
     -- place for the self-collision skip, and before the empty-list check so a record
     -- is never both dropped and subtracted.
-    if claimNegStr or claimNegCF then
-        for i = 1, #filters do applyClaimSubtraction(filters[i]) end
+    if claimNegStr or claimNegCF or claimGap then
+        local kept = {}
+        for i = 1, #filters do
+            applyClaimSubtraction(filters[i])
+            if not filters[i].dead then kept[#kept + 1] = filters[i] end
+        end
+        filters = kept
     end
 
-    if #filters == 0 then
-        -- Claims emptied a NON-empty selection: EMPTY array = render nothing
-        -- (DriveDebuffFactory intercepts — see the header comment).
-        if claimed and (boss or role or db.debuffFilterPriority or ccToken or raidOn or dispelOn
-                        or db.debuffFilterNonPlayer) then
-            return filters
-        end
-        return nil  -- nothing selected: safe fallback = show all
+    local selected = boss or role or db.debuffFilterPriority or ccToken or dispelOn
+        or db.debuffFilterNonPlayer
+    for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do
+        selected = selected or (db["debuffFilter" .. c.flag] and AuraFilters[c.token])
     end
-    return filters
+    for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do
+        selected = selected or db["debuffFilter" .. c.flag]
+    end
+    selected = selected or db.debuffFilterPlayer
+    if #filters > 0 then
+        filters = applyDebuffHides(applyDebuffHides(filters, extraClaims), hide)
+        filters = addUncleansableTwins(filters, uncleansable)
+        -- Hide emptied the selection: render nothing, as a full claim does.
+        return filters
+    end
+    -- Claims emptied a NON-empty selection: EMPTY array = render nothing
+    -- (DriveDebuffFactory intercepts — see the header comment).
+    if claimed and selected then return filters end
+    -- An Aura Designer group with nothing picked shows nothing, whatever it hides.
+    if db.debuffEmptyShowsNothing then return nil end
+    -- Nothing selected: the safe fallback is show all, still minus what is hidden and
+    -- still under the length cap.
+    if hide or hidePermanent or maxDur then
+        local capAll = maxDur or (hidePermanent and PERMANENT_DEBUFF_CAP) or nil
+        return addUncleansableTwins(applyDebuffHides({ { filter = "HARMFUL", key = "all",
+            candidateFilters = capAll and { maxDuration = capAll } or nil } }, hide), uncleansable)
+    end
+    return nil
 end
 
 -- Public facade over BuildDirectDebuffFilters for the Aura Designer's debuff
@@ -1302,8 +1866,8 @@ end
 -- at the top of BuildDirectDebuffFilters cannot fire for AD calls — the dgroup
 -- sync gates on its OWN preset-level toggle (adDB.debuffGroupDedup) before
 -- passing claimed; the two dedup paths are deliberately independent switches.
-function DF:BuildDebuffFilterRecords(dbLike, claimed)
-    return BuildDirectDebuffFilters(dbLike, claimed)
+function DF:BuildDebuffFilterRecords(dbLike, claimed, selfOnly)
+    return BuildDirectDebuffFilters(dbLike, claimed, selfOnly)
 end
 
 -- ☠ HOW MANY GROUPS THE DEBUFF ROW WILL BUILD — i.e. what "Max Debuffs" actually
@@ -1324,14 +1888,21 @@ end
 -- split to honour the cap silently deletes the highlight. Krathe's call, 2026-09-02:
 -- never lose debuffs or functionality — SAY SO INSTEAD.
 --
--- Claims are deliberately NOT passed: an Aura Designer claim only ever REMOVES records,
--- so ignoring them yields the worst case, which is what a ceiling should report. Nil
--- records mean the show-all fallback, which is a single group.
+-- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
+-- those gets an uncleansable twin. So the ceiling is the larger of the unclaimed and
+-- By Me-claimed builds, each with and without the racial self gap. Nil records mean
+-- the show-all fallback, which is a single group.
+local GROUP_COUNT_CLAIMS = { false, { dispellable = true } }
 function DF:GetDebuffRowGroupCount(dbLike)
     if not dbLike then return 1 end
-    local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, nil)
-    if not ok or type(recs) ~= "table" then return 1 end
-    return math.max(1, #recs)
+    local most = 1
+    for _, claimed in ipairs(GROUP_COUNT_CLAIMS) do
+        for _, selfOnly in ipairs({ false, true }) do
+            local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, claimed or nil, selfOnly)
+            if ok and type(recs) == "table" and #recs > most then most = #recs end
+        end
+    end
+    return most
 end
 
 -- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)
@@ -2602,20 +3173,20 @@ end
 -- time (SetOwner anchor + the ShouldShowTooltip combat gate), so this spec rides
 -- style.* and hot-applies through the cosmetic ApplyStyle pass — no rebuild.
 -- key = "Buff"/"Debuff"/"Defensive" (the Tooltips page's per-row blocks).
--- Model mapping (mirrors the legacy frame-tooltip semantics in Create.lua):
---   DEFAULT -> ANCHOR_BOTTOMLEFT 0,0 (the template's own default — explicit so a
---              hot-apply can always overwrite a previous mode)
+-- The tooltip is Blizzard's forbidden AuraButtonTooltip, so the only lever is an
+-- owner-relative or cursor anchor name: there is no "game default" placement.
 --   CURSOR  -> cursor-follow anchor, side picked from AnchorPos (offsets unused,
 --              matching the page greying them out)
 --   FRAME   -> "ANCHOR_"..AnchorPos on the hovered icon + the X/Y offsets.
---              CENTER has no native anchor name -> falls back to DEFAULT
+--              CENTER has no native anchor name -> ANCHOR_BOTTOMLEFT 0,0
 --              (SetTooltipAnchorPoint asserts on anything off its list).
+--   DEFAULT -> FRAME. A stored value the page no longer offers; it shows as the icon.
 local NATIVE_TOOLTIP_POINTS = {
     TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, RIGHT = true,
     BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
 }
 local function buildTooltipSpec(db, key)
-    local mode = db["tooltip" .. key .. "Anchor"] or "DEFAULT"
+    local mode = db["tooltip" .. key .. "Anchor"]
     local pos  = db["tooltip" .. key .. "AnchorPos"]
     local point, x, y = "ANCHOR_BOTTOMLEFT", 0, 0
     if mode == "CURSOR" then
@@ -2626,7 +3197,7 @@ local function buildTooltipSpec(db, key)
         else
             point = "ANCHOR_CURSOR"
         end
-    elseif mode == "FRAME" and NATIVE_TOOLTIP_POINTS[pos] then
+    elseif NATIVE_TOOLTIP_POINTS[pos] then
         point = "ANCHOR_" .. pos
         x = db["tooltip" .. key .. "X"] or 0
         y = db["tooltip" .. key .. "Y"] or 0
@@ -3092,6 +3663,30 @@ end
 --     (HELPFUL <-> HELPFUL|PLAYER) and the dispel row's All/By-Me token swap free:
 --     same key, different string, no container recreated.
 -- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
+-- Border animation on a row that opted in (config.adBorderAnim — the defensive row).
+-- The effect is built once in the button's secure init and cannot be retuned on a live
+-- button, so every animation key is STRUCTURAL: a change must hand over fresh buttons.
+-- Empty when no animation is set, so rows without one keep their signature unchanged.
+-- Same key set as the Aura Designer's rawBorderAnimStructTok.
+local function rowBorderAnimTok(cfg)
+    local b = cfg.adBorderAnim and cfg.style and cfg.style.border
+    local d, p = b and b.db, b and b.prefix
+    if not d or not p then return "" end
+    p = p .. "BorderAnimation"
+    local ty = d[p .. "Type"]
+    if not ty or ty == "NONE" then return "" end
+    local c = d[p .. "Color"]
+    return "|an=" .. tostring(ty)
+        .. "," .. tostring(d[p .. "Frequency"]) .. "," .. tostring(d[p .. "Particles"])
+        .. "," .. tostring(d[p .. "Length"]) .. "," .. tostring(d[p .. "Thickness"])
+        .. "," .. tostring(d[p .. "Scale"]) .. "," .. tostring(d[p .. "Inset"])
+        .. "," .. tostring(d[p .. "OffsetX"]) .. "," .. tostring(d[p .. "OffsetY"])
+        .. "," .. tostring(d[p .. "Mask"]) .. "," .. tostring(d[p .. "SidesAxis"])
+        .. "," .. tostring(d[p .. "CornerLength"]) .. "," .. tostring(d[p .. "ProcStart"])
+        .. "," .. tostring(d[p .. "BlendMode"])
+        .. "," .. (type(c) == "table" and (tostring(c.r) .. "/" .. tostring(c.g) .. "/" .. tostring(c.b) .. "/" .. tostring(c.a)) or "-")
+end
+
 local function rowStructSig(cfg)
     local s = cfg.style
     return table.concat({
@@ -3137,7 +3732,7 @@ local function rowStructSig(cfg)
         -- unsupported client (no spec) sigs identically to the feature being off.
         tostring(s.pandemic and s.pandemic.mode),
         tostring(s.pandemic and s.pandemic.flash),
-    }, "|")
+    }, "|") .. rowBorderAnimTok(cfg)
 end
 
 local function rowTuningSig(cfg)
@@ -3162,8 +3757,8 @@ end
 -- Handle:Refresh is the addon-callable re-parse and it RETURNS whether a genuine one
 -- happened, so this is a fix and an instrument at once: it forces the parse, and a "did NOT
 -- happen" line is the bounce having failed rather than an unexplained icon.
--- ✅ Source-confirmed combat-safe (see the note on Handle:Refresh). No combat gate needed
--- anyway — in combat the retarget itself defers to regen, so this cannot be reached there.
+-- The drives call this out of combat only; in combat the bounce is unavailable and the
+-- post-combat heal re-parses everything after regen.
 -- ⚠ Cheap: the drives call this only on an ACTUAL unit change, never per pass.
 -- ⚠ Handle:Refresh never throws (it pcalls internally) and answers false BOTH for a
 -- failed bounce and for a backend that simply has not attached yet — a deferred
@@ -3233,31 +3828,19 @@ function DF:DriveBuffFactory(frame, db)
         h:GetFrame():SetAlpha(rowAlpha)
     end
 
-    -- Keep the container on the frame's current unit. OOC retargets immediately; in combat
-    -- the factory defers the retarget, so hide the row until regen rather than show the
-    -- previous unit's buffs. Hide via the PLAIN anchor frame (GetFrame():SetShown), NOT
-    -- h:SetShown -- the latter also queues an 'enable' op which, paired with the queued
-    -- 'retarget', would upgrade to a full rebuild (frame leak). The container's own
-    -- OnShow/OnHide drive event (de)registration. (SetUnit combat-legality is queued for Krathe.)
+    -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfBuffFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "buff", frame.unit) end
-    elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "buff: regen, unhiding row after deferred retarget")
-        frame.dfBuffFactoryHidden = nil
     end
-    -- Show/hide only on state change (no per-event SetShown churn on the live tree).
-    -- Through SetIntentShown, not the raw frame: intent must be recorded on the
-    -- handle or the identity-gate sweep resurrects a hidden row (no enable op, so
-    -- the queued-retarget frame leak SetShown carries does not apply).
-    local rowShown = not frame.dfBuffFactoryHidden
-    if frame.dfBuffFactoryShown ~= rowShown then
-        frame.dfBuffFactoryShown = rowShown
-        h:SetIntentShown(rowShown)
+    -- Shown once, through SetIntentShown so the intent is recorded on the handle (the
+    -- identity-gate sweep restores recorded intent); no per-event SetShown churn.
+    if not frame.dfBuffFactoryShown then
+        frame.dfBuffFactoryShown = true
+        h:SetIntentShown(true)
     end
 
     -- Apply setting changes only when the layout version actually bumped — and only OUT
@@ -3382,9 +3965,15 @@ end
 
 function DF:DriveDebuffFactory(frame, db)
     local ver = DF.auraLayoutVersion or 0
+    -- ☠ SELF-NESS IS PART OF THE PLAN AND MOVES WITHOUT THE VERSION: a Dwarf's own frame
+    -- counts bleeds as By Me (Stoneform), and roster churn reassigns a frame to or from
+    -- the player with no layout bump. The stamp only forces the re-plan below; the
+    -- records it produces carry the difference into the signatures, so it is APPLIED.
+    local racialSelf = DF:IsRacialDispelSelf(frame.unit)
+    local selfMoved = (frame.dfDebuffRacialSelf or false) ~= racialSelf
     if frame.dfDebuffFactoryEmptyVer then
-        if frame.dfDebuffFactoryEmptyVer == ver or InCombatLockdown() then return end
-        frame.dfDebuffFactoryEmptyVer = nil   -- version moved: fall through and re-evaluate
+        if (frame.dfDebuffFactoryEmptyVer == ver and not selfMoved) or InCombatLockdown() then return end
+        frame.dfDebuffFactoryEmptyVer = nil   -- version or self-ness moved: re-evaluate
     end
 
     -- ★ PER-FRAME IMPORTANT-HIGHLIGHT OPT-OUT (preview only; nothing sets this stamp on a
@@ -3414,8 +4003,9 @@ function DF:DriveDebuffFactory(frame, db)
     local h = frame.debuffFactory
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
-            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
         filterList = applyDebuffBlacklist(filterList, db)
+        frame.dfDebuffRacialSelf = racialSelf
         if filterList and #filterList == 0 then
             frame.dfDebuffFactoryEmptyVer = ver   -- fully claimed: no container at all
             return
@@ -3443,25 +4033,21 @@ function DF:DriveDebuffFactory(frame, db)
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "debuff", frame.unit) end
-    elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "debuff: regen, unhiding row after deferred retarget")
-        frame.dfDebuffFactoryHidden = nil
     end
-    local rowShown = not frame.dfDebuffFactoryHidden
-    if frame.dfDebuffFactoryShown ~= rowShown then
-        frame.dfDebuffFactoryShown = rowShown
-        h:SetIntentShown(rowShown)   -- intent-recorded hide; see the buff drive
+    if not frame.dfDebuffFactoryShown then
+        frame.dfDebuffFactoryShown = true
+        h:SetIntentShown(true)   -- see the buff drive
     end
 
-    if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
+    if (frame.dfDebuffFactoryVersion ~= ver or selfMoved) and not InCombatLockdown() then
         frame.dfDebuffFactoryVersion = ver
         local filterList = BuildDirectDebuffFilters(db,
-            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+            DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
         filterList = applyDebuffBlacklist(filterList, db)
+        frame.dfDebuffRacialSelf = racialSelf
         if filterList and #filterList == 0 then
             -- Fully claimed while a container stands: park it hidden (intent-recorded,
             -- combat-safe) until a version bump changes the claim set.
@@ -3762,27 +4348,17 @@ function DF:DriveDefensiveFactory(frame, db)
 
     if not h then return end
 
-    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via
-    -- h:SetIntentShown, NOT h:SetShown -- the latter queues an enable op that would
-    -- upgrade a queued retarget into a full rebuild (frame leak). SetIntentShown is the
-    -- op-free variant that still records intent, so the gate sweep can't resurrect it.
+    -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
+            InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        frame.dfDefFactoryHidden = InCombatLockdown() or nil
         if not InCombatLockdown() then confirmRetarget(h, "defensive", frame.unit) end
-    elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
-        DF:Debug("AURAROW", "defensive: regen, unhiding row after deferred retarget")
-        frame.dfDefFactoryHidden = nil
     end
-    -- Show/hide only on state change (no per-event SetShown churn on the live tree —
-    -- build-once-leave-it, mirrors DriveBuffFactory).
-    local rowShown = not frame.dfDefFactoryHidden
-    if frame.dfDefFactoryShown ~= rowShown then
-        frame.dfDefFactoryShown = rowShown
-        h:SetIntentShown(rowShown)
+    if not frame.dfDefFactoryShown then
+        frame.dfDefFactoryShown = true
+        h:SetIntentShown(true)   -- see the buff drive
     end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it

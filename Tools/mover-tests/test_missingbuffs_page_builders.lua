@@ -11,8 +11,10 @@ local NS = ...
 --                         Icon, in its body -- as Show Buffs does) and Buffs to
 --                         Check (Manual Mode), which hides, header and band
 --                         together, while auto-detect is on.
---   column 2   "Icon"     Appearance, Position, Border (Show Border is the
---                         header's tick, through the toolkit's noShowToggle).
+--              "Layout"   Position.
+--   column 2   "Appearance"  Icon Style, Border (Show Border is the header's
+--                         tick, through the toolkit's noShowToggle).
+--   The cards mount by group (tools.MountCardGroups).
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -164,11 +166,24 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    -- ---- the two category headers, added straight to a column ----------
-    for _, pair in ipairs({ { "Content", "1" }, { "Icon", "2" } }) do
-        local n = 0
-        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
-        eq(n, 1, "headers: the " .. pair[1] .. " category header opens column " .. pair[2] .. ", once")
+    -- ---- the groups: one table, mounted in order (tools.MountCardGroups) ----
+    -- The page's Add order is what a one-column window stacks, so the cards
+    -- register with tools.DeferCard and mount group by group, each group
+    -- under its header.
+    local groupsSrc = PAGE:match("tools%.MountCardGroups%(Add, (%b{})%)")
+    check(groupsSrc ~= nil, "groups: the cards mount by group from one table")
+    local gotGroups = {}
+    for label, col, keys in (groupsSrc or ""):gmatch('label = L%["([^"]+)"%], col = (%d), keys = {(.-)}') do
+        local ks = {}
+        for k in keys:gmatch('"([%w_]+)"') do ks[#ks + 1] = k end
+        gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
+    end
+    eq(table.concat(gotGroups, " | "),
+       "Content@1: missingbuffs_settings, missingbuffs_buffs | Layout@1: missingbuffs_position | Appearance@2: missingbuffs_appearance, missingbuffs_border",
+       "groups: Content, Layout, Appearance, each over its cards")
+    for _, key in ipairs({ "missingbuffs_settings", "missingbuffs_buffs", "missingbuffs_appearance", "missingbuffs_position", "missingbuffs_border" }) do
+        check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
+              "groups: " .. key .. " registers its card for the group mount")
     end
 
     -- ---- the vocabulary, at PAGE scope, above every builder -------------
@@ -249,10 +264,10 @@ local CARDS = {
       box = "Buffs to Check (Manual Mode)", classicCol = 1,
       builder = "BuildMissingBuffsToCheckGroup", golden = MISSING_BUFFS, summary = "MissingBuffsToCheckSummary",
       dim = true, hide = "HideManualBuffVariant" },
-    { label = "Appearance", key = "missingbuffs_appearance", col = 2, box = "Appearance", classicCol = 2,
+    { label = "Icon Style", key = "missingbuffs_appearance", col = 2, box = "Appearance", classicCol = 2,
       builder = "BuildMissingAppearanceGroup", golden = MISSING_APPEARANCE, summary = "MissingAppearanceSummary",
       dim = true, pin = true },
-    { label = "Position", key = "missingbuffs_position", col = 2, box = "Position", classicCol = 1,
+    { label = "Position", key = "missingbuffs_position", col = 1, box = "Position", classicCol = 1,
       builder = "BuildMissingPositionGroup", golden = MISSING_POSITION, summary = "MissingPositionSummary",
       dim = true, pin = true },
     { label = "Border", key = "missingbuffs_border", col = 2, box = "Border", classicCol = 2,
@@ -332,11 +347,8 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Settings | Buffs to Check (Manual Mode) | Appearance | Position | Border",
-       "order: the five cards open in the order the old bands read: Content, Icon")
-    local iconAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Icon"]), 40, 2)', 1, true)
-    local appAt  = PAGE:find('OpenSection(L["Appearance"]', 1, true)
-    check(iconAt and appAt and iconAt < appAt, "order: Icon heads Appearance")
+       "Settings | Buffs to Check (Manual Mode) | Icon Style | Position | Border",
+       "order: the five cards are declared in classic's order; they mount in the group table's")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -355,9 +367,9 @@ do
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: the page adds the pair at the top, spanning both columns")
     local stripAt   = PAGE:find("tools.SectionControls", 1, true)
-    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
-    check(stripAt and contentAt and stripAt < contentAt,
-          "bulk: ...above the first category header, because it acts on the whole page")
+    local mountAt   = PAGE:find("tools.MountCardGroups(Add,", 1, true)
+    check(stripAt and mountAt and stripAt < mountAt,
+          "bulk: ...above the first group header, because it acts on the whole page")
 
     -- ⚠ THE SUMMARY'S KEY TABLE AND THE BUILDER CANNOT DRIFT.
     local body = builderBody("BuildMissingBuffsToCheckGroup")

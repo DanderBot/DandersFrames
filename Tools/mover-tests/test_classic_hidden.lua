@@ -143,6 +143,8 @@ local function RunAppearance()
     function GUI:CreateOutlineDropdown(_, label) return W(label) end
     function GUI:CreateLabel(_, label) return W(label) end
     function GUI:CreateCheckbox(_, label) return W(label) end
+    function GUI:CreateDropdown(_, label) return W(label) end
+    if not DF.GetGlobalDB then DF.GetGlobalDB = function() return {} end end
     local group = {}
     function group:AddWidget(w) labels[#labels + 1] = w.label return w end
     local env = setmetatable({ GUI = GUI, L = L, DF = DF }, { __index = _G })
@@ -159,12 +161,12 @@ if builderSrc then
     DF.CLASSIC_SETTINGS_AVAILABLE = false
     local has, n = RunAppearance()
     check(not has, "switch off: the classic tick is not built")
-    eq(n, 3, "switch off: ...the card keeps its font dropdown, outline dropdown and note")
+    eq(n, 5, "switch off: ...the card keeps its font dropdown, outline dropdown, note, Page Tips and its note")
 
     DF.CLASSIC_SETTINGS_AVAILABLE = true
     has, n = RunAppearance()
     check(has, "switch on: the classic tick is built again")
-    eq(n, 4, "switch on: ...as the card's fourth widget")
+    eq(n, 6, "switch on: ...as the card's sixth widget")
     DF.CLASSIC_SETTINGS_AVAILABLE = false
 end
 

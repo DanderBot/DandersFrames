@@ -706,7 +706,7 @@ local function CreateColorPickerFrame(host, hasAlpha)
     host:StyleButton(copyBtn, {
         width = 18, height = 18,
         icon = {
-            texture = ICON_PATH .. "content_copy",
+            texture = ICON_PATH .. "content_copy.png",
             size    = 12,
             color   = C_TEXT,
         },

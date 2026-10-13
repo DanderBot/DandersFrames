@@ -306,7 +306,7 @@ function DF:CreatePermanentMover(container, mode)
     handle:SetSize(db.permanentMoverWidth or 20, db.permanentMoverHeight or 20)
     handle:SetFrameStrata("MEDIUM")
     handle:SetFrameLevel(100)
-    -- Chrome only, NOT CreateMoverBackdrop: this handle's colour is a user setting
+    -- Chrome only, not the theme accent: this handle's colour is a user setting
     -- (permanentMoverColor) with its own hover/in-combat lifecycle in
     -- ApplyHandleColors below, so it must not take the theme hue.
     DF.GUI:CreateElementBackdrop(handle, { edgeSize = 1 })

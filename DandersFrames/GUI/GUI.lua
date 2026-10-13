@@ -95,6 +95,18 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- A mover belongs to the thing it moves, so its pole is pinned rather than
     -- following whichever page the window happens to be showing.
     accentFor = function(isRaid) return GUI.GetThemeColorFor(isRaid) end,
+    -- Banners the user folded to a chip (CreateInfoBanner's dismissKey). Account-
+    -- wide, like the other "you have read this" stores (seenTabs, seenSections).
+    tipStore = function()
+        if not DandersFramesDB_v2 then return nil end
+        DandersFramesDB_v2.hiddenTips = DandersFramesDB_v2.hiddenTips or {}
+        return DandersFramesDB_v2.hiddenTips
+    end,
+    -- How those banners start: GLOBAL > Settings > Page Tips.
+    tipMode = function()
+        local g = DF.GetGlobalDB and DF:GetGlobalDB()
+        return (g and g.pageTips) or "show"
+    end,
     onPopupOpen = function() DF:ClearSettingHighlights() end,
 
     -- ---- auto-profile override semantics ------------------------
@@ -447,7 +459,9 @@ DF.SECTION_PREFIXES = {
     display_pets                 = { "pet" },
     display_tooltips             = { "tooltip" },
     display_visibility           = { "soloMode", "hidePlayerFrame", "restedIndicator" },
-    general_fonts                = { "fontShadow" },
+    -- The Fonts page owns nothing: Apply to All writes other pages' keys, and the
+    -- shadow (fontShadow*) is one value for both modes. It is a GLOBAL page.
+    general_fonts                = {},
     general_frame                = { "frame", "permanentMover", "border", "anchor" },
     general_labels               = { "groupLabel" },
     general_pinnedframes         = { "pinnedFrames" },
@@ -518,6 +532,43 @@ GUI.GetThemeColor = GetThemeColor
 
 -- Seed the accent to match the initial mode.
 GUI:SetAccent(GetThemeColorFor(false))
+
+-- ============================================================
+-- THE GLOBAL TAB
+-- ------------------------------------------------------------
+-- Pages whose settings are not Party's or Raid's -- stored per profile or per
+-- account, or written to both modes at once -- live on the GLOBAL tab, in its
+-- own accent, and Party and Raid show only the rest.
+--
+-- ☠ GUI.SelectedMode STAYS "party" OR "raid" UNDERNEATH while GLOBAL is
+-- showing. Every page and control resolves its db through it, so a "global"
+-- mode would hand them a nil table; and test mode and unlock stay on the mode
+-- the user came from. GUI.GlobalView is the only thing that says which tab is up.
+-- ============================================================
+GUI.GlobalAccent = { r = 0.25, g = 0.78, b = 0.85, a = 1 }   -- teal-cyan
+GUI.GlobalPages = {
+    general_settings      = true,
+    general_integrations  = true,
+    general_fonts         = true,
+    general_nicknames     = true,
+    display_classcolors   = true,
+    auras_filterdesigner  = true,
+    profiles_manage       = true,
+    profiles_importexport = true,
+    profiles_changed_global = true,
+    debug_console         = true,
+}
+GUI.GlobalView = false
+
+function GUI.IsGlobalPage(name)
+    return name ~= nil and GUI.GlobalPages[name] == true
+end
+
+-- The accent for whichever tab the window is showing.
+function GUI.CurrentAccent()
+    if GUI.GlobalView then return GUI.GlobalAccent end
+    return GetThemeColorFor(GUI.SelectedMode == "raid")
+end
 
 -- Registry of tabs that should show a "New" badge until opened.
 -- Add tab IDs here for new features; the badge auto-hides once viewed.

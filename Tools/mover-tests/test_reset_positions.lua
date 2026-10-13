@@ -236,7 +236,6 @@ do
     -- run-at-once timer some earlier suite left on the global either.
     local prevTimer = C_Timer
     C_Timer = { After = function() end }
-    StaticPopupDialogs = StaticPopupDialogs or {}
     local prevSession = NS.Session
     load_addon_file("Session.lua")
     C_Timer = prevTimer

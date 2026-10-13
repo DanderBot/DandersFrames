@@ -4,5 +4,4 @@
 	<Script file="Sections.lua"/>
 	<Script file="PopoutRow.lua"/>
 	<Script file="ColorPicker.lua"/>
-	<Script file="ControlRow.lua"/>
 </Ui>

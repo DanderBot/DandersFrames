@@ -327,7 +327,7 @@ end
 -- ============================================================
 do
     local cs = options_file_source("Features/ChangedSettings.lua")
-    local body = cs:match("function ChangedSettings:CacheKey%(GUI%)(.-)\nend")
+    local body = cs:match("function ChangedSettings:CacheKey%(GUI, scope%)(.-)\nend")
     check(body ~= nil, "indexreuse: ChangedSettings:CacheKey is found")
     if body then
         local reuse = body:find("Search:TryReuseRegistry()", 1, true)

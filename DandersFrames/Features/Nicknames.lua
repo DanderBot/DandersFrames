@@ -1101,7 +1101,7 @@ function NK:ShowConflictPopup()
     title:SetText(L["Addon nicknames conflict"])
     title:SetTextColor(1, 0.3, 0.3)
 
-    local warnTex = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning"
+    local warnTex = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png"
     local lw = popup:CreateTexture(nil, "OVERLAY"); lw:SetSize(18, 18)
     lw:SetPoint("RIGHT", title, "LEFT", -8, 0); lw:SetTexture(warnTex); lw:SetVertexColor(1, 0.3, 0.3)
     local rw = popup:CreateTexture(nil, "OVERLAY"); rw:SetSize(18, 18)

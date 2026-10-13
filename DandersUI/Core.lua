@@ -19,7 +19,7 @@ local addonName, NS = ...
 -- ☠ Bumping MINOR means bumping EXPECTED_MINOR in OptionsCore.lua in the SAME
 -- commit -- the options manifest compares the two for equality and goes inert on
 -- a mismatch. See the README's split-loading section.
-local MAJOR, MINOR = "DandersUI-1.0", 32
+local MAJOR, MINOR = "DandersUI-1.0", 34
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private
@@ -114,6 +114,11 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   onSectionToggled(key, expanded)          after a collapsible section toggles
 --   scrollToSection(page, section) -> widget jump the settings scroll to a section; absent =
 --        link-to-setting controls don't render
+--   tipStore() -> table                      persistent per-banner choices, dismissKey -> true
+--        (closed) | false (opened); absent = no banner offers its x
+--   tipMode() -> "show" | "fold" | "off"     how dismissible banners start: open, as their
+--        chip, or not drawn at all (never an opts.notice banner); absent = "show". Call
+--        host:RefreshTips() after it changes
 function UI:NewHost(name, hooks)
     if type(name) ~= "string" or name == "" then
         error("DandersUI: NewHost needs a consumer name", 2)

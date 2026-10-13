@@ -97,6 +97,7 @@ CreateFrame = function(kind, _, parent)
     f._kind = kind
     f._children = {}
     f._parent = parent
+    f.GetChildren = function(self) return unpack(self._children) end
     f.GetParent = function(self) return self._parent end
     f.SetParent = function(self, p) self._parent = p end
     if kind == "Slider" then
@@ -120,6 +121,8 @@ CreateFrame = function(kind, _, parent)
     return f
 end
 C_Timer = { After = function(_, fn) fn() end }
+-- WoW's global alias, which SettingsWidgets.lua uses.
+format = format or string.format
 
 load_ui_file_into("Widgets.lua", ns)
 
@@ -266,10 +269,49 @@ do
     eq(TT.title, "Changed from default", "tooltip: the header")
     eq(TT.lines[1] and TT.lines[1].text, "Default: 1", "tooltip: the default, in the slider's own format")
     eq(TT.lines[2] and TT.lines[2].text, "Current: 2.5", "tooltip: the current value, same format")
-    eq(TT.lines[3] and TT.lines[3].text, "Hold click to reset", "tooltip: the hint")
+    eq(TT.lines[3] and TT.lines[3].text, "Click and hold to reset to the default", "tooltip: the hint")
     check(TT.lines[3] and TT.lines[3].r < TT.lines[2].r, "tooltip: ...drawn dimmer than the values")
     fire(hit, "OnLeave")
     check(not TT.shown, "tooltip: hidden on leave")
+end
+
+-- An auto-layout override: the tooltip carries the default, the global and the
+-- layout's value, and a hold removes ONE layer -- the override, back to the
+-- global, through the control's own reset. A running layout has no hold.
+print("-- Modified dot: an override's tooltip, and a hold that peels one layer")
+do
+    local db, defaults = { w = 30 }, { w = 10 }
+    local host = newHost(db, defaults)
+    local ov, resets = "overridden", 0
+    host.hooks.getOverrideState = function() return ov, 20 end
+    host.hooks.resetOverride = function(t, key)
+        resets = resets + 1
+        ov = "editing"
+        t[key] = 20
+        return 20
+    end
+    local s = slider(host, db, "w")
+    fire(s.modifiedDotHit, "OnEnter")
+    eq(TT.title, "Set by this auto layout", "override: the header")
+    eq(TT.lines[1] and TT.lines[1].text, "Default: 10", "override: the default")
+    eq(TT.lines[2] and TT.lines[2].text, "Global: 20", "override: ...the global")
+    eq(TT.lines[3] and TT.lines[3].text, "This layout: 30", "override: ...and the layout's value")
+    eq(TT.lines[4] and TT.lines[4].text, "Click and hold to reset to your global value", "override: the hint names the layer")
+
+    hold(s.modifiedDotHit, 20, 0.05)
+    eq(resets, 1, "override hold: the control's override reset ran once")
+    eq(db.w, 20, "override hold: ...and the value is the global")
+    check(s.modifiedDot:IsShown(), "override hold: the global still differs from the default, so the dot stays")
+    eq(TT.title, "Changed from default", "override hold: ...and says the next layer")
+    eq(TT.lines[4] and TT.lines[4].text, "Click and hold to reset to the default", "override hold: ...with its own hint")
+
+    ov = "runtime"
+    s:UpdateOverrideIndicators(20)
+    fire(s.modifiedDotHit, "OnEnter")
+    eq(TT.title, "Set by the active auto layout", "runtime: the header")
+    eq(TT.lines[4] and TT.lines[4].text, "To change this, edit the layout in Auto Layouts.", "runtime: no hold, a pointer")
+    hold(s.modifiedDotHit, 20, 0.05)
+    eq(resets, 1, "runtime: a hold does nothing")
 end
 
 do
@@ -331,6 +373,9 @@ do
     fire(hit, "OnEnter")
     fire(hit, "OnMouseDown", "LeftButton")
     check(hit:GetScript("OnUpdate") ~= nil, "hold: pressing starts the per-frame update")
+    -- The ring around the dot is what reads under a pointer: shown on the press.
+    check(hit.ringFill and hit.ringFill:IsShown(), "hold: the ring that fills is shown")
+    check(hit.ringTrack and hit.ringTrack:IsShown(), "hold: ...over its faint full track")
     local up = hit:GetScript("OnUpdate")
     up(hit, 0.3)
     eq(db.w, 30, "hold: nothing is written before the threshold")
@@ -362,6 +407,7 @@ do
     fire(hit, "OnMouseUp", "LeftButton")
     eq(hit:GetScript("OnUpdate"), nil, "release: the update stops")
     eq(s.modifiedDot:GetWidth(), 6, "release: the dot shrinks back")
+    check(not hit.ringFill:IsShown() and not hit.ringTrack:IsShown(), "release: the ring goes")
     eq(db.w, 30, "release: nothing written")
 
     -- A new press starts from zero, not from where the last one stopped.
@@ -492,8 +538,8 @@ end
 -- the colour picker are the real ones.
 -- ============================================================
 do
-    local db, defaults = { showX = false, tint = { r = 1, g = 0, b = 0 }, name = "x" },
-                         { showX = true,  tint = { r = 0, g = 1, b = 0 }, name = "" }
+    local db, defaults = { showX = false, tint = { r = 1, g = 0, b = 0 }, name = "x", w = 30 },
+                         { showX = true,  tint = { r = 0, g = 1, b = 0 }, name = "", w = 10 }
     local host, log = newHost(db, defaults)
     host.Colors = UI.Colors
     host.RowHeight = UI.RowHeight
@@ -503,6 +549,9 @@ do
     function DF:UpdateAll() updates = updates + 1 end
     function DF:ThrottledUpdateAll() end
     DandersFrames = DF
+    -- The DF factories re-anchor the kit's dot through GUI:PinModifiedDotTopLeft,
+    -- which lives in the resident GUI/Compat.lua.
+    load_df_file_into("GUI/Compat.lua", { GUI = host })
     load_options_file_into("GUI/SettingsWidgets.lua", ns)
     -- The box's chrome (pixel snapping, the themed check) is not under test.
     host.StyleCheckButton = function() end
@@ -511,6 +560,12 @@ do
     local clicks = 0
     local cb = host:CreateCheckbox(pane(), "Show X", db, "showX", function() clicks = clicks + 1 end)
     check(cb.modifiedDot:IsShown(), "checkbox: modified shows the dot")
+    local dp = cb.modifiedDot._points[#cb.modifiedDot._points]
+    check(dp[1] == "CENTER" and dp[2] == cb.label and dp[3] == "TOPLEFT",
+          "checkbox: the dot sits against the label's top-left")
+    local hp = cb.modifiedDotHit._points[#cb.modifiedDotHit._points]
+    check(hp[2] == cb.label and hp[3] == "TOPLEFT" and hp[4] == dp[4] and hp[5] == dp[5],
+          "checkbox: ...and its hit is centred on it")
     fire(cb.modifiedDotHit, "OnEnter")
     eq(TT.lines[1].text, "Default: On", "checkbox: the default as On/Off")
     eq(TT.lines[2].text, "Current: Off", "checkbox: ...and the current")
@@ -519,6 +574,42 @@ do
     eq(clicks, 1, "checkbox: through its click: the callback ran once")
     check(updates >= 1, "checkbox: ...and the live refresh")
     check(not cb.modifiedDot:IsShown(), "checkbox: dot out")
+
+    -- The positional slider (GUI/Compat.lua) paints its dot inside the kit's
+    -- constructor, before the shim wraps it, and a slider born visible gets no
+    -- OnShow to repaint it: the wrap has to re-place a dot that is already up.
+    print("-- Modified dot: the positional slider, painted at build")
+    local sl = host:CreateSlider(pane(), "Width", 0, 100, 1, db, "w")
+    check(sl.modifiedDot:IsShown(), "slider: modified shows the dot at build")
+    local sp = sl.modifiedDot._points[#sl.modifiedDot._points]
+    check(sp[1] == "CENTER" and sp[3] == "TOPLEFT",
+          "slider: ...already against the label's top-left, with no repaint")
+    local shp = sl.modifiedDotHit._points[#sl.modifiedDotHit._points]
+    check(shp[2] == sp[2] and shp[3] == "TOPLEFT", "slider: ...and its hit with it")
+
+    -- A card's header mark asks every control in its body, through a body row
+    -- that holds them, and hears a control's own update. settingsGroup and
+    -- parentSection are what AddWidget and RegisterChild set.
+    print("-- Modified dot: a card's header mark counts its body")
+    local section, band = pane(), pane()
+    section.title = section:CreateFontString()
+    section.sectionChildren = { band }
+    band.parentSection = section
+    host:AttachCardModifiedMark(section, pane())
+    local bodyRow = CreateFrame("Frame", nil, band)
+    local atDefault = host:CreateCheckbox(bodyRow, "Show X", db, "showX")
+    local changed = host:CreateSlider(bodyRow, "Width", 0, 100, 1, db, "w")
+    atDefault.settingsGroup, changed.settingsGroup = band, band
+    section:RefreshModifiedMark()
+    check(section.modifiedMark:IsShown(), "mark: one changed control in the body lights the header")
+    check(section.modifiedMarkHit:IsShown(), "mark: ...with its hover")
+    check(section.modifiedMarkHit._flags.mouseClick == false, "mark: ...which takes no clicks, so the header still folds")
+    fire(section.modifiedMarkHit, "OnEnter")
+    eq(TT.title, "Changed in this section", "mark: its title")
+    eq(TT.lines[1].text, "1 changed from default", "mark: ...and how many, by kind")
+    db.w = 10
+    changed:UpdateOverrideIndicators(10)
+    check(not section.modifiedMark:IsShown(), "mark: back to default puts it out, from the control's own update")
 
     print("-- Modified dot: the colour picker")
     local recolours = 0

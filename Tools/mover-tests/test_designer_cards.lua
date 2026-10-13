@@ -102,19 +102,22 @@ if cardTableSrc and chromeSrc then
         check(hov and hov.frame == card and hov.opts.anchorTo == header
               and hov.opts.sublevel == GUI.RoundStripSublevel and hov.opts.border == false,
               "chrome: the hover wash is under the ring, over the header only")
-        eq(hov and hov.fill and hov.fill[4], CARDM.hoverAlpha, "chrome: ...at the card's hover alpha")
+        eq(hov and hov.fill and hov.fill[4], CARDM.headerAlpha,
+           "chrome: ...at the header's resting alpha: the header is its own strip")
+        check(CARDM.headerAlpha < CARDM.hoverAlpha, "chrome: rest is a step under hover")
 
         -- Colours: TEXT title, accent chevron, dim summary.
         eq(chrome.title._tc and chrome.title._tc.r, C_TEXT.r, "chrome: the title is TEXT, not accent")
         eq(chrome.chevron._vertex and chrome.chevron._vertex.b, ACCENT.b, "chrome: the chevron is the accent")
         eq(chrome.summary._tc and chrome.summary._tc.r, C_TEXT_DIM.r, "chrome: the summary is dim")
 
-        -- Hover.
-        check(not hov.shown, "chrome: the hover wash starts hidden")
+        -- Hover: the strip is always drawn, brighter under the mouse.
+        check(hov.shown, "chrome: the header strip is drawn at rest")
         header._scripts.OnEnter()
-        check(hov.shown, "chrome: entering the header shows the wash")
+        eq(hov.fill and hov.fill[4], CARDM.hoverAlpha, "chrome: entering the header brightens it")
         header._scripts.OnLeave()
-        check(not hov.shown, "chrome: leaving hides it")
+        eq(hov.fill and hov.fill[4], CARDM.headerAlpha, "chrome: leaving puts it back to rest")
+        check(hov.shown, "chrome: ...still drawn")
 
         -- Title / summary layout, clear of the caller's buttons.
         local anchor = MakeFrame()
@@ -144,7 +147,7 @@ if cardTableSrc and chromeSrc then
             if pt[1] == "BOTTOM" and pt[2] == body then bottomToBody = true end
         end
         check(bottomToBody, "fold: open, the card runs down to the body's bottom")
-        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
            "fold: open, the chevron points down")
         chrome:SetExpanded(false, body)
         check(not chrome.line:IsShown(), "fold: shut, no hairline")
@@ -154,7 +157,7 @@ if cardTableSrc and chromeSrc then
             if pt[1] == "BOTTOM" and pt[2] == header then bottomToHeader = true end
         end
         check(bottomToHeader, "fold: shut, the card is the header alone")
-        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+        eq(chrome.chevron:GetTexture(), "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png",
            "fold: shut, the chevron points right")
 
         -- Disabled.

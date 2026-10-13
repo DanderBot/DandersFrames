@@ -226,8 +226,8 @@ do
           "hide self: the tick runs that one copy")
 
     local block, call = sectionBlock("Frame Display")
-    check(call:find('OpenSection(L["Frame Display"], "visibility_framedisplay", 2, nil)', 1, true) ~= nil,
-          "hide self: the box's own name as a card, keyed visibility_framedisplay, in column 2 -- no tick, no pin")
+    check(call:find('OpenSection(L["Frame Display"], "visibility_framedisplay", 2, FrameDisplaySummary)', 1, true) ~= nil,
+          "hide self: the box's own name as a card, keyed visibility_framedisplay, in column 2, saying shown / hidden -- no tick, no pin")
     check(block:find("BuildHideSelfGroup({ group = displayBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
           "hide self: mounts the builder exactly as classic does")
 end

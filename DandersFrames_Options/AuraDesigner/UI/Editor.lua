@@ -222,15 +222,18 @@ local function BuildLinkedFiltersSection(env, group)
     lfEditText:SetPoint("RIGHT", 0, 0)
     lfEditText:SetJustifyH("RIGHT")
     lfEditText:SetText(L["Manage Filters"])
-    local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
-    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
-    lfEdit:SetScript("OnLeave", function()
-        -- Re-read the accent rather than restoring lfTC: a party/raid switch can
-        -- repaint the card while the cursor is still on this.
-        local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
+    local function PaintLink()
+        local c = GUI.GetThemeColor()
         lfEditText:SetTextColor(c.r, c.g, c.b)
-    end)
+    end
+    PaintLink()
+    -- On the host's repaint list, so a tab switch re-tints it rather than a hover.
+    host.ThemeListeners = host.ThemeListeners or {}
+    table.insert(host.ThemeListeners, { UpdateTheme = function()
+        if not lfEdit:IsMouseOver() then PaintLink() end
+    end })
+    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
+    lfEdit:SetScript("OnLeave", PaintLink)
     lfEdit:SetScript("OnClick", function()
         if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
     end)
@@ -289,7 +292,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- Remove ✕ (mirror the member-row remove idiom)
             local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -313,7 +316,7 @@ local function BuildLinkedFiltersSection(env, group)
             -- btn.tooltip assigned afterwards is read by nothing.
             local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png",
                 color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
                 hoverColor = { 1, 1, 1 },
                 tooltip    = {
@@ -351,7 +354,7 @@ local function BuildLinkedFiltersSection(env, group)
     -- "+ Add Filter" button → mini-picker of unlinked presets + customs
     local addFilterLinkBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addFilterLinkBtn:SetHeight(22)
-    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
+    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add Filter"] })
     GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
     addFilterLinkBtn:SetScript("OnClick", function()
         OpenFilterPicker({
@@ -414,7 +417,7 @@ local function BuildMembersSection(env, group)
                 -- One arrow texture serves both directions via rotation.
                 local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                     rotation = math.rad(180),
                 })
                 upBtn:SetPoint("TOPLEFT", 2, -1)
@@ -429,7 +432,7 @@ local function BuildMembersSection(env, group)
             if canMoveDown then
                 local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
                     width = 20, height = 16, iconSize = 14,
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png",
                 })
                 downBtn:SetPoint("BOTTOMLEFT", 2, 1)
                 downBtn:SetScript("OnClick", function()
@@ -498,7 +501,7 @@ local function BuildMembersSection(env, group)
             -- Red at rest, brighter red on hover: an inline destructive remove.
             local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
                 size = 18, iconSize = 12,
-                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png",
                 color      = { 0.55, 0.30, 0.30 },
                 hoverColor = { 1, 0.40, 0.40 },
             })
@@ -523,13 +526,14 @@ local function BuildMembersSection(env, group)
             -- Customise button (navigates to Effects tab for this indicator)
             -- Accent-tinted action button: persistent accent fill + accent border
             -- + accent label at rest, accent-wash hover.
+            -- ⚠ No opts.accent: a passed accent is treated as FIXED and never repainted,
+            -- so the live theme handed in froze at whichever tab built the row.
             local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
             custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
             GUI:StyleButton(custBtn, {
                 width = 56, height = 18,
                 text = L["Customise"],
                 tinted = true,
-                accent = GetThemeColor(),
             })
             local capturedAuraName = member.auraName
             local capturedIndID = member.indicatorID
@@ -566,7 +570,7 @@ local function BuildMembersSection(env, group)
     -- "+ Add aura" button
     local addMemBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     addMemBtn:SetHeight(22)
-    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
+    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 11 }, text = L["Add aura"] })
     GUI:SetSettingsFont(addMemBtn.Text, 9, "")
     addMemBtn:SetScript("OnClick", function()
         -- Shared spell picker, group context: searchable, class/category-filterable
@@ -600,10 +604,7 @@ local function GroupApply(kind)
 end
 
 -- ── PLACEMENT (every group kind) ──
--- ☠ THE CONTROLS BIND THE GROUP RECORD ITSELF, in both layouts. The popout row
--- above them takes a VIEW of the same record (P.GroupRecordView) so its modified
--- tick and its footer have something the defaults engine can answer for -- the
--- record is SavedVariables and cannot carry the adapter itself.
+-- The controls bind the group record itself, in both layouts.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
@@ -869,12 +870,7 @@ end
 -- page, the choice behind it. The Effects tab got that in phase 5 and this tab
 -- was simply missed.
 --
--- ☠ NO CHOICE CARD *GROUP* IN HERE. GUI:CreateChoiceCardGroup wraps its cards in
--- a collapsible header keyed by its TITLE TEXT in the account-wide collapsed
--- store -- a second header inside a panel that already has one, and a profile key
--- for a fold nobody can usefully close.
---
--- ☠ AND NO FAT CARDS EITHER, since spec section 26 item 6: two SEGMENTS side by
+-- ☠ NO FAT CARDS, since spec section 26 item 6: two SEGMENTS side by
 -- side, each a picture of the row of icons the group produces, drawn on one of
 -- the player's own frames. Two 60px cards stacked cost 122px of panel; two
 -- segments cost 68.
@@ -1127,9 +1123,9 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
         -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
             if shown() then
-                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
             else
-                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
             end
             eyeBtn:SetGlyphHover(shown())
         end
@@ -1300,11 +1296,28 @@ local function DebuffCategoryDefs()
         { key = "role",         label = L["Role Debuffs"],        tooltip = L["Debuffs Blizzard flags as important for your role."] },
         { key = "priority",     label = L["Priority Debuffs"],    tooltip = L["Debuffs Blizzard flags as high priority."] },
         { key = "crowdControl", label = L["Crowd Control"],       tooltip = L["CC effects like stuns, roots, and incapacitates."] },
-        { key = "raid",         label = L["Raid Debuffs"],        tooltip = L["Other debuffs Blizzard flags for raid frames."] },
         { key = "dispellable",  label = L["Dispellable Debuffs"], tooltip = L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."] },
+        { key = "important",    label = L["Important"],      tooltip = L["Debuffs Blizzard flags as important (its IMPORTANT filter). Not the same set as the Highlight card, which marks boss, role and priority debuffs."] },
+        { key = "raidInCombat", label = L["Raid In Combat"], tooltip = L["Debuffs Blizzard flags to show on raid frames in combat."] },
+        { key = "magic",   label = L["Magic"],   tooltip = L["Magic debuffs, whoever can dispel them."] },
+        { key = "curse",   label = L["Curse"],   tooltip = L["Curse debuffs, whoever can dispel them."] },
+        { key = "poison",  label = L["Poison"],  tooltip = L["Poison debuffs, whoever can dispel them."] },
+        { key = "disease", label = L["Disease"], tooltip = L["Disease debuffs, whoever can dispel them."] },
+        { key = "bleed",   label = L["Bleed"],   tooltip = L["Bleed effects."] },
+        { key = "nonPlayer",  label = L["Non-Player"],      tooltip = L["Debuffs no player or pet applied: from bosses, mobs and the environment. Show adds them; Hide removes them, leaving only player-cast debuffs."] },
+        { key = "fromPlayer", label = L["From Any Player"], tooltip = L["Debuffs a player or their pet applied, including you: Sated, Forbearance and the like. Show adds them; Hide removes them."] },
+        { key = "mine",       label = L["Cast By You"],     tooltip = L["Debuffs you or your pet applied. Show adds them; Hide removes them."] },
     }
 end
 P.DebuffCategoryDefs = DebuffCategoryDefs
+
+-- Every Hide-column key on group.selection, for the summary's count.
+local DEBUFF_HIDE_KEYS = {
+    "hideBoss", "hideRole", "hidePriority", "hideImportant", "hideRaidInCombat",
+    "hideCrowdControl", "hideDispellable",
+    "hideMagic", "hideCurse", "hidePoison", "hideDisease", "hideBleed",
+    "hideNonPlayer", "hidePlayer", "hideMine",
+}
 
 -- Repair a missing selection table (hand-edited data). All categories start
 -- FALSE so an unconfigured group renders — and claims — nothing until the user
@@ -1319,6 +1332,46 @@ local function EnsureDebuffSelection(group)
 end
 P.EnsureDebuffSelection = EnsureDebuffSelection
 
+-- The editor's rows, the Debuff Bar's groups: a Show box and a Hide box per
+-- category. Who Cast It is not claimed, so what a group shows from it stays on the
+-- bar as well. `byAll` marks the dispel types already shown when Dispellable is
+-- shown for Anyone.
+local function DebuffRowSections()
+    local tips = {}
+    for _, d in ipairs(DebuffCategoryDefs()) do tips[d.key] = d.tooltip end
+    local function R(label, show, hide, tip, extra)
+        local r = { label = label, show = show, hide = hide, tooltip = tip or tips[show] }
+        for k, v in pairs(extra or {}) do r[k] = v end
+        return r
+    end
+    -- The Debuff Bar's lockouts: hiding non-player and player-cast debuffs together hides
+    -- everything, and Cast By You is a part of From Any Player.
+    local function NonPlayerHideOff(s) return s.hidePlayer and not s.hideNonPlayer end
+    local function PlayerHideOff(s) return s.hideNonPlayer and not s.hidePlayer end
+    local function MineOff(s) return s.hidePlayer and true or false end
+    return {
+        { caption = L["Blizzard Flags"], rows = {
+            R(L["Boss"], "boss", "hideBoss"), R(L["Role"], "role", "hideRole"),
+            R(L["Priority"], "priority", "hidePriority"), R(L["Important"], "important", "hideImportant"),
+            R(L["Raid In Combat"], "raidInCombat", "hideRaidInCombat"),
+            R(L["Crowd Control"], "crowdControl", "hideCrowdControl"),
+        } },
+        { caption = L["Dispels"], rows = {
+            R(L["Dispellable"], "dispellable", "hideDispellable"),
+        } },
+        { caption = L["Dispel Type"], byAll = true, rows = {
+            R(L["Magic"], "magic", "hideMagic"), R(L["Curse"], "curse", "hideCurse"),
+            R(L["Poison"], "poison", "hidePoison"), R(L["Disease"], "disease", "hideDisease"),
+            R(L["Bleed"], "bleed", "hideBleed"),
+        } },
+        { caption = L["Who Cast It"], rows = {
+            R(L["Non-Player"], "nonPlayer", "hideNonPlayer", nil, { hideOffWhen = NonPlayerHideOff }),
+            R(L["From Any Player"], "fromPlayer", "hidePlayer", nil, { hideOffWhen = PlayerHideOff }),
+            R(L["Cast By You"], "mine", "hideMine", nil, { offWhen = MineOff }),
+        } },
+    }
+end
+
 -- The collapsed header's own line: the selected category names (the A5 collapsed
 -- treatment, categories instead of a link count).
 S.DebuffGroupSummary = function(group)
@@ -1329,7 +1382,16 @@ S.DebuffGroupSummary = function(group)
             if selRead[def.key] then tinsert(selectedNames, def.label) end
         end
     end
-    if #selectedNames > 0 then return table.concat(selectedNames, ", ") end
+    if #selectedNames > 0 then
+        local hidden = 0
+        for _, k in ipairs(DEBUFF_HIDE_KEYS) do
+            if selRead[k] then hidden = hidden + 1 end
+        end
+        -- Match All reads as one combined condition: "Boss + Magic".
+        local joined = table.concat(selectedNames, selRead.matchAll and " + " or ", ")
+        if hidden > 0 then joined = joined .. ", " .. format(L["Hiding %d"], hidden) end
+        return joined
+    end
     return L["No categories selected"]
 end
 
@@ -1343,6 +1405,8 @@ end
 local function BuildDebuffCategories(env, group)
     local place, host = env.place, env.host
     local sel = EnsureDebuffSelection(group)
+    -- The Raid row is gone (it was Dispellable By Me); move a saved tick before drawing.
+    if DF.MigrateRaidDebuffRow and (sel.raid or sel.hideRaid) then DF:MigrateRaidDebuffRow(sel, true) end
 
     local function StructuralDebuffGroupRefresh()
         env.Redraw()
@@ -1365,54 +1429,131 @@ local function BuildDebuffCategories(env, group)
         end
     end
 
-    for _, def in ipairs(DebuffCategoryDefs()) do
-        local cb = GUI:CreateCheckbox(host, def.label, sel, def.key, StructuralDebuffGroupRefresh)
-        cb.tooltip = def.tooltip
-        place(cb, 26, { indent = 8, width = false })
+    -- The Debuff Bar's layout: a header per group, a separator between groups, and a
+    -- Show box and a Hide box per category; ticking one clears the other.
+    local rowWidth = env.bodyWidth and (env.bodyWidth - 10) or nil
 
-        if def.key == "dispellable" then
-            -- Mode dropdown, indented under Dispellable Debuffs (the Aura Filters
-            -- column's control, group-scoped; back to TWO entries 2026-08-22 --
-            -- the PTR-5-era third mode "Any Dispel Type" was collapsed into All
-            -- Dispellable once both rode the DISPELLABLE token and became one
-            -- query wearing two rows).
-            --
-            -- ★ Self-heal for a stored "ANY": AD groups have no startup migration
-            -- walk, and a shared template can re-introduce the value at any time.
-            -- This is the one surface where it would show (as a blank dropdown);
-            -- the engine already treats ANY as ALL, so this write changes
-            -- presentation only, never behaviour.
-            if sel.dispellableMode == "ANY" then
-                sel.dispellableMode = "ALL"
-            end
-            local modeDrop = GUI:CreateDropdown(host, L["Mode"], {
-                PLAYER = L["Dispellable By Me"],
-                ALL = L["All Dispellable"],
-                _order = { "PLAYER", "ALL" },
-            }, sel, "dispellableMode", StructuralDebuffGroupRefresh)
-            modeDrop.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
-            modeDrop.disableOn = function() return not sel.dispellable end
-            modeDrop:SetEnabled(not not sel.dispellable)
-            place(modeDrop, 54, { indent = 24, width = env.bodyWidth and (env.bodyWidth - 30) or nil })
+    -- Match: Any (the Debuff Bar's model, each ticked Show row adds debuffs) or All (a
+    -- debuff must fit every ticked Show row). Stored as sel.matchAll; read through a
+    -- proxy so an untouched group shows Any without the tab writing anything.
+    local matchDB = setmetatable({}, {
+        __index = function(_, k) if k == "match" then return sel.matchAll and "ALL" or "ANY" end end,
+        __newindex = function(_, k, v) if k == "match" then sel.matchAll = (v == "ALL") or nil end end,
+    })
+    local matchOptions = { ANY = L["Any"], ALL = L["All"], _order = { "ANY", "ALL" } }
+    local matchDrop = GUI:CreateDropdown(host, L["Match"], matchOptions, matchDB, "match", StructuralDebuffGroupRefresh)
+    matchDrop.tooltip = "|cffffffff" .. L["Any"] .. ":|r " .. L["a debuff shows if it fits any ticked Show row."]
+        .. "\n|cffffffff" .. L["All"] .. ":|r " .. L["it must fit every ticked Show row. Boss and Magic shows only magic boss debuffs; ticked dispel types count as one."]
+        .. "\n" .. L["Hide rows remove debuffs either way."]
+    place(matchDrop, 54, { indent = 8, width = env.bodyWidth and (env.bodyWidth - 10) or nil })
+
+    local function AnyoneShown()
+        -- Under Match All a dispel type narrows Dispellable rather than repeating it.
+        return not sel.matchAll and sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY")
+    end
+    -- Under Match All, Non-Player cannot be combined with a player-cast row.
+    local function MatchShowOff(r)
+        if not sel.matchAll then return nil end
+        if r.show == "nonPlayer" then
+            return function() return (sel.fromPlayer or sel.mine) and not sel.nonPlayer end
+        elseif r.show == "fromPlayer" or r.show == "mine" then
+            return function() return sel.nonPlayer and not sel[r.show] end
         end
     end
+    -- Hiding every dispellable leaves the per-type rows nothing to do.
+    local function AllDispelHidden()
+        return sel.hideDispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") and true or false
+    end
+    for i, section in ipairs(DebuffRowSections()) do
+        if i > 1 then place(GUI:CreateSeparator(host, { width = rowWidth }), 12, { indent = 8 }) end
+        local moot = section.byAll and AnyoneShown or nil
+        place(GUI:CreateShowHideHeader(host, section.caption, sel, { showOffWhen = moot }), 24,
+            { indent = 8, gap = 4, width = rowWidth })
+        for _, r in ipairs(section.rows) do
+            local row = GUI:CreateShowHideRow(host, r.label, sel, r.show, r.hide, StructuralDebuffGroupRefresh,
+                { plain = true, showOffWhen = (section.byAll and AnyoneShown) or MatchShowOff(r), hideOffWhen = r.hideOffWhen,
+                  offWhen = r.offWhen or (section.byAll and AllDispelHidden) or nil })
+            row.tooltip = r.tooltip
+            place(row, 26, { indent = 8, width = rowWidth })
+            if r.show == "dispellable" then
+                -- Mode dropdown, indented under Dispellable Debuffs (the Aura Filters
+                -- column's control, group-scoped; back to TWO entries 2026-08-22 --
+                -- the PTR-5-era third mode "Any Dispel Type" was collapsed into All
+                -- Dispellable once both rode the DISPELLABLE token and became one
+                -- query wearing two rows).
+                --
+                -- ★ Self-heal for a stored "ANY": AD groups have no startup migration
+                -- walk, and a shared template can re-introduce the value at any time.
+                -- This is the one surface where it would show (as a blank dropdown);
+                -- the engine already treats ANY as ALL, so this write changes
+                -- presentation only, never behaviour.
+                if sel.dispellableMode == "ANY" then
+                    sel.dispellableMode = "ALL"
+                end
+                local modeDrop = GUI:CreateDropdown(host, L["Dispellable"], {
+                    PLAYER = L["By Me"],
+                    ALL    = L["All"],
+                    _order = { "PLAYER", "ALL" },
+                }, sel, "dispellableMode", StructuralDebuffGroupRefresh)
+                modeDrop.tooltip = L["Which debuffs the Dispellable row means."]
+                    .. "\n|cffffffff" .. L["By Me"] .. ":|r " .. L["ones you can dispel."]
+                    .. "\n|cffffffff" .. L["All"] .. ":|r " .. L["any debuff with a dispel type."]
+                -- Live while the group shows or hides dispellables: both follow this mode.
+                modeDrop.disableOn = function() return not (sel.dispellable or sel.hideDispellable) end
+                modeDrop:SetEnabled(not not (sel.dispellable or sel.hideDispellable))
+                place(modeDrop, 54, { indent = 8, width = env.bodyWidth and (env.bodyWidth - 30) or nil })
+            end
+        end
+    end
+    place(GUI:CreateSeparator(host, { width = rowWidth }), 12, { indent = 8 })
 
     local hideLongCb = GUI:CreateCheckbox(host, L["Hide Long Debuffs"], sel, "hideLong", StructuralDebuffGroupRefresh)
     hideLongCb.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
     place(hideLongCb, 26, { indent = 8, width = false, gap = 4 })
 
-    local minSlider = GUI:CreateSlider(host, L["Hide Longer Than (minutes)"], 1, 30, 1,
-        sel, "hideLongMinutes", LayoutDebuffGroupRefresh)
+    -- The unit picks which slider is built, so changing it redraws the section.
+    -- Read through a proxy so a group saved without the key shows Minutes without
+    -- the tab writing anything just by being opened.
+    local unitDB = setmetatable({}, {
+        __index = function(_, k) if k == "hideLongUnit" then return sel.hideLongUnit or "MINUTES" end end,
+        __newindex = function(_, k, v) sel[k] = v end,
+    })
+    local unitDrop = GUI:CreateDropdown(host, L["Threshold Unit"], {
+        MINUTES = L["Minutes"],
+        SECONDS = L["Seconds"],
+        _order = { "MINUTES", "SECONDS" },
+    }, unitDB, "hideLongUnit", StructuralDebuffGroupRefresh)
+    unitDrop.disableOn = function() return not sel.hideLong end
+    unitDrop:SetEnabled(not not sel.hideLong)
+    place(unitDrop, 54, { indent = 8, width = env.bodyWidth and (env.bodyWidth - 10) or nil })
+
+    local minSlider
+    if sel.hideLongUnit == "SECONDS" then
+        minSlider = GUI:CreateSlider(host, L["Hide Longer Than (seconds)"], 1, 60, 1,
+            sel, "hideLongSeconds", LayoutDebuffGroupRefresh)
+    else
+        minSlider = GUI:CreateSlider(host, L["Hide Longer Than (minutes)"], 1, 30, 1,
+            sel, "hideLongMinutes", LayoutDebuffGroupRefresh)
+    end
     minSlider.disableOn = function() return not sel.hideLong end
     minSlider:SetEnabled(not not sel.hideLong)
     place(minSlider, 54, { indent = 8, width = env.bodyWidth and (env.bodyWidth - 10) or nil })
 
-    -- Keep-important, indented under Hide Long (Aura Filters idiom)
+    -- Keep-important: flush with Hide Long's other controls, greyed with them.
     local keepCb = GUI:CreateCheckbox(host, L["Keep important debuffs"], sel, "keepImportant", StructuralDebuffGroupRefresh)
     keepCb.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
-    keepCb.disableOn = function() return not sel.hideLong end
-    keepCb:SetEnabled(not not sel.hideLong)
-    place(keepCb, 30, { indent = 24, width = false })
+    -- It only protects the Boss, Role and Priority rows' debuffs, so it needs one shown.
+    local function KeepOff() return not sel.hideLong or not (sel.boss or sel.role or sel.priority) end
+    keepCb.disableOn = KeepOff
+    keepCb:SetEnabled(not KeepOff())
+    place(keepCb, 26, { indent = 8, width = false })
+
+    local permCb = GUI:CreateCheckbox(host, L["Hide Permanent Auras"], sel, "hidePermanent", StructuralDebuffGroupRefresh)
+    permCb.tooltip = L["Hide debuffs with no duration, such as auras that last until cancelled. Hide Long Debuffs also hides these while it is on."]
+    -- A duration threshold already drops permanent debuffs, so this does nothing then.
+    permCb.disableOn = function() return sel.hideLong end
+    permCb:SetEnabled(not sel.hideLong)
+    place(permCb, 26, { indent = 8, width = false })
 end
 
 -- The ordered section list for one debuff category group.
@@ -1609,7 +1750,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
                 StructuralDedupRefresh,
                 function() return adDBForDedup.debuffGroupDedup ~= false end,
                 function(v) adDBForDedup.debuffGroupDedup = v and true or false end)
-            dgDedup.tooltip = L["A debuff matching several groups shows only in the first matching group in the list, so it never appears twice. Turn off to let every matching group show it."]
+            dgDedup.tooltip = L["When a group shows all of a category, groups further down the list leave it out. A group that narrows a category (with Hide ticks, Hide Long Debuffs or Hide Permanent Auras) does not, so its debuffs can also appear in later groups. Turn off to let every matching group show them."]
             dgDedup:SetPoint("TOPLEFT", 8, yPos)
             yPos = yPos - 28
         end
@@ -1691,9 +1832,9 @@ S.BuildDebuffGroupsTab = function()
             -- restores the state; hover is suppressed while hidden.
             local function updateEyeIcon()
                 if shown() then
-                    eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility.png", { 0.95, 0.95, 0.95 })
                 else
-                    eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+                    eyeBtn:SetGlyph(mediaPath .. "visibility_off.png", { 0.45, 0.45, 0.45 })
                 end
                 eyeBtn:SetGlyphHover(shown())
             end
@@ -1792,6 +1933,42 @@ end
 -- ============================================================
 -- MAIN PAGE BUILD
 -- ============================================================
+
+-- ============================================================
+-- THE ENABLE STATE -- the banner's tick and the disabled cover
+-- ------------------------------------------------------------
+-- ☠ EVERY FULL BUILD ENDS HERE, NOT ONLY THE REFRESH. A full build makes a new
+-- S.mainFrame and the cover belongs to the frame it was made on, so the rebuild
+-- every party/raid switch runs would come up with NO cover -- and the page's
+-- RefreshStates skips the refresh at an unchanged size, so nothing else puts
+-- one back: a disabled designer whose preview and tabs all still work.
+-- ☠ FROM THE MODE, NOT THE PRESET: the enable click writes the mode, and a read
+-- of the preset field it no longer writes would untick the box under the user.
+-- ============================================================
+local function ApplyEnabledState()
+    if not S.mainFrame then return end
+    local adEnabled = DF.IsAuraDesignerEnabledForMode
+        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
+    if S.enableBanner then
+        S.enableBanner.checkbox:SetChecked(adEnabled)
+    end
+    local split = S.mainFrame.splitContainer
+    if not split then return end
+    if not adEnabled then
+        if not S.mainFrame.disabledOverlay then
+            -- Shared with the Text Designer and Raid Auto Layouts; this page only
+            -- owns the extent (the whole split container) and the label.
+            local overlay = GUI:CreateDisabledOverlay(split, {
+                label = L["Aura Designer is disabled"],
+            })
+            overlay:SetAllPoints()
+            S.mainFrame.disabledOverlay = overlay
+        end
+        S.mainFrame.disabledOverlay:Show()
+    elseif S.mainFrame.disabledOverlay then
+        S.mainFrame.disabledOverlay:Hide()
+    end
+end
 
 -- ============================================================
 -- THE SPLIT-PANEL PAGE
@@ -2097,10 +2274,6 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
-    -- (Removed) S.origY_framePreview and S.contentRightInset, both set to 0 here and
-    -- read nowhere -- old-layout anchors that the current layout does not use. The
-    -- second even carried "no right inset needed in new layout", i.e. a field whose
-    -- own comment said it was not needed.
     S.framePreview = CreateFramePreview(S.leftPanel, 0, nil)
 
     -- ── RIGHT PANEL (tabbed settings) ──
@@ -2263,6 +2436,8 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     end)
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
+    -- The cover lives on S.mainFrame, which this build has just replaced.
+    ApplyEnabledState()
 end
 
 -- ============================================================
@@ -2347,43 +2522,10 @@ function DF:AuraDesigner_RefreshPage()
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
 
-    -- Update enable state.
-    -- ☠ FROM THE MODE, NOT THE PRESET. These two reads are what broke the enable click
-    -- when the switch moved to the mode db: the click writes the mode, then calls THIS
-    -- refresh, and this re-synced the checkbox and the overlay from the preset field
-    -- the click no longer writes -- so the box unticked itself and the disabled overlay
-    -- stayed up until a page revisit ran the full build (whose reads were updated).
-    -- "when I click enable the toggle does not stick and AD does not activate" (Krathe,
-    -- 2026-08-22) was exactly these two lines. They read GetAuraDesignerDB().enabled
-    -- INLINE, which is why the sweep that fixed every named `adDB.enabled` missed them.
-    local adEnabled = DF.IsAuraDesignerEnabledForMode
-        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
-    if S.enableBanner then
-        S.enableBanner.checkbox:SetChecked(adEnabled)
-    end
+    ApplyEnabledState()
     -- Spec dropdown lives on the main tab strip (B2): refresh its text on
     -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
     UpdateSpecDropdownState()
-
-    -- Show/hide disabled overlay on the split container
-    if S.mainFrame.splitContainer then
-        if not adEnabled then
-            if not S.mainFrame.disabledOverlay then
-                -- Shared with the Text Designer and Raid Auto Layouts; this S.page
-                -- only owns the extent (the whole split container) and the label.
-                local overlay = GUI:CreateDisabledOverlay(S.mainFrame.splitContainer, {
-                    label = L["Aura Designer is disabled"],
-                })
-                overlay:SetAllPoints()
-                S.mainFrame.disabledOverlay = overlay
-            end
-            S.mainFrame.disabledOverlay:Show()
-        else
-            if S.mainFrame.disabledOverlay then
-                S.mainFrame.disabledOverlay:Hide()
-            end
-        end
-    end
 
     -- Refresh buffs tab banner state if visible
     local buffsPage = GUI and GUI.Pages and GUI.Pages["auras_buffs"]

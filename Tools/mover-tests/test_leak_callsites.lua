@@ -148,6 +148,7 @@ do
             local GUI = {
                 SetAccent = function() end,
                 GetThemeColorFor = function() return {} end,
+                CurrentAccent = function() return {} end,
                 RefreshCurrentPage = function() calls.forced = calls.forced + 1 end,
                 RefreshCurrentPageCached = function() calls.cached = calls.cached + 1 end,
             }

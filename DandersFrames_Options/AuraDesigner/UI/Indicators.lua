@@ -1262,7 +1262,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_healthbar_multi",
                     tone = "info",
                     text = L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1317,7 +1317,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_background_multi",
                     tone = "info",
                     text = L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1372,7 +1372,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_group",
                     tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
@@ -1389,7 +1389,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- player's OWN cast — and for a spell that My Buffs also tracked,
             -- both pools' sounds would fire. Surface it (B1 concern 2).
             if IsOtherTab() then
-                local obBanner = GUI:CreateInfoBanner(parent, {
+                local obBanner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_anyone",
                     tone = "info",
                     text = L["Sound alerts play when anyone gains this buff, including your own casts."],
                 })
@@ -1511,90 +1511,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
     end
 
-    -- ============================================================
-    -- 12.1 AURA-SYSTEM STATUS OVERLAYS (P4.7 GUI pass)
-    -- Frost the AD effect-settings the 12.1 Blizzard aura system can't drive.
-    -- Every block gates on DF:FactoryOwnsAD(d). Only
-    -- the settings GROUPS built above are targeted — the trigger tags (the
-    -- working "which aura" layer) live in `parent` above `startY` and are left
-    -- alone. "roadmap" = temporary (delete the single call site when the port
-    -- lands); "limitation" = permanent (secret-value casualty).
-    -- ============================================================
-
-    if typeKey == "icon" or typeKey == "square" then
-        -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
-        -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
-        -- the read-free missing-mode container (static spell icon / colour square while absent).
-        -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. Two
-        -- surgical blocks remain:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-        --   * Min Stacks to Show — REMOVED 2026-07-25 (was a permanent limitation, then a
-        --     confirmed no-op). Stack counts render on the native no-formatter path (a
-        --     formatter would receive the SECRET application count and trap — see
-        --     Features/Auras.lua's stacks-formatter warning), so a custom minimum other than
-        --     the native "shown at >1" is not expressible. The control, its key and its
-        --     defaults are gone rather than frosted.
-        --   * Duration "Colour by Time" — P4.4 SHIPPED: the duration text now colours by
-        --     time via the native bucket formatter (C-side |c escapes), so the roadmap
-        --     overlay is gone and the control is fully editable under the factory.
-    elseif typeKey == "bar" then
-        -- P4.4 SHIPPED: the bar renders on the container engine (native SetDurationBar fill
-        -- + texture/colour/orientation + border + duration text). The whole-type roadmap
-        -- overlay is gone. One surgical block remains:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-    elseif typeKey == "sound" then
-        -- P4.5 SHIPPED: the sound indicator plays natively via C_UnitAuras.AddAuraSound.
-        -- The Sound Alert group (picker / volume / preview) and the per-event groups
-        -- (Applied / Buff Dropped / Stack Gained) are all live and unblocked.
-        -- REMOVED 2026-07-25 -- Missing Trigger and Expire Alert. "Alert WHILE the buff is
-        -- absent" is presence-driven and no native hook fires during absence; "alert as the
-        -- buff FADES" is remaining-time-driven. Both were permanently frosted, and Expire
-        -- Alert's intent is now served natively by Buff Dropped (the Removed trigger), so
-        -- the groups and their ten inert keys are gone rather than left as dead controls.
-    elseif typeKey == "nametext" or typeKey == "healthtext" then
-        -- RECOVERED (colour-by-cover): the base Color works — the Text Designer keeps a
-        -- glyph-identical coloured cover in sync with the real element (Render mirrors)
-        -- and the aura slot's secret visibility shows it on presence. Two surgical blocks:
-        --   * Show When Missing is not built for text covers at all - the checkbox is
-        --     simply never created for them. A cover is SetAllPoints onto the real
-        --     FontString, so its screen rect belongs to the text it mirrors; missing mode
-        --     hides by MOVING a badge, so parking/pushing could never change what shows.
-        --     (Same control SHIPPED for border/healthbar/background, whose art really does
-        --     live inside the window.) Candidate path if it is ever wanted:
-        --     SetAlphaFromBoolean(presence, 0, 255) on the mirror - on SimpleRegion as well
-        --     as SimpleFrame, AllowedWhenTainted, and taking both alphas makes inversion
-        --     free. Open question is sourcing `presence` as a SECRET BOOLEAN we can pass
-        --     through without reading: an unrun in-game probe.
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-    elseif typeKey == "healthbar" or typeKey == "background" or typeKey == "border" then
-        -- Base effect settings (colour / mode / style) work on the container
-        -- engine. Two surgical blocks on top:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-        --   * Show When Missing — P4.5 SHIPPED: the effect now renders via the read-free
-        --     missing-mode container (tint / ring shown while the buff is absent), so the
-        --     roadmap overlay is gone and the checkbox is fully editable under the factory.
-        --   * Gradient border style -- UNFROSTED 2026-07-25 to test the claim behind it.
-        --     The frost said gradient "needs a resolved rect to compute its direction+
-        --     extent" and so degrades to solid on a secret-anchored slot. Re-reading
-        --     Border.lua that looks wrong on two counts: the gradient path measures
-        --     NOTHING (it is SetColorTexture + SetGradient on SetPoint-anchored edges --
-        --     no GetWidth/GetHeight anywhere in Apply), and Apply's gradient branch is
-        --     gated on `style == "GRADIENT" and gradient and CreateColor` with no
-        --     _solidOnly check, so the slot's solidOnly flag never blocked the paint.
-        --     solidOnly is about secret COLOURS (CreateColor taints on them), which the
-        --     gradient pickers are not -- they are static config. secretRect is the flag
-        --     that handles rects, and only TEXTURE style needs it. If gradient still
-        --     renders solid in game, the cause is something not yet found and the block
-        --     should come back with the real reason recorded.
-    end
+    -- What the effect settings above deliberately do NOT offer, because the 12.1 aura
+    -- container cannot drive it -- so nobody re-adds one as a dead control:
+    --   * No Expiring group on any type: remaining time is secret. DF.Expiration (the
+    --     Expiry Alert group) is the 12.1-safe replacement.
+    --   * No Min Stacks to Show: counts render on the native no-formatter path (a
+    --     formatter would receive the secret count -- see Features/Auras.lua), so only
+    --     the native "shown at >1" is expressible.
+    --   * Sound has no Missing Trigger or Expire Alert: no native hook fires while a
+    --     buff is absent, and fading is remaining-time-driven. Buff Dropped covers the
+    --     expire case natively.
+    --   * Text covers have no Show When Missing: a cover is SetAllPoints onto the real
+    --     FontString, and missing mode hides by moving a badge, which cannot change what
+    --     a text cover shows. A possible path is SetAlphaFromBoolean(presence, 0, 255)
+    --     on the mirror, if a secret presence boolean can be sourced (unprobed).
+    --   * Gradient border style is NOT greyed out: the gradient paint measures no rect
+    --     and its colours are static config, so a secret-anchored slot can draw it. If it
+    --     renders solid in game, the cause is something else and should be recorded.
 
     totalHeight = totalHeight + 8  -- bottom padding
     parent:SetHeight(totalHeight)

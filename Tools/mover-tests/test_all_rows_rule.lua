@@ -8,7 +8,6 @@ local NS = ...
 -- census files pin which shape each SITE took:
 --
 --   a control row  -- one setting on a popout row's plate, in a band
---                     (DandersUI/ControlRow.lua)
 --   a full-width box -- a group that could not convert, built at the BAND's
 --                     width and added "both"
 --

@@ -1400,6 +1400,65 @@ end
 
 -- Slot plan from settings. selfOnly marks the PLAYER'S OWN frame — the only frame where
 -- the racial half of the gap means anything, since a racial cleanses its own caster.
+-- The types the user ticked Hide on, or nil. One key per type on the mode db.
+local OVERLAY_HIDE_KEYS = {
+    Magic = "dispelOverlayHideMagic", Curse = "dispelOverlayHideCurse", Poison = "dispelOverlayHidePoison",
+    Disease = "dispelOverlayHideDisease", Bleed = "dispelOverlayHideBleed",
+}
+local function overlayHiddenTypes(db)
+    local hidden
+    for t, key in pairs(OVERLAY_HIDE_KEYS) do
+        if db[key] then
+            hidden = hidden or {}
+            hidden[t] = true
+        end
+    end
+    return hidden
+end
+
+-- Subtract the hidden types from every slot, the way the talent-aware exclude is:
+-- a slot that includes types loses them (and goes when none are left), any other
+-- slot excludes them. A hidden type is never picked, so the overlay moves on to the
+-- next dispellable debuff instead of drawing a type the user asked not to see.
+-- Copies every candidate table it changes; nil when no slot is left.
+local function applyOverlayHides(slots, hidden)
+    if not hidden then return slots end
+    local kept = {}
+    for _, s in ipairs(slots) do
+        local cf = {}
+        for k, v in pairs(s.candidateFilters or {}) do cf[k] = v end
+        if cf.includeDispelTypes then
+            local inc = {}
+            for t in pairs(cf.includeDispelTypes) do
+                if not hidden[t] then inc[t] = true end
+            end
+            if next(inc) then
+                cf.includeDispelTypes = inc
+                s.candidateFilters = cf
+                kept[#kept + 1] = s
+            end
+        else
+            local ex = {}
+            for t in pairs(cf.excludeDispelTypes or {}) do ex[t] = true end
+            for t in pairs(hidden) do ex[t] = true end
+            cf.excludeDispelTypes = ex
+            s.candidateFilters = cf
+            kept[#kept + 1] = s
+        end
+    end
+    -- ☠ NEVER NIL. A nil plan makes the drive return before touching the container, so
+    -- the PREVIOUS plan kept lighting (every type hidden, the overlay still showed them).
+    -- Park the main slot instead with the universal reject (maxDuration = 0 also drops
+    -- permanent auras, so it matches nothing): same slot set, so it re-tunes in place.
+    if #kept == 0 then
+        local main = slots[1]
+        main.candidateFilters = { maxDuration = 0 }
+        kept[1] = main
+    end
+    kept.mode = slots.mode   -- the tuning signature reads it
+    return kept
+end
+
 local function dispelSlotPlan(db, selfOnly)
     local byMe = (db.dispelOverlayDispelType or 2) == 1
 
@@ -1454,6 +1513,9 @@ local function dispelSlotPlan(db, selfOnly)
         -- exclude, correct for a priest) and racialSelf=false on every build.
         -- ⚠ Test any future change to this line IN A MIXED RAID: solo, the wrong token
         -- is indistinguishable from the right one.
+        -- ☠ Nor is RAID_PLAYER_DISPELLABLE a "dispellable by my group" set, whatever its
+        -- comment says: with a paladin and a shaman in the party, and again after
+        -- converting to a raid, a poison stayed dark on it while DISPELLABLE lit it.
         baseFilter = "HARMFUL|RAID"
         -- ☠ THE ENGINE'S FLAG OVER-REPORTS TALENT-GATED DISPELS, so subtract what this
         -- character demonstrably cannot cleanse. Field-reported: "dispellable by me always
@@ -1543,7 +1605,7 @@ local function dispelSlotPlan(db, selfOnly)
     -- a badge baked in. `Icon` gives the same clean RaidFrame-Icon-Debuff* atlas those
     -- slots drew by hand, on ONE carrier, with Blizzard choosing the type. See the
     -- badge block in DispelSlotSecureInit.
-    return slots
+    return applyOverlayHides(slots, overlayHiddenTypes(db))
 end
 
 -- Structural signature: me/all, border slot, icon slots — anything that changes
@@ -1622,6 +1684,8 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
             table.sort(types)
             tu[#tu + 1] = slots[i].key .. ":idt=" .. table.concat(types, ",")
         end
+        -- The every-type-hidden park (applyOverlayHides) differs only by this key.
+        if scf and scf.maxDuration then tu[#tu + 1] = slots[i].key .. ":md=" .. tostring(scf.maxDuration) end
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
         -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
         -- They used to be separate slot keys (and so rode the loop above); now that one
