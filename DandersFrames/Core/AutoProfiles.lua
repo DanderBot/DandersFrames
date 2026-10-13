@@ -246,6 +246,7 @@ local function RefreshOverrideTabMap()
     {"oor",                 "display_fading",       L["Fading"]},
     {"dead",                "display_fading",       L["Fading"]},
     {"offline",             "display_fading",       L["Fading"]},
+    {"fadeUnhealable",      "display_fading",       L["Fading"]},
     {"pet",                 "display_pets",         L["Pet Frames"]},
     -- General (specific before generic)
     {"fontShadow",          "general_fonts",        L["Fonts"]},

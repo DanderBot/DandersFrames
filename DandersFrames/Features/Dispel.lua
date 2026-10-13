@@ -2988,6 +2988,10 @@ end
 function DF:UpdateDispelOverlay(frame)
     if not frame then return end
 
+    -- Rides this call for its call sites (every per-frame refresh and unit change,
+    -- pinned frames too); it is its own feature and ignores the dispel settings.
+    if DF.DriveUnhealableFade then DF:DriveUnhealableFade(frame) end
+
     -- MEMORY TEST: Skip if disabled
     if DF:MemTestDisabled("enableDispel") then
         HideDispelAndInvalidate(frame)

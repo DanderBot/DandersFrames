@@ -1664,6 +1664,11 @@ DF.PartyDefaults = {
     healthFadeThreshold = 100,
     hfCancelOnDispel = true,
 
+    -- Unhealable fading (Spirit of Redemption): a cover over the frame while the aura is up
+    fadeUnhealableEnabled = false,
+    fadeUnhealableAlpha = 0.4,
+    fadeUnhealableColor = {r = 0.05, g = 0.05, b = 0.05},
+
     -- Debuff settings
     debuffAlpha = 1,
     debuffAnchor = "BOTTOMLEFT",

@@ -145,6 +145,7 @@ Features\Sort.lua
 Features\SecureSort.lua
 Features\FrameSort.lua
 Features\Dispel.lua
+Features\UnhealableFade.lua
 
 # Aura Designer
 AuraDesigner\Config.lua

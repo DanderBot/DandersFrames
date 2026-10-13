@@ -1250,7 +1250,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "dead" and "offline" matched nothing: the keys are fadeDead*, which begins
         -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
         -- three. Prefixes must be real key prefixes, not the box's name.
-        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
+        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
 
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: three 280 boxes -- Out of Range in
@@ -1827,6 +1827,65 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     end,
                 })
             BuildHealthFadeGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+                hoistToggle = true,
+            })
+            CloseSection(band)
+        end
+
+        -- ===== UNHEALABLE FADING (a 280 box in column 2 in classic, the third
+        -- column-2 card in Modern) =====
+        -- The same textbook hoist as Dead/Offline. The "fade" is a cover, not an
+        -- alpha (Features/UnhealableFade.lua), so the slider is the opacity the
+        -- frame APPEARS to have and the colour is what it dims towards.
+        local function BuildUnhealableFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local function apply() DF:RefreshUnhealableFade() end
+
+            if not tools2.hoistToggle then
+                local ufEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Fade Unhealable Units"], db, "fadeUnhealableEnabled", function()
+                    tools2.refreshStates()
+                    apply()
+                end), 30)
+                ufEnable.keepEnabled = true
+                ufEnable.tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."]
+            end
+            group.disableChildrenOn = function(d) return not d.fadeUnhealableEnabled end
+
+            local ufAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Unhealable)"], 0.1, 1.0, 0.05, db, "fadeUnhealableAlpha", apply, apply, true), 55)
+            ufAlpha.tooltip = L["How visible the frame stays while its unit cannot be healed."]
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Fade Color"], db, "fadeUnhealableColor", false, apply, apply, true), 35)
+        end
+
+        if classicLayout then
+            AddSpace(GUI.Space.block, 2)
+            local ufGroup = GUI:CreateSettingsGroup(self.child, 280)
+            ufGroup:AddWidget(GUI:CreateHeader(self.child, L["Unhealable Fading"]), 40)
+            BuildUnhealableFadeGroup({
+                group = ufGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(ufGroup, nil, 2)
+        else
+            local function UnhealableFadeSummary(d)
+                if not d then return "" end
+                local a = tonumber(d.fadeUnhealableAlpha)
+                return a and format("%s %.2f", L["Alpha"], a) or ""
+            end
+
+            local band = OpenSection(L["Unhealable Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
+                BuildUnhealableFadeGroup, {
+                    db = db, key = "fadeUnhealableEnabled", label = L["Fade Unhealable Units"],
+                    tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."],
+                    onChanged = function()
+                        self:RefreshStates()
+                        DF:RefreshUnhealableFade()
+                        tools.ReflowMounted()
+                    end,
+                })
+            BuildUnhealableFadeGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
                 hoistToggle = true,

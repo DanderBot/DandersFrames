@@ -310,25 +310,25 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading",
-       "order: the four cards open in reading order")
+       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading | Unhealable Fading",
+       "order: the five cards open in reading order")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
-    eq(hoists, 3, "ticks: three mounts skip their in-body toggle -- one checkbox per setting")
+    eq(hoists, 4, "ticks: four mounts skip their in-body toggle -- one checkbox per setting")
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, spanning both columns")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
     local firstAt = PAGE:find('OpenSection(L["Out of Range"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    check(PAGE:find('Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
-          "page: the copy button's prefix list is exactly what it was")
+    check(PAGE:find('Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
+          "page: the copy button's prefix list, unhealable fading included")
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 3, "classic: three bare 280 boxes, all the classic branch's own")
+    eq(bare, 4, "classic: four bare 280 boxes, all the classic branch's own")
     local spacer = 0
     for _ in PAGE:gmatch("AddSpace%(GUI%.Space%.block, 2%)") do spacer = spacer + 1 end
-    eq(spacer, 1, "classic: the column-2 spacer is declared once, inside the classic arm")
+    eq(spacer, 2, "classic: one column-2 spacer per stacked box, inside the classic arms")
 
     -- Every string the page asks for ships in enUS. ONE is new with this
     -- conversion: the second card's title, "Element-Specific Alpha".
