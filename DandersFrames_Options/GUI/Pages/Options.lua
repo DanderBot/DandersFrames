@@ -3008,6 +3008,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ), 30)
             disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
 
+            local playerRaidOnlyCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Only in a Raid Group"],
+                nil, nil,
+                function() DF:UpdateDefaultPlayerFrame() end,
+                makeBlizGet("hideDefaultPlayerFrameRaidOnly"),
+                makeBlizSet("hideDefaultPlayerFrameRaidOnly", function() DF:UpdateDefaultPlayerFrame() end),
+                "hideDefaultPlayerFrameRaidOnly"
+            ), 30)
+            playerRaidOnlyCheck.disableOn = function()
+                local p = DF.db.party
+                return not (p and p.hideDefaultPlayerFrame)
+            end
+            playerRaidOnlyCheck.tooltip = L["Hides the Blizzard player frame only while you are in a raid group. In a party or solo it shows as normal."]
+
             -- Visual divider to separate the related sub-option (Show Side Menu only
             -- applies once a Blizzard frame is disabled).
             group:AddWidget(GUI:CreateSeparator(parent), 14)
@@ -3064,7 +3078,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 local hidden = {}
                 if p.hideBlizzardPartyFrames then hidden[#hidden + 1] = L["Party"] end
                 if p.hideBlizzardRaidFrames  then hidden[#hidden + 1] = L["Raid"] end
-                if p.hideDefaultPlayerFrame  then hidden[#hidden + 1] = L["Player"] end
+                if p.hideDefaultPlayerFrame  then
+                    hidden[#hidden + 1] = p.hideDefaultPlayerFrameRaidOnly and L["Player (in raid)"] or L["Player"]
+                end
                 if #hidden == 0 then return L["Shown"] end
                 local text = format(L["%s hidden"], table.concat(hidden, " \194\183 "))
                 if not p.showBlizzardSideMenu and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames) then

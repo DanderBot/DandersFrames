@@ -8299,6 +8299,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
         end
 
+        if DF.pendingPlayerFrameUpdate then
+            DF.pendingPlayerFrameUpdate = nil
+            DF:UpdateDefaultPlayerFrame()
+        end
+
         -- Pet work the lockdown blocked, on any track. Two flags rather than one
         -- because they cost differently: a visibility replay only needs the show/hide
         -- pass re-run, while a position replay re-parents and re-anchors every pet
@@ -9074,13 +9079,27 @@ end
 -- ========================================
 -- Hide/Show Default Player Frame
 -- ========================================
-function DF:UpdateDefaultPlayerFrame()
+-- Read from the party table on purpose: the setting is global (written to both modes) and
+-- a raid auto layout can never override it, so there is one answer however the group is
+-- shaped. "Only in a raid group" is that global choice, not a per-layout one.
+function DF:ShouldHideDefaultPlayerFrame()
     local db = DF:GetDB()
-    if not db then return end
-    
-    -- Hide default player frame when the option is checked (independent of solo mode)
-    local shouldHide = db.hideDefaultPlayerFrame
-    
+    if not (db and db.hideDefaultPlayerFrame) then return false end
+    if db.hideDefaultPlayerFrameRaidOnly then return IsInRaid() and true or false end
+    return true
+end
+
+function DF:UpdateDefaultPlayerFrame()
+    if not DF:GetDB() then return end
+    -- PlayerFrame is protected: a change that lands in combat (joining a raid mid-fight)
+    -- waits for PLAYER_REGEN_ENABLED instead of being dropped.
+    if InCombatLockdown() then
+        DF.pendingPlayerFrameUpdate = true
+        return
+    end
+
+    local shouldHide = DF:ShouldHideDefaultPlayerFrame()
+
     if shouldHide then
         -- Hide the default player frame using the standard method
         if PlayerFrame and not InCombatLockdown() then
@@ -9089,8 +9108,7 @@ function DF:UpdateDefaultPlayerFrame()
             -- Use a hook to keep it hidden
             if not DF.playerFrameHooked then
                 hooksecurefunc(PlayerFrame, "Show", function(self)
-                    local db = DF:GetDB()
-                    if db and db.hideDefaultPlayerFrame then
+                    if DF:ShouldHideDefaultPlayerFrame() then
                         if not InCombatLockdown() then
                             self:Hide()
                         end

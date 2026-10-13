@@ -2048,6 +2048,7 @@ DF.PartyDefaults = {
     hideBlizzardPartyFrames = true,
     hideBlizzardRaidFrames = true,
     hideDefaultPlayerFrame = false,
+    hideDefaultPlayerFrameRaidOnly = false,
     hidePlayerFrame = false,
     showBlizzardSideMenu = true,
 

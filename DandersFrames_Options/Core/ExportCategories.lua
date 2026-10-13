@@ -55,6 +55,7 @@ DF.ExportCategories = {
         "growDirection",
         "growthAnchor",
         "hideDefaultPlayerFrame",
+        "hideDefaultPlayerFrameRaidOnly",
         "hidePlayerFrame",
         "locked",
         "pixelPerfect",

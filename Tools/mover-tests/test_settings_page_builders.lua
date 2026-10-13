@@ -168,6 +168,7 @@ local BLIZZARD_FRAMES = {
     { "checkbox",  "Disable Blizzard Party Frames", "DF.db.party.hideBlizzardPartyFrames", 30 },
     { "checkbox",  "Disable Blizzard Raid Frames",  "DF.db.party.hideBlizzardRaidFrames",  30 },
     { "checkbox",  "Hide Blizzard Player Frame",    "(none)",                              30 },
+    { "checkbox",  "Only in a Raid Group",          "(none)",                              30 },
     { "separator", "(none)",                        "(none)",                              14 },
     { "checkbox",  "Show Party/Raid Side Menu",     "DF.db.party.showBlizzardSideMenu",    30 },
 }
