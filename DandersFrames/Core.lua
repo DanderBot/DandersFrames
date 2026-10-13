@@ -4176,6 +4176,12 @@ function DF:MigrateContainerPositionRecords()
         if type(profile) == "table" and DF.PinnedFrames and DF.PinnedFrames.MigrateProfileRecords then
             DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
         end
+
+        -- Global settings captured as raid auto-layout overrides: runs every time for the
+        -- same reason, since an import can bring one back. See GLOBAL_KEYS (AutoProfiles).
+        if type(profile) == "table" and DF.StripGlobalLayoutOverrides then
+            DF:StripGlobalLayoutOverrides(profile)
+        end
     end
 
     -- Phase D tail: move what lives OUTSIDE the profiles across to the uid key format.
