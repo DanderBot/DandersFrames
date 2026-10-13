@@ -1960,6 +1960,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     -- the table but the preview ignores them: the canvas is standalone, not layered over a
     -- unit frame, so there is nothing for a z-order band to mean there.)
     local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(GetAuraDesignerDB())
+    -- A packed member renders as the group flow draws it: scale folded into its size and
+    -- text, because the flow runs the slot at scale 1 (see Factory memberView).
+    if flowParent and Factory.MemberView then
+        effectiveConfig = Factory:MemberView(effectiveConfig, defs)
+    end
     local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defs)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
@@ -2507,9 +2512,12 @@ local function ApplyMemberGroupFlows(mockFrame, flows)
             -- The group's LAYOUT AND STYLE, from the factory. The style is what carries the
             -- duration-strip reservation into the row stride (stripReservation reads
             -- config.style.bar); passing layout alone padded the canvas's rows differently
-            -- from live's for any group with a duration bar.
+            -- from live's for any group with a duration bar. Every packed member's cell
+            -- goes in too, shown or not, because live sizes its row cap from all of them.
+            local recStyles = {}
+            for i, m in ipairs(f.keys) do recStyles[i] = { style = m.style } end
             local cfg = Factory.BuildGroupFlowConfig
-                and Factory:BuildGroupFlowConfig(mockFrame, f.group)
+                and Factory:BuildGroupFlowConfig(mockFrame, f.group, nil, recStyles)
                 or { layout = Factory:BuildGroupLayout(f.group) }
             AC.FlowSlots(f.box, mockFrame, slots, n, cfg, pp)
         else

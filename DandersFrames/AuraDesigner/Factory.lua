@@ -3403,6 +3403,57 @@ function Factory:MemberSize(ind, defs)
     return math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24)
 end
 
+-- ☠ A PACKED MEMBER HAS NO SCALE OF ITS OWN. A loose placement renders inside a container
+-- SetScale'd by its scale; a member shares the group's one container, so the only places
+-- its scale can live are its cell size and its text. This view folds scale into exactly
+-- what SetScale would have grown (size, text scale, text offsets) and reports scale 1, so
+-- every builder that reads the member renders it at its scaled size. Border thickness stays
+-- in pixels. Read with the same caller baselines buildPlacedStyle uses (duration 1.2,
+-- stack offset 2/-2). Views are reused per indicator and refreshed in place: this runs on
+-- the per-aura-event sync path.
+local memberView
+do
+    local memberViews = setmetatable({}, { __mode = "k" })
+    function memberView(ind, defs)
+        local sc = tonumber(defOf(ind, "scale", defs, 1)) or 1
+        if sc == 1 then return ind end
+        local v = memberViews[ind]
+        if not v then
+            v = setmetatable({}, { __index = ind })
+            memberViews[ind] = v
+        end
+        v.scale         = 1
+        v.size          = math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24) * sc
+        v.durationScale = (tonumber(defOf(ind, "durationScale", defs, 1.2)) or 1.2) * sc
+        v.durationX     = (tonumber(defOf(ind, "durationX", defs, 0)) or 0) * sc
+        v.durationY     = (tonumber(defOf(ind, "durationY", defs, 0)) or 0) * sc
+        v.stackScale    = (tonumber(defOf(ind, "stackScale", defs, 1)) or 1) * sc
+        v.stackX        = (tonumber(defOf(ind, "stackX", defs, 2)) or 2) * sc
+        v.stackY        = (tonumber(defOf(ind, "stackY", defs, -2)) or -2) * sc
+        return v
+    end
+end
+
+-- The member as the group flow renders it (see memberView) — the canvas styles its packed
+-- slots from this so they match the live buttons.
+function Factory:MemberView(ind, defs)
+    return memberView(ind, defs)
+end
+
+-- ☠ THE ROW CAP IS A WIDTH, NOT A COUNT. The engine wraps when the running row width
+-- passes `wrap` cells of layout.size, so that size has to be the members' own cell or
+-- "Icons Per Row" counts wrong: members smaller than the group's fallback 24 fit an extra
+-- icon per row. The largest member is the cell, so uniform members wrap exactly at the
+-- setting and a mixed group never wraps before it.
+function Factory.MemberFlowCell(recs)
+    local cell
+    for _, r in ipairs(recs) do
+        local s = r.size or (r.style and r.style.layout and r.style.layout.size)
+        if s and (not cell or s > cell) then cell = s end
+    end
+    return cell
+end
+
 -- A member's PER-RECORD STYLE, in the shape recordGroupLayout reads (Frames/AuraContainer):
 -- layout.size gives the record its own cell, layoutIndex fixes its order in the flow. This
 -- is the same style buildMemberGroupConfig declares per record; the button half is omitted
@@ -3413,7 +3464,7 @@ end
 -- for a declared cell first (GetElementSize) and only measures the button when there is
 -- none. Stamp this on the slot as dfImpRecStyle and the shared flow does the rest.
 function Factory:MemberRecordStyle(ind, defs, memberIdx)
-    return { layout = { size = self:MemberSize(ind, defs) }, layoutIndex = memberIdx }
+    return { layout = { size = self:MemberSize(memberView(ind, defs), defs) }, layoutIndex = memberIdx }
 end
 
 -- The CONFIG a group's flow is laid out with: its layout AND its style.
@@ -3421,9 +3472,14 @@ end
 -- duration strip's height, and that reservation is folded into elementHeight — so a config
 -- carrying layout alone silently drops the padding live applies, and every row of a group
 -- with a duration bar sat tighter on the canvas than on the frame.
-function Factory:BuildGroupFlowConfig(frame, group, wrapDefault)
+-- records: a member group's packed record styles, so the row cap uses the members' own
+-- cell exactly as buildMemberGroupConfig does (memberFlowCell).
+function Factory:BuildGroupFlowConfig(frame, group, wrapDefault, records)
+    local layout = buildFilterGroupLayout(group, wrapDefault)
+    local cell = records and Factory.MemberFlowCell(records)
+    if cell then layout.size = cell end
     return {
-        layout = buildFilterGroupLayout(group, wrapDefault),
+        layout = layout,
         style  = buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
     }
 end
@@ -3577,6 +3633,8 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             },
         }
     end
+    local layout = buildFilterGroupLayout(group)
+    layout.size = Factory.MemberFlowCell(recs) or layout.size
     return {
         unit = frame.unit,
         mode = "row",
@@ -3594,7 +3652,7 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
         tooltips = adTooltipsOn(frame, "tooltipADIndicatorsEnabled"),
         adBorderAnim = true,
         frameLevelOffset = (defs and defs.level) or 40,
-        layout = buildFilterGroupLayout(group),
+        layout = layout,
         style = buildFilterGroupStyle(group, borderSpec),
     }
 end
@@ -4952,6 +5010,7 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
             local map = ids and ids.includeSpellIDs
             if map then
+                ind = memberView(ind, defs)
                 local isSquare = ind.type == "square"
                 local borderOn = placedBorderOn(ind, ind.hideIcon)
                 recs = recs or {}
