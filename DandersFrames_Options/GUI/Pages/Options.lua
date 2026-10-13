@@ -2998,6 +2998,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ), 30)
             disableRaidCheck.tooltip = L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."]
 
+            -- Sets the player tick and its raid-only sub-option apart from the two above.
+            group:AddWidget(GUI:CreateSeparator(parent), 14)
+
             local disablePlayerCheck = group:AddWidget(GUI:CreateCheckbox(
                 parent, L["Hide Blizzard Player Frame"],
                 nil, nil,
