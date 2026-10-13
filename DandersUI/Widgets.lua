@@ -6,10 +6,9 @@ local S = UI._state
 local P = UI._priv
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       UI.Colors.panel, UI.Colors.element, UI.Colors.border, UI.Colors.hover, UI.Colors.text, UI.Colors.textDim
--- The amber notice token, and the ONLY colour the modified-default dot wears.
--- Deliberately not UI.OVERRIDE_MARKER_COLOR (the auto-profile star's gold) and
--- not the accent: three markers in one hue would be three things saying the
--- same thing, and they do not mean the same thing. See AddModifiedDot.
+-- The amber notice token: the changed dot's colour for a changed default. An
+-- auto-layout override wears the tab accent instead, so the two never read as
+-- one marker. See AddModifiedDot.
 local C_NOTICE = UI.Colors.notice
 local SnapLen = UI.SnapLen
 local SnapHeightEven = UI.SnapHeightEven
@@ -4074,8 +4073,15 @@ local HINT_STEP = 2
 local shrunkLines = {}
 local function RestoreShrunkLines()
     for fs, s in pairs(shrunkLines) do
-        if s.obj then fs:SetFontObject(s.obj) end
-        fs:SetFont(s.file, s.size, s.flags)
+        -- Only pin the face when the object alone does not bring it back: a pinned
+        -- shared line stops following later changes to its font object.
+        local restored = false
+        if s.obj then
+            fs:SetFontObject(s.obj)
+            local file, size, flags = fs:GetFont()
+            restored = file == s.file and size == s.size and (flags or "") == (s.flags or "")
+        end
+        if not restored then fs:SetFont(s.file, s.size, s.flags) end
         shrunkLines[fs] = nil
     end
 end

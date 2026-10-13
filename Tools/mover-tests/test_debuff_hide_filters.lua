@@ -163,6 +163,72 @@ do
         mig(s, true)
         check(s.dispellable == true and s.dispellableMode == "PLAYER" and s.raid == nil,
               "raid migration: an Aura Designer group's selection moves the same way")
+        t = { debuffFilterRaid = true, debuffHideRaid = true, directDebuffDispellableMode = "ALL" }
+        mig(t)
+        check(t.debuffHideDispellable == true and not t.debuffFilterDispellable
+              and t.directDebuffDispellableMode == "PLAYER",
+              "raid migration: Show and Hide both ticked was Hide, and stays Hide")
+    end
+end
+
+-- ---- raid auto-layout overrides keep what they meant -------------------------------------
+do
+    local a2 = src:find("function DF:MigrateRaidDebuffRow", 1, true)
+    local a3 = src:find("function DF:MigrateRaidDebuffOverrides", 1, true)
+    local b3 = a3 and src:find("\nend\n", a3, true)
+    local migOv = a2 and b3 and assert(loadstring("local DF = {}\n" .. src:sub(a2, b3 + 4)
+        .. "\nreturn function(base, auto) DF:MigrateRaidDebuffOverrides(base, auto); DF:MigrateRaidDebuffRow(base) end"))()
+    check(migOv ~= nil, "raid override migration: lifted")
+    if migOv then
+        local function layout(ov) return { profiles = { { overrides = ov } } } end
+        -- Base had Raid on, the layout switched it off: the layout must not inherit By Me.
+        local base = { debuffFilterRaid = true, debuffFilterDispellable = false, debuffHideRaid = false,
+                       debuffHideDispellable = false, directDebuffDispellableMode = "ALL" }
+        local ov = { debuffFilterRaid = false }
+        migOv(base, { instanced = layout(ov) })
+        check(base.debuffFilterDispellable == true and base.directDebuffDispellableMode == "PLAYER",
+              "raid override migration: the base moves to By Me")
+        check(ov.debuffFilterDispellable == false and ov.debuffFilterRaid == nil,
+              "raid override migration: a layout that had Raid off keeps Dispellable off")
+        -- Base without Raid, the layout ticked it: the layout gets By Me, the base nothing.
+        base = { debuffFilterRaid = false, debuffFilterDispellable = false, debuffHideRaid = false,
+                 debuffHideDispellable = false, directDebuffDispellableMode = "ALL" }
+        ov = { debuffFilterRaid = true }
+        migOv(base, { openWorld = layout(ov) })
+        check(base.debuffFilterDispellable == false and base.directDebuffDispellableMode == "ALL",
+              "raid override migration: an untouched base stays untouched")
+        check(ov.debuffFilterDispellable == true and ov.directDebuffDispellableMode == "PLAYER"
+              and ov.debuffFilterRaid == nil,
+              "raid override migration: a layout's own Raid tick becomes its own By Me")
+        -- Nothing Raid anywhere: the override table is left exactly as it was.
+        base = { debuffFilterRaid = false, debuffHideRaid = false, directDebuffDispellableMode = "ALL" }
+        ov = { debuffFilterBoss = true }
+        migOv(base, { mythic = { profile = { overrides = ov } } })
+        local n = 0
+        for _ in pairs(ov) do n = n + 1 end
+        check(n == 1 and ov.debuffFilterBoss == true, "raid override migration: no Raid, no change")
+    end
+end
+
+-- ---- the Max Debuffs ceiling counts the records a claim adds -----------------------------
+do
+    local a4 = src:find("local GROUP_COUNT_CLAIMS", 1, true)
+    local b4 = a4 and src:find("\nend\n", a4, true)
+    local groupCount = a4 and b4 and assert(loadstring("local DF = {}\nlocal BuildDirectDebuffFilters = ...\n"
+        .. src:sub(a4, b4 + 4) .. "\nreturn function(d) return DF:GetDebuffRowGroupCount(d) end"))(build)
+    check(groupCount ~= nil, "group count: lifted")
+    if groupCount then
+        local d = db({ directDebuffShowAll = true })
+        local most = 1
+        for _, c in ipairs({ false, { dispellable = true } }) do
+            for _, so in ipairs({ false, true }) do
+                local r = build(d, c or nil, so)
+                if r and #r > most then most = #r end
+            end
+        end
+        local plain = build(d, nil) or {}
+        check(groupCount(d) == most, "group count: the ceiling is the largest build, claims included")
+        check(groupCount(d) >= #plain, "group count: never below the unclaimed build")
     end
 end
 

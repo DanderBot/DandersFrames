@@ -640,21 +640,62 @@ function DF:MigrateRaidDebuffRow(t, sel)
     local modeKey = sel and "dispellableMode" or "directDebuffDispellableMode"
     local cleared = false          -- the bar keeps the key at its default; a group drops it
     if sel then cleared = nil end
-    if t[showRaid] == true then
-        -- A Hide on Dispellable already removed everything this row added.
-        if not t[showDisp] and not t[hideDisp] then
-            t[showDisp] = true
-            t[modeKey] = "PLAYER"
-        end
-        t[showRaid] = cleared
+    local showR, hideR = t[showRaid] == true, t[hideRaid] == true
+    if not (showR or hideR) then return end
+    -- A tick already on the Dispellable row wins: a Hide there already removed
+    -- everything this row added. Both Raid boxes ticked meant Hide, since Hide holds.
+    if not t[showDisp] and not t[hideDisp] then
+        if hideR then t[hideDisp] = true else t[showDisp] = true end
+        t[modeKey] = "PLAYER"
     end
-    if t[hideRaid] == true then
-        if not t[showDisp] and not t[hideDisp] then
-            t[hideDisp] = true
-            t[modeKey] = "PLAYER"
+    if showR then t[showRaid] = cleared end
+    if hideR then t[hideRaid] = cleared end
+end
+
+-- The same move for raid auto-layout overrides. An override only holds what differs
+-- from the base, so migrating it alone is wrong both ways: a layout overriding Raid
+-- off on a base with Raid on would inherit the base's new Dispellable tick. Each
+-- layout's effective row is migrated against the base's own result instead, and the
+-- override keeps whatever still differs. ⚠ Must run BEFORE the base is migrated.
+local RAID_ROW_KEYS = {
+    "debuffFilterRaid", "debuffHideRaid", "debuffFilterDispellable",
+    "debuffHideDispellable", "directDebuffDispellableMode",
+}
+function DF:MigrateRaidDebuffOverrides(baseDb, autoDb)
+    if type(baseDb) ~= "table" or type(autoDb) ~= "table" then return end
+    local function snapshot(ov)
+        local s = {}
+        for _, k in ipairs(RAID_ROW_KEYS) do
+            local v = baseDb[k]
+            if ov and ov[k] ~= nil then v = ov[k] end
+            s[k] = v
         end
-        t[hideRaid] = cleared
+        return s
     end
+    local baseAfter = snapshot(nil)
+    DF:MigrateRaidDebuffRow(baseAfter)
+    local function migrateLayout(layout)
+        local ov = layout and layout.overrides
+        if type(ov) ~= "table" then return end
+        if ov.debuffFilterRaid == nil and ov.debuffHideRaid == nil
+            and baseDb.debuffFilterRaid ~= true and baseDb.debuffHideRaid ~= true then
+            return
+        end
+        local eff = snapshot(ov)
+        DF:MigrateRaidDebuffRow(eff)
+        for _, k in ipairs(RAID_ROW_KEYS) do
+            if eff[k] ~= baseAfter[k] or ov[k] ~= nil then ov[k] = eff[k] end
+        end
+        -- The row is gone; the base's cleared value is what a layout inherits.
+        ov.debuffFilterRaid, ov.debuffHideRaid = nil, nil
+    end
+    for _, ctKey in ipairs({ "instanced", "openWorld" }) do
+        local ct = autoDb[ctKey]
+        if type(ct) == "table" and type(ct.profiles) == "table" then
+            for _, layout in pairs(ct.profiles) do migrateLayout(layout) end
+        end
+    end
+    if type(autoDb.mythic) == "table" then migrateLayout(autoDb.mythic.profile) end
 end
 
 -- Whether a frame showing `unit` gets the racial (self-only) gap: the player is a Dwarf
@@ -1847,14 +1888,21 @@ end
 -- split to honour the cap silently deletes the highlight. Krathe's call, 2026-09-02:
 -- never lose debuffs or functionality — SAY SO INSTEAD.
 --
--- Claims are deliberately NOT passed: an Aura Designer claim only ever REMOVES records,
--- so ignoring them yields the worst case, which is what a ceiling should report. Nil
--- records mean the show-all fallback, which is a single group.
+-- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
+-- those gets an uncleansable twin. So the ceiling is the larger of the unclaimed and
+-- By Me-claimed builds, each with and without the racial self gap. Nil records mean
+-- the show-all fallback, which is a single group.
+local GROUP_COUNT_CLAIMS = { false, { dispellable = true } }
 function DF:GetDebuffRowGroupCount(dbLike)
     if not dbLike then return 1 end
-    local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, nil)
-    if not ok or type(recs) ~= "table" then return 1 end
-    return math.max(1, #recs)
+    local most = 1
+    for _, claimed in ipairs(GROUP_COUNT_CLAIMS) do
+        for _, selfOnly in ipairs({ false, true }) do
+            local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, claimed or nil, selfOnly)
+            if ok and type(recs) == "table" and #recs > most then most = #recs end
+        end
+    end
+    return most
 end
 
 -- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)

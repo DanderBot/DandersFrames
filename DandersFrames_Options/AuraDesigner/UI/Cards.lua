@@ -2484,9 +2484,9 @@ local function BuildGlobalView(parent)
             local lbl = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
             lbl:SetPoint("TOPLEFT", 8, 0)
             if isCompat then
-                lbl:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\check:12:12|t  " .. item[2])
+                lbl:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\check.png:12:12|t  " .. item[2])
             else
-                lbl:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\close:12:12|t  " .. item[2])
+                lbl:SetText("|TInterface\\AddOns\\DandersFrames\\Media\\Icons\\close.png:12:12|t  " .. item[2])
             end
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             g:AddWidget(row, 16)

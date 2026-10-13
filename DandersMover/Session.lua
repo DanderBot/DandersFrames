@@ -128,19 +128,28 @@ end
 function Sess:Lock()
     if not self.active then return end
     if not self.dirty then self:Finish("save") return end
+    -- The popup frame is shared with the host addon, so remember that this prompt is
+    -- ours: Finish and Escape close only it, never a dialog someone else opened.
+    self.promptOpen = true
     NS.UI:ShowPopupAlert({
         title   = L["Unsaved changes"],
         message = L["You have unsaved mover changes."],
         buttons = {
-            { label = L["Save"],    onClick = function() Sess:Finish("save") end },
-            { label = L["Cancel"] },
-            { label = L["Discard"], onClick = function() Sess:Finish("discard") end },
+            { label = L["Save"],    onClick = function() Sess.promptOpen = nil; Sess:Finish("save") end },
+            { label = L["Cancel"],  onClick = function() Sess.promptOpen = nil end },
+            { label = L["Discard"], onClick = function() Sess.promptOpen = nil; Sess:Finish("discard") end },
         },
     })
 end
 
 function Sess:Finish(mode)
     if not self.active then return end
+    -- Saved or discarded from the strip or panel while the prompt is up: close it, or
+    -- its buttons would act on whatever session is running when they are clicked.
+    if self.promptOpen then
+        self.promptOpen = nil
+        NS.UI:DismissPopup()
+    end
     local tTotal = perfStart()
     if mode == "discard" then
         for id, snap in pairs(self.snapshots) do
@@ -717,7 +726,8 @@ function Sess:EnableKeyboard(on)
             -- surprise -- and with the overlay no longer taking clicks, this is
             -- the only way to deselect. The exit prompt, when it is up, is the
             -- innermost of all: Escape closes it as Cancel would.
-            if NS.UI:DismissPopup() then -- closed the prompt
+            if NS.UI:DismissPopup() then -- closed the prompt (or any dialog on top)
+                Sess.promptOpen = nil
             elseif Sess.linking then Sess:CancelLink()
             elseif Sess.selected then Sess:Select(nil)
             else Sess:Lock() end

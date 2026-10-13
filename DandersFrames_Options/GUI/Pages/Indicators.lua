@@ -1406,9 +1406,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 { label = L["Text"], col = 1, keys = {
                     "buffs_duration", "buffs_stack",
                 } },
+                -- Its only card hides without the factory row, so the heading must too.
                 { label = L["Effects"], col = 1, keys = {
                     "buffs_pandemic",
-                } },
+                }, hideOn = function(d) return not DF:FactoryOwnsBuffRow(d) end },
             })
         end
 
@@ -1542,12 +1543,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { key = "debuffFilterRole",         name = "Role Debuffs",        desc = "Debuffs Blizzard flags as important for your role." },
             { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
             { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
-            -- ⚠ Inserted BEFORE Dispellable, not appended: the entry below claims the
-            -- dispel-mode dropdown is "just below", which is only true while it is the
-            -- last row in this group.
             { key = "debuffFilterNonPlayer",    name = "Non-Player Debuffs",  desc = "Debuffs applied by enemies and the environment, never by a player or their pet. Use it to keep boss and trash effects while dropping player-cast clutter such as Sated or Forbearance." },
-            -- ⚠ "just below" stays true on this page: the dispel-mode dropdown
-            -- is the next widget in this same group.
+            -- "Set just below": the dispel-mode dropdown is added right after this row.
             { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },
             { key = "debuffFilterImportant",        name = "Important",                 desc = "Debuffs Blizzard flags as important (its IMPORTANT filter). Not the same set as the Highlight card, which marks boss, role and priority debuffs." },
             { key = "debuffFilterRaidInCombat",     name = "Raid In Combat",            desc = "Debuffs Blizzard flags to show on raid frames in combat." },
@@ -1562,6 +1559,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Every Hide-column key, for the summary's count. Each maps to a filter
         -- Blizzard applies on every unit (DebuffHideSpec in Features/Auras.lua), so
         -- these hold on friendly frames too.
+        local DEBUFF_TYPE_SHOW_KEYS = {
+            debuffFilterMagic = true, debuffFilterCurse = true, debuffFilterPoison = true,
+            debuffFilterDisease = true, debuffFilterBleed = true,
+        }
         local DEBUFF_HIDES = {
             { key = "debuffHideBoss" },
             { key = "debuffHideRole" },
@@ -1804,6 +1805,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools2.refreshStates()
                 DebuffFilterChanged()
             end
+            -- The Raid row is gone (it was Dispellable By Me). The login sweep moves saved
+            -- ticks, but an import since then can bring one back with no row to clear it.
+            if DF.MigrateRaidDebuffRow and (db.debuffFilterRaid == true or db.debuffHideRaid == true) then
+                DF:MigrateRaidDebuffRow(db)
+            end
 
             group:AddWidget(GUI:CreateLabel(parent,
                 "|cff888888" .. L["These categories are Blizzard's and cannot be edited."] .. "|r", 250), 35)
@@ -1863,7 +1869,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(catCaution, catCaution.layoutHeight or 45)
 
             -- With All Debuffs as the base every category already shows, so only the
-            -- Show segment greys; Hide still applies.
+            -- Show box is hidden; Hide still applies.
             -- Which dispels count: a sub-option of the Dispellable row.
             -- ⚠ BOTH its gates live in this group now, so unlike its previous home it
             -- can never be greyed with nothing on the page able to lift it.
@@ -1883,7 +1889,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 db.directDebuffDispellableMode = "ALL"
             end
             -- Two columns: Show adds a category, Hide takes it away, in either
-            -- base; ticking both hides it. With All Debuffs everything already shows,
+            -- base; the two boxes are either-or. With All Debuffs everything already shows,
             -- so the Show column is hidden.
             local function InAll(d) return d.directDebuffShowAll and true or false end
             local function AllDispelShown(d)
@@ -1942,9 +1948,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if d.directDebuffShowAll then
                 parts[#parts + 1] = L["All Debuffs"]
             else
+                -- A Dispel Type Show box is hidden while Dispellable is shown as All, so a
+                -- tick left in it does nothing and is not counted.
+                local m = d.directDebuffDispellableMode
+                local typesMoot = d.debuffFilterDispellable and (m == "ALL" or m == "ANY")
                 local on = 0
                 for _, cat in ipairs(DEBUFF_CATEGORIES) do
-                    if d[cat.key] then on = on + 1 end
+                    if d[cat.key] and not (typesMoot and DEBUFF_TYPE_SHOW_KEYS[cat.key]) then
+                        on = on + 1
+                    end
                 end
                 parts[#parts + 1] = format("%d/%d", on, #DEBUFF_CATEGORIES)
             end
@@ -1952,6 +1964,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             for _, h in ipairs(DEBUFF_HIDES) do
                 if d[h.key] then hidden = hidden + 1 end
             end
+            -- Hide Permanent is inert under Hide Long, which already drops permanents.
+            if d.debuffHidePermanent and not d.debuffMaxDurationEnabled then hidden = hidden + 1 end
             if hidden > 0 then parts[#parts + 1] = format(L["Hiding %d"], hidden) end
             return Join(parts)
         end

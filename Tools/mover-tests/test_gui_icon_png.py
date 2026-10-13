@@ -31,9 +31,22 @@ def check(cond, msg):
 
 print("-- GUI icons: 64x64 PNG files, and every reference names a real .png")
 
+KIT_LEGACY_TGA = {
+    "check", "chevron_left", "chevron_right", "close", "content_copy", "dot",
+    "expand_less", "expand_more", "info", "notch", "pin", "refresh", "search",
+    "settings", "warning",
+}
 names = {}
 for d, tag in ((DF_DIR, "df"), (KIT_DIR, "kit")):
-    check(not list(d.glob("*.tga")), "files: no TGA left in %s" % d.relative_to(ROOT))
+    # The kit keeps the TGAs it shipped before the PNG switch, beside their PNGs: other
+    # addons embed older kit copies whose own code still asks for them by extensionless
+    # path, and when DandersFrames' newer kit wins LibStub, UI.MEDIA points here.
+    allowed = KIT_LEGACY_TGA if tag == "kit" else set()
+    tgas = {p.stem for p in d.glob("*.tga")}
+    check(tgas <= allowed, "files: no TGA left in %s (beyond the legacy kit set): %s"
+          % (d.relative_to(ROOT), sorted(tgas - allowed)))
+    for stem in tgas & allowed:
+        check((d / (stem + ".png")).exists(), "files: legacy %s.tga has its .png" % stem)
     for p in d.glob("*.png"):
         data = p.read_bytes()
         w, h, depth, ctype = struct.unpack(">IIBB", data[16:26])
