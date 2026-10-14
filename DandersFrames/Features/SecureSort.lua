@@ -116,6 +116,28 @@ SecureSort.specCache = {}
 -- Queue for players who need inspection
 SecureSort.inspectQueue = {}
 SecureSort.inspectInProgress = false
+SecureSort.inspectAttempts = {}   -- guid -> requests sent without an answer
+
+-- ☠ THE CLIENT HOLDS ONE INSPECT TARGET, and Blizzard's inspect UI owns it from the moment
+-- it asks until its window hides: InspectFrame_Show sets InspectFrame.unit and calls
+-- NotifyInspect at once, the window only SHOWS on INSPECT_READY, and its OnHide clears
+-- .unit and calls ClearInspectPlayer. So IsShown() is false for the whole load, and a
+-- NotifyInspect or ClearInspectPlayer of ours in that window empties the gear the user
+-- is waiting for. The talent frame's inspect mode owns it the same way (Blizzard's own
+-- OnHide checks it before clearing).
+local function InspectUIBusy()
+    if InspectFrame and (InspectFrame.unit ~= nil or InspectFrame:IsShown()) then return true end
+    if PlayerSpellsFrame and PlayerSpellsFrame.IsInspecting and PlayerSpellsFrame:IsInspecting() then
+        return true
+    end
+    return false
+end
+
+-- An answer can be lost -- the user's own inspect supersedes ours, or the server drops it
+-- -- and only an answer moves the queue on, so a request gives up after this long. A unit
+-- that never answers is dropped after a few tries rather than re-asked forever.
+local INSPECT_TIMEOUT = 5
+local INSPECT_MAX_ATTEMPTS = 3
 
 -- A unit's GUID can be a SECRET value in 12.0 (e.g. M+ encounters) and a secret
 -- cannot be used as a table key — doing so throws "cannot be indexed with secret
@@ -252,18 +274,34 @@ function SecureSort:ProcessInspectQueue()
         return
     end
     
-    -- Check if InspectFrame is open (don't interfere with player inspection)
-    if InspectFrame and InspectFrame:IsShown() then
+    -- Never while the user's own inspect is loading or open (see InspectUIBusy).
+    if InspectUIBusy() then
         C_Timer.After(2, function() self:ProcessInspectQueue() end)
         return
     end
-    
+
+    local attempts = (self.inspectAttempts[guid] or 0) + 1
+    if attempts > INSPECT_MAX_ATTEMPTS then
+        self.inspectQueue[guid] = nil
+        self.inspectAttempts[guid] = nil
+        C_Timer.After(0.1, function() self:ProcessInspectQueue() end)
+        return
+    end
+    self.inspectAttempts[guid] = attempts
+
     self.inspectInProgress = true
-    
-    -- Request inspection
+    -- Each request carries a token; the answer or the timeout spends it, whichever is first.
+    local token = (self.inspectToken or 0) + 1
+    self.inspectToken = token
+
     NotifyInspect(unit)
-    
-    -- Wait for result (handled by INSPECT_READY event)
+
+    -- The answer arrives as INSPECT_READY (OnInspectReady).
+    C_Timer.After(INSPECT_TIMEOUT, function()
+        if self.inspectToken ~= token then return end
+        self.inspectToken = token + 1
+        self:ProcessInspectQueue()
+    end)
 end
 
 -- Debounce party-sort re-runs driven by inspect results. Inspects arrive roughly
@@ -295,12 +333,17 @@ function SecureSort:OnInspectReady(guid)
         return
     end
     
+    -- Answered: spend the request's token so its timeout stands down.
+    self.inspectToken = (self.inspectToken or 0) + 1
+
     -- Process our queued inspect. Same live-GUID secrecy guard as
     -- ProcessInspectQueue: comparing a secret value throws.
+    local gotSpec = false
     local liveGuid = UnitGUID(unit)
     if UnitExists(unit) and canaccessvalue(liveGuid) and liveGuid == guid then
         local specID = GetInspectSpecialization(unit)
         if specID and specID > 0 then
+            gotSpec = true
             self:CacheUnitSpec(unit, specID)
             
             -- Re-sort with the updated spec data if not in combat
@@ -337,12 +380,26 @@ function SecureSort:OnInspectReady(guid)
         end
     end
     
+    -- ☠ NEVER CLEAR WHILE THE USER'S INSPECT OWNS THE TARGET. This GUID can be one the user
+    -- just inspected themselves (it is in our queue too), and clearing then empties the
+    -- window it is about to fill. Keep what was read, leave the GUID queued if nothing was,
+    -- and let Blizzard's own OnHide do the clear.
+    if InspectUIBusy() then
+        if gotSpec then
+            self.inspectQueue[guid] = nil
+            self.inspectAttempts[guid] = nil
+        end
+        C_Timer.After(0.5, function() self:ProcessInspectQueue() end)
+        return
+    end
+
     -- Remove from queue (only our inspects reach here)
     self.inspectQueue[guid] = nil
-    
-    -- Clear inspection (safe because this was our inspect)
+    self.inspectAttempts[guid] = nil
+
+    -- Clear inspection (safe: this was our inspect and nothing else holds the target)
     ClearInspectPlayer()
-    
+
     -- Process next in queue after a delay
     C_Timer.After(0.5, function() self:ProcessInspectQueue() end)
 end
@@ -353,6 +410,7 @@ function SecureSort:ScanGroupForSpecs()
     
     -- Clear old queue
     wipe(self.inspectQueue)
+    wipe(self.inspectAttempts)
     
     -- Cache player's own spec
     local playerSpecID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 0)
