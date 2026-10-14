@@ -1914,6 +1914,7 @@ end
 -- RE-SYNC verb.
 local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
     local chips = {}
+    local SyncActive
     for _, chip in ipairs(TextFilterChips()) do
         local c = CreateFrame("Button", nil, host, "BackdropTemplate")
         local fs = c:CreateFontString(nil, "OVERLAY")
@@ -1928,6 +1929,7 @@ local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
         c.fs = fs
         c:SetScript("OnClick", function(self)
             state.activeFilter = self.key
+            SyncActive()
             -- NOT FullRebuildCards: a filter chip changes what is listed, not
             -- what any frame renders, so it must not drag every live frame
             -- through a refresh.
@@ -1963,7 +1965,7 @@ local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
     -- is actually filtered. That is exactly what shipped on the Aura Designer's
     -- own filter panel (rework spec section 23). The opener calls this on every
     -- open.
-    local function SyncActive()
+    function SyncActive()
         local active = (state and state.activeFilter) or "_all"
         for k = 1, #chips do
             local c = chips[k]
