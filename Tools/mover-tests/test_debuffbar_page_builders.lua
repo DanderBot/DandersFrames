@@ -139,6 +139,9 @@ end
 
 -- The shared section helper and its two opt-ins, in the page tools.
 local TOOLS = CTRL:match("\nfunction GUI:CreatePopoutPageTools%(page%)(.-)\nend\n") or ""
+-- The two-track and quiet-caption helpers sit at file scope (published for the Aura
+-- Designer's own cards), between the threshold and their publication.
+local TWOTRACK = CTRL:match("\n(local SECTION_TWO_TRACK_MIN = .-\nGUI%.WireTwoTrack  = WireTwoTrack)") or ""
 local OPEN = (TOOLS:match("\n    local function OpenSection%(Add, .-\n    end\n") or ""):gsub("%s+", " ")
 local CLOSE = TOOLS:match("\n    local function CloseSection%(Add, band%)(.-)\n    end\n") or ""
 
@@ -664,9 +667,9 @@ do
           "opt-in: ...and the band's children are touched only on an opted-in band, after the builder filled it")
 
     -- ---- two per row: the kit's grid, the number chosen per pass --------
-    check(TOOLS:find("local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)", 1, true) ~= nil,
+    check(TWOTRACK:find("local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)", 1, true) ~= nil,
           "two tracks: a second track needs 160px per control plus the kit's own gutter")
-    local wire = TOOLS:match("local function WireTwoTrack%(band%)(.-)\n    end\n") or ""
+    local wire = TWOTRACK:match("local function WireTwoTrack%(band%)(.-)\nend\n") or ""
     check(wire:find("band.LayoutChildren = function(self)", 1, true) ~= nil
       and wire:find("local fits = inner >= SECTION_TWO_TRACK_MIN", 1, true) ~= nil
       and wire:find("self.innerColumns = fits and 2 or nil", 1, true) ~= nil
@@ -687,7 +690,7 @@ do
           "two tracks: All Debuffs heads the category list on a row of its own")
 
     -- ---- quiet captions ---------------------------------------------------
-    local quiet = TOOLS:match("local function QuietLabel%(fs%)(.-)\n    end\n") or ""
+    local quiet = TWOTRACK:match("local function QuietLabel%(fs%)(.-)\nend\n") or ""
     check(quiet:find("return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)", 1, true) ~= nil,
           "quiet: a live caption draws in the theme's caption tone")
     check(quiet:find("C_TEXT_DIM", 1, true) == nil and quiet:find("0.5", 1, true) == nil,
@@ -696,7 +699,7 @@ do
           "quiet: ...and any other colour passes straight through")
     check(quiet:find("SetFont", 1, true) == nil and quiet:find("upper", 1, true) == nil,
           "quiet: the font object is untouched and nothing is upper-cased")
-    local labels = TOOLS:match("local function QuietLabels%(band%)(.-)\n    end\n") or ""
+    local labels = TWOTRACK:match("local function QuietLabels%(band%)(.-)\nend\n") or ""
     check(labels:find('rawget(w, "rowKind") ~= "checkbox"', 1, true) ~= nil,
           "quiet: a checkbox's caption IS the control, so it keeps its colour")
     check(labels:find('rawget(w, "refreshValue") ~= nil', 1, true) ~= nil,

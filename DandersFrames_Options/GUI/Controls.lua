@@ -4540,6 +4540,190 @@ GUI.SectionKindByKey = {
 }
 
 -- ============================================================
+-- THE CARD BODY'S TWO TRACKS AND QUIET CAPTIONS (used by the page tools below)
+-- ============================================================
+-- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
+-- not chosen. Every factory in the kit was laid out against a 260 column; at
+-- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
+-- longest word on these pages ("Default (Slot Order)") still fits its opener,
+-- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
+-- Permanent Auras") still sits on one line. Below it they start to truncate.
+-- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
+local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+-- Published for the resize readout (Panel.lua), which predicts the card's
+-- track count mid-drag, before any layout pass has run.
+GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
+
+-- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
+-- sweep's one name, and every db-bound factory carries it (slider, dropdown
+-- and its texture/font/outline variants, checkbox, colour picker); prose,
+-- notes, banners, cross-links, buttons and the growth control do not. Those
+-- take a row of their own, or a wrapping blurb lands beside the control
+-- above it and a 155px growth block squeezes into half a card.
+local function StampFullRows(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
+            w.fullRow = true
+        end
+    end
+end
+
+-- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
+-- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
+-- 55px slider floated on the slider's label line with a hole under it --
+-- and the next row down then read as starting in two different places.
+-- Centring the shorter slot puts its box level with the slider's bar and
+-- value box, which is the line the eye actually compares. Done after the
+-- kit's pass and only on a two-track band, so no other group moves.
+local function CentreShortSlots(group)
+    local rows = {}
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        if w and w:IsShown() and not rawget(w, "fullRow") then
+            local _, _, _, _, y = w:GetPoint(1)
+            if y then
+                local r = rows[y]
+                if not r then r = { h = 0 }; rows[y] = r end
+                r[#r + 1] = entry
+                if (entry.height or 0) > r.h then r.h = entry.height or 0 end
+            end
+        end
+    end
+    for y, r in pairs(rows) do
+        if #r > 1 then
+            for _, entry in ipairs(r) do
+                local dy = math.floor((r.h - (entry.height or 0)) / 2)
+                if dy > 0 then
+                    local w = entry.widget
+                    local p, rel, rp, x = w:GetPoint(1)
+                    w:ClearAllPoints()
+                    w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
+                end
+            end
+        end
+    end
+end
+
+-- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
+-- folds to one column and back, and a resize-grip drag widens or narrows the
+-- card, without the page being rebuilt -- a rebuild would retire the whole
+-- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
+-- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
+-- only the NUMBER is chosen here, off the band's live width, right before
+-- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
+-- or more, one below it.
+--
+-- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
+-- measured against the Debuff Bar's captions; the Global Settings page has
+-- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
+-- caption ran under the checkbox beside it. A control that knows its one-line
+-- width says so (NaturalWidth), and a card holding one too wide for half of
+-- it stays one track. Hidden rows count too, so toggling one never flips the
+-- card's shape.
+local function WidestPairedRow(group)
+    local widest = 0
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        local natural = w and rawget(w, "NaturalWidth")
+        if natural and not rawget(w, "fullRow") then
+            local n = natural(w) or 0
+            if n > widest then widest = n end
+        end
+    end
+    return widest
+end
+
+local function WireTwoTrack(band)
+    band.dfTwoTrack = true
+    local layout = band.LayoutChildren
+    local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
+    band.LayoutChildren = function(self)
+        local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
+        local fits = inner >= SECTION_TWO_TRACK_MIN
+            and (inner - gap) / 2 >= WidestPairedRow(self)
+        self.innerColumns = fits and 2 or nil
+        local h = layout(self)
+        if self.innerColumns then CentreShortSlots(self) end
+        return h
+    end
+end
+
+-- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
+-- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
+-- DFFontHighlightSmall in the SAME colour, and one step of size was all that
+-- told the two apart. So on an opted-in band the caption takes the caption
+-- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
+-- value it labels (the slider's number, the dropdown's choice, the swatch)
+-- keeps its full brightness.
+-- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
+-- in it too the card read as greyed out while every control in it was on.
+--
+-- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
+-- repaints its caption in SetEnabled -- text when on, textDim when off -- on
+-- every state pass, so a one-off paint would be undone the first time the
+-- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
+-- and the "off" colour passes through as it is. Any other colour (an override
+-- marker's) passes straight through. No factory changes, and a caption on any
+-- other page is never touched.
+-- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
+-- whole widget to 0.4, so a second fade on the caption stacked differently per
+-- control and greyed some settings far more than their neighbours.
+--
+-- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
+-- repaint that passed the nil along would keep whatever alpha the caption had.
+--
+-- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
+-- one.
+local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
+local function QuietLabel(fs)
+    if not fs or rawget(fs, "_dfQuiet") then return end
+    fs._dfQuiet = true
+    local set = fs.SetTextColor
+    fs.SetTextColor = function(self, r, g, b, a)
+        if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
+            return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
+        end
+        return set(self, r, g, b, a or 1)
+    end
+    fs:SetTextColor(fs:GetTextColor())
+end
+
+-- A control's caption: the field the kit's slider and dropdown publish, else
+-- the first string the factory created (the texture and font dropdowns build
+-- theirs first and publish nothing), and on a colour picker the first string
+-- on its button, which is where that factory draws it.
+local function firstString(frame)
+    if not frame or not frame.GetRegions then return nil end
+    for _, r in ipairs({ frame:GetRegions() }) do
+        if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
+    end
+    return nil
+end
+local function CaptionOf(w)
+    local fs = rawget(w, "label")
+    if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
+    if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
+        return firstString((w:GetChildren()))
+    end
+    return firstString(w)
+end
+local function QuietLabels(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
+            QuietLabel(CaptionOf(w))
+        end
+    end
+end
+
+-- Published: any surface that stacks its own card bodies (the Aura Designer's
+-- indicator cards) flows them the same way a page's cards do.
+GUI.WireTwoTrack  = WireTwoTrack
+GUI.StampFullRows = StampFullRows
+GUI.QuietLabels   = QuietLabels
+
+-- ============================================================
 -- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
 -- ------------------------------------------------------------
 -- Everything a settings page needs to build its card sections. This is the
@@ -4961,181 +5145,6 @@ function GUI:CreatePopoutPageTools(page)
     --                GUI.SectionKindByKey[key] (above), never the title
     --   collapsed    the card starts SHUT on a first run (a page of many cards
     --                that reads best as a list of headers -- Icons)
-
-    -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
-    -- not chosen. Every factory in the kit was laid out against a 260 column; at
-    -- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
-    -- longest word on these pages ("Default (Slot Order)") still fits its opener,
-    -- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
-    -- Permanent Auras") still sits on one line. Below it they start to truncate.
-    -- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
-    local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
-    -- Published for the resize readout (Panel.lua), which predicts the card's
-    -- track count mid-drag, before any layout pass has run.
-    GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
-
-    -- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
-    -- sweep's one name, and every db-bound factory carries it (slider, dropdown
-    -- and its texture/font/outline variants, checkbox, colour picker); prose,
-    -- notes, banners, cross-links, buttons and the growth control do not. Those
-    -- take a row of their own, or a wrapping blurb lands beside the control
-    -- above it and a 155px growth block squeezes into half a card.
-    local function StampFullRows(band)
-        for _, entry in ipairs(band.groupChildren or {}) do
-            local w = entry.widget
-            if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
-                w.fullRow = true
-            end
-        end
-    end
-
-    -- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
-    -- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
-    -- 55px slider floated on the slider's label line with a hole under it --
-    -- and the next row down then read as starting in two different places.
-    -- Centring the shorter slot puts its box level with the slider's bar and
-    -- value box, which is the line the eye actually compares. Done after the
-    -- kit's pass and only on a two-track band, so no other group moves.
-    local function CentreShortSlots(group)
-        local rows = {}
-        for _, entry in ipairs(group.groupChildren or {}) do
-            local w = entry.widget
-            if w and w:IsShown() and not rawget(w, "fullRow") then
-                local _, _, _, _, y = w:GetPoint(1)
-                if y then
-                    local r = rows[y]
-                    if not r then r = { h = 0 }; rows[y] = r end
-                    r[#r + 1] = entry
-                    if (entry.height or 0) > r.h then r.h = entry.height or 0 end
-                end
-            end
-        end
-        for y, r in pairs(rows) do
-            if #r > 1 then
-                for _, entry in ipairs(r) do
-                    local dy = math.floor((r.h - (entry.height or 0)) / 2)
-                    if dy > 0 then
-                        local w = entry.widget
-                        local p, rel, rp, x = w:GetPoint(1)
-                        w:ClearAllPoints()
-                        w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
-                    end
-                end
-            end
-        end
-    end
-
-    -- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
-    -- folds to one column and back, and a resize-grip drag widens or narrows the
-    -- card, without the page being rebuilt -- a rebuild would retire the whole
-    -- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
-    -- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
-    -- only the NUMBER is chosen here, off the band's live width, right before
-    -- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
-    -- or more, one below it.
-    --
-    -- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
-    -- measured against the Debuff Bar's captions; the Global Settings page has
-    -- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
-    -- caption ran under the checkbox beside it. A control that knows its one-line
-    -- width says so (NaturalWidth), and a card holding one too wide for half of
-    -- it stays one track. Hidden rows count too, so toggling one never flips the
-    -- card's shape.
-    local function WidestPairedRow(group)
-        local widest = 0
-        for _, entry in ipairs(group.groupChildren or {}) do
-            local w = entry.widget
-            local natural = w and rawget(w, "NaturalWidth")
-            if natural and not rawget(w, "fullRow") then
-                local n = natural(w) or 0
-                if n > widest then widest = n end
-            end
-        end
-        return widest
-    end
-
-    local function WireTwoTrack(band)
-        band.dfTwoTrack = true
-        local layout = band.LayoutChildren
-        local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
-        band.LayoutChildren = function(self)
-            local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
-            local fits = inner >= SECTION_TWO_TRACK_MIN
-                and (inner - gap) / 2 >= WidestPairedRow(self)
-            self.innerColumns = fits and 2 or nil
-            local h = layout(self)
-            if self.innerColumns then CentreShortSlots(self) end
-            return h
-        end
-    end
-
-    -- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
-    -- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
-    -- DFFontHighlightSmall in the SAME colour, and one step of size was all that
-    -- told the two apart. So on an opted-in band the caption takes the caption
-    -- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
-    -- value it labels (the slider's number, the dropdown's choice, the swatch)
-    -- keeps its full brightness.
-    -- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
-    -- in it too the card read as greyed out while every control in it was on.
-    --
-    -- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
-    -- repaints its caption in SetEnabled -- text when on, textDim when off -- on
-    -- every state pass, so a one-off paint would be undone the first time the
-    -- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
-    -- and the "off" colour passes through as it is. Any other colour (an override
-    -- marker's) passes straight through. No factory changes, and a caption on any
-    -- other page is never touched.
-    -- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
-    -- whole widget to 0.4, so a second fade on the caption stacked differently per
-    -- control and greyed some settings far more than their neighbours.
-    --
-    -- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
-    -- repaint that passed the nil along would keep whatever alpha the caption had.
-    --
-    -- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
-    -- one.
-    local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
-    local function QuietLabel(fs)
-        if not fs or rawget(fs, "_dfQuiet") then return end
-        fs._dfQuiet = true
-        local set = fs.SetTextColor
-        fs.SetTextColor = function(self, r, g, b, a)
-            if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
-                return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
-            end
-            return set(self, r, g, b, a or 1)
-        end
-        fs:SetTextColor(fs:GetTextColor())
-    end
-
-    -- A control's caption: the field the kit's slider and dropdown publish, else
-    -- the first string the factory created (the texture and font dropdowns build
-    -- theirs first and publish nothing), and on a colour picker the first string
-    -- on its button, which is where that factory draws it.
-    local function firstString(frame)
-        if not frame or not frame.GetRegions then return nil end
-        for _, r in ipairs({ frame:GetRegions() }) do
-            if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
-        end
-        return nil
-    end
-    local function CaptionOf(w)
-        local fs = rawget(w, "label")
-        if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
-        if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
-            return firstString((w:GetChildren()))
-        end
-        return firstString(w)
-    end
-    local function QuietLabels(band)
-        for _, entry in ipairs(band.groupChildren or {}) do
-            local w = entry.widget
-            if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
-                QuietLabel(CaptionOf(w))
-            end
-        end
-    end
 
     local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
         local pin

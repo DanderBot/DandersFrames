@@ -190,7 +190,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         for _, entry in ipairs(widgets) do
             local w = entry.widget
             local h
-            if w.calculatedHeight then
+            if w.isCard then
+                -- A card header's slot is the one number its fold changes.
+                h = w.layoutHeight or entry.height
+            elseif w.calculatedHeight then
                 -- SettingsGroup tracks its current height after LayoutChildren.
                 h = w.calculatedHeight
             else
@@ -203,17 +206,51 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         parent:SetHeight(y)
     end
 
-    -- ONE section: a collapsible settings group stacked into the card.
+    -- ONE section: a card stacked into the indicator card, the same card every settings
+    -- page draws (chevron, kind icon, title), its body flowing two settings per row once
+    -- the card is wide enough. Cards inside a card, as the GUI rework asked of the
+    -- designers (a16 #4).
+    -- ☠ A FOLD REBUILDS THE PAGE, NOT A RE-FLOW. The indicator card sizes its body once,
+    -- at build, and the old collapsible groups already answered a fold with a full
+    -- designer redraw (the onSectionToggled hook); this keeps that, and a shut card
+    -- builds no body at all.
+    -- Kind is keyed off the HEADER STRING here only because these headers are the
+    -- section's identity in this file already (swmGroup below); the page cards key it
+    -- off a stable section key, which these sections have never had.
+    local SECTION_KIND = {
+        [L["Position"]] = "position", [L["Appearance"]] = "appearance",
+        [L["Border"]] = "border", [L["Duration Text"]] = "text", [L["Stack Count"]] = "text",
+        [L["Expiration"]] = "timer", [L["Pandemic"]] = "effects", [L["Duration Bar"]] = "timer",
+        [L["Show When Missing"]] = "visibility", [L["Tracked IDs"]] = "filters",
+        [L["Size & Orientation"]] = "size", [L["Sound Alert"]] = "notifications",
+        [L["Buff Dropped"]] = "notifications", [L["Stack Gained"]] = "notifications",
+        [L["Power Infusion Helper"]] = "important",
+    }
     local function AddGroup(header, buildFn, showSummary)
-        local group = GUI:CreateSettingsGroup(parent, contentWidth - 10, {
-            collapsible = true,
-            showSummary = showSummary or false,
+        local section = GUI:CreateCollapsibleSection(parent, header, true, contentWidth - 10, {
+            card = true,
+            collapseKey = "adSection:" .. header,
+            kind = SECTION_KIND[header],
         })
-        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
-        buildFn(group)
-        local h = group:LayoutChildren()
-        AddWidget(group, h)
+        section.Toggle = function(self)
+            self:SetExpanded(not self.expanded)
+            ADStructuralRedraw(parent)
+        end
+        local group = GUI:CreateSettingsGroup(parent, contentWidth - 10, { chromeless = true })
+        section:RegisterChild(group)   -- the card's body: its inset, its gap, its fold
+        AddWidget(section, section.layoutHeight)
+        if section.expanded then
+            buildFn(group)
+            if GUI.StampFullRows then
+                GUI.StampFullRows(group)
+                GUI.QuietLabels(group)
+                GUI.WireTwoTrack(group)
+            end
+            local h = group:LayoutChildren()
+            AddWidget(group, h)
+        else
+            group:Hide()
+        end
         -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
         return group

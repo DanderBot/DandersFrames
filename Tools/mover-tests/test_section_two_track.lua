@@ -95,9 +95,10 @@ local host = setmetatable({ hooks = { getSettingsDB = function() return {} end }
 -- ---- the four helpers, lifted out of the page tools ---------------------
 local HELPERS
 do
-    local a = CTRL:find("\n    local SECTION_TWO_TRACK_MIN = ", 1, true)
-    local b = CTRL:find("\n    local function OpenSection(Add, ", 1, true)
-    check(a ~= nil and b ~= nil and a < b, "lift: the helpers sit between the threshold and OpenSection")
+    -- File scope now, published for the Aura Designer's own cards (a16 #4).
+    local a = CTRL:find("\nlocal SECTION_TWO_TRACK_MIN = ", 1, true)
+    local b = CTRL:find("\nGUI.WireTwoTrack  = WireTwoTrack", 1, true)
+    check(a ~= nil and b ~= nil and a < b, "lift: the helpers sit between the threshold and their publication")
     local chunk = (a and b) and CTRL:sub(a, b) or ""
     chunk = chunk .. "\nreturn { MIN = SECTION_TWO_TRACK_MIN, WireTwoTrack = WireTwoTrack,"
         .. " StampFullRows = StampFullRows, QuietLabels = QuietLabels, QuietLabel = QuietLabel }\n"
