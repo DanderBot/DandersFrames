@@ -348,11 +348,11 @@ do
     check(PAGE:find("return not pandemicSupported or BuffsOffRow(d)", 1, true) ~= nil,
           "gate: the Pandemic section greys on an unsupported client too")
 
-    -- ...and the three that classic has NEVER dimmed do not start now.
-    for _, name in ipairs({ "Visibility", "Buff Filters" }) do
-        check(sectionBlock(name):find("BuffsOffRow", 1, true) == nil,
-              "gate: the " .. name .. " section is not greyed -- its box never was")
-    end
+    -- Visibility holds the Show Buffs tick itself, so it is the one card left live.
+    check(sectionBlock("Visibility"):find("BuffsOffRow", 1, true) == nil,
+          "gate: the Visibility section is not greyed -- it holds the tick")
+    check(sectionBlock("Buff Filters"):find("BuffsOffRow", 1, true) ~= nil,
+          "gate: the Buff Filters section greys with the page like the rest")
     check(PAGE:find("dedupRow.disableOn", 1, true) == nil,
           "gate: the Hide Duplicate Buffs control row is not greyed -- its box never was")
 

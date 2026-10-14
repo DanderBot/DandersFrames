@@ -618,9 +618,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(filterGroup, nil, 1)
         else
             tools.DeferCard("buffs_filters", function()
-                -- ⚠ NOT DIMMED BY THE PAGE GATE, exactly as its classic box never was:
-                -- you may pick what the bar would show before you switch the bar on.
-                local band = OpenSection(L["Buff Filters"], "buffs_filters", 1, BuffFilterSummary)
+                -- Greys with the page gate like every other card: with the bar off nothing
+                -- on this page applies, and a tester read the one live card as a fault.
+                local band = OpenSection(L["Buff Filters"], "buffs_filters", 1, BuffFilterSummary, BuffsOffRow)
                 BuildBuffFilterGroup({
                     group = band, parent = self.child,
                     refreshStates = function() self:RefreshStates() end,
@@ -2062,9 +2062,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(filterGroup, nil, 1)
         else
             tools.DeferCard("debuffs_filters", function()
-                -- ⚠ NOT DIMMED BY THE PAGE GATE, exactly as its classic box never was:
-                -- you may pick what the bar would show before you switch the bar on.
-                local band = OpenSection(L["Debuff Filters"], "debuffs_filters", 1, DebuffFilterSummary)
+                -- Greys with the page gate like every other card (see the Buff Bar's note).
+                local band = OpenSection(L["Debuff Filters"], "debuffs_filters", 1, DebuffFilterSummary, DebuffsOffRow)
                 BuildDebuffFilterGroup({
                     group = band, parent = self.child,
                     refreshStates = function() self:RefreshStates() end,
@@ -2189,9 +2188,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 Add(blGroup, nil, 1)
             else
                 tools.DeferCard("debuffs_blacklist", function()
-                    -- Decides what SHOWS, so no pin, and not dimmed by the page gate --
-                    -- its classic box never was.
-                    local band = OpenSection(L["Debuff Blacklist"], "debuffs_blacklist", 1, DebuffBlacklistSummary)
+                    -- Decides what SHOWS, so no pin; greys with the page gate.
+                    local band = OpenSection(L["Debuff Blacklist"], "debuffs_blacklist", 1, DebuffBlacklistSummary, DebuffsOffRow)
                     BuildDebuffBlacklistGroup({
                         group = band, parent = self.child,
                         refreshStates = function() self:RefreshStates() end,
