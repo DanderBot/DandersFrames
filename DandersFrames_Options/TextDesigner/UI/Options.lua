@@ -1462,17 +1462,21 @@ local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card
     local w = width - 2 * TD_SECTION_INSET
     local entries = {}
 
+    -- ☠ THE SECTIONS SPAN THE CARD, by anchors, not at a width read at build: the list
+    -- can measure 0 on a first build, and a fixed width left every section stuck at
+    -- the fallback, narrow and one track, whatever the window was.
     local function Relayout()
         local y = -TD_SECTION_INSET
         for _, e in ipairs(entries) do
             e.section:ClearAllPoints()
             e.section:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
-            e.section:SetWidth(w)
+            e.section:SetPoint("RIGHT", body, "RIGHT", -TD_SECTION_INSET, 0)
             y = y - e.section.layoutHeight
             if e.section.expanded then
                 e.body:Show()
                 e.body:ClearAllPoints()
                 e.body:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
+                e.body:SetPoint("RIGHT", body, "RIGHT", -TD_SECTION_INSET, 0)
                 y = y - (e.body.calculatedHeight or 0)
             else
                 e.body:Hide()
@@ -1509,6 +1513,21 @@ local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card
         end
         entries[#entries + 1] = { section = section, body = group }
     end
+
+    -- A width change re-lays every open body (the track count is decided off the live
+    -- width, WireTwoTrack) and hands the element card its new height. Width only:
+    -- Relayout's own SetHeight fires this too.
+    local lastW
+    body:HookScript("OnSizeChanged", function(self, bw)
+        if not bw or bw < 50 or (lastW and math.abs(bw - lastW) < 0.5) then return end
+        lastW = bw
+        for _, e in ipairs(entries) do
+            e.body:SetWidth(bw - 2 * TD_SECTION_INSET)
+            if e.section.expanded then e.body:LayoutChildren() end
+        end
+        local h = Relayout()
+        if onResize then onResize(h) end
+    end)
     return Relayout()
 end
 
