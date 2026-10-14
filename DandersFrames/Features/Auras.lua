@@ -3208,6 +3208,53 @@ local function buildTooltipSpec(db, key)
     }
 end
 
+-- ☠ MY BUFFS DEDUP HIDES ONLY YOUR OWN CASTS. The Aura Designer shows those ids for
+-- your casts alone, so another player's cast must stay on the buff bar or it shows
+-- nowhere. "Mine" is only expressible as the PLAYER filter token, and a token is per
+-- group, so with Only Mine off the row splits into a PLAYER group (ids hidden) and a
+-- !PLAYER group (ids kept). The two are disjoint, so nothing doubles.
+-- ⚠ Each group takes the full Max (the engine has no row-wide cap), so the split row
+-- can show up to twice Max Buffs, and your casts sort ahead of others'. The debuff row
+-- lives with the same limit (DF:GetDebuffRowGroupCount) and the Max Buffs note says
+-- so; hiding buffs to keep the number exact is the worse failure.
+-- Returns the (possibly replaced) filter list and config-level candidate filters.
+local function SplitBuffRowForOwnCasts(filter, candidateFilters, mineOnly)
+    if not (mineOnly and next(mineOnly)) then return filter, candidateFilters end
+    if not (type(filter) == "table" and #filter == 1 and type(filter[1]) == "string") then
+        return filter, candidateFilters
+    end
+    local function withoutMine(cf)
+        local out = {}
+        if cf then for k, v in pairs(cf) do out[k] = v end end
+        if out.includeSpellIDs then
+            local inc = {}
+            for id in pairs(out.includeSpellIDs) do
+                if not mineOnly[id] then inc[id] = true end
+            end
+            out.includeSpellIDs = inc
+        else
+            local excl = {}
+            if out.excludeSpellIDs then
+                for id in pairs(out.excludeSpellIDs) do excl[id] = true end
+            end
+            for id in pairs(mineOnly) do excl[id] = true end
+            out.excludeSpellIDs = excl
+        end
+        return out
+    end
+    local f = filter[1]
+    for component in f:gmatch("[^|]+") do
+        if component == "PLAYER" then
+            -- Only Mine already: the whole row is your casts.
+            return filter, withoutMine(candidateFilters)
+        end
+    end
+    return {
+        { filter = f .. "|PLAYER",  key = "mine",   candidateFilters = withoutMine(candidateFilters) },
+        { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters },
+    }, candidateFilters
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -3319,8 +3366,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- map above, and folded into the row tuning signature via excludeSig, so a
         -- change in the tracked set re-applies the buff row's candidate filters in
         -- place (see rowTuningSig / ApplyTuning).
+        -- My Buffs ids (shown only for YOUR casts) come back separately and are applied
+        -- at the end of this block, to the PLAYER half only.
+        local adMineOnly
         if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
-            local adIDs = DF:GetADTrackedSpellIDs(opts.frame, db)
+            local adIDs, mineOnly = DF:GetADTrackedSpellIDs(opts.frame, db)
+            adMineOnly = mineOnly
             if adIDs then
                 candidateFilters = candidateFilters or {}
                 local map = candidateFilters.excludeSpellIDs or {}
@@ -3375,6 +3426,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             local excl = candidateFilters.excludeSpellIDs or {}
             for id in pairs(res.map) do excl[id] = true end
             candidateFilters.excludeSpellIDs = excl
+        end
+
+        -- My Buffs ids hide only your own casts -- see SplitBuffRowForOwnCasts.
+        if adMineOnly then
+            filter, candidateFilters = SplitBuffRowForOwnCasts(filter, candidateFilters, adMineOnly)
         end
     end
 

@@ -1346,6 +1346,7 @@ L["Max Debuffs"] = true
 -- ⚠ TWO FORMAT PLACEHOLDERS, IN ORDER: the number of category groups, then the resulting
 -- ceiling (groups x the slider). A translation must keep both %d and their order.
 L["The game applies this limit to each category separately. Your filters use %d categories, so up to %d debuffs can show at once."] = true
+L["When My Buffs in the Aura Designer tracks a buff, your casts and other players' casts are limited separately, so up to %d buffs can show at once."] = true
 L["Max Health"] = true
 L["Max HP"] = true
 L["Max HP Reduction %"] = true

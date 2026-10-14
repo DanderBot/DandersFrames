@@ -292,8 +292,28 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             end
 
-            local buffMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Buffs"], 0, 8, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            local buffMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Buffs"], 0, 8, 1, db, "buffMax", nil, function()
+                DF:RefreshAllVisibleFrames()
+                tools2.refreshStates()
+            end, true), 55)
             buffMax.disableOn = function(d) return not d.showBuffs end
+
+            -- ⚠ THE SAME ENGINE LIMIT AS THE DEBUFF ROW'S NOTE. With Hide Duplicate Buffs
+            -- on and Only Mine off, the row splits into your casts and other players'
+            -- (see BuildAuraRowConfig) whenever My Buffs tracks something, and the limit
+            -- applies to each half. Said rather than hidden, as on the debuff row.
+            local maxNote = group:AddWidget(GUI:CreateNote(parent, "",
+                { tone = "caution", prefix = "Note", width = GUI:GroupInnerWidth(group) }))
+            maxNote.hideOn = function(d)
+                return not d.showBuffs or (tonumber(d.buffMax) or 0) <= 0
+                    or not d.buffDeduplicateDefensives or d.directBuffOnlyMine
+            end
+            maxNote.refreshContent = function(w, d)
+                local per = tonumber(d.buffMax) or 0
+                w:SetText(("|c%s%s:|r "):format(GUI:ToneHex("caution"), (L and L["Note"]) or "Note")
+                    .. L["When My Buffs in the Aura Designer tracks a buff, your casts and other players' casts are limited separately, so up to %d buffs can show at once."]:format(per * 2))
+            end
+            maxNote:refreshContent(db)
         end
 
         local function VisibilitySummary(d)

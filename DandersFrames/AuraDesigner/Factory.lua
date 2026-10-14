@@ -679,10 +679,27 @@ function DF:GetADTrackedSpellIDs(frame, db)
 
     local specAuras = adDB.auras and adDB.auras[spec]
 
-    local union
+    -- ☠ TWO MAPS, BECAUSE THE POOLS DO NOT SEE THE SAME CASTERS. My Buffs (the spec pool,
+    -- and the spec tab's filter groups) renders "HELPFUL|PLAYER" -- only YOUR casts -- while
+    -- Other Buffs renders any caster. A single caster-agnostic exclude hid another player's
+    -- copy of a My-Buffs spell from the buff bar as well, so it showed nowhere. `union`
+    -- holds what is shown whoever cast it; `mineOnly` what is shown only for your casts,
+    -- which the buff row excludes from its PLAYER half alone.
+    -- ⚠ Self-only auras on your own frame drop the caster filter (resolvePoolMode), so
+    -- they count as any-caster there. Inlined: resolvePoolMode is declared below this
+    -- function, and calling it from here would compile as a nil global.
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    local onOwnFrame = frame.unit and UnitIsUnit and UnitIsUnit(frame.unit, "player")
+    local union, mineOnly
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
-            union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            local selfOnly = onOwnFrame and Adapter and Adapter.IsSelfOnlyAura
+                and Adapter:IsSelfOnlyAura(spec, auraName)
+            if selfOnly then
+                union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            else
+                mineOnly = unionTrackedIdentity(spec, auraName, auraCfg, mineOnly)
+            end
         end
     end
 
@@ -737,9 +754,15 @@ function DF:GetADTrackedSpellIDs(frame, db)
                         and not group.othersOnly then
                         local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
                         if res.kind == "include" and res.map then
+                            -- Spec-tab groups render your casts only (g == 1).
                             for id in pairs(res.map) do
-                                union = union or {}   -- only allocate when the map has entries
-                                union[id] = true
+                                if g == 1 then
+                                    mineOnly = mineOnly or {}
+                                    mineOnly[id] = true
+                                else
+                                    union = union or {}   -- only allocate when the map has entries
+                                    union[id] = true
+                                end
                             end
                         end
                     end
@@ -747,7 +770,12 @@ function DF:GetADTrackedSpellIDs(frame, db)
             end
         end
     end
-    return union   -- nil when nothing is tracked -> caller unions nothing
+    -- An id shown for any caster already covers your own casts.
+    if mineOnly and union then
+        for id in pairs(union) do mineOnly[id] = nil end
+    end
+    if mineOnly and not next(mineOnly) then mineOnly = nil end
+    return union, mineOnly   -- nil when nothing is tracked -> caller unions nothing
 end
 
 -- ============================================================
@@ -880,10 +908,9 @@ end
 -- design doc §11.1 — "it's literally in the name"; a tester with two same-class
 -- players saw indicators fire for the other player's buffs). The OTHER pool is
 -- unchanged: anyone-cast, or "HELPFUL|!PLAYER" when the effect is othersOnly.
--- ACCEPTED consequence: the buff-bar dedup exclude map is caster-agnostic, so with
--- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
--- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
--- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+-- The buff-bar dedup follows that split: GetADTrackedSpellIDs returns My Buffs ids
+-- separately, and the buff row hides them only from its PLAYER half, so another
+-- player's cast of a My-Buffs-tracked spell stays on the bar.
 -- SELF_ONLY: a third `mine` value, not a boolean. See resolvePoolMode below for what
 -- it means and why it exists; checked FIRST because a truthy string would otherwise
 -- fall into the My Buffs branch, and it deliberately ignores othersOnly (an Other-pool
