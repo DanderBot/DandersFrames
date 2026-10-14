@@ -247,6 +247,24 @@ local function ApplyGUIScale(frame, value, keepPlace)
     for _, f in ipairs(GUI._scaledSurfaces) do
         f:SetScale(value)
     end
+    for _, fn in pairs(GUI._windowScaleListeners) do pcall(fn) end
+end
+
+-- ☠ A DESIGNER PREVIEW IS A RULER, SO THE WINDOW'S SCALE MUST NOT REACH IT. The mock
+-- frame lives inside the settings window and inherits its scale, so at a 60% window a
+-- Preview Scale of 1.0 drew the frame at 60% of the live one and the preview stopped
+-- being a true-size reference (Aphoex, a16 #6). Previews multiply their scale by this
+-- to divide the window's back out, and register a refresh so a slider drag re-fits them.
+GUI._windowScaleListeners = GUI._windowScaleListeners or setmetatable({}, { __mode = "k" })
+
+function GUI.PreviewUnscale()
+    local ws = DF.GetWindowState and DF:GetWindowState()
+    local s = tonumber(ws and ws.scale) or 1
+    return (s > 0) and (1 / s) or 1
+end
+
+function GUI.OnWindowScaleChanged(owner, fn)
+    if owner and fn then GUI._windowScaleListeners[owner] = fn end
 end
 
 -- ★ THE WIDTH THE LAYOUT PASS GIVES A WIDGET, or nil when it keeps its own.

@@ -3022,7 +3022,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- Preview scale, from whichever designer's config this canvas belongs to.
     local adDB = GetAuraDesignerDB()
     local scaleDB = (opts and opts.scaleDB) or adDB
-    local previewScale = scaleDB.previewScale or 1.0
+    local previewScale = (scaleDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -3104,7 +3104,8 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         local h = fdb.frameHeight or 64
         mockFrame:SetSize(w, h)
 
-        local want = (scaleDB or {}).previewScale or 1.0
+        -- Relative to the LIVE frame: the window's own scale is divided back out.
+        local want = ((scaleDB or {}).previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1)
 
         -- ☠ THE ANCHOR IS PART OF THE SCALE, so both exits set both. A SetPoint
         -- offset on a scaled frame is in that frame's OWN units, so the nudge has
@@ -3189,6 +3190,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     end
 
     container:SetScript("OnSizeChanged", function() container.RefreshGeometry() end)
+    if not thumb and GUI.OnWindowScaleChanged then
+        GUI.OnWindowScaleChanged(container, container.RefreshGeometry)
+    end
 
     -- ⚠ A THUMBNAIL HAS NO SIZE EVENT TO WAIT FOR. Its box was set at the top of
     -- this function, BEFORE the hook above existed, and it never changes again --
@@ -3564,7 +3568,8 @@ function P.CanvasWantedHeight(compact, scaleDB)
     local fh   = fdb.frameHeight or 64
     -- The SAME table the canvas's slider writes -- the host passes it, defaulting
     -- to the Aura Designer's config for every caller that names none.
-    local want = ((scaleDB or GetAuraDesignerDB()) or {}).previewScale or 1.0
+    local want = (((scaleDB or GetAuraDesignerDB()) or {}).previewScale or 1.0)
+        * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1)
 
     -- The mock is centred at (0, -CANVAS_DY) in SCREEN pixels -- RefreshGeometry
     -- divides the offset by the scale to keep it so. Its top edge therefore sits

@@ -2904,7 +2904,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         mockFrame = CreateFrame("Frame", nil, previewPanel, "BackdropTemplate")
         mockFrame:SetSize(FRAME_W, FRAME_H)
         mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
-        mockFrame:SetScale(tdDB.previewScale or 1.0)
+        mockFrame:SetScale((tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1))
         ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
         previewPanel.mockFrame = mockFrame
         state.mockFrame = mockFrame
@@ -3002,7 +3002,9 @@ local function BuildTextDesignerIsland(GUI, page, db)
         if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
         if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
 
-        local want = tdDB.previewScale or 1.0
+        -- Preview Scale is relative to the LIVE frame, so the window's own scale is
+        -- divided back out (GUI.PreviewUnscale).
+        local want = (tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1)
         -- Before the first layout pass the panel has no size yet; honour the user's
         -- scale rather than clamping against a zero and collapsing the mock.
         local cw, ch = previewPanel:GetWidth() or 0, previewPanel:GetHeight() or 0
@@ -3016,6 +3018,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         m:SetScale(math.max(0.2, math.min(want, fit)))
     end
     previewPanel.RefreshGeometry()
+    if GUI.OnWindowScaleChanged then GUI.OnWindowScaleChanged(previewPanel, previewPanel.RefreshGeometry) end
 
     -- Preview Scale slider (top-left of preview panel, below the FRAME PREVIEW
     -- label). Mirrors AD's Preview Scale slider (AuraDesigner/UI/Cards.lua) —
