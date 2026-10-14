@@ -569,18 +569,25 @@ local function PageRefreshStates(self)
     for _, w in ipairs(self.children) do
         if w.isPageFooter and w:IsShown() then footer = w break end
     end
+    -- ☠ THE STRETCH MUST FOLLOW THE VIEWPORT'S HEIGHT, not be taken once here. This
+    -- pass re-runs on content and WIDTH changes only, so a page stretched to one
+    -- height kept it through a vertical resize of the window or a return from the
+    -- page dock at another height -- and the difference became scroll range on a page
+    -- that fits (only pages with a See Also footer ever stretch, which is the tell).
+    -- The flow geometry is kept so the OnSizeChanged hook can redo just this part.
     if footer then
-        local viewH = self:GetHeight() or 0
-        if viewH > contentH then
-            contentH = viewH
-            footer:ClearAllPoints()
-            footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
-                SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
-            footer:SetWidth(SnapLen(footer, usableWidth))
+        local _, _, _, fx, fy = footer:GetPoint(1)
+        self._footerFit = { footer = footer, flowH = contentH, x = fx, y = fy,
+            x1 = x1, width = usableWidth }
+        if not self._footerFitHooked then
+            self._footerFitHooked = true
+            self:HookScript("OnSizeChanged", function(page) GUI.FitPageFooter(page) end)
         end
+    else
+        self._footerFit = nil
     end
-
     self.child:SetHeight(contentH)
+    if footer then GUI.FitPageFooter(self) end
 
     -- Update scroll child width to match the page viewport. GUI.PageChildWidth,
     -- not a second copy of the arithmetic: CreateSubTab sizes the child the same
@@ -591,6 +598,26 @@ local function PageRefreshStates(self)
     end
 end
 GUI.PageRefreshStates = PageRefreshStates
+
+-- Seat a page's See Also footer for the viewport's CURRENT height: at the bottom with
+-- the child stretched to fill when the content is shorter than the viewport, back at
+-- its place in the flow when it is not.
+function GUI.FitPageFooter(page)
+    local fit = page and page._footerFit
+    if not (fit and page.child) then return end
+    local footer = fit.footer
+    local viewH = page:GetHeight() or 0
+    footer:ClearAllPoints()
+    if viewH > fit.flowH then
+        page.child:SetHeight(viewH)
+        footer:SetPoint("BOTTOMLEFT", page.child, "BOTTOMLEFT",
+            SnapLen(page.child, fit.x1), SnapLen(page.child, GUI.Space.footer))
+        footer:SetWidth(SnapLen(footer, fit.width))
+    else
+        page.child:SetHeight(fit.flowH)
+        footer:SetPoint("TOPLEFT", fit.x or 0, fit.y or 0)
+    end
+end
 
 function DF:CreateGUI()
     if DF.GUIFrame then return end
