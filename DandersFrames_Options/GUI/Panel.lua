@@ -2521,6 +2521,17 @@ function DF:CreateGUI()
     -- the handlers below -- the sync, the locks, the test hand-over, a new search
     -- index, a second refresh of the page and of every override dot -- has
     -- nothing to do. This is GLOBAL's own path, the other way.
+    -- ☠ A MODE SWITCH MUST NOT OVERLAP A MOVER SESSION. The handlers below lock the
+    -- departing mode and carry test mode across, but with unsaved moves the lock is only a
+    -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
+    -- session's claim against the wrong mode: test frames stuck on screen, or both groups
+    -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
+    local function DeferForMoverSession(btn)
+        local B = DF.MoverBridge
+        if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
+        B:EndSessionThen(function() btn:Click() end)
+        return true
+    end
     local function LeaveGlobalTo(mode)
         if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
         GUI:EnterView(false)
@@ -2529,6 +2540,7 @@ function DF:CreateGUI()
     end
 
     btnParty:SetScript("OnClick", function()
+        if DeferForMoverSession(btnParty) then return end
         if LeaveGlobalTo("party") then return end
         -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
         -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
@@ -2606,6 +2618,7 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        if DeferForMoverSession(btnRaid) then return end
         if LeaveGlobalTo("raid") then return end
         -- Leaving GLOBAL, if it was up -- see the Party handler.
         GUI.GlobalView = false
@@ -2672,6 +2685,7 @@ function DF:CreateGUI()
     
     -- Click Casting tab click handler
     btnClicks:SetScript("OnClick", function()
+        if DeferForMoverSession(btnClicks) then return end
         GUI.GlobalView = false
         -- Clean up any test/unlock state from previous mode
         if GUI.SelectedMode == "party" then

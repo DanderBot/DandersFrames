@@ -739,6 +739,28 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     perfLog(tTotal, "Unlocked callback total")
 end)
 
+-- End the open session, THEN run fn -- for a host action that must not overlap a
+-- session (the settings window switching Party/Raid). With unsaved moves the lock is a
+-- prompt: fn waits for Save/Discard, and Cancel drops it, leaving everything as it was.
+-- The window is open already, so the Locked callback must not reopen it on the page
+-- the session started from.
+function Bridge:IsSessionActive()
+    return Mover and Mover:IsUnlocked() or false
+end
+
+function Bridge:EndSessionThen(fn)
+    if not self:IsSessionActive() then fn() return end
+    self.closedGUIPage, self.closedGUIMode = nil, nil
+    local answered = false
+    Mover:Lock(function(ended)
+        answered = true
+        if ended then fn() end
+    end)
+    -- An older embedded lib (MINOR < 5) ignores the callback; a clean session still
+    -- ended synchronously, so act on that.
+    if not answered and not self:IsSessionActive() then fn() end
+end
+
 Mover.RegisterCallback(Bridge, "Locked", function()
     local tTotal = perfStart()
     -- Only the scope the session claimed does any work here (releaseScope

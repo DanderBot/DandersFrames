@@ -8,7 +8,9 @@ local addonName, NS = ...
 -- MINOR 3 adds the optional def.visibleOffset (see RECORD-TO-VISIBLE OFFSET
 -- below), and slabs clamp the way elements do.
 -- MINOR 4 adds the optional target def.partOf (Registry:WouldCreateCycle).
-local MAJOR, MINOR = "DandersMover-1.0", 4
+-- MINOR 5 adds Lib:Lock(onDone): onDone(true) once the session has ended, onDone(false)
+-- if the unsaved-changes prompt was cancelled.
+local MAJOR, MINOR = "DandersMover-1.0", 5
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -560,7 +562,7 @@ end
 -- relevant). Other addons' enabled+relevant elements stay anchor targets in a filtered
 -- session and get proxies with DandersMoverDB.showOtherAddons. See Registry:NormalizeFilter.
 function Lib:Unlock(filter) if NS.Session then NS.Session:Unlock(filter) end end
-function Lib:Lock() if NS.Session then NS.Session:Lock() end end
+function Lib:Lock(onDone) if NS.Session then NS.Session:Lock(onDone) end end
 function Lib:Toggle() if NS.Session then NS.Session:Toggle() end end
 function Lib:IsUnlocked() return NS.Session and NS.Session:IsActive() or false end
 function Lib:IsEnabled(addon, key) return Registry:IsEnabled(addon, key) end

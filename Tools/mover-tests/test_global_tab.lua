@@ -197,9 +197,10 @@ do
         G.GlobalView = false; calls = {}
         eq(leave("party"), false, "leave: from Party itself it does nothing")
     end
-    check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
-      and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
-          "leave: both mode buttons ask first")
+    -- A mover session is ended first (a15 #7), then the GLOBAL hand-off is asked.
+    check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if DeferForMoverSession(btnParty) then return end\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
+      and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if DeferForMoverSession(btnRaid) then return end\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
+          "leave: both mode buttons end a mover session, then ask")
 end
 
 print("-- Global tab: switching tabs repaints only the page arriving")

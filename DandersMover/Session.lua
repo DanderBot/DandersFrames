@@ -125,8 +125,15 @@ function Sess:Unlock(filter)
     end)
 end
 
-function Sess:Lock()
-    if not self.active then return end
+-- onDone (optional): told whether the session actually ended. With unsaved changes
+-- the prompt makes that asynchronous, and a caller that has to act only once the
+-- session is gone (a host switching what it shows) cannot assume Lock() finished it.
+function Sess:Lock(onDone)
+    if not self.active then
+        if onDone then onDone(true) end
+        return
+    end
+    self.lockDone = onDone
     if not self.dirty then self:Finish("save") return end
     -- The popup frame is shared with the host addon, so remember that this prompt is
     -- ours: Finish and Escape close only it, never a dialog someone else opened.
@@ -136,10 +143,18 @@ function Sess:Lock()
         message = L["You have unsaved mover changes."],
         buttons = {
             { label = L["Save"],    onClick = function() Sess.promptOpen = nil; Sess:Finish("save") end },
-            { label = L["Cancel"],  onClick = function() Sess.promptOpen = nil end },
+            { label = L["Cancel"],  onClick = function() Sess.promptOpen = nil; Sess:CancelLock() end },
             { label = L["Discard"], onClick = function() Sess.promptOpen = nil; Sess:Finish("discard") end },
         },
     })
+end
+
+-- The prompt was backed out of: the session carries on, and whoever asked for the
+-- lock hears that it did not happen.
+function Sess:CancelLock()
+    local cb = self.lockDone
+    self.lockDone = nil
+    if cb then cb(false) end
 end
 
 function Sess:Finish(mode)
@@ -183,6 +198,9 @@ function Sess:Finish(mode)
     perfLog(tLocked, "Locked callbacks")
     Lib.callbacks:Fire(mode == "discard" and "Discarded" or "Saved")
     perfLog(tTotal, "Finish total")
+    local cb = self.lockDone
+    self.lockDone = nil
+    if cb then cb(true) end
 end
 
 function Sess:Toggle() if self.active then self:Lock() else self:Unlock() end end
@@ -727,6 +745,7 @@ function Sess:EnableKeyboard(on)
             -- the only way to deselect. The exit prompt, when it is up, is the
             -- innermost of all: Escape closes it as Cancel would.
             if NS.UI:DismissPopup() then -- closed the prompt (or any dialog on top)
+                if Sess.promptOpen then Sess:CancelLock() end
                 Sess.promptOpen = nil
             elseif Sess.linking then Sess:CancelLink()
             elseif Sess.selected then Sess:Select(nil)
