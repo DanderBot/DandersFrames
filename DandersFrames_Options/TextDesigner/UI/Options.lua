@@ -1438,6 +1438,80 @@ end
 -- Body sections: Content / Appearance / Position.
 -- ============================================================
 
+-- ============================================================
+-- THE ELEMENT CARD'S SECTIONS AS CARDS (cards inside a card, as the Aura Designer)
+-- ------------------------------------------------------------
+-- Content / Appearance / Position, each the settings pages' card over a chromeless
+-- body that the section builders fill in their GROUP mode (they add to a group rather
+-- than hand-anchoring down the card), flowing two settings per row once the card is
+-- wide enough -- the page cards' own helpers (Controls.lua).
+-- ☠ A FOLD RE-STACKS IN PLACE, it never rebuilds: every rebuild here creates frames WoW
+-- never frees, which is why the element cards themselves fold the same way. onResize
+-- hands the element card its new body height so it can re-size and re-stack its list.
+-- Folds persist per section, shared by every element ("tdSection:<key>").
+local TD_SECTIONS = {
+    { key = "content",    label = function() return L["Content"] end,    kind = "text" },
+    { key = "appearance", label = function() return L["Appearance"] end, kind = "appearance" },
+    { key = "position",   label = function() return L["Position"] end,   kind = "position" },
+}
+local TD_SECTION_INSET = 8
+
+local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card, width, onResize)
+    -- The list's width can still read 0 on a first build; size against a sane column.
+    if not width or width < 100 then width = 300 end
+    local w = width - 2 * TD_SECTION_INSET
+    local entries = {}
+
+    local function Relayout()
+        local y = -TD_SECTION_INSET
+        for _, e in ipairs(entries) do
+            e.section:ClearAllPoints()
+            e.section:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
+            e.section:SetWidth(w)
+            y = y - e.section.layoutHeight
+            if e.section.expanded then
+                e.body:Show()
+                e.body:ClearAllPoints()
+                e.body:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
+                y = y - (e.body.calculatedHeight or 0)
+            else
+                e.body:Hide()
+            end
+        end
+        local h = math.max(1, -y + TD_SECTION_INSET - GUI.SectionCard.gap)
+        body:SetHeight(h)
+        return h
+    end
+
+    for _, def in ipairs(TD_SECTIONS) do
+        local section = GUI:CreateCollapsibleSection(body, def.label(), true, w, {
+            card = true, collapseKey = "tdSection:" .. def.key, kind = def.kind,
+        })
+        local group = GUI:CreateSettingsGroup(body, w, { chromeless = true })
+        section:RegisterChild(group)   -- the card's body: its inset, its gap, its fold
+        if def.key == "content" then
+            BuildContentSection(GUI, body, elem, tdDB, state, page, card, 0, false, group)
+        elseif def.key == "appearance" then
+            BuildAppearanceSection(GUI, body, elem, card, 0, group)
+        else
+            BuildPositionSection(GUI, body, elem, tdDB, card, 0, group)
+        end
+        if GUI.StampFullRows then
+            GUI.StampFullRows(group)
+            GUI.QuietLabels(group)
+            GUI.WireTwoTrack(group)
+        end
+        group:LayoutChildren()
+        section.Toggle = function(self)
+            self:SetExpanded(not self.expanded)
+            local h = Relayout()
+            if onResize then onResize(h) end
+        end
+        entries[#entries + 1] = { section = section, body = group }
+    end
+    return Relayout()
+end
+
 -- AD-style card builder. Returns (card, totalCardH). Caller advances its
 -- y-cursor with totalCardH. The card is layout-only; the header and body each
 -- own their own backdrop so there's no underlying surface bleeding through.
@@ -1580,16 +1654,19 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
     card.body = body
 
-    -- Build content sections inside body.
-    local yEnd = BuildContentSection(GUI, body, elem, tdDB, state, page, card, -10)
-    yEnd = BuildAppearanceSection(GUI, body, elem, card, yEnd)
-    yEnd = BuildPositionSection(GUI, body, elem, tdDB, card, yEnd)
-    local bodyHeight = math.max(1, -yEnd + 10)
-    body:SetHeight(bodyHeight)
+    -- Build the content sections inside body, as cards (BuildElementSectionCards).
+    local bodyHeight
+    local ApplyCollapseState
+    bodyHeight = BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card,
+        parent:GetWidth(), function(h)
+            bodyHeight = h
+            ApplyCollapseState()
+            RestackCards(state.cardOrder, parent, GUI.SectionCard.gap)
+        end)
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
     -- (cardKey / card.collapsed were read before the header, for the chrome.)
-    local function ApplyCollapseState()
+    function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
             card.cardHeight = HEADER_HEIGHT
@@ -2297,18 +2374,21 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     -- section so the group anchor/offset can be configured like any text
     -- element — groups behave exactly like text elements, except their content
     -- is concatenated from multiple sources.
-    local yEnd = BuildContentSection(GUI, body, elem, tdDB, state, page, card, -10)
-    yEnd = BuildAppearanceSection(GUI, body, elem, card, yEnd)
-    yEnd = BuildPositionSection(GUI, body, elem, tdDB, card, yEnd)
-    local bodyHeight = math.max(1, -yEnd + 10)
-    body:SetHeight(bodyHeight)
+    local bodyHeight
+    local ApplyCollapseState
+    bodyHeight = BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card,
+        parent:GetWidth(), function(h)
+            bodyHeight = h
+            ApplyCollapseState()
+            RestackCards(state.groupCardOrder, parent, GUI.SectionCard.gap)
+        end)
 
     -- Update meta line: show item count.
     chrome:SetSummary(("(%d %s)"):format(#elem.groupItems, (#elem.groupItems == 1) and L["item"] or L["items"]))
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
     -- (cardKey / card.collapsed were read before the header, for the chrome.)
-    local function ApplyCollapseState()
+    function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
             card.cardHeight = HEADER_HEIGHT
