@@ -19,12 +19,11 @@ local NS = ...
 -- Shape x specs is the whole page. A control dropped from a builder fails (a); a
 -- key or label typo'd in one icon fails (b).
 --
--- MODERN is the Debuff Bar's collapsible-card design with ONE CARD PER ICON:
--- the icon's three builders mounted one after another into the same card, two
--- per row when it is wide enough, captions dim, the icon's Enable as the card's
--- header tick (Role has none), every card pinnable. Icon Text Settings is a card
--- of its own at the top of column 1, and AFK's Timer Text is a card of its own
--- under the AFK card. Header previews stay classic-only.
+-- ONE CARD PER ICON: the icon's three builders mounted one after another into
+-- the same card, two per row when it is wide enough, captions dim, the icon's
+-- Enable as the card's header tick (Role has none), every card pinnable, its
+-- icon previewed in the header. Icon Text Settings is a card of its own at the
+-- top of column 1, and AFK's Timer Text sits inside the AFK card.
 --
 --   column 1   Icon Text Settings, Role, Leader, Target Marker, Ready Check,
 --              Ping, Summon
@@ -37,10 +36,7 @@ local NS = ...
 -- against it.
 --
 -- What that buys, and what it does not:
---   ✓ the widget census of every builder, and every spec field it is handed --
---     which together are the evidence that CLASSIC RENDERS AS IT DID, because
---     the classic branch mounts the same builders into the same 280 boxes, in
---     the same sections, in the same column.
+--   ✓ the widget census of every builder, and every spec field it is handed.
 --   ✓ each card's column, stable collapse key, summary, tick and pin; that
 --     there is one checkbox per setting; the two opt-ins; that no count,
 --     footer or plate survives.
@@ -139,8 +135,6 @@ end
 -- ============================================================
 print("-- Icons page: the shared machinery, and one builder for thirteen icons")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -173,7 +167,7 @@ do
 
     -- ☠ THE WHOLE POINT OF THIS PAGE'S SHAPE. Thirteen icons, and exactly ONE
     -- declaration of each of the three shared builders, ONE of the mount that
-    -- drives both layouts, and ONE of the card it builds in Modern.
+    -- drives every icon, and ONE of the card it builds.
     for _, b in ipairs({ "BuildIconSettingsGroup", "BuildIconAppearanceGroup",
                          "BuildIconPositionGroup", "MountIcon", "MountIconCard" }) do
         local n = 0
@@ -184,43 +178,11 @@ do
     for _ in PAGE:gmatch("MountIcon%(%{") do mounts = mounts + 1 end
     eq(mounts, 13, "shape: all thirteen icons are mounted through the one function")
 
-    -- ---- the classic half, untouched ---------------------------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "classic: four bare 280 boxes in the source, and they are the classic branch's own")
-    check(PAGE:find('return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)', 1, true) ~= nil,
-          "classic: keeps the 280 section header in column 1, at slot 36")
-    check(PAGE:find('textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)', 1, true) ~= nil,
-          "classic: keeps the Icon Text Settings section exactly as it was")
-    local sections = 0
-    for _ in PAGE:gmatch("GUI:CreateCollapsibleSection%(") do sections = sections + 1 end
-    eq(sections, 2, "classic: two direct section builds, both classic's (Modern builds cards through the helper)")
-    for _, g in ipairs({ "settingsGroup", "extraGroup", "appearanceGroup", "positionGroup" }) do
-        check(PAGE:find("section:RegisterChild(" .. g .. ")", 1, true) ~= nil,
-              "classic: the " .. g .. " is registered to its section")
-        check(PAGE:find("Add(" .. g .. ", nil, 1)", 1, true) ~= nil,
-              "classic: ...in column 1, where it always was")
-    end
-    for _, h in ipairs({ "Settings", "Appearance", "Position" }) do
-        check(PAGE:find('GUI:CreateHeader(self.child, L["' .. h .. '"]), GUI.RowHeight.sectionHeader', 1, true) ~= nil,
-              "classic: the box keeps its own " .. h .. " header")
-    end
-    check(PAGE:find("GUI:CreateHeader(self.child, spec.extraGroup.label), GUI.RowHeight.sectionHeader", 1, true) ~= nil,
-          "classic: ...and the extra box takes its header from the spec")
-
-    -- ☠ MODERN TAKES ITS OWN ROAD BEFORE classic's section is built, so the
-    -- classic arm is reached only in classic and no Modern card is ever a
-    -- classic section with a preview.
-    local mount = builderBody("MountIcon")
-    local early = mount:find("if not classicLayout then\n                queuedIcons[#queuedIcons + 1] = spec\n                return\n            end", 1, true)
-    local sectionAt = mount:find("local section = AddSection(spec.section)", 1, true)
-    check(early and sectionAt and early < sectionAt,
-          "classic: Modern queues the spec and returns before the classic section and preview are built")
-
+    -- ---- the icon groups --------------------------------------------
     -- ...and the queue is mounted by subject group, every icon in exactly one
     -- group, with a fallback so an icon left out of the groups still mounts.
     local groupsSrc = PAGE:match("local ICON_GROUPS = (%b{})")
-    check(groupsSrc ~= nil, "groups: the Modern icon groups are one table")
+    check(groupsSrc ~= nil, "groups: the icon groups are one table")
     local seen, dup = {}, false
     for key in (groupsSrc or ""):gmatch('"(%w+Icon)"') do
         if seen[key] then dup = true end
@@ -243,7 +205,7 @@ print("-- Icons page: one card per icon")
 do
     local card = builderBody("MountIconCard"):gsub("%s+", " ")
 
-    -- ---- the card is the icon's three builders, in classic's box order ----
+    -- ---- the card is the icon's three builders, in reading order ----
     check(card:find("local settingsBuild = spec.settings or BuildIconSettingsGroup", 1, true) ~= nil,
           "card: Role's own Settings builder still replaces the shared one")
     check(card:find("local function BuildIconCard(tools2) settingsBuild(tools2, spec) if extra then BuildExtraInCard(tools2) end BuildIconAppearanceGroup(tools2, spec) BuildIconPositionGroup(tools2, spec) end", 1, true) ~= nil,
@@ -253,7 +215,7 @@ do
     check(card:find('local band = OpenSection(spec.section, "icons_" .. spec.key, spec.col, IconCardSummary(spec), nil, nil, BuildIconCard, toggle)', 1, true) ~= nil,
           "card: titled for the icon, keyed icons_<db prefix>, in its spec's column, pinnable from its own builder, ticked where it has an enable")
     check(card:find("BuildIconCard({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = spec.enableKey ~= nil, })", 1, true) ~= nil,
-          "card: mounts the builders as classic does, plus hoistToggle where the header carries the enable")
+          "card: mounts its builders, with hoistToggle where the header carries the enable")
     check(card:find("if spec.enableKey then toggle = { db = db, key = spec.enableKey, label = spec.enableLabel, tooltip = spec.enableTooltip,", 1, true) ~= nil,
           "tick: the header tick is the icon's own enable, under its own label and tooltip -- none for Role")
     check(card:find("onChanged = function() if spec.onEnable then spec.onEnable() end self:RefreshStates() tools.ReflowMounted() end,", 1, true) ~= nil,
@@ -273,20 +235,20 @@ do
     -- ---- AFK's Timer Text, inside the AFK card -----------------------------
     check(card:find("group:AddWidget(GUI:CreateHeader(tools2.parent, extra.label, { keepSearchSection = true }), GUI.RowHeight.sectionHeader)", 1, true) ~= nil,
           "extra: the fourth box sits in the icon's own card, under a header that leaves search on the card")
-    check(card:find("extra.build({ group = group, parent = tools2.parent, refreshStates = tools2.refreshStates, inIconCard = true }, spec)", 1, true) ~= nil,
-          "extra: ...its own builder reused, told it is inside the icon's card")
+    check(card:find("extra.build({ group = group, parent = tools2.parent, refreshStates = tools2.refreshStates }, spec)", 1, true) ~= nil,
+          "extra: ...its own builder reused")
     check(card:find("w.hideOn = function(d) return extra.hideOn(d) or (own and own(d)) or false end", 1, true) ~= nil,
           "extra: ...header and controls hide on the box's own gate, on top of their own")
     check(card:find("_extra", 1, true) == nil and PAGE:find("RowTitle", 1, true) == nil,
           "extra: no second card, and no composed title left over")
 
     -- ---- Icon Text Settings ---------------------------------------------
-    check(PAGE:find('local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,\n                nil, nil, BuildIconTextGroup)', 1, true) ~= nil,
+    check(PAGE:find('local band = OpenSection(L["Icon Text Settings"], "icons_text", 1, IconTextSummary,\n            nil, nil, BuildIconTextGroup)', 1, true) ~= nil,
           "text: Icon Text Settings is a card at the top of column 1, pinnable")
-    check(PAGE:find("BuildIconTextGroup({\n                group = band, parent = self.child,", 1, true) ~= nil,
+    check(PAGE:find("BuildIconTextGroup({\n            group = band, parent = self.child,", 1, true) ~= nil,
           "text: ...its builder is handed the card's group")
-    check(builderBody("BuildIconTextGroup"):find("add = function(widget, height) return group:AddWidget(widget, height) end", 1, true) ~= nil,
-          "text: ...and adds into a group when no loose `add` is given (classic still passes one)")
+    check(builderBody("BuildIconTextGroup"):find("local function add(widget, height) return group:AddWidget(widget, height) end", 1, true) ~= nil,
+          "text: ...and adds into that group")
 
     -- ---- the order and the columns ---------------------------------------
     local stripAt = PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true)
@@ -295,7 +257,7 @@ do
     check(stripAt and textAt and firstIcon and stripAt < textAt and textAt < firstIcon,
           "order: Expand All / Collapse All first, spanning both columns, then Icon Text, then the icons")
 
-    -- ★ EVERY ICON CARD PREVIEWS ITS ICON, as classic's headers always did: the
+    -- ★ EVERY ICON CARD PREVIEWS ITS ICON: the
     -- same spec.preview, through the same wiring, onto the card's own section.
     check(card:find("local section = band.collapsibleSection", 1, true) ~= nil
           and card:find("if spec.preview then WireStatusPreview(section, spec.preview) end", 1, true) ~= nil,
@@ -373,23 +335,20 @@ do
         { "outlinedropdown", "Outline",  "afkIconTimerOutline",  55 },
         { "shadowcheckbox",  "Shadow",   "afkIconTimerOutline",  30 },
         { "shadowlink",      "(none)",   "(none)",               nil },
-        { "colorpicker",     "(none)",   "afkIconTimerColor",    30 },
-        { "slider",          "(none)",   "afkIconTimerX",        55 },
-        { "slider",          "(none)",   "afkIconTimerY",        55 },
+        { "colorpicker",     "Timer Color",    "afkIconTimerColor",    30 },
+        { "slider",          "Timer Offset X", "afkIconTimerX",        55 },
+        { "slider",          "Timer Offset Y", "afkIconTimerY",        55 },
     }, "afk timer text")
-    -- Those three name themselves inside the AFK card, beside the icon's own
-    -- Text Color and Offset X / Y; classic's box keeps the short names.
-    local timerBody = builderBody("BuildAFKTimerGroup")
-    for _, pair in ipairs({ { "Timer Color", "Color" }, { "Timer Offset X", "Offset X" }, { "Timer Offset Y", "Offset Y" } }) do
-        check(timerBody:find('inCard and L["' .. pair[1] .. '"] or L["' .. pair[2] .. '"]', 1, true) ~= nil,
-              "afk timer text: " .. pair[1] .. " in the card, " .. pair[2] .. " in classic's box")
-    end
+    -- Those three name themselves "Timer" inside the AFK card, beside the
+    -- icon's own Text Color and Offset X / Y -- and never anything else.
+    check(builderBody("BuildAFKTimerGroup"):find("inCard", 1, true) == nil,
+          "afk timer text: one set of labels, no second naming")
 end
 
 -- ============================================================
 -- 4. THE THIRTEEN SPECS -- THE VALUES
 -- Every field the shape reads, pinned against the census taken from the
--- pre-change source, plus the Modern card's column. This is where a mistyped
+-- source, plus the card's column. This is where a mistyped
 -- key or a swapped label fails.
 -- ============================================================
 local ICONS = {
@@ -558,9 +517,9 @@ for i, want in ipairs(ICONS) do
 end
 
 -- ============================================================
--- 5. THE PREVIEWS, CLASSIC'S ALONE
+-- 5. THE HEADER PREVIEWS
 -- ============================================================
-print("-- Icons page: the header previews stay in classic")
+print("-- Icons page: the header previews")
 do
     check(PAGE:find("local function WireStatusPreview(section, opts)", 1, true) ~= nil,
           "preview: the status-icon preview wiring is still on the page")

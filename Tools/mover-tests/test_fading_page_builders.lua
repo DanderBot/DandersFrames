@@ -3,10 +3,10 @@ local NS = ...
 -- ============================================================
 -- FADING PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Fading: three classic boxes. In Modern they are the Debuff Bar's
--- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
--- value summary in a shut card's corner, Expand All / Collapse All at the top --
--- and the Out of Range box is split in two:
+-- Display > Fading: the Debuff Bar's collapsible CARDS -- two per row inside a
+-- card wide enough, dim captions, the value summary in a shut card's corner,
+-- Expand All / Collapse All at the top -- with the range check and the
+-- per-element alphas as two cards:
 --
 --   column 1   Out of Range            the range check: NO on/off (it fades
 --                                      either way), no pin
@@ -14,13 +14,12 @@ local NS = ...
 --   column 2   Dead/Offline Fading     tick: fadeDeadFrames, pinnable
 --              Health Threshold Fading tick: healthFadeEnabled, pinnable
 --
--- ☠ THE SPLIT IS THE RISK THIS FILE COVERS. Classic still builds ONE Out of
--- Range box by mounting the two halves back to back (BuildOutOfRangeGroup), so
--- the census of the two halves, in order, must be the PRE-CHANGE census of the
--- one builder -- or classic silently lost or reordered a control.
+-- ☠ THE SPLIT IS THE RISK THIS FILE COVERS. The two halves' census, in order,
+-- must be the whole range group's -- or a control was silently lost or
+-- reordered between the two cards.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the CENSUS of each builder (the pre-change goldens), classic's mounts.
+--   ✓ the CENSUS of each builder.
 --   ✓ each card's column, stable collapse key, summary, tick and pin.
 --   ✓ the two BUILD-TIME db seeds still sit inside the range builder.
 --   ✗ nothing about runtime behaviour -- read in game.
@@ -114,8 +113,6 @@ end
 -- ============================================================
 print("-- Fading page: the shared machinery and the page-scope helpers")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
@@ -151,7 +148,7 @@ do
 end
 
 -- ============================================================
--- 2. OUT OF RANGE -- ONE CLASSIC BOX, TWO BUILDERS, TWO CARDS
+-- 2. OUT OF RANGE -- TWO BUILDERS, TWO CARDS
 -- ============================================================
 local OUT_OF_RANGE = {
     { "dropdown", "Range Check Spell",            "rangeCheckSpellID",     55 },
@@ -179,22 +176,7 @@ do
     local range = builderBody("BuildRangeCheckGroup")
     local element = builderBody("BuildElementAlphaGroup")
     checkCensus(census(range .. "\n" .. element), OUT_OF_RANGE, "out of range (both halves, in order)")
-    eq(#census(range), 5, "out of range: the range half is the first five of the classic box's controls")
-
-    -- ☠ CLASSIC STILL MOUNTS THE WHOLE BOX: both halves, back to back, once.
-    local whole = PAGE:match("local function BuildOutOfRangeGroup%(tools2%)(.-)\n        end\n") or ""
-    check(whole:find("BuildRangeCheckGroup(tools2)\n            BuildElementAlphaGroup(tools2)", 1, true) ~= nil,
-          "classic: BuildOutOfRangeGroup mounts the range half then the element half, into one box")
-    local rangeAt = PAGE:find("local function BuildRangeCheckGroup(tools2)", 1, true)
-    local elemAt  = PAGE:find("local function BuildElementAlphaGroup(tools2)", 1, true)
-    local wholeAt = PAGE:find("local function BuildOutOfRangeGroup(tools2)", 1, true)
-    check(rangeAt and elemAt and wholeAt and rangeAt < elemAt and elemAt < wholeAt,
-          "classic: ...declared after both halves, so it closes over the real functions")
-    local box = PAGE:match('local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%["Out of Range"%]%)')
-    check(box ~= nil and PAGE:find("BuildOutOfRangeGroup({\n                group = " .. box .. ",", 1, true) ~= nil
-      and PAGE:find("Add(" .. box .. ", nil, 1)", 1, true) ~= nil,
-          "classic: the Out of Range box still mounts the whole builder, in column 1")
-
+    eq(#census(range), 5, "out of range: the range half is the first five of the group's controls")
     -- The two build-time seeds, still ahead of the controls that read them.
     check(range:find("if db.rangeCheckSpellID == nil then", 1, true) ~= nil
       and range:find("if db.rangeUpdateInterval == nil then", 1, true) ~= nil,
@@ -212,7 +194,7 @@ do
           "element alpha: the in-body switch is skipped when the header carries it")
     local tick = element:match('CreateCheckbox%(parent, L%["Enable Element%-Specific Alpha"%].-end%), 30%)')
     check(tick ~= nil and tick:find("tools2.refreshStates()", 1, true) ~= nil,
-          "element alpha: ...and in classic it still reflows through tools2")
+          "element alpha: ...and it reflows through tools2")
     check(range:find("hoistToggle", 1, true) == nil and range:find("disableChildrenOn", 1, true) == nil,
           "out of range: the range half has no toggle and no group gate")
 
@@ -220,7 +202,7 @@ do
     check(call:find('OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)', 1, true) ~= nil,
           "out of range: a card keyed fading_range in column 1 -- no tick, no pin")
     check(block:find("BuildRangeCheckGroup({ group = rangeBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "out of range: mounts the range half as classic does")
+          "out of range: mounts the range half into its card's band")
 
     local block2, call2 = sectionBlock("Element-Specific Alpha", "BuildElementAlphaGroup")
     check(call2:find('OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil, BuildElementAlphaGroup, {', 1, true) ~= nil,
@@ -232,10 +214,10 @@ do
     check(block2:find("BuildElementAlphaGroup({ group = elementBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
           "element alpha: mounts the element half plus hoistToggle for its header tick")
 
-    local oor = PAGE:match("local function OutOfRangeSummary%(d%)(.-)\n            end")
+    local oor = PAGE:match("local function OutOfRangeSummary%(d%)(.-)\n        end")
     check(oor ~= nil and oor:find("if d.oorEnabled then return \"\" end", 1, true) ~= nil and oor:find('L%["Alpha"%]') ~= nil,
           "summary: Out of Range names the frame-level alpha, and only while it is the one in use")
-    local ele = PAGE:match("local function ElementAlphaSummary%(d%)(.-)\n            end")
+    local ele = PAGE:match("local function ElementAlphaSummary%(d%)(.-)\n        end")
     check(ele ~= nil and ele:find('L%["Health Bar Alpha"%]') ~= nil,
           "summary: Element-Specific Alpha names which alpha it prints")
 end
@@ -276,17 +258,8 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    -- declaration, classic mount, card mount, and the card's pin argument
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    local esc = g.label:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, 2)", 1, true) ~= nil,
-          g.label .. ": the classic box keeps its header and column 2")
-
     check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil and body:find(".keepEnabled = true", 1, true) ~= nil,
-          g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in classic")
+          g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in a pinned panel")
     check(body:find("group.disableChildrenOn = function(d) return not d." .. g.toggleKey .. " end", 1, true) ~= nil,
           g.label .. ": the body greys while the tick is off, from inside the builder")
 
@@ -299,13 +272,13 @@ for _, g in ipairs(CARDS) do
       and call:find("RefreshCurrentPage", 1, true) == nil,
           g.label .. ": ...committing what the checkbox ran plus a state pass, never a rebuild")
     check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
-          g.label .. ": mounts the builder as classic does, plus hoistToggle for its header tick")
+          g.label .. ": mounts its builder with hoistToggle for its header tick")
 end
 
 -- ============================================================
--- 4. THE CARDS TOGETHER, THE CLASSIC BOXES AND THE LOCALE
+-- 4. THE CARDS TOGETHER AND THE LOCALE
 -- ============================================================
-print("-- Fading page: the cards together, the classic boxes, the locale")
+print("-- Fading page: the cards together, the locale")
 do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
@@ -323,12 +296,6 @@ do
 
     check(PAGE:find('Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)', 1, true) ~= nil,
           "page: the copy button's prefix list, unhealable fading included")
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "classic: four bare 280 boxes, all the classic branch's own")
-    local spacer = 0
-    for _ in PAGE:gmatch("AddSpace%(GUI%.Space%.block, 2%)") do spacer = spacer + 1 end
-    eq(spacer, 2, "classic: one column-2 spacer per stacked box, inside the classic arms")
 
     -- Every string the page asks for ships in enUS. ONE is new with this
     -- conversion: the second card's title, "Element-Specific Alpha".

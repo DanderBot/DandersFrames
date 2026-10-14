@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- PET FRAMES PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Pet Frames: TEN groups. In Modern they are the Debuff Bar's
+-- Display > Pet Frames: TEN groups, as the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
@@ -19,8 +19,8 @@ local NS = ...
 -- decide how the pets LOOK.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the CENSUS of each builder (the pre-change goldens -- classic renders as
---     it did), in both mode variants where a group changes shape.
+--   ✓ the CENSUS of each builder, in both mode variants where a group changes
+--     shape.
 --   ✓ each card's column, stable collapse key, summary, grey gate, tick, pin.
 --   ✓ the page-rebuild gate: only the layout dropdown rebuilds.
 --   ✗ nothing about runtime behaviour -- read in game.
@@ -114,8 +114,6 @@ end
 -- ============================================================
 print("-- Pet Frames page: the shared machinery, and the row furniture gone")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
@@ -168,7 +166,7 @@ end
 
 -- ============================================================
 -- 3. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local GENERAL = {
     { "checkbox", "Enable Pet Frames", "petEnabled", 30 },
@@ -233,28 +231,28 @@ local HEALTH_TEXT = {
     { "slider",          "Health Y Offset",    "petHealthY",           55 },
 }
 
--- label, stable key, card column, classic box column, builder, golden, summary
+-- label, stable key, card column, builder, golden, summary
 -- (the text as it appears in the call), dim = greys with the page gate, pin =
 -- passes its builder.
 local CARDS = {
-    { label = "Settings", classicLabel = "Pet Frame Settings", key = "pets_settings", col = 1, classicCol = 1,
+    { label = "Settings", key = "pets_settings", col = 1, 
       builder = "BuildPetGeneralGroup", golden = GENERAL, summary = "PetSettingsSummary" },
-    { label = "Layout Mode", key = "pets_layoutmode", col = 1, classicCol = 1,
+    { label = "Layout Mode", key = "pets_layoutmode", col = 1, 
       builder = "BuildPetLayoutModeGroup", golden = LAYOUT_MODE, summary = "PetLayoutModeSummary", dim = true },
-    { label = "Group Settings", key = "pets_group", col = 1, classicCol = 1,
+    { label = "Group Settings", key = "pets_group", col = 1, 
       builder = "BuildPetGroupSettingsGroup", golden = GROUP_SETTINGS, summary = "PetGroupSummary", dim = true, pin = true },
-    { label = "Size", key = "pets_size", col = 1, classicCol = 1,
+    { label = "Size", key = "pets_size", col = 1, 
       builder = "BuildPetSizeGroup", golden = SIZE, summary = "PetSizeSummary", dim = true, pin = true },
-    { label = "Frame Style", classicLabel = "Appearance", key = "pets_appearance", col = 2, classicCol = 2,
+    { label = "Frame Style", key = "pets_appearance", col = 2, 
       builder = "BuildPetAppearanceGroup", golden = APPEARANCE, summary = "PetAppearanceSummary", dim = true, pin = true },
-    { label = "Health Bar", key = "pets_healthbar", col = 2, classicCol = 2,
+    { label = "Health Bar", key = "pets_healthbar", col = 2, 
       builder = "BuildPetHealthBarGroup", golden = HEALTH_BAR, summary = "PetHealthBarSummary", dim = true, pin = true },
-    { label = "Name Text", key = "pets_nametext", col = 1, classicCol = 2,
+    { label = "Name Text", key = "pets_nametext", col = 1, 
       builder = "BuildPetNameTextGroup", golden = NAME_TEXT,
       summary = 'TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor")', dim = true, pin = true },
-    { label = "Position", key = "pets_position", col = 1, classicCol = 1,
+    { label = "Position", key = "pets_position", col = 1, 
       builder = "BuildPetPositionGroup", golden = POSITION, summary = "PetPositionSummary", dim = true, pin = true },
-    { label = "Health Text", key = "pets_healthtext", col = 1, classicCol = 2,
+    { label = "Health Text", key = "pets_healthtext", col = 1, 
       builder = "BuildPetHealthTextGroup", golden = HEALTH_TEXT,
       summary = 'TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor")', dim = true, pin = true },
 }
@@ -264,15 +262,7 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
     check(body:find("group.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil,
-          g.label .. ": the body greys behind petEnabled, from inside the builder, in both layouts")
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    local esc = (g.classicLabel or g.label):gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
+          g.label .. ": the body greys behind petEnabled, from inside the builder")
 
     local block, call = sectionBlock(g.label, g.builder)
     local flatSummary = g.summary:gsub("%s+", " ")
@@ -284,7 +274,7 @@ for _, g in ipairs(CARDS) do
        g.label .. (g.pin and ": pinnable, from its own builder" or ": behaviour, so no pin"))
     check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
     check(block:find(g.builder .. "({ group = ", 1, true) ~= nil and block:find("hoistToggle", 1, true) == nil,
-          g.label .. ": mounts the builder as classic does")
+          g.label .. ": mounts its builder")
 end
 
 -- The two cards whose builders change shape with the layout mode.
@@ -293,7 +283,7 @@ do
     local grouped = PAGE:find("if isGroupedMode then", 1, true)
     local groupCard = PAGE:find('OpenSection(L["Group Settings"]', 1, true)
     check(grouped and groupCard and grouped < groupCard, "mode: Group Settings is built in grouped mode only")
-    local attached = PAGE:find("if not isGroupedMode then\n            if classicLayout then", 1, true)
+    local attached = PAGE:find("if not isGroupedMode then\n            -- Which side of the owner", 1, true)
     local posCard = PAGE:find('OpenSection(L["Position"]', 1, true)
     check(attached and posCard and attached < posCard, "mode: Position is built in attached mode only")
     check(builderBody("BuildPetGroupSettingsGroup"):find("if isRaidMode then", 1, true) ~= nil,
@@ -317,13 +307,6 @@ do
           "border: the header tick is the toolkit's own noShowToggle")
     check(body:find("group.disableChildrenOn = function(d)", 1, true) == nil,
           "border: the builder sets no group gate, because the toolkit owns the group")
-    check(PAGE:find("petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end", 1, true) ~= nil
-      and PAGE:find("Add(petBorderGroup, nil, 2)", 1, true) ~= nil,
-          "border: classic still gates its box and keeps column 2")
-
-    local calls = 0
-    for _ in PAGE:gmatch("BuildPetBorderGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "border: declared once, mounted twice -- classic box and card")
 
     local block, call = sectionBlock("Border", "BuildPetBorderGroup")
     check(call:find('OpenSection(L["Border"], "pets_border", 2, PetBorderSummary, PetsOffRow, nil, BuildPetBorderGroup, {', 1, true) ~= nil,
@@ -336,13 +319,13 @@ do
       and call:find("RefreshCurrentPage", 1, true) == nil,
           "border: ...committing what the toolkit ran, a state pass and a pinned-panel repaint -- never a rebuild")
     check(block:find("band.disableChildrenOn = function(d) return not d.petEnabled end BuildPetBorderGroup({", 1, true) ~= nil,
-          "border: the band carries the page gate, set before the build, as classic sets it on its box")
+          "border: the band carries the page gate, set before the build")
     check(block:find("BuildPetBorderGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
-          "border: mounts the builder as classic does, plus hoistToggle for its header tick")
+          "border: mounts its builder with hoistToggle for its header tick")
 end
 
 -- ============================================================
--- 5. THE CARDS TOGETHER, THE CLASSIC BOXES AND THE LOCALE
+-- 5. THE CARDS TOGETHER AND THE LOCALE
 -- ============================================================
 print("-- Pet Frames page: the cards together")
 do
@@ -362,10 +345,6 @@ do
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
     local firstAt = PAGE:find('OpenSection(L["Settings"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
-
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 10, "classic: ten bare 280 boxes, all the classic branch's own")
 
     local loc = df_file_source("Locales/enUS.lua")
     local have = {}

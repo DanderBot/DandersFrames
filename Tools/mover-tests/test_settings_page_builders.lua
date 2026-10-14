@@ -3,14 +3,14 @@ local NS = ...
 -- ============================================================
 -- SETTINGS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- General > Settings: seven classic boxes under an info banner. In Modern they
--- are the Debuff Bar's collapsible CARDS -- two per row inside a card wide
--- enough, dim captions, the value summary in a shut card's corner, Expand All /
--- Collapse All at the top -- keeping the page's two-band split as its columns:
+-- General > Settings: the Debuff Bar's collapsible CARDS under an info banner
+-- -- two per row inside a card wide enough, dim captions, the value summary in
+-- a shut card's corner, Expand All / Collapse All at the top -- in two
+-- columns:
 --
 --   column 1   Frame Modes, Blizzard Frames, Notifications   (what it DOES)
 --   column 2   Rendering, Settings Panel Appearance           (how it LOOKS)
---              Minimap, Language -- each classic box's one control as a card
+--              Minimap, Language -- one control each, as a card
 --
 -- No header ticks (every group is independent switches). Pins on Rendering and
 -- Settings Panel Appearance.
@@ -19,15 +19,13 @@ local NS = ...
 -- settings-font keys are at the DF.db ROOT, the Blizzard / minimap /
 -- pixel-perfect toggles are read party-canonical and written to BOTH mode
 -- tables, the update rate and the notification ticks are account-wide, the
--- language override is per-character, and the classic-layout flag has no table.
+-- language override is per-character.
 -- So a card's summary must read ITS OWN store (the page's state pass hands it
 -- the per-mode table), and no reset may ever be wired here -- section 6.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the CENSUS of each builder (the pre-change goldens -- classic renders as
---     it did), with the store each control binds to.
+--   ✓ the CENSUS of each builder, with the store each control binds to.
 --   ✓ each card's column, stable collapse key, summary store, tick and pin.
---   ✓ the classic-layout escape hatch's decision (section 5).
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
@@ -126,8 +124,6 @@ end
 -- ============================================================
 print("-- Settings page: the shared machinery, and the row furniture gone")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
@@ -151,13 +147,11 @@ do
           "bulk: no global-settings banner -- the GLOBAL tab says it")
     check(stripAt and firstAt and stripAt < firstAt,
           "bulk: Expand All / Collapse All spanning both columns, then the first card")
-    check(PAGE:find("if not classicLayout then\n            Add(tools.SectionControls(self.child), 24, \"both\")\n        end", 1, true) ~= nil,
-          "bulk: ...and only in Modern")
 end
 
 -- ============================================================
 -- 2. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local FRAME_MODES = {
     { "checkbox", "Enable Party Frames", "DF.db.partyEnabled", 30 },
@@ -186,7 +180,6 @@ local PANEL_APPEARANCE = {
     { "label", "Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those.", "(none)", 60 },
     { "dropdown", "Page Tips", "DF:GetGlobalDB().pageTips", 55 },
     { "label", "Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them.", "(none)", 46 },
-    { "checkbox",        "Use classic settings layout", "(none)",              30 },
 }
 local NOTIFICATIONS = {
     { "checkbox", "Notify me when a newer version is available", "DF:GetGlobalDB().notifyOutdated",  30 },
@@ -196,19 +189,19 @@ local NOTIFICATIONS = {
 -- summary = the argument as it appears in the call; `store` = the table the
 -- summary is made to read instead of the per-mode one it is handed.
 local CARDS = {
-    { label = "Frame Modes", key = "general_framemodes", col = 1, classicCol = 1,
+    { label = "Frame Modes", key = "general_framemodes", col = 1, 
       builder = "BuildFrameModesGroup", golden = FRAME_MODES,
       summary = "function() return FrameModesSummary(DF.db) end" },
-    { label = "Blizzard Frames", key = "general_blizzard", col = 1, classicCol = 1,
+    { label = "Blizzard Frames", key = "general_blizzard", col = 1, 
       builder = "BuildBlizzardFramesGroup", golden = BLIZZARD_FRAMES,
       summary = "function() return BlizzardFramesSummary(DF.db.party) end" },
-    { label = "Rendering", key = "general_rendering", col = 1, classicCol = 1,
+    { label = "Rendering", key = "general_rendering", col = 1, 
       builder = "BuildRenderingGroup", golden = RENDERING,
       summary = "function() return RenderingSummary(DF:GetGlobalDB(), DF.db.party) end", pin = true },
-    { label = "Settings Panel Appearance", key = "general_panelappearance", col = 2, classicCol = 2,
+    { label = "Settings Panel Appearance", key = "general_panelappearance", col = 2, 
       builder = "BuildPanelAppearanceGroup", golden = PANEL_APPEARANCE,
       summary = "function() return PanelAppearanceSummary(DF.db) end", pin = true },
-    { label = "Notifications", key = "general_notifications", col = 2, classicCol = 2,
+    { label = "Notifications", key = "general_notifications", col = 2, 
       builder = "BuildNotificationsGroup", golden = NOTIFICATIONS,
       summary = "function() return NotificationsSummary(DF:GetGlobalDB()) end" },
 }
@@ -218,14 +211,6 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    local esc = g.label:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
-
     local block, call = sectionBlock(g.label, g.builder .. "({")
     check(call:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
           g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", its summary reading its own store")
@@ -233,7 +218,7 @@ for _, g in ipairs(CARDS) do
        g.label .. (g.pin and ": pinnable, from its own builder" or ": behaviour, so no pin"))
     check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick -- independent switches")
     check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          g.label .. ": mounts the builder exactly as classic does")
+          g.label .. ": mounts its builder into the card's band")
 end
 
 print("-- Settings page: what each builder binds, and the summaries")
@@ -242,7 +227,7 @@ do
     check(modes:find('function() PromptReloadAfterModeToggle("party") end', 1, true) ~= nil
       and modes:find('function() PromptReloadAfterModeToggle("raid") end', 1, true) ~= nil,
           "frame modes: both ticks still raise the contextual reload prompt")
-    local sum = PAGE:match("local function FrameModesSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function FrameModesSummary%(d%)(.-)\n        end")
     check(sum ~= nil and sum:find("d.partyEnabled ~= false", 1, true) ~= nil
       and sum:find("d.raidEnabled ~= false", 1, true) ~= nil and sum:find("not d.partyEnabled", 1, true) == nil,
           "frame modes: the summary tests presence, never truthiness -- absent means enabled")
@@ -262,21 +247,21 @@ do
     check(render:find("scaleHint.refreshContent = function()", 1, true) ~= nil
       and render:find("group:AddWidget(scaleHint, 72)", 1, true) ~= nil,
           "rendering: the live scale hint keeps its refreshContent and its slot height")
-    local rsum = PAGE:match("local function RenderingSummary%(g, p%)(.-)\n            end")
+    local rsum = PAGE:match("local function RenderingSummary%(g, p%)(.-)\n        end")
     check(rsum ~= nil and rsum:find('rate == "SMOOTH"', 1, true) ~= nil and rsum:find('L["Normal"]', 1, true) ~= nil
       and rsum:find("p.pixelPerfect", 1, true) ~= nil,
           "rendering: the summary names Pixel-Perfect from party and the rate, Normal included")
 
-    local psum = PAGE:match("local function PanelAppearanceSummary%(d%)(.-)\n            end")
+    local psum = PAGE:match("local function PanelAppearanceSummary%(d%)(.-)\n        end")
     check(psum ~= nil and psum:find("DF:GetFontNameFromPath(d.settingsFont)", 1, true) ~= nil
       and psum:find("GUI:OutlineName(d.settingsFontOutline)", 1, true) ~= nil,
           "panel appearance: the font's name and outline, through the dropdowns' own resolvers")
 
-    local bsum = PAGE:match("local function BlizzardFramesSummary%(p%)(.-)\n            end")
+    local bsum = PAGE:match("local function BlizzardFramesSummary%(p%)(.-)\n        end")
     check(bsum ~= nil and bsum:find('L["%s hidden"]', 1, true) ~= nil and bsum:find('L["Shown"]', 1, true) ~= nil,
           "blizzard frames: the summary says which frames are hidden, or Shown")
 
-    local nsum = PAGE:match("local function NotificationsSummary%(g%)(.-)\n            end")
+    local nsum = PAGE:match("local function NotificationsSummary%(g%)(.-)\n        end")
     check(nsum ~= nil and nsum:find('return ""', 1, true) ~= nil,
           "notifications: blank while both are on -- it names only what is off")
 end
@@ -289,25 +274,19 @@ do
     local MINIMAP = 'GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function() DF:UpdateMinimapButton() end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)'
     local LANGUAGE = 'GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)'
     local flat = PAGE:gsub("%s+", " ")
-    check(flat:find("minimapGroup:AddWidget(" .. MINIMAP, 1, true) ~= nil
-      and PAGE:find("Add(minimapGroup, nil, 1)", 1, true) ~= nil,
-          "minimap: classic keeps its box, its tick and column 1")
-    check(flat:find("languageGroup:AddWidget(" .. LANGUAGE, 1, true) ~= nil
-      and PAGE:find("Add(languageGroup, nil, 2)", 1, true) ~= nil,
-          "language: classic keeps its box, its dropdown and column 2")
 
     local mblock, mcall = sectionBlock("Minimap", "minimapCard:AddWidget(")
     check(mcall:find('OpenSection(L["Minimap"], "general_minimap", 2,', 1, true) ~= nil
       and mcall:find('DF.db.party.showMinimapButton and L["Shown"] or L["Hidden"] end)', 1, true) ~= nil,
           "minimap: a card keyed general_minimap in column 2, saying Shown / Hidden -- no tick, no pin")
     check(mblock:find("minimapCard:AddWidget(" .. MINIMAP, 1, true) ~= nil,
-          "minimap: ...holding the SAME call classic makes -- party-canonical read, write to both")
+          "minimap: ...holding the tick -- party-canonical read, write to both")
 
     local lblock, lcall = sectionBlock("Language", "languageCard:AddWidget(")
     check(lcall:find('OpenSection(L["Language"], "general_language", 2, LanguageSummary)', 1, true) ~= nil,
           "language: a card keyed general_language in column 2, naming the language -- no tick, no pin")
     check(lblock:find("languageCard:AddWidget(" .. LANGUAGE, 1, true) ~= nil,
-          "language: ...holding the SAME dropdown classic builds, on the per-character store")
+          "language: ...holding the dropdown, on the per-character store")
     check(lblock:find("Translations are community-contributed and may be incomplete.\"], GUI:GroupInnerWidth(languageCard)))", 1, true) ~= nil,
           "language: ...and its blurb, measured at the card's own width")
 
@@ -321,7 +300,7 @@ do
 end
 
 -- ============================================================
--- 4. THE CARDS TOGETHER AND THE CLASSIC BOXES
+-- 4. THE CARDS TOGETHER
 -- ============================================================
 print("-- Settings page: the cards together")
 do
@@ -331,32 +310,6 @@ do
        "Frame Modes | Blizzard Frames | Rendering | Settings Panel Appearance | Notifications | Minimap | Language",
        "order: the seven cards open in the order they stack")
     check(PAGE:find("hoistToggle", 1, true) == nil, "ticks: nothing on this page has a header tick")
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 7, "classic: seven bare 280 boxes, all the classic branch's own")
-end
-
--- ============================================================
--- 5. THE CLASSIC-LAYOUT ESCAPE HATCH
--- ============================================================
-print("-- Settings page: the classic-layout escape hatch")
-do
-    local body = builderBody("BuildPanelAppearanceGroup")
-    check(body:find("GUI:FlipSettingsLayout(", 1, true) ~= nil,
-          "escape hatch: the flip routes through the one shared function")
-    local panelSrc = options_file_source("GUI/Panel.lua")
-    local fa = panelSrc:find("function GUI:FlipSettingsLayout", 1, true)
-    local flipBody = fa and panelSrc:sub(fa, panelSrc:find("\nend\n", fa, true) or #panelSrc) or ""
-    local closeAt  = flipBody:find('GUI:CloseAllPopoutRows("layoutFlip")', 1, true)
-    local invalAt  = flipBody:find("GUI:InvalidateAllPages()", 1, true)
-    local rebuildAt = flipBody:find("GUI:RefreshCurrentPage()", 1, true)
-    check(closeAt and invalAt and rebuildAt and closeAt < invalAt and invalAt < rebuildAt,
-          "escape hatch: ...which closes the open panels (a pinned copy's included), drops every build, then rebuilds")
-    check(body:find("C_Timer.After", 1, true) == nil,
-          "escape hatch: the rebuild is synchronous")
-    check(body:find("function() return DF:IsClassicSettingsLayout() end", 1, true) ~= nil
-      and body:find("function(val) DF:SetClassicSettingsLayout(val) end", 1, true) ~= nil,
-          "escape hatch: still read from and written to the account-level flag")
 end
 
 -- ============================================================

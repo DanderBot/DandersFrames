@@ -1157,7 +1157,7 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
 -- is how they drifted; there is no longer a field list to copy.
 --
--- kind: nil/"members" = classic member arranger (legacy records carry no kind); "filter" = a
+-- kind: nil/"members" = member arranger (legacy records carry no kind); "filter" = a
 -- container-backed group linked to registry filters (stable preset keys / custom ids in
 -- filterSelection) with uniform per-group styling (iconSize / maxIcons on top of the shared
 -- layout). The caller owns `id` and `name` -- both come from the store it is inserting into.
@@ -2689,7 +2689,7 @@ local function RefreshPlacedIndicators()
     -- FILTER GROUP PLACEHOLDERS (My Buffs / Other Buffs): labeled outline
     -- blocks via the shared helper above. Pooled per group id — SEPARATE pool
     -- table per tab (the two id counters can collide, mirror the dgroup pool);
-    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the classic
+    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the
     -- member-group layout.
     do
         local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"

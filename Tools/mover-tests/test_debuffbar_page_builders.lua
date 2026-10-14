@@ -4,7 +4,7 @@ local NS = ...
 -- DEBUFF BAR PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
 -- Auras > Debuff Bar is the Buff Bar's twin plus two groups the buff row has no
--- use for: FOURTEEN groups. In Modern they are the Buff Bar's collapsible
+-- use for: FOURTEEN groups, as the Buff Bar's collapsible
 -- CARDS -- thirteen of them -- and the fourteenth, a lone checkbox (Hide
 -- Duplicate Debuffs), moved into Debuff Filters as Hide Duplicate Buffs moved
 -- into Buff Filters.
@@ -25,13 +25,11 @@ local NS = ...
 -- page's SOURCE and asserts against it.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot
+--     height, in order -- so a builder that quietly dropped a control or
+--     renamed a key fails here.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate,
 --     header tick and pin; that there is one checkbox per setting.
 --   ✓ the two opt-ins, and that the Buff Bar now asks for them too.
@@ -168,8 +166,6 @@ end
 -- ============================================================
 print("-- Debuff Bar page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
 
@@ -285,7 +281,7 @@ do
         check(gate:find("tools2.refreshStates()", 1, true) ~= nil,
               "format gate: ...the panel re-runs its state passes")
         check(gate:find("GUI.RelayoutCurrentPage()", 1, true) ~= nil,
-              "format gate: ...and a card or a classic box re-lays the page")
+              "format gate: ...and a card re-lays the page")
         check(gate:find("GUI:RefreshCurrentPage()", 1, true) == nil,
               "format gate: ...without rebuilding it (the rebuild leaked the page)")
     end
@@ -300,7 +296,7 @@ end
 
 -- ============================================================
 -- THE THIRTEEN BUILDERS, CONTROL BY CONTROL
--- Every golden below is the census of the PRE-CHANGE source: same factories,
+-- Every golden below is the census of the builder: same factories,
 -- same L keys, same db keys, same slot heights, in the same order.
 -- ============================================================
 local VISIBILITY = {
@@ -377,8 +373,7 @@ local DEBUFF_IMPORTANT = {
 }
 -- ⚠ HAND-BUILT, not GUI:CreateTextControls. The buff page's Duration Text block
 -- went through the shared helper; this one has always spelled its eight text
--- controls out, and the census pins that rather than tidying it -- classic has
--- to render byte for byte what it did.
+-- controls out, and the census pins that rather than tidying it.
 local DEBUFF_DURATION = {
     { "checkbox",        "Show Duration",                    "debuffShowDuration",              30 },
     { "checkbox",        "Hide Cooldown Swipe",              "debuffHideSwipe",                 30 },
@@ -426,43 +421,42 @@ local DEBUFF_DURBAR = {
 }
 
 -- ---- the thirteen cards ------------------------------------------------
--- label, stable collapse key, card column, classic box header and column, the
+-- label, stable collapse key, card column, the
 -- row's summary; `dim` = greys with the page gate, `hide` = the factory gate on
 -- both halves, `pin` = passes its builder (decides how the bar LOOKS), `tick` =
 -- its on/off moved into the header.
 local CARDS = {
-    { label = "Visibility",        key = "debuffs_visibility",  col = 1, box = "Visibility",       classicCol = 1,
+    { label = "Visibility",        key = "debuffs_visibility",  col = 1, 
       builder = "BuildDebuffVisibilityGroup", golden = VISIBILITY,        summary = "DebuffVisibilitySummary" },
-    { label = "Debuff Filters",    key = "debuffs_filters",     col = 1, box = "Debuff Filters",   classicCol = 1,
+    { label = "Debuff Filters",    key = "debuffs_filters",     col = 1, 
       builder = "BuildDebuffFilterGroup",     golden = DEBUFF_FILTERS,    summary = "DebuffFilterSummary", dim = true },
-    { label = "Debuff Blacklist",  key = "debuffs_blacklist",   col = 1, box = "Debuff Blacklist", classicCol = 1,
+    { label = "Debuff Blacklist",  key = "debuffs_blacklist",   col = 1, 
       builder = "BuildDebuffBlacklistGroup",  golden = DEBUFF_BLACKLIST,  summary = "DebuffBlacklistSummary", dim = true },
-    { label = "Order & Limits",    key = "debuffs_order",       col = 1, box = "Order & Limits",   classicCol = 1,
+    { label = "Order & Limits",    key = "debuffs_order",       col = 1, 
       builder = "BuildDebuffOrderGroup",      golden = DEBUFF_ORDER,      summary = "DebuffOrderSummary", dim = true },
-    { label = "Icon Style",        key = "debuffs_appearance",  col = 2, box = "Appearance",       classicCol = 2,
+    { label = "Icon Style",        key = "debuffs_appearance",  col = 2, 
       builder = "BuildDebuffAppearanceGroup", golden = DEBUFF_APPEARANCE, summary = "DebuffAppearanceSummary",
       dim = true, pin = true },
-    { label = "Layout",            key = "debuffs_layout",      col = 2, box = "Layout",           classicCol = 1,
+    { label = "Layout",            key = "debuffs_layout",      col = 2, 
       builder = "BuildDebuffLayoutGroup",     golden = DEBUFF_LAYOUT,     summary = "DebuffLayoutSummary", dim = true, pin = true },
-    { label = "Position",          key = "debuffs_position",    col = 2, box = "Position",         classicCol = 1,
+    { label = "Position",          key = "debuffs_position",    col = 2, 
       builder = "BuildDebuffPositionGroup",   golden = DEBUFF_POSITION,   summary = "DebuffPositionSummary", dim = true, pin = true },
-    { label = "Border",            key = "debuffs_border",      col = 2, box = "Border",           classicCol = 1,
+    { label = "Border",            key = "debuffs_border",      col = 2, 
       builder = "BuildDebuffBorderGroup",     golden = DEBUFF_BORDER,     summary = "DebuffBorderSummary",
       dim = true, pin = true,
       tick = { key = "debuffShowBorder", name = "Show Border" }, composite = true },
-    { label = "Highlight",         key = "debuffs_important",   col = 2, box = nil,                classicCol = 2,
-      builder = "BuildImportantDebuffsGroup", golden = DEBUFF_IMPORTANT,  summary = "ImportantDebuffsSummary",
+    { label = "Highlight",         key = "debuffs_important",   col = 2, builder = "BuildImportantDebuffsGroup", golden = DEBUFF_IMPORTANT,  summary = "ImportantDebuffsSummary",
       dim = true, pin = true, tick = { key = "debuffImportantHighlight", name = "Highlight Important Debuffs" } },
-    { label = "Duration Text",     key = "debuffs_duration",    col = 1, box = "Duration Text",    classicCol = 2,
+    { label = "Duration Text",     key = "debuffs_duration",    col = 1, 
       builder = "BuildDebuffDurationGroup",   golden = DEBUFF_DURATION,   summary = "DebuffDurationSummary",
       dim = true, pin = true, tick = { key = "debuffShowDuration", name = "Show Duration" } },
-    { label = "Stack Count",       key = "debuffs_stack",       col = 1, box = "Stack Count",      classicCol = 2,
+    { label = "Stack Count",       key = "debuffs_stack",       col = 1, 
       builder = "BuildDebuffStackGroup",      golden = DEBUFF_STACK,      summary = "DebuffStackSummary", dim = true, pin = true },
-    { label = "Dispel Text",       key = "debuffs_dispeltext",  col = 1, box = "Dispel Text",      classicCol = 2,
+    { label = "Dispel Text",       key = "debuffs_dispeltext",  col = 1, 
       builder = "BuildDebuffDispelTextGroup", golden = DEBUFF_DISPEL,     summary = "DebuffDispelSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "debuffDispelSymbolEnabled", name = "Show Dispel Text" } },
-    { label = "Duration Bar",      key = "debuffs_durationbar", col = 2, box = "Duration Bar",     classicCol = 2,
+    { label = "Duration Bar",      key = "debuffs_durationbar", col = 2, 
       builder = "BuildDebuffDurationBarGroup", golden = DEBUFF_DURBAR,    summary = "DebuffDurationBarSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "debuffDurationBarEnabled", name = "Enable Duration Bar" } },
@@ -471,31 +465,7 @@ local CARDS = {
 for _, g in ipairs(CARDS) do
     print("-- Debuff Bar page: " .. g.label)
     local body = builderBody(g.builder)
-    -- The census is the PRE-CHANGE one: classic renders what it always did.
     checkCensus(census(body), g.golden, g.label:lower())
-
-    -- ONE builder, BOTH layouts: the declaration, the classic box's mount and the
-    -- card's. (The pin's panel copy is built by the shared helper, which calls
-    -- whatever builder it was handed -- not a fourth call site here.)
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    -- The classic box, with its own header, in the column it always had.
-    if g.box then
-        local box
-        for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-            local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.box .. '"])'
-            local hit = PAGE:find(want, at, true)
-            if hit and hit - at < 900 then box = name break end
-        end
-        check(box ~= nil, g.label .. ": the classic box keeps its own header (" .. g.box .. ")")
-        if box then
-            check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-                  g.label .. ": ...which still goes to column " .. g.classicCol)
-        end
-    end
-
     local block, call = sectionBlock(g.label)
     -- ☠ A STABLE COLLAPSE KEY, NEVER THE TITLE, and the card's column.
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -539,28 +509,28 @@ for _, g in ipairs(CARDS) do
               g.label .. ": no header tick")
     end
 
-    -- The card hands the builder EXACTLY what classic hands it, plus hoistToggle
+    -- The card hands the builder its band, plus hoistToggle
     -- where the tick moved to the header -- so there is ONE checkbox per setting.
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 
 end
 
 print("-- Debuff Bar page: the cards together")
 do
-    -- ---- the source order: classic's; the cards MOUNT in the group table's ----
+    -- ---- the source order; the cards MOUNT in the group table's ----
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Highlight | Duration Text | Stack Count | Dispel Text | Caster Name | Duration Bar",
-       "order: the fourteen cards are declared in classic's order")
+       "order: the fourteen cards are declared in reading order")
 
     -- ---- one checkbox per setting --------------------------------------
-    -- Five ticks, five hoists, every hoist inside a ticked card -- so the classic
-    -- boxes still build their checkbox and no card builds it twice.
+    -- Six ticks, six hoists, every hoist inside a ticked card -- so no card
+    -- builds its checkbox twice.
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
     eq(hoists, 6, "ticks: exactly six mounts ask their builder to skip the in-body toggle")
@@ -570,7 +540,7 @@ do
     end
     -- The PTR lane's Caster Name card is ticked too; it has no CARDS row (no golden yet).
     inCards = inCards + select(2, (sectionBlock("Caster Name")):gsub("hoistToggle = true,", ""))
-    eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's")
 
     -- ☠ NOT VISIBILITY. Show Debuffs is the page's master switch: it stays in the
     -- body, built by the builder, exactly as Show Buffs does on the Buff Bar.
@@ -597,42 +567,16 @@ do
           "dedup: ...on a row of its own")
     local tips = 0
     for _ in PAGE:gmatch("local DEDUP_TIP = L%[") do tips = tips + 1 end
-    eq(tips, 1, "dedup: the tooltip is declared once, for both layouts")
+    eq(tips, 1, "dedup: the tooltip is declared once")
     local tipAt = PAGE:find("local DEDUP_TIP = L[", 1, true)
     local filtersAt = PAGE:find('OpenSection(L["Debuff Filters"]', 1, true)
     check(tipAt and filtersAt and tipAt < filtersAt, "dedup: ...above the card that uses it")
-    -- Classic keeps its own box.
-    check(PAGE:find('GUI:CreateHeader(self.child, L["Deduplication"])', 1, true) ~= nil
-      and PAGE:find('GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged)', 1, true) ~= nil
-      and PAGE:find("Add(dedupGroup, nil, 1)", 1, true) ~= nil,
-          "dedup: classic still builds its own Deduplication box in column 1")
 
-    -- ---- the Important Debuffs swatch stays classic-only -----------------
-    check(PAGE:find("local impSwatch = GUI:AttachHeaderSwatch(impHeader, 13, 2)", 1, true) ~= nil,
-          "swatch: the classic box still hangs the marker preview off its header")
-    check(builderBody("BuildImportantDebuffsGroup"):find("AttachHeaderSwatch", 1, true) == nil,
-          "swatch: ...the shared builder never touches it")
+    -- ---- the Important Debuffs swatch is the card header's icon ----------
+    check(PAGE:find("AttachHeaderSwatch", 1, true) == nil,
+          "swatch: no header swatch of its own -- the card's icon slot previews the marker")
     check(PAGE:find("if UpdateImportantSwatch then UpdateImportantSwatch() end", 1, true) ~= nil,
-          "swatch: ...and the shared callback guards it, so the card's nil is safe")
-
-    -- ---- fourteen classic boxes, in the order they always had ----------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 15, "classic: fifteen bare 280 boxes, and they are the classic branch's own")
-    local ADDS = { "visibilityGroup, nil, 1", "filterGroup, nil, 1", "blGroup, nil, 1",
-                   "debuffOrderGroup, nil, 1", "dedupGroup, nil, 1", "appearanceGroup, nil, 2",
-                   "gridGroup, nil, 1", "positionGroup, nil, 1", "borderGroup, nil, 1",
-                   "impGroup, nil, 2", "durationGroup, nil, 2", "stackCountGroup, nil, 2",
-                   "symbolGroup, nil, 2", "durBarGroup, nil, 2" }
-    local prev = 0
-    for _, a in ipairs(ADDS) do
-        local at = PAGE:find("Add(" .. a .. ")", 1, true)
-        check(at ~= nil and at > prev, "classic: still calls Add(" .. a .. ") in sequence")
-        prev = at or prev
-    end
-    check(PAGE:find("durBarGroup.hideOn = NoFactoryRow", 1, true) ~= nil
-      and PAGE:find("symbolGroup.hideOn = NoFactoryRow", 1, true) ~= nil,
-          "classic: ...and still puts the factory gate on its two boxes")
+          "swatch: ...and the shared callback guards it, so a call before the card exists is safe")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"debuff", "showDebuffs", "directDebuff", "debuffBlacklist"}', 1, true) ~= nil,

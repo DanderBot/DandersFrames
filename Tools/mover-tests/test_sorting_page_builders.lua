@@ -3,17 +3,16 @@ local NS = ...
 -- ============================================================
 -- SORTING PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- General > Sorting: five 280 boxes in classic; in modern, the Debuff Bar's
--- collapsible CARDS in the two columns classic has always drawn:
+-- General > Sorting: the Debuff Bar's collapsible CARDS in two columns:
 --
 --   column 1   Unit Frame Sorting (+ Self Position), FrameSort Integration
 --              (only with the FrameSort addon; header tick)
 --   column 2   "Priority"  Role Priority, Class Priority
 --
 -- ☠ WHAT THIS SUITE PINS:
---   * each builder's census (pre-card source) -- classic renders as it did;
---   * ONE builder per box, and the card hands it exactly what classic does
---     (plus hoistToggle where the tick moved into the header);
+--   * each builder's census;
+--   * how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header);
 --   * Enable Custom Sorting stays in the first card's body -- it is the PAGE
 --     gate -- and that card says Off while sorting is off;
 --   * Use FrameSort Addon is the FrameSort card's header tick;
@@ -110,8 +109,6 @@ end
 -- ============================================================
 print("-- Sorting page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
@@ -161,41 +158,30 @@ print("-- Sorting page: Unit Frame Sorting")
 do
     local body = builderBody("BuildSortOptionsGroup")
     checkCensus(census(body), SORT_OPTIONS, "unit frame sorting")
-    local calls = 0
-    for _ in PAGE:gmatch("BuildSortOptionsGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "unit frame sorting: declared once, mounted twice -- classic box and card")
-    check(PAGE:find("local sortOptionsGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
-      and PAGE:find('sortOptionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame Sorting"]), 40)', 1, true) ~= nil
-      and PAGE:find("Add(sortOptionsGroup, nil, 1)", 1, true) ~= nil,
-          "unit frame sorting: classic's box, header and column are unchanged")
 
     local block, call = sectionBlock("Unit Frame Sorting")
     check(block:find('OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)', 1, true) ~= nil,
           "unit frame sorting: a card keyed sorting_unitframes in column 1, no tick, no gates, no pin")
     check(block:find("BuildSortOptionsGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "unit frame sorting: mounts the builder exactly as classic does -- the enable stays in the body")
+          "unit frame sorting: mounts its builder into the card's band -- the enable stays in the body")
     check(body:find(".keepEnabled = true", 1, true) ~= nil
       and body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
           "unit frame sorting: the enable stays live under the group gate that greys the rest")
-    local summary = PAGE:match("local function SortOptionsSummary%(d%)(.-)\n            end")
+    local summary = PAGE:match("local function SortOptionsSummary%(d%)(.-)\n        end")
     check(summary and summary:find('if not d.sortEnabled then return L["Off"] end', 1, true) ~= nil,
           "unit frame sorting: shut, the corner says Off while sorting is off")
 
     -- ☠ SELF POSITION, the lone control, at the foot of this card.
     check(block:find('local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil,
-          "self position: the dropdown is the card's last control -- same key, options and commit as classic")
+          "self position: the dropdown is the card's last control")
     check(block:find("selfPos.hideOn = HideSortOptions", 1, true) ~= nil,
-          "self position: ...hidden under a FrameSort takeover, as classic's box was")
+          "self position: ...hidden under a FrameSort takeover")
     local declAt = PAGE:find("local selfPosValues = {", 1, true)
     local cardAt = PAGE:find('OpenSection(L["Unit Frame Sorting"]', 1, true)
     check(declAt and cardAt and declAt < cardAt, "self position: its vocabulary is declared above the card that uses it")
     local decls = 0
     for _ in PAGE:gmatch("local selfPosValues = {") do decls = decls + 1 end
     eq(decls, 1, "self position: ...exactly once")
-    check(PAGE:find("local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
-      and PAGE:find('selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil
-      and PAGE:find("Add(selfPosGroup, nil, 1)", 1, true) ~= nil,
-          "self position: classic keeps its own box")
 end
 
 -- ============================================================
@@ -210,30 +196,26 @@ local CLASS_PRIORITY = {
 
 for _, g in ipairs({
     { label = "Role Priority", builder = "BuildRolePriorityGroup", golden = ROLE_PRIORITY, key = "sorting_rolepriority",
-      box = "rolePriorityGroup", summary = "RolePrioritySummary", hide = "HideSortOptions)" },
+      summary = "RolePrioritySummary", hide = "HideSortOptions)" },
     { label = "Class Priority", builder = "BuildClassPriorityGroup", golden = CLASS_PRIORITY, key = "sorting_classpriority",
-      box = "classPriorityGroup", summary = "ClassPrioritySummary",
+      summary = "ClassPrioritySummary",
       hide = "function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end)" },
 }) do
     print("-- Sorting page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    check(PAGE:find("Add(" .. g.box .. ", nil, 2)", 1, true) ~= nil, g.label .. ": classic's box still goes to column 2")
     check(body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
           g.label .. ": the list greys through the builder's group gate")
     local block = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", 2, ' .. g.summary .. ', DisableSortOptions, ' .. g.hide, 1, true) ~= nil,
-          g.label .. ": a card in column 2 -- header greyed while sorting is off, hidden by classic's own gate, no pin")
+          g.label .. ": a card in column 2 -- header greyed while sorting is off, hidden by its own gate, no pin")
     check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          g.label .. ": mounts the builder exactly as classic does")
+          g.label .. ": mounts its builder into the card's band")
 end
 
 print("-- Sorting page: the Priority header")
 do
-    check(PAGE:find('local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])\n            priorityHeader.hideOn = HideSortOptions\n            Add(priorityHeader, 40, 2)', 1, true) ~= nil,
+    check(PAGE:find('local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])\n        priorityHeader.hideOn = HideSortOptions\n        Add(priorityHeader, 40, 2)', 1, true) ~= nil,
           "priority: the category header opens column 2 and hides with both cards under a FrameSort takeover")
     local hAt = PAGE:find("Add(priorityHeader, 40, 2)", 1, true)
     local rAt = PAGE:find('OpenSection(L["Role Priority"]', 1, true)
@@ -268,11 +250,8 @@ do
       and commit:find("RefreshCurrentPage", 1, true) == nil,
           "framesort: one named commit -- both modes, the module, a re-sort and a state pass, never a rebuild")
 
-    check(PAGE:find("if FrameSortApi then\n            if classicLayout then", 1, true) ~= nil,
-          "framesort: only built with the FrameSort addon, in either layout")
-    check(PAGE:find("BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })", 1, true) ~= nil
-      and PAGE:find("Add(frameSortGroup, nil, 1)", 1, true) ~= nil,
-          "framesort: classic's box and column are unchanged")
+    check(PAGE:find("if FrameSortApi then\n", 1, true) ~= nil,
+          "framesort: only built with the FrameSort addon")
     local a = PAGE:find('OpenSection(L["FrameSort Integration"]', 1, true)
     local b = a and PAGE:find("CloseSection(band)", a, true)
     local block = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
@@ -290,14 +269,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Unit Frame Sorting | FrameSort Integration | Role Priority | Class Priority",
-       "order: the cards open in classic's order, which is the one-column fold's")
-    local prev = 0
-    for _, a in ipairs({ "Add(sortOptionsGroup, nil, 1)", "Add(frameSortGroup, nil, 1)", "Add(selfPosGroup, nil, 1)",
-                         "Add(rolePriorityGroup, nil, 2)", "Add(classPriorityGroup, nil, 2)" }) do
-        local at = PAGE:find(a, prev + 1, true)
-        check(at ~= nil and at > prev, "classic: still calls " .. a .. " in sequence")
-        prev = at or prev
-    end
+       "order: the cards open in the one-column fold's order")
     check(PAGE:find('combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end', 1, true) ~= nil,
           "page: the combat banner keeps its own gate")
     check(PAGE:find('{pageId = "general_frame", label = L["Frame"]}', 1, true) ~= nil,

@@ -439,7 +439,7 @@ end
 -- ============================================================
 -- 8. THE HEAD AREAS ARE THE CARD LAYOUT'S OWN
 -- Every tab's furniture above the list -- the add block, the chips, the choice
--- cards, the teaching prose -- is declared ONCE and mounted by both layouts. Two
+-- cards, the teaching prose -- is declared ONCE and mounted by every caller. Two
 -- copies would be two edits every time the add flow moves, which is phase 5.
 -- ============================================================
 print("-- Aura Designer: one head area per tab")
@@ -527,7 +527,7 @@ do
 
     -- ☠ THE SPLIT PANEL'S CARD BLOCKS ARE GONE (2026-09-22). It mounts these same
     -- two panes ON its tabs now (opts.onPage), and a tile click adds -- see
-    -- test_designers_classic.lua for the mount, run.
+    -- test_designers_island.lua for the mount, run.
     check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) == nil,
           "addgroup: the split panel no longer draws its Layout Groups card block")
     check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) == nil,
@@ -544,11 +544,11 @@ do
         -- opts.onPage drops the numbered question; the rows page still gets it.
         check(b:find("    if not opts.onPage then\n        CreateNumberedHeading(host, 1, L[\"WHICH KIND OF GROUP?\"], y, W)", 1, true) ~= nil,
               "addgroup: " .. fn .. " asks its question only off the page")
-        -- The classic gate is asked on the click, before the pane closes or adds.
+        -- The add gate is asked on the click, before the pane closes or adds.
         local gAt = b:find("if opts.gate and not opts.gate() then return end", 1, true)
         local cAt = b:find("if opts.Close then opts.Close() end", 1, true)
         check(gAt and cAt and gAt < cAt,
-              "addgroup: " .. fn .. " asks the classic gate before anything happens")
+              "addgroup: " .. fn .. " asks the add gate before anything happens")
         check(b:find('if opts.blocked then tile:SetTileState("disabled") end', 1, true) ~= nil,
               "addgroup: " .. fn .. " greys its tiles when the add is blocked")
     end
@@ -570,7 +570,7 @@ end
 
 -- ============================================================
 -- 8c. THE SECTION LIST, PER GROUP KIND
--- Which blocks a group has is decided in ONE place for both layouts.
+-- Which blocks a group has is decided in ONE place.
 -- ============================================================
 print("-- Aura Designer: the section list per group kind")
 do
@@ -987,7 +987,7 @@ do
     check(POOL:find("S.BuildPoolStrip = function(buffTabBar)", 1, true) ~= nil,
           "pool: the split panel's pool strip is declared once")
     -- (poolHost: the strip's left part -- the spec picker holds its right end,
-    -- see test_designers_classic.lua.)
+    -- see test_designers_island.lua.)
     check(EDIT:find("S.BuildPoolStrip(poolHost)", 1, true) ~= nil,
           "pool: ...and the split panel mounts it into its own slice")
     -- ⚠ ONE DESCRIPTION OF THE POOLS, and it is a FUNCTION: a file-scope
@@ -1156,7 +1156,7 @@ do
           "narrow: what follows the chips is anchored TO them, so a re-wrap carries it")
 
     -- ---- the choice cards are gone ---------------------------------------
-    -- The split panel's add blocks are one button each, opening the Modern panes in
+    -- The split panel's add blocks are one button each, opening the add panes in
     -- a popout; the choice-card factory itself was deleted with its last caller.
     check(HEAD:find("CreateChoiceCard", 1, true) == nil,
           "narrow: the Effects head area builds no choice cards any more")
@@ -1348,30 +1348,30 @@ do
     local headBody = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos%)(.-)\nend\n")
     check(headBody ~= nil, "add: the head area's body can be read")
     headBody = headBody or ""
-    check(headBody:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
-          "add: ...and it mounts the classic add tiles")
+    check(headBody:find('yPos = S.BuildAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
+          "add: ...and it mounts the add tiles")
 
-    -- ☠ THE CLASSIC DESIGNER RUNS THIS PANE INSIDE ITS TAB (2026-09-22), never in a
+    -- ☠ THE DESIGNER RUNS THIS PANE INSIDE ITS TAB, never in a
     -- popout: two picture tiles, Add from a Spell / Add from a Filter, each handing
-    -- the pane the route it chose. The flow is run in test_designers_classic.lua;
+    -- the pane the route it chose. The flow is run in test_designers_island.lua;
     -- here the wiring is read.
-    local defsBody = CARDS:match("S%.ClassicAddSourceDefs = function%(%)(.-)\nend\n") or ""
+    local defsBody = CARDS:match("S%.AddSourceDefs = function%(%)(.-)\nend\n") or ""
     check(defsBody:find('{ source = "spell",  label = L["Add from a Spell"]', 1, true) ~= nil,
-          "add: the classic Effects tab has an Add from a Spell tile")
+          "add: the Effects tab has an Add from a Spell tile")
     check(defsBody:find('{ source = "filter", label = L["Add from a Filter"]', 1, true) ~= nil,
           "add: ...and an Add from a Filter tile")
     check(defsBody:find('L["Add Indicator"]', 1, true) == nil,
           "add: ...instead of one Add Indicator button")
-    local flowBody = CARDS:match("S%.BuildClassicAddFlow = function%(parent, kind%)(.-)\nend\n") or ""
+    local flowBody = CARDS:match("S%.BuildAddFlow = function%(parent, kind%)(.-)\nend\n") or ""
     check(flowBody:find("source = flow.source, fitWidth = true, restore = restore,", 1, true) ~= nil,
           "add: ...each entering the pane with its route chosen, laid out for the tab")
     check(flowBody:find("inline = true,", 1, true) ~= nil,
           "add: ...as the inline pane, which says its states and follows its own height")
     check(flowBody:find('L["Back to Effects"]', 1, true) ~= nil,
           "add: ...headed by Back to Effects")
-    check(flowBody:find("back:SetScript(\"OnClick\", function() S.EndClassicAddFlow(true, kind) end)", 1, true) ~= nil,
+    check(flowBody:find("back:SetScript(\"OnClick\", function() S.EndAddFlow(true, kind) end)", 1, true) ~= nil,
           "add: ...which ends the flow and rebuilds the list")
-    check(CARDS:find('"df.adadd.', 1, true) == nil and CARDS:find("S.OpenClassicAddPopout", 1, true) == nil,
+    check(CARDS:find('"df.adadd.', 1, true) == nil,
           "add: ...and no popout hosts it any more")
     -- The pane's opt-ins, each behind its own opts field.
     check(pane:find('local srcOnly = (opts.source == "spell" or opts.source == "filter") and opts.source or nil', 1, true) ~= nil,

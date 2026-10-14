@@ -65,9 +65,9 @@ do
             if rest then
                 local width, opts = rest:match("^(%d+)%s*,%s*(.+)$")
                 if width then
-                    -- ☠ THE RULE. A bare number is a CLASSIC arm's box -- classic
-                    -- passes no opts and always has. A number WITH an opts table is
-                    -- a new-UI mount at a column's width, which is the shape this
+                    -- ☠ THE RULE. A bare number is a fixed-width box (Profiles,
+                    -- Debug), which passes no opts. A number WITH an opts table
+                    -- is a mount at a column's width, which is the shape this
                     -- whole pass removed.
                     narrow = narrow + 1
                     check(false, "alignment: " .. page ..
@@ -122,10 +122,8 @@ do
     -- their counts only ever fall now and zero is a legitimate end state. The
     -- per-site rules above still police every one that is left; `groups` is
     -- what proves the sweep read the pages.
-    -- ⚠ 150, NOT 200: once every settings page became cards (2026-09-22) the
-    -- pages hold 179 groups. Still far above what a sweep that silently read
-    -- nothing would find. (The chromeless-band floor went with the designers'
-    -- rows pages, 2026-09-26: they held every chromeless band this sweep saw --
-    -- the card sections' bands are built in GUI/Controls.lua.)
-    check(groups > 150, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
+    -- The pages' own settings groups only: every card's band is built in
+    -- GUI/Controls.lua, so the count is small, but a sweep that silently read
+    -- nothing finds none.
+    check(groups > 10, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
 end

@@ -1826,7 +1826,7 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
     -- Resolve the indicator's Duration Format (default NUMBER — bare "45" / "2m" / "1h",
-    -- the same default the buff/debuff/defensive rows use). Classic formats come back as
+    -- the same default the buff/debuff/defensive rows use). Plain formats come back as
     -- a plain formatter; the percent family (PERCENT / SECONDS_PERCENT, PTR-7 #5) comes
     -- back as a SetTextFormat spec instead. The formatter also carries colour-by-time
     -- buckets + hide-above blanking when set — hide-above never composes with the
@@ -3894,7 +3894,7 @@ end
 
 -- ============================================================
 -- MEMBER LAYOUT GROUPS — position arranger (12.1 port)
--- A member ("classic") layout group arranges its members' PLACED indicators in
+-- A member layout group arranges its members' PLACED indicators in
 -- a grid computed from the group's settings (anchor / offset / grow direction /
 -- icons per row / spacing). On 12.1 aura presence is SECRET, so slots are STATIC: each
 -- member owns the grid cell of its member index (no compaction as auras come and go),

@@ -3,10 +3,9 @@ local NS = ...
 -- ============================================================
 -- GROUP LABELS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Frames.lua
 -- ------------------------------------------------------------
--- General > Group Labels: four classic boxes, raid + group-based only. In
--- Modern they are the Debuff Bar's collapsible CARDS -- two per row inside a
--- card wide enough, dim captions, the value summary in a shut card's corner,
--- Expand All / Collapse All at the top -- in classic's own columns:
+-- General > Group Labels: the Debuff Bar's collapsible CARDS, raid +
+-- group-based only -- two per row inside a card wide enough, dim captions, the
+-- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
 --   column 1   Raid Group Labels (the page's master switch, Enable Group
 --              Labels, in its body), Position
@@ -17,8 +16,7 @@ local NS = ...
 -- label LOOKS.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the CENSUS of each builder (the pre-change goldens), and the Text Format
---     box classic still builds inline.
+--   ✓ the CENSUS of each builder.
 --   ✓ each card's column, stable key, summary, grey and hide gates, pin.
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
@@ -107,8 +105,6 @@ end
 -- ============================================================
 print("-- Group Labels page: the shared machinery, and the row furniture gone")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "GUI:CreateControlRow(", "tools.PopoutContent(",
@@ -130,7 +126,7 @@ end
 
 -- ============================================================
 -- 2. THE BUILDERS AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local LABEL_SETTINGS = {
     { "label",    "Display labels above or beside each raid group.", "(none)",            25 },
@@ -154,16 +150,16 @@ local TEXT_FORMAT = {
 }
 
 local CARDS = {
-    { label = "Raid Group Labels", key = "grouplabels_settings", col = 1, classicCol = 1,
+    { label = "Raid Group Labels", key = "grouplabels_settings", col = 1, 
       builder = "BuildLabelSettingsGroup", golden = LABEL_SETTINGS,
       call = 'OpenSection(L["Raid Group Labels"], "grouplabels_settings", 1, GroupLabelsSummary, nil, HideGroupLabelOptions)' },
-    { label = "Text Format", key = "grouplabels_format", col = 2, classicCol = 2,
-      builder = "BuildTextFormatGroup", golden = TEXT_FORMAT, pin = true, calls = 2,
+    { label = "Text Format", key = "grouplabels_format", col = 2, 
+      builder = "BuildTextFormatGroup", golden = TEXT_FORMAT, pin = true,
       call = 'OpenSection(L["Text Format"], "grouplabels_format", 2, LabelFormatSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildTextFormatGroup)' },
-    { label = "Font Settings", key = "grouplabels_font", col = 2, classicCol = 2,
+    { label = "Font Settings", key = "grouplabels_font", col = 2, 
       builder = "BuildFontGroup", golden = FONT_SETTINGS, pin = true,
       call = 'OpenSection(L["Font Settings"], "grouplabels_font", 2, FontSettingsSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildFontGroup)' },
-    { label = "Position", key = "grouplabels_position", col = 1, classicCol = 1,
+    { label = "Position", key = "grouplabels_position", col = 1, 
       builder = "BuildPositionGroup", golden = POSITION, pin = true,
       call = 'OpenSection(L["Position"], "grouplabels_position", 1, PositionSummary, DisableGroupLabelOptions, HideGroupLabelOptions, BuildPositionGroup)' },
 }
@@ -173,17 +169,12 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    -- Declared once and mounted by classic and the card -- except Text Format,
-    -- whose classic box still builds its dropdown inline, so only the card
-    -- mounts the builder.
+    -- Declared once and mounted once, by its card.
     local calls = 0
     for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, g.calls or 3, g.label .. ": declared once, mounted " .. ((g.calls or 3) - 1) .. " time(s)")
+    eq(calls, 2, g.label .. ": declared once, mounted once")
 
     local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. g.label:gsub("%p", "%%%0") .. "\"%]%)")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil
-      and PAGE:find(box .. ".hideOn = HideGroupLabelOptions", 1, true) ~= nil,
-          g.label .. ": the classic box keeps its header, its hide gate and column " .. g.classicCol)
 
     local block, call = sectionBlock(g.label, g.builder .. "({")
     check(call:find(g.call, 1, true) ~= nil,
@@ -191,7 +182,7 @@ for _, g in ipairs(CARDS) do
           .. (g.pin and ", greying with the enable, pinnable" or ", never greying -- it holds the switch"))
     check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
     check(block:find("({ group = ", 1, true) ~= nil and block:find("refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          g.label .. ": mounts the builder as classic does")
+          g.label .. ": mounts its builder")
 end
 
 print("-- Group Labels page: the builders' own gates, and Text Format")
@@ -204,10 +195,7 @@ do
         check(builderBody(b):find("group.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
               b .. ": the body greys with the enable, from inside the builder")
     end
-    -- Text Format: classic still builds its box's dropdown inline, identically.
-    check(PAGE:find('formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil
-      and PAGE:find("formatGroup.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
-          "text format: classic's box builds the same dropdown with the same gate")
+    -- Text Format: the card's builder builds the dropdown.
     check(builderBody("BuildTextFormatGroup"):find('GUI:CreateDropdown(parent, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil,
           "text format: ...and the card's builder builds that same call")
     local fmtAt = PAGE:find("local formatOptions = {", 1, true)
@@ -223,24 +211,21 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Raid Group Labels | Text Format | Font Settings | Position",
-       "order: the four cards open in classic's order")
-    check(PAGE:find('local strip = Add(tools.SectionControls(self.child), 24, "both")\n            strip.hideOn = HideGroupLabelOptions', 1, true) ~= nil,
+       "order: the four cards open in reading order")
+    check(PAGE:find('local strip = Add(tools.SectionControls(self.child), 24, "both")\n        strip.hideOn = HideGroupLabelOptions', 1, true) ~= nil,
           "bulk: Expand All / Collapse All at the top, hidden with the cards outside raid + groups")
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
     local firstAt = PAGE:find('OpenSection(L["Raid Group Labels"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    local sum = PAGE:match("local function FontSettingsSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function FontSettingsSummary%(d%)(.-)\n        end")
     check(sum ~= nil and sum:find("DF:GetFontNameFromPath(d.groupLabelFont)", 1, true) ~= nil,
           "summary: Font Settings names its font through the dropdown's own resolver")
-    local psum = PAGE:match("local function PositionSummary%(d%)(.-)\n            end")
+    local psum = PAGE:match("local function PositionSummary%(d%)(.-)\n        end")
     check(psum ~= nil and psum:find('L["Start"]', 1, true) ~= nil,
           "summary: Position uses the short placement words")
 
     check(PAGE:find('partyMsg.hideOn = function() return GUI.SelectedMode == "raid" end', 1, true) ~= nil
       and PAGE:find('flatMsg.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end', 1, true) ~= nil,
           "page: the party and flat messages are unchanged")
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "classic: four bare 280 boxes, all the classic branch's own")
 end

@@ -365,23 +365,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     BuildPage(pageVisibility, function(self, db, Add, AddSpace, AddSyncPoint)
         Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: ONE 280 box in column 1 headed
-        -- "Frame Display", holding all six controls in their original order.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per
-        -- group, two settings per row inside a card wide enough, dim captions,
-        -- the value summary in a shut card's corner, Expand All / Collapse All
-        -- at the top.
-        --
-        -- ☠ MODERN SPLITS THE CLASSIC BOX IN TWO, because it was never one
-        -- feature. Solo Mode plus the three rested controls is a GATED group --
-        -- turn Solo Mode off and none of them do anything, which is exactly what
-        -- their own disableOn predicates already say -- so Solo Mode is that
-        -- card's header tick. "Hide Self from Party Frames" is an INDEPENDENT
-        -- tick that works whether or not you ever play solo, so it cannot go
-        -- behind that gate: it keeps the box's own name, "Frame Display", as a
-        -- card of its own.
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- ☠ TWO CARDS, because this is not one feature. Solo Mode plus the three
+        -- rested controls is a GATED group -- turn Solo Mode off and none of
+        -- them do anything, which is exactly what their own disableOn
+        -- predicates say -- so Solo Mode is that card's header tick. "Hide Self
+        -- from Party Frames" is an INDEPENDENT tick that works whether or not
+        -- you ever play solo, so it cannot go behind that gate: it is a card of
+        -- its own, "Frame Display".
         --
         --   column 1   Solo Mode       (tick: soloMode)
         --   column 2   Frame Display   (Hide Self from Party Frames)
@@ -390,14 +381,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- balanced rather than split by behaviour/looks.
         --
         -- ⚠ THE PAGE IS partyOnly (set just below this builder) and every widget
-        -- here carries its own raid hideOn. Both are kept exactly as they were:
-        -- the tab is never reachable in raid mode, and the per-widget guards are
-        -- the belt that has always been there.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- the `if classicLayout then` arm below leans on.
+        -- here carries its own raid hideOn as well: the tab is never reachable
+        -- in raid mode, and the per-widget guards are the belt.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
@@ -411,22 +398,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.CloseSection(Add, band)
         end
 
-        -- ===== SOLO MODE (the top of the classic box, the first card) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db keys, same callbacks, same slot
-        -- heights, same hideOn/disableOn. Guarded by
-        -- test_visibility_page_builders.lua, which reads this body out of the
-        -- source and checks it against the inventory it had inline.
+        -- ===== SOLO MODE (the first card) =====
+        -- Guarded by test_visibility_page_builders.lua, which reads this body
+        -- out of the source and checks its inventory.
         --
-        -- ⚠ THE COMPOUND disableOn PREDICATES ARE UNCHANGED, including the
-        -- "not d.soloMode" half. Classic has no header tick and needs that half;
-        -- in the card it is what greys the three rested controls while the tick
-        -- is off. One builder serving both is what stops the two drifting.
+        -- ⚠ THE COMPOUND disableOn PREDICATES KEEP their "not d.soloMode" half:
+        -- it is what greys the three rested controls while the tick is off, in
+        -- the card and in a pinned panel alike.
         local function BuildSoloModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the card's HEADER carries this tick. Still built in
-            -- classic, where it is the group's only on/off control.
+            -- Suppressed when the card's HEADER carries this tick.
             if not tools2.hoistToggle then
                 local soloMode = group:AddWidget(GUI:CreateCheckbox(parent, L["Solo Mode"], db, "soloMode", function()
                     DF:UpdateAllFrames()
@@ -460,8 +442,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, the
-        -- Frame Display card in Modern) =====
+        -- ===== HIDE SELF FROM PARTY FRAMES (the Frame Display card) =====
         -- ⚠ THE CALLBACK IS VERBATIM AND MUST STAY SO: it writes a SECURE header
         -- attribute, which is why it is gated on InCombatLockdown before it
         -- touches showPlayer. Named at page scope so there is one copy of a body
@@ -485,85 +466,67 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]
         end
 
-        if classicLayout then
-            -- ===== FRAME DISPLAY GROUP (Column 1) =====
-            -- One box, both builders, in the order the six controls always had.
-            local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)
-            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
-            BuildSoloModeGroup({
-                group = frameDisplayGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            BuildHideSelfGroup({
-                group = frameDisplayGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(frameDisplayGroup, nil, 1)
-        else
-            -- The summary, per the sweep's convention: at most four items, a
-            -- fixed order, "\194\183" between them, WORDS localised and numbers
-            -- raw, every read guarded because a profile mid-migration may be
-            -- missing any of these keys. The header tick already says whether
-            -- Solo Mode is on (a shut card reads "Off" while it is not), so the
-            -- summary is about the one thing BEHIND it -- the rested indicator
-            -- and how it is drawn.
-            --
-            -- ⚠ NOTHING IS INVENTED. "Rested Indicator" is the checkbox's own
-            -- label, and "Icon" / "Glow" are single words the locale already
-            -- ships -- the two sub-ticks' own labels carry the indent that pins
-            -- them under their parent and are far too long for a summary line.
-            local function SoloModeSummary(d)
-                if not d then return "" end
-                if not d.restedIndicator then return format("%s %s", L["Rested Indicator"], L["Off"]) end
-                local parts = { L["Rested Indicator"] }
-                if d.restedIndicatorIcon then parts[#parts + 1] = L["Icon"] end
-                if d.restedIndicatorGlow then parts[#parts + 1] = L["Glow"] end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Buff Bar's placement and its reasons: they act on cards in both
-            -- columns, and "both" carries them through the one-column fold intact.
-            Add(tools.SectionControls(self.child), 24, "both")
-
-            -- ☠ SOLO MODE IS THE HEADER'S TICK, so the builder is told not to
-            -- build its own (hoistToggle). The commit is what the in-body
-            -- checkbox ran plus the state pass that greys the three rested
-            -- controls -- never a page rebuild. Decides whether a solo frame
-            -- exists at all, so no pin.
-            local soloBand = OpenSection(L["Solo Mode"], "visibility_solo", 1, SoloModeSummary, nil, nil, nil, {
-                db = db, key = "soloMode", label = L["Solo Mode"],
-                onChanged = function()
-                    DF:UpdateAllFrames()
-                    DF:UpdateDefaultPlayerFrame()
-                    self:RefreshStates()
-                end,
-            })
-            BuildSoloModeGroup({
-                group = soloBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(soloBand)
-
-            -- ☠ HIDE SELF KEEPS THE BOX'S NAME, as a card of its own. It is what
-            -- is left of "Frame Display" once Solo Mode has its own card, and it
-            -- is not behind Solo Mode's gate and never was. No tick: the one
-            -- checkbox IS the setting. Behaviour, so no pin.
-            -- Its one tick, as the state it leaves you in.
-            local function FrameDisplaySummary(d)
-                if not d then return "" end
-                return format(d.hidePlayerFrame and L["%s hidden"] or L["%s shown"], L["Self"])
-            end
-            local displayBand = OpenSection(L["Frame Display"], "visibility_framedisplay", 2, FrameDisplaySummary)
-            BuildHideSelfGroup({
-                group = displayBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(displayBand)
+        -- The summary, per the sweep's convention: at most four items, a
+        -- fixed order, "\194\183" between them, WORDS localised and numbers
+        -- raw, every read guarded because a profile mid-migration may be
+        -- missing any of these keys. The header tick already says whether
+        -- Solo Mode is on (a shut card reads "Off" while it is not), so the
+        -- summary is about the one thing BEHIND it -- the rested indicator
+        -- and how it is drawn.
+        --
+        -- ⚠ NOTHING IS INVENTED. "Rested Indicator" is the checkbox's own
+        -- label, and "Icon" / "Glow" are single words the locale already
+        -- ships -- the two sub-ticks' own labels carry the indent that pins
+        -- them under their parent and are far too long for a summary line.
+        local function SoloModeSummary(d)
+            if not d then return "" end
+            if not d.restedIndicator then return format("%s %s", L["Rested Indicator"], L["Off"]) end
+            local parts = { L["Rested Indicator"] }
+            if d.restedIndicatorIcon then parts[#parts + 1] = L["Icon"] end
+            if d.restedIndicatorGlow then parts[#parts + 1] = L["Glow"] end
+            return table.concat(parts, " \194\183 ")
         end
+
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Buff Bar's placement and its reasons: they act on cards in both
+        -- columns, and "both" carries them through the one-column fold intact.
+        Add(tools.SectionControls(self.child), 24, "both")
+
+        -- ☠ SOLO MODE IS THE HEADER'S TICK, so the builder is told not to
+        -- build its own (hoistToggle). The commit is what the in-body
+        -- checkbox ran plus the state pass that greys the three rested
+        -- controls -- never a page rebuild. Decides whether a solo frame
+        -- exists at all, so no pin.
+        local soloBand = OpenSection(L["Solo Mode"], "visibility_solo", 1, SoloModeSummary, nil, nil, nil, {
+            db = db, key = "soloMode", label = L["Solo Mode"],
+            onChanged = function()
+                DF:UpdateAllFrames()
+                DF:UpdateDefaultPlayerFrame()
+                self:RefreshStates()
+            end,
+        })
+        BuildSoloModeGroup({
+            group = soloBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(soloBand)
+
+        -- ☠ HIDE SELF KEEPS THE BOX'S NAME, as a card of its own. It is what
+        -- is left of "Frame Display" once Solo Mode has its own card, and it
+        -- is not behind Solo Mode's gate and never was. No tick: the one
+        -- checkbox IS the setting. Behaviour, so no pin.
+        -- Its one tick, as the state it leaves you in.
+        local function FrameDisplaySummary(d)
+            if not d then return "" end
+            return format(d.hidePlayerFrame and L["%s hidden"] or L["%s shown"], L["Self"])
+        end
+        local displayBand = OpenSection(L["Frame Display"], "visibility_framedisplay", 2, FrameDisplaySummary)
+        BuildHideSelfGroup({
+            group = displayBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(displayBand)
     end)
     -- The Visibility tab is entirely party/solo-oriented, so hide it in raid mode.
     if GUI.Tabs and GUI.Tabs["display_visibility"] then
@@ -626,7 +589,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local TIP_VIS_OOC = L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."]
         local TIP_VIS_COMBAT = L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."]
 
-        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. The Modern cards print
+        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. The cards print
         -- the CHOSEN anchor as their summary, and the summary is built outside the
         -- group's builder -- so the word for FRAME has to come from the same table
         -- the dropdown offers, or a card could say "Unit Frame" while the control
@@ -686,16 +649,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:UpdateAllFrames()
         end
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: seven 280 boxes in two columns,
-        -- in the columns and the order they have always had.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design, one card per box:
-        -- two settings per row inside a card wide enough, dim captions, the value
-        -- summary in a shut card's corner, Expand All / Collapse All at the top.
-        --
+        -- ===== THE PAGE'S CARDS ===========================================
         --   column 1   "Unit Frame"  Frame Tooltips, Binding Tooltips -- the two
-        --                            boxes that describe the SAME hover -- and
+        --                            groups that describe the SAME hover -- and
         --                            Resurrection Icon Tooltips, for balance.
         --   column 2   "Auras"       Buff, Debuff, Defensive Icon and Aura
         --                            Designer Tooltips -- hovering an ICON the
@@ -709,14 +665,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where the toggle moved into the
-        -- header, `hoistToggle`. The classic branch mounts the SAME builder into
-        -- the box it always built -- test_tooltips_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- every `if classicLayout then` arm below leans on.
+        -- header, `hoistToggle` -- test_tooltips_page_builders.lua pins each
+        -- inventory.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
@@ -732,16 +684,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ☠ WHAT AN "ANCHOR TO" CHANGE COSTS. Picking an anchor re-gates the three
         -- controls under it (the Anchor position greys under Game Default; the two
-        -- offsets grey unless the tooltip is pinned to the frame or icon). A classic
-        -- box and a Modern card are both page widgets, so both take the page's
-        -- state pass; `popout` is only ever set by a pinned-panel mount, which has
-        -- a pane of its own to reflow (no card on this page is pinnable today, so
-        -- that arm is kept for the builder's shape rather than exercised).
+        -- offsets grey unless the tooltip is pinned to the frame or icon). A card
+        -- is a page widget, so it takes the page's state pass; `popout` is only
+        -- ever set by a pinned-panel mount, which has a pane of its own to
+        -- reflow (no card on this page is pinnable today, so that arm is kept
+        -- for the builder's shape rather than exercised).
         --
-        -- ★ NEITHER LAYOUT REBUILDS. What the rebuild used to buy is the
-        -- same state pass, over a page whose three controls carry their gates as
-        -- disableOn -- and the rebuild leaked the whole page on every pick (see
-        -- RelayoutCurrentPage in GUI/Panel.lua).
+        -- ★ NO REBUILD: the three controls carry their gates as disableOn, so
+        -- the state pass is all a rebuild would buy -- and a rebuild leaks the
+        -- whole page on every pick (see RelayoutCurrentPage in GUI/Panel.lua).
         local function AnchorGateRefresh(tools2)
             if tools2.popout then
                 tools2.refreshStates()
@@ -799,22 +750,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== Frame Tooltips + Buff Tooltips (classic row 1) =====
-
-        -- Frame Tooltips (a 280 box in column 1 in classic, the first Unit Frame
-        -- card in Modern). Verbatim, taking the group and parent it should build
-        -- into: same factories, same L keys, same db keys, same slot heights, same
-        -- disableOn.
+        -- Frame Tooltips (the first Unit Frame card).
         --
-        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while frame tooltips are off; the card's body has to do the
-        -- same while its header tick is off, and one builder serving both is what
-        -- stops the two drifting.
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, so a pinned copy greys its
+        -- children while frame tooltips are off, exactly as the card's body does
+        -- while its header tick is off.
         local function BuildFrameTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the card's HEADER carries this tick. Still built in classic,
-            -- where it is the group's only on/off control.
+            -- Suppressed when the card's HEADER carries this tick.
             if not tools2.hoistToggle then
                 local frameTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Tooltips"], db, "tooltipFrameEnabled", nil), 30)
                 frameTooltipEnable.keepEnabled = true
@@ -843,48 +787,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             frameOffsetY.disableOn = function(d) return d.tooltipFrameAnchor ~= "FRAME" end
         end
 
-        if classicLayout then
-            local frameTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            frameTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Tooltips"]), 40)
-            BuildFrameTooltipGroup({
-                group = frameTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Buff Bar's placement and its reasons: they act on cards in both
+        -- columns, and "both" carries them through the one-column fold intact.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- The category header the three Unit Frame cards sit under -- the very
+        -- word the first two cards' Anchor To dropdowns use for the thing
+        -- they attach to.
+        Add(GUI:CreateHeader(self.child, L["Unit Frame"]), 40, 1)
+        -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+        -- build its own (hoistToggle). Every control here is read at HOVER
+        -- time, so the commit is only the state pass that greys the body --
+        -- never a page rebuild. When a tooltip appears is behaviour, not
+        -- looks, so no pin.
+        local band = OpenSection(L["Frame Tooltips"], "tooltips_frame", 1,
+            HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat"),
+            nil, nil, nil, {
+                db = db, key = "tooltipFrameEnabled", label = L["Enable Frame Tooltips"],
+                onChanged = function() self:RefreshStates() end,
             })
-            Add(frameTooltipGroup, nil, 1)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Buff Bar's placement and its reasons: they act on cards in both
-            -- columns, and "both" carries them through the one-column fold intact.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- The category header the three Unit Frame cards sit under -- the very
-            -- word the first two cards' Anchor To dropdowns use for the thing
-            -- they attach to.
-            Add(GUI:CreateHeader(self.child, L["Unit Frame"]), 40, 1)
-            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
-            -- build its own (hoistToggle). Every control here is read at HOVER
-            -- time, so the commit is only the state pass that greys the body --
-            -- never a page rebuild. When a tooltip appears is behaviour, not
-            -- looks, so no pin.
-            local band = OpenSection(L["Frame Tooltips"], "tooltips_frame", 1,
-                HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat"),
-                nil, nil, nil, {
-                    db = db, key = "tooltipFrameEnabled", label = L["Enable Frame Tooltips"],
-                    onChanged = function() self:RefreshStates() end,
-                })
-            BuildFrameTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildFrameTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- Binding Tooltips (a 280 box in column 2 in classic, the second Unit
-        -- Frame card in Modern) — pairs with Frame Tooltips: both anchor to the
-        -- Unit Frame, so they are the two boxes describing the SAME hover. In
-        -- classic they sat side by side and the reader had to notice; in Modern
-        -- the "Unit Frame" header over both says it.
+        -- Binding Tooltips (the second Unit Frame card) — pairs with Frame
+        -- Tooltips: both anchor to the Unit Frame, so they describe the SAME
+        -- hover, and the "Unit Frame" header over both says it.
         local function BuildBindTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -916,34 +847,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             bindOffsetY.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
         end
 
-        if classicLayout then
-            local bindTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            bindTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Binding Tooltips"]), 40)
-            BuildBindTooltipGroup({
-                group = bindTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- The Frame Tooltips card's shape and reasoning: the same gated chain
+        -- of picks over the same hover, the enable in the header.
+        local band = OpenSection(L["Binding Tooltips"], "tooltips_binding", 1,
+            HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
+            nil, nil, nil, {
+                db = db, key = "tooltipBindingEnabled", label = L["Enable Binding Tooltips"],
+                onChanged = function() self:RefreshStates() end,
             })
-            Add(bindTooltipGroup, nil, 2)
-        else
-            -- The Frame Tooltips card's shape and reasoning: the same gated chain
-            -- of picks over the same hover, the enable in the header.
-            local band = OpenSection(L["Binding Tooltips"], "tooltips_binding", 1,
-                HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
-                nil, nil, nil, {
-                    db = db, key = "tooltipBindingEnabled", label = L["Enable Binding Tooltips"],
-                    onChanged = function() self:RefreshStates() end,
-                })
-            BuildBindTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildBindTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- Buff Tooltips (a 280 box in column 1 in classic, the first Auras card
-        -- in Modern).
+        -- Buff Tooltips (the first Auras card).
         local function BuildBuffTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -967,61 +886,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor == "CURSOR" end
         end
 
-        if classicLayout then
-            local buffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            buffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Tooltips"]), 40)
-            BuildBuffTooltipGroup({
-                group = buffTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- Column 2 opens here, with the category header the four aura cards
+        -- sit under.
+        Add(GUI:CreateHeader(self.child, L["Auras"]), 40, 2)
+        -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+        -- build its own (hoistToggle). The commit is what the in-body
+        -- checkbox ran (the aura buttons are the game's own, so a changed flag
+        -- has to be pushed into them) plus the state pass that greys the
+        -- body -- never a page rebuild. When a tooltip appears is behaviour,
+        -- not looks, so no pin.
+        local band = OpenSection(L["Buff Tooltips"], "tooltips_buff", 2,
+            AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat"),
+            nil, nil, nil, {
+                db = db, key = "tooltipBuffEnabled", label = L["Enable Buff Tooltips"],
+                onChanged = function()
+                    RefreshAuraTooltips()
+                    self:RefreshStates()
+                end,
             })
-            Add(buffTooltipGroup, nil, 1)
-        else
-            -- Column 2 opens here, with the category header the four aura cards
-            -- sit under.
-            Add(GUI:CreateHeader(self.child, L["Auras"]), 40, 2)
-            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
-            -- build its own (hoistToggle). The commit is what the in-body
-            -- checkbox ran (the aura buttons are the game's own, so a changed flag
-            -- has to be pushed into them) plus the state pass that greys the
-            -- body -- never a page rebuild. When a tooltip appears is behaviour,
-            -- not looks, so no pin.
-            local band = OpenSection(L["Buff Tooltips"], "tooltips_buff", 2,
-                AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat"),
-                nil, nil, nil, {
-                    db = db, key = "tooltipBuffEnabled", label = L["Enable Buff Tooltips"],
-                    onChanged = function()
-                        RefreshAuraTooltips()
-                        self:RefreshStates()
-                    end,
-                })
-            BuildBuffTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildBuffTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- ⚠ NO sync points between these boxes. Every tooltip box bar Resurrection
-        -- is the same 320 tall by construction (header 40 + enable 30 + combat 30
-        -- + two dropdowns at 55 + two sliders at 55), so the two columns stay level
-        -- on their own — the old "align row N" sync points bought nothing, and one
-        -- of them actively hurt: column 2 carries Resurrection (70) as a third box,
-        -- so syncing after it dropped BOTH columns to column 2's bottom and left a
-        -- ~70px hole in column 1 between Debuff and Binding.
-        --
-        -- 5 boxes of 320 plus one of 70 cannot be split evenly, so the short box
-        -- belongs at the bottom of the SHORTER column (column 2), where a trailing
-        -- gap reads as the end of a column rather than as a mistake.
-        --
-        -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY, and it still holds
-        -- there. Modern's cards are column-filling and two per row inside, so
-        -- none of these heights apply; its columns are split by subject instead
-        -- (Unit Frame left, Auras right).
-
-        -- Debuff Tooltips (a 280 box in column 2 in classic, the second Auras
-        -- card in Modern).
+        -- Debuff Tooltips (the second Auras card).
         local function BuildDebuffTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1045,36 +935,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor == "CURSOR" end
         end
 
-        if classicLayout then
-            local debuffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            debuffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Tooltips"]), 40)
-            BuildDebuffTooltipGroup({
-                group = debuffTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- The Buff Tooltips card's shape: one group, two auras.
+        local band = OpenSection(L["Debuff Tooltips"], "tooltips_debuff", 2,
+            AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat"),
+            nil, nil, nil, {
+                db = db, key = "tooltipDebuffEnabled", label = L["Enable Debuff Tooltips"],
+                onChanged = function()
+                    RefreshAuraTooltips()
+                    self:RefreshStates()
+                end,
             })
-            Add(debuffTooltipGroup, nil, 2)
-        else
-            -- The Buff Tooltips card's shape: one group, two auras.
-            local band = OpenSection(L["Debuff Tooltips"], "tooltips_debuff", 2,
-                AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat"),
-                nil, nil, nil, {
-                    db = db, key = "tooltipDebuffEnabled", label = L["Enable Debuff Tooltips"],
-                    onChanged = function()
-                        RefreshAuraTooltips()
-                        self:RefreshStates()
-                    end,
-                })
-            BuildDebuffTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildDebuffTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- Defensive Icon Tooltips (a 280 box in column 1 in classic, the third
-        -- Auras card in Modern).
+        -- Defensive Icon Tooltips (the third Auras card).
         local function BuildDefTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1098,40 +976,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor == "CURSOR" end
         end
 
-        if classicLayout then
-            local defTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            defTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Icon Tooltips"]), 40)
-            BuildDefTooltipGroup({
-                group = defTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- The third of the aura trio, and the Buff Tooltips card's shape:
+        -- the enable is the header's tick (the builder skips its own).
+        local band = OpenSection(L["Defensive Icon Tooltips"], "tooltips_defensive", 2,
+            AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat"),
+            nil, nil, nil, {
+                db = db, key = "tooltipDefensiveEnabled", label = L["Enable Defensive Icon Tooltips"],
+                onChanged = function()
+                    RefreshAuraTooltips()
+                    self:RefreshStates()
+                end,
             })
-            Add(defTooltipGroup, nil, 1)
-        else
-            -- The third of the aura trio, and the Buff Tooltips card's shape:
-            -- the enable is the header's tick (the builder skips its own).
-            local band = OpenSection(L["Defensive Icon Tooltips"], "tooltips_defensive", 2,
-                AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat"),
-                nil, nil, nil, {
-                    db = db, key = "tooltipDefensiveEnabled", label = L["Enable Defensive Icon Tooltips"],
-                    onChanged = function()
-                        RefreshAuraTooltips()
-                        self:RefreshStates()
-                    end,
-                })
-            BuildDefTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildDefTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- Aura Designer Tooltips (a 280 box in column 2 in classic, the last
-        -- Auras card in Modern). Lives HERE rather than on the Aura
-        -- Designer page: this setting only ever gets touched by someone who
-        -- wants a tooltip and hasn't got one, or has one and doesn't want it —
-        -- and both of those people go looking for "tooltip". The AD page links
+        -- Aura Designer Tooltips (the last Auras card). Lives HERE rather than on
+        -- the Aura Designer page: this setting only ever gets touched by someone
+        -- who wants a tooltip and hasn't got one, or has one and doesn't want it
+        -- — and both of those people go looking for "tooltip". The AD page links
         -- across via its See Also row.
         --
         -- Split by AD surface rather than one blanket toggle, because the value
@@ -1158,64 +1024,43 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             adBarTip.tooltip = L["The Aura Designer bar."]
         end
 
-        if classicLayout then
-            local adTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            adTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Designer Tooltips"]), 40)
-            BuildADTooltipGroup({
-                group = adTooltipGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(adTooltipGroup, nil, 2)
-        else
-            -- Which of the three surfaces are on, in the order the checkboxes
-            -- are in. Three items at most, all of them single words the locale
-            -- already ships as those checkboxes' own labels -- and with none of
-            -- them on it says nothing, which is the honest answer for a card
-            -- whose whole group is off.
-            local function ADTooltipSummary(d)
-                if not d then return "" end
-                local parts = {}
-                if d.tooltipADGroupsEnabled then parts[#parts + 1] = L["Groups"] end
-                if d.tooltipADIndicatorsEnabled then parts[#parts + 1] = L["Indicators"] end
-                if d.tooltipADBarsEnabled then parts[#parts + 1] = L["Bars"] end
-                if #parts == 0 then return L["None"] end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- ☠ NO HEADER TICK: three INDEPENDENT switches and no one of them is
-            -- the group's on/off (see the builder's note). Behaviour, so no pin.
-            local band = OpenSection(L["Aura Designer Tooltips"], "tooltips_auradesigner", 2, ADTooltipSummary)
-            BuildADTooltipGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- Which of the three surfaces are on, in the order the checkboxes
+        -- are in. Three items at most, all of them single words the locale
+        -- already ships as those checkboxes' own labels -- and with none of
+        -- them on it says nothing, which is the honest answer for a card
+        -- whose whole group is off.
+        local function ADTooltipSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.tooltipADGroupsEnabled then parts[#parts + 1] = L["Groups"] end
+            if d.tooltipADIndicatorsEnabled then parts[#parts + 1] = L["Indicators"] end
+            if d.tooltipADBarsEnabled then parts[#parts + 1] = L["Bars"] end
+            if #parts == 0 then return L["None"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- Resurrection Icon Tooltips (Column 2 in classic; the last Unit Frame
-        -- card in Modern) — the one short box, kept last so the leftover space
-        -- lands at the foot of a column.
+        -- ☠ NO HEADER TICK: three INDEPENDENT switches and no one of them is
+        -- the group's on/off (see the builder's note). Behaviour, so no pin.
+        local band = OpenSection(L["Aura Designer Tooltips"], "tooltips_auradesigner", 2, ADTooltipSummary)
+        BuildADTooltipGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- Resurrection Icon Tooltips (the last Unit Frame card).
         --
         -- ☠ ONE SETTING, SO ITS CARD HOLDS THE CHECKBOX AND NO HEADER TICK. The
         -- enable is the whole group: hoisted, it would leave a card with an empty
-        -- body under a tick. The same call classic makes, on the same key, so the
-        -- search entry is the one classic registers. Its column is the Unit Frame
-        -- side for balance (three cards against four), as the old row's was.
-        if classicLayout then
-            local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-            resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)
-            resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
-            Add(resTooltipGroup, nil, 2)
-        else
-            local function ResurrectionTooltipSummary(d)
-                if not d then return "" end
-                return d.tooltipResurrectionEnabled and L["On"] or L["Off"]
-            end
-            local band = OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, ResurrectionTooltipSummary)
-            band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
-            CloseSection(band)
+        -- body under a tick. Its column is the Unit Frame side for balance
+        -- (three cards against four).
+        local function ResurrectionTooltipSummary(d)
+            if not d then return "" end
+            return d.tooltipResurrectionEnabled and L["On"] or L["Off"]
         end
+        local band = OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, ResurrectionTooltipSummary)
+        band:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
+        CloseSection(band)
 
         -- ===== NO BAND TAIL ================================================
         -- A card's band holds one group and is Add'd by CloseSection the moment
@@ -1252,24 +1097,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- three. Prefixes must be real key prefixes, not the box's name.
         Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "fadeUnhealable", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: three 280 boxes -- Out of Range in
-        -- column 1, then Dead/Offline Fading and Health Threshold Fading stacked in
-        -- column 2 with the block spacer between them.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: two settings per row
-        -- inside a card wide enough, dim captions, the value summary in a shut
-        -- card's corner, Expand All / Collapse All at the top. FOUR cards, because
-        -- the Out of Range box is split in two (see its builder):
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- FOUR cards, because the range check and the per-element alphas are
+        -- split (see BuildRangeCheckGroup):
         --
         --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
         --              oorEnabled)
         --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
-        --              Threshold Fading (tick: healthFadeEnabled)
+        --              Threshold Fading (tick: healthFadeEnabled), Unhealable
+        --              Fading
         --
         -- Every feature that has an enable carries it as its header tick (one
         -- checkbox per setting, the builder's own skipped through hoistToggle).
-        -- The three fades are how a frame LOOKS, so they are pinnable; the range
+        -- The fades are how a frame LOOKS, so they are pinnable; the range
         -- check is behaviour and is not.
         --
         -- ⚠ NO CATEGORY HEADERS. A header names a SECTION -- and the section here
@@ -1277,14 +1117,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } and, where the toggle moved into the
-        -- header, `hoistToggle`. The classic branch mounts the SAME builders into
-        -- the boxes it always built -- test_fading_page_builders.lua pins the
-        -- inventory of each one against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- every `if classicLayout then` arm below leans on.
+        -- header, `hoistToggle` -- test_fading_page_builders.lua pins each
+        -- inventory.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
@@ -1311,18 +1147,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return d.oorEnabled
         end
 
-        -- ☠ THREE HELPERS MOVED UP TO PAGE SCOPE, ABOVE EVERY BUILDER. All three
-        -- used to sit in the straight-line code between the controls that call
-        -- them, which was fine while the page WAS straight-line code. The builders
-        -- are CLOSURES now, and a closure captures the upvalue that exists when it
+        -- ☠ THESE HELPERS SIT AT PAGE SCOPE, ABOVE EVERY BUILDER. The builders
+        -- are closures, and a closure captures the upvalue that exists when it
         -- is CREATED -- so a builder declared above one of these would see nil
         -- rather than the function.
         --
         -- ⚠ THE RANGE PAIR READS THE PAGE'S OWN FIELDS (self.rangeSpellInput,
-        -- self.rangeSpellInfoLabel) rather than locals, and that indirection is
-        -- what makes them work in BOTH layouts: the builder stamps them wherever
-        -- it is mounted, the classic box or the Out of Range card. (Which is why
-        -- that card grows no pin: a second, pinned copy would re-point them.)
+        -- self.rangeSpellInfoLabel) rather than locals: the builder stamps them
+        -- wherever it is mounted. Which is why the Out of Range card grows no
+        -- pin: a second, pinned copy would re-point them.
         local function RefreshRangeInfoLabel()
             if self.rangeSpellInfoLabel and self.rangeSpellInfoLabel.SetText and DF.GetCurrentRangeSpellInfo then
                 local info = DF:GetCurrentRangeSpellInfo()
@@ -1351,26 +1184,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
         end
 
-        -- ===== OUT OF RANGE (a 280 box in column 1 in classic, TWO cards in
-        -- Modern) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db keys, same callbacks, same slot heights,
-        -- same hideOn/disableOn -- split into the two builders below, which the
-        -- classic box mounts back to back (BuildOutOfRangeGroup) and Modern mounts
-        -- as two cards.
+        -- ===== OUT OF RANGE =====
+        -- ☠ WHY TWO CARDS. The range check (spell, custom spell, interval,
+        -- frame-level alpha) has no on/off: out of range fades either way. The
+        -- twelve per-element alphas DO -- oorEnabled -- and as one card that
+        -- switch could not go in the header without claiming to speak for the
+        -- range spell too, and it HIDES the frame-level slider, so a tick over
+        -- the whole group would grey the one control the group is left with.
+        -- Split, the second card's header carries it honestly, the way the
+        -- fades beside it do.
         --
-        -- ☠ WHY TWO. The range check (spell, custom spell, interval, frame-level
-        -- alpha) has no on/off: out of range fades either way. The twelve
-        -- per-element alphas DO -- oorEnabled -- and as one card that switch could
-        -- not go in the header without claiming to speak for the range spell too,
-        -- and it HIDES the frame-level slider, so a tick over the whole group
-        -- would grey the one control the group is left with. Split, the second
-        -- card's header carries it honestly, the way the two fades beside it do.
-        --
-        -- ☠ THE TWO db SEEDS STAY EXACTLY WHERE THEY WERE, inside the builder and
-        -- ahead of the control that reads them. They are the page's only build-time
-        -- writes, so they still land at the moment they always did -- which is
-        -- what the export byte-identity gate measures.
+        -- ☠ THE TWO db SEEDS STAY inside the builder, ahead of the control that
+        -- reads them. They are the page's only build-time writes, and where
+        -- they land is what the export byte-identity gate measures.
         local function BuildRangeCheckGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1478,10 +1304,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             frameLevelAlpha.hideOn = HideFrameLevelAlpha
         end
 
-        -- ===== ELEMENT-SPECIFIC ALPHA (the second half of the classic Out of
-        -- Range box, a card of its own in Modern) =====
-        -- The switch and the twelve per-element alphas behind it. Verbatim, less
-        -- the switch when the card's HEADER carries it.
+        -- ===== ELEMENT-SPECIFIC ALPHA =====
+        -- The switch and the twelve per-element alphas behind it, less the
+        -- switch when the card's HEADER carries it.
         local function BuildElementAlphaGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1538,107 +1363,83 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             oorAuraDesigner.disableOn = HideOOROptions
         end
 
-        -- The classic box's builder: both halves, back to back, into the ONE box,
-        -- in the order the seventeen controls always had.
-        local function BuildOutOfRangeGroup(tools2)
-            BuildRangeCheckGroup(tools2)
-            BuildElementAlphaGroup(tools2)
+        -- The two summaries, per the sweep's convention: at most four items, a
+        -- fixed order, "\194\183" between them, WORDS localised and numbers
+        -- raw, every read guarded because a profile mid-migration may be
+        -- missing any of these keys.
+        --
+        -- Out of Range reports the ONE frame-level alpha, and only while it
+        -- is the one in use: with element-specific alpha on, the frame-level
+        -- slider is hidden and a number labelled "Alpha" would be a lie. The
+        -- range SPELL is deliberately absent -- it is a spell name rather than
+        -- a setting value, and the card's own info label says which is live.
+        local function OutOfRangeSummary(d)
+            if not d then return "" end
+            if d.oorEnabled then return "" end
+            local a = tonumber(d.rangeFadeAlpha)
+            if not a then return "" end
+            return format("%s %.2f", L["Alpha"], a)
+        end
+        -- Element-Specific Alpha names the HEALTH BAR's alpha -- the element
+        -- that covers most of the frame and the one people mean by "how
+        -- faded is it". A shut card reads "Off" while its tick is off.
+        local function ElementAlphaSummary(d)
+            if not d then return "" end
+            local hp = tonumber(d.oorHealthBarAlpha)
+            if not hp then return "" end
+            return format("%s %.2f", L["Health Bar Alpha"], hp)
         end
 
-        if classicLayout then
-            -- ===== OUT OF RANGE GROUP (Column 1) =====
-            local oorGroup = GUI:CreateSettingsGroup(self.child, 280)
-            oorGroup:AddWidget(GUI:CreateHeader(self.child, L["Out of Range"]), 40)
-            BuildOutOfRangeGroup({
-                group = oorGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Buff Bar's placement and its reasons: they act on cards in both
+        -- columns, and "both" carries them through the one-column fold intact.
+        Add(tools.SectionControls(self.child), 24, "both")
+
+        -- ☠ NO TICK, AND NO PIN. Out of range fading has no on/off: it fades
+        -- either way, through the one frame-level alpha or the per-element
+        -- ones below. The range spell and the check interval are behaviour,
+        -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
+        -- for the range helpers -- a pinned second copy would re-point them.
+        Add(GUI:CreateHeader(self.child, L["Range"]), 40, 1)
+        local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
+        BuildRangeCheckGroup({
+            group = rangeBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(rangeBand)
+
+        -- ☠ TWELVE PER-ELEMENT ALPHAS BEHIND ONE SWITCH is a feature with an
+        -- on/off, so the switch is the header's tick (hoistToggle) -- the
+        -- consistency the fades on this page have. The commit is the state pass
+        -- the in-body checkbox ran: it greys the twelve here and swaps the
+        -- frame-level slider in the card above in or out. How faded each
+        -- element is is how it LOOKS, so it is pinnable.
+        local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil,
+            BuildElementAlphaGroup, {
+                db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
+                onChanged = function()
+                    self:RefreshStates()
+                    tools.ReflowMounted()
+                end,
             })
-            Add(oorGroup, nil, 1)
-        else
-            -- The two summaries, per the sweep's convention: at most four items, a
-            -- fixed order, "\194\183" between them, WORDS localised and numbers
-            -- raw, every read guarded because a profile mid-migration may be
-            -- missing any of these keys.
-            --
-            -- Out of Range reports the ONE frame-level alpha, and only while it
-            -- is the one in use: with element-specific alpha on, the frame-level
-            -- slider is hidden and a number labelled "Alpha" would be a lie. The
-            -- range SPELL is deliberately absent -- it is a spell name rather than
-            -- a setting value, and the card's own info label says which is live.
-            local function OutOfRangeSummary(d)
-                if not d then return "" end
-                if d.oorEnabled then return "" end
-                local a = tonumber(d.rangeFadeAlpha)
-                if not a then return "" end
-                return format("%s %.2f", L["Alpha"], a)
-            end
-            -- Element-Specific Alpha names the HEALTH BAR's alpha -- the element
-            -- that covers most of the frame and the one people mean by "how
-            -- faded is it". A shut card reads "Off" while its tick is off.
-            local function ElementAlphaSummary(d)
-                if not d then return "" end
-                local hp = tonumber(d.oorHealthBarAlpha)
-                if not hp then return "" end
-                return format("%s %.2f", L["Health Bar Alpha"], hp)
-            end
+        BuildElementAlphaGroup({
+            group = elementBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(elementBand)
 
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Buff Bar's placement and its reasons: they act on cards in both
-            -- columns, and "both" carries them through the one-column fold intact.
-            Add(tools.SectionControls(self.child), 24, "both")
-
-            -- ☠ NO TICK, AND NO PIN. Out of range fading has no on/off: it fades
-            -- either way, through the one frame-level alpha or the per-element
-            -- ones below. The range spell and the check interval are behaviour,
-            -- and the builder stamps self.rangeSpellInput / rangeSpellInfoLabel
-            -- for the range helpers -- a pinned second copy would re-point them.
-            Add(GUI:CreateHeader(self.child, L["Range"]), 40, 1)
-            local rangeBand = OpenSection(L["Out of Range"], "fading_range", 1, OutOfRangeSummary)
-            BuildRangeCheckGroup({
-                group = rangeBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(rangeBand)
-
-            -- ☠ THE CLASSIC BOX'S SECOND HALF, AS ITS OWN CARD. Twelve per-element
-            -- alphas behind one switch is a feature with an on/off, so the switch
-            -- is the header's tick (hoistToggle) -- the consistency the other two
-            -- fades on this page already have. The commit is the state pass the
-            -- in-body checkbox ran: it greys the twelve here and swaps the
-            -- frame-level slider in the card above in or out. How faded each
-            -- element is is how it LOOKS, so it is pinnable.
-            local elementBand = OpenSection(L["Element-Specific Alpha"], "fading_elements", 1, ElementAlphaSummary, nil, nil,
-                BuildElementAlphaGroup, {
-                    db = db, key = "oorEnabled", label = L["Enable Element-Specific Alpha"],
-                    onChanged = function()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildElementAlphaGroup({
-                group = elementBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(elementBand)
-        end
-
-        -- ===== DEAD/OFFLINE FADING (a 280 box in column 2 in classic, the first
-        -- column-2 card in Modern) =====
+        -- ===== DEAD/OFFLINE FADING (the first column-2 card) =====
         -- The textbook header tick: one enable with keepEnabled and a group gate
         -- that greys everything behind it, which is the shape of "am I doing
         -- anything at all".
         --
-        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while dead fading is off; the card's body has to do the
-        -- same while its header tick is off, and one builder serving both is what
-        -- stops the two drifting.
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, so a pinned copy greys its
+        -- children while dead fading is off, exactly as the card's body does.
         local function BuildDeadFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the card's HEADER carries this tick. Still built in classic,
-            -- where it is the group's only on/off control.
+            -- Suppressed when the card's HEADER carries this tick.
             if not tools2.hoistToggle then
                 local deadFadeEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dead Fade"], db, "fadeDeadFrames", function()
                     tools2.refreshStates()
@@ -1660,8 +1461,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             -- ⚠ tools2.refreshStates, NOT self:RefreshStates: this tick gates the
             -- colour picker under it, and a group living in a popout holder is not
-            -- reached by the page's own state pass. Identical in classic, where the
-            -- tools2 hook IS self:RefreshStates.
+            -- reached by the page's own state pass.
             group:AddWidget(GUI:CreateCheckbox(parent, L["Custom Dead Background"], db, "fadeDeadUseCustomColor", function()
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
@@ -1674,71 +1474,58 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             deadBgColor.disableOn = function(d) return not d.fadeDeadUseCustomColor end
         end
 
-        if classicLayout then
-            -- ===== DEAD/OFFLINE FADING GROUP (Column 2) =====
-            local deadGroup = GUI:CreateSettingsGroup(self.child, 280)
-            deadGroup:AddWidget(GUI:CreateHeader(self.child, L["Dead/Offline Fading"]), 40)
-            BuildDeadFadeGroup({
-                group = deadGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(deadGroup, nil, 2)
-        else
-            -- The header tick already says whether dead fading is on (a shut card
-            -- reads "Off" while it is not), so the summary is about what is BEHIND
-            -- it -- and only where that is doing something. Seven alphas cannot
-            -- fit, so it names the one that covers most of the frame, and only
-            -- when it actually fades; the custom background follows it, in that
-            -- checkbox's own words.
-            -- The elements a dead frame actually fades, each with its alpha, in the
-            -- sliders' order -- "None" when every one is at 1. Three at most, so
-            -- the custom background still fits as the fourth.
-            local DEAD_FADE_PARTS = {
-                { "fadeDeadBackground", L["Background"] }, { "fadeDeadHealthBar", L["Health Bar"] },
-                { "fadeDeadName", L["Name"] }, { "fadeDeadPowerBar", L["Power"] },
-                { "fadeDeadIcons", L["Icons"] }, { "fadeDeadAuras", L["Auras"] },
-                { "fadeDeadStatusText", L["Status Text"] },
-            }
-            local function DeadFadeSummary(d)
-                if not d then return "" end
-                local parts = {}
-                for _, p in ipairs(DEAD_FADE_PARTS) do
-                    local a = tonumber(d[p[1]])
-                    if a and a < 1 and #parts < 3 then parts[#parts + 1] = format("%s %.2f", p[2], a) end
-                end
-                if #parts == 0 then parts[1] = L["None"] end
-                if d.fadeDeadUseCustomColor then parts[#parts + 1] = L["Custom Dead Background"] end
-                return table.concat(parts, " \194\183 ")
+        -- The header tick already says whether dead fading is on (a shut card
+        -- reads "Off" while it is not), so the summary is about what is BEHIND
+        -- it -- and only where that is doing something. Seven alphas cannot
+        -- fit, so it names the one that covers most of the frame, and only
+        -- when it actually fades; the custom background follows it, in that
+        -- checkbox's own words.
+        -- The elements a dead frame actually fades, each with its alpha, in the
+        -- sliders' order -- "None" when every one is at 1. Three at most, so
+        -- the custom background still fits as the fourth.
+        local DEAD_FADE_PARTS = {
+            { "fadeDeadBackground", L["Background"] }, { "fadeDeadHealthBar", L["Health Bar"] },
+            { "fadeDeadName", L["Name"] }, { "fadeDeadPowerBar", L["Power"] },
+            { "fadeDeadIcons", L["Icons"] }, { "fadeDeadAuras", L["Auras"] },
+            { "fadeDeadStatusText", L["Status Text"] },
+        }
+        local function DeadFadeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            for _, p in ipairs(DEAD_FADE_PARTS) do
+                local a = tonumber(d[p[1]])
+                if a and a < 1 and #parts < 3 then parts[#parts + 1] = format("%s %.2f", p[2], a) end
             end
-
-            -- Column 2 opens here.
-            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
-            -- build its own (hoistToggle). The commit is what the in-body checkbox
-            -- ran (its tools2.refreshStates is the state pass here) -- never a
-            -- page rebuild. How a dead frame is drawn is how it LOOKS, so it is
-            -- pinnable.
-            Add(GUI:CreateHeader(self.child, L["Unit State"]), 40, 2)
-            local band = OpenSection(L["Dead/Offline Fading"], "fading_dead", 2, DeadFadeSummary, nil, nil,
-                BuildDeadFadeGroup, {
-                    db = db, key = "fadeDeadFrames", label = L["Enable Dead Fade"],
-                    onChanged = function()
-                        self:RefreshStates()
-                        DF:UpdateAllFrames()
-                        DF:RefreshAllVisibleFrames()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildDeadFadeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+            if #parts == 0 then parts[1] = L["None"] end
+            if d.fadeDeadUseCustomColor then parts[#parts + 1] = L["Custom Dead Background"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== HEALTH THRESHOLD FADING (a 280 box in column 2 in classic, the
-        -- second column-2 card in Modern) =====
+        -- Column 2 opens here.
+        -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+        -- build its own (hoistToggle). The commit is what the in-body checkbox
+        -- ran (its tools2.refreshStates is the state pass here) -- never a
+        -- page rebuild. How a dead frame is drawn is how it LOOKS, so it is
+        -- pinnable.
+        Add(GUI:CreateHeader(self.child, L["Unit State"]), 40, 2)
+        local band = OpenSection(L["Dead/Offline Fading"], "fading_dead", 2, DeadFadeSummary, nil, nil,
+            BuildDeadFadeGroup, {
+                db = db, key = "fadeDeadFrames", label = L["Enable Dead Fade"],
+                onChanged = function()
+                    self:RefreshStates()
+                    DF:UpdateAllFrames()
+                    DF:RefreshAllVisibleFrames()
+                    tools.ReflowMounted()
+                end,
+            })
+        BuildDeadFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
+
+        -- ===== HEALTH THRESHOLD FADING (the second column-2 card) =====
         -- The same textbook hoist as Dead/Offline: keepEnabled plus a group gate.
         local function BuildHealthFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
@@ -1771,71 +1558,45 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
         end
 
-        if classicLayout then
-            -- ===== HEALTH THRESHOLD FADING (col2) =====
-            -- Column width, and the spacer above it is column 2 as well. A "both"
-            -- widget takes the LOWER of the two columns and drops both to it, so a
-            -- "both" spacer here would push column 2 down past the bottom of the
-            -- out-of-range group in column 1 and leave a hole under Dead/Offline.
-            --
-            -- Column 2 rather than 1 because column 1 carries the out-of-range group
-            -- and its long stack of per-element sliders, far and away the tallest
-            -- thing on the page.
-            --
-            -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY, which is why the
-            -- spacer lives in this arm: the popout layout has no columns left to
-            -- balance -- all three groups are rows in one full-width band.
-            AddSpace(GUI.Space.block, 2)
-            local hfGroup = GUI:CreateSettingsGroup(self.child, 280)
-            hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"]), 40)
-            BuildHealthFadeGroup({
-                group = hfGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(hfGroup, nil, 2)
-        else
-            -- Threshold first, then the opacity it applies: the two numbers the
-            -- feature IS, in the order the controls are in. The threshold is a
-            -- percent and wears its sign; the opacity takes L["Alpha"]. Both are
-            -- shown unconditionally: the feature is off on a default profile (a
-            -- shut card then reads "Off"), so anyone reading this turned it on and
-            -- wants the numbers.
-            local function HealthFadeSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local t = tonumber(d.healthFadeThreshold)
-                if t then parts[#parts + 1] = format("%d%%", math.floor(t)) end
-                local a = tonumber(d.healthFadeAlpha)
-                if a then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
-            -- build its own (hoistToggle). The commit is what the in-body checkbox
-            -- ran plus the state pass that greys the body -- never a page rebuild.
-            -- How faded a healthy frame is is how it LOOKS, so it is pinnable.
-            local band = OpenSection(L["Health Threshold Fading"], "fading_health", 2, HealthFadeSummary, nil, nil,
-                BuildHealthFadeGroup, {
-                    db = db, key = "healthFadeEnabled", label = L["Enable Health Threshold Fade"],
-                    tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."],
-                    onChanged = function()
-                        DF:UpdateAllFrames()
-                        DF:RefreshAllVisibleFrames()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildHealthFadeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+        -- Threshold first, then the opacity it applies: the two numbers the
+        -- feature IS, in the order the controls are in. The threshold is a
+        -- percent and wears its sign; the opacity takes L["Alpha"]. Both are
+        -- shown unconditionally: the feature is off on a default profile (a
+        -- shut card then reads "Off"), so anyone reading this turned it on and
+        -- wants the numbers.
+        local function HealthFadeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local t = tonumber(d.healthFadeThreshold)
+            if t then parts[#parts + 1] = format("%d%%", math.floor(t)) end
+            local a = tonumber(d.healthFadeAlpha)
+            if a then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== UNHEALABLE FADING (a 280 box in column 2 in classic, the third
-        -- column-2 card in Modern) =====
+        -- ☠ THE ENABLE IS THE HEADER'S TICK, so the builder is told not to
+        -- build its own (hoistToggle). The commit is what the in-body checkbox
+        -- ran plus the state pass that greys the body -- never a page rebuild.
+        -- How faded a healthy frame is is how it LOOKS, so it is pinnable.
+        local band = OpenSection(L["Health Threshold Fading"], "fading_health", 2, HealthFadeSummary, nil, nil,
+            BuildHealthFadeGroup, {
+                db = db, key = "healthFadeEnabled", label = L["Enable Health Threshold Fade"],
+                tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."],
+                onChanged = function()
+                    DF:UpdateAllFrames()
+                    DF:RefreshAllVisibleFrames()
+                    self:RefreshStates()
+                    tools.ReflowMounted()
+                end,
+            })
+        BuildHealthFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
+
+        -- ===== UNHEALABLE FADING (the third column-2 card) =====
         -- The same textbook hoist as Dead/Offline. The "fade" is a cover, not an
         -- alpha (Features/UnhealableFade.lua), so the slider is the opacity the
         -- frame APPEARS to have and the colour is what it dims towards.
@@ -1858,40 +1619,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateColorPicker(parent, L["Fade Color"], db, "fadeUnhealableColor", false, apply, apply, true), 35)
         end
 
-        if classicLayout then
-            AddSpace(GUI.Space.block, 2)
-            local ufGroup = GUI:CreateSettingsGroup(self.child, 280)
-            ufGroup:AddWidget(GUI:CreateHeader(self.child, L["Unhealable Fading"]), 40)
-            BuildUnhealableFadeGroup({
-                group = ufGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(ufGroup, nil, 2)
-        else
-            local function UnhealableFadeSummary(d)
-                if not d then return "" end
-                local a = tonumber(d.fadeUnhealableAlpha)
-                return a and format("%s %.2f", L["Alpha"], a) or ""
-            end
-
-            local band = OpenSection(L["Unhealable Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
-                BuildUnhealableFadeGroup, {
-                    db = db, key = "fadeUnhealableEnabled", label = L["Fade Unhealable Units"],
-                    tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."],
-                    onChanged = function()
-                        self:RefreshStates()
-                        DF:RefreshUnhealableFade()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildUnhealableFadeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+        local function UnhealableFadeSummary(d)
+            if not d then return "" end
+            local a = tonumber(d.fadeUnhealableAlpha)
+            return a and format("%s %.2f", L["Alpha"], a) or ""
         end
+
+        local band = OpenSection(L["Unhealable Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
+            BuildUnhealableFadeGroup, {
+                db = db, key = "fadeUnhealableEnabled", label = L["Fade Unhealable Units"],
+                tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."],
+                onChanged = function()
+                    self:RefreshStates()
+                    DF:RefreshUnhealableFade()
+                    tools.ReflowMounted()
+                end,
+            })
+        BuildUnhealableFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
         -- ===== NO BAND TAIL ================================================
         -- A card's band holds one group and is Add'd by CloseSection the moment
@@ -1916,16 +1665,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local isGroupedMode = db.petGroupMode == "GROUPED"
         local isRaidMode = GUI.SelectedMode == "raid"
         
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: ten 280 boxes in the two columns
-        -- and the same order -- General, Layout Mode, Group Settings (grouped
-        -- only), Size and Position (attached only) down column 1; Appearance,
-        -- Border, Health Bar, Name Text and Health Text down column 2.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design, one card per box:
-        -- two settings per row inside a card wide enough, dim captions, the value
-        -- summary in a shut card's corner, Expand All / Collapse All at the top.
-        --
+        -- ===== THE PAGE'S CARDS ===========================================
         --   column 1   Pet Frame Settings (the PAGE gate, Enable Pet Frames, in
         --              its body); "Layout": Layout Mode, Group Settings (grouped
         --              only), Size, Position (attached only); "Text": Name Text,
@@ -1934,22 +1674,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --              tick), Health Bar
         --
         -- Every card but the first greys with the page gate. Border is the one
-        -- card with a header tick -- the Frame page's Border card's shape -- so
-        -- it now behaves like every other card rather than like a feature row.
+        -- card with a header tick -- the Frame page's Border card's shape.
         -- Pins on the eight cards that decide how the pets LOOK; Pet Frame
         -- Settings and Layout Mode are behaviour.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } plus, where it matters, `popout` (a
-        -- pinned panel's mount) and `hoistToggle`. The classic branch mounts the
-        -- SAME builder into the box it always built --
-        -- test_petframes_page_builders.lua pins the inventory of each one against
-        -- the census taken before the move, in BOTH mode variants.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- every `if classicLayout then` arm below leans on.
+        -- pinned panel's mount) and `hoistToggle` --
+        -- test_petframes_page_builders.lua pins each inventory, in BOTH mode
+        -- variants.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
@@ -1964,25 +1699,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- ☠ THE PAGE GATE, ON THE CARDS. Every group on this page carries
-        -- `disableChildrenOn = not petEnabled` and always has; those gates stay
-        -- INSIDE the builders, so a card's body greys exactly as its box did. This
-        -- greys the card HEADERS with it, as the whole classic page visibly dims.
-        -- A pinned Border panel takes it as its toolkit's consumer gate too.
+        -- `disableChildrenOn = not petEnabled` INSIDE its builder, so a card's
+        -- body and a pinned copy grey alike. This greys the card HEADERS with
+        -- it. A pinned Border panel takes it as its toolkit's consumer gate too.
         --
-        -- ☠ NO INDEX-1 REPAIR ANY MORE: DandersUI Sections' RefreshChildStates
-        -- skips on the `isSectionHeader` mark now, not on the position, so a
-        -- band's (or a pinned pane's) first control greys like the rest.
+        -- ☠ NO INDEX-1 REPAIR: DandersUI Sections' RefreshChildStates skips on
+        -- the `isSectionHeader` mark, not on the position, so a band's (or a
+        -- pinned pane's) first control greys like the rest.
         local function PetsOffRow(d) return not (d or db).petEnabled end
 
         -- ☠ WHAT A GATING CONTROL'S CALLBACK COSTS. Five controls on this page
         -- (the two Match Owner ticks, the health colour mode, Show Power Bar and
-        -- the power colour mode) re-gate a sibling. A classic box and a Modern
-        -- card are both page widgets, so both take the page's state pass; a
-        -- pinned panel (`popout`) reflows its own pane instead.
+        -- the power colour mode) re-gate a sibling. A card is a page widget, so
+        -- it takes the page's state pass; a pinned panel (`popout`) reflows its
+        -- own pane instead.
         --
-        -- ★ NEITHER REBUILDS: every sibling these gate carries its gate as
-        -- hideOn/disableOn, so the state pass is all a rebuild bought -- and the
-        -- rebuild leaked the whole page per click.
+        -- ★ NO REBUILD: every sibling these gate carries its gate as
+        -- hideOn/disableOn, so the state pass is all a rebuild would buy -- and
+        -- a rebuild leaks the whole page per click.
         local function GateRefresh(tools2)
             if tools2.popout then
                 tools2.refreshStates()
@@ -2042,15 +1776,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             and function() if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end end
             or function() if DF.UpdatePetGroupLayout then DF:UpdatePetGroupLayout() end end
 
-        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, the first card
-        -- in Modern) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db keys, same callbacks, same slot heights.
-        --
+        -- ===== GENERAL GROUP (the first card) =====
         -- ⚠ tools2.refreshStates, NOT self:RefreshStates. The enable gates every
-        -- other group on this page, so in Modern it has to re-grey the cards AND
-        -- any pinned panel standing open beside them. In classic the tools2 hook
-        -- IS self:RefreshStates, so nothing changed there.
+        -- other group on this page, so it has to re-grey the cards AND any
+        -- pinned panel standing open beside them.
         local function BuildPetGeneralGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2067,8 +1796,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
         end
 
-        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, the first
-        -- Layout card in Modern) =====
+        -- ===== LAYOUT MODE GROUP (the first Layout card) =====
         local function BuildPetLayoutModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2081,8 +1809,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- disappears, two Match Owner ticks come and go, and two sliders swap
             -- their disableOn for nothing. No state pass produces widgets that
             -- were never built, so the rebuild is the work rather than a shortcut
-            -- to it. The dropdown lives on the PAGE in both layouts, which is what
-            -- makes that legal: a page widget expects to be retired by a rebuild,
+            -- to it. The dropdown lives on the PAGE, which is what makes that
+            -- legal: a page widget expects to be retired by a rebuild,
             -- and the helper's prologue closing the open panels on the way in is
             -- the intended behaviour on a structural change, not a casualty of it.
             local petLayoutMode = group:AddWidget(GUI:CreateDropdown(parent, L["Layout Mode"], groupModeValues, db, "petGroupMode", function()
@@ -2099,78 +1827,49 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        if classicLayout then
-            -- ===== GENERAL GROUP (col1) =====
-            -- Column width, not full width. A full-width box belongs to a page that
-            -- genuinely needs the room -- Pinned Frames, Nicknames -- and everything
-            -- below these two here is ordinary two-column controls, so stretching
-            -- them across the top reads as two different layouts stacked together.
-            local generalGroup = GUI:CreateSettingsGroup(self.child, 280)
-            generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
-            BuildPetGeneralGroup({
-                group = generalGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(generalGroup, nil, 1)
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Buff Bar's placement and its reasons: they act on cards in both
+        -- columns, and "both" carries them through the one-column fold intact.
+        Add(tools.SectionControls(self.child), 24, "both")
 
-            -- ===== LAYOUT MODE GROUP (col1) =====
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
-            BuildPetLayoutModeGroup({
-                group = layoutGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(layoutGroup, nil, 1)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Buff Bar's placement and its reasons: they act on cards in both
-            -- columns, and "both" carries them through the one-column fold intact.
-            Add(tools.SectionControls(self.child), 24, "both")
-
-            -- ☠ ENABLE PET FRAMES STAYS IN THE BODY, as Show Buffs does on the
-            -- Buff Bar: it is the PAGE gate, a fold is not a switch, and a header
-            -- tick that greyed the whole page would surprise people. So the first
-            -- card holds it and its blurb, and never greys itself. Its commit also
-            -- repaints a pinned panel, whose own gate reads the same key.
-            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
-            local function PetSettingsSummary(d)
-                if not d then return "" end
-                return d.petEnabled and L["On"] or L["Off"]
-            end
-            local settingsBand = OpenSection(L["Settings"], "pets_settings", 1, PetSettingsSummary)
-            BuildPetGeneralGroup({
-                group = settingsBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
-            })
-            CloseSection(settingsBand)
-
-            -- The category header the Layout cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
-            -- ☠ LAYOUT MODE REBUILDS THE PAGE, in both layouts: picking a mode
-            -- changes which cards exist at all (Group Settings, Position, the two
-            -- Match Owner ticks). A card is a page widget and expects to be
-            -- retired by a rebuild; its fold survives it (a stable key). Which
-            -- layout the pets use is behaviour, so no pin -- and a pinned copy of
-            -- a control that rebuilds the page would close under the hand anyway.
-            local function PetLayoutModeSummary(d)
-                return d and groupModeValues[d.petGroupMode] or ""
-            end
-            local modeBand = OpenSection(L["Layout Mode"], "pets_layoutmode", 1, PetLayoutModeSummary, PetsOffRow)
-            BuildPetLayoutModeGroup({
-                group = modeBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(modeBand)
+        -- ☠ ENABLE PET FRAMES STAYS IN THE BODY, as Show Buffs does on the
+        -- Buff Bar: it is the PAGE gate, a fold is not a switch, and a header
+        -- tick that greyed the whole page would surprise people. So the first
+        -- card holds it and its blurb, and never greys itself. Its commit also
+        -- repaints a pinned panel, whose own gate reads the same key.
+        Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+        local function PetSettingsSummary(d)
+            if not d then return "" end
+            return d.petEnabled and L["On"] or L["Off"]
         end
+        local settingsBand = OpenSection(L["Settings"], "pets_settings", 1, PetSettingsSummary)
+        BuildPetGeneralGroup({
+            group = settingsBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
+        })
+        CloseSection(settingsBand)
 
-        -- ===== GROUP SETTINGS (grouped mode only: a 280 box in column 1 in
-        -- classic, a Layout card in Modern) =====
-        -- Built only in GROUPED mode, exactly as today. The page rebuilds when the
-        -- layout mode changes, so the card simply is not there in attached mode --
-        -- which is what the box did, and what keeps the two layouts agreeing about
-        -- what exists.
+        -- The category header the Layout cards sit under.
+        Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
+        -- ☠ LAYOUT MODE REBUILDS THE PAGE: picking a mode
+        -- changes which cards exist at all (Group Settings, Position, the two
+        -- Match Owner ticks). A card is a page widget and expects to be
+        -- retired by a rebuild; its fold survives it (a stable key). Which
+        -- layout the pets use is behaviour, so no pin -- and a pinned copy of
+        -- a control that rebuilds the page would close under the hand anyway.
+        local function PetLayoutModeSummary(d)
+            return d and groupModeValues[d.petGroupMode] or ""
+        end
+        local modeBand = OpenSection(L["Layout Mode"], "pets_layoutmode", 1, PetLayoutModeSummary, PetsOffRow)
+        BuildPetLayoutModeGroup({
+            group = modeBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(modeBand)
+
+        -- ===== GROUP SETTINGS (grouped mode only, a Layout card) =====
+        -- The page rebuilds when the layout mode changes, so the card simply is
+        -- not there in attached mode.
         local function BuildPetGroupSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2192,51 +1891,38 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         if isGroupedMode then
-            if classicLayout then
-                -- GROUPED MODE: Group Settings (col1)
-                local groupedSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-                groupedSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Settings"]), 40)
-                BuildPetGroupSettingsGroup({
-                    group = groupedSettingsGroup,
-                    parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                Add(groupedSettingsGroup, nil, 1)
-            else
-                -- Where the block sits, which way it grows, and the nudge -- the
-                -- three facts that place it. Both words come out of the
-                -- dropdowns' own option tables. Spacing is deliberately absent:
-                -- a bare number with no word that fits beside two others.
-                local function PetGroupSummary(d)
-                    if not d then return "" end
-                    local parts = {}
-                    local pos = groupAnchorValues[d.petGroupAnchor]
-                    if pos then parts[#parts + 1] = pos end
-                    local growth = growthValues[d.petGroupGrowth]
-                    if growth then parts[#parts + 1] = growth end
-                    local ox = tonumber(d.petGroupOffsetX) or 0
-                    local oy = tonumber(d.petGroupOffsetY) or 0
-                    if ox ~= 0 or oy ~= 0 then
-                        parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
-                    end
-                    return table.concat(parts, " \194\183 ")
+            -- Where the block sits, which way it grows, and the nudge -- the
+            -- three facts that place it. Both words come out of the
+            -- dropdowns' own option tables. Spacing is deliberately absent:
+            -- a bare number with no word that fits beside two others.
+            local function PetGroupSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local pos = groupAnchorValues[d.petGroupAnchor]
+                if pos then parts[#parts + 1] = pos end
+                local growth = growthValues[d.petGroupGrowth]
+                if growth then parts[#parts + 1] = growth end
+                local ox = tonumber(d.petGroupOffsetX) or 0
+                local oy = tonumber(d.petGroupOffsetY) or 0
+                if ox ~= 0 or oy ~= 0 then
+                    parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
                 end
-
-                -- Grouped mode only, exactly as the box. Where the pet block sits
-                -- and how it is spaced is how it LOOKS, so it is pinnable; greys
-                -- with the page gate.
-                local band = OpenSection(L["Group Settings"], "pets_group", 1, PetGroupSummary, PetsOffRow, nil,
-                    BuildPetGroupSettingsGroup)
-                BuildPetGroupSettingsGroup({
-                    group = band, parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                CloseSection(band)
+                return table.concat(parts, " \194\183 ")
             end
+
+            -- Grouped mode only, exactly as the box. Where the pet block sits
+            -- and how it is spaced is how it LOOKS, so it is pinnable; greys
+            -- with the page gate.
+            local band = OpenSection(L["Group Settings"], "pets_group", 1, PetGroupSummary, PetsOffRow, nil,
+                BuildPetGroupSettingsGroup)
+            BuildPetGroupSettingsGroup({
+                group = band, parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            CloseSection(band)
         end
 
-        -- ===== SIZE (a 280 box in column 1 in classic, a Layout card in Modern)
-        -- =====
+        -- ===== SIZE (a Layout card) =====
         local function BuildPetSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2270,51 +1956,38 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        if classicLayout then
-            -- SIZE GROUP (col1)
-            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-            BuildPetSizeGroup({
-                group = sizeGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(sizeGroup, nil, 1)
-        else
-            -- ⚠ A NUMBER ONLY WHERE IT IS THE NUMBER IN USE. In attached mode
-            -- either dimension can be handed to the owner's frame, and
-            -- petMatchOwnerWidth ships ON -- so printing "Width 130" on a default
-            -- profile would name a value nothing renders. The matched half is
-            -- simply absent. In grouped mode neither tick exists and both numbers
-            -- are always the real ones.
-            local function PetSizeSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local attached = d.petGroupMode ~= "GROUPED"
-                if not (attached and d.petMatchOwnerWidth) then
-                    local w = tonumber(d.petFrameWidth)
-                    if w then parts[#parts + 1] = format("%s %d", L["Width"], math.floor(w)) end
-                end
-                if not (attached and d.petMatchOwnerHeight) then
-                    local h = tonumber(d.petFrameHeight)
-                    if h then parts[#parts + 1] = format("%s %d", L["Height"], math.floor(h)) end
-                end
-                return table.concat(parts, " \194\183 ")
+        -- ⚠ A NUMBER ONLY WHERE IT IS THE NUMBER IN USE. In attached mode
+        -- either dimension can be handed to the owner's frame, and
+        -- petMatchOwnerWidth ships ON -- so printing "Width 130" on a default
+        -- profile would name a value nothing renders. The matched half is
+        -- simply absent. In grouped mode neither tick exists and both numbers
+        -- are always the real ones.
+        local function PetSizeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local attached = d.petGroupMode ~= "GROUPED"
+            if not (attached and d.petMatchOwnerWidth) then
+                local w = tonumber(d.petFrameWidth)
+                if w then parts[#parts + 1] = format("%s %d", L["Width"], math.floor(w)) end
             end
-
-            -- No tick: a pet frame has a size either way. How big the pet frame
-            -- is is how it LOOKS, so it is pinnable; greys with the page gate.
-            local band = OpenSection(L["Size"], "pets_size", 1, PetSizeSummary, PetsOffRow, nil,
-                BuildPetSizeGroup)
-            BuildPetSizeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            if not (attached and d.petMatchOwnerHeight) then
+                local h = tonumber(d.petFrameHeight)
+                if h then parts[#parts + 1] = format("%s %d", L["Height"], math.floor(h)) end
+            end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== APPEARANCE (a 280 box in column 2 in classic, the first Frame
-        -- card in Modern) =====
+        -- No tick: a pet frame has a size either way. How big the pet frame
+        -- is is how it LOOKS, so it is pinnable; greys with the page gate.
+        local band = OpenSection(L["Size"], "pets_size", 1, PetSizeSummary, PetsOffRow, nil,
+            BuildPetSizeGroup)
+        BuildPetSizeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== APPEARANCE (the first Frame card) =====
         local function BuildPetAppearanceGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2328,46 +2001,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
         end
 
-        if classicLayout then
-            -- APPEARANCE GROUP (col2)
-            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-            BuildPetAppearanceGroup({
-                group = appearanceGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(appearanceGroup, nil, 2)
-        else
-            -- The texture's NAME, and nothing else: it is the one thing in this
-            -- group that can be said in words, and a background colour cannot.
-            -- The name comes from DF:GetTextureNameFromPath -- the resolver
-            -- GUI:CreateTextureDropdown itself prints on its button, so the
-            -- card and the control inside it cannot disagree.
-            local function PetAppearanceSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(d.petTexture)
-                if type(name) == "string" and name ~= "" then parts[#parts + 1] = name end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- Column 2 opens here, with the category header its three cards sit
-            -- under. How the frame LOOKS, so it is pinnable; greys with the page
-            -- gate.
-            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
-            local band = OpenSection(L["Frame Style"], "pets_appearance", 2, PetAppearanceSummary, PetsOffRow, nil,
-                BuildPetAppearanceGroup)
-            BuildPetAppearanceGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- The texture's NAME, and nothing else: it is the one thing in this
+        -- group that can be said in words, and a background colour cannot.
+        -- The name comes from DF:GetTextureNameFromPath -- the resolver
+        -- GUI:CreateTextureDropdown itself prints on its button, so the
+        -- card and the control inside it cannot disagree.
+        local function PetAppearanceSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(d.petTexture)
+            if type(name) == "string" and name ~= "" then parts[#parts + 1] = name end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== BORDER (a 280 box in column 2 in classic, the second Frame card
-        -- in Modern) =====
-        -- include set tailored for a mini unit frame's border. Skipped:
+        -- Column 2 opens here, with the category header its three cards sit
+        -- under. How the frame LOOKS, so it is pinnable; greys with the page
+        -- gate.
+        Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+        local band = OpenSection(L["Frame Style"], "pets_appearance", 2, PetAppearanceSummary, PetsOffRow, nil,
+            BuildPetAppearanceGroup)
+        BuildPetAppearanceGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== BORDER (the second Frame card) =====
+        -- An include set tailored for a mini unit frame's border. Skipped:
         -- animate (decoration, not alert), offset (Pet Frame has its own
         -- Offset X / Y in the Position group in column 1), class / role colour
         -- (UnitClass("pet") returns the pet family, not a class token),
@@ -2403,9 +2063,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- each of the sixteen itself -- so the gate goes in as the
                 -- CONSUMER gate it is, which the factory composes on top of
                 -- borderOff and every widget's own predicate. nil on the page --
-                -- the classic box and the Modern card both carry the gate as
-                -- their own disableChildrenOn, set before this runs -- so only a
-                -- pinned panel's mount (tools2.popout) takes it here.
+                -- the card carries the gate as its own disableChildrenOn, set
+                -- before this runs -- so only a pinned panel's mount
+                -- (tools2.popout) takes it here.
                 disableWhen  = tools2.popout and PetsOffRow or nil,
             })
         end
@@ -2416,69 +2076,54 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end
 
-        if classicLayout then
-            -- ===== BORDER GROUP (col2) =====
-            local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
-            petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-            petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
-            BuildPetBorderGroup({
-                group = petBorderGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(petBorderGroup, nil, 2)
-        else
-            -- The Frame page's Border summary, less the colour source it has and
-            -- this one does not: thickness in pixels, the style word, and the
-            -- alpha only when it is doing something.
-            local function PetBorderSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local size = tonumber(d.petBorderSize)
-                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
-                local style = d.petBorderStyle
-                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
-                                 or (style == "TEXTURE" and L["Texture"])
-                                 or L["Solid"]
-                local c = d.petBorderColor
-                local a = type(c) == "table" and tonumber(c.a) or nil
-                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
-            -- build its own (hoistToggle -> noShowToggle); showKey is still read,
-            -- so the other fifteen grey exactly as before. The commit is what the
-            -- in-body checkbox ran plus a state pass and a repaint of a pinned
-            -- panel -- never a page rebuild. The tick greys with the page gate.
-            --
-            -- ⚠ THE PAGE GATE ON THE BODY IS THE CLASSIC BOX'S OWN LINE. The
-            -- toolkit owns the group and writes disableOn onto each control, so
-            -- the builder takes the page gate as the consumer gate only when it
-            -- is mounted in a pinned panel (tools2.popout); on the page the band
-            -- carries the group gate, set before the build, exactly as classic
-            -- sets it on its box. How the border LOOKS, so it is pinnable.
-            local band = OpenSection(L["Border"], "pets_border", 2, PetBorderSummary, PetsOffRow, nil,
-                BuildPetBorderGroup, {
-                    db = db, key = "petShowBorder", label = L["Show Border"],
-                    disableOn = PetsOffRow,
-                    onChanged = function()
-                        ApplyPetBorder()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
-            band.disableChildrenOn = function(d) return not d.petEnabled end
-            BuildPetBorderGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+        -- The Frame page's Border summary, less the colour source it has and
+        -- this one does not: thickness in pixels, the style word, and the
+        -- alpha only when it is doing something.
+        local function PetBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.petBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.petBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.petBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== HEALTH BAR (a 280 box in column 2 in classic, the third Frame
-        -- card in Modern) =====
+        -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+        -- build its own (hoistToggle -> noShowToggle); showKey is still read,
+        -- so the other fifteen grey exactly as before. The commit is what the
+        -- in-body checkbox ran plus a state pass and a repaint of a pinned
+        -- panel -- never a page rebuild. The tick greys with the page gate.
+        --
+        -- ⚠ THE PAGE GATE ON THE BODY IS THE BAND'S. The toolkit owns the
+        -- group and writes disableOn onto each control, so the builder takes the
+        -- page gate as the consumer gate only when it is mounted in a pinned
+        -- panel (tools2.popout); on the page the band carries the group gate,
+        -- set before the build. How the border LOOKS, so it is pinnable.
+        local band = OpenSection(L["Border"], "pets_border", 2, PetBorderSummary, PetsOffRow, nil,
+            BuildPetBorderGroup, {
+                db = db, key = "petShowBorder", label = L["Show Border"],
+                disableOn = PetsOffRow,
+                onChanged = function()
+                    ApplyPetBorder()
+                    self:RefreshStates()
+                    tools.ReflowMounted()
+                end,
+            })
+        band.disableChildrenOn = function(d) return not d.petEnabled end
+        BuildPetBorderGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
+
+        -- ===== HEALTH BAR (the third Frame card) =====
         local function BuildPetHealthBarGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2524,48 +2169,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             customPowerColor.hideOn = function(d) return d.petPowerColorMode ~= "CUSTOM" end
         end
 
-        if classicLayout then
-            -- HEALTH BAR GROUP (col2)
-            local healthBarGroup = GUI:CreateSettingsGroup(self.child, 280)
-            healthBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Bar"]), 40)
-            BuildPetHealthBarGroup({
-                group = healthBarGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(healthBarGroup, nil, 2)
-        else
-            -- What colour the bar is, then whether there is a second bar under it.
-            -- Both in the controls' own words: the colour mode out of the
-            -- dropdown's option table, the power bar out of its checkbox's label,
-            -- and the power bar only when it is on.
-            --
-            -- ⚠ NO HEADER TICK. Show Power Bar is the only boolean in the group
-            -- and it governs three of the seven controls; in the header it would
-            -- claim to speak for the four health-bar settings it has nothing to do
-            -- with, and a card switched off would grey a health bar that is always
-            -- drawn.
-            local function PetHealthBarSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local mode = healthColorValues[d.petHealthColorMode]
-                if mode then parts[#parts + 1] = mode end
-                if d.petShowPowerBar then parts[#parts + 1] = L["Show Power Bar"] end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- How the bar LOOKS, so it is pinnable; greys with the page gate.
-            local band = OpenSection(L["Health Bar"], "pets_healthbar", 2, PetHealthBarSummary, PetsOffRow, nil,
-                BuildPetHealthBarGroup)
-            BuildPetHealthBarGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- What colour the bar is, then whether there is a second bar under it.
+        -- Both in the controls' own words: the colour mode out of the
+        -- dropdown's option table, the power bar out of its checkbox's label,
+        -- and the power bar only when it is on.
+        --
+        -- ⚠ NO HEADER TICK. Show Power Bar is the only boolean in the group
+        -- and it governs three of the seven controls; in the header it would
+        -- claim to speak for the four health-bar settings it has nothing to do
+        -- with, and a card switched off would grey a health bar that is always
+        -- drawn.
+        local function PetHealthBarSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = healthColorValues[d.petHealthColorMode]
+            if mode then parts[#parts + 1] = mode end
+            if d.petShowPowerBar then parts[#parts + 1] = L["Show Power Bar"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== NAME TEXT (a 280 box in column 2 in classic, the first Text card
-        -- in Modern -- opened after Position, see NAME TEXT, AS A CARD) =====
+        -- How the bar LOOKS, so it is pinnable; greys with the page gate.
+        local band = OpenSection(L["Health Bar"], "pets_healthbar", 2, PetHealthBarSummary, PetsOffRow, nil,
+            BuildPetHealthBarGroup)
+        BuildPetHealthBarGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== NAME TEXT (the first Text card -- opened after Position, see
+        -- NAME TEXT, AS A CARD) =====
         local function BuildPetNameTextGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2623,25 +2256,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        if classicLayout then
-            -- NAME TEXT GROUP (col2)
-            local nameTextGroup = GUI:CreateSettingsGroup(self.child, 280)
-            nameTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Name Text"]), 40)
-            BuildPetNameTextGroup({
-                group = nameTextGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(nameTextGroup, nil, 2)
-        end
-        -- (Modern builds the Name Text card further down, after Position -- see
-        -- NAME TEXT, AS A CARD.)
-
-        -- ===== POSITION (attached mode only: a 280 box in column 1 in classic,
-        -- the last Layout card in Modern) =====
-        -- Built only in ATTACHED mode, exactly as today -- in grouped mode there
-        -- is no owner to sit beside and the Group Settings card owns the
-        -- placement instead.
+        -- ===== POSITION (attached mode only, the last Layout card) =====
+        -- In grouped mode there is no owner to sit beside and the Group
+        -- Settings card owns the placement instead.
         local function BuildPetPositionGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2665,67 +2282,52 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         if not isGroupedMode then
-            if classicLayout then
-                -- POSITION GROUP (col1, Attached mode only)
-                local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-                positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-                BuildPetPositionGroup({
-                    group = positionGroup,
-                    parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                Add(positionGroup, nil, 1)
-            else
-                -- Which side of the owner, then the nudge -- the Group Settings
-                -- card's shape, in the owner's words rather than the raid's. The
-                -- offsets are printed as a pair when either is set; petOffsetY
-                -- ships at -1, so a default profile shows both facts.
-                local function PetPositionSummary(d)
-                    if not d then return "" end
-                    local parts = {}
-                    local anchor = anchorValues[d.petAnchor]
-                    if anchor then parts[#parts + 1] = anchor end
-                    local ox = tonumber(d.petOffsetX) or 0
-                    local oy = tonumber(d.petOffsetY) or 0
-                    if ox ~= 0 or oy ~= 0 then
-                        parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
-                    end
-                    return table.concat(parts, " \194\183 ")
+            -- Which side of the owner, then the nudge -- the Group Settings
+            -- card's shape, in the owner's words rather than the raid's. The
+            -- offsets are printed as a pair when either is set; petOffsetY
+            -- ships at -1, so a default profile shows both facts.
+            local function PetPositionSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local anchor = anchorValues[d.petAnchor]
+                if anchor then parts[#parts + 1] = anchor end
+                local ox = tonumber(d.petOffsetX) or 0
+                local oy = tonumber(d.petOffsetY) or 0
+                if ox ~= 0 or oy ~= 0 then
+                    parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
                 end
-
-                -- The last Layout card. Where the pet sits is how it LOOKS, so it
-                -- is pinnable; greys with the page gate.
-                local band = OpenSection(L["Position"], "pets_position", 1, PetPositionSummary, PetsOffRow, nil,
-                    BuildPetPositionGroup)
-                BuildPetPositionGroup({
-                    group = band, parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                CloseSection(band)
+                return table.concat(parts, " \194\183 ")
             end
-        end
 
-        -- ===== NAME TEXT, AS A CARD (Modern only) ==========================
-        -- ☠ ADDED HERE, AFTER POSITION, NOT WHERE ITS BUILDER SITS. A card goes
-        -- into its column the moment CloseSection runs, so the order cards are
-        -- built in IS the order they stack in. Name Text heads the Text cards
-        -- in column 1, which has to be below the Layout cards -- Position
-        -- included -- so it is opened here rather than beside its classic box.
-        -- How the name LOOKS, so it is pinnable; greys with the page gate.
-        if not classicLayout then
-            Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
-            local band = OpenSection(L["Name Text"], "pets_nametext", 1,
-                TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor"), PetsOffRow, nil,
-                BuildPetNameTextGroup)
-            BuildPetNameTextGroup({
+            -- The last Layout card. Where the pet sits is how it LOOKS, so it
+            -- is pinnable; greys with the page gate.
+            local band = OpenSection(L["Position"], "pets_position", 1, PetPositionSummary, PetsOffRow, nil,
+                BuildPetPositionGroup)
+            BuildPetPositionGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
             CloseSection(band)
         end
 
-        -- ===== HEALTH TEXT (a 280 box in column 2 in classic, the second Text
-        -- card in Modern) =====
+        -- ===== NAME TEXT, AS A CARD ======================================
+        -- ☠ ADDED HERE, AFTER POSITION, NOT WHERE ITS BUILDER SITS. A card goes
+        -- into its column the moment CloseSection runs, so the order cards are
+        -- built in IS the order they stack in. Name Text heads the Text cards
+        -- in column 1, which has to be below the Layout cards -- Position
+        -- included. How the name LOOKS, so it is pinnable; greys with the page
+        -- gate.
+        Add(GUI:CreateHeader(self.child, L["Text"]), 40, 1)
+        local band = OpenSection(L["Name Text"], "pets_nametext", 1,
+            TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor"), PetsOffRow, nil,
+            BuildPetNameTextGroup)
+        BuildPetNameTextGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== HEALTH TEXT (the second Text card) =====
         local function BuildPetHealthTextGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2757,29 +2359,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
         end
 
-        if classicLayout then
-            -- HEALTH TEXT GROUP (col2)
-            local healthTextGroup = GUI:CreateSettingsGroup(self.child, 280)
-            healthTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Text"]), 40)
-            BuildPetHealthTextGroup({
-                group = healthTextGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(healthTextGroup, nil, 2)
-        else
-            -- The second Text card, under Name Text in column 1. The font, its
-            -- size and where the text sits -- TextRowSummary's three facts. How
-            -- the text LOOKS, so it is pinnable; greys with the page gate.
-            local band = OpenSection(L["Health Text"], "pets_healthtext", 1,
-                TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor"), PetsOffRow, nil,
-                BuildPetHealthTextGroup)
-            BuildPetHealthTextGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- The second Text card, under Name Text in column 1. The font, its
+        -- size and where the text sits -- TextRowSummary's three facts. How
+        -- the text LOOKS, so it is pinnable; greys with the page gate.
+        local band = OpenSection(L["Health Text"], "pets_healthtext", 1,
+            TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor"), PetsOffRow, nil,
+            BuildPetHealthTextGroup)
+        BuildPetHealthTextGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
         -- ===== NO BAND TAIL ================================================
         -- A card's band holds one group and is Add'd by CloseSection the moment
@@ -2800,10 +2390,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- of which mode is currently selected. The Blizzard frames are
         -- global UI elements so the toggle conceptually has no mode.
         --
-        -- ☠ THESE STAY AT PAGE SCOPE, in both layouts. Three of the builders
-        -- below are bound to them, the classic box, the card and a pinned copy
-        -- must drive the SAME setter, and neither closes over anything
-        -- group-specific.
+        -- ☠ THESE STAY AT PAGE SCOPE: three of the builders below are bound to
+        -- them, the card and a pinned copy must drive the SAME setter, and
+        -- neither closes over anything group-specific.
         local function makeBlizGet(key)
             return function() return DF.db.party and DF.db.party[key] end
         end
@@ -2890,17 +2479,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
         end
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: seven 280 boxes under the info
-        -- banner, four in column one and three in column two. MODERN makes each
-        -- of the seven a collapsible card (see THE PAGE'S CARDS, below the
-        -- banner).
-        --
+        -- ===== THE PAGE'S STORES ==========================================
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking
-        -- { group, parent, refreshStates }. The classic branch mounts the SAME
-        -- builder into the box it always built --
-        -- test_settings_page_builders.lua pins the inventory of each one against
-        -- the census taken before the move.
+        -- { group, parent, refreshStates } -- test_settings_page_builders.lua
+        -- pins each inventory.
         --
         -- ☠☠ THIS PAGE OWNS NOT ONE PLAIN PER-MODE PROFILE KEY, and every
         -- summary and every store below follows from it:
@@ -2912,9 +2494,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --     written to BOTH tables through makeBlizSet;
         --   * the aura update rate and the two notification ticks are
         --     account-wide (DF:GetGlobalDB());
-        --   * the language override lives on the per-character SavedVariable;
-        --   * "Use classic settings layout" is an account-level flag with no db
-        --     table at all.
+        --   * the language override lives on the per-character SavedVariable.
         --
         -- So a card's summary, which the page's state pass hands the PER-MODE
         -- table, reads the store its own keys live in instead of what it was
@@ -2922,30 +2502,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- answers for the per-mode tables only, a per-mode write would desync
         -- the pair makeBlizSet keeps together, and two of these groups need a UI
         -- RELOAD to take effect.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- every `if classicLayout then` arm below leans on.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== THE PAGE'S CARDS (Modern) ==================================
-        -- The Debuff Bar's collapsible-card design, one card per classic box: two
-        -- settings per row inside a card wide enough, dim captions, the value
-        -- summary in a shut card's corner, Expand All / Collapse All at the top.
-        -- The two bands the page was split into are kept as its two columns:
-        --
+        -- ===== THE PAGE'S CARDS ===========================================
         --   column 1   Frame Modes, Blizzard Frames, Notifications -- what the
         --              addon DOES
         --   column 2   Rendering, Settings Panel Appearance -- how things LOOK --
-        --              then Minimap and Language, each its classic box as a card
+        --              then Minimap and Language, one setting each
         --
         -- No header ticks: every group here is independent switches, not one
         -- feature's on/off. Pins on Rendering and Settings Panel Appearance.
-        -- No category headers -- a header would mean inventing a name the
-        -- classic page never had; the info banner says what is true of it all.
+        -- No category headers; the info banner says what is true of it all.
         --
-        -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
+        -- ONE SECTION: the shared helper (tools.OpenSection) and its two
         -- opt-ins, which every card here takes.
         local function OpenSection(label, key, col, summaryFn, dimFn, hideFn, builder, toggle)
             return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle,
@@ -2958,14 +2529,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ☠ THE PAGE'S TWO BULK VERBS, under the banner and above every card, at
         -- col "both" -- the Buff Bar's placement and its reasons.
-        if not classicLayout then
-            Add(tools.SectionControls(self.child), 24, "both")
-        end
+        Add(tools.SectionControls(self.child), 24, "both")
 
-        -- ===== FRAME MODES (a 280 box in classic, the first card in Modern) ==
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db table and keys, same callbacks, same
-        -- slot heights.
+        -- ===== FRAME MODES (the first card) =====
         --
         -- ⚠ NO TOGGLE IS HOISTED, and there are two candidates. Neither tick means
         -- "am I doing anything": Enable Party Frames and Enable Raid Frames are two
@@ -2981,56 +2547,40 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 260), 80)
         end
 
-        if classicLayout then
-            -- ===== FRAME MODES GROUP (Column 1, Top) =====
-            local modesGroup = GUI:CreateSettingsGroup(self.child, 280)
-            modesGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Modes"]), 40)
-            BuildFrameModesGroup({
-                group = modesGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(modesGroup, nil, 1)
-        else
-            -- The modes that are running, always: "Party · Raid", "Raid only",
-            -- or "Off" with neither.
-            --
-            -- ⚠ `~= false`, NOT TRUTHINESS. ABSENT MEANS ENABLED for these two
-            -- keys, so a profile that has not been seeded yet would otherwise be
-            -- reported as having both modes off.
-            local function FrameModesSummary(d)
-                if not d then return "" end
-                local party, raid = d.partyEnabled ~= false, d.raidEnabled ~= false
-                if party and raid then return format("%s \194\183 %s", L["Party"], L["Raid"]) end
-                if party then return format(L["%s only"], L["Party"]) end
-                if raid then return format(L["%s only"], L["Raid"]) end
-                return L["Off"]
-            end
-
-            -- ☠ THE PROFILE ROOT, NOT THE PAGE'S TABLE. A card's summary is handed
-            -- the per-mode db; partyEnabled / raidEnabled live at DF.db itself, and
-            -- a summary reading the per-mode table would print nothing whatever
-            -- the user had set.
-            --
-            -- ⚠ NO HEADER TICK: two INDEPENDENT modes, either can be off without
-            -- the other. Behaviour, so no pin.
-            Add(GUI:CreateHeader(self.child, L["Frames"]), 40, 1)
-            local band = OpenSection(L["Frame Modes"], "general_framemodes", 1,
-                function() return FrameModesSummary(DF.db) end)
-            BuildFrameModesGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- The modes that are running, always: "Party · Raid", "Raid only",
+        -- or "Off" with neither.
+        --
+        -- ⚠ `~= false`, NOT TRUTHINESS. ABSENT MEANS ENABLED for these two
+        -- keys, so a profile that has not been seeded yet would otherwise be
+        -- reported as having both modes off.
+        local function FrameModesSummary(d)
+            if not d then return "" end
+            local party, raid = d.partyEnabled ~= false, d.raidEnabled ~= false
+            if party and raid then return format("%s \194\183 %s", L["Party"], L["Raid"]) end
+            if party then return format(L["%s only"], L["Party"]) end
+            if raid then return format(L["%s only"], L["Raid"]) end
+            return L["Off"]
         end
 
-        -- ===== BLIZZARD FRAMES (a 280 box in classic, a card in Modern) =====
+        -- ☠ THE PROFILE ROOT, NOT THE PAGE'S TABLE. A card's summary is handed
+        -- the per-mode db; partyEnabled / raidEnabled live at DF.db itself, and
+        -- a summary reading the per-mode table would print nothing whatever
+        -- the user had set.
+        --
+        -- ⚠ NO HEADER TICK: two INDEPENDENT modes, either can be off without
+        -- the other. Behaviour, so no pin.
+        Add(GUI:CreateHeader(self.child, L["Frames"]), 40, 1)
+        local band = OpenSection(L["Frame Modes"], "general_framemodes", 1,
+            function() return FrameModesSummary(DF.db) end)
+        BuildFrameModesGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== BLIZZARD FRAMES =====
         -- Storage stays per-mode (party + raid both updated via setter sync)
         -- so AutoProfiles and ExportCategories continue to work unchanged.
-        --
-        -- Verbatim, taking the group and parent it should build into -- the four
-        -- ticks, their tooltips, the separator and the side-menu disableOn, in the
-        -- same order at the same slot heights.
         --
         -- ⚠ NO TOGGLE IS HOISTED here either, for the Frame Modes reason twice
         -- over: these are four independent switches over three different Blizzard
@@ -3095,21 +2645,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 makeBlizGet("showBlizzardSideMenu"),
                 makeBlizSet("showBlizzardSideMenu", function() DF:UpdateBlizzardFrameVisibility() end)
             ), 30)
-            -- ⚠ STAYS INSIDE THE BUILDER. In classic this greys the side-menu tick
-            -- in the box; the card has to do the same, and one builder serving both
-            -- is what stops the two drifting.
+            -- ⚠ STAYS INSIDE THE BUILDER, so a pinned copy greys the side-menu
+            -- tick exactly as the card does.
             --
             -- ⚠ IN THE PANE IT IS ONE REFRESH BEHIND, and that is an accepted trade
             -- rather than an oversight. The grey is applied by the group's
             -- RefreshChildStates, which the checkbox factory reaches implicitly
             -- through `parent:RefreshStates()` -- and the parent is the page child
-            -- in classic (which forwards to the page) but a bare popout holder in a
-            -- pane, which has no such method. Repairing it means appending a
-            -- refreshStates call to the two Disable Blizzard * callbacks, i.e.
-            -- editing a reload-popup callback this pass is not allowed to touch --
-            -- and both of those settings put a "reload required" prompt on screen
-            -- the moment they are clicked, so the panel behind it is about to be
-            -- rebuilt anyway. The next reflow (or reopening the row) puts it right.
+            -- on the page (which forwards to the page) but a bare popout holder in
+            -- a pane, which has no such method. Both Disable Blizzard * settings
+            -- put a "reload required" prompt on screen the moment they are
+            -- clicked, so the panel behind it is about to be rebuilt anyway. The
+            -- next reflow (or reopening the row) puts it right.
             sideMenuCheck.disableOn = function()
                 local p = DF.db.party
                 return not (p and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames))
@@ -3117,75 +2664,48 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             sideMenuCheck.tooltip = L["Shows the ping wheel & party management menu when Blizzard frames are disabled."]
         end
 
-        if classicLayout then
-            -- ===== BLIZZARD FRAMES GROUP (Column 1, Bottom) =====
-            local blizzardGroup = GUI:CreateSettingsGroup(self.child, 280)
-            blizzardGroup:AddWidget(GUI:CreateHeader(self.child, L["Blizzard Frames"]), 40)
-            BuildBlizzardFramesGroup({
-                group = blizzardGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(blizzardGroup, nil, 1)
-        else
-            -- Which Blizzard frames are hidden, always -- "Shown" when none are.
-            -- The side menu only when it is off AND something it serves is hidden:
-            -- with both group frames shown it does nothing either way.
-            --
-            -- ⚠ "%s hidden" CARRIES THE DIRECTION. Frame Modes above prints
-            -- L["Party"] and L["Raid"] about DF's own frames running; bare here,
-            -- the same words would read as the opposite state.
-            local function BlizzardFramesSummary(p)
-                if not p then return "" end
-                local hidden = {}
-                if p.hideBlizzardPartyFrames then hidden[#hidden + 1] = L["Party"] end
-                if p.hideBlizzardRaidFrames  then hidden[#hidden + 1] = L["Raid"] end
-                if p.hideDefaultPlayerFrame  then
-                    hidden[#hidden + 1] = p.hideDefaultPlayerFrameRaidOnly and L["Player (in raid)"] or L["Player"]
-                end
-                if #hidden == 0 then return L["Shown"] end
-                local text = format(L["%s hidden"], table.concat(hidden, " \194\183 "))
-                if not p.showBlizzardSideMenu and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames) then
-                    text = format("%s \194\183 %s %s", text, L["Side Menu"], L["Off"])
-                end
-                return text
+        -- Which Blizzard frames are hidden, always -- "Shown" when none are.
+        -- The side menu only when it is off AND something it serves is hidden:
+        -- with both group frames shown it does nothing either way.
+        --
+        -- ⚠ "%s hidden" CARRIES THE DIRECTION. Frame Modes above prints
+        -- L["Party"] and L["Raid"] about DF's own frames running; bare here,
+        -- the same words would read as the opposite state.
+        local function BlizzardFramesSummary(p)
+            if not p then return "" end
+            local hidden = {}
+            if p.hideBlizzardPartyFrames then hidden[#hidden + 1] = L["Party"] end
+            if p.hideBlizzardRaidFrames  then hidden[#hidden + 1] = L["Raid"] end
+            if p.hideDefaultPlayerFrame  then
+                hidden[#hidden + 1] = p.hideDefaultPlayerFrameRaidOnly and L["Player (in raid)"] or L["Player"]
             end
-
-            -- ☠ PARTY-CANONICAL, like every tick in the card: makeBlizSet writes
-            -- both tables and makeBlizGet reads party, so the summary does too.
-            -- Four independent switches, so no header tick; behaviour, so no pin.
-            local band = OpenSection(L["Blizzard Frames"], "general_blizzard", 1,
-                function() return BlizzardFramesSummary(DF.db.party) end)
-            BuildBlizzardFramesGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            if #hidden == 0 then return L["Shown"] end
+            local text = format(L["%s hidden"], table.concat(hidden, " \194\183 "))
+            if not p.showBlizzardSideMenu and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames) then
+                text = format("%s \194\183 %s %s", text, L["Side Menu"], L["Off"])
+            end
+            return text
         end
 
-        -- ===== MINIMAP (Column 1 in classic; a card near the foot in Modern) ==
-        -- The minimap button is a single global UI element (no mode), so it lives
-        -- here rather than the per-mode Visibility page. Reads party-canonical and
-        -- writes both dbs so it stays consistent regardless of selected mode.
-        -- Modern builds its card at the foot of the page -- see MINIMAP AND
-        -- LANGUAGE, AS CARDS.
-        if classicLayout then
-            local minimapGroup = GUI:CreateSettingsGroup(self.child, 280)
-            minimapGroup:AddWidget(GUI:CreateHeader(self.child, L["Minimap"]), 40)
-            minimapGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
-                DF:UpdateMinimapButton()
-            end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
-            Add(minimapGroup, nil, 1)
-        end
+        -- ☠ PARTY-CANONICAL, like every tick in the card: makeBlizSet writes
+        -- both tables and makeBlizGet reads party, so the summary does too.
+        -- Four independent switches, so no header tick; behaviour, so no pin.
+        local band = OpenSection(L["Blizzard Frames"], "general_blizzard", 1,
+            function() return BlizzardFramesSummary(DF.db.party) end)
+        BuildBlizzardFramesGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== RENDERING (a 280 box in classic, a card in Modern) ===========
+        -- ===== RENDERING =====
         -- Pixel-Perfect Scaling is a render-quality flag read by every frame and
         -- element in BOTH modes (Frames/Core.lua GetPixelScale + 60-odd db.pixelPerfect
         -- reads), so it's global — read party-canonical, write both mode dbs (same
-        -- pattern as the Blizzard/Minimap toggles above) — and lives here rather than
+        -- pattern as the Blizzard/Minimap toggles) — and lives here rather than
         -- on the per-mode Frame page.
         --
-        -- ☠ AT PAGE SCOPE, like the two makeBliz helpers: the classic box and every
+        -- ☠ AT PAGE SCOPE, like the two makeBliz helpers: the card and every
         -- pane instance must drive the same refresh, and it closes over nothing
         -- group-specific.
         local function refreshPixelPerfect()
@@ -3270,45 +2790,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 250), 52)
         end
 
-        if classicLayout then
-            -- ===== RENDERING GROUP (Column 1) =====
-            local renderingGroup = GUI:CreateSettingsGroup(self.child, 280)
-            renderingGroup:AddWidget(GUI:CreateHeader(self.child, L["Rendering"]), 40)
-            BuildRenderingGroup({
-                group = renderingGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(renderingGroup, nil, 1)
-        else
-            -- "Pixel-Perfect" while it is on, then the update rate, always.
-            --
-            -- ☠ TWO STORES, NEITHER THE PAGE'S. A card's summary is handed the
-            -- per-mode db; Pixel-Perfect is read party-canonical like its tick, and
-            -- the update rate lives in DF:GetGlobalDB().
-            local function RenderingSummary(g, p)
-                local parts = {}
-                if p and p.pixelPerfect then parts[#parts + 1] = L["Pixel-Perfect"] end
-                local rate = g and g.auraDurationUpdateInterval
-                if rate == "SMOOTH" then parts[#parts + 1] = L["Smooth"]
-                elseif rate == "PERFORMANCE" then parts[#parts + 1] = L["Performance"]
-                else parts[#parts + 1] = L["Normal"]
-                end
-                return table.concat(parts, " \194\183 ")
+        -- "Pixel-Perfect" while it is on, then the update rate, always.
+        --
+        -- ☠ TWO STORES, NEITHER THE PAGE'S. A card's summary is handed the
+        -- per-mode db; Pixel-Perfect is read party-canonical like its tick, and
+        -- the update rate lives in DF:GetGlobalDB().
+        local function RenderingSummary(g, p)
+            local parts = {}
+            if p and p.pixelPerfect then parts[#parts + 1] = L["Pixel-Perfect"] end
+            local rate = g and g.auraDurationUpdateInterval
+            if rate == "SMOOTH" then parts[#parts + 1] = L["Smooth"]
+            elseif rate == "PERFORMANCE" then parts[#parts + 1] = L["Performance"]
+            else parts[#parts + 1] = L["Normal"]
             end
-
-            -- The last of the Frames cards. Two independent settings, so no
-            -- header tick. Render quality is how the frames LOOK, so it is pinnable.
-            local band = OpenSection(L["Rendering"], "general_rendering", 1,
-                function() return RenderingSummary(DF:GetGlobalDB(), DF.db.party) end, nil, nil, BuildRenderingGroup)
-            BuildRenderingGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== SETTINGS PANEL APPEARANCE (a 280 box in classic, a card) =====
+        -- The last of the Frames cards. Two independent settings, so no
+        -- header tick. Render quality is how the frames LOOK, so it is pinnable.
+        local band = OpenSection(L["Rendering"], "general_rendering", 1,
+            function() return RenderingSummary(DF:GetGlobalDB(), DF.db.party) end, nil, nil, BuildRenderingGroup)
+        BuildRenderingGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== SETTINGS PANEL APPEARANCE =====
         -- Controls the look of this settings panel itself — does NOT affect
         -- in-game frame text (use Health Text / Name Text pages for those).
         local function BuildPanelAppearanceGroup(tools2)
@@ -3341,118 +2849,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 L["Closed shows each tip as a small icon: hover it to read the tip, click it to open. Hidden removes tips entirely. Notices about what is happening now still show until you close them."],
                 260), 46)
 
-            -- Classic-layout fallback for the settings redesign. Account-level and
-            -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
-            -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /
-            -- minimap toggles above use for their non-db storage. No overrideKey: this
-            -- is not a profile setting, so it has no auto-profile override to indicate.
-            --
-            -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
-            -- popout redesign is finished.
-            --
-            -- ☠☠ THE ESCAPE HATCH CAN LIVE INSIDE A PINNED PANEL, AND THE FLIP
-            -- TAKES EVERY PANEL DOWN ITSELF -- BEFORE the rebuild, which is the
-            -- whole point. In Modern this tick sits in the Settings Panel
-            -- Appearance card, which is pinnable, so the click that turns classic
-            -- ON can happen with a panel standing open that the shell's own
-            -- source-death tick leaves alone.
-            --
-            -- ⚠ GUI:CreatePopoutPageTools DOES CLOSE PANELS ON A CLASSIC BUILD --
-            -- its prologue runs above the classic early return, deliberately -- so
-            -- this line is no longer the ONLY thing that would close them. It is
-            -- kept because it is the only thing that closes them AT THE RIGHT
-            -- MOMENT: DoBuild retires a page's children BEFORE it calls the
-            -- builder, so the helper's close lands after the row the panel is
-            -- wired to is already in the trash. Closing here, ahead of the
-            -- rebuild, closes them while their rows are still alive. (It also
-            -- covers the path where RefreshCurrentPage returns early and no
-            -- builder runs at all.) Both are guarded no-ops the second time.
-            --
-            -- ⚠ AND THE REBUILD STAYS SYNCHRONOUS, unlike the Frame page's Raid
-            -- Layout Mode toggle. That one is deferred because the tick is ON THE
-            -- ROW and the kit calls row.Refresh() after the write -- on a frame the
-            -- rebuild has just retired. This tick is an ordinary checkbox INSIDE
-            -- the pane: the factory's OnClick does the write, this callback, then
-            -- `parent.RefreshStates` (the pane holder has none) and DF:UpdateAll,
-            -- so there is no row refresh to land on a dead frame and nothing to
-            -- gain from a frame's delay.
-            --
-            -- ⚠ Unconditional, not popout-only: in classic there is no open panel
-            -- and CloseAllPopoutRows is a guarded no-op, so one builder still
-            -- serves both layouts. It also takes down any panel PINNED out of the
-            -- layout being left, which is right -- those belong to the old shape.
-            --
-            -- ☠ HIDDEN WITH CLASSIC (2026-09-26): built only while
-            -- DF.CLASSIC_SETTINGS_AVAILABLE (Core/Config.lua) is true -- the one
-            -- switch that also hides the title-bar picker. Off, the card holds the
-            -- font controls alone, and search never indexes this tick.
-            if DF:ClassicSettingsAvailable() then
-            local classicCheck = group:AddWidget(GUI:CreateCheckbox(
-                parent, L["Use classic settings layout"],
-                nil, nil,
-                function()
-                    -- The one shared flip -- GUI:FlipSettingsLayout (GUI/Panel.lua)
-                    -- runs the whole sequence the notes above describe, in the
-                    -- order they demand (panels first, then every page's build
-                    -- cache, then the page on screen, then the title-bar glyph's
-                    -- tint). The factory's set has already written the field, so
-                    -- the value passed here is a restated no-op write and the
-                    -- sequence is the whole point.
-                    GUI:FlipSettingsLayout(DF:IsClassicSettingsLayout())
-                end,
-                function() return DF:IsClassicSettingsLayout() end,
-                function(val) DF:SetClassicSettingsLayout(val) end
-            ), 30)
-            classicCheck.tooltip = L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."]
-            end -- DF:ClassicSettingsAvailable()
         end
 
-        if classicLayout then
-            -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
-            local panelAppearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-            panelAppearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings Panel Appearance"]), 40)
-            BuildPanelAppearanceGroup({
-                group = panelAppearanceGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(panelAppearanceGroup, nil, 2)
-        else
-            -- The font name, always, then the outline once it is not None. Both
-            -- through the resolvers the two dropdowns print on their own buttons
-            -- (DF:GetFontNameFromPath, GUI:OutlineName). The classic-layout switch
-            -- and Page Tips are not in here: neither is about how the font looks.
-            local function PanelAppearanceSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local name = DF.GetFontNameFromPath and DF:GetFontNameFromPath(d.settingsFont)
-                if type(name) == "string" and name ~= "" then parts[#parts + 1] = name end
-                if DF:OutlineFlag(d.settingsFontOutline) ~= "NONE" then
-                    parts[#parts + 1] = GUI:OutlineName(d.settingsFontOutline)
-                end
-                return table.concat(parts, " \194\183 ")
+        -- The font name, always, then the outline once it is not None. Both
+        -- through the resolvers the two dropdowns print on their own buttons
+        -- (DF:GetFontNameFromPath, GUI:OutlineName). Page Tips is not in here: it
+        -- is not about how the font looks.
+        local function PanelAppearanceSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local name = DF.GetFontNameFromPath and DF:GetFontNameFromPath(d.settingsFont)
+            if type(name) == "string" and name ~= "" then parts[#parts + 1] = name end
+            if DF:OutlineFlag(d.settingsFontOutline) ~= "NONE" then
+                parts[#parts + 1] = GUI:OutlineName(d.settingsFontOutline)
             end
-
-            -- ☠ THE PROFILE ROOT, NOT THE PAGE'S TABLE. A card's summary is handed
-            -- the per-mode db; settingsFont lives at DF.db itself, so the summary
-            -- reads the root and ignores what it was handed.
-            --
-            -- How the settings window LOOKS, so it is pinnable. ⚠ The classic
-            -- layout switch rides in here, in a pinned copy too: flipping it runs
-            -- GUI:FlipSettingsLayout, which closes every panel first.
-            Add(GUI:CreateHeader(self.child, L["Interface"]), 40, 2)
-            local band = OpenSection(L["Settings Panel Appearance"], "general_panelappearance", 2,
-                function() return PanelAppearanceSummary(DF.db) end, nil, nil, BuildPanelAppearanceGroup)
-            BuildPanelAppearanceGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== LANGUAGE (Column 2 in classic; the last card in Modern) ========
-        -- Modern builds its card at the foot of the page -- see MINIMAP AND
-        -- LANGUAGE, AS CARDS.
+        -- ☠ THE PROFILE ROOT, NOT THE PAGE'S TABLE. A card's summary is handed
+        -- the per-mode db; settingsFont lives at DF.db itself, so the summary
+        -- reads the root and ignores what it was handed.
+        --
+        -- How the settings window LOOKS, so it is pinnable.
+        Add(GUI:CreateHeader(self.child, L["Interface"]), 40, 2)
+        local band = OpenSection(L["Settings Panel Appearance"], "general_panelappearance", 2,
+            function() return PanelAppearanceSummary(DF.db) end, nil, nil, BuildPanelAppearanceGroup)
+        BuildPanelAppearanceGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== LANGUAGE (its card is built at the foot of the page -- see
+        -- MINIMAP AND LANGUAGE, AS CARDS) =====
         local languageValues = {
             AUTO  = L["Auto (use client language)"],
             enUS  = "English",
@@ -3467,10 +2896,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             zhCN  = "中文 (简体)",
             zhTW  = "中文 (繁體)",
         }
-        -- The reload prompt, under a name at page scope: the classic dropdown and
-        -- the card's dropdown must run the SAME callback, and a second copy of
-        -- a four-branch popup is the kind of duplication that drifts a button
-        -- caption. The body is the one that was inline here, unchanged.
+        -- The reload prompt, under a name at page scope: the card's dropdown
+        -- and a pinned copy must run the SAME callback, and a second copy of a
+        -- four-branch popup is the kind of duplication that drifts a button
+        -- caption.
         local function PromptLanguageReload()
             if DF.ShowPopupAlert then
                 DF:ShowPopupAlert({
@@ -3484,21 +2913,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        if classicLayout then
-            local languageGroup = GUI:CreateSettingsGroup(self.child, 280)
-            languageGroup:AddWidget(GUI:CreateHeader(self.child, L["Language"]), 40)
-            -- Language override lives on the per-character SavedVariable so
-            -- locale files can read it at file-load time (before DF.db exists).
-            languageGroup:AddWidget(GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)
-            languageGroup:AddWidget(GUI:CreateLabel(self.child,
-                L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
-                260), 60)
-            Add(languageGroup, nil, 2)
-        end
-
-        -- ===== NOTIFICATIONS (a 280 box in classic, a card in Modern) =======
-        -- Verbatim, including the two empty-bodied callbacks: neither setting has
-        -- anything to re-render now (one is read by the version check, the other
+        -- ===== NOTIFICATIONS =====
+        -- Including the two empty-bodied callbacks: neither setting has
+        -- anything to re-render (one is read by the version check, the other
         -- at next login), and the comments saying so are the reason nobody adds a
         -- refresh call to them.
         local function BuildNotificationsGroup(tools2)
@@ -3514,78 +2931,62 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             loginMsgCheck.tooltip = L["The one-line greeting printed to chat when you log in. Takes effect at your next login."]
         end
 
-        if classicLayout then
-            -- ===== NOTIFICATIONS GROUP (Column 2, Bottom) =====
-            local notificationsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            notificationsGroup:AddWidget(GUI:CreateHeader(self.child, L["Notifications"]), 40)
-            BuildNotificationsGroup({
-                group = notificationsGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(notificationsGroup, nil, 2)
-        else
-            -- ⚠ BLANK WHILE BOTH ARE ON, by decision: two yes/nos have no headline,
-            -- so the corner only names what has been switched off.
-            local function NotificationsSummary(g)
-                if not g then return "" end
-                if not g.notifyOutdated and not g.showLoginMessage then return L["Off"] end
-                if not g.notifyOutdated then return format("%s %s", L["Updates"], L["Off"]) end
-                if not g.showLoginMessage then return format("%s %s", L["Login Message"], L["Off"]) end
-                return ""
-            end
-
-            -- ☠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S -- both ticks live in
-            -- DF:GetGlobalDB(). Two independent switches, so no header tick;
-            -- behaviour, so no pin.
-            local band = OpenSection(L["Notifications"], "general_notifications", 2,
-                function() return NotificationsSummary(DF:GetGlobalDB()) end)
-            BuildNotificationsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- ⚠ BLANK WHILE BOTH ARE ON, by decision: two yes/nos have no headline,
+        -- so the corner only names what has been switched off.
+        local function NotificationsSummary(g)
+            if not g then return "" end
+            if not g.notifyOutdated and not g.showLoginMessage then return L["Off"] end
+            if not g.notifyOutdated then return format("%s %s", L["Updates"], L["Off"]) end
+            if not g.showLoginMessage then return format("%s %s", L["Login Message"], L["Off"]) end
+            return ""
         end
 
-        -- ===== MINIMAP AND LANGUAGE, AS CARDS (Modern only) =================
-        -- ☠ BUILT HERE, AT THE FOOT, NOT BESIDE THEIR CLASSIC BOXES. A card goes
-        -- into its column the moment CloseSection runs, so the order cards are
-        -- built in IS the order they stack in: these two follow Rendering and
-        -- Settings Panel Appearance down column 2, and on a narrow window the
-        -- page folds to the five multi-setting cards first and these two last.
+        -- ☠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S -- both ticks live in
+        -- DF:GetGlobalDB(). Two independent switches, so no header tick;
+        -- behaviour, so no pin.
+        local band = OpenSection(L["Notifications"], "general_notifications", 2,
+            function() return NotificationsSummary(DF:GetGlobalDB()) end)
+        BuildNotificationsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== MINIMAP AND LANGUAGE, AS CARDS =============================
+        -- ☠ BUILT HERE, AT THE FOOT. A card goes into its column the moment
+        -- CloseSection runs, so the order cards are built in IS the order they
+        -- stack in: these two follow Rendering and Settings Panel Appearance
+        -- down column 2, and on a narrow window the page folds to the five
+        -- multi-setting cards first and these two last.
         --
-        -- ☠ ONE SETTING EACH, SO EACH CARD HOLDS ITS CONTROL AND NO HEADER TICK
-        -- -- the same call classic makes, on the same storage, so the search
-        -- entry is the one classic registers. Neither decides how anything
-        -- looks, so neither is pinnable.
-        if not classicLayout then
-            -- The minimap button is a single global UI element (no mode): read
-            -- party-canonical, written to both modes, exactly as classic's tick.
-            local minimapCard = OpenSection(L["Minimap"], "general_minimap", 2,
-                function() return DF.db.party and DF.db.party.showMinimapButton and L["Shown"] or L["Hidden"] end)
-            minimapCard:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
-                DF:UpdateMinimapButton()
-            end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
-            CloseSection(minimapCard)
+        -- ☠ ONE SETTING EACH, SO EACH CARD HOLDS ITS CONTROL AND NO HEADER TICK.
+        -- Neither decides how anything looks, so neither is pinnable.
+        -- The minimap button is a single global UI element (no mode), so it
+        -- lives here rather than on the per-mode Visibility page: read
+        -- party-canonical, written to both modes.
+        local minimapCard = OpenSection(L["Minimap"], "general_minimap", 2,
+            function() return DF.db.party and DF.db.party.showMinimapButton and L["Shown"] or L["Hidden"] end)
+        minimapCard:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
+            DF:UpdateMinimapButton()
+        end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
+        CloseSection(minimapCard)
 
-            -- Language override lives on the per-character SavedVariable so
-            -- locale files can read it at file-load time (before DF.db exists).
-            -- The blurb is measured, not pinned: at the card's width it wraps to
-            -- fewer lines than at classic's 260.
-            -- "Auto", or the language in its own name -- the dropdown's words,
-            -- less the "(use client language)" a corner has no room for.
-            local function LanguageSummary()
-                local code = DandersFramesCharDB and DandersFramesCharDB.languageOverride
-                if not code or code == "AUTO" then return L["Auto"] end
-                return languageValues[code] or code
-            end
-            local languageCard = OpenSection(L["Language"], "general_language", 2, LanguageSummary)
-            languageCard:AddWidget(GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)
-            languageCard:AddWidget(GUI:CreateLabel(self.child,
-                L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
-                GUI:GroupInnerWidth(languageCard)))
-            CloseSection(languageCard)
+        -- Language override lives on the per-character SavedVariable so
+        -- locale files can read it at file-load time (before DF.db exists).
+        -- The blurb is measured, not pinned: it wraps to the card's width.
+        -- "Auto", or the language in its own name -- the dropdown's words,
+        -- less the "(use client language)" a corner has no room for.
+        local function LanguageSummary()
+            local code = DandersFramesCharDB and DandersFramesCharDB.languageOverride
+            if not code or code == "AUTO" then return L["Auto"] end
+            return languageValues[code] or code
         end
+        local languageCard = OpenSection(L["Language"], "general_language", 2, LanguageSummary)
+        languageCard:AddWidget(GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)
+        languageCard:AddWidget(GUI:CreateLabel(self.child,
+            L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
+            GUI:GroupInnerWidth(languageCard)))
+        CloseSection(languageCard)
     end)
 
     -- General > Frame
@@ -3728,23 +3129,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
         end
         
-        -- CLASSIC: column 1 is the layout chain -- size, direction, raid mode,
-        -- and whichever group detail that mode implies. Column 2 keeps
-        -- Appearance at the top, where styling sits on every other page.
-        --
-        -- Six boxes against three is not the imbalance it looks: FIVE of
-        -- the left column's boxes are raid-only, so in party mode the page
-        -- is Frame Size + Layout Direction against Appearance + Permanent
-        -- Mover. Permanent Mover is also by far the biggest box here, which
-        -- carries column 2 in raid.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design, one card per
-        -- group: two settings per row inside a card wide enough, dim captions,
-        -- the value summary in a shut card's corner, Expand All / Collapse All at
-        -- the top. Every card now behaves the same way -- the old page had three
-        -- (plated rows with a strip, rows behind a panel, rows with hoisted
-        -- controls on the plate).
-        --
+        -- ===== THE PAGE'S CARDS ===========================================
         --   column 1   "Layout"      Frame Size, Layout Direction, then the raid
         --                            cards (Raid Layout Mode, Group Layout
         --                            Settings, Group Visibility, Group Display
@@ -3759,12 +3144,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Pins on the cards that decide how the frames LOOK: Frame Size, the
         -- three Appearance cards, Group Layout Settings and Flat Grid Settings.
         -- Layout Direction is not, because its dropdown rebuilds the page.
-        local classicLayout = DF:IsClassicSettingsLayout()
-
-        -- The shared page-scope machinery. Its PROLOGUE closes any panel a previous
-        -- build left standing and retires that build's holders, and it carries the
-        -- section helper the card pages build with. nil in classic, which is what
-        -- every `if classicLayout then` arm below leans on.
+        --
+        -- On a narrow window the page folds to one column in the order the
+        -- cards are built -- the layout chain first, then how the frames look,
+        -- then the mover.
+        -- The tools' PROLOGUE closes any panel a previous build left standing and
+        -- retires that build's holders.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE SECTION: the Debuff Bar's helper (tools.OpenSection) and its two
@@ -3778,20 +3163,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.CloseSection(Add, band)
         end
 
-        -- ===== APPEARANCE: THE CLASSIC CONTAINER ============================
-        -- CLASSIC -- exactly what it has always been: a 280 box, in column 2,
-        -- added at its own place in the flow further down, holding the border,
-        -- the shadow block and nothing else. Modern builds no container: its
-        -- three Appearance groups are cards of their own.
-        local appearanceGroup
-        if classicLayout then
-            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        end
-
-        -- ===== GROUP VISIBILITY (a 280 box in classic, a raid card) =========
+        -- ===== GROUP VISIBILITY (a raid card) =====
         -- Eight ticks, raid only. The card lays them out two per row when it is
-        -- wide enough -- four rows of two is the shape a group picker wants. The
-        -- classic box stays one track, as it always was.
+        -- wide enough -- four rows of two is the shape a group picker wants.
         --
         -- ☠ THE TICKS ARE CUSTOM-GET/SET OVER ONE TABLE SETTING. Each stamps a
         -- per-index override key ("raidGroupVisible_3") that the profile does not
@@ -3813,7 +3187,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function BuildGroupVisGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             -- fullRow: a blurb describes the whole card, not the tick beside it.
-            -- Inert wherever the interior is one track (the classic box).
             local groupVisHintLabel = group:AddWidget(GUI:CreateLabel(parent, L["Choose which groups to display."], 250), 25)
             groupVisHintLabel.fullRow = true
 
@@ -3833,12 +3206,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ===== FRAME SIZE (a 280 box in classic, the first Layout card) =====
-        -- Verbatim, taking the group and parent it should build into -- same
-        -- factories, same L keys, same db keys, same callbacks, same slot
-        -- heights, same hideOn. Guarded by test_frame_page_builders.lua, which
-        -- reads this body out of the source and checks it against the inventory
-        -- it had inline.
+        -- ===== FRAME SIZE (the first Layout card) =====
+        -- Guarded by test_frame_page_builders.lua, which reads this body out of
+        -- the source and checks its inventory.
         local function BuildFrameSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
@@ -3849,128 +3219,106 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
         end
 
+        -- The summary, per the convention the border cards set: at most four
+        -- items, a fixed order, "\194\183" between them, WORDS localised and
+        -- numbers raw. The SIZE is unconditional -- it is the question the
+        -- group exists to answer. The other three only when changed.
+        --
+        -- ☠ "138x59", NOT the multiplication sign: the settings panel draws in
+        -- the user's Settings Font, which carries Latin, digits and
+        -- punctuation.
+        local function FrameSizeSummary(d)
+            if not d then return "" end
+            local D = DF.Defaults
+            local parts = {}
+            local w, h = tonumber(d.frameWidth), tonumber(d.frameHeight)
+            if w and h then
+                parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
+            end
+            -- "Not the shipped default" via the defaults engine rather than a
+            -- literal per key: the defaults live in Config.lua and a number
+            -- copied here would be a second copy nothing keeps in step.
+            local function changed(key) return D and D:IsModified(d, key) end
+            local sc = tonumber(d.frameScale)
+            if sc and changed("frameScale") then
+                parts[#parts + 1] = format("%s %.2f", L["Scale"], sc)
+            end
+            local pad = tonumber(d.framePadding)
+            if pad and changed("framePadding") then
+                parts[#parts + 1] = format("%s %d", L["Padding"], math.floor(pad))
+            end
+            local sp = tonumber(d.frameSpacing)
+            if sp and changed("frameSpacing") then
+                parts[#parts + 1] = format("%s %d", L["Spacing"], math.floor(sp))
+            end
+            return table.concat(parts, " \194\183 ")
+        end
 
-        if classicLayout then
-            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
-            BuildFrameSizeGroup({
-                group = sizeGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(sizeGroup, nil, 1)
-        else
-            -- The summary, per the convention the border cards set: at most four
-            -- items, a fixed order, "\194\183" between them, WORDS localised and
-            -- numbers raw. The SIZE is unconditional -- it is the question the
-            -- group exists to answer. The other three only when changed.
-            --
-            -- ☠ "138x59", NOT the multiplication sign: the settings panel draws in
-            -- the user's Settings Font, which carries Latin, digits and
-            -- punctuation.
-            local function FrameSizeSummary(d)
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Buff Bar's placement and its reasons: they act on cards in both
+        -- columns, and "both" carries them through the one-column fold intact.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- Content: which raid groups show. Raid only, so its header hides
+        -- with the card outside raid.
+        local contentHeader = GUI:CreateHeader(self.child, L["Content"])
+        contentHeader.hideOn = function() return GUI.SelectedMode ~= "raid" end
+        Add(contentHeader, 40, 1)
+        do
+            -- How many of the eight are on, and -- while the list is short enough
+            -- to be worth reading -- which ones are not.
+            local function GroupVisSummary(d)
                 if not d then return "" end
-                local D = DF.Defaults
-                local parts = {}
-                local w, h = tonumber(d.frameWidth), tonumber(d.frameHeight)
-                if w and h then
-                    parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
+                local vis = d.raidGroupVisible
+                local shown, hidden = 0, {}
+                for i = 1, 8 do
+                    if type(vis) ~= "table" or vis[i] ~= false then
+                        shown = shown + 1
+                    else
+                        hidden[#hidden + 1] = i
+                    end
                 end
-                -- "Not the shipped default" via the defaults engine rather than a
-                -- literal per key: the defaults live in Config.lua and a number
-                -- copied here would be a second copy nothing keeps in step.
-                local function changed(key) return D and D:IsModified(d, key) end
-                local sc = tonumber(d.frameScale)
-                if sc and changed("frameScale") then
-                    parts[#parts + 1] = format("%s %.2f", L["Scale"], sc)
-                end
-                local pad = tonumber(d.framePadding)
-                if pad and changed("framePadding") then
-                    parts[#parts + 1] = format("%s %d", L["Padding"], math.floor(pad))
-                end
-                local sp = tonumber(d.frameSpacing)
-                if sp and changed("frameSpacing") then
-                    parts[#parts + 1] = format("%s %d", L["Spacing"], math.floor(sp))
+                local parts = { format("%d/8", shown) }
+                if #hidden > 0 and #hidden <= 3 then
+                    parts[#parts + 1] = format("%s %s", L["Hidden"], table.concat(hidden, ", "))
                 end
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Buff Bar's placement and its reasons: they act on cards in both
-            -- columns, and "both" carries them through the one-column fold intact.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- Content: which raid groups show. Raid only, so its header hides
-            -- with the card outside raid.
-            local contentHeader = GUI:CreateHeader(self.child, L["Content"])
-            contentHeader.hideOn = function() return GUI.SelectedMode ~= "raid" end
-            Add(contentHeader, 40, 1)
-            do
-                -- How many of the eight are on, and -- while the list is short enough
-                -- to be worth reading -- which ones are not.
-                local function GroupVisSummary(d)
-                    if not d then return "" end
-                    local vis = d.raidGroupVisible
-                    local shown, hidden = 0, {}
-                    for i = 1, 8 do
-                        if type(vis) ~= "table" or vis[i] ~= false then
-                            shown = shown + 1
-                        else
-                            hidden[#hidden + 1] = i
-                        end
-                    end
-                    local parts = { format("%d/8", shown) }
-                    if #hidden > 0 and #hidden <= 3 then
-                        parts[#parts + 1] = format("%s %s", L["Hidden"], table.concat(hidden, ", "))
-                    end
-                    return table.concat(parts, " \194\183 ")
-                end
-
-                -- Raid only, header and band together, as the box. Eight one-word
-                -- ticks, which the card lays out two per row when it is wide enough
-                -- (the builder's hint is a full row of its own). Which groups show is
-                -- behaviour, so no pin.
-                local band = OpenSection(L["Group Visibility"], "frame_groupvisibility", 1, GroupVisSummary, nil,
-                    function() return GUI.SelectedMode ~= "raid" end)
-                BuildGroupVisGroup({
-                    group = band, parent = self.child,
-                    refreshStates = function() self:RefreshStates() end,
-                })
-                CloseSection(band)
-            end
-            -- The category header the layout cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
-            -- No tick: a frame has a size either way. How big a frame is is how
-            -- it LOOKS, so it is pinnable.
-            local band = OpenSection(L["Frame Size"], "frame_size", 1, FrameSizeSummary, nil, nil, BuildFrameSizeGroup)
-            BuildFrameSizeGroup({
+            -- Raid only, header and band together, as the box. Eight one-word
+            -- ticks, which the card lays out two per row when it is wide enough
+            -- (the builder's hint is a full row of its own). Which groups show is
+            -- behaviour, so no pin.
+            local band = OpenSection(L["Group Visibility"], "frame_groupvisibility", 1, GroupVisSummary, nil,
+                function() return GUI.SelectedMode ~= "raid" end)
+            BuildGroupVisGroup({
                 group = band, parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
             CloseSection(band)
         end
+        -- The category header the layout cards sit under.
+        Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
+        -- No tick: a frame has a size either way. How big a frame is is how
+        -- it LOOKS, so it is pinnable.
+        local band = OpenSection(L["Frame Size"], "frame_size", 1, FrameSizeSummary, nil, nil, BuildFrameSizeGroup)
+        BuildFrameSizeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
-        -- The classic container is built above -- see the note there. Modern
-        -- draws the same "Appearance" word as the category header over its three
-        -- cards instead (see the border arm below).
-        if classicLayout then
-            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        end
-        -- Canonical border controls via the unified helper. Replaces the
-        -- previous hand-rolled Show / Color / Style / Texture / Size block.
-        -- classColor + roleColor are now first-class helper include flags (no
-        -- bespoke "Use Class Color" extra needed). (Pixel-Perfect Scaling moved
-        -- to General > Settings > Rendering — it's a global, mode-agnostic flag.)
+        -- ===== APPEARANCE: Border, Border Shadow, Frame Fade (column 2) =====
+        -- Canonical border controls via the unified helper. classColor +
+        -- roleColor are first-class helper include flags. (Pixel-Perfect
+        -- Scaling lives on General > Settings > Rendering — it's a global,
+        -- mode-agnostic flag.)
         --
         -- Border and Border Shadow are TWO builders, each taking the group and
-        -- parent it should build into, because Modern mounts them as two cards.
-        -- Classic mounts them back-to-back into the one Appearance box, which is
-        -- the same panel, in the same order, as the single CreateBorderControls
-        -- call they replaced.
+        -- parent it should build into, because they are two cards.
         --
-        -- ⚠ shadowDisableWhen is not decoration. In the single call the shadow
-        -- rows greyed with Show Border because CreateBorderControls' own
-        -- composition loop reached them; split out, the shadow builder is never
+        -- ⚠ shadowDisableWhen is not decoration. A single CreateBorderControls
+        -- call greys the shadow rows with Show Border because its own
+        -- composition loop reaches them; split out, the shadow builder is never
         -- inside that loop, so the same predicate has to be handed to it.
         local function BuildBorderGroup(tools2)
             GUI:CreateBorderControls(tools2.group, db, "frame", {
@@ -4011,148 +3359,129 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- over explicitly. One definition, both branches.
         local function BorderOff() return db.frameShowBorder == false end
 
+        -- ===== THE SAME TWO GROUPS, AS TWO CARDS ========================
+        -- The group's own apply: what its widgets' callbacks already do, named
+        -- once so both header ticks run the same work.
+        local function ApplyBorder()
+            UpdateFrames()
+            DF:LightweightUpdateBorder()
+        end
 
-        if classicLayout then
-            local borderTools = {
-                group  = appearanceGroup,
-                parent = self.child,
-                -- A state pass, not a rebuild: every border control carries its
-                -- gate as hideOn/disableOn (GUI:CreateBorderControls).
-                refreshStates = function() GUI.RelayoutCurrentPage() end,
-                shadowDisableWhen = BorderOff,
-            }
-            BuildBorderGroup(borderTools)
-            BuildBorderShadowGroup(borderTools)
-        else
-            -- ===== THE SAME TWO GROUPS, AS TWO CARDS ========================
-            -- The group's own apply: what its widgets' callbacks already do, named
-            -- once so both header ticks run the same work.
-            local function ApplyBorder()
-                UpdateFrames()
-                DF:LightweightUpdateBorder()
+        -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
+        -- page, the header tick being clicked included. What a tick has to buy
+        -- is the hideOn/disableOn passes (Show Border greys the shadow card's
+        -- header and body) and a repaint of any pinned panel.
+        local function OnBorderToggle()
+            ApplyBorder()
+            self:RefreshStates()
+            tools.ReflowMounted()
+        end
+
+        -- The summaries. At most four items, a fixed order, "\194\183" between
+        -- them, labels or units only where a bare number would be ambiguous,
+        -- WORDS localised and numbers raw, every read guarded.
+        local function BorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.frameBorderSize)
+            if size then
+                parts[#parts + 1] = format("%dpx", math.floor(size))
             end
+            local style = d.frameBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            -- STATIC is the default and says nothing; the other two are the
+            -- whole reason a border may not be the colour beneath it.
+            local src = d.frameBorderColorSource
+            if src == "CLASS" then parts[#parts + 1] = L["Class"]
+            elseif src == "ROLE" then parts[#parts + 1] = L["Role"] end
+            -- ☠ THE WORD, NOT "\206\177" (U+03B1). The settings panel draws in
+            -- the user's Settings Font, and the shipped default carries no
+            -- Greek. Only when the alpha is actually doing something.
+            local c = d.frameBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return table.concat(parts, " \194\183 ")
+        end
 
-            -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
-            -- page, the header tick being clicked included. What a tick has to buy
-            -- is the hideOn/disableOn passes (Show Border greys the shadow card's
-            -- header and body) and a repaint of any pinned panel.
-            local function OnBorderToggle()
-                ApplyBorder()
-                self:RefreshStates()
-                tools.ReflowMounted()
+        local function ShadowSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.frameBorderShadowSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local ox = tonumber(d.frameBorderShadowOffsetX) or 0
+            local oy = tonumber(d.frameBorderShadowOffsetY) or 0
+            if ox ~= 0 or oy ~= 0 then
+                parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
             end
+            return table.concat(parts, " \194\183 ")
+        end
 
-            -- The summaries. At most four items, a fixed order, "\194\183" between
-            -- them, labels or units only where a bare number would be ambiguous,
-            -- WORDS localised and numbers raw, every read guarded.
-            local function BorderSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local size = tonumber(d.frameBorderSize)
-                if size then
-                    parts[#parts + 1] = format("%dpx", math.floor(size))
-                end
-                local style = d.frameBorderStyle
-                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
-                                 or (style == "TEXTURE" and L["Texture"])
-                                 or L["Solid"]
-                -- STATIC is the default and says nothing; the other two are the
-                -- whole reason a border may not be the colour beneath it.
-                local src = d.frameBorderColorSource
-                if src == "CLASS" then parts[#parts + 1] = L["Class"]
-                elseif src == "ROLE" then parts[#parts + 1] = L["Role"] end
-                -- ☠ THE WORD, NOT "\206\177" (U+03B1). The settings panel draws in
-                -- the user's Settings Font, and the shipped default carries no
-                -- Greek. Only when the alpha is actually doing something.
-                local c = d.frameBorderColor
-                local a = type(c) == "table" and tonumber(c.a) or nil
-                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
-                return table.concat(parts, " \194\183 ")
-            end
+        -- Show Border off greys the shadow card: its header (the dim gate and
+        -- the tick's own gate) and its body (shadowDisableWhen, below).
+        local function ShadowGatedOff(d) return (d or db).frameShowBorder == false end
 
-            local function ShadowSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local size = tonumber(d.frameBorderShadowSize)
-                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
-                local ox = tonumber(d.frameBorderShadowOffsetX) or 0
-                local oy = tonumber(d.frameBorderShadowOffsetY) or 0
-                if ox ~= 0 or oy ~= 0 then
-                    parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
-                end
-                return table.concat(parts, " \194\183 ")
-            end
+        -- ☠ THE SHADOW PIN NEEDS THE GATE HANDED OVER. A pinned panel mounts
+        -- the section's builder with the four standard fields only, and the
+        -- shadow builder takes Show Border's grey through shadowDisableWhen --
+        -- so the pin mounts it through this one wrapper, the same builder with
+        -- the same gate the card's body gets.
+        local function BuildBorderShadowPinned(tools2)
+            tools2.shadowDisableWhen = BorderOff
+            BuildBorderShadowGroup(tools2)
+        end
 
-            -- Show Border off greys the shadow card: its header (the dim gate and
-            -- the tick's own gate) and its body (shadowDisableWhen, below).
-            local function ShadowGatedOff(d) return (d or db).frameShowBorder == false end
+        -- Column 2 opens here, with the category header its three cards sit
+        -- under.
+        Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
 
-            -- ☠ THE SHADOW PIN NEEDS THE GATE HANDED OVER. A pinned panel mounts
-            -- the section's builder with the four standard fields only, and the
-            -- shadow builder takes Show Border's grey through shadowDisableWhen --
-            -- so the pin mounts it through this one wrapper, the same builder with
-            -- the same gate the card's body gets.
-            local function BuildBorderShadowPinned(tools2)
-                tools2.shadowDisableWhen = BorderOff
-                BuildBorderShadowGroup(tools2)
-            end
+        -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+        -- build its own (hoistToggles -> noShowToggle); showKey is still read,
+        -- so the rest of the border greys exactly as before. How the frame's
+        -- edge LOOKS, so it is pinnable.
+        local borderBand = OpenSection(L["Border"], "frame_border", 2, BorderSummary, nil, nil, BuildBorderGroup, {
+            db = db, key = "frameShowBorder", label = L["Show Border"],
+            isOn = function(d) return d.frameShowBorder ~= false end,
+            onChanged = OnBorderToggle,
+        })
+        BuildBorderGroup({
+            group = borderBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggles = true,
+        })
+        CloseSection(borderBand)
 
-            -- Column 2 opens here, with the category header its three cards sit
-            -- under.
-            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
-
-            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
-            -- build its own (hoistToggles -> noShowToggle); showKey is still read,
-            -- so the rest of the border greys exactly as before. How the frame's
-            -- edge LOOKS, so it is pinnable.
-            local borderBand = OpenSection(L["Border"], "frame_border", 2, BorderSummary, nil, nil, BuildBorderGroup, {
-                db = db, key = "frameShowBorder", label = L["Show Border"],
-                isOn = function(d) return d.frameShowBorder ~= false end,
+        -- ☠ THE SHADOW'S ENABLE IS ITS HEADER'S TICK (hoistToggles ->
+        -- noEnableToggle), and the whole card greys while Show Border is off,
+        -- the tick included -- as the in-body block always did. Pinnable.
+        local shadowBand = OpenSection(L["Border Shadow"], "frame_bordershadow", 2, ShadowSummary, ShadowGatedOff, nil,
+            BuildBorderShadowPinned, {
+                db = db, key = "frameBorderShadowEnabled", label = L["Border Shadow"],
+                disableOn = ShadowGatedOff,
                 onChanged = OnBorderToggle,
             })
-            BuildBorderGroup({
-                group = borderBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggles = true,
-            })
-            CloseSection(borderBand)
+        BuildBorderShadowGroup({
+            group = shadowBand, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            shadowDisableWhen = BorderOff,
+            hoistToggles = true,
+        })
+        CloseSection(shadowBand)
 
-            -- ☠ THE SHADOW'S ENABLE IS ITS HEADER'S TICK (hoistToggles ->
-            -- noEnableToggle), and the whole card greys while Show Border is off,
-            -- the tick included -- as the in-body block always did. Pinnable.
-            local shadowBand = OpenSection(L["Border Shadow"], "frame_bordershadow", 2, ShadowSummary, ShadowGatedOff, nil,
-                BuildBorderShadowPinned, {
-                    db = db, key = "frameBorderShadowEnabled", label = L["Border Shadow"],
-                    disableOn = ShadowGatedOff,
-                    onChanged = OnBorderToggle,
-                })
-            BuildBorderShadowGroup({
-                group = shadowBand, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                shadowDisableWhen = BorderOff,
-                hoistToggles = true,
-            })
-            CloseSection(shadowBand)
-        end
-        -- Classic only: Modern has no Appearance container -- its three cards
-        -- were each added as they were built.
-        if classicLayout then Add(appearanceGroup, nil, 2) end
-
-        -- ===== FRAME FADE (Column 2 box in classic, the third Appearance card) =
+        -- ===== FRAME FADE (the third Appearance card) =====
         -- Whole-frame base opacity, multiplied with the range / health fades
         -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
         -- split on -- an out-of-combat and an in-combat value, plus a hover option that
         -- shows the in-combat value while the mouse is on a frame out of combat.
         --
         -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
-        -- The group went a whole release without one because it had no boolean
-        -- meaning "am I doing anything at all" -- and the candidate that looked
-        -- like one was wrong twice over: the split is a MODE rather than an
-        -- enable (both states fade), and it HIDES the global slider, so a tick
-        -- that switched it off would grey the one control the group exists for.
-        -- So the missing boolean was ADDED (Config.lua, defaulting true) rather
-        -- than borrowed, and the engine reads it before anything else it fades on
-        -- (DF:GetFrameBaseAlpha). Off means alpha 1, not alpha 0.1.
+        -- The split is a MODE rather than an enable (both states fade), and it
+        -- HIDES the global slider, so a tick that switched it off would grey the
+        -- one control the group exists for. frameFadeEnabled (Config.lua,
+        -- defaulting true) is the group's own boolean, and the engine reads it
+        -- before anything else it fades on (DF:GetFrameBaseAlpha). Off means
+        -- alpha 1, not alpha 0.1.
         local function RefreshFrameFade()
             if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
             -- Pets re-apply their fade only on a range-cache miss; flush it so the
@@ -4171,16 +3500,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function BuildFrameFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the card's HEADER carries this tick. Still built in
-            -- classic, where it is the group's only on/off control.
+            -- Suppressed when the card's HEADER carries this tick.
             if not tools2.hoistToggle then
                 local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
                 ffEnable.keepEnabled = true
             end
             -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
-            -- header-tick group on this page: classic greys its own children off
-            -- this, the card's body has to do the same, and one builder serving
-            -- both is what stops the two drifting.
+            -- header-tick group on this page, so a pinned copy greys alike.
             group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
 
             local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
@@ -4209,59 +3535,47 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
         end
 
-        if classicLayout then
-            local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)
-            frameFadeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Fade"]), 40)
-            BuildFrameFadeGroup({
-                group = frameFadeGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(frameFadeGroup, nil, 2)
-        else
-            -- The summary, per the same convention the border cards follow: at
-            -- most four items, a fixed order, "\194\183" between them, WORDS
-            -- localised and numbers raw, and every opacity carries the word that
-            -- says WHICH opacity it is. Two shapes, because the group has two: one
-            -- value when the split is off, the out-of-combat value plus the
-            -- in-combat one when it is on.
-            local function FrameFadeSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
-                                                     or d.frameFadeAlpha
-                base = tonumber(base)
-                if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
-                if d.frameFadeSplitCombat then
-                    local inc = tonumber(d.frameFadeAlphaInCombat)
-                    if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
-                end
-                return table.concat(parts, " \194\183 ")
+        -- The summary, per the same convention the border cards follow: at
+        -- most four items, a fixed order, "\194\183" between them, WORDS
+        -- localised and numbers raw, and every opacity carries the word that
+        -- says WHICH opacity it is. Two shapes, because the group has two: one
+        -- value when the split is off, the out-of-combat value plus the
+        -- in-combat one when it is on.
+        local function FrameFadeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
+                                                 or d.frameFadeAlpha
+            base = tonumber(base)
+            if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
+            if d.frameFadeSplitCombat then
+                local inc = tonumber(d.frameFadeAlphaInCombat)
+                if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
             end
-
-            -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
-            -- to build its own (hoistToggle). The commit is what the in-body
-            -- checkbox ran plus the state pass that greys the seven behind it and
-            -- a repaint of a pinned panel -- never a page rebuild. How much of the
-            -- frame you can see is how it LOOKS, so it is pinnable.
-            local band = OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
-                db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
-                onChanged = function()
-                    RefreshFrameFade()
-                    self:RefreshStates()
-                    tools.ReflowMounted()
-                end,
-            })
-            BuildFrameFadeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+            return table.concat(parts, " \194\183 ")
         end
 
+        -- ☠ ENABLE FRAME FADE IS THE HEADER'S TICK, so the builder is told not
+        -- to build its own (hoistToggle). The commit is what the in-body
+        -- checkbox ran plus the state pass that greys the seven behind it and
+        -- a repaint of a pinned panel -- never a page rebuild. How much of the
+        -- frame you can see is how it LOOKS, so it is pinnable.
+        local band = OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {
+            db = db, key = "frameFadeEnabled", label = L["Enable Frame Fade"],
+            onChanged = function()
+                RefreshFrameFade()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end,
+        })
+        BuildFrameFadeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- ===== LAYOUT DIRECTION (a 280 box in classic, a Layout card) =======
+        -- ===== LAYOUT DIRECTION (a Layout card) =====
         -- Three dropdowns and never more than two of them visible: the two
         -- Growth Direction variants are mutually exclusive, and Frames Grow
         -- From is party-only.
@@ -4421,59 +3735,47 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-
-        if classicLayout then
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
-            BuildLayoutDirectionGroup({
-                group = layoutGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(layoutGroup, nil, 1)
-        else
-            -- Both dropdown values, in the order the card shows them: the shape
-            -- of the repeating unit first, then where it starts from. The anchor
-            -- half is PARTY ONLY, because the control is.
-            --
-            -- ☠ THE WORDS ARE DERIVED FROM `d`, NOT FROM THE BUILD-TIME MAIN_ /
-            -- CROSS_ LOCALS ABOVE. Those are baked from db.growDirection at build;
-            -- a summary is re-read on every refresh.
-            local function LayoutDirectionSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local vert    = d.growDirection == "VERTICAL"
-                local grouped = GUI.SelectedMode == "raid" and d.raidUseGroups
-                -- Grouped raid inverts the pair -- the repeating unit is a GROUP
-                -- there, see the ☠☠ note above the dropdowns.
-                if grouped then
-                    parts[#parts + 1] = vert and L["Rows"] or L["Columns"]
-                else
-                    parts[#parts + 1] = vert and L["Columns"] or L["Rows"]
-                end
-                if GUI.SelectedMode ~= "raid" then
-                    local a = d.growthAnchor or "START"
-                    parts[#parts + 1] = (a == "CENTER" and L["Center"])
-                                     or (a == "END" and (vert and L["Bottom"] or L["Right"]))
-                                     or (vert and L["Top"] or L["Left"])
-                end
-                return table.concat(parts, " \194\183 ")
+        -- Both dropdown values, in the order the card shows them: the shape
+        -- of the repeating unit first, then where it starts from. The anchor
+        -- half is PARTY ONLY, because the control is.
+        --
+        -- ☠ THE WORDS ARE DERIVED FROM `d`, NOT FROM THE BUILD-TIME MAIN_ /
+        -- CROSS_ LOCALS ABOVE. Those are baked from db.growDirection at build;
+        -- a summary is re-read on every refresh.
+        local function LayoutDirectionSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local vert    = d.growDirection == "VERTICAL"
+            local grouped = GUI.SelectedMode == "raid" and d.raidUseGroups
+            -- Grouped raid inverts the pair -- the repeating unit is a GROUP
+            -- there, see the ☠☠ note above the dropdowns.
+            if grouped then
+                parts[#parts + 1] = vert and L["Rows"] or L["Columns"]
+            else
+                parts[#parts + 1] = vert and L["Columns"] or L["Rows"]
             end
-
-            -- ☠ NO PIN, AND IT IS THE REBUILD THAT DECIDES IT. Growth Direction
-            -- rebuilds the page (OnGrowthDirectionChanged) and every route into a
-            -- page builder closes every open panel, pinned ones included -- so a
-            -- pinned copy would shut under the hand that changed it. The card
-            -- itself survives the rebuild: its fold is persisted on a stable key.
-            local band = OpenSection(L["Layout Direction"], "frame_layoutdirection", 1, LayoutDirectionSummary)
-            BuildLayoutDirectionGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            if GUI.SelectedMode ~= "raid" then
+                local a = d.growthAnchor or "START"
+                parts[#parts + 1] = (a == "CENTER" and L["Center"])
+                                 or (a == "END" and (vert and L["Bottom"] or L["Right"]))
+                                 or (vert and L["Top"] or L["Left"])
+            end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== RAID LAYOUT MODE (a 280 box in classic, a raid-only card) =====
+        -- ☠ NO PIN, AND IT IS THE REBUILD THAT DECIDES IT. Growth Direction
+        -- rebuilds the page (OnGrowthDirectionChanged) and every route into a
+        -- page builder closes every open panel, pinned ones included -- so a
+        -- pinned copy would shut under the hand that changed it. The card
+        -- itself survives the rebuild: its fold is persisted on a stable key.
+        local band = OpenSection(L["Layout Direction"], "frame_layoutdirection", 1, LayoutDirectionSummary)
+        BuildLayoutDirectionGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== RAID LAYOUT MODE (a raid-only card) =====
         -- Use Group-Based Layout and the blurb that explains the two modes. The
         -- tick is a MODE, not an on/off (flat is a layout too), so it stays in the
         -- card's body.
@@ -4536,8 +3838,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- The tick and its blurb. (hoistToggle is never passed today -- the tick is
-        -- a mode, so it stays in the body in both layouts.)
+        -- The tick and its blurb. (hoistToggle is never passed -- the tick is a
+        -- mode, so it stays in the body.)
         local function BuildRaidModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             if not tools2.hoistToggle then
@@ -4549,60 +3851,42 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
         end
 
-        if classicLayout then
-            local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280)
-            raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
-            raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
-            BuildRaidModeGroup({
-                group = raidModeGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(raidModeGroup, nil, 1)
-        else
-            -- One word, in both states: both are a raid layout, so "Off" would
-            -- say the raid was not being laid out at all.
-            local function RaidModeSummary(d)
-                if not d then return "" end
-                return d.raidUseGroups and L["Groups"] or L["Flat"]
-            end
-
-            -- ☠ USE GROUP-BASED LAYOUT STAYS IN THE BODY -- NO HEADER TICK. It is
-            -- a MODE, not this card's on/off: flat is a layout too, and a shut
-            -- card with the tick off would read "Off". In the body it is a page
-            -- widget exactly as classic's is, so its callback's synchronous page
-            -- rebuild (the flip changes which cards exist and the words every
-            -- anchor dropdown offers) retires it the way it retires classic's --
-            -- the fold survives (a stable key). Raid only, header and band
-            -- together. Behaviour, so no pin.
-            local band = OpenSection(L["Raid Layout Mode"], "frame_raidmode", 1, RaidModeSummary, nil,
-                function() return GUI.SelectedMode ~= "raid" end)
-            BuildRaidModeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- One word, in both states: both are a raid layout, so "Off" would
+        -- say the raid was not being laid out at all.
+        local function RaidModeSummary(d)
+            if not d then return "" end
+            return d.raidUseGroups and L["Groups"] or L["Flat"]
         end
 
-        -- ===== GROUP LAYOUT SETTINGS (a 280 box in classic, a raid card) =====
-        -- Raid + groups only, in both layouts. In classic that is a group-level
-        -- hideOn on the box; in Modern it is the SAME predicate on the card's
-        -- header and band. This and Flat Grid Settings below read opposite sides
-        -- of raidUseGroups, so exactly one of them is ever on the page.
+        -- ☠ USE GROUP-BASED LAYOUT STAYS IN THE BODY -- NO HEADER TICK. It is
+        -- a MODE, not this card's on/off: flat is a layout too, and a shut
+        -- card with the tick off would read "Off". Its callback's synchronous
+        -- page rebuild (the flip changes which cards exist and the words every
+        -- anchor dropdown offers) retires it, and the fold survives (a stable
+        -- key). Raid only, header and band together. Behaviour, so no pin.
+        local band = OpenSection(L["Raid Layout Mode"], "frame_raidmode", 1, RaidModeSummary, nil,
+            function() return GUI.SelectedMode ~= "raid" end)
+        BuildRaidModeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== GROUP LAYOUT SETTINGS (a raid card) =====
+        -- Raid + groups only, on the card's header and band. This and Flat Grid
+        -- Settings below read opposite sides of raidUseGroups, so exactly one of
+        -- them is ever on the page.
         --
-        -- ☠ THE TWO REFRESH COUPLINGS IN HERE ARE NAMED, AND THAT IS WHY THEY
-        -- MOVED INSIDE THE BUILDER. UpdateFramesAndGates re-asks the GROUP for a
-        -- state pass and UpdatePinMainGroup re-asks the anchor GRID for a repaint;
-        -- both used to close over the page-level box. Left out here they would
-        -- have gone on refreshing the object the CLASSIC branch built rather than
-        -- whichever instance the user is in. Inside the builder `group` and
-        -- `groupAnchorGrid` ARE the instance's own, one pair per instance, so a
-        -- pinned panel refreshes itself and not the card.
+        -- ☠ THE TWO REFRESH COUPLINGS IN HERE ARE NAMED, AND LIVE INSIDE THE
+        -- BUILDER. UpdateFramesAndGates re-asks the GROUP for a state pass and
+        -- UpdatePinMainGroup re-asks the anchor GRID for a repaint. Inside the
+        -- builder `group` and `groupAnchorGrid` ARE the instance's own, one pair
+        -- per instance, so a pinned panel refreshes itself and not the card.
         local function BuildGroupLayoutGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
             -- No fullRow needed: a two-per-row card makes every unbound widget (a
-            -- label included) a row of its own, and the classic box is one track.
+            -- label included) a row of its own.
             group:AddWidget(GUI:CreateLabel(parent, groupLayoutHint, 250), 25)
         
             -- Six controls, four of them directional, and their labels already swap with the
@@ -4798,63 +4082,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         end
 
-        if classicLayout then
-            local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-            groupLayoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Layout Settings"]), 40)
-            groupLayoutGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
-            BuildGroupLayoutGroup({
-                group = groupLayoutGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(groupLayoutGroup, nil, 1)
-        else
-            -- Wrap first, because it is the number that decides the SHAPE of the
-            -- block, then the gap between groups. Center Mode joins only when it
-            -- is Fixed. The corner the Groups Anchor picker names is deliberately
-            -- absent: it is two keys read through a transpose and a mirror, and a
-            -- summary restating that would be a second place for it to be wrong.
-            local function GroupLayoutSummary(d)
-                if not d then return "" end
-                local parts = {}
-                parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidGroupsPerRow) or 8)
-                local gap = tonumber(d.raidGroupSpacing)
-                if gap then parts[#parts + 1] = format("%s %d", L["Gap"], math.floor(gap)) end
-                if (d.raidGroupCenterMode or "ALL") == "MAIN" then
-                    parts[#parts + 1] = L["Fixed"]
-                end
-                return table.concat(parts, " \194\183 ")
+        -- Wrap first, because it is the number that decides the SHAPE of the
+        -- block, then the gap between groups. Center Mode joins only when it
+        -- is Fixed. The corner the Groups Anchor picker names is deliberately
+        -- absent: it is two keys read through a transpose and a mirror, and a
+        -- summary restating that would be a second place for it to be wrong.
+        local function GroupLayoutSummary(d)
+            if not d then return "" end
+            local parts = {}
+            parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidGroupsPerRow) or 8)
+            local gap = tonumber(d.raidGroupSpacing)
+            if gap then parts[#parts + 1] = format("%s %d", L["Gap"], math.floor(gap)) end
+            if (d.raidGroupCenterMode or "ALL") == "MAIN" then
+                parts[#parts + 1] = L["Fixed"]
             end
-
-            -- Raid + groups only, header and band together, as the box. How the
-            -- groups are arranged is how the raid LOOKS, so it is pinnable -- the
-            -- builder's two refresh couplings are its own per instance, so a
-            -- pinned copy refreshes itself and not the card.
-            local band = OpenSection(L["Group Layout Settings"], "frame_grouplayout", 1, GroupLayoutSummary, nil,
-                function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end, BuildGroupLayoutGroup)
-            BuildGroupLayoutGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== GROUP VISIBILITY, CLASSIC =====================================
-        -- The card is built under Content, above the Layout cards; the classic
-        -- box stays where it always stood.
-        if classicLayout then
-            local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280)
-            groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
-            groupVisGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
-            BuildGroupVisGroup({
-                group = groupVisGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(groupVisGroup, nil, 1)
-        end
+        -- Raid + groups only, header and band together, as the box. How the
+        -- groups are arranged is how the raid LOOKS, so it is pinnable -- the
+        -- builder's two refresh couplings are its own per instance, so a
+        -- pinned copy refreshes itself and not the card.
+        local band = OpenSection(L["Group Layout Settings"], "frame_grouplayout", 1, GroupLayoutSummary, nil,
+            function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end, BuildGroupLayoutGroup)
+        BuildGroupLayoutGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== GROUP DISPLAY ORDER (a 280 box in classic, a raid card) =======
+        -- ===== GROUP DISPLAY ORDER (a raid card) =====
         -- ONE track wherever it is built: the box is a blurb, a tick and a 230px
         -- drag list, and the list IS the box -- pairing it with the tick would
         -- give a 25px control a 230px row and still leave the list to fill
@@ -4894,55 +4151,42 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(groupOrderWidget, 230)
         end
 
-
-        if classicLayout then
-            local groupOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
-            groupOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Display Order"]), 40)
-            groupOrderGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
-            BuildGroupOrderGroup({
-                group = groupOrderGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(groupOrderGroup, nil, 2)
-        else
-            -- The order itself, which is the whole point of the group, plus the
-            -- one qualifier that overrides it.
-            local function GroupOrderSummary(d)
-                if not d then return "" end
-                local order = d.raidGroupDisplayOrder
-                local parts = {}
-                if type(order) == "table" and #order > 0 then
-                    local seen, out = {}, {}
-                    for _, n in ipairs(order) do
-                        n = tonumber(n)
-                        if n and n >= 1 and n <= 8 and not seen[n] then
-                            seen[n] = true
-                            out[#out + 1] = n
-                        end
+        -- The order itself, which is the whole point of the group, plus the
+        -- one qualifier that overrides it.
+        local function GroupOrderSummary(d)
+            if not d then return "" end
+            local order = d.raidGroupDisplayOrder
+            local parts = {}
+            if type(order) == "table" and #order > 0 then
+                local seen, out = {}, {}
+                for _, n in ipairs(order) do
+                    n = tonumber(n)
+                    if n and n >= 1 and n <= 8 and not seen[n] then
+                        seen[n] = true
+                        out[#out + 1] = n
                     end
-                    for i = 1, 8 do
-                        if not seen[i] then out[#out + 1] = i end
-                    end
-                    parts[#parts + 1] = table.concat(out, " ")
                 end
-                if d.raidPlayerGroupFirst then parts[#parts + 1] = L["My Group First"] end
-                return table.concat(parts, " \194\183 ")
+                for i = 1, 8 do
+                    if not seen[i] then out[#out + 1] = i end
+                end
+                parts[#parts + 1] = table.concat(out, " ")
             end
-
-            -- Raid + groups only, header and band together, as the box. Which
-            -- order the groups come in is behaviour, so no pin. The 230px drag
-            -- list is a full row of its own (it binds no single value).
-            local band = OpenSection(L["Group Display Order"], "frame_grouporder", 1, GroupOrderSummary, nil,
-                function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end)
-            BuildGroupOrderGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+            if d.raidPlayerGroupFirst then parts[#parts + 1] = L["My Group First"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== FLAT GRID SETTINGS (a 280 box in classic, a raid card) ========
+        -- Raid + groups only, header and band together, as the box. Which
+        -- order the groups come in is behaviour, so no pin. The 230px drag
+        -- list is a full row of its own (it binds no single value).
+        local band = OpenSection(L["Group Display Order"], "frame_grouporder", 1, GroupOrderSummary, nil,
+            function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end)
+        BuildGroupOrderGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- ===== FLAT GRID SETTINGS (a raid card) =====
         -- Raid + FLAT only -- the opposite side of raidUseGroups from Group
         -- Layout Settings above, which is what keeps exactly one of the two on
         -- the page at a time.
@@ -4987,55 +4231,42 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateSlider(parent, L["Vertical Spacing"], -5, 100, 1, db, "raidFlatVerticalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
         end
 
-        if classicLayout then
-            local flatGridGroup = GUI:CreateSettingsGroup(self.child, 280)
-            flatGridGroup:AddWidget(GUI:CreateHeader(self.child, L["Flat Grid Settings"]), 40)
-            flatGridGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
-            BuildFlatGridGroup({
-                group = flatGridGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(flatGridGroup, nil, 1)
-        else
-            -- Two items, and the first deliberately borrows the word the GROUPED
-            -- card uses for its own wrap count: one says how many groups fit
-            -- before the block wraps, the other how many players do, and the two
-            -- are never on screen together. The second is where the block sits in
-            -- the reserved area. The edge words are derived from `d`, not from the
-            -- build-time CROSS_ locals, for the Layout Direction summary's reason.
-            local function FlatGridSummary(d)
-                if not d then return "" end
-                local parts = {}
-                parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidPlayersPerRow) or 1)
-                local vert = d.growDirection == "VERTICAL"
-                local a = d.raidFlatGrowthAnchor or "START"
-                parts[#parts + 1] = (a == "CENTER" and L["Center"])
-                                 or (a == "END" and (vert and L["Right"] or L["Bottom"]))
-                                 or (vert and L["Left"] or L["Top"])
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- Raid + FLAT only, header and band together -- the opposite side of
-            -- raidUseGroups from Group Layout Settings, so exactly one of the two
-            -- is ever on the page. How the grid is laid out is how it LOOKS, so it
-            -- is pinnable.
-            local band = OpenSection(L["Flat Grid Settings"], "frame_flatgrid", 1, FlatGridSummary, nil,
-                function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end, BuildFlatGridGroup)
-            BuildFlatGridGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- Two items, and the first deliberately borrows the word the GROUPED
+        -- card uses for its own wrap count: one says how many groups fit
+        -- before the block wraps, the other how many players do, and the two
+        -- are never on screen together. The second is where the block sits in
+        -- the reserved area. The edge words are derived from `d`, not from the
+        -- build-time CROSS_ locals, for the Layout Direction summary's reason.
+        local function FlatGridSummary(d)
+            if not d then return "" end
+            local parts = {}
+            parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidPlayersPerRow) or 1)
+            local vert = d.growDirection == "VERTICAL"
+            local a = d.raidFlatGrowthAnchor or "START"
+            parts[#parts + 1] = (a == "CENTER" and L["Center"])
+                             or (a == "END" and (vert and L["Right"] or L["Bottom"]))
+                             or (vert and L["Left"] or L["Top"])
+            return table.concat(parts, " \194\183 ")
         end
+
+        -- Raid + FLAT only, header and band together -- the opposite side of
+        -- raidUseGroups from Group Layout Settings, so exactly one of the two
+        -- is ever on the page. How the grid is laid out is how it LOOKS, so it
+        -- is pinnable.
+        local band = OpenSection(L["Flat Grid Settings"], "frame_flatgrid", 1, FlatGridSummary, nil,
+            function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end, BuildFlatGridGroup)
+        BuildFlatGridGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
         
         -- Update labels on show.
-        -- ⚠ THE THREE UPVALUES NOW POINT INTO WHICHEVER GROUP WAS BUILT LAST. In
-        -- classic that is the one box each; in Modern it is the card, built after
-        -- its pin's eager copy. A later pinned instance re-points them, and that
-        -- is harmless: the only thing the hook does is re-read
-        -- db.growDirection and re-label the flat grid's slider, so the worst case
-        -- is the hook firing for the other copy of the same control.
+        -- ⚠ THE THREE UPVALUES POINT INTO WHICHEVER GROUP WAS BUILT LAST: the
+        -- card, built after its pin's eager copy. A later pinned instance
+        -- re-points them, and that is harmless: the only thing the hook does is
+        -- re-read db.growDirection and re-label the flat grid's slider, so the
+        -- worst case is the hook firing for the other copy of the same control.
         if groupsPerRowSlider and groupsPerRowSlider.label then
             groupsPerRowSlider:HookScript("OnShow", UpdateDynamicLabels)
         end
@@ -5046,9 +4277,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             playersPerRowSlider:HookScript("OnShow", UpdateDynamicLabels)
         end
 
-        -- ===== PERMANENT MOVER (Column 2 box in classic, a card in Modern) =====
+        -- ===== PERMANENT MOVER =====
         -- ONE checkbox that means "am I doing anything", and fifteen controls that
-        -- grey behind it: in Modern that checkbox is the card's header tick.
+        -- grey behind it: that checkbox is the card's header tick.
         --
         -- Declared out here rather than inside the builder because the SUMMARY
         -- reads it too: the card says which corner the handle sits in, and there
@@ -5059,11 +4290,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             BOTTOMLEFT= L["Bottom Left"], BOTTOM= L["Bottom"], BOTTOMRIGHT= L["Bottom Right"],
         }
 
-        -- Verbatim, less the enable checkbox when the card's header carries it.
-        -- Every widget keeps its own `disableOn` on permanentMover: that is what
-        -- greys the body behind the header tick in Modern and the box in classic,
-        -- one builder carrying the behaviour of both. Guarded by
-        -- test_frame_page_builders.lua against the inventory it had inline.
+        -- Less the enable checkbox when the card's header carries it. Every
+        -- widget keeps its own `disableOn` on permanentMover: that is what greys
+        -- the body behind the header tick. Guarded by
+        -- test_frame_page_builders.lua.
         local function BuildPermanentMoverGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -5146,62 +4376,47 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             permPullTimer.tooltip = L["Duration in seconds for the Pull Timer quick action."]
         end
 
-        if classicLayout then
-            local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)
-            permMoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]), 40)
-            BuildPermanentMoverGroup({ group = permMoverGroup, parent = self.child })
-            Add(permMoverGroup, nil, 2)
-        else
-            -- The summary: where the handle is, how big it is, and what it is
-            -- attached to when that is not the default. Three items, fixed order,
-            -- words localised and numbers raw -- the attach word only when it is
-            -- doing something. A shut card reads "Off" while the mover is off.
-            local function PermMoverSummary(d)
-                if not d then return "" end
-                local parts = {}
-                local pos = d.permanentMoverAnchor and moverAnchorValues[d.permanentMoverAnchor]
-                if pos then parts[#parts + 1] = pos end
-                local w, h = tonumber(d.permanentMoverWidth), tonumber(d.permanentMoverHeight)
-                if w and h then
-                    parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
-                end
-                local attach = d.permanentMoverAttachTo
-                if attach == "FIRST" then parts[#parts + 1] = L["First Unit"]
-                elseif attach == "LAST" then parts[#parts + 1] = L["Last Unit"] end
-                return table.concat(parts, " \194\183 ")
+        -- The summary: where the handle is, how big it is, and what it is
+        -- attached to when that is not the default. Three items, fixed order,
+        -- words localised and numbers raw -- the attach word only when it is
+        -- doing something. A shut card reads "Off" while the mover is off.
+        local function PermMoverSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local pos = d.permanentMoverAnchor and moverAnchorValues[d.permanentMoverAnchor]
+            if pos then parts[#parts + 1] = pos end
+            local w, h = tonumber(d.permanentMoverWidth), tonumber(d.permanentMoverHeight)
+            if w and h then
+                parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
             end
-
-            -- The category header the mover card sits under: the card's own
-            -- title says "Permanent Mover", so the header names what the section
-            -- is ABOUT, as the band's did.
-            Add(GUI:CreateHeader(self.child, L["Movement"]), 40, 1)
-            -- ☠ ENABLE PERMANENT MOVER IS THE HEADER'S TICK, so the builder is told
-            -- not to build its own (hoistToggle). Every control in the body keeps
-            -- its own disableOn on permanentMover, so the fifteen grey behind the
-            -- tick through the state pass the commit runs -- never a page rebuild.
-            -- A drag handle and its click actions are behaviour, so no pin.
-            local band = OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {
-                db = db, key = "permanentMover", label = L["Enable Permanent Mover"],
-                onChanged = function()
-                    DF:UpdatePermanentMoverVisibility()
-                    self:RefreshStates()
-                end,
-            })
-            BuildPermanentMoverGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+            local attach = d.permanentMoverAttachTo
+            if attach == "FIRST" then parts[#parts + 1] = L["First Unit"]
+            elseif attach == "LAST" then parts[#parts + 1] = L["Last Unit"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== NO BAND TAIL ================================================
-        -- A card's band holds one group and is Add'd by CloseSection the moment
-        -- that group is built, so nothing is deferred to here. Layout and Movement
-        -- down the left, Appearance down the right; on a narrow window the page
-        -- folds to one column in the order the cards were built -- the layout
-        -- chain first, then how the frames look, then the mover. Classic does its
-        -- own two-column Add above, with fixed 280 boxes.
+        -- The category header the mover card sits under: the card's own
+        -- title says "Permanent Mover", so the header names what the section
+        -- is ABOUT, as the band's did.
+        Add(GUI:CreateHeader(self.child, L["Movement"]), 40, 1)
+        -- ☠ ENABLE PERMANENT MOVER IS THE HEADER'S TICK, so the builder is told
+        -- not to build its own (hoistToggle). Every control in the body keeps
+        -- its own disableOn on permanentMover, so the fifteen grey behind the
+        -- tick through the state pass the commit runs -- never a page rebuild.
+        -- A drag handle and its click actions are behaviour, so no pin.
+        local band = OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {
+            db = db, key = "permanentMover", label = L["Enable Permanent Mover"],
+            onChanged = function()
+                DF:UpdatePermanentMoverVisibility()
+                self:RefreshStates()
+            end,
+        })
+        BuildPermanentMoverGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")

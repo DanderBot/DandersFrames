@@ -2872,7 +2872,7 @@ end
 -- seconds banded into a seconds-sampled formatter — a percent component can't
 -- blank on a seconds cut, and blanking only the seconds half would leave a
 -- floating "(45%)". The GUI greys Hide Above when a percent format is picked.
--- colorByTime (the pre-68914 |c bucket fallback) only ever reaches the classic
+-- colorByTime (the pre-68914 |c bucket fallback) only ever reaches the plain
 -- formats: a client old enough to bucket lacks SetTextFormat, so the percent
 -- family falls back to plain NUMBER there rather than render wrong bands.
 function DF:GetDurationFormatFields(format, hideAboveT, colorByTime)

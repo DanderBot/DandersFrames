@@ -3,20 +3,16 @@ local NS = ...
 -- ============================================================
 -- PINNED FRAMES PAGE -- DandersFrames_Options/GUI/Pages/Frames.lua
 -- ------------------------------------------------------------
--- General > Pinned Frames keeps its STRUCTURE in Modern -- the per-set tab
+-- General > Pinned Frames keeps its STRUCTURE -- the per-set tab
 -- strip (add, remove, rename, the on/off pip), the Setup / Appearance /
 -- Members sub-tabs and the Members roster -- and takes the other General pages'
 -- look: the intro is an info banner, each box is a collapsible CARD in its
 -- column behind its box's own sub-tab gate, and Expand All / Collapse All sits
 -- under the sub-tabs.
 --
--- ☠ THE PAGE HAD NO LAYOUT BRANCH BEFORE THIS, so every Modern difference is a
--- NEW `if classicLayout then ... else ... end` whose classic arm is the code the
--- page always ran. What this file pins:
---   ✓ each card's column, stable key and sub-tab gate, and that the box it
---     replaces is still what classic builds;
+-- What this file pins:
+--   ✓ each card's column, stable key and sub-tab gate;
 --   ✓ that the set machinery (add / remove / tab switch) is untouched;
---   ✓ that classic never takes the page tools.
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
 
@@ -32,10 +28,6 @@ end
 
 print("-- Pinned Frames page: the layout decision and the tools")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
-    check(PAGE:find("local tools = (not classicLayout) and GUI:CreatePopoutPageTools(self) or nil", 1, true) ~= nil,
-          "tools: ...and takes the page tools in Modern only, so classic runs exactly what it always did")
     local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
     check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
           "sections: every card goes through the shared helper")
@@ -47,19 +39,14 @@ end
 
 print("-- Pinned Frames page: the intro")
 do
-    -- Classic keeps the titled box and its deferred height measuring; Modern
-    -- says the same sentence as a banner.
-    check(PAGE:find('        if classicLayout then\n            local headerGroup = GUI:CreateSettingsGroup(self.child, 560)', 1, true) ~= nil,
-          "intro: classic builds the header box, and only classic")
-    check(PAGE:find('            Add(headerGroup, nil, "both")\n        else', 1, true) ~= nil,
-          "intro: ...adding it where it always did")
+    -- The intro sentence is an info banner.
     local text = 'L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."]'
     local n = 0
     for _ in PAGE:gmatch(text:gsub("%p", "%%%0")) do n = n + 1 end
-    eq(n, 2, "intro: the one sentence, shipped string, in both layouts")
+    eq(n, 1, "intro: the one sentence, shipped string")
     check(PAGE:find('local pinnedIntro = GUI:CreateInfoBanner(self.child, {', 1, true) ~= nil
       and PAGE:find('Add(pinnedIntro, pinnedIntro.layoutHeight, "both")', 1, true) ~= nil,
-          "intro: Modern's is an info banner spanning both columns")
+          "intro: an info banner spanning both columns")
 end
 
 print("-- Pinned Frames page: the cards")
@@ -78,29 +65,23 @@ do
 
     for _, c in ipairs(CARDS) do
         local flat = PAGE:gsub("%s+", " ")
-        check(flat:find(c.var .. ' = GUI:CreateSettingsGroup(self.child, ' .. c.width .. ')', 1, true) ~= nil,
-              c.label .. ": classic still builds its " .. c.width .. " box")
-        -- The OpenSection call, up to the `end` closing its else arm.
+        -- The OpenSection statement, up to the blank line after it.
         local a = PAGE:find('OpenSection(L["' .. c.label .. '"]', 1, true)
-        local b = a and PAGE:find("\n        end", a, true)
+        local b = a and PAGE:find("\n\n", a, true)
         local call = (a and b) and PAGE:sub(a, b):gsub("%s+", " ") or ""
         check(call:find('"' .. c.key .. '", ' .. c.col, 1, true) ~= nil,
-              c.label .. ": Modern opens a card keyed " .. c.key .. " in column " .. c.col)
+              c.label .. ": opens a card keyed " .. c.key .. " in column " .. c.col)
         check(call:find(c.gate, 1, true) ~= nil,
-              c.label .. ": ...hidden outside its sub-tab, the same gate as the box")
-        check(flat:find("if classicLayout then Add(" .. c.var .. ", nil, " .. c.col .. ") else CloseSection(" .. c.var .. ") end", 1, true) ~= nil,
-              c.label .. ": classic adds the box where it always did; Modern closes the card after its last control")
+              c.label .. ": ...hidden outside its sub-tab")
     end
     -- Frame Type greys, header and body, while the set is disabled.
     local fa = PAGE:find('OpenSection(L["Frame Type"]', 1, true)
-    local fb = fa and PAGE:find("\n        end", fa, true)
+    local fb = fa and PAGE:find("\n\n", fa, true)
     local ft = (fa and fb) and PAGE:sub(fa, fb) or ""
     check(ft:find("function() return PinnedSetDisabled() end", 1, true) ~= nil,
           "cards: Frame Type's header greys while the set is disabled, as its body does")
-    check(PAGE:find("if classicLayout then\n            AddSpace(GUI.Space.section, \"both\")\n        end", 1, true) ~= nil,
-          "cards: the spacer between the Setup and Appearance boxes is classic's alone")
-    check(PAGE:find('if not classicLayout then\n            Add(tools.SectionControls(self.child), 24, "both")\n        end', 1, true) ~= nil,
-          "bulk: Expand All / Collapse All under the sub-tabs, Modern only")
+    check(PAGE:find('\n        Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: Expand All / Collapse All under the sub-tabs")
 end
 
 print("-- Pinned Frames page: the set machinery is untouched")

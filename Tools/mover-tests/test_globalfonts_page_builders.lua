@@ -3,11 +3,10 @@ local NS = ...
 -- ============================================================
 -- FONTS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Frames.lua
 -- ------------------------------------------------------------
--- GLOBAL > Fonts (once "Global Fonts"): three classic boxes. In Modern they are the Debuff
--- Bar's collapsible CARDS -- two per row inside a card wide enough, dim
--- captions, the value summary in a shut card's corner, Expand All / Collapse
--- All at the top -- and TWO COLUMNS when the window is wide (the rows were one
--- column at every width):
+-- GLOBAL > Fonts (once "Global Fonts"): the Debuff Bar's collapsible CARDS --
+-- two per row inside a card wide enough, dim captions, the value summary in a
+-- shut card's corner, Expand All / Collapse All at the top -- and TWO COLUMNS
+-- when the window is wide:
 --
 --   column 1   Font Settings         the scratch pad and its Apply to All
 --              Shadow Settings       pinnable; the Shadow cross-link's target
@@ -112,8 +111,6 @@ end
 -- ============================================================
 print("-- Global Fonts page: the shared machinery, and the row furniture gone")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
@@ -128,7 +125,7 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
 
-    -- The scratch table stays at PAGE scope, above every builder, in both layouts.
+    -- The scratch table stays at PAGE scope, above every builder.
     local tempAt = PAGE:find("if not DF.GlobalFontTemp then", 1, true)
     local buildAt = PAGE:find("local function BuildFontSelectionGroup(tools2)", 1, true)
     check(tempAt and buildAt and tempAt < buildAt, "scratch: DF.GlobalFontTemp is seeded at page scope, above the builder")
@@ -189,20 +186,13 @@ do
     eq(fontWrites, 20, "apply: the press writes the chosen font in twenty places")
     eq(outlineWrites, 20, "apply: ...and the outline beside each one")
 
-    local calls = 0
-    for _ in PAGE:gmatch("BuildFontSelectionGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "font settings: declared once, mounted twice -- classic box and card")
-    check(PAGE:find('fontSelectGroup:AddWidget(GUI:CreateHeader(self.child, L["Font Settings"]), 40)', 1, true) ~= nil
-      and PAGE:find("Add(fontSelectGroup, nil, 1)", 1, true) ~= nil,
-          "font settings: classic keeps its box, its header and column 1")
-
     -- The collapse key keeps its old name: renaming it would forget every
     -- user's fold.
     local block, call = sectionBlock("Font Settings", "BuildFontSelectionGroup({")
     check(call:find('OpenSection(L["Font Settings"], "fonts_global", 1, GlobalFontSummary)', 1, true) ~= nil,
           "font settings: a card keyed fonts_global in column 1, naming SDF -- no tick, no pin")
     check(block:find("BuildFontSelectionGroup({ group = fontCard, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "font settings: mounts the builder exactly as classic does")
+          "font settings: mounts its builder into the card's band")
 end
 
 -- ============================================================
@@ -229,20 +219,13 @@ do
     check(body:find("UpdateShadowSettings, LightweightShadowUpdate", 1, true) ~= nil,
           "shadow settings: the sliders keep their full apply and their drag-time one")
 
-    local calls = 0
-    for _ in PAGE:gmatch("BuildShadowSettingsGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "shadow settings: declared once, mounted twice -- classic box and card")
-    check(PAGE:find('shadowGroup:AddWidget(GUI:CreateHeader(self.child, L["Shadow Settings"]), 40)', 1, true) ~= nil
-      and PAGE:find("Add(shadowGroup, nil, 1)", 1, true) ~= nil,
-          "shadow settings: classic keeps its box, its header and column 1")
-
     local block, call = sectionBlock("Shadow Settings", "BuildShadowSettingsGroup({")
     check(call:find('OpenSection(L["Shadow Settings"], "fonts_shadow", 1, function() return ShadowSettingsSummary(DF:GetDB("party")) end, nil, nil, BuildShadowSettingsGroup)', 1, true) ~= nil,
           "shadow settings: a card keyed fonts_shadow in column 1, its summary reading the party table, pinnable")
     check(block:find("BuildShadowSettingsGroup({ group = shadowCard, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "shadow settings: mounts the builder exactly as classic does")
+          "shadow settings: mounts its builder into the card's band")
 
-    local sum = PAGE:match("local function ShadowSettingsSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function ShadowSettingsSummary%(d%)(.-)\n        end")
     check(sum ~= nil and sum:find("if ox ~= 0 or oy ~= 0 then", 1, true) ~= nil
       and sum:find('format("%g, %g", ox, oy)', 1, true) ~= nil and sum:find("math.floor", 1, true) == nil,
           "shadow settings: the summary is the offset pair, only when set, at half-pixel resolution")
@@ -271,11 +254,7 @@ end
 print("-- Fonts page: Affected Elements")
 do
     check(PAGE:find('local INFO_LIST = L["', 1, true) ~= nil and PAGE:find('local INFO_NOTE = L["', 1, true) ~= nil,
-          "affected: the list and the note are one page-scope copy each, read by both layouts")
-    check(PAGE:find("infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, 250), 235)", 1, true) ~= nil
-      and PAGE:find('infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = 250}), 40)', 1, true) ~= nil
-      and PAGE:find("Add(infoGroup, nil, 2)", 1, true) ~= nil,
-          "affected: classic keeps its 280 box, the pinned 235 and column 2")
+          "affected: the list and the note are one page-scope copy each")
 
     check(PAGE:find('OpenSection(L["Affected Elements"]', 1, true) == nil,
           "affected: not a card -- it holds only text, so nothing to fold")
@@ -301,7 +280,4 @@ do
     local firstAt = PAGE:find('OpenSection(L["Font Settings"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
     check(PAGE:find("hoistToggle", 1, true) == nil, "ticks: no card on this page has a header tick")
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "boxes: classic's three bare 280 boxes, plus Modern's Affected Elements box")
 end

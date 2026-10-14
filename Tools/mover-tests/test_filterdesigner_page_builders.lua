@@ -8,11 +8,10 @@ local NS = ...
 -- anchored straight onto the page child with a spacer carrying its height
 -- through the standard layout pass.
 --
--- ⚠ 2026-09-26: the page's Modern "band arm" -- one popout row per filter, each
+-- ⚠ 2026-09-26: the page's "band arm" -- one popout row per filter, each
 -- panel carrying that filter's own header and spell list -- was deleted along
--- with the other designers' rows pages. The designers build their classic
--- version in both settings layouts (decided 2026-09-22), so the arm had been
--- unreachable since then. What is left here pins the island.
+-- with the other designers' rows pages; every designer builds its island.
+-- What is left here pins the island.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to a real ScrollFrame, a
 -- real settings group, GUI.contentFrame and DF.db -- so this file does what

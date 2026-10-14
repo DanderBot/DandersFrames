@@ -4731,14 +4731,9 @@ GUI.QuietLabels   = QuietLabels
 -- one of the load-bearing notes rather than the code under it. The essays below
 -- are the only place each piece is explained.
 --
--- USAGE, at the top of a BuildPage builder and unconditionally:
+-- USAGE, at the top of a BuildPage builder:
 --
---     local classicLayout = DF:IsClassicSettingsLayout()
 --     local tools = GUI:CreatePopoutPageTools(self)
---
--- `tools` is nil in the classic layout, which is what makes the classic branch
--- of every converted group a plain `if classicLayout then` arm building the box
--- it always built.
 --
 -- WHAT COMES BACK (all closing over this page's own state -- its mounted panes
 -- and its holders -- so two pages built in one session cannot reflow each
@@ -4763,23 +4758,14 @@ function GUI:CreatePopoutPageTools(page)
 
     -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
     -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
-    -- the classic-layout flip, and the settings search registry, which is built
+    -- and the settings search registry, which is built
     -- by re-running every page's builder -- and an open popout from the PREVIOUS
     -- build is showing widgets wired to the db table THAT build captured. After
     -- a mode switch that table is the other mode's, so a slider dragged in a
     -- stale panel writes live settings into the wrong mode. Guarded rather than
     -- called bare, so an older embedded copy of the pack without the verb cannot
     -- break the page.
-    --
-    -- ☠ AND IT IS ABOVE THE CLASSIC BAIL. The flip TO classic is itself a
-    -- rebuild, and it is the one rebuild that can happen with a panel standing
-    -- open. Left below the early return, the helper would hand the classic page
-    -- back with an orphan panel still floating beside it. Classic has nothing
-    -- open otherwise, so on every other classic build this is a no-op over an
-    -- empty registry.
     if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
-
-    if DF:IsClassicSettingsLayout() then return nil end
 
     -- Retire the previous build's holders. They are deliberately NOT in
     -- page.children -- anything in that list is laid out into one of the page's
@@ -4882,7 +4868,7 @@ function GUI:CreatePopoutPageTools(page)
 
             -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE, because the widget
             -- factories reach for it by name. Every one of them ends a write with
-            -- `if parent.RefreshStates then parent:RefreshStates() end`; classic's
+            -- `if parent.RefreshStates then parent:RefreshStates() end`; the page's
             -- scroll child carries that forwarder (Panel.lua), a bare holder does
             -- not, so the guard would read nil and silently do NOTHING -- every
             -- `disableOn` inside a pane stale until the panel was re-opened.
@@ -5220,7 +5206,7 @@ function GUI:CreatePopoutPageTools(page)
     end
 
     -- CARD GROUPS. A page whose cards are declared in an order that interleaves
-    -- its groups registers each Modern card's mount with DeferCard, then
+    -- its groups registers each card's mount with DeferCard, then
     -- MountCardGroups adds them group by group, each under its header. The
     -- page's Add order is what a one-column window stacks, so this is what
     -- keeps a group's cards together there. A registered card in no group

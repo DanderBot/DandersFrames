@@ -604,7 +604,7 @@ local function GroupApply(kind)
 end
 
 -- ── PLACEMENT (every group kind) ──
--- The controls bind the group record itself, in both layouts.
+-- The controls bind the group record itself.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
@@ -803,8 +803,8 @@ local function PaintIconRowOnThumb(pv, colors, ghost)
         x = x + GROUP_ICON_SIZE + GROUP_ICON_GAP
     end
 end
--- Published for the classic Effects tab's Add from a Spell / Add from a Filter
--- tiles (Cards.lua's S.BuildClassicAddTiles), which draw in this same vocabulary.
+-- Published for the Effects tab's Add from a Spell / Add from a Filter
+-- tiles (Cards.lua's S.BuildAddTiles), which draw in this same vocabulary.
 P.PaintGroupIconRow = PaintIconRowOnThumb
 
 -- "Create Filter" -- jump to the Filter Designer and pulse its New Filter button.
@@ -886,11 +886,11 @@ end
 --   opts.Close()       shut the panel once something has been added
 -- ============================================================
 local GROUP_TILE_PIC_H, GROUP_TILE_GAP = 40, 6
--- The same numbers for the classic Effects tab's source tiles (Cards.lua's
--- S.BuildClassicAddTiles), so all three tabs' add tiles are one size.
+-- The same numbers for the Effects tab's source tiles (Cards.lua's
+-- S.BuildAddTiles), so all three tabs' add tiles are one size.
 P.GroupTileMetrics = { picH = GROUP_TILE_PIC_H, gap = GROUP_TILE_GAP }
 
--- ── opts.onPage: THE CLASSIC DESIGNER MOUNTS THESE PANES ON ITS TAB ──
+-- ── opts.onPage: THE DESIGNER MOUNTS THESE PANES ON ITS TAB ──
 -- The split panel's Layout Groups / Debuffs tabs draw these tiles straight onto
 -- the page, above the list, and a click ADDS (2026-09-22). So there is no numbered
 -- question over them -- the tab heading already says what the tiles are -- and the
@@ -968,11 +968,11 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local hasGroups = #VisibleLayoutGroups() > 0
 
     -- ── SPELL GROUP / FILTER GROUP ──
-    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH (2026-09-22). The Modern
+    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH (2026-09-22). The
     -- pane (S.BuildAddLayoutGroupPane, opts.onPage) mounted straight onto this tab:
     -- a tile click creates the group, and the Create / Manage Filters pair sits
-    -- under the tiles -- see Cards.lua's THE CLASSIC DESIGNER'S INLINE ADD FLOWS.
-    yPos = S.BuildClassicAddTiles(parent, yPos, "layout")
+    -- under the tiles -- see Cards.lua's THE DESIGNER'S INLINE ADD FLOWS.
+    yPos = S.BuildAddTiles(parent, yPos, "layout")
 
     -- Teaching prose, first visit only. The CARDS below are pinned permanently --
     -- they are the create action, so they have to be -- but this sentence is read
@@ -1626,7 +1626,7 @@ end
 -- says what this kind of group IS. A bare row would be one click cheaper and
 -- would drop that sentence on the floor.
 -- ============================================================
--- opts.onPage / opts.blocked / opts.gate: the classic tab's mount, exactly as the
+-- opts.onPage / opts.blocked / opts.gate: the tab's mount, exactly as the
 -- Layout Groups pane takes them (see opts.onPage above S.BuildAddLayoutGroupPane).
 S.BuildAddDebuffGroupPane = function(host, opts)
     opts = opts or {}
@@ -1690,7 +1690,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     -- The Debuffs pool's half of the same change: its one tile, on the page
     -- (S.BuildAddDebuffGroupPane, opts.onPage), one click adds. The debuffGroups
     -- array is still born lazily on the first add.
-    yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")
+    yPos = S.BuildAddTiles(parent, yPos, "debuff")
 
     -- Teaching prose, first visit only -- see the Layout Groups tab.
     if not hasGroups then
@@ -1736,7 +1736,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
         -- which is the whole reason it was lifted out.
         local adDBForDedup = GetAuraDesignerDB()
         if adDBForDedup then
-            -- Same structural chain both layouts already spell for the eye and the
+            -- Same structural chain the designer already spells for the eye and the
             -- delete; defined here because neither host's copy is in scope.
             local function StructuralDedupRefresh()
                 S.SwitchTab("layout")
@@ -1975,8 +1975,7 @@ end
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside one S.mainFrame that the page harness never sees. It is
--- why this page had to force the window 210px wider than its own default. It is
--- the designer's only page, in both settings layouts (decided 2026-09-22).
+-- why this page had to force the window 210px wider than its own default.
 -- ============================================================
 local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local prevDB = S.db  -- capture before overwrite to detect mode switch
@@ -2466,9 +2465,8 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- The designer always builds its classic island, in both settings layouts
--- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
--- contract is unchanged; the island does not use them.
+-- The designer always builds its island. `Add` and `AddSpace` are still
+-- accepted so BuildPage's contract is unchanged; the island does not use them.
 -- ============================================================
 function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)

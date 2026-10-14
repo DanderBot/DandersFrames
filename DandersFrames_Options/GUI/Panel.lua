@@ -33,35 +33,6 @@ local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 
 -- ============================================================
--- THE LAYOUT FLIP -- ONE FUNCTION, TWO DOORS
--- ------------------------------------------------------------
--- The title-bar glyph and the Options page's classic checkbox both flip the
--- same SV root field, and both must run the SAME sequence in the SAME order:
--- the open panels first (they belong to the layout being left), then every
--- page's build cache, then the page on screen, then the glyph's tint. The two
--- sites each carried their own copy of that list, which is exactly how they
--- would drift; this is the only copy now.
---
--- `value` omitted = toggle (the glyph). The checkbox passes the value its
--- factory has already written -- SetClassicSettingsLayout is an idempotent
--- field write, so restating it costs nothing and the one function serves both.
---
--- Safe from ANY page, the designer shells included: the rebuild goes through
--- RefreshCurrentPage -> page:Refresh() -> the page's own builder, and each
--- designer's build dispatcher owns the arm swap (DF.BuildAuraDesignerPage /
--- DF.BuildTextDesignerPage restore the harness's RefreshStates their classic
--- island replaced -- see those files).
--- ============================================================
-function GUI:FlipSettingsLayout(value)
-    if value == nil then value = not DF:IsClassicSettingsLayout() end
-    DF:SetClassicSettingsLayout(value)
-    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
-    if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
-    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-    if GUI.PaintLayoutButton then GUI.PaintLayoutButton() end
-end
-
--- ============================================================
 -- THE CONTENT CORRIDOR
 -- ------------------------------------------------------------
 -- Every number between the right edge of a widget on a page and the right edge
@@ -155,7 +126,7 @@ end
 -- between column 1's right edge (a band filling its column: colMargin + ColumnWidth)
 -- and column 2's left edge (Column2X). nil while the page has one column. Read by the
 -- resize grip's guide line, so the line sits where the split lands after release.
--- ⚠ A classic page's fixed-width boxes are SettingsBox.group wide rather than
+-- ⚠ A boxed page's fixed-width boxes (Profiles, Debug) are SettingsBox.group wide rather than
 -- ColumnWidth, so their gap is wider on the left; column 2's start is the same either way.
 function GUI.ColumnSplitX()
     if not GUI.UsesTwoColumns() then return nil end
@@ -275,10 +246,9 @@ end
 -- for the old width until the next refresh: two tracks spilling out of a card
 -- that had just narrowed, or a widened card's controls still at the narrow
 -- width, wrapping.
--- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A classic page's
--- boxes are built at a FIXED width and sit in a column wider than themselves;
--- sizing those to the column would restyle a layout this is not allowed to
--- touch. Only a band that declares it wants to FILL its column is resized --
+-- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A boxed page's
+-- boxes (Profiles, Debug) are built at a FIXED width and sit in a column wider
+-- than themselves; sizing those to the column would restyle them. Only a band that declares it wants to FILL its column is resized --
 -- to the column with two, and to the WHOLE usable width with one, which is
 -- what makes the two-column layout a presentation of the same page rather
 -- than a second one.
@@ -1028,83 +998,6 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
-    -- ☠ HIDDEN WITH CLASSIC (2026-09-26). The whole picker is built only while
-    -- DF.CLASSIC_SETTINGS_AVAILABLE (Core/Config.lua) is true -- the one switch.
-    -- Off, there is no layoutChip, no GUI.LayoutButton and no PaintLayoutButton
-    -- (GUI:FlipSettingsLayout guards that call), and the profile chip anchors to
-    -- the scale glyph instead. Flip the switch and this comes back unchanged.
-    local layoutChip
-    if DF:ClassicSettingsAvailable() then
-    -- ⇄ SETTINGS LAYOUT. Which layout the panel draws in is account identity,
-    -- like the profile chip beside it — it shapes every page, so it is reachable
-    -- from every page rather than buried on the Options page (whose checkbox
-    -- stays; both read the same SV root field, so they cannot drift).
-    --
-    -- ⚠ A DROPDOWN, NOT A CHECKBOX. A lone ticked box among a row of glyphs read
-    -- as clutter and made the bar feel crowded, and a checkbox can only say "the
-    -- other one" about whatever it is not. The two layouts are two NAMED things,
-    -- so the control that names them is a menu. Deliberately the same shape,
-    -- height, opener and menu alignment as the profile chip beside it: both
-    -- answer "which <thing> is this window in", and a bar that asks that question
-    -- twice should not ask it in two different languages.
-    --
-    -- ⚠ RAW KEYS IN THE MENU, LOCALISED TEXT ON IT. The stored field is a BOOLEAN
-    -- (DandersFramesDB_v2.classicSettings), so the option VALUES are the stable
-    -- keys "classic"/"compact" and the boolean is derived at the seam below --
-    -- never the display text, which changes with the client's language.
-    local LAYOUT_OPTIONS = {
-        _order  = { "compact", "classic" },
-        -- ⚠ SHOWN AS "MODERN", STILL KEYED "compact". The value is the menu's stable
-        -- identifier and nothing persists it (the saved field is the classicSettings
-        -- boolean), so only the word the user reads changed. "Compact" undersold it:
-        -- this is the ROOMIER layout -- two columns, settings inline -- and read like
-        -- the smaller option. Its own label, because L["Compact"] also names an
-        -- unrelated Indicators option that keeps its word.
-        compact = { value = "compact", text = L["Modern"] },
-        classic = { value = "classic", text = L["Classic"] },
-    }
-    layoutChip = GUI:CreateDropdown(
-        titleBar, "", LAYOUT_OPTIONS,
-        nil, nil, nil,
-        function()                                              -- customGet
-            return DF:IsClassicSettingsLayout() and "classic" or "compact"
-        end,
-        function(value)                                         -- customSet
-            local classic = (value == "classic")
-            -- Same guard as the profile chip: re-picking what is already active
-            -- must not pay for a full rebuild of every page.
-            if classic == DF:IsClassicSettingsLayout() then return end
-            -- The one shared flip -- see GUI:FlipSettingsLayout above. It writes
-            -- the field, closes the panels belonging to the layout being left,
-            -- invalidates every page's build cache, rebuilds the page on screen
-            -- and repaints this chip, IN THAT ORDER. The order is the point.
-            GUI:FlipSettingsLayout(classic)
-        end,
-        { inline = true, menuAlign = "RIGHT" }
-    )
-    -- Narrower than the profile chip (126): a profile is a user-typed name of
-    -- any length, a layout is one of two words we ship and translate ourselves.
-    layoutChip:SetSize(104, 20)
-    layoutChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
-    layoutChip.openerTooltip = {
-        title = L["Settings Layout"],
-        lines = { L["Applies to the whole account."] },
-    }
-    GUI.LayoutButton = layoutChip
-    local function PaintLayoutButton()
-        -- UpdateText, NOT RebuildOptions: the two options never change, so the
-        -- caption is the only thing that can have moved. Same reasoning as
-        -- UpdateProfileChip below.
-        if layoutChip.UpdateText then layoutChip:UpdateText() end
-    end
-    -- Exposed so the Options-page checkbox (which flips the same field) can
-    -- repaint this one. hooksecurefunc on RefreshCurrentPage was the first
-    -- cut -- it is assigned AFTER this runs and reassigned by AutoProfiles, so
-    -- the hook would either error or be silently bypassed.
-    GUI.PaintLayoutButton = PaintLayoutButton
-    PaintLayoutButton()
-    end -- DF:ClassicSettingsAvailable()
-
     -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
     -- and it used to be answerable only by walking to the Profiles page. The
     -- chip is the shared inline dropdown -- same opener, same menu, same
@@ -1138,13 +1031,7 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    -- Beside the layout picker when it exists; otherwise it takes the picker's
-    -- own place, the same 8 px left of the scale glyph.
-    if layoutChip then
-        profileChip:SetPoint("TOPRIGHT", layoutChip, "TOPLEFT", -6, 0)
-    else
-        profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
-    end
+    profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 

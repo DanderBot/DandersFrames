@@ -288,18 +288,15 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- style is asked for once, here, off the host that declared it -- a consumer
     -- that declared nothing gets exactly the square box it always had.
     --
-    -- ☠ THIS SKINS BOTH LAYOUT MODES. The classic (non-container) page layout
-    -- and the container one draw the SAME group frame -- they differ in how the
-    -- boxes are arranged, not in what a box is -- so rounding it rounds both.
-    -- That is the intended reading (the skin is shared chrome, like the header),
-    -- but it does mean classic-mode pages change shape without anything on the
-    -- classic path being touched.
+    -- ☠ THIS SKINS EVERY GROUP. Pages arrange their boxes differently, but they
+    -- draw the SAME group frame, so rounding it rounds all of them -- the skin
+    -- is shared chrome, like the header.
     --
     -- ===== opts.bandStyle -- THE THIRD SHAPE ==========================
     -- A page that has converted some of its sections into BANDS (a header above
     -- a stack of full-width popout-row plates) and left others inline ends up
     -- speaking two visual languages at once: the bands are header-outside plus
-    -- fat plates, the survivors are the classic dense box with its title INSIDE
+    -- fat plates, the survivors are the dense box with its title INSIDE
     -- a faint white rectangle. Danders, on the converted Frame page: "Layout
     -- Direction does not match the Appearance settings."
     --
@@ -631,7 +628,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- Its CONTENT then takes a second inset inside the plate, and the two
         -- together are ContentInsetX. Every other kind of group has contentInset
         -- equal to its padding and contentWidth equal to innerWidth, which is
-        -- what keeps the classic box byte-identical.
+        -- what keeps a plain box byte-identical.
         local plateInset = self.bandStyle and padding or 0
         local contentInset = SnapLen(self, ContentInsetX(self))
         local contentWidth = SnapLen(self, (self:GetWidth() or 0) - (contentInset * 2))
@@ -956,7 +953,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- RefreshStates on toggle, so the grey state updates live.
         --
         -- ☠ THE SKIPS ARE MARKS, NOT POSITIONS. This read `i > 1` -- "except the
-        -- header", spelled as "except the first child" because in a classic settings
+        -- header", spelled as "except the first child" because in a boxed settings
         -- column the header IS the first child. A POPOUT PANE has no header: its
         -- group is chromeless and its first child is a real control, so with the
         -- row's own tick off the very first setting behind it stayed live and

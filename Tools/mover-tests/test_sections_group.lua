@@ -309,7 +309,7 @@ end
 --
 -- A page half-converted to bands speaks two visual languages: the converted
 -- sections are an accent header ABOVE a stack of fat row plates, the survivors
--- are the classic dense box with the title INSIDE a faint white rectangle.
+-- are the dense box with the title INSIDE a faint white rectangle.
 -- Danders, on the converted Frame page: "Layout Direction does not match the
 -- Appearance settings."
 --
@@ -875,7 +875,7 @@ end
 -- or the group could never be turned back on.
 --
 -- ☠ IT USED TO SPARE "CHILD NUMBER ONE". That is the same rule only while a
--- header IS the first child, which is every classic settings box and NO popout
+-- header IS the first child, which is every boxed settings group and NO popout
 -- pane: a pane's group is chromeless and headerless, so its first child is a
 -- real control, and it never greyed. Every hoisted-tick row shipped with its
 -- first setting live behind an off switch -- Frame Fade's Global Frame Fade
@@ -934,7 +934,7 @@ end
 
 print("-- Group: keepEnabled is spared wherever it sits")
 do
-    -- The classic shape: header, the group's own Enable, then what it gates. The
+    -- The boxed shape: header, the group's own Enable, then what it gates. The
     -- Enable is child TWO, so only its own mark can be what spares it.
     local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
     g.disableChildrenOn = function(d) return d.gateTest end

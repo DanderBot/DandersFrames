@@ -1,20 +1,18 @@
 local NS = ...
 
 -- ============================================================
--- THE DESIGNERS BUILD CLASSIC IN BOTH LAYOUTS
+-- THE DESIGNERS BUILD THEIR SPLIT-PANEL ISLAND
 -- ------------------------------------------------------------
--- Decided 2026-09-22: testers rated the classic designers the best part of the
--- settings panel, so the Aura, Text and Filter Designers build their classic
--- version in the Modern layout too. The rows builds were deleted 2026-09-26.
+-- The Aura, Text and Filter Designers each build one split panel (the
+-- "island"), never a rows page.
 --
--- ☠ THE CLASSIC BUILD HAS TO REACH EVERYTHING THE ROWS BUILD DID. The rows
--- rework moved things out of the split panel rather than copying them -- the
--- Aura Designer's spec picker left the pool strip for a band of its own
--- (dff68754), and the strip was the classic panel's only copy. These checks pin
--- what the classic build must still offer, so a later move cannot strand it.
+-- ☠ THE ISLAND HAS TO REACH EVERYTHING. The Aura Designer's spec picker once
+-- left the pool strip for a band of its own (dff68754), and the strip was the
+-- panel's only copy. These checks pin what the island must offer, so a later
+-- move cannot strand it.
 --
--- What is RUN here rather than read: the switch itself, the pool list (PoolDefs)
--- and the classic pool strip (S.BuildPoolStrip) against stub frames. The island
+-- What is RUN here rather than read: the pool list (PoolDefs) and the pool
+-- strip (S.BuildPoolStrip) against stub frames. The island
 -- as a whole cannot be built headlessly; its wiring is read off the source.
 -- ============================================================
 
@@ -36,10 +34,10 @@ end
 
 -- ============================================================
 -- 1. NO DESIGNER HAS A ROWS ARM ANY MORE
--- The Modern "rows" builds and their switch (DF:DesignersUseRows) were deleted
--- 2026-09-26; every designer goes straight to its classic build.
+-- The "rows" builds and their switch (DF:DesignersUseRows) were deleted
+-- 2026-09-26; every designer goes straight to its island.
 -- ============================================================
-print("-- Designers: classic is the only build")
+print("-- Designers: the island is the only build")
 do
     check(CFG:find("function DF:DesignersUseRows()", 1, true) == nil,
           "switch: DF:DesignersUseRows is gone from Core/Config.lua")
@@ -90,9 +88,9 @@ do
 end
 
 -- ============================================================
--- 3. THE CLASSIC POOL STRIP, BUILT AGAINST STUB FRAMES
+-- 3. THE POOL STRIP, BUILT AGAINST STUB FRAMES
 -- ============================================================
-print("-- Aura Designer: the classic pool strip builds every pool")
+print("-- Aura Designer: the pool strip builds every pool")
 do
     local stripSrc = cut(ROWS, "S.BuildPoolStrip = function(buffTabBar)")
     check(stripSrc ~= nil, "strip: S.BuildPoolStrip can be cut out of PoolStrip.lua")
@@ -169,7 +167,7 @@ do
 end
 
 -- ============================================================
--- 4. THE CLASSIC ISLAND MOUNTS THE STRIP AND THE SPEC PICKER
+-- 4. THE ISLAND MOUNTS THE STRIP AND THE SPEC PICKER
 -- ============================================================
 print("-- Aura Designer: the split panel mounts the pools and the spec picker")
 do
@@ -194,27 +192,27 @@ do
     -- The pool strip's tooltip title honours the helper's full name.
     check(ROWS:find("local tipTitle, tipLines = def.tooltipTitle or def.label, def.tooltip", 1, true) ~= nil,
           "island: the pool strip titles an abbreviated tab with its full name")
-    -- Everything else the pools reach in the classic panel -- the helper's Triggers
+    -- Everything else the pools reach in the panel -- the helper's Triggers
     -- and Effects, its enable card and its add area -- hangs off shared builders
-    -- the classic tab functions already call.
+    -- the tab functions already call.
     local cards = options_file_source("AuraDesigner/UI/Cards.lua")
     check(cards:find("yPos = S.BuildPIHelperAddArea(parent, yPos, function() S.SwitchTab(\"effects\") end)", 1, true) ~= nil,
-          "island: the helper's add area is on the classic Effects tab")
+          "island: the helper's add area is on the Effects tab")
     check(cards:find("local yPos, open = S.BuildPIHelperCard(parent, { startY = -10, Refresh = Refresh })", 1, true) ~= nil,
-          "island: the helper's enable card is on the classic Triggers tab")
+          "island: the helper's enable card is on the Triggers tab")
     check(cards:find('{ key = "global",  label = L["Triggers"]', 1, true) ~= nil,
           "island: ...which the helper's pool labels Triggers")
 end
 
 -- ============================================================
--- 5. THE CLASSIC ADD TILES (2026-09-22)
+-- 5. THE ADD TILES
 -- ------------------------------------------------------------
 -- The split panel's three add areas -- the Effects tab's three scope cards
 -- (Placed on the Frame / Frame-Level Effect / From a Filter) and the Layout
 -- Groups / Debuffs choice-card blocks -- became PICTURE TILES on the page:
---   * Effects: Add from a Spell / Add from a Filter. A tile runs the Modern pane
+--   * Effects: Add from a Spell / Add from a Filter. A tile runs the add pane
 --     INSIDE the tab, in place of the list, headed by "Back to Effects".
---   * Layout Groups / Debuffs: the Modern group panes mounted ON the page
+--   * Layout Groups / Debuffs: the group panes mounted ON the page
 --     (opts.onPage). A tile click ADDS the group -- no flow, no confirm step.
 -- (ffd4031c hosted the panes in a popout beside the window; dd0c51a1 ran the
 -- group panes as flows with an Add button. Both are gone.)
@@ -222,80 +220,78 @@ end
 -- the page watchers, and the group panes' one-click add, against stub frames.
 -- What is READ: which head area mounts which tiles, and the wiring around them.
 -- ============================================================
-print("-- Aura Designer: the classic add tiles")
+print("-- Aura Designer: the add tiles")
 do
     local CARDS = options_file_source("AuraDesigner/UI/Cards.lua"):gsub("\r\n", "\n")
     local EDITN = EDIT:gsub("\r\n", "\n")
 
     -- ---- read: the old three-option list and the card blocks are gone ----
     check(CARDS:find("local function AddFlowScopes()", 1, true) == nil,
-          "classic add: the three-scope list is gone")
+          "add: the three-scope list is gone")
     check(CARDS:find('L["Placed on the Frame"]', 1, true) == nil,
-          "classic add: ...no 'Placed on the Frame' option is drawn")
+          "add: ...no 'Placed on the Frame' option is drawn")
     check(CARDS:find('title    = L["ADD AN INDICATOR"]', 1, true) == nil,
-          "classic add: ...nor the ADD AN INDICATOR card block")
+          "add: ...nor the ADD AN INDICATOR card block")
     check(CARDS:find("effectsPicker", 1, true) == nil,
-          "classic add: ...nor the picker column it took over")
+          "add: ...nor the picker column it took over")
     check(EDITN:find('L["ADD A LAYOUT GROUP"]', 1, true) == nil,
-          "classic add: the Layout Groups card block is gone")
+          "add: the Layout Groups card block is gone")
     check(EDITN:find('L["ADD A DEBUFF GROUP"]', 1, true) == nil,
-          "classic add: ...and the Debuffs one")
+          "add: ...and the Debuffs one")
 
     -- ---- read: no popout hosting, no buttons, no group flows ----
     check(CARDS:find('"df.adadd.', 1, true) == nil,
-          "classic add: no keyed add popout is created any more")
-    for _, name in ipairs({ "S.OpenClassicAddPopout", "S.SyncClassicAddPopouts",
-                            "DockClassicAddPopout", "S.BuildClassicAddButton",
-                            "S.ClassicAddButtonDefs", "BuildChosenGroupPane" }) do
+          "add: no keyed add popout is created any more")
+    for _, name in ipairs({ "BuildChosenGroupPane" }) do
         check(CARDS:find(name, 1, true) == nil and EDITN:find(name, 1, true) == nil,
-              "classic add: " .. name .. " is gone")
+              "add: " .. name .. " is gone")
     end
     for _, k in ipairs({ "layout", "debuff" }) do
-        local call = 'S.BuildClassicAddFlow(parent, "' .. k .. '")'
+        local call = 'S.BuildAddFlow(parent, "' .. k .. '")'
         check(EDITN:find(call, 1, true) == nil,
-              "classic add: the " .. k .. " tab no longer asks for a flow -- its tiles add on one click")
+              "add: the " .. k .. " tab no longer asks for a flow -- its tiles add on one click")
     end
     local en = df_file_source("Locales/enUS.lua")
     check(en:find('L["Back to Layout Groups"]', 1, true) == nil and en:find('L["Back to Debuff Groups"]', 1, true) == nil,
-          "classic add: ...so their Back labels are gone from the source locale")
+          "add: ...so their Back labels are gone from the source locale")
 
-    -- ---- read: each classic head area mounts its tiles ----
+    -- ---- read: each head area mounts its tiles ----
     local head = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
-    check(head:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
-          "classic add: the Effects tab mounts its add tiles")
+    check(head:find('yPos = S.BuildAddTiles(parent, yPos, "indicator")', 1, true) ~= nil,
+          "add: the Effects tab mounts its add tiles")
     local lg = EDITN:match("S%.BuildLayoutGroupsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
-    check(lg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "layout")', 1, true) ~= nil,
-          "classic add: the Layout Groups tab mounts its tiles")
+    check(lg:find('yPos = S.BuildAddTiles(parent, yPos, "layout")', 1, true) ~= nil,
+          "add: the Layout Groups tab mounts its tiles")
     local dg = EDITN:match("S%.BuildDebuffGroupsHeadArea = function%(parent, yPos%)(.-)\nend\n") or ""
-    check(dg:find('yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")', 1, true) ~= nil,
-          "classic add: the Debuffs pool's tab mounts its tile, likewise")
+    check(dg:find('yPos = S.BuildAddTiles(parent, yPos, "debuff")', 1, true) ~= nil,
+          "add: the Debuffs pool's tab mounts its tile, likewise")
 
     -- ---- read: the PI Helper pool keeps its own add area, first ----
     local piAt  = head:find("if IsPIHelperTab() and S.BuildPIHelperAddArea then", 1, true)
-    local tileAt = head:find('yPos = S.BuildClassicAddTiles(parent, yPos, "indicator")', 1, true)
+    local tileAt = head:find('yPos = S.BuildAddTiles(parent, yPos, "indicator")', 1, true)
     check(piAt ~= nil and tileAt ~= nil and piAt < tileAt,
-          "classic add: the PI Helper pool takes its own tiles, never the add tiles")
+          "add: the PI Helper pool takes its own tiles, never the add tiles")
     check(CARDS:find("S.BuildPIHelperAddArea = function(parent, yPos, Refresh)", 1, true) ~= nil
           and CARDS:find("    yPos = pihBuildAddTiles(parent, yPos, Refresh)", 1, true) ~= nil,
-          "classic add: ...and S.BuildPIHelperAddArea itself is untouched")
+          "add: ...and S.BuildPIHelperAddArea itself is untouched")
 
     -- ---- read: the refresh path and the Effects tab ask the flow first ----
     local sw = CARDS:match("S%.SwitchTab = function%(tabKey%)(.-)\nend\n") or ""
-    check(sw:find("if S.SyncClassicAddFlow then S.SyncClassicAddFlow(tabKey) end", 1, true) ~= nil,
-          "classic add: S.SwitchTab re-checks a running flow before it rebuilds")
-    local syncAt = sw:find("S.SyncClassicAddFlow(tabKey)", 1, true)
+    check(sw:find("if S.SyncAddFlow then S.SyncAddFlow(tabKey) end", 1, true) ~= nil,
+          "add: S.SwitchTab re-checks a running flow before it rebuilds")
+    local syncAt = sw:find("S.SyncAddFlow(tabKey)", 1, true)
     local clearAt = sw:find("ClearTabContent()", 1, true)
-    check(syncAt and clearAt and syncAt < clearAt, "classic add: ...before the tab is cleared and rebuilt")
+    check(syncAt and clearAt and syncAt < clearAt, "add: ...before the tab is cleared and rebuilt")
     local et = CARDS:match("S%.BuildEffectsTab = function%(%)(.-)\nend\n") or ""
-    local flowAt = et:find('if S.BuildClassicAddFlow and S.BuildClassicAddFlow(parent, "indicator") then return end', 1, true)
+    local flowAt = et:find('if S.BuildAddFlow and S.BuildAddFlow(parent, "indicator") then return end', 1, true)
     local headAt = et:find("S.BuildEffectsHeadArea(parent, -10)", 1, true)
     check(flowAt and headAt and flowAt < headAt,
-          "classic add: the Effects tab draws a running flow in place of its list")
+          "add: the Effects tab draws a running flow in place of its list")
 
     -- ---- run: the block itself, against stubs ----
-    local s0 = CARDS:find("S.ClassicAddContext = function()", 1, true)
+    local s0 = CARDS:find("S.AddContext = function()", 1, true)
     local s1 = CARDS:find("-- Returns the y the caller should continue at", s0 or 1, true)
-    check(s0 ~= nil and s1 ~= nil, "classic add: the flow block can be cut out of Cards.lua")
+    check(s0 ~= nil and s1 ~= nil, "add: the flow block can be cut out of Cards.lua")
     local block = (s0 and s1) and CARDS:sub(s0, s1 - 1) or ""
 
     local function Stub(parent)
@@ -338,7 +334,7 @@ do
     end
 
     -- A world: the island's state table, a content column of `width`, a stub
-    -- S.SwitchTab that runs the classic arm's order -- sync, clear, then either the
+    -- S.SwitchTab that runs the tab's order -- sync, clear, then either the
     -- flow or the list (whose head area mounts the real tiles) -- stub panes that
     -- record how they were asked to build, and a stub picture tile.
     local function World(opts)
@@ -407,19 +403,19 @@ do
         end
         S.SwitchTab = function(tabKey)
             S.activeTab = tabKey
-            if S.SyncClassicAddFlow then S.SyncClassicAddFlow(tabKey) end
+            if S.SyncAddFlow then S.SyncAddFlow(tabKey) end
             local c = S.tabContentFrame
             for _, k in ipairs(c.kids) do k:Hide(); k:ClearAllPoints() end
             local kind = ListKind()
             -- Only the Effects tab asks for a flow now.
-            if kind == "indicator" and S.BuildClassicAddFlow(c, kind) then
+            if kind == "indicator" and S.BuildAddFlow(c, kind) then
                 W.drew[#W.drew + 1] = "flow:" .. kind
             else
                 W.drew[#W.drew + 1] = "list:" .. kind
                 if not (kind == "indicator" and S.activeBuffTab == "pihelper") then
                     W.tiles = {}
                     local n = #c.kids
-                    S.BuildClassicAddTiles(c, -10, kind)
+                    S.BuildAddTiles(c, -10, kind)
                     for i = n + 1, #c.kids do
                         for _, t in ipairs(c.kids[i].kids) do W.tiles[#W.tiles + 1] = t end
                     end
@@ -446,8 +442,8 @@ do
         setmetatable(env, { __index = _G })
         local chunk = loadstring(block)
         if chunk then setfenv(chunk, env); chunk() end
-        W.ok = chunk ~= nil and S.BuildClassicAddTiles ~= nil and S.BuildClassicAddFlow ~= nil
-            and S.StartClassicAddFlow ~= nil
+        W.ok = chunk ~= nil and S.BuildAddTiles ~= nil and S.BuildAddFlow ~= nil
+            and S.StartAddFlow ~= nil
         W.Visit = function(tab) if W.ok then S.SwitchTab(tab or S.activeTab) end end
         W.Click = function(i)
             local t = W.tiles and W.tiles[i]
@@ -470,19 +466,19 @@ do
 
     -- ---- the enabled gate ----
     local off = World({ enabled = false })
-    check(off.ok, "classic add: the flow block loads headlessly")
+    check(off.ok, "add: the flow block loads headlessly")
     if off.ok then
         off.Visit("effects")
-        eq(#(off.tiles or {}), 2, "classic add: the Effects tab has two add tiles")
-        eq(off.tiles[1] and off.tiles[1].tileState, "disabled", "classic add: a disabled designer greys them")
-        eq(off.tiles[2] and off.tiles[2].tileState, "disabled", "classic add: ...both of them")
-        eq(off.S.StartClassicAddFlow("indicator", "spell"), false,
-           "classic add: ...and the starter, asked directly, starts nothing")
-        eq(#off.builds, 0, "classic add: ...so no pane is built")
+        eq(#(off.tiles or {}), 2, "add: the Effects tab has two add tiles")
+        eq(off.tiles[1] and off.tiles[1].tileState, "disabled", "add: a disabled designer greys them")
+        eq(off.tiles[2] and off.tiles[2].tileState, "disabled", "add: ...both of them")
+        eq(off.S.StartAddFlow("indicator", "spell"), false,
+           "add: ...and the starter, asked directly, starts nothing")
+        eq(#off.builds, 0, "add: ...so no pane is built")
         off.Visit("layout")
         local b = off.LastBuild()
-        eq(b and b.opts.blocked, true, "classic add: a disabled designer greys the group tiles too")
-        eq(b and b.opts.gate(), false, "classic add: ...and their gate refuses a click")
+        eq(b and b.opts.blocked, true, "add: a disabled designer greys the group tiles too")
+        eq(b and b.opts.gate(), false, "add: ...and their gate refuses a click")
     end
 
     -- ---- indicators: two picture tiles, each entering the flow with its source ----
@@ -490,65 +486,65 @@ do
     if on.ok then
         on.Visit("effects")
         local t1, t2 = on.tiles[1], on.tiles[2]
-        eq(t1 and t1.tileOpts.label, "Add from a Spell", "classic add: the first tile says Add from a Spell")
-        eq(t2 and t2.tileOpts.label, "Add from a Filter", "classic add: ...the second Add from a Filter")
-        eq(t1 and t1.tileState, "normal", "classic add: an enabled designer leaves them live")
-        eq(t1 and t1.w, math.floor((284 - 6) / 2), "classic add: ...half the column each, the group tiles' size")
-        eq(t1 and t1.tileOpts.picHeight, 40, "classic add: ...with the group tiles' 40px picture")
-        eq(on.painted[1] and on.painted[1].n, 1, "classic add: a spell is drawn as ONE icon on the frame")
-        eq(on.painted[2] and on.painted[2].n, 3, "classic add: ...a filter as a uniform row, the Filter Group's picture")
+        eq(t1 and t1.tileOpts.label, "Add from a Spell", "add: the first tile says Add from a Spell")
+        eq(t2 and t2.tileOpts.label, "Add from a Filter", "add: ...the second Add from a Filter")
+        eq(t1 and t1.tileState, "normal", "add: an enabled designer leaves them live")
+        eq(t1 and t1.w, math.floor((284 - 6) / 2), "add: ...half the column each, the group tiles' size")
+        eq(t1 and t1.tileOpts.picHeight, 40, "add: ...with the group tiles' 40px picture")
+        eq(on.painted[1] and on.painted[1].n, 1, "add: a spell is drawn as ONE icon on the frame")
+        eq(on.painted[2] and on.painted[2].n, 3, "add: ...a filter as a uniform row, the Filter Group's picture")
         check(type(t1.tileOpts.tooltip) == "table" and t1.tileOpts.tooltip.lines[1] ~= nil,
-              "classic add: ...and each says what it is on hover")
+              "add: ...and each says what it is on hover")
         on.S.tabScrollFrame.scroll = 120
         on.Click(1)
-        eq(on.Last(), "flow:indicator", "classic add: Add from a Spell replaces the Effects list with the flow")
+        eq(on.Last(), "flow:indicator", "add: Add from a Spell replaces the Effects list with the flow")
         local bi = on.builds[1]
-        eq(bi and bi.kind, "indicator", "classic add: ...built by S.BuildAddIndicatorPane")
-        eq(bi and bi.opts.source, "spell", "classic add: ...with the spell route already chosen")
-        eq(bi and bi.opts.fitWidth, true, "classic add: ...laid out for the tab's width")
-        eq(bi and bi.opts.inline, true, "classic add: ...as the inline pane that says its states")
-        eq(bi and bi.opts.width, 300 - 4, "classic add: ...which is the tab's column, less the pane's gutter")
-        eq(on.S.tabScrollFrame.scroll, 0, "classic add: ...starting at the top")
+        eq(bi and bi.kind, "indicator", "add: ...built by S.BuildAddIndicatorPane")
+        eq(bi and bi.opts.source, "spell", "add: ...with the spell route already chosen")
+        eq(bi and bi.opts.fitWidth, true, "add: ...laid out for the tab's width")
+        eq(bi and bi.opts.inline, true, "add: ...as the inline pane that says its states")
+        eq(bi and bi.opts.width, 300 - 4, "add: ...which is the tab's column, less the pane's gutter")
+        eq(on.S.tabScrollFrame.scroll, 0, "add: ...starting at the top")
         local back = on.Back()
-        eq(back and back.styled.text, "Back to Effects", "classic add: the flow is headed by Back to Effects")
-        eq(on.Heading(), "Add from a Spell", "classic add: ...and by the source that was chosen")
+        eq(back and back.styled.text, "Back to Effects", "add: the flow is headed by Back to Effects")
+        eq(on.Heading(), "Add from a Spell", "add: ...and by the source that was chosen")
 
         -- The pane's height follows its sections, and the column follows it.
         local cf = on.S.tabContentFrame
         bi.opts.SetHeight(500)
-        eq(cf.h, 10 + 30 + 24 + 500 + 20, "classic add: the pane reporting a new height re-sizes the tab's column")
+        eq(cf.h, 10 + 30 + 24 + 500 + 20, "add: the pane reporting a new height re-sizes the tab's column")
         on.S.tabScrollFrame.scroll, on.S.tabScrollFrame.range = 400, 90
         bi.opts.SetHeight(200)
-        eq(on.S.tabScrollFrame.scroll, 90, "classic add: ...and a scroll left past the new end is pulled back")
+        eq(on.S.tabScrollFrame.scroll, 90, "add: ...and a scroll left past the new end is pulled back")
         on.S.tabScrollFrame.scroll = 0
 
         -- A rebuild of the same tab keeps the pane, re-synced.
         local syncs = on.syncs
         on.S.SwitchTab("effects")
-        eq(on.Last(), "flow:indicator", "classic add: a rebuild of the tab keeps the flow")
-        eq(#on.builds, 1, "classic add: ...and the same pane, not a new one")
-        eq(on.syncs, syncs + 1, "classic add: ...re-synced, because a kept pane is stale")
-        eq(bi.host.shown, true, "classic add: ...and shown again after the clear")
+        eq(on.Last(), "flow:indicator", "add: a rebuild of the tab keeps the flow")
+        eq(#on.builds, 1, "add: ...and the same pane, not a new one")
+        eq(on.syncs, syncs + 1, "add: ...re-synced, because a kept pane is stale")
+        eq(bi.host.shown, true, "add: ...and shown again after the clear")
 
         -- Back returns to the list, at the scroll the list was left at.
         on.Back().scripts.OnClick(on.Back())
-        eq(on.S.classicAddFlow, nil, "classic add: Back ends the flow")
-        eq(on.Last(), "list:indicator", "classic add: ...and the tab draws the effect list again")
-        eq(on.S.tabScrollFrame.scroll, 120, "classic add: ...where the list was left")
+        eq(on.S.addFlow, nil, "add: Back ends the flow")
+        eq(on.Last(), "list:indicator", "add: ...and the tab draws the effect list again")
+        eq(on.S.tabScrollFrame.scroll, 120, "add: ...where the list was left")
         -- A pane gone stale says nothing: its height report after Back moves nothing.
         local hBefore = cf.h
         bi.opts.SetHeight(900)
-        eq(cf.h, hBefore, "classic add: ...and an ended flow's pane no longer sizes the column")
+        eq(cf.h, hBefore, "add: ...and an ended flow's pane no longer sizes the column")
 
         -- The filter tile.
         on.Click(2)
         local bf = on.builds[#on.builds]
-        eq(bf and bf.opts.source, "filter", "classic add: Add from a Filter enters with the filter route chosen")
-        eq(on.Heading(), "Add from a Filter", "classic add: ...headed by its own label")
+        eq(bf and bf.opts.source, "filter", "add: Add from a Filter enters with the filter route chosen")
+        eq(on.Heading(), "Add from a Filter", "add: ...headed by its own label")
         bf.opts.Close()
-        eq(on.S.classicAddFlow, nil, "classic add: the pane's Close ends the flow")
+        eq(on.S.addFlow, nil, "add: the pane's Close ends the flow")
         on.S.SwitchTab("effects")
-        eq(on.Last(), "list:indicator", "classic add: ...so the rebuild after an add lands on the list")
+        eq(on.Last(), "list:indicator", "add: ...so the rebuild after an add lands on the list")
     end
 
     -- ---- a new width builds the pane again, from its answers ----
@@ -559,34 +555,34 @@ do
         local cf = rs.S.tabContentFrame
         cf.w = 520
         cf:Fire("OnSizeChanged", 520)
-        eq(#rs.timers, 1, "classic add: a resize under a flow schedules one re-lay")
+        eq(#rs.timers, 1, "add: a resize under a flow schedules one re-lay")
         cf:Fire("OnSizeChanged", 530)
-        eq(#rs.timers, 1, "classic add: ...coalesced while one is pending")
+        eq(#rs.timers, 1, "add: ...coalesced while one is pending")
         cf.w = 530
         rs.timers[1]()
-        eq(#rs.builds, 2, "classic add: ...which builds the pane again")
+        eq(#rs.builds, 2, "add: ...which builds the pane again")
         local b2 = rs.builds[2]
-        eq(b2 and b2.opts.width, 530 - 4, "classic add: ...at the new width")
+        eq(b2 and b2.opts.width, 530 - 4, "add: ...at the new width")
         eq(b2 and b2.opts.restore and b2.opts.restore.tag, 1,
-           "classic add: ...from the first pane's own answers")
-        eq(b2 and b2.opts.source, "spell", "classic add: ...still on the chosen route")
+           "add: ...from the first pane's own answers")
+        eq(b2 and b2.opts.source, "spell", "add: ...still on the chosen route")
     end
 
     -- ---- layout groups: the pane ON the page, one click adds, no flow ----
     local lgw = World({ width = 300 })
     if lgw.ok then
         lgw.Visit("layout")
-        eq(lgw.Last(), "list:layout", "classic add: the Layout Groups tab draws its list")
+        eq(lgw.Last(), "list:layout", "add: the Layout Groups tab draws its list")
         local b = lgw.LastBuild()
-        eq(b and b.kind, "layout", "classic add: ...with S.BuildAddLayoutGroupPane mounted on it")
-        eq(b and b.opts.onPage, true, "classic add: ...on the page, not in a flow")
-        eq(b and b.opts.width, 300 - 16, "classic add: ...at the tab's column")
-        eq(b and b.opts.blocked, false, "classic add: ...live, with the designer on and a spec")
-        eq(b and b.opts.Close, nil, "classic add: ...and no flow to close behind a click")
-        eq(b and b.opts.gate(), true, "classic add: ...so a tile click goes straight through")
-        eq(lgw.S.classicAddFlow, nil, "classic add: ...and nothing starts a flow")
-        eq(lgw.S.StartClassicAddFlow("layout", "spell"), false,
-           "classic add: a group flow cannot be started at all any more")
+        eq(b and b.kind, "layout", "add: ...with S.BuildAddLayoutGroupPane mounted on it")
+        eq(b and b.opts.onPage, true, "add: ...on the page, not in a flow")
+        eq(b and b.opts.width, 300 - 16, "add: ...at the tab's column")
+        eq(b and b.opts.blocked, false, "add: ...live, with the designer on and a spec")
+        eq(b and b.opts.Close, nil, "add: ...and no flow to close behind a click")
+        eq(b and b.opts.gate(), true, "add: ...so a tile click goes straight through")
+        eq(lgw.S.addFlow, nil, "add: ...and nothing starts a flow")
+        eq(lgw.S.StartAddFlow("layout", "spell"), false,
+           "add: a group flow cannot be started at all any more")
     end
 
     -- ---- debuff groups: the same, spec-independent ----
@@ -595,41 +591,41 @@ do
         dgw.S.activeTab = "layout"
         dgw.Visit("layout")
         local b = dgw.LastBuild()
-        eq(b and b.kind, "debuff", "classic add: the Debuffs pool mounts S.BuildAddDebuffGroupPane")
-        eq(b and b.opts.onPage, true, "classic add: ...on the page")
-        eq(b and b.opts.blocked, false, "classic add: ...live even with no spec -- debuff groups are shared")
-        eq(b and b.opts.gate(), true, "classic add: ...and a click adds")
-        eq(#dgw.said, 0, "classic add: ...without a word")
+        eq(b and b.kind, "debuff", "add: the Debuffs pool mounts S.BuildAddDebuffGroupPane")
+        eq(b and b.opts.onPage, true, "add: ...on the page")
+        eq(b and b.opts.blocked, false, "add: ...live even with no spec -- debuff groups are shared")
+        eq(b and b.opts.gate(), true, "add: ...and a click adds")
+        eq(#dgw.said, 0, "add: ...without a word")
     end
 
     -- ---- My Buffs with no spec: every add tile greyed, and why ----
     local ns = World({ width = 300, noSpec = true })
     if ns.ok then
         ns.Visit("effects")
-        eq(ns.tiles[1] and ns.tiles[1].tileState, "disabled", "classic add, no spec: the effect tiles are greyed")
+        eq(ns.tiles[1] and ns.tiles[1].tileState, "disabled", "add, no spec: the effect tiles are greyed")
         check(type(ns.note) == "string" and ns.note:find("No trackable spells found", 1, true) ~= nil,
-              "classic add, no spec: ...with the reason under them")
-        eq(ns.S.StartClassicAddFlow("indicator", "spell"), false, "classic add, no spec: ...and a flow is refused")
+              "add, no spec: ...with the reason under them")
+        eq(ns.S.StartAddFlow("indicator", "spell"), false, "add, no spec: ...and a flow is refused")
         eq(ns.said[#ns.said] and ns.said[#ns.said]:find("No trackable spells found", 1, true) ~= nil, true,
-           "classic add, no spec: ...out loud")
+           "add, no spec: ...out loud")
         ns.Visit("layout")
         local b = ns.LastBuild()
-        eq(b and b.opts.blocked, true, "classic add, no spec: the group tiles are greyed too")
+        eq(b and b.opts.blocked, true, "add, no spec: the group tiles are greyed too")
         local n = #ns.said
-        eq(b and b.opts.gate(), false, "classic add, no spec: ...and their gate refuses a click")
-        eq(#ns.said, n + 1, "classic add, no spec: ...saying why")
+        eq(b and b.opts.gate(), false, "add, no spec: ...and their gate refuses a click")
+        eq(#ns.said, n + 1, "add, no spec: ...saying why")
         -- Any Buff is spec-independent: live.
         ns.S.activeBuffTab = "other"
         ns.Visit("layout")
-        eq(ns.LastBuild().opts.blocked, false, "classic add, no spec: Any Buff's group tiles stay live")
+        eq(ns.LastBuild().opts.blocked, false, "add, no spec: Any Buff's group tiles stay live")
     end
 
     -- ---- the PI Helper pool: no flow ----
     local pw = World({ pool = "pihelper" })
     if pw.ok then
-        eq(pw.S.StartClassicAddFlow("indicator", "spell"), false,
-           "classic add: the helper's pool refuses an indicator flow")
-        eq(#pw.builds, 0, "classic add: ...and builds no pane")
+        eq(pw.S.StartAddFlow("indicator", "spell"), false,
+           "add: the helper's pool refuses an indicator flow")
+        eq(#pw.builds, 0, "add: ...and builds no pane")
     end
 
     -- ---- what ends a running flow ----
@@ -637,57 +633,57 @@ do
         local w = World(opts)
         if not w.ok then return w end
         w.Visit("effects")
-        w.S.StartClassicAddFlow("indicator", (opts and opts.source) or "spell")
+        w.S.StartAddFlow("indicator", (opts and opts.source) or "spell")
         return w
     end
     local t1 = Running({})
     if t1.ok then
         t1.S.SwitchTab("global")
-        eq(t1.S.classicAddFlow, nil, "classic add: leaving the tab ends the flow")
+        eq(t1.S.addFlow, nil, "add: leaving the tab ends the flow")
         t1.S.SwitchTab("effects")
-        eq(t1.Last(), "list:indicator", "classic add: ...and coming back draws the list")
+        eq(t1.Last(), "list:indicator", "add: ...and coming back draws the list")
     end
     local t2 = Running({})
     if t2.ok then
         t2.S.activeBuffTab = "other"
         t2.S.SwitchTab("effects")
-        eq(t2.Last(), "list:indicator", "classic add: a pool switch ends it")
+        eq(t2.Last(), "list:indicator", "add: a pool switch ends it")
     end
     local t3 = Running({})
     if t3.ok then
         t3.spec = 262
         t3.S.SwitchTab("effects")
-        eq(t3.Last(), "list:indicator", "classic add: a spec change on My Buffs ends it")
+        eq(t3.Last(), "list:indicator", "add: a spec change on My Buffs ends it")
     end
     local t4 = Running({ pool = "other", source = "filter" })
     if t4.ok then
         t4.spec = 262
         t4.S.SwitchTab("effects")
-        eq(t4.Last(), "flow:indicator", "classic add: ...but not on Any Buff, which is shared across specs")
+        eq(t4.Last(), "flow:indicator", "add: ...but not on Any Buff, which is shared across specs")
     end
     local t6 = Running({})
     if t6.ok then
         t6.GUI.SelectedMode = "raid"
         t6.S.SwitchTab("effects")
-        eq(t6.Last(), "list:indicator", "classic add: a party/raid switch ends it")
+        eq(t6.Last(), "list:indicator", "add: a party/raid switch ends it")
     end
     local t7 = Running({})
     if t7.ok then
         t7.enabled = false
         t7.S.SwitchTab("effects")
-        eq(t7.Last(), "list:indicator", "classic add: switching the designer off ends it")
+        eq(t7.Last(), "list:indicator", "add: switching the designer off ends it")
     end
     local t8 = Running({})
     if t8.ok then
         local rp = t8.S.rightPanel
         rp:Fire("OnHide")
-        eq(t8.S.classicAddFlow, nil, "classic add: the page going away ends it")
+        eq(t8.S.addFlow, nil, "add: the page going away ends it")
         local n = #t8.drew
         rp:Fire("OnShow")
-        eq(#t8.drew, n + 1, "classic add: ...and the next showing redraws the tab")
-        eq(t8.Last(), "list:indicator", "classic add: ...as the list")
+        eq(#t8.drew, n + 1, "add: ...and the next showing redraws the tab")
+        eq(t8.Last(), "list:indicator", "add: ...as the list")
         rp:Fire("OnShow")
-        eq(#t8.drew, n + 1, "classic add: ...once, not on every showing after")
+        eq(#t8.drew, n + 1, "add: ...once, not on every showing after")
     end
 end
 

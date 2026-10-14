@@ -274,8 +274,6 @@ if cardTableSrc and fnSrc then
         local IND = options_file_source("GUI/Pages/Indicators.lua")
         check(IND:find("section:SetPreviewIcons({ { size = 14, layers = ImportantMarkerLayers(d),", 1, true) ~= nil,
               "layered: the Important Debuffs card previews its marker in the icon slot")
-        check(IND:find("impSwatch:SetSwatch(ImportantMarkerLayers(d), ImportantMarkerOff(d))", 1, true) ~= nil,
-              "layered: ...from the same layers and gate as classic's header swatch")
 
         -- ---- more icons than the slot: a hover lists them all ----
         -- The hover is the HOUSE tooltip with an icon row, not a lookalike frame.

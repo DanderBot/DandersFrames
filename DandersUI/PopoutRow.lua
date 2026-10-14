@@ -518,7 +518,7 @@ local function syncGate(po, row, rec)
     -- would re-enable the row lives somewhere else entirely -- the two designers'
     -- Enable banner, which is a band of its own -- the pane holds nothing but
     -- settings that cannot do anything, and leaving them writable is what the
-    -- classic layout's full-cover scrim has always refused to do. Those
+    -- settings page's full-cover scrim has always refused to do. Those
     -- consumers opt in per row with `gateWhenDisabled`; nobody else's rows move.
     --
     -- rawget for both, the convention this file uses for a private field that may

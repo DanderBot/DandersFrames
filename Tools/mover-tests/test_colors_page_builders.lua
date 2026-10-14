@@ -3,16 +3,14 @@ local NS = ...
 -- ============================================================
 -- COLORS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Display > Colors: four boxes in classic; in modern, the Debuff Bar's
--- collapsible CARDS, one per box, in the columns classic has always used:
+-- Display > Colors: the Debuff Bar's collapsible CARDS, in two columns:
 --
 --   column 1   Class Colors, Dispel Type Colors
 --   column 2   Role Colors, Color by Time
 --
 -- ☠ WHAT THIS SUITE PINS:
 --   * the three palette builders' census and their page-scope lists;
---   * that ONE builder serves both layouts and the card hands it exactly what
---     classic does;
+--   * how each card mounts its builder;
 --   * the palettes are pinnable and summary-less; Color by Time is a card with
 --     no pin, because its structural edits rebuild the page;
 --   * the reset buttons repaint through the value sweep, never a rebuild;
@@ -112,19 +110,7 @@ local function sectionBlock(labelKey)
 end
 
 -- What all three palettes have in common.
-local function checkShared(builder, label, boxVar, column, key, col)
-    local calls = 0
-    for _ in PAGE:gmatch(builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, label .. ": declared once, mounted twice -- classic box and card")
-
-    local esc = label:gsub("%p", "%%%0")
-    check(PAGE:find("local " .. boxVar .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          label .. ": the classic 280 box is unchanged")
-    check(PAGE:find(boxVar .. ':AddWidget%(GUI:CreateHeader%(self%.child, L%["' .. esc .. '"%]%), 40%)') ~= nil,
-          label .. ": ...with its own header")
-    check(PAGE:find("Add(" .. boxVar .. ", nil, " .. column .. ")", 1, true) ~= nil,
-          label .. ": ...still added to column " .. column)
-
+local function checkShared(builder, label, key, col)
     -- ☠ A PALETTE HAS NO ON/OFF, and it decides how frames look -- so a pin,
     -- no tick, no gates, and a "Default" / "N custom" summary of its own.
     local block, call = sectionBlock(label)
@@ -133,7 +119,7 @@ local function checkShared(builder, label, boxVar, column, key, col)
           label .. ": a card keyed " .. key .. " in column " .. col .. ", summarised by " .. summaryFn .. ", pinnable from its own builder")
     check(call:find('key = "', 1, true) == nil, label .. ": ...and no header tick -- a palette is always in force")
     local mount = builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
-    check(block:find(mount, 1, true) ~= nil, label .. ": mounts the builder exactly as classic does")
+    check(block:find(mount, 1, true) ~= nil, label .. ": mounts its builder into the card's band")
 end
 
 -- ============================================================
@@ -141,8 +127,6 @@ end
 -- ============================================================
 print("-- Colors page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
 
@@ -241,13 +225,13 @@ local DISPEL_BLURB = "Colours for each dispel type, used by the dispel overlay a
 
 local PALETTES = {
     { builder = "BuildClassColorsGroup", label = "Class Colors",
-      dbName = "classColorsDB", boxVar = "col1", column = "1", key = "colors_class", col = 1,
+      dbName = "classColorsDB", key = "colors_class", col = 1,
       list = CLASS_LIST, blurb = CLASS_BLURB, blurbH = 50, resetVar = "resetAllBtn" },
     { builder = "BuildRoleColorsGroup", label = "Role Colors",
-      dbName = "roleColorsDB", boxVar = "col2", column = "2", key = "colors_role", col = 1,
+      dbName = "roleColorsDB", key = "colors_role", col = 1,
       list = ROLE_LIST, blurb = ROLE_BLURB, blurbH = 50, resetVar = "roleResetBtn" },
     { builder = "BuildDispelColorsGroup", label = "Dispel Type Colors",
-      dbName = "dispelColorsDB", boxVar = "dispelCol", column = "1", key = "colors_dispel", col = 2,
+      dbName = "dispelColorsDB", key = "colors_dispel", col = 2,
       list = DISPEL_LIST, blurb = DISPEL_BLURB, blurbH = 55, resetVar = "dispelResetBtn" },
 }
 
@@ -263,7 +247,7 @@ for _, p in ipairs(PALETTES) do
         { "colorpicker", "(none)", "(none)", 30 },
     }, p.label:lower())
 
-    checkShared(p.builder, p.label, p.boxVar, p.column, p.key, p.col)
+    checkShared(p.builder, p.label, p.key, p.col)
 
     -- The group's own Reset All button, inside its group where it always was --
     -- parented to the BUILDER's parent (self.child, or a pinned panel's holder).
@@ -289,7 +273,6 @@ for _, p in ipairs(PALETTES) do
     check(body:find("disableChildrenOn", 1, true) == nil,
           p.label .. ": ...and no group gate either")
 
-
 end
 
 -- ============================================================
@@ -302,11 +285,6 @@ do
     eq(table.concat(order, " | "), "Class Colors | Role Colors | Dispel Type Colors | Color by Time",
        "order: the four cards open in the page's own order, which is the one-column fold's")
 
-    -- Four bare 280 boxes: the three classic palettes' own, and the Color by
-    -- Time editor's classic box.
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "boxes: four bare 280 boxes -- three classic palettes and classic's editor box")
     check(PAGE:find("INLINE_BOX", 1, true) == nil, "boxes: nothing wears the old band skin")
 
     -- The page still has no copy button: nothing on it is per-mode.
@@ -320,21 +298,20 @@ end
 print("-- Colors page: the reset repaint and the dispel section anchor")
 do
     -- ONE page-scope helper, declared once, and it is what every reset button
-    -- calls. In the pane it runs the group-wide VALUE sweep (which is what
-    -- repaints a colour picker's swatch); in classic it rebuilds the page,
-    -- exactly as it always did.
+    -- calls: the group-wide VALUE sweep (which is what repaints a colour
+    -- picker's swatch), never a page rebuild.
     local helper = PAGE:match("local function RepaintSwatches%(tools2%)(.-)\n        end")
     check(helper ~= nil, "reset: RepaintSwatches is a named page-scope helper")
     local decls = 0
     for _ in PAGE:gmatch("local function RepaintSwatches%(tools2%)") do decls = decls + 1 end
     eq(decls, 1, "reset: ...and there is exactly one of it")
     if helper then
-        check(helper:find("if tools2.popout then", 1, true) ~= nil,
-              "reset: ...a pinned panel reflows every mounted pane")
-        check(helper:find("tools2.group:RefreshChildValues()\n                if tools then tools.ReflowMounted(true) end", 1, true) ~= nil,
-              "reset: ...a card or a classic box sweeps its own group, and a card then any pinned copy")
-        check(helper:find("pageColors:Refresh()", 1, true) ~= nil,
-              "reset: ...and the page rebuild is only the fallback")
+        check(helper:find("if not tools2.popout then tools2.group:RefreshChildValues() end", 1, true) ~= nil,
+              "reset: ...a card sweeps its own group")
+        check(helper:find("tools.ReflowMounted(true)", 1, true) ~= nil,
+              "reset: ...and every mounted pane, a pinned copy included")
+        check(helper:find("Refresh()", 1, true) == nil,
+              "reset: ...and never rebuilds the page")
     end
 
     -- ☠ NO BUILDER REBUILDS THE PAGE ITSELF. A rebuild retires the pane, and the
@@ -400,14 +377,8 @@ print("-- Colors page: Color by Time")
 do
     check(PAGE:find("BuildSection", 1, true) ~= nil,
           "cbt: the editor is still built by its own BuildSection")
-    check(PAGE:find("local cbtGroup = classicLayout\n            and GUI:CreateSettingsGroup(self.child, 280)\n            or OpenSection(L[\"Color by Time\"], \"colors_bytime\", cbtColumn)", 1, true) ~= nil,
-          "cbt: classic's 280 box, or a card keyed colors_bytime in its column -- no summary, no pin")
-    check(PAGE:find("if classicLayout then\n            Add(cbtGroup, nil, cbtColumn)\n            if cbtSection then cbtSection:RegisterChild(cbtGroup) end\n        else\n            CloseSection(cbtGroup)\n        end", 1, true) ~= nil,
-          "cbt: ...classic adds its box under its section exactly as before; the card closes its own band")
-    check(PAGE:find('cbtSection = classicLayout\n            and Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, cbtColumn)\n            or nil', 1, true) ~= nil,
-          "cbt: the full collapsible section is classic's only -- the card is modern's")
     check(PAGE:find("local cbtColumn = 2", 1, true) ~= nil,
-          "cbt: column 2 in both layouts, as classic always had it")
+          "cbt: column 2")
 
     local rebuilds = 0
     for _ in PAGE:gmatch("if pageColors and pageColors%.Refresh then pageColors:Refresh%(%) end") do

@@ -53,7 +53,6 @@ end
 -- Search system strings
 L["(missing)"] = true
 L["12.1 AuraContainer factory (build, filters, capability gate)"] = true
-L["Applies to the whole account."] = true
 L["Aura Designer (incl. sounds)"] = true
 L["Aura row drivers: rebuild vs tuning vs style, retargets"] = true
 L["Auto-create profiles disabled. Profiles will not be created for new loadouts."] = true
@@ -86,7 +85,6 @@ L["Frame size, spacing, growth direction, container resize"] = true
 L["FrameSort addon integration"] = true
 L["Filter registry: custom filter import, scrub and reference rewrites"] = true
 L["Group composition changes, throttling, sorting decisions"] = true
-L["Settings Layout"] = true
 L["Settings search: breadcrumb resolution and navigation failures"] = true
 L["Header show/hide and state-driver changes"] = true
 L["Health bar value writes, including Reduced Max Health"] = true
@@ -127,7 +125,6 @@ L["Role icon show/hide decisions and combat transitions"] = true
 L["Secure header creation, attributes and re-anchoring"] = true
 L["Secure position handler trigger and snippet runs"] = true
 L["Settings window internals — slider drag paths, relayout"] = true
-L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."] = true
 L["Switched to profile: %s (%s)"] = true
 L["Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup"] = true
 L["Text Designer render and mirror state"] = true
@@ -1371,7 +1368,6 @@ L["Missing Health Color"] = true
 L["Missing Health Gradient"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
-L["Modern"] = true
 L["Melee DPS"] = true
 L["Match ALL groups"] = true
 L["Match ANY group"] = true
@@ -1933,7 +1929,6 @@ L["Too many to show here."] = true
 L["Use /df debug overrides for the full list — active layout, or Edit one to inspect it."] = true
 L["Use In-Combat Fade In Instances"] = true
 L["Use Class Color"] = true
-L["Use classic settings layout"] = true
 L["Use Custom Colors"] = true
 L["Use DF Color Picker"] = true
 L["Use DF Color Picker for All Addons"] = true
@@ -2959,7 +2954,7 @@ L["This list can't be built during combat."] = true
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
--- Settings page group headers (the Modern layout card groups).
+-- Settings page group headers (the card groups).
 L["Frames"] = true
 L["Interface"] = true
 L["Unit Colors"] = true

@@ -3,29 +3,21 @@ local NS = ...
 -- ============================================================
 -- ABSORBS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Bars > Absorbs is the sweep's first LOOSE-WIDGET page. Every page converted
--- before it built BOXES in classic, so a builder could be handed the box and
--- call `group:AddWidget(w, h)` in both layouts. There is no box here: the two
--- collapsible sections hold thirty-six widgets added STRAIGHT onto the page,
--- each with its own slot height and its own COLUMN.
---
--- So classic hands its builders its own `add` (AddToSection, column and all),
--- and a modern CARD -- the Debuff Bar's collapsible card -- hands them a `group`
--- like every other page's builder. The two cards sit side by side:
+-- Bars > Absorbs: two collapsible CARDS side by side, each holding one bar's
+-- controls. The builders add into the card's group (a local `add` over
+-- group:AddWidget); the column each call still names is ignored inside a card.
 --
 --   column 1   Absorb Shield   (21 widgets, no tick, pinnable)
 --   column 2   Heal Absorb     (15 widgets, no tick, pinnable)
 --
 -- ☠ THREE THINGS THIS SUITE IS HERE TO PIN:
 --
---   1. THE `add` SEAM. Each builder takes tools2.add when classic hands it
---      AddToSection, and falls back to its tools2.group when a card or a pinned
---      panel hands it one -- so "classic renders as it did" is structural.
---   2. THE COLUMNS SURVIVE. The census below records the COLUMN of every widget
---      as well as its height, taken from the pre-change source.
---   3. THE FULL-WIDTH SECTIONS AND THEIR SPACER ARE CLASSIC'S ONLY. In modern a
---      "both" section or spacer between the two cards would end column 1 and
---      push Heal Absorb under Absorb Shield.
+--   1. THE `add` SEAM. Each builder adds into tools2.group, the card's or a
+--      pinned panel's.
+--   2. THE COLUMNS SURVIVE in the source. The census below records the COLUMN
+--      of every widget as well as its height.
+--   3. NO FULL-WIDTH SECTION OR SPACER. A "both" widget between the two cards
+--      would end column 1 and push Heal Absorb under Absorb Shield.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to the panel (a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db) -- so this file
@@ -33,9 +25,9 @@ local NS = ...
 -- and asserts against it.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key, slot
---     height and column, in order -- taken from the PRE-CHANGE source.
---   ✓ that ONE builder serves both layouts.
+--   ✓ the widget CENSUS of each builder -- kind, L key, db key, slot height and
+--     column, in order.
+--   ✓ how each card mounts its builder.
 --   ✓ each card's column, stable collapse key, summary and pin; Expand/Collapse
 --     All; and that no popout furniture or settings count is left.
 --   ✓ that the two mode dropdowns route through tools2.refreshStates, so a
@@ -147,8 +139,6 @@ end
 -- ============================================================
 print("-- Absorbs page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     check(PAGE:find("_popoutHolders", 1, true) == nil,
@@ -235,9 +225,9 @@ end
 -- 3. THE TWO MODE DROPDOWNS -- the page's own RefreshStates, routed
 -- Picking a display mode hides and shows controls inside the SAME group, so the
 -- pane changes height when it is clicked and the panel around it has to be told.
--- Classic paid for that with self:RefreshStates() -- NOT GUI:RefreshCurrentPage,
--- so there is no rebuild to unpick -- and tools2.refreshStates IS that call in
--- classic, while in a pane it is ReflowPane plus the page's own pass.
+-- tools2.refreshStates covers it: on a card it is the page's own
+-- self:RefreshStates(), in a pane ReflowPane plus the page's own pass. Never
+-- GUI:RefreshCurrentPage.
 -- ============================================================
 print("-- Absorbs page: the mode dropdowns route through the tools")
 do
@@ -273,7 +263,7 @@ local ABSORB_SHIELD = {
     { "colorpicker",     "Glow Color",           "absorbBarOvershieldColor",   35, 1 },
     { "slider",          "Glow Alpha",           "absorbBarOvershieldAlpha",   55, 1 },
     { "checkbox",        "Reverse Position",     "absorbBarOvershieldReverse", 25, 1 },
-    -- ⚠ THE SWEEP'S FIRST HEADER INSIDE A PANE, and it keeps column 2 in classic.
+    -- ⚠ A HEADER INSIDE A CARD, on a row of its own (its column names 2).
     { "header",          "Floating Bar Position", "(none)",                    45, 2 },
     { "dropdown",        "Orientation",          "absorbBarOrientation",       55, 1 },
     { "checkbox",        "Reverse Fill",         "absorbBarReverse",           25, 2 },
@@ -317,18 +307,9 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    -- ---- ONE builder, BOTH layouts: the declaration and the two mounts ----
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic page and card")
-
     -- ---- THE `add` SEAM -------------------------------------------------
-    check(body:find("local add, parent = tools2.add, tools2.parent", 1, true) ~= nil,
-          g.label .. ": the builder takes classic's add from the tools")
-    check(body:find("if not add then\n                local group = tools2.group\n                add = function(w, h) return group:AddWidget(w, h) end\n            end", 1, true) ~= nil,
-          g.label .. ": ...and adds into a card's or a pinned panel's group, column dropped, when handed one")
-    check(PAGE:find("add = AddToSection,", 1, true) ~= nil,
-          g.label .. ": classic hands it the page's own AddToSection")
+    check(body:find("local group, parent = tools2.group, tools2.parent\n            local function add(w, h) return group:AddWidget(w, h) end", 1, true) ~= nil,
+          g.label .. ": the builder adds into the card's or a pinned panel's group, column dropped")
 
     -- ---- the card -------------------------------------------------------
     local block, call = sectionBlock(g.label)
@@ -343,25 +324,14 @@ for _, g in ipairs(CARDS) do
 end
 
 -- ============================================================
--- 5. THE FULL-WIDTH SECTIONS AND THE SPACER ARE CLASSIC'S ONLY
+-- 5. NO FULL-WIDTH SECTIONS OR SPACERS
 -- ============================================================
-print("-- Absorbs page: the collapsible sections and the page's own order")
+print("-- Absorbs page: no full-width sections, and the page's own order")
 do
-    for _, s in ipairs({
-        { "absorbSection",     "Absorb Shield" },
-        { "healAbsorbSection", "Heal Absorb" },
-    }) do
-        check(PAGE:find("local " .. s[1] .. ' = classicLayout\n            and Add(GUI:CreateCollapsibleSection(self.child, L["' .. s[2] .. '"], true), 36, "both")\n            or nil', 1, true) ~= nil,
-              "sections: " .. s[2] .. " is still classic's collapsible section, and modern's card instead")
-    end
-    check(PAGE:find("local function AddToSection(widget, height, col)", 1, true) ~= nil,
-          "sections: the page keeps its own section-registering Add for classic")
-    local spacers = 0
-    for _ in PAGE:gmatch('if classicLayout then AddSpace%(GUI%.Space%.section, "both"%) end') do spacers = spacers + 1 end
-    eq(spacers, 1, "page: the between-section spacer survives, in classic only")
-    local bare = 0
-    for _ in PAGE:gmatch('AddSpace%(GUI%.Space%.section, "both"%)') do bare = bare + 1 end
-    eq(bare, 1, "page: ...and there is no other copy of it")
+    check(PAGE:find("AddToSection", 1, true) == nil and PAGE:find("currentSection", 1, true) == nil,
+          "sections: no page-level section mount is left")
+    check(PAGE:find('AddSpace(GUI.Space.section, "both")', 1, true) == nil,
+          "sections: ...and no full-width spacer")
 
     -- ☠ SIDE BY SIDE: nothing "both" between the two cards once the pair of
     -- bulk verbs is in.
@@ -369,21 +339,16 @@ do
     local b = PAGE:find('OpenSection(L["Heal Absorb"]', 1, true)
     local between = (a and b) and PAGE:sub(a, b) or ""
     check(a and b and a < b, "order: Absorb Shield opens before Heal Absorb")
-    local stray = between:gsub("%-%-[^\n]*", ""):gsub("if classicLayout then AddSpace%(GUI%.Space%.section, \"both\"%) end", "")
-                         :gsub('classicLayout\n%s*and Add%(GUI:CreateCollapsibleSection%(self%.child, L%["Heal Absorb"%], true%), 36, "both"%)', "")
+    local stray = between:gsub("%-%-[^\n]*", "")
     check(stray:find('"both"', 1, true) == nil,
-          "order: ...and nothing spanning both columns sits between the two cards in modern")
+          "order: ...and nothing spanning both columns sits between the two cards")
 
     -- ---- the copy button is untouched -----------------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, L["Absorbs"], "bars_absorb")', 1, true) ~= nil,
           "page: the copy button still covers both bars")
-
-    -- ---- and no 280 box was invented ------------------------------------
-    -- ☠ THIS PAGE NEVER HAD ONE. Every widget went straight onto the page, and
-    -- the conversion did not quietly wrap the classic arm in a box to make the
-    -- builders easier to write -- that would have changed what classic renders.
+    -- ☠ THIS PAGE NEVER HAD ONE: every widget goes into its card.
     check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280", 1, true) == nil,
-          "page: classic still builds no settings box at all")
+          "page: no fixed-width settings box at all")
 end
 
 -- ============================================================

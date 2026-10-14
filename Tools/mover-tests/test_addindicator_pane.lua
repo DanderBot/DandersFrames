@@ -213,7 +213,6 @@ local DF = { db = { party = {} },
              ADFilterRefDisplayName = function(_, ref) return "Filter " .. ref end,
              AuraDesigner = { SpecInfo = {} } }
 DF.GUIFrame = CreateFrame("Frame", nil, nil)
-function DF:IsClassicSettingsLayout() return false end
 
 -- ============================================================
 -- 1. THE REAL BUILDER, LIFTED OUT OF Cards.lua
@@ -1143,13 +1142,13 @@ do
 end
 
 -- ============================================================
--- 5. THE CLASSIC DESIGNER'S OPT-INS (2026-09-22)
+-- 5. THE DESIGNER'S OPT-INS
 -- The split panel runs this pane INSIDE its Effects tab, behind Add from a Spell /
 -- Add from a Filter. opts.source draws only the route the button chose,
 -- opts.fitWidth spreads the tiles across a tab column, and opts.restore rebuilds
 -- the pane at a new width from an earlier build's answers. Driven, like the rest.
 -- ============================================================
-print("-- Add Indicator: the classic designer's opt-ins")
+print("-- Add Indicator: the designer's opt-ins")
 do
     local function Kids(h)
         local out = {}
@@ -1184,42 +1183,42 @@ do
     -- ---- opts.source: one route, the whole row ----
     local apiS, hS = Build(260, { source = "spell" })
     local rS = Routes(hS)
-    check(rS["Select a spell"] ~= nil, "classic opts: a spell flow draws the spell route")
-    eq(rS["Select a filter"], nil, "classic opts: ...and no filter route beside it")
+    check(rS["Select a spell"] ~= nil, "inline opts: a spell flow draws the spell route")
+    eq(rS["Select a filter"], nil, "inline opts: ...and no filter route beside it")
     eq(rS["Select a spell"] and rS["Select a spell"]:GetWidth(), 260 - 12,
-       "classic opts: ...across the whole row, gutter to gutter")
+       "inline opts: ...across the whole row, gutter to gutter")
     local _, hF = Build(260, { source = "filter" })
     local rF = Routes(hF)
     check(rF["Select a filter"] ~= nil and rF["Select a spell"] == nil,
-          "classic opts: a filter flow draws the filter route only")
+          "inline opts: a filter flow draws the filter route only")
     -- The remaining route still answers the question and lights up as it does.
     check(apiS.PickSpell("Rejuvenation", "Rejuvenation") == true,
-          "classic opts: the one route still takes an answer")
-    eq(rS["Select a spell"].dfActive, true, "classic opts: ...and lights once it has one")
+          "inline opts: the one route still takes an answer")
+    eq(rS["Select a spell"].dfActive, true, "inline opts: ...and lights once it has one")
 
     -- ---- absent: the rows page's pane, unchanged ----
     local _, hN = Build(260, {})
     local rN = Routes(hN)
     check(rN["Select a spell"] ~= nil and rN["Select a filter"] ~= nil,
-          "classic opts: without opts.source both routes are still drawn")
+          "inline opts: without opts.source both routes are still drawn")
     local w3 = Tiles(hN)[1] and Tiles(hN)[1]:GetWidth()
-    eq(w3, 78, "classic opts: ...and the tiles keep the popout's three 78px columns")
+    eq(w3, 78, "inline opts: ...and the tiles keep the popout's three 78px columns")
 
     -- ---- opts.fitWidth: more columns in a wider column ----
     local _, hW = Build(600, { fitWidth = true })
     local tW = Tiles(hW)
-    eq(#tW, 9, "classic opts: a wide flow still draws all nine tiles")
+    eq(#tW, 9, "inline opts: a wide flow still draws all nine tiles")
     -- 588 content px fit seven 78px columns; nine over two even rows is 5 + 4.
     local tw = tW[1] and tW[1]:GetWidth() or 0
-    eq(tw, math.floor((588 - 7 * 4) / 5), "classic opts: ...five to a row, widened to fill it")
+    eq(tw, math.floor((588 - 7 * 4) / 5), "inline opts: ...five to a row, widened to fill it")
     check(tW[1] and tW[1]:GetHeight() > (Tiles(hN)[1]:GetHeight() or 0),
-          "classic opts: ...with taller pictures than the popout's")
+          "inline opts: ...with taller pictures than the popout's")
     local _, hD = Build(260, { fitWidth = true })
     eq(Tiles(hD)[1] and Tiles(hD)[1]:GetWidth(), 78,
-       "classic opts: at popout width fitWidth changes nothing")
+       "inline opts: at popout width fitWidth changes nothing")
 
     -- ---- opts.restore: rebuilt at a new width from the old answers ----
-    check(type(apiS.Snapshot) == "function", "classic opts: the pane hands out a Snapshot verb")
+    check(type(apiS.Snapshot) == "function", "inline opts: the pane hands out a Snapshot verb")
     -- Guarded, so a pane without the verb fails the checks above rather than
     -- aborting the whole run on a nil call.
     local function Snap(api)
@@ -1227,23 +1226,23 @@ do
     end
     apiS.SelectType("square")
     local snap = Snap(apiS)
-    eq(snap.source and snap.source.auraName, "Rejuvenation", "classic opts: ...holding the aura")
-    eq(snap.selected, "square", "classic opts: ...and the look")
+    eq(snap.source and snap.source.auraName, "Rejuvenation", "inline opts: ...holding the aura")
+    eq(snap.selected, "square", "inline opts: ...and the look")
     local apiR = Build(480, { source = "spell", fitWidth = true, restore = snap })
     local again = Snap(apiR)
     eq(again.source and again.source.auraName, "Rejuvenation",
-       "classic opts: a restored build starts from the old aura")
-    eq(again.selected, "square", "classic opts: ...and the old look")
+       "inline opts: a restored build starts from the old aura")
+    eq(again.selected, "square", "inline opts: ...and the old look")
     -- A restore of the OTHER route is not carried: this build has no button for it.
     local apiX = Build(260, { source = "filter", restore = snap })
     check(type(apiX.Snapshot) == "function" and Snap(apiX).source == nil,
-          "classic opts: ...but never into a flow for the other route")
+          "inline opts: ...but never into a flow for the other route")
 end
 
 -- ============================================================
 -- opts.inline: EVERY NOT-YET / NOT-NEEDED STATE IS SAID, NOT GREYED (2026-09-22)
 -- ------------------------------------------------------------
--- The classic designer runs this pane in its Effects tab, where it may change
+-- The designer runs this pane in its Effects tab, where it may change
 -- height. Section 3 hides its grid unless the chosen look has a position, section
 -- 2 says "Choose an aura first." over one dimmed block, a dim tile carries its
 -- reason on the picture, and the headings speak their state. Driven, then read

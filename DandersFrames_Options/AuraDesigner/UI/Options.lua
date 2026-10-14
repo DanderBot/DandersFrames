@@ -562,7 +562,7 @@ end
 P.NextGroupName = NextGroupName
 
 -- Create a new debuff category group (C1 data model; C2 wires the UI). Defaults:
--- Boss + Role selected (the classic "important debuffs" baseline), everything
+-- Boss + Role selected (the usual "important debuffs" baseline), everything
 -- else off, Hide Long staged at 5 minutes with Keep Important on. Layout mirrors
 -- the filter-group creation defaults (compact 4x4).
 local function CreateDebuffGroup(name)

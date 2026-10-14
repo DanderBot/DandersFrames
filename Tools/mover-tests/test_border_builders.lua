@@ -692,26 +692,9 @@ if GUI.CreateBorderShadowControls then
         end
     end
 
-    -- ---- and WHERE the classic box is mounted ----
-    -- Classic keeps its one Appearance box -- 280, column 2, the border and the
-    -- shadow back to back -- and Modern builds no container at all: its three
-    -- Appearance groups are cards of their own.
-    do
-        local frameAt = pageSrc:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
-        check(frameAt ~= nil, "classic box: the Frame page is locatable by its copy button")
-        local blockStart = pageSrc:find("local classicLayout = DF:IsClassicSettingsLayout()", frameAt or 1, true)
-        local blockEnd   = pageSrc:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true)
-        check(blockStart ~= nil and blockEnd ~= nil and blockEnd > blockStart,
-              "classic box: the Appearance block closes with the classic-only Add")
-        local block = pageSrc:sub(blockStart or 1, (blockEnd or 1) + 60)
-        check(block:find("if classicLayout then\n            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)\n        end", 1, true) ~= nil,
-              "classic box: the 280 box is built in classic only")
-        check(block:find("chromeless", 1, true) == nil,
-              "classic box: ...and there is no chromeless container left beside it")
-        local adds = 0
-        for _ in block:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
-        eq(adds, 1, "classic box: the Appearance block adds the classic box and nothing else")
-    end
+    -- ---- no Appearance container: its three groups are cards of their own ----
+    check(pageSrc:find("appearanceGroup", 1, true) == nil and pageSrc:find("chromeless", 1, true) == nil,
+          "frame page: no Appearance container, chromeless or boxed, is left")
 end
 
 -- ============================================================
@@ -773,14 +756,14 @@ if GUI.CreateBorderShadowControls then
         { "slider",      "Shadow Offset Y",      "petBorderShadowOffsetY",        55 },
     }
 
-    -- ---- the classic box: the whole sixteen ----
-    local petClassicRec, petClassicW, petClassicDB
+    -- ---- the full build: the whole sixteen ----
+    local petBoxRec, petBoxW, petBoxDB
     do
         rec = {}
         local tools = newTools()
-        petClassicDB = newPetDB(true)
-        local before = keySet(petClassicDB)
-        petClassicW = GUI:CreateBorderControls(newGroup(), petClassicDB, "pet", {
+        petBoxDB = newPetDB(true)
+        local before = keySet(petBoxDB)
+        petBoxW = GUI:CreateBorderControls(newGroup(), petBoxDB, "pet", {
             parent  = tools.parent,
             include = PET_OPTS,
             fullUpdate    = tools.full,
@@ -789,18 +772,18 @@ if GUI.CreateBorderShadowControls then
             refreshStates = tools.refresh,
             sizeMin = 1, sizeMax = 6, sizeStep = 1,
         })
-        petClassicRec = rec
-        checkInventory(petClassicRec, PET_GOLDEN, "pet classic")
+        petBoxRec = rec
+        checkInventory(petBoxRec, PET_GOLDEN, "pet box")
         eq(tools.fired.full + tools.fired.light + tools.fired.colors + tools.fired.refresh, 0,
-           "pet classic: building fired no callbacks")
+           "pet box: building fired no callbacks")
 
         local byLabel = {}
-        for _, e in ipairs(petClassicRec) do byLabel[e.label] = e end
-        eq(byLabel["Border Thickness"].min, 1, "pet classic: thickness min is the page's")
-        eq(byLabel["Border Thickness"].max, 6, "pet classic: ...and its max, which is not the frame's 16")
+        for _, e in ipairs(petBoxRec) do byLabel[e.label] = e end
+        eq(byLabel["Border Thickness"].min, 1, "pet box: thickness min is the page's")
+        eq(byLabel["Border Thickness"].max, 6, "pet box: ...and its max, which is not the frame's 16")
 
         -- With the colour table already present, a pet build writes NOTHING.
-        local added = newKeys(before, petClassicDB)
+        local added = newKeys(before, petBoxDB)
         eq(#added, 0, "pet seed: a pet border build with a colour table writes nothing at all")
     end
 
@@ -840,26 +823,26 @@ if GUI.CreateBorderShadowControls then
             sizeMin = 1, sizeMax = 6, sizeStep = 1,
             noShowToggle  = true,
             -- The page's own gate, in through the consumer door: pet frames
-            -- switched off greys the whole pane, which is what the classic box's
-            -- disableChildrenOn does for it there.
+            -- switched off greys the whole pane, which is what the card's
+            -- disableChildrenOn does for it on the page.
             disableWhen   = function(d) return d.petEnabled == false end,
         })
         petPaneRec = rec
 
-        -- Field for field against the classic rows, minus `slot`: a popout group
+        -- Field for field against the full build, minus `slot`: a popout group
         -- starts its own numbering at 1.
         local PANE_COMPARED = {}
         for _, f in ipairs(COMPARED) do
             if f ~= "slot" then PANE_COMPARED[#PANE_COMPARED + 1] = f end
         end
-        eq(#petPaneRec, #PET_GOLDEN - 1, "pet pane: exactly one row fewer than the classic box")
+        eq(#petPaneRec, #PET_GOLDEN - 1, "pet pane: exactly one row fewer than the full build")
         eq(petPaneW.show, nil, "pet pane: ...and it is the hoisted Show Border checkbox")
         for i = 1, #petPaneRec do
             for _, field in ipairs(PANE_COMPARED) do
-                local a, b = petPaneRec[i][field], petClassicRec[i + 1][field]
+                local a, b = petPaneRec[i][field], petBoxRec[i + 1][field]
                 if field == "dbTable" then a, b = a ~= false, b ~= false end
                 eq(tostring(a), tostring(b),
-                   string.format("pet pane: row %d field %s matches the classic build", i, field))
+                   string.format("pet pane: row %d field %s matches the full build", i, field))
             end
         end
         eq(#newKeys(before, petPaneDB), 0, "pet pane seed: the hoist changed no build-time write")

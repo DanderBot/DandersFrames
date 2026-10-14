@@ -330,7 +330,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             card.title:SetText(displayName)
             -- Re-apply the category tint so SetText doesn't reset it back to
             -- the default font colour.
-            -- A classic card's colour is its chrome's (TEXT, or grey while hidden).
+            -- A card's colour is its chrome's (TEXT, or grey while hidden).
             local cc = card.titleCatColor
             if card.chrome then
                 card.chrome:Paint()
@@ -2762,8 +2762,7 @@ end
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside frames the page harness never sees. It is why this page
--- had to force the settings window 210px wider than its own default. It is the
--- designer's only page, in both settings layouts (decided 2026-09-22).
+-- had to force the settings window 210px wider than its own default.
 -- ============================================================
 local function BuildTextDesignerIsland(GUI, page, db)
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
@@ -3237,9 +3236,9 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- The designer always builds its split-panel island, in both settings layouts
--- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
--- contract is unchanged; the island does not use them.
+-- The designer always builds its split-panel island. `Add` and `AddSpace` are
+-- still accepted so BuildPage's contract is unchanged; the island does not use
+-- them.
 -- ============================================================
 function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
     return BuildTextDesignerIsland(GUI, page, db)

@@ -4,8 +4,7 @@ local NS = ...
 -- INTEGRATIONS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
 -- General > Integrations is the smallest card page: one real group, Color
--- Picker, which is one 280 box in classic and one of the Debuff Bar's
--- collapsible CARDS in modern -- no header tick, no pin. The See Also block and
+-- Picker, a collapsible CARD -- no header tick, no pin. The See Also block and
 -- the two removed-group notes are not settings groups and are untouched.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY -- it is welded to the panel -- so this
@@ -102,8 +101,6 @@ end
 -- ============================================================
 print("-- Integrations page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
@@ -141,22 +138,8 @@ do
     local body = builderBody("BuildColorPickerGroup")
     checkCensus(census(body, "pickerDB"), COLOR_PICKER, "color picker")
 
-    -- ONE builder, BOTH layouts: the declaration and the two mounts.
-    local calls = 0
-    for _ in PAGE:gmatch("BuildColorPickerGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "color picker: declared once, mounted twice -- classic box and card")
-
-    -- The classic branch builds the box it always did, with its own header, in
-    -- the column it always had.
-    check(PAGE:find("local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "color picker: the classic 280 box is unchanged")
-    check(PAGE:find('colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)', 1, true) ~= nil,
-          "color picker: ...with its own header")
-    check(PAGE:find("Add(colorPickerGroup, nil, 1)", 1, true) ~= nil,
-          "color picker: ...still added to column 1")
-
     -- ⚠ THE ACCOUNT-WIDE TABLE IS READ ONCE AT PAGE SCOPE and closed over by the
-    -- builder, so the classic box and every pane instance write the same table.
+    -- builder, so the card and every pane instance write the same table.
     check(PAGE:find("local pickerDB = DF:GetGlobalDB()", 1, true) ~= nil,
           "color picker: the account-wide table is resolved once, at page scope")
 
@@ -166,11 +149,11 @@ do
     check(block:find('OpenSection(L["Color Picker"], "integrations_colorpicker", 1, ColorPickerSummary)', 1, true) ~= nil,
           "color picker: a card keyed integrations_colorpicker in column 1 -- no gates, no pin, no tick")
     check(block:find("BuildColorPickerGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "color picker: ...mounting the builder exactly as classic does")
+          "color picker: ...mounting its builder")
 
     -- ☠ THE SUMMARY READS THE ACCOUNT-WIDE TABLE. The page pass hands a card's
     -- corner the per-mode table, which never holds these keys.
-    local sum = PAGE:match("local function ColorPickerSummary%(%)(.-)\n            end")
+    local sum = PAGE:match("local function ColorPickerSummary%(%)(.-)\n        end")
     check(sum ~= nil, "color picker: the summary is a named function on the page, taking no table")
     if sum then
         check(sum:find("local g = DF:GetGlobalDB()", 1, true) ~= nil,
@@ -200,10 +183,6 @@ end
 -- ============================================================
 print("-- Integrations page: the order and what was left alone")
 do
-    -- Exactly one bare 280 box left on the page, and it is the classic branch's.
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 1, "order: one bare 280 box left, and it is the classic branch's own")
     -- Nothing stays inline here, so the band skin is never reached for.
     check(PAGE:find("INLINE_BOX", 1, true) == nil,
           "order: no stay-inline box on this page, so no band skin either")

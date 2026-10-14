@@ -4,9 +4,9 @@ local NS = ...
 -- COLOR BY TIME FILLS ITS CARD
 -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- The Seconds / Percent tabs and the editor's colour band were built at the
--- classic box's width (two 128 tabs, bands placed across 256) and stayed that
--- size in a wider Modern card. The tabs now anchor to their halves of the row,
+-- The Seconds / Percent tabs and the editor's colour band once had a fixed
+-- width (two 128 tabs, bands placed across 256) inside a wider card. The tabs
+-- now anchor to their halves of the row,
 -- and the band re-places its segments from its live width. BuildStrip is lifted
 -- out and run over fake frames.
 -- ============================================================
