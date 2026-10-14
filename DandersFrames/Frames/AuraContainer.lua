@@ -750,8 +750,10 @@ end
 -- ☠ PARK-STRING SENTINEL. The slot park string rests on engine-INVISIBLE C parser
 -- semantics, and TWO conventions have now failed open in the field — "" (caught
 -- 2026-08-18) and "HELPFUL|!HELPFUL" (caught 2026-08-29: parked slots rendered live
--- DEBUFFS, the parser reading the contradiction as harmful). The CF second lock
--- (SLOT_PARK_CF) holds the slots dark either way, but the NEXT parser drift should
+-- DEBUFFS, the parser reading the contradiction as harmful). Neither string is pushed any
+-- more and the park is the engine's own enable bit, so this sentinel now guards NOTHING we
+-- depend on — which is exactly why it is worth keeping. It is a free read that would have
+-- caught both of those failures a build early, and the NEXT parser drift should
 -- announce itself instead of waiting for a field report: ask the engine directly what
 -- the park string matches on the player. Any non-zero answer = the string is open
 -- again. Runs on the 30s sweep (one C call), WARNs once per session, secrecy-guarded
@@ -1087,24 +1089,88 @@ end
 AuraContainer._handleVisDark = handleVisDark
 AuraContainer._slotVisDark   = slotVisDark
 
+-- ★★★ IT HEALS NOW, IT DOES NOT ONLY WARN — and that is the whole point of the collapse.
+-- With one park mechanism the engine can be ASKED whether a slot is dark, so a
+-- disagreement between what a consumer believes and what the engine has is both
+-- detectable and FIXABLE from here. Both directions matter and they are the two failure
+-- modes this system exists to prevent:
+--   · believed dark, engine ENABLED  -> auras render at a retired indicator's position
+--     (Drasvin's report, and Krathe's own frames after a profile swap)
+--   · believed live, engine DISABLED -> the slot shows nothing and every consumer-side
+--     field says it should. Nothing in DF could see this before, because a disabled slot
+--     is indistinguishable from one whose auras simply do not match. This is the
+--     "stuck parked until /reload" class.
+-- ☠ THE FIX IS _pushFilter, NOT A DIRECT WRITE. It re-derives dark from
+-- parked/_deathLatched/_visLatched and re-pushes filter, candidates and the enable bit
+-- together, so healing cannot invent a state the consumer never asked for. A second
+-- writer racing the first is what made the latch reconciler CLEAR-only; here the same
+-- discipline means deferring to the one function that owns the decision.
+-- ⚠ An edge is a transition and transitions can be missed — a refused push in combat with
+-- no later tuning pass, a rebuilt handle inheriting an engine slot. That is exactly why
+-- this runs periodically instead of trusting the push sites.
+-- ⚠ Warn latched per SLOT KEY so several slots failing reads differently from one; the
+-- HEAL is not latched, because a slot that drifts twice must be fixed twice.
 local darkWarned = {}
+-- ⚠ WEAK-KEYED, unlike darkWarned's string keys: this is keyed by the HANDLE object, and a
+-- strong table here would pin every container DF ever built for the session.
+local groupDriftWarned = setmetatable({}, { __mode = "k" })
 local function checkDarkMismatch()
-    local parkCF = AuraContainer.SLOT_PARK_CF
-    if not parkCF then return end
     for h in pairs(AuraContainer._slotHandles or {}) do
-        local dark = h.parked or h._deathLatched or slotVisDark(h)
-        if dark and h._cfPushed ~= parkCF and not darkWarned[h.key] then
-            darkWarned[h.key] = true
-            DF:DebugWarn(DBG,
-                "SLOT BELIEVED DARK BUT NOT LOCKED: slot %s on %s — parked=%s death=%s vis=%s,"
-                .. " CF lock NOT recorded (pushOK=%s%s). This is the precondition of auras"
-                .. " rendering at a retired indicator's position.",
-                tostring(h.key), tostring(h.owner and h.owner.unit),
-                tostring(h.parked and true or false),
-                tostring(h._deathLatched and true or false),
-                tostring(slotVisDark(h)),
-                tostring(h._pushOK),
-                h._pendingTuning and ", replay queued" or "")
+        local c = h.owner and h.owner.container
+        if c and c.IsAuraSlotEnabled then
+            local dark = (h.parked or h._deathLatched or slotVisDark(h)) and true or false
+            local okRead, isEnabled = pcall(c.IsAuraSlotEnabled, c, h.key)
+            local secretEn = issecretvalue and issecretvalue(isEnabled) or false
+            if okRead and not secretEn and isEnabled == dark then
+                if not darkWarned[h.key] then
+                    darkWarned[h.key] = true
+                    DF:DebugWarn(DBG,
+                        "SLOT ENABLE DRIFT: slot %s on %s — believed %s (parked=%s death=%s"
+                        .. " vis=%s) but the engine slot is %s (pushOK=%s%s). Re-pushing.",
+                        tostring(h.key), tostring(h.owner and h.owner.unit),
+                        dark and "DARK" or "LIVE",
+                        tostring(h.parked and true or false),
+                        tostring(h._deathLatched and true or false),
+                        tostring(slotVisDark(h)),
+                        isEnabled and "ENABLED" or "DISABLED",
+                        tostring(h._pushOK),
+                        h._pendingTuning and ", replay queued" or "")
+                end
+                pcall(h._pushFilter, h)
+            end
+        end
+    end
+    -- ── THE GROUP HALF. Same question, same heal, different topology: a handle's groups
+    -- are darkened by the two UNIT latches, so a disagreement means a container is either
+    -- parsing while its unit is dead/away, or parsing nothing while everything says it
+    -- should be live. _pushEngineDark re-derives from the latches and corrects every group
+    -- on the handle, so — as on the slot side — the fix goes through the one function that
+    -- owns the decision rather than writing the engine directly.
+    -- ⚠ Slot-backed handles are skipped by _pushEngineDark itself (their slots own the
+    -- bit), so this loop is safe to run over every handle.
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.container and h.container.IsAuraGroupEnabled and h.groupKeys then
+            -- ASKED, NOT REMEMBERED (main's rule): _visLatched is a memo of the last apply.
+            local dark = (h._deathLatched or handleVisDark(h)) and true or false
+            for _, key in ipairs(h.groupKeys) do
+                local okRead, isEnabled = pcall(h.container.IsAuraGroupEnabled, h.container, key)
+                local secretEn = issecretvalue and issecretvalue(isEnabled) or false
+                if okRead and not secretEn and isEnabled == dark then
+                    if not groupDriftWarned[h] then
+                        groupDriftWarned[h] = true
+                        DF:DebugWarn(DBG,
+                            "GROUP ENABLE DRIFT: %s on %s — believed %s (death=%s vis=%s)"
+                            .. " but the engine group is %s. Re-pushing.",
+                            tostring(key), tostring(h.config and h.config.unit),
+                            dark and "DARK" or "LIVE",
+                            tostring(h._deathLatched and true or false),
+                            tostring(handleVisDark(h)),
+                            isEnabled and "ENABLED" or "DISABLED")
+                    end
+                    pcall(h._pushEngineDark, h)
+                    break   -- one push corrects every key on this handle
+                end
+            end
         end
     end
 end
@@ -1119,6 +1185,17 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     checkOutOfRangeAttribution()
     checkSlotAccumulation()
     checkDarkMismatch()
+    -- ☠ THIS WAS MISSING, AND THE RECONCILER'S OWN HEADER SAID IT SHOULD BE HERE:
+    -- "the only structural answer is to periodically re-ask the question". It had exactly
+    -- one caller — the PLAYER_ENTERING_WORLD / PLAYER_REGEN_ENABLED handler — so a latch
+    -- that went stale outside those two moments had nothing to clear it but the next zone
+    -- change. Worse, that handler opens with an InCombatLockdown early-out, so a unit
+    -- latched while you were still fighting eight seconds after a loading screen got no
+    -- reconcile from it at all.
+    -- ⚠ NOT gated on anyLiveContainers below: a stale latch is precisely the state where
+    -- containers are dark, so gating it on live containers would skip the case it exists
+    -- for. Same reasoning the zone-in caller already carries.
+    AuraContainer.ReconcileLatches("safety sweep")
     if not anyLiveContainers() then return end
     AuraContainer._kickLiveParse("safety sweep")
 end)
@@ -6349,15 +6426,70 @@ end
 -- alive edge clears the latch and BOUNCES, so the rows come back re-parsed
 -- rather than stale. Deliberate tradeoff (Danders, 2026-08-13): auras that
 -- legitimately persist through death are hidden while dead too.
+-- ★★★ THE GROUP-SIDE PARK (12.1.5). The slot half has had a real park since
+-- SetAuraSlotEnabled landed; this is its twin, and until now the group half had nothing
+-- equivalent — a latched handle only HID DF's own frame. Hiding is correct as far as it
+-- goes (nothing renders) but the container keeps parsing, keeps binding auras to buttons
+-- and keeps holding whatever it bound, so an unhidden container was one write away from
+-- showing stale content. Disabling stops the parse outright and clears the group's auras.
+--
+-- ⚠ GROUPS ONLY. A slot-backed handle's slots each own their enable bit through
+-- SlotHandle:_pushFilter; pushing here as well would be a second writer for the same
+-- decision, which is how the two latch registries desynced in the first place.
+--
+-- ☠ `parked` is NOT part of dark here, unlike the slot half. Parking is per-slot consumer
+-- state; a handle has no equivalent, and its group set is declared once. Only the two UNIT
+-- latches darken a whole container.
+--
+-- ⚠ The engine is asked, never a stored flag — same reasoning as the slot half, and the
+-- same reason: groups are add-only, so a rebuilt handle inherits whatever engine state the
+-- previous one left.
+-- ⚠ Safe to disable every group on a container: OnAuraGroupsChanged runs
+-- UpdateEventRegistrations -> RebuildAuraParseFilters -> UpdateAllAuras, so re-enabling
+-- restores the UNIT_AURA registration that HasAnyEnabledAuraGroups had dropped and
+-- reparses. Verified in source; without that this would be a way to strand a container.
+function Handle:_pushEngineDark()
+    local c = self.container
+    if not c or not c.SetAuraGroupEnabled or not c.IsAuraGroupEnabled then return true end
+    if not self.groupKeys then return true end
+    -- The DERIVED verdict, never the memo: this runs from the drift healer as well as
+    -- from _setVisLatch, and a retargeted handle's memo is the stale answer main retired.
+    local wantEnabled = not ((self._deathLatched or handleVisDark(self)) and true or false)
+    local ok = true
+    for _, key in ipairs(self.groupKeys) do
+        local okRead, isEnabled = pcall(c.IsAuraGroupEnabled, c, key)
+        local secretEn = issecretvalue and issecretvalue(isEnabled) or false
+        if okRead and not secretEn and isEnabled ~= wantEnabled then
+            if not pcall(c.SetAuraGroupEnabled, c, key, wantEnabled) then ok = false end
+        end
+    end
+    return ok
+end
+
+-- ☠ A REFUSED PUSH MUST NOT BE LATCHED AND FORGOTTEN — the same contract the slot half
+-- carries. The handle regen drain already exists (_registerRegen consumes _pendingTuning),
+-- and ApplyTuning ends by calling _pushEngineDark, so queuing a tuning replay is what
+-- re-asserts the enable state after combat.
+function Handle:_queueDarkReplay(ok)
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        self:_registerRegen()
+    end
+end
+
 function Handle:_setDeathLatch(on)
     on = on or nil
     if self._deathLatched == on then return end
     self._deathLatched = on
     self:_applyVisibility()
+    self:_queueDarkReplay(self:_pushEngineDark())
     if not on then
         -- Re-parse on revival: the death window produced no aura events, so the
         -- standing parse predates the death. Refresh() is combat-aware (falls
         -- back to a mark-dirty that the next aura event flushes).
+        -- ⚠ Kept even though the enable transition above also calls UpdateAllAuras
+        -- engine-side: that only fires when the group state actually MOVED, and on a
+        -- client without the enable bit it never fires at all. Refresh is the guarantee.
         self:Refresh()
     end
 end
@@ -6378,6 +6510,9 @@ function Handle:_setVisLatch(_on)
     if self._visLatched == want then return end
     self._visLatched = want          -- memo of what was applied, NOT the authority
     self:_applyVisibility()
+    -- The engine-level park follows the DERIVED verdict (main's _setVisLatch ignores its
+    -- argument on purpose; `want` is the answer for the unit this handle is bound to NOW).
+    self:_queueDarkReplay(self:_pushEngineDark())
     if not want then self:Refresh() end
 end
 
@@ -6653,6 +6788,13 @@ function Handle:ApplyTuning(tuning)
     if self.backend and self.backend.applyGroupTuning then
         self.backend:applyGroupTuning()
     end
+    -- ★ RE-ASSERT THE GROUP PARK LAST. Two jobs: it is what makes the _pendingTuning
+    -- replay above actually restore the enable state after combat (the drain re-runs this
+    -- function, not the latch setter that queued it), and it re-applies the park after any
+    -- tuning pass that might have moved group state underneath a latched handle.
+    -- ⚠ LAST, after the filter/candidate pushes: enabling reparses, so a group being woken
+    -- must land on values already updated. Same ordering rule as the slot half.
+    self:_pushEngineDark()
 end
 
 -- ═══ HELPER GATE: BROADCAST AND BACKSTOP ═══
@@ -8051,10 +8193,13 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     -- (_lastCandidateFilters is stashed ABOVE, before the declare, so _cf() could read it.)
-    -- CF-lock seed: AddAuraSlot just declared these candidates engine-side, so the
+    -- CF seed: AddAuraSlot just declared these candidates engine-side, so the
     -- value-tracked push in _pushFilter must not redundantly re-push (and reparse)
     -- them on the first live pass. Seeded with the DECLARED value (through _cf()), so a
-    -- slot born helper-gated tracks the dead map it actually declared. See SLOT_PARK_CF.
+    -- slot born helper-gated tracks the dead map it actually declared.
+    -- ⚠ Nothing to do with parking any more — candidates are just candidates now; the
+    -- park is the enable bit. A slot born DARK is handled by _pushFilter's engine read on
+    -- its first pass, not by seeding a park constant here.
     -- Both memos: the guard tests _cfWant, the audits read _cfPushed (see _pushFilter).
     handle._cfPushed = declaredCF
     handle._cfWant = declaredCF
@@ -8223,8 +8368,13 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- apart, and the first version of this probe reported exactly that bare count.
 -- ⚠ Independent of the field repro, which stands on its own: parked slots rendering live
 -- debuffs (Drasvin, then Krathe's own frames after a profile swap).
-local SLOT_PARK_CF = { maxDuration = 0 }
-AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
+-- ☠ SLOT_PARK_CF ({ maxDuration = 0 }) IS RETIRED — the enable bit in _pushFilter is the
+-- park now. It is not deleted history: it was measured working in game and it is what the
+-- 12.1.0 line still ships. Kept out of the code rather than out of the record, because the
+-- reason it went is not that it failed — it is that a second dark-state representation
+-- earns its keep only while there is no way to ask the engine directly, and now there is.
+-- ⚠ The park-string SENTINEL above stays. It is a parser canary, load-bearing for nothing,
+-- and precisely because it is no longer load-bearing it is worth keeping as a drift alarm.
 
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
@@ -8269,36 +8419,29 @@ function SlotHandle:_pushFilter()
     -- indicator that renders while believed dark needs the pushed value.
     self._pushedFilter = want
     self._pushOK = ok and true or false
-    -- ★ THE SECOND LOCK (see SLOT_PARK_CF). Dark pushes the CF park; live restores the
-    -- stored live candidates (nil clears — a slot with no live CFs must not keep the
-    -- park). Value-tracked because SetAuraSlotCandidateFilters has NO engine-side
-    -- equality guard — every call clears the slot's candidates and reparses — so this
-    -- pushes only on a real transition. The dark->live push doubles as the unlatch
-    -- BOUNCE the death-latch clear wants (the standing parse predates the death).
-    --
-    -- ☠☠ TRACKED AGAINST WHAT WAS LAST ASKED FOR (_cfWant), NOT WHAT WAS CONFIRMED
-    -- (_cfPushed) — and the difference was the 5.3.2 battle-res bug (2026-09-13,
-    -- two reports: "if somebody dies and gets a BR their auras vanish till the fight
-    -- is over"). _cfPushed is recorded only out of lockdown, on purpose: a secure
-    -- setter can refuse QUIETLY in combat, so the audits must not believe a combat
-    -- push. But this guard USED to compare against it, and a death is nearly always
-    -- in combat -- so the park push landed (SetAuraSlotCandidateFilters works in
-    -- combat; the helper gate proved it, deferred=0 across a raid) and went
-    -- UNRECORDED, and the rez's dark->live pass then compared the live stash against
-    -- the pre-combat live stash, found them identical by table identity, and SKIPPED.
-    -- The engine kept the maxDuration=0 park on every AD indicator until the regen
-    -- replay cleared the memo. The comment here claimed "dark always records the park
-    -- constant, so the transition can never compare equal" -- true out of combat and
-    -- false exactly when a death latch fires. A fix whose comment asserts a false
-    -- mechanism: this is the class.
-    -- ⇒ _cfWant records every ATTEMPT, in or out of lockdown, so the transition test
-    -- is about intent and always sees the park it just asked for. _cfPushed keeps its
-    -- meaning for the slot audit and the AD dump, and the regen replay clears BOTH so
-    -- a quietly-refused combat push is still re-pushed fresh.
+    -- CANDIDATE FILTERS — the slot's REAL ones, always. This used to swap in a
+    -- maxDuration=0 park constant while dark; that park is gone (see the enable bit
+    -- below), so this is now purely "push what the slot actually wants".
+    -- ☠ WHY THE PARK LEFT THIS LINE. It was the third mechanism to hold a slot dark, after
+    -- two filter strings that both failed open in the field. It worked — it was measured in
+    -- game — but it parks the RENDER by lying to the filter, which means every reader that
+    -- wants to know "is this slot dark" has to infer it from a pushed constant, and a slot
+    -- carrying a filter that is not its own is one build away from being the next
+    -- invisible-C surprise. 12.1.5's enable bit answers the question directly and stops the
+    -- PARSE rather than filtering its result, so keeping the CF park alongside it would be
+    -- two mechanisms for one job with the weaker one owning the diagnostics.
+    -- Value-tracked because SetAuraSlotCandidateFilters has NO engine-side equality guard —
+    -- every call clears the slot's candidates and reparses. Tracked against the last ASK
+    -- (_cfWant, recorded in or out of lockdown) rather than the OOC-confirmed memo
+    -- (_cfPushed, which the audits read) — retail's 5.3.2 battle-res fix. With the park
+    -- gone the two sides of a death latch push the SAME candidates, so the dark->live
+    -- bounce no longer falls out of this guard: it is the enable transition below, whose
+    -- engine-side setter calls UpdateAllAuras unconditionally. The regen replay clears
+    -- both memos so a quietly-refused combat push is still re-pushed fresh.
     -- Through _cf(), never the raw stash: the wake push after a park/latch clears must
     -- not un-gate a helper-owned slot whose Power Infusion gate is still dark. _cf()
     -- returns the stash (already caster-locked at write) or the helper dead map.
-    local cfWant = dark and SLOT_PARK_CF or self:_cf()
+    local cfWant = self:_cf()
     if self._cfWant ~= cfWant then
         local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
         -- ⚠ RECORD THE ASK ONLY IF THE CALL ITSELF SURVIVED. A QUIET combat refusal
@@ -8312,6 +8455,66 @@ function SlotHandle:_pushFilter()
             if not InCombatLockdown() then self._cfPushed = cfWant end
         end
         ok = ok and okCF
+    end
+    -- ★★★ THE PARK. One mechanism, not a lock in a stack of them — this branch is the
+    -- ONLY thing that holds a slot dark on this build.
+    --
+    -- Three conventions came before it and two of them failed open in the field, because
+    -- all three parked by handing the slot a FILTER and letting invisible C decide what
+    -- that filter meant. This does not filter: a disabled slot is SKIPPED when parse
+    -- consumers are registered and again when a parsed aura is offered
+    -- (Blizzard_AuraContainerSlots.lua), and its candidates and frame assignment are
+    -- cleared outright. It stops the parse rather than suppressing its result, and it is
+    -- keyed by our own slot key so there is nothing left to reinterpret.
+    --
+    -- ☠ NO SECOND LOCK, DELIBERATELY, AND THAT IS A REVERSAL. The maxDuration=0 CF park
+    -- was carried alongside this for exactly one release under the "AND, never swap"
+    -- doctrine that filter-string failures earned. That doctrine was about tokens whose
+    -- meaning we cannot read; it does not apply to a boolean we can read back. Two
+    -- mechanisms for one job meant two dark-state representations, and the diagnostics
+    -- keyed off the weaker one. This branch is now the single source of truth and every
+    -- reader asks the engine.
+    -- ⚠ The 12.1.0 fallback went with it. This branch is a no-op on a client without the
+    -- methods, so a slot there would never park at all — which is correct for a build that
+    -- targets 12.1.5 and would NOT be correct if this file were ever merged back to a
+    -- 12.1.0 line. Check that before any cross-lane cherry-pick.
+    --
+    -- ☠ THE UNLATCH BOUNCE MOVED HERE, AND IT MUST NOT BE LOST. A death latch clears with
+    -- no aura event to trigger a re-parse — the standing parse predates the death — so the
+    -- clear has to carry its own bounce. That used to fall out of the CF park: dark pushed
+    -- a non-nil constant, so the dark->live transition could never compare equal. With the
+    -- park gone the CF values are identical on both sides and that push is skipped. The
+    -- bounce is now the enable transition itself: SetAuraSlotEnabled calls UpdateAllAuras
+    -- UNCONDITIONALLY, which is a fuller rebuild than the slot-level reparse it replaces.
+    --
+    -- ☠ THE DECISION READS THE ENGINE, NOT A CONSUMER FLAG. Tracking "what we last
+    -- pushed" on the handle is the exact shape that desynced both latches (a pooled thing
+    -- outliving the flag that described it): slots are add-only, so a rebuilt handle
+    -- inherits an engine slot that may already be disabled, and a consumer flag reset to
+    -- nil would read "enabled" and never push — leaving the slot dark with nothing to
+    -- clear it, which is the /reload class all over again. IsAuraSlotEnabled is a plain
+    -- boolean (`self.enabled == true`, seeded true at Init) and never secret, so asking
+    -- the engine is both safe and single-sourced.
+    -- ⚠ issecretvalue FIRST as its own statement anyway — house rule, and free.
+    -- ⚠ Value-tracked against that read because ManagedAuraContainer's SetAuraSlotEnabled
+    -- calls UpdateAllAuras() UNCONDITIONALLY, even when the manager's own early-out made
+    -- the write a no-op. A redundant call is a full rebuild-dirty, not free.
+    -- ⚠ LAST, after the string and the candidates: enabling re-parses, so the push that
+    -- wakes a slot must land on values already updated.
+    -- _enabledPushed records INTENT only (the slot audit diffs it against a live read);
+    -- a refused push folds into `ok`, and every caller queues the regen replay on that.
+    if c.SetAuraSlotEnabled and c.IsAuraSlotEnabled then
+        local wantEnabled = not dark
+        local okRead, isEnabled = pcall(c.IsAuraSlotEnabled, c, self.key)
+        local secretEn = issecretvalue and issecretvalue(isEnabled) or false
+        if okRead and not secretEn and isEnabled ~= wantEnabled then
+            local okEn = pcall(c.SetAuraSlotEnabled, c, self.key, wantEnabled)
+            -- ☠ Explicit if, NOT `okEn and wantEnabled or nil`: wantEnabled is false on
+            -- the park side, so the and/or idiom would collapse a SUCCESSFUL park to nil
+            -- and make the audit claim we never pushed it.
+            if okEn then self._enabledPushed = wantEnabled else self._enabledPushed = nil end
+            ok = ok and okEn
+        end
     end
     return ok
 end
@@ -9447,16 +9650,37 @@ function AuraContainer.DebugDumpIdentityGate()
             local ow = h.owner
             if ow then byOwner[ow] = (byOwner[ow] or 0) + 1 end
             local why
-            -- ☠ THE FILTER-STRING TEST IS GONE, and must not come back. A dark slot now
-            -- KEEPS its live filter on purpose (see _pushFilter) — the contradiction
-            -- string is proven to match auras and is no longer pushed — so comparing the
-            -- pushed string against the park constant would flag every correctly-dark
-            -- slot as suspect. The CF lock is the only thing darkening a slot, so it is
-            -- the only sound test for "believed dark but not actually dark".
-            if dark and h._cfPushed ~= SLOT_PARK_CF then
-                why = "believed dark, CF lock not recorded"
-            elseif h._pushOK == false then
+            -- ☠ NEITHER THE FILTER STRING NOR THE CF LOCK IS A TEST ANY MORE, and neither
+            -- must come back. A dark slot keeps its own filter AND its own candidates now
+            -- (see _pushFilter): the park is the engine's enable bit, so both of those
+            -- values are identical on a dark slot and a live one. Comparing either would
+            -- flag every correctly-parked slot as suspect. The engine read below is the
+            -- only sound test, and it is authoritative rather than inferential.
+            if h._pushOK == false then
                 why = "last filter push REFUSED and not yet replayed"
+            end
+            -- ★★ 12.1.5: THE ENGINE CAN NOW BE ASKED, so this is the one place a slot's
+            -- believed state meets engine truth rather than another record of our own
+            -- intent. IsAuraSlotEnabled is a plain boolean and never secret.
+            -- ☠ BOTH DIRECTIONS ON PURPOSE. "Believed dark but enabled" is the leak
+            -- precondition the rest of this audit hunts; "believed live but DISABLED" is
+            -- its mirror — a slot rendering nothing while every consumer-side field says
+            -- it should — and that is the stuck-dark shape only a /reload has ever
+            -- cleared. Nothing else in DF could see it before, because a disabled slot is
+            -- indistinguishable from one whose auras simply do not match.
+            if not why then
+                local cc = h.owner and h.owner.container
+                if cc and cc.IsAuraSlotEnabled then
+                    local okRead, isEnabled = pcall(cc.IsAuraSlotEnabled, cc, h.key)
+                    local secretEn = issecretvalue and issecretvalue(isEnabled) or false
+                    if okRead and not secretEn then
+                        if dark and isEnabled then
+                            why = "believed dark but the engine slot is ENABLED"
+                        elseif (not dark) and (not isEnabled) then
+                            why = "believed LIVE but the engine slot is DISABLED (stuck dark)"
+                        end
+                    end
+                end
             end
             if why then
                 flagged = flagged + 1

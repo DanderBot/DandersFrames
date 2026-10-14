@@ -6528,10 +6528,23 @@ function Factory:DebugDumpADGate()
                                 -- convention later. The CF park constant is now the only
                                 -- thing that darkens a slot, so it is the only honest
                                 -- source for this column.
+                                -- ★ NOW AN ENGINE READ, NOT AN INFERENCE. The CF park is
+                                -- retired too (see AuraContainer's SLOT_PARK_CF tombstone):
+                                -- a dark slot carries its own filter AND its own
+                                -- candidates, so both would report every parked slot as
+                                -- shown. IsAuraSlotEnabled answers the question directly
+                                -- instead of asking what we last pushed, which is the whole
+                                -- reason this column has been wrong twice.
                                 local pf = h and h._pushedFilter
-                                local parkCF = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_CF
-                                local darkCF = parkCF ~= nil and h and h._cfPushed == parkCF
-                                hShown = (pf == nil) and "-" or (darkCF and "false" or "true")
+                                local cc = h and h.owner and h.owner.container
+                                local darkEn
+                                if cc and cc.IsAuraSlotEnabled then
+                                    local okR, en = pcall(cc.IsAuraSlotEnabled, cc, h.key)
+                                    local secretEn = issecretvalue and issecretvalue(en) or false
+                                    if okR and not secretEn then darkEn = not en end
+                                end
+                                hShown = (pf == nil) and "-"
+                                    or (darkEn == nil and "?" or (darkEn and "false" or "true"))
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter
