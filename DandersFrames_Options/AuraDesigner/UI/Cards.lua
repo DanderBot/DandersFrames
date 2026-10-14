@@ -452,7 +452,7 @@ end
 -- and a source of flicker the moment it has three.
 -- ☠ ITS OWN TABLE, and not for tidiness: PIH_SURFACE_ORDER (since removed) was declared far
 -- BELOW here, so naming it would have compiled as a nil GLOBAL read -- the "declared below
--- its first caller" trap UnitExemptFromHelpfulGate documents in Frames/AuraContainer.lua.
+-- its first caller" trap.
 -- Kept in the same order as the menu, and it only has to be self-consistent: this decides
 -- which hit is called primary, not what anything renders.
 PIH_K.RANK  = {
@@ -1983,8 +1983,7 @@ end
 -- ⚠ IT LIVES HERE, NOT BESIDE PIH_IsEnabled, BECAUSE OF ONE UPVALUE. It calls
 -- pihCreateSignal, a `local function` declared further up the file than the settings
 -- accessors -- referencing it from up there compiles as a nil GLOBAL read, which luac -p
--- is blind to and only the _ENV globals diff catches. Same trap as the one
--- UnitExemptFromHelpfulGate documents.
+-- is blind to and only the _ENV globals diff catches.
 -- ⚠ TURNING IT ON WITH NOTHING THERE SEEDS THE DEFAULT EFFECT, and that is the one place this
 -- differs from AD's switch. AD is enabled and then you add indicators; the helper is a recipe,
 -- and a first-ever enable that lit up an empty Effects tab would be a switch with nothing on

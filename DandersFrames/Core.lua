@@ -6398,7 +6398,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- either; these are reached THROUGH it and have to match it.
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
-        sub("idgate",       "engine gate mirror + group canaries ('probe' toggles them)", true)
+        sub("idgate",       "aura latches, slot audit and the latch trail", true)
         sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -7346,15 +7346,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- text is always a width fault; this says WHICH frame caused it.
                 if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
             elseif msg == "idgate" or msg:match("^idgate%s") then
-                -- Post-demolition (69465): "idgate" prints everything — handles/slots
-                -- classification, the per-group-member engine mirror, canary readings
-                -- and the always-on gate trail; works in combat (reads only).
-                -- "idgate probe" TOGGLES group-wide canaries (no unit arg);
-                -- "idgate probe show" toggles the eyeball placement.
-                local probeArgs = msg:match("^idgate%s+probe%s*(.-)%s*$")
-                if probeArgs and DF.AuraContainer and DF.AuraContainer.DebugGateProbe then
-                    DF.AuraContainer.DebugGateProbe(probeArgs)
-                elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
+                -- Every container's latches and filters, the slot-enable audit and the
+                -- always-on latch trail; reads only, so it works in combat.
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
             elseif msg == "dispelcap" then

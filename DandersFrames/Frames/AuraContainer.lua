@@ -776,19 +776,16 @@ local function samplePoolGrowth()
                 if base == nil then
                     -- First sight is the batch allocation (10 per group); baseline
                     -- silently. A flood that lands before the first sample baselines
-                    -- in — accepted; the canary probe covers arm-time state.
+                    -- in — accepted.
                     w.base[key] = n
                 elseif n > base then
                     w.base[key] = n
                     local unit = h.config and h.config.unit
-                    local gated = h.backend.gatedGroupKeys and h.backend.gatedGroupKeys[key]
                     DF:DebugWarn(DBG,
                         "POOL GREW unit=%s group=%s %d -> %d: more than %d auras were assigned to"
-                        .. " this one group at once%s. Latched for the session — this line is proof"
+                        .. " this one group at once. Latched for the session — this line is proof"
                         .. " the overflow happened even if a kick has already healed the display.",
-                        tostring(unit), tostring(key), base, n, base,
-                        gated and " — and this group's HELPFUL exclude list is skipped when the"
-                            .. " identity gate declines, so this is likely that flood" or "")
+                        tostring(unit), tostring(key), base, n, base)
                 end
             end
         end
@@ -1848,138 +1845,18 @@ local function recordCandidateFilters(rec, config)
     return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
 end
 
--- IDENTITY-GATE EXPOSURE, as 12.1.5 evaluates it. include/excludeSpellIDs are tested only
--- inside CanApplyIdentityCandidateFilters. Helpful auras on group-member tokens always pass
--- it (exit A2); anywhere else it needs UnitCanAssist, which fails for a cross-faction unit
--- outside instances, a duel partner or a mind-controlled pinned unit. When it declines:
---   * an include list REJECTS the aura, so the pool renders blank rather than flooding.
---     Not counted as vulnerable: nothing wrong can show.
---   * an exclude list is SKIPPED, so "everything except X" shows everything.
---   * a spell-CATEGORY token (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE, the defensive row's
---     empty-selection fallback) is decided in C where we cannot see it, so it is treated
---     as the exclude case.
--- Plain HELPFUL pools carry no selection and are correct on any unit. Nothing acts on
--- this classification any more; it feeds the dump and the POOL GREW warning.
-local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true }
-
--- ★ THE NeverSecret EXEMPTION, and why it is EXCLUDE-ONLY. The engine's identity gate has
--- a per-AURA escape hatch (Blizzard_AuraContainerUtil, checked FIRST and it wins outright):
--- a spell whose C_Secrets.GetSpellAuraSecrecy is NeverSecret stays filterable on any unit —
--- that is how Blizzard itself drops Exhaustion/Sated from friendly frames.
---   * An excludeSpellIDs pool whose ENTIRE set is NeverSecret can never change behaviour
---     on lost trust: the excluded auras keep hitting the exclude test (their exemption
---     holds the gate open for THEM), and every other aura was never excluded anyway. Same
---     output in both trust states ⇒ genuinely not vulnerable ⇒ parking it would hide
---     correct data for nothing. This also honours the 2026-07-18 uniform-blackout call
---     better than the blackout did: the buffs the user chose to hide STAY hidden.
---   * An includeSpellIDs pool needs no exemption: a declined gate rejects every aura it
---     does not exempt, so the pool can only lose auras, never gain them.
--- Secrecy is a static DB2 property, so one session cache; pcall + guards because the
--- C_Secrets surface is 12.x-only and a probe failure must degrade to "vulnerable"
--- (park too much, never leak).
-local auraSecrecyCache
-local function excludeSetAllNeverSecret(map)
-    local CS = C_Secrets
-    if not (CS and CS.GetSpellAuraSecrecy and Enum and Enum.SecrecyLevel) then return false end
-    local never = Enum.SecrecyLevel.NeverSecret
-    auraSecrecyCache = auraSecrecyCache or {}
-    for id in pairs(map) do
-        local v = auraSecrecyCache[id]
-        if v == nil then
-            local ok, s = pcall(CS.GetSpellAuraSecrecy, id)
-            v = (ok and s == never) or false
-            auraSecrecyCache[id] = v
-        end
-        if not v then return false end
-    end
-    return true
-end
-
-local function filterVulnerableToIdentityGate(filterString, cf)
-    if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
-    if cf and cf.includeSpellIDs then return false end
-    if cf and cf.excludeSpellIDs and not excludeSetAllNeverSecret(cf.excludeSpellIDs) then
-        return true
-    end
-    for token in filterString:gmatch("[^|%s]+") do
-        if GATED_CATEGORY_TOKENS[(token:gsub("^!", ""))] then return true end
-    end
-    return false
-end
-
 -- SOURCE-RELATIVE pools are the ones that can FAIL OPEN on who cast an aura: the
--- PLAYER token ("HELPFUL|PLAYER" = only-my-buffs). For a unit that isn't in your
--- visible world (a same-faction party member in a DIFFERENT instance) the engine
--- can't attribute a caster, so "mine" passes every caster's aura. Spell-ID
--- sub-filters are source-INDEPENDENT and keep working, so only-my-buffs breaks in
--- isolation while UnitCanAssist stays TRUE — which is why an assist gate never
--- catches it. HISTORICAL: the visibility gate that acted on this flag died with the
--- demolition; the flag survives as classification for the dump. The attribution
--- failure itself was NOT fixed by 69465 — if a source-only pool is ever seen leaking
--- on a cross-instance unit, this classification is where a response would re-key.
+-- PLAYER token ("HELPFUL|PLAYER" = only-my-buffs). For a unit outside your world the
+-- engine can't attribute a caster, so "mine" passes every caster's aura, while
+-- UnitCanAssist stays TRUE. The visibility latch acts on exactly these pools (see
+-- AuraContainer.SetUnitVisibilityLatched).
 --
--- ☠ isFromPlayerOrPlayerPet USED TO COUNT HERE AND MUST NOT. It was added on the
--- reading that the field meant "cast by ME", which made it look like a second flavour
--- of only-my-buffs. It does not — it means "the caster is A PLAYER", Blizzard's own
--- consumer names the parameter `casterIsAPlayer`, and the correction is written up in
--- the friendly-debuff-filtering notes.
--- ★ On the corrected reading it CANNOT fail open. Blizzard_AuraContainerUtil applies
--- it as an equality test — `auraData.isFromPlayerOrPlayerPet ~= cf.isFromPlayerOrPlayerPet
--- → reject` — and that test sits OUTSIDE the CanApplyIdentityCandidateFilters block,
--- which wraps only includeSpellIDs/excludeSpellIDs. So it keeps being applied on units
--- where spell-ID filtering is dead, and if the caster is unattributable the aura's own
--- field cannot equal the requested value, so the aura is REJECTED. It fails CLOSED: it
--- can hide too much, never leak.
--- ⇒ Gating it hid a row that was filtering perfectly well — a false trigger, and on the
--- Non-Player Debuffs category it would have blanked the row on any phased or
--- out-of-instance unit for no reason. The gate should fire where something actually
--- fails open (Krathe, 2026-08-13).
--- ⚠ Reasoned from Blizzard's shipped source, not measured. If a source-only pool is ever
--- seen leaking on a non-visible unit, this is the line to revisit first.
--- `_cf` is accepted and ignored ON PURPOSE — callers still hand over the
--- candidateFilters, and the underscore is there so the next reader sees the omission
--- as a decision rather than an oversight to fix.
--- ═══ RETIRED 2026-08-15: the four-boolean debuff park (RecordIdentityGated) ═══
---
--- It parked records asserting isBossAura / isBossOrRoleAura / isRoleAura / isPriorityAura
--- whenever unit trust was lost. Removed because the engine never skips those filters, so
--- there was no failure for it to prevent — only rows it could empty by mistake, which is
--- what it did (dispel overlay lit with no debuff icon under it, two testers on 5.1.3).
---
--- The three findings that settled it, all from the shipped client
--- (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua):
---   1. In DoesAuraPassCandidateFilters, ONLY `includeSpellIDs` and `excludeSpellIDs` sit
---      inside the `if CanApplyIdentityCandidateFilters(...)` block. All four booleans —
---      and isFromPlayerOrPlayerPet — are evaluated after it, unconditionally.
---   2. The categorisation cannot be poisoned by lost identity: the ENGINE evaluates
---      AuraUtil.IsRoleAura (which reads auraData.isTank/isHealer/isDPSRoleAura, not
---      spellId) and IsPriorityDebuff (a securecallfunction with the real ID). It is our
---      Lua that cannot read spellId, not Blizzard's.
---   3. Even under the one assumption source cannot settle — that those auraData fields
---      might be unpopulated for an untrusted unit — each is applied as an EQUALITY test,
---      so `nil ~= true` rejects and `nil ~= false` rejects. Both directions fail CLOSED.
---      There is no direction in which they leak, therefore none in which parking helps.
---
--- ⚠ We inherited the belief from a peer, which marks the identical four "identity-gated".
--- Another 12.1 raid-frame implementation, arrived at independently, parks the opposite
--- side: HELPFUL records carrying spell-ID filters, and never gates harmful at all. That is
--- the keying the API supports, and it is what gatedGroupKeys carries now.
--- ☠ HARMFUL must never take a TRANSIENT park: for a harmful aura the engine skips spell-ID
--- filters when you CAN assist, so on a friendly they are permanently dead, not
--- intermittently — parking on that would park forever.
---
--- ═══════════════════════════════════════════════════════════════════════════════
---
--- ⚠ HISTORY, kept because it is the reason to distrust a "one-character fix". The park
--- first tested `~= nil` rather than `== true`, and `false ~= nil` is true — so the dedup
--- subtractions BuildDirectDebuffFilters stamps onto every token record (isBossOrRoleAura
--- = false etc.) counted as gated, and losing trust emptied the ENTIRE debuff row. That was
--- corrected to `== true` on 2026-08-14 and the row stopped blanking, which read as a fix
--- and was really a mitigation: the predicate was still wrong, just less often. Both
--- Danders and I wrote that one-liner independently the same day and neither of us went on
--- to ask whether the four keys belonged there at all. A change that makes the symptom go
--- away is the easiest place to stop looking.
-
+-- ☠ isFromPlayerOrPlayerPet DOES NOT COUNT, and must not come back. It means "the caster
+-- is A PLAYER", not "cast by me", and the engine applies it as an equality test OUTSIDE
+-- CanApplyIdentityCandidateFilters, so an unattributable caster is REJECTED -- it can
+-- hide too much, never leak. Gating it would blank Non-Player Debuffs on any phased or
+-- out-of-instance unit for nothing.
+-- `_cf` is accepted and ignored ON PURPOSE: callers still hand over the candidate filters.
 local function filterSourceRelative(filterString, _cf)
     if type(filterString) == "string" then
         for token in filterString:gmatch("[^|%s]+") do
@@ -1987,53 +1864,6 @@ local function filterSourceRelative(filterString, _cf)
         end
     end
     return false
-end
-
--- ★★ EXIT A2 — THE 69465 GROUP-MEMBER EXEMPTION (hotfix 2026-08-24, Gethe 86017d5a,
--- verified against the RETAIL dump on the same date, .build.info 12.1.0.69465).
--- The engine's gate now allows HELPFUL identity filters UNCONDITIONALLY for
--- group-member tokens, checked BEFORE its assist tests:
---     if auraData.isHelpful and UnitIsPlayerControlledOrGroupMember(unitToken) then
---         return true
---     end
--- The new API is TOKEN-SHAPE, not state — per its doc string: true for 'player',
--- 'pet', 'vehicle', partyN/partypetN/raidN/raidpetN. MC, death, cinematics, vehicles,
--- phasing, faction flips: none of it matters — the HELPFUL fail-open cannot happen on
--- these tokens any more (Blizzard's own comment names Mind Control as the motivating
--- case). Our verdict mirrors it exactly: an exempt unit never takes assist-side
--- distrust. Without the mirror the gate OVER-HIDES — every wipe/MC/cinematic would
--- hide pools the engine is now filtering correctly (the "decoupled" quadrant the
--- canary probe was built to detect).
--- ⚠ The API doubles as the BUILD MARKER: nil on a pre-69465 client, where the full
--- gate stands unchanged. Fails toward NOT exempt on any doubt (pcall failure,
--- secret) — not-exempt only re-enables the old gate, which over-hides at worst and
--- never leaks.
--- ⚠ What this does NOT retire: the death latch (death strips auras with no
--- UNIT_AURA — engine staleness, unrelated to the gate) and the visibility/phase
--- probes (cross-instance data is frozen and "Only Mine" attribution is unfixed —
--- this hotfix touched neither).
--- ⚠ DECLARED HERE, with the other gate predicates, far above its callers. Declared
--- lower down it would compile as a nil GLOBAL at its first caller: the exact
--- "declared below its first caller" trap GateAppliesTo documents.
-local function UnitExemptFromHelpfulGate(unit)
-    if not UnitIsPlayerControlledOrGroupMember then return false end
-    local ok, v = pcall(UnitIsPlayerControlledOrGroupMember, unit)
-    if not ok then return false end
-    if issecretvalue and issecretvalue(v) then return false end
-    return v == true
-end
-
--- The residual assist probe, for the non-exempt tokens. 69465 also grew UnitCanAssist
--- by two args (canAssistImmunePC, canAssistUninteractable — both default false) and
--- the engine's gate passes true,true, so assist ignores immune/uninteractable states
--- (vehicle, teleporting, entombed). Matching it keeps the residual verdict aligned
--- with what the engine actually consults. Same build marker: a pre-69465 client
--- keeps the exact old call.
-local function GateAssistProbe(unit)
-    if UnitIsPlayerControlledOrGroupMember then
-        return pcall(UnitCanAssist, "player", unit, true, true)
-    end
-    return pcall(UnitCanAssist, "player", unit)
 end
 
 -- Dynamic-unit tokens whose underlying unit changes WITHOUT the token changing, so
@@ -4377,7 +4207,6 @@ function NativeBackend:build()
     -- it out as an oversight rather than a constraint.
     local sortMethod, sortDirection = deriveSort(config)
     self.groupKeys = {}
-    self.gatedGroupKeys = nil   -- rebuilt below, per group (identity park set)
     -- key -> the record style that group was built with. applyLayout re-pushes group
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to
     -- the shared size, so it needs to know which groups are scaled.
@@ -4385,7 +4214,6 @@ function NativeBackend:build()
     -- key -> native slot button (consumer styling). Overlay AND single-slot rows:
     -- both declare AuraSlots, and both need the button reachable by key afterwards.
     self.slotButtons = (isOverlay or isSingleSlot) and {} or nil
-    handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
     -- ★ OWN-FRAME PREVIEW (see Handle:_buildOwnPreview). When on, test mode declares
     -- NOTHING to the engine and paints our own frames instead, so the global sample
@@ -4565,15 +4393,6 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
-        -- NOT gated on `cf`: filterVulnerableToIdentityGate's OTHER branch is the
-        -- spell-CATEGORY token case (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE), which is
-        -- precisely the defensive row's empty-selection fallback -- and that config
-        -- carries NO candidateFilters. Requiring cf here made that branch dead, so a
-        -- cleared defensive selection went ungated and filled with ordinary buffs on
-        -- a cross-faction unit. The function is nil-safe on cf.
-        if filterVulnerableToIdentityGate(f, cf) then
-            handle._idGateVulnerable = true
-        end
         if filterSourceRelative(f, cf) then
             handle._idGateSourceRelative = true
         end
@@ -4592,13 +4411,6 @@ function NativeBackend:build()
                 if okSlot and btn then
                     pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
-                    -- ☠ PARK KEYS AT BIRTH, mirroring the group branch. The tuning path
-                    -- rebuilds this set. Post-demolition (69465) the key set is pure
-                    -- classification for the dump — nothing parks on it any more.
-                    if filterVulnerableToIdentityGate(f, cf) then
-                        self.gatedGroupKeys = self.gatedGroupKeys or {}
-                        self.gatedGroupKeys[key] = true
-                    end
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             elseif isSingleSlot then
                 -- Same declaration as the overlay branch, different GEOMETRY: an
@@ -4619,11 +4431,6 @@ function NativeBackend:build()
                     pcall(btn.ClearAllPoints, btn)
                     pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                     self.slotButtons[key] = btn
-                    -- Park keys at birth — see the overlay branch above for why.
-                    if filterVulnerableToIdentityGate(f, cf) then
-                        self.gatedGroupKeys = self.gatedGroupKeys or {}
-                        self.gatedGroupKeys[key] = true
-                    end
                 elseif not okSlot then
                     DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
                 end
@@ -4644,19 +4451,6 @@ function NativeBackend:build()
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
-                    -- Remember which groups the identity park applies to. Per KEY, so
-                    -- token records stay live while the identity-dependent ones park.
-                    -- ☠ THE PREDICATE IS `filterVulnerableToIdentityGate`, i.e. exactly the
-                    -- records whose filters the ENGINE can skip: HELPFUL pools carrying
-                    -- an exclude list or a category token. It used to be RecordIdentityGated -- four
-                    -- category booleans on the DEBUFF row -- which the engine applies
-                    -- unconditionally (Blizzard_AuraContainerUtil: only the two spell-ID
-                    -- keys sit inside CanApplyIdentityCandidateFilters). Those booleans
-                    -- also fail CLOSED in both directions -- the test is an equality, so an
-                    -- unpopulated field rejects rather than passes -- so there was never a
-                    -- leak for that park to prevent, only rows it could empty by mistake.
-                    self.gatedGroupKeys = self.gatedGroupKeys or {}
-                    self.gatedGroupKeys[key] = filterVulnerableToIdentityGate(f, cf) or nil
                 else
                     DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
                 end
@@ -4959,22 +4753,14 @@ function NativeBackend:applyGroupTuning()
     -- On a cross-faction unit (UnitCanAssist false) the gate fails open and an
     -- "only these spells" row renders every buff, so recompute from the records
     -- this call is about to push.
-    self.handle._idGateVulnerable = nil
     self.handle._idGateSourceRelative = nil
-    self.gatedGroupKeys = nil
     for i, rec in ipairs(normalizeFilters(config.filter)) do
         local key = rec.key or ("df" .. i)
         local cf = recordCandidateFilters(rec, config)
         cfByKey[key] = cf
         fsByKey[key] = rec.f
-        -- Classification only, post-demolition (69465): nothing actuates on these —
-        -- the dump prints them, and a string-only delta lands here because filter
-        -- strings can change without a rebuild.
-        if filterVulnerableToIdentityGate(rec.f, cf) then
-            self.handle._idGateVulnerable = true
-            self.gatedGroupKeys = self.gatedGroupKeys or {}
-            self.gatedGroupKeys[key] = true
-        end
+        -- Re-derived here because a filter string can change without a rebuild, and the
+        -- visibility latch reads this flag.
         if filterSourceRelative(rec.f, cf) then
             self.handle._idGateSourceRelative = true
         end
@@ -6741,8 +6527,8 @@ end
 -- ============================================================
 -- GATE EVENT LOG — always-on in-memory trail + the IDGATE category
 -- ============================================================
--- Post-demolition the writers are FEW and RARE: death-latch transitions and the
--- canary probe. That is why this can be ALWAYS-CAPTURING (Krathe's ask,
+-- The writers are FEW and RARE: the death and visibility latch transitions and the
+-- latch reconciler. That is why this can be ALWAYS-CAPTURING (Krathe's ask,
 -- 2026-08-24: "the debug console should capture anything we need" without
 -- toggling a category on) where the old gate's log could not — the old writers
 -- produced hundreds of lines per zone-in and had to stay opt-in. The trail is a
@@ -8411,8 +8197,7 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
         or setmetatable({}, { __mode = "k" })
     AuraContainer._slotHandles[handle] = true
 
-    -- Classification stamp (inert bookkeeping for the dump) + the replay's stores.
-    handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
+    -- Source-relative stamp (the visibility latch reads it) + the replay's stores.
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     -- (_lastCandidateFilters is stashed ABOVE, before the declare, so _cf() could read it.)
     -- CF seed: AddAuraSlot just declared these candidates engine-side, so the
@@ -8852,13 +8637,11 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         self._lastSortMethod    = sortMethod
         self._lastSortDirection = sortDirection or 0
     end
-    -- Recompute the CLASSIFICATION whenever either half of the filter moves (inert
-    -- bookkeeping post-demolition — the dump prints it; nothing actuates on it). Pure
-    -- stored state, so it is correct to do even in lockdown -- only the secure pushes
-    -- defer.
+    -- Recompute the source-relative flag whenever either half of the filter moves (the
+    -- visibility latch reads it). Pure stored state, so it is correct to do even in
+    -- lockdown -- only the secure pushes defer.
     if filterChanged or candidatesChanged then
         local cf = self._lastCandidateFilters   -- RAW on purpose -- see _cf()'s header
-        self._idGateVulnerable    = filterVulnerableToIdentityGate(self.liveFilter, cf)
         self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
     end
     -- Defer and replay, mirroring ApplyStyle below.
@@ -8935,10 +8718,8 @@ end
 -- otherwise. Every nil test at the read sites keeps its meaning, and the recovery edge can
 -- never be burned by a gated slot that has a real selection.
 --
--- ⚠ THE ONE READ THAT STAYS RAW is ApplyTuning's vulnerability recompute:
--- _idGateVulnerable is a property of the user's REAL selection, and deriving it from the
--- dead map would drop a gated-dark slot out of the cinematic-latch population -- it would
--- come back from a cutscene fail-open.
+-- ⚠ THE ONE READ THAT STAYS RAW is ApplyTuning's source-relative recompute: that flag
+-- is a property of the user's REAL selection, not of the dead map.
 --
 -- ☠ CANDIDATE LANE ONLY. The identity gate's verdicts actuate through the shared
 -- owner anchor because gate/cine/death are UNIT-level facts (see _pushFilter). Ours is
@@ -9379,22 +9160,12 @@ end
 -- ============================================================
 
 -- ============================================================
--- ☠ THE IDENTITY-GATE MACHINERY WAS DEMOLISHED HERE (2026-08-24, Krathe's call).
--- Build 69465's exit A2 (UnitIsPlayerControlledOrGroupMember — token-shape, see
--- UnitExemptFromHelpfulGate) plus the hardened 4-arg UnitCanAssist made the
--- engine's own gate safe: HELPFUL identity filters are ALWAYS applied on group
--- tokens, so there is no fail-open left to hide and every re-parse is correct.
--- Removed wholesale: the verdict twins (_applyIdentityGate), the park
--- (maxFrameCount 0 / gate filter pushes), the gate hides (_idGateHidden /
--- _gateHidden), the recovery edge (_noteGateRecovery / _pendingGateReparse),
--- the cinematic latch (cineWatch / CineLatchAll / _setCineLatch), the event
--- watcher (idGateWatch), the sweep (IdentityGateSweep / GateAppliesTo) and the
--- 5s backstop ticker. git history at tag backup/pre-gate-demolition holds the
--- full machinery if the residual class (non-group tokens: pinned bossN,
--- target/focus dynamics) ever produces a real fail-open report.
--- What survives: the DEATH LATCH below (death strips auras with NO UNIT_AURA —
--- engine staleness, not the gate), consumer Park/Restore, the classification
--- flags (inert bookkeeping for the dump), and the canary probe.
+-- ☠ THE ENGINE'S IDENTITY GATE NEEDS NO DF COUNTERPART. On group tokens it always
+-- applies HELPFUL spell-ID filters (UnitIsPlayerControlledOrGroupMember), and since
+-- 12.1.5 a declined include list rejects rather than floods; DF builds no HARMFUL
+-- include lists. What remains here is not about the gate: the DEATH LATCH (death
+-- strips auras with NO UNIT_AURA -- engine staleness) and the VISIBILITY LATCH (the
+-- PLAYER token cannot attribute a caster for a unit outside your world).
 -- ============================================================
 -- DEATH LATCH — unit-keyed sweep (#1043)
 -- ============================================================
@@ -9409,9 +9180,7 @@ end
 -- a NEW death transition, and the unit is already dead, so that edge never comes again.
 --
 -- Field shape: reload while a party member is a ghost and their auras all come back --
--- every row, because the latch is the ONLY cover for the ones the identity gate does not
--- reach (a HARMFUL row with no includeSpellIDs reports zero gated groups, so it is neither
--- vulnerable nor gated and never enters the assist branch at all).
+-- every row, because the latch is the only thing that hides a corpse's stale auras.
 --
 -- Keyed by unit token, matching the latch's own unit-keyed design, so every display of
 -- that unit -- party frame, pinned frame, whatever is built later -- reads the same answer.
@@ -9754,35 +9523,20 @@ local function safeTxt(v)
     return (s:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
 end
 
--- ★ POST-DEMOLITION SHAPE (69465). The DF-side gate is GONE — exit A2 plus the
--- hardened 4-arg assist made the engine's own gate safe for every group token, so
--- there is no verdict, park, gate-hide, recovery edge or cinematic latch left to
--- report. What remains per line: the CLASSIFICATION (vuln/srcRel — which pools the
--- OLD world would have gated; kept as inert bookkeeping and printed so a field
--- report can still say which pools carry identity filters), the engine mirror
--- (a2 + live 4-arg canAssist), the DEATH LATCH (the one surviving hide), and the
--- window state. If a container is dark, the answer is now always one of: consumer
--- intent, death latch, or the consumer's own Park — nothing else hides.
+-- Per container: its filters, whether it is source-relative (the visibility latch's
+-- population), the two latches and the window state. If a container is dark, the
+-- answer is always one of: consumer intent, a latch, or the consumer's own Park.
 function AuraContainer.DebugDumpIdentityGate()
     local o = DF:Out("Identity Gate")
     local CAP = 30
-    local n, vuln = 0, 0
+    local n = 0
     for h in pairs(AuraContainer._handles or {}) do
         n = n + 1
-        if h._idGateVulnerable then vuln = vuln + 1 end
         if n <= CAP then
             local cfg = h.config or {}
             local unit = cfg.unit
-            local canTxt = "-"
-            if type(unit) == "string" and UnitExists(unit) then
-                local ok, can = GateAssistProbe(unit)
-                if not ok then canTxt = "ERR"
-                elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
-                else canTxt = tostring(can) end
-            end
             -- Filter + cf summary: distinct record filter strings, and whether ANY
-            -- record carries an include/exclude spell map — the fields the
-            -- vulnerability classification is derived from.
+            -- record carries an include/exclude spell map.
             local fParts, seenF, inc, exc = {}, {}, false, false
             for _, rec in ipairs(normalizeFilters(cfg.filter)) do
                 if not seenF[rec.f] then
@@ -9799,15 +9553,13 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            local a2Txt = tostring(type(unit) == "string" and UnitExists(unit)
-                and UnitExemptFromHelpfulGate(unit) or false)
-            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s a2=%s canAssist=%s death=%s intent=%s shown=%s retry=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s srcRel=%s exists=%s death=%s vis=%s intent=%s shown=%s retry=%s"):format(
                 n, safeTxt(cfg.mode or "row"), safeTxt(unit),
                 safeTxt(table.concat(fParts, "&")), tostring(inc), tostring(exc),
-                tostring(h._idGateVulnerable or false),
                 tostring(h._idGateSourceRelative or false),
-                tostring(type(unit) == "string" and UnitExists(unit) or false), a2Txt, canTxt,
+                tostring(type(unit) == "string" and UnitExists(unit) or false),
                 tostring(h._deathLatched or false),
+                tostring(h._visLatched or false),
                 tostring(h._intendedShown ~= false),
                 tostring(h.config and h.config.parentDrivenVisibility and "(nested)"
                     or (h.frame and h.frame:IsShown()) or false),
@@ -9824,28 +9576,17 @@ function AuraContainer.DebugDumpIdentityGate()
     -- view is derived, and printing it would hide the user's real selection behind the
     -- dead placeholder — on the one diagnostic most likely to be read while debugging the
     -- Power Infusion helper.
-    local sn, svuln = 0, 0
+    local sn = 0
     for s in pairs(AuraContainer._slotHandles or {}) do
         sn = sn + 1
-        if s._idGateVulnerable then svuln = svuln + 1 end
         if sn <= CAP then
             local unit = s.owner and s.owner.unit
-            local canTxt = "-"
-            if type(unit) == "string" and UnitExists(unit) then
-                local ok, can = GateAssistProbe(unit)
-                if not ok then canTxt = "ERR"
-                elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
-                else canTxt = tostring(can) end
-            end
-            local sa2Txt = tostring(type(unit) == "string" and UnitExists(unit)
-                and UnitExemptFromHelpfulGate(unit) or false)
-            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s a2=%s canAssist=%s parked=%s death=%s live=%s pushed=[%s] pushOK=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s srcRel=%s parked=%s death=%s vis=%s live=%s pushed=[%s] pushOK=%s"):format(
                 sn, safeTxt(s.key), safeTxt(unit),
-                tostring(s._idGateVulnerable or false),
                 tostring(s._idGateSourceRelative or false),
-                sa2Txt, canTxt,
                 tostring(s.parked or false),
                 tostring(s._deathLatched or false),
+                tostring(s._visLatched or false),
                 -- ⚠ live= is the INTENDED filter. pushed= is what _pushFilter last sent:
                 -- a dark slot keeps its OWN live filter now (the CF lock parks it; the
                 -- park string is no longer pushed). pushOK= is whether the setter was
@@ -9858,11 +9599,12 @@ function AuraContainer.DebugDumpIdentityGate()
     end
     o:Section("Summary")
     o:Field("handles", n, n > 0 and "GOOD" or "NEUTRAL")
-    -- vuln counts pools that the PRE-69465 world would have gated — informational
-    -- only now, so no WARN colour: carrying identity filters is normal and safe.
-    o:Field("identity-filtered", vuln, "NEUTRAL")
     o:Field("slots", sn, sn > 0 and "GOOD" or "NEUTRAL")
-    o:Field("slots identity-filtered", svuln, "NEUTRAL")
+    local nDead, nVis = 0, 0
+    for _ in pairs(AuraContainer._deathLatchedUnits or {}) do nDead = nDead + 1 end
+    for _ in pairs(AuraContainer._invisibleUnits or {}) do nVis = nVis + 1 end
+    o:Field("units death-latched", nDead, "NEUTRAL")
+    o:Field("units visibility-latched", nVis, "NEUTRAL")
     -- ★ Global aura secrecy, printed because it frames every line above: it does NOT
     -- switch the identity gate off (CanApplyIdentityCandidateFilters has no such bypass),
     -- but it is the first thing you want to know when a filter behaves unexpectedly.
@@ -9871,12 +9613,6 @@ function AuraContainer.DebugDumpIdentityGate()
         o:Field("auras secret", okS and tostring(secret) or "ERR", "NEUTRAL")
     end
     o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
-    -- ★ GROUP SECTION — per group member: the engine mirror (a2 / 4-arg assist),
-    -- death-latch state, and canary readings when the probe is armed. Defined in
-    -- the probe block below; resolved at call time, so declaration order is fine.
-    if AuraContainer.DebugGateProbeStatus then
-        AuraContainer.DebugGateProbeStatus(o)
-    end
     -- ★ SLOT AUDIT — the parked-slot leak class (2026-08-29), made visible. Presence is
     -- secret, so "is this dark slot RENDERING" cannot be read — but every input on OUR
     -- side of the divergence can: what we believe (parked/latched), what we last pushed
@@ -9962,347 +9698,9 @@ function AuraContainer.DebugDumpIdentityGate()
         o:Section(("Gate trail — last %d of %d lines (always on)"):format(nT - first + 1, nT))
         for i = first, nT do print("    " .. safeTxt(trail[i])) end
     else
-        o:Section("Gate trail — empty (no death-latch or canary transitions this session)")
+        o:Section("Gate trail — empty (no latch transitions this session)")
     end
     o:Siblings("idgate")
-end
-
--- ============================================================
--- /df debug idgate probe — THE ENGINE CANARY (post-69465 shape)
--- ============================================================
--- Watches whether the ENGINE honours identity candidate filters, group-wide,
--- with no per-unit arming (Krathe's shape, 2026-08-24): bare `probe` TOGGLES
--- canaries for player + party1-4 (raid1-10 in a raid); `/df debug idgate`
--- prints everything, in or out of combat; transitions land in the always-on
--- gate trail. Post-demolition its job is REGRESSION WATCH: the DF gate is
--- gone on the strength of 69465's exit A2, so a HELPFUL canary ever reading
--- OPEN on a group token is the signal that Blizzard moved the ground again.
---
--- MECHANISM. Per unit, two RAW engine containers (outside every DF path — the
--- instrument measures the engine). Each declares ONE group whose
--- includeSpellIDs is { [6603] = true } (Auto Attack — a real spell that is
--- never an aura), so the group is empty BY CONSTRUCTION while the engine
--- honours the filter. Any button materialising = the include map was skipped.
---   * HELPFUL canary — must stay clean on group tokens (exit A2). The watch.
---   * HARMFUL canary — exit B: OPEN on assistable friendlies is the DESIGNED
---     baseline; it reading clean would flag a harmful-side change.
--- DETECTION — graceful degradation (aura-adjacent frame state can be secret;
--- every read pcall + issecretvalue guarded): the plain `created` counter
--- (post-settle growth only — the template pre-creates ~10 frames per group),
--- guarded shown/width reads, and the `probe show` eyeball as the zero-read
--- fallback. The 1s ticker logs transitions to the gate trail.
---
---   probe        toggle group canaries (arm out of combat; disarm any time)
---   probe show   toggle the eyeball placement (bottom-centre, full alpha)
---
--- ⚠ Teardown leaks the canary buttons for the session (there is no public
--- button release — see NativeBackend:teardown). Debug tool, used briefly;
--- accepted. Developer diagnostic: plain print by project convention.
-do
-    local CANARY_SPELL = 6603   -- Auto Attack: real spell ID, never an aura
-    local probe                 -- { units = {unit -> rec}, ticker, eyeball }
-
-    -- Mirrors the ENGINE's gate exactly — exit A2 then the 4-arg assist test,
-    -- the only two things CanApplyIdentityCandidateFilters consults (69465).
-    -- The DF-side gate was demolished after the hotfix (this file's verdict
-    -- machinery is gone), so the engine mirror is the only verdict left to
-    -- print beside what the canary observed.
-    local function trustVerdict(unit)
-        if not (type(unit) == "string" and UnitExists(unit)) then return nil, "no-unit" end
-        if UnitExemptFromHelpfulGate(unit) then return true, "a2-exempt" end
-        local ok, can = GateAssistProbe(unit)
-        if not ok then return true, "assist-err(open)" end
-        if issecretvalue and issecretvalue(can) then can = true end
-        -- `can and nil or "cannot-assist"` named every trusted unit cannot-assist too.
-        if can then return true, nil end
-        return false, "cannot-assist"
-    end
-
-    -- created, shownN, hiddenN, unreadableN, widthTxt. Child buttons belong
-    -- to the engine; IsShown on them can be secret, so unreadable is its own
-    -- bucket — a drain/fill verdict is only trusted when unreadable == 0.
-    local function canaryRead(entry)
-        local shownN, hiddenN, oddN = 0, 0, 0
-        local okCh, kids = pcall(function() return { entry.container:GetChildren() } end)
-        if okCh and kids then
-            for i = 1, #kids do
-                local okS, s = pcall(kids[i].IsShown, kids[i])
-                if not okS or (issecretvalue and issecretvalue(s)) then oddN = oddN + 1
-                elseif s then shownN = shownN + 1
-                else hiddenN = hiddenN + 1 end
-            end
-        end
-        -- ☠ STRUCTURE GUARD. Buttons are pooled, so once created they remain
-        -- child frames (hidden) forever — created > 0 with ZERO children found
-        -- means the buttons live deeper than one level and this scan is blind.
-        -- Degrade to unreadable rather than let "shown=0" masquerade as a
-        -- clean engine (the false-DECOUPLED it would produce is the one
-        -- verdict that must never be wrong).
-        if entry.created > 0 and shownN + hiddenN + oddN == 0 then oddN = 1 end
-        local wTxt = "ERR"
-        local okW, w = pcall(entry.container.GetWidth, entry.container)
-        if okW then
-            if issecretvalue and issecretvalue(w) then wTxt = "SECRET"
-            elseif type(w) == "number" then wTxt = ("%.1f"):format(w) end
-        end
-        return entry.created, shownN, hiddenN, oddN, wTxt
-    end
-
-    -- Build order copied from NativeBackend:build (proven live): create ->
-    -- points -> SetUnit -> AddAuraGroup -> SetEnabled LAST (the enable gates
-    -- aura-event registration on IsVisible() and IsEnabled(), so the host
-    -- must be SHOWN — alpha 0 and off-screen both keep IsVisible true).
-    local function buildCanary(host, unit, filterString, xOff)
-        local entry = { label = filterString, created = 0 }
-        local sub = CreateFrame("Frame", nil, host)
-        sub:SetSize(100, 32)
-        sub:SetPoint("LEFT", host, "LEFT", xOff, 0)
-        local c = CreateFrame("AuraContainer", nil, sub, "CustomAuraContainerTemplate")
-        c:SetAllPoints(sub)
-        local okU = pcall(c.SetUnit, c, unit)
-        local okG, err = pcall(c.AddAuraGroup, c, "dfprobe", filterString, {
-            maxFrameCount = 20,
-            candidateFilters = { includeSpellIDs = { [CANARY_SPELL] = true } },
-            -- Counter only — no styling, no reads. Cumulative by design:
-            -- buttons are pooled, so this can only rise, which is exactly the
-            -- "did fail-open EVER happen since arm" bit that cannot be secret.
-            initializeFrame = function() entry.created = entry.created + 1 end,
-        })
-        if not (okU and okG) then
-            pcall(sub.Hide, sub)
-            return nil, err
-        end
-        pcall(c.SetEnabled, c, true)
-        entry.sub, entry.container = sub, c
-        -- Width at arm, for the status line. ⚠ Raw context only, never a
-        -- verdict input: a unit ALREADY fail-open at arm (the HARMFUL canary
-        -- on any friendly) baselines at the filled width.
-        -- ☠ AND THE CREATED BASELINE. The template PRE-CREATES ~10 frames per
-        -- group at AddAuraGroup, firing initializeFrame for each — field-observed
-        -- 2026-08-24 (created=10 on BOTH canaries with zero matching auras,
-        -- Krathe on 69465) and independently corroborated by Grid2, which ships
-        -- a "10 - maxFrameCount" compensation for the same burst. Raw `created`
-        -- therefore counts pool CONSTRUCTION, not membership; only growth AFTER
-        -- this settle snapshot is evidence the include map was skipped.
-        -- ⚠ Accepted blind spot: a fail-open landing inside the 0.6s settle
-        -- window baselines in. A rearm while trusted re-zeros it.
-        C_Timer.After(0.6, function()
-            if entry.container and entry.baseW == nil then
-                local okW, w = pcall(entry.container.GetWidth, entry.container)
-                if okW and not (issecretvalue and issecretvalue(w)) and type(w) == "number" then
-                    entry.baseW = w
-                end
-            end
-            if entry.container and entry.createdBase == nil then
-                entry.createdBase = entry.created
-                entry.lastCreated = entry.created
-            end
-        end)
-        return entry
-    end
-
-    local function layoutHost(rec, idx)
-        rec.host:ClearAllPoints()
-        if probe.eyeball then
-            rec.host:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 140 + (idx - 1) * 44)
-            rec.host:SetAlpha(1)
-        else
-            -- Off-screen + alpha 0: IsVisible stays true (shown chain only),
-            -- so the engine keeps parsing; nothing renders where anyone looks.
-            rec.host:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -2500, 2500)
-            rec.host:SetAlpha(0)
-        end
-    end
-
-    local function relayoutAll()
-        local idx = 0
-        for _, rec in pairs(probe.units) do
-            idx = idx + 1
-            layoutHost(rec, idx)
-        end
-    end
-
-    local function teardownUnit(rec)
-        for _, entry in ipairs(rec.canaries) do
-            if entry.container then pcall(entry.container.SetEnabled, entry.container, false) end
-        end
-        pcall(rec.host.Hide, rec.host)   -- pcall: eyeball mode can be hovered
-    end
-
-    -- One line per TRANSITION into the IDGATE category, so a scenario run
-    -- (cinematic, duel, portal, rez) reads as a timeline in the log tail.
-    -- Fill/drain verdicts only when every child read plain (odd == 0);
-    -- "drained with no addon action" is the line that retires the recovery
-    -- machinery, so it must never fire on an unreadable sample.
-    local function tick()
-        if not probe then return end
-        for unit, rec in pairs(probe.units) do
-            local trust, why = trustVerdict(unit)
-            if rec.lastTrust ~= nil and trust ~= nil and trust ~= rec.lastTrust then
-                GateLog("probe %s: trust %s (%s)", unit,
-                    trust and "RECOVERED" or "LOST", tostring(why or "-"))
-            end
-            if trust ~= nil then rec.lastTrust = trust end
-            for _, entry in ipairs(rec.canaries) do
-                local created, shownN, _, oddN = canaryRead(entry)
-                -- ⚠ Only counted once the settle snapshot exists — see buildCanary:
-                -- the template's ~10-frame pre-creation burst is pool construction,
-                -- not membership, and logged as fail-open it cried wolf on the very
-                -- first field run.
-                if entry.createdBase and created > (entry.lastCreated or entry.createdBase) then
-                    GateLog("probe %s %s: +%d canary buttons (include map SKIPPED = fail-open)",
-                        unit, entry.label, created - (entry.lastCreated or entry.createdBase))
-                    entry.lastCreated = created
-                end
-                if oddN == 0 then
-                    local state = shownN > 0 and "filled" or "empty"
-                    if entry.lastState and state ~= entry.lastState then
-                        if state == "filled" then
-                            GateLog("probe %s %s: canary FILLED (shown=%d)", unit, entry.label, shownN)
-                        else
-                            GateLog("probe %s %s: canary DRAINED with no addon action - engine self-recovered",
-                                unit, entry.label)
-                        end
-                    end
-                    entry.lastState = state
-                end
-            end
-        end
-    end
-
-    local function armUnit(unit)
-        local rec = { unit = unit, canaries = {} }
-        rec.host = CreateFrame("Frame", nil, UIParent)
-        rec.host:SetSize(210, 32)
-        rec.host:SetFrameStrata("TOOLTIP")
-        rec.host.text = rec.host:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        rec.host.text:SetPoint("BOTTOM", rec.host, "TOP", 0, 2)
-        rec.host.text:SetText("DF gate probe " .. unit .. "  [HELPFUL | HARMFUL]")
-        local h, errH = buildCanary(rec.host, unit, "HELPFUL", 0)
-        local d, errD = buildCanary(rec.host, unit, "HARMFUL", 110)
-        if not (h and d) then
-            pcall(rec.host.Hide, rec.host)
-            return nil, errH or errD
-        end
-        rec.canaries[1], rec.canaries[2] = h, d
-        probe.units[unit] = rec
-        relayoutAll()
-        GateLog("probe armed unit=%s (canary spell %d)", unit, CANARY_SPELL)
-        return rec
-    end
-
-    -- The units the group instruments cover: player + party1-4, or raid1..10 in a
-    -- raid (existing units only; capped so an arm in a 40-raid stays a debug tool).
-    local function groupUnits()
-        local units = { "player" }
-        if IsInRaid and IsInRaid() then
-            for i = 1, 10 do
-                local u = "raid" .. i
-                if UnitExists(u) then units[#units + 1] = u end
-            end
-        else
-            for i = 1, 4 do
-                local u = "party" .. i
-                if UnitExists(u) then units[#units + 1] = u end
-            end
-        end
-        return units
-    end
-
-    -- ★ THE GROUP SECTION of /df debug idgate (Krathe's shape, 2026-08-24: one
-    -- command, whole group, no unit typing, works in combat). READS ONLY, so it is
-    -- combat-safe; the canary lines appear for whichever units were armed when the
-    -- probe toggle last ran. Called by DebugDumpIdentityGate through the module
-    -- table — this block sits below the dump, so the name resolves at call time.
-    function AuraContainer.DebugGateProbeStatus(o)
-        o:Section(probe and "Group — engine mirror + canaries"
-            or "Group — engine mirror ('/df debug idgate probe' to arm canaries)")
-        for _, unit in ipairs(groupUnits()) do
-            local trust, why = trustVerdict(unit)
-            local latched = AuraContainer._deathLatchedUnits
-                and AuraContainer._deathLatchedUnits[unit] and true or false
-            print(("    %s: filters=%s%s deathLatch=%s"):format(
-                safeTxt(unit),
-                trust == false and "|cffffcc00SKIPPED(fail-open regime)|r" or "applied",
-                why and (" [" .. safeTxt(why) .. "]") or "",
-                tostring(latched)))
-            local rec = probe and probe.units[unit]
-            for _, entry in ipairs(rec and rec.canaries or {}) do
-                local created, shownN, hiddenN, oddN, wTxt = canaryRead(entry)
-                local live
-                if oddN > 0 then live = "unreadable(secret) - 'probe show' to eyeball"
-                elseif shownN > 0 then live = "|cffff3333ENGINE OPEN|r"
-                else live = "clean" end
-                local createdTxt = entry.createdBase
-                    and ("%d(+%d)"):format(created, created - entry.createdBase)
-                    or ("%d(settling)"):format(created)
-                print(("      %s canary: created=%s shown=%d hidden=%d unreadable=%d width=%s -> %s"):format(
-                    entry.label, createdTxt, shownN, hiddenN, oddN, wTxt, live))
-                -- The quadrant verdict, HELPFUL only (HARMFUL open on friendlies
-                -- is exit-B design; its canary is the baseline that would flag a
-                -- future harmful-side change by reading clean).
-                if entry.label == "HELPFUL" and oddN == 0 and trust ~= nil then
-                    if not trust and shownN == 0 then
-                        print("        = engine honoured the map while assist fails - the A2 exemption at work")
-                    elseif shownN > 0 and (entry.createdBase == nil
-                        or created > entry.createdBase or trust) then
-                        print("        = |cffffcc00investigate|r: canary visible - fail-open or stale parse")
-                    end
-                end
-            end
-        end
-    end
-
-    function AuraContainer.DebugGateProbe(args)
-        local word = type(args) == "string" and args:match("^%s*(%S*)") or ""
-        if word == "show" then
-            if not probe then print("Identity Gate Probe: nothing armed") return end
-            probe.eyeball = not probe.eyeball
-            relayoutAll()
-            print("Identity Gate Probe: eyeball " .. (probe.eyeball and "ON (bottom-centre)" or "OFF"))
-            return
-        end
-        if word ~= "" then
-            print("Identity Gate Probe: 'probe' toggles group canaries, 'probe show' toggles the eyeball; '/df debug idgate' prints everything")
-            return
-        end
-        -- Bare 'probe' = TOGGLE for the whole group (no per-unit arming — Krathe's
-        -- ask). Disarm needs no guards; arming builds containers, so it keeps the
-        -- out-of-combat / test-mode / support guards.
-        if probe then
-            for _, rec in pairs(probe.units) do teardownUnit(rec) end
-            if probe.ticker then probe.ticker:Cancel() end
-            probe = nil
-            print("Identity Gate Probe: disarmed (canary buttons leak for the session - by design)")
-            return
-        end
-        if InCombatLockdown() then
-            print("Identity Gate Probe: arm out of combat (container build); the '/df debug idgate' dump itself works any time")
-            return
-        end
-        if AuraContainer._testMode then
-            print("Identity Gate Probe: not in test mode (preview units fabricate state)")
-            return
-        end
-        if not AuraContainer.IsSupported() then
-            print("Identity Gate Probe: container API not available on this client")
-            return
-        end
-        probe = { units = {} }
-        local armed, failed = 0, 0
-        for _, unit in ipairs(groupUnits()) do
-            local rec = armUnit(unit)
-            if rec then armed = armed + 1 else failed = failed + 1 end
-        end
-        if armed == 0 then
-            probe = nil
-            print("Identity Gate Probe: arm failed for every group unit")
-            return
-        end
-        probe.ticker = C_Timer.NewTicker(1, tick)
-        print(("Identity Gate Probe: armed on %d group unit(s)%s - '/df debug idgate' shows everything; re-toggle after big roster changes"):format(
-            armed, failed > 0 and (" (" .. failed .. " failed)") or ""))
-    end
 end
 
 -- /df debug ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
