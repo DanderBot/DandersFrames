@@ -2258,8 +2258,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     yPos = yPos - (BUFFTAB_H + SECTION_GAP)
 
     -- ========================================
-    -- 50/50 SPLIT: LEFT PANEL + RIGHT PANEL
+    -- SPLIT: LEFT PANEL (preview) + RIGHT PANEL (settings)
     -- ========================================
+    -- The preview takes what its hint rows need on one line (dfMinWidth, measured by
+    -- CreateFramePreview) and the settings panel takes the rest, so the settings cards
+    -- reach two settings per row at a narrower window. Below twice that, 50/50 as before.
+    local SPLIT_GAP, LEFT_FLOOR = 6, 300
+    local function SplitLeftWidth(total)
+        local need = max(LEFT_FLOOR, (S.framePreview and S.framePreview.dfMinWidth) or 0)
+        if total - SPLIT_GAP - need < need then return floor((total - SPLIT_GAP) / 2) end
+        return need
+    end
+    local function SplitRightWidth(total) return total - SPLIT_GAP - SplitLeftWidth(total) end
     local splitContainer = CreateFrame("Frame", nil, S.mainFrame)
     splitContainer:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
     splitContainer:SetPoint("BOTTOMRIGHT", S.mainFrame, "BOTTOMRIGHT", 0, 0)
@@ -2269,7 +2279,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.leftPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     S.leftPanel:SetPoint("TOPLEFT", 0, 0)
     S.leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
-    S.leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -3, 0)
+    -- Width set by ApplySplit below, once the preview has measured its hint rows.
     -- NO border here — the inner preview container (CreateFramePreview) draws the
     -- visible dim border. A border on both stacked to a brighter doubled line.
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
@@ -2281,7 +2291,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     S.rightPanel:SetPoint("TOPRIGHT", 0, 0)
     S.rightPanel:SetPoint("BOTTOMRIGHT", 0, 0)
-    S.rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 3, 0)  -- 6px split gap (matches Text Designer)
+    S.rightPanel:SetPoint("LEFT", S.leftPanel, "RIGHT", SPLIT_GAP, 0)
+
+    local function ApplySplit(total)
+        if not total or total < 100 then return end
+        S.leftPanel:SetWidth(SplitLeftWidth(total))
+    end
+    local splitStartW = parent:GetWidth()
+    if splitStartW < 100 then
+        splitStartW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
+    end
+    ApplySplit(splitStartW)
+    splitContainer:SetScript("OnSizeChanged", function(_, w) ApplySplit(w) end)
     GUI:CreatePanelBackdrop(S.rightPanel, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
 
     -- ── TAB BAR ── (shared underline-tab style, mirroring the Pinned Frames
@@ -2329,7 +2350,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        btn:SetWidth(max(60, floor(((provW / 2) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
+        btn:SetWidth(max(60, floor((SplitRightWidth(provW) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
 
         -- Shared underline-tab styling; S.SwitchTab drives SetActive. label = btn.Text.
         GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
@@ -2379,7 +2400,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     if earlyW < 100 then
         earlyW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
     end
-    S.tabContentFrame:SetWidth(max(1, (earlyW / 2) - 2 - 22))
+    S.tabContentFrame:SetWidth(max(1, SplitRightWidth(earlyW) - 22))
     S.tabContentFrame:SetHeight(800)
     S.tabScrollFrame:SetScrollChild(S.tabContentFrame)
     DF.GUI.StyleScrollBar(S.tabScrollFrame)
@@ -2418,7 +2439,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local parentW = parent:GetWidth()
     if parentW < 100 and GUI and GUI.contentFrame then parentW = GUI.contentFrame:GetWidth() end
     if parentW < 100 then parentW = UIParent:GetWidth() / 2 end
-    local initW = (parentW / 2) - 2 - 22  -- half split minus gap minus scrollbar
+    local initW = SplitRightWidth(parentW) - 22  -- the settings panel less its scrollbar
     if initW > 50 then
         S.tabContentFrame:SetWidth(initW)
     end

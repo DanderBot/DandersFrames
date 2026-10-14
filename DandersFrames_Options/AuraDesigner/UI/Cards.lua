@@ -3427,6 +3427,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     end
 
     local instrCount = #instrRows
+    -- The width the hint rows need on one line each: the designer's split gives the
+    -- preview this much and the settings panel the rest (Editor.lua, SplitLeftWidth).
+    container.dfMinWidth = 0
     for i, row in ipairs(instrRows) do
         local rowBottomOffset = 10 + (instrCount - i) * 18
 
@@ -3451,6 +3454,8 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         descText:SetJustifyH("LEFT")
         descText:SetText(row.desc)
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+        local need = 8 + badge:GetWidth() + 5 + math.ceil(descText:GetUnboundedStringWidth() or 0) + 8
+        if need > container.dfMinWidth then container.dfMinWidth = need end
     end
 
     -- ========================================
