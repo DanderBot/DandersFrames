@@ -2260,12 +2260,13 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- ========================================
     -- SPLIT: LEFT PANEL (preview) + RIGHT PANEL (settings)
     -- ========================================
-    -- The preview takes what its hint rows need on one line (dfMinWidth, measured by
-    -- CreateFramePreview) and the settings panel takes the rest, so the settings cards
-    -- reach two settings per row at a narrower window. Below twice that, 50/50 as before.
+    -- The preview takes what its hint rows need on one line (GUI.DesignerPreviewWidth,
+    -- shared with the Text Designer so both pages split alike) and the settings panel
+    -- takes the rest, so the settings cards reach two settings per row at a narrower
+    -- window. Below twice that, 50/50 as before.
     local SPLIT_GAP, LEFT_FLOOR = 6, 300
     local function SplitLeftWidth(total)
-        local need = max(LEFT_FLOOR, (S.framePreview and S.framePreview.dfMinWidth) or 0)
+        local need = max(LEFT_FLOOR, GUI.DesignerPreviewWidth and GUI.DesignerPreviewWidth() or 0)
         if total - SPLIT_GAP - need < need then return floor((total - SPLIT_GAP) / 2) end
         return need
     end

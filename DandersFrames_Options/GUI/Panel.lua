@@ -617,6 +617,32 @@ local function PageRefreshStates(self)
 end
 GUI.PageRefreshStates = PageRefreshStates
 
+-- ONE PREVIEW WIDTH FOR BOTH DESIGNERS. The Aura Designer's preview must fit its
+-- Click / Drag / Right-click hint rows on one line each; the Text Designer uses the same
+-- width so the two pages read as one design. Measured once off the hint strings
+-- (same font, same badge arithmetic as CreateFramePreview), floored at 300.
+local designerPreviewW
+function GUI.DesignerPreviewWidth()
+    if designerPreviewW then return designerPreviewW end
+    local probe = UIParent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    probe:Hide()
+    local need = 300
+    for _, row in ipairs({
+        { L["Click"],       L["an indicator on the frame to expand its settings"] },
+        { L["Drag"],        L["a placed indicator to reposition it on the frame"] },
+        { L["Right-click"], L["a placed indicator to remove it from the frame"] },
+    }) do
+        probe:SetText(row[1])
+        local badgeW = math.max((probe:GetStringWidth() or 0) + 10, 20)
+        probe:SetText(row[2])
+        local w = 8 + badgeW + 5 + math.ceil(probe:GetUnboundedStringWidth() or 0) + 8
+        if w > need then need = w end
+    end
+    -- Only cache a real measurement: before fonts load a string measures 0.
+    if need > 300 then designerPreviewW = need end
+    return need
+end
+
 -- An ISLAND page (the designers) is exactly one viewport tall and scrolls only inside
 -- its own panels. Its RefreshStates sets that, but RefreshStates does not run on every
 -- height change, so the child is held to the viewport on resize too -- a stale taller

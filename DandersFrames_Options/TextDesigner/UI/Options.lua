@@ -29,6 +29,19 @@ local C_RIGHT_PANEL_BORDER = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a 
 -- Row-height constant for GUI:CreateEditBox (label-above style).
 local EDIT_BOX_ROW_H = 56
 
+-- THE SPLIT, the Aura Designer's rule (AuraDesigner/UI/Editor.lua): the preview takes
+-- the width its own furniture needs (tdPreviewNeed, measured when the preview is built)
+-- and the settings panel the rest; below twice that, 50/50.
+local TD_SPLIT_GAP, TD_LEFT_FLOOR = 6, 300
+local tdPreviewNeed = TD_LEFT_FLOOR
+local function TDSplitLeftWidth(total)
+    if total - TD_SPLIT_GAP - tdPreviewNeed < tdPreviewNeed then
+        return math.floor((total - TD_SPLIT_GAP) / 2)
+    end
+    return tdPreviewNeed
+end
+local function TDSplitRightWidth(total) return total - TD_SPLIT_GAP - TDSplitLeftWidth(total) end
+
 -- Semantic palette for content-type categories. Tints card title text and
 -- could be reused for category badges later.
 local CATEGORY_COLORS = {
@@ -1826,7 +1839,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        btn:SetWidth(math.max(60, math.floor(((provW / 2) - (#tabDefs - 1) * TAB_GAP) / #tabDefs)))
+        btn:SetWidth(math.max(60, math.floor((TDSplitRightWidth(provW) - (#tabDefs - 1) * TAB_GAP) / #tabDefs)))
 
         -- Shared underline-tab styling; SelectTab drives SetActive. text = btn.Text.
         GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
@@ -2882,7 +2895,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- Bottom anchor matches rightAnchorFrame:BOTTOMRIGHT page.child 0,0 so
     -- the two panels end at exactly the same Y.
     previewPanel:SetPoint("BOTTOM", page.child, "BOTTOM", 0, 0)
-    previewPanel:SetPoint("RIGHT", page.child, "CENTER", -2, 0)
+    -- Width from the split (TDSplitLeftWidth), applied once the panel's furniture exists.
     state.previewPanel = previewPanel
 
     -- "Frame Preview" label
@@ -3042,6 +3055,25 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
     previewNote:SetText(L["Preview placeholder (visual mockup)"])
     previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+
+    -- The Aura Designer's preview width, so the two designers share one layout.
+    tdPreviewNeed = math.max(TD_LEFT_FLOOR,
+        GUI.DesignerPreviewWidth and GUI.DesignerPreviewWidth() or 0)
+    local function ApplySplit(total)
+        if total and total >= 100 then previewPanel:SetWidth(TDSplitLeftWidth(total)) end
+    end
+    local splitW = page.child:GetWidth()
+    if not splitW or splitW < 100 then
+        splitW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
+    end
+    ApplySplit(splitW)
+    if not page.child._dfTDSplitHooked then
+        page.child._dfTDSplitHooked = true
+        page.child:HookScript("OnSizeChanged", function(_, w)
+            local pp = GetState(page).previewPanel
+            if pp and w and w >= 100 then pp:SetWidth(TDSplitLeftWidth(w)) end
+        end)
+    end
 
     -- ── RIGHT-SIDE CONTAINER ───────────────────────────────────
     -- Dark panel chrome wrapping the tab strip + per-tab content frames.
