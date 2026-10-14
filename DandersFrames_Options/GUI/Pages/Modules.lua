@@ -1349,7 +1349,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Suppressed when the CARD's header carries this tick; still the
             -- group's own head in a pinned panel.
             if not tools2.hoistToggle then
-                local showIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
                     ApplyDispelSettings()
                     tools2.refreshStates()
                 end), 30)
@@ -1428,7 +1428,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             GreyWithPage(tools2)
 
             if not tools2.hoistToggle then
-                local showBorder = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "dispelShowBorder", function()
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "dispelShowBorder", function()
                     ApplyDispelSettings()
                     tools2.refreshStates()
                 end), 30)
@@ -1489,7 +1489,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             GreyWithPage(tools2)
 
             if not tools2.hoistToggle then
-                local showGradient = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Gradient"], db, "dispelShowGradient", function()
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Gradient"], db, "dispelShowGradient", function()
                     ApplyDispelSettings()
                     tools2.refreshStates()
                 end), 30)
