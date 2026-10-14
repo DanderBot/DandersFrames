@@ -2124,6 +2124,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- dimensions actually changed.  GUI window resize cases (the real
     -- reason this hook exists) still rebuild; banner-cascade-as-noop
     -- cases stop the loop.
+    if GUI.PinChildToViewport then GUI.PinChildToViewport(S.page) end
     S.page.RefreshStates = function(self)
         local pageH = self:GetHeight()
         self.child:SetHeight(pageH)

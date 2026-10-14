@@ -2671,6 +2671,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- the full page viewport instead. (Mirrors AD's S.page.RefreshStates override.)
     -- Installed every call (even when short-circuited) because RefreshStates
     -- may be invoked freshly on tab re-open.
+    if GUI.PinChildToViewport then GUI.PinChildToViewport(page) end
     page.RefreshStates = function(self)
         if self.child then
             self.child:SetHeight(self:GetHeight())

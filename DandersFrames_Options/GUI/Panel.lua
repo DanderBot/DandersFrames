@@ -599,6 +599,18 @@ local function PageRefreshStates(self)
 end
 GUI.PageRefreshStates = PageRefreshStates
 
+-- An ISLAND page (the designers) is exactly one viewport tall and scrolls only inside
+-- its own panels. Its RefreshStates sets that, but RefreshStates does not run on every
+-- height change, so the child is held to the viewport on resize too -- a stale taller
+-- child is page-level scroll on a page that must never scroll.
+function GUI.PinChildToViewport(page)
+    if not page or page._childPinned then return end
+    page._childPinned = true
+    page:HookScript("OnSizeChanged", function(p)
+        if p.child then p.child:SetHeight(p:GetHeight()) end
+    end)
+end
+
 -- Seat a page's See Also footer for the viewport's CURRENT height: at the bottom with
 -- the child stretched to fill when the content is shorter than the viewport, back at
 -- its place in the flow when it is not.
