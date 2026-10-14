@@ -277,9 +277,9 @@ do
         gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
     eq(table.concat(gotGroups, " | "),
-       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack | Effects@1: buffs_pandemic",
+       "Content@1: buffs_visibility, buffs_filters, buffs_order | Layout@2: buffs_layout, buffs_position | Appearance@2: buffs_appearance, buffs_border, buffs_durationbar | Text@1: buffs_duration, buffs_stack, buffs_caster | Effects@1: buffs_pandemic",
        "groups: Content, Layout, Appearance, Text, Effects, each over its cards")
-    for _, key in ipairs({ "buffs_visibility", "buffs_filters", "buffs_order", "buffs_appearance", "buffs_layout", "buffs_position", "buffs_border", "buffs_duration", "buffs_stack", "buffs_durationbar", "buffs_pandemic" }) do
+    for _, key in ipairs({ "buffs_visibility", "buffs_filters", "buffs_order", "buffs_appearance", "buffs_layout", "buffs_position", "buffs_border", "buffs_duration", "buffs_stack", "buffs_caster", "buffs_durationbar", "buffs_pandemic" }) do
         check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
               "groups: " .. key .. " registers its card for the group mount")
     end
@@ -744,7 +744,7 @@ do
     -- ---- twelve bare 280 boxes left, all inside a classicLayout arm ---
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 12, "boxes: twelve bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 13, "boxes: thirteen bare 280 boxes left, and they are the classic branch's own")
     check(PAGE:find("280, tools", 1, true) == nil,
           "boxes: no stay-inline 280 box is left on the page")
     check(PAGE:find("bandStyle", 1, true) == nil,
@@ -756,8 +756,8 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Buff Filters | Order & Limits | Icon Style | Layout | Position | Border | Duration Text | Stack Count | Duration Bar | Pandemic",
-       "order: the eleven sections are declared in classic's order")
+       "Visibility | Buff Filters | Order & Limits | Icon Style | Layout | Position | Border | Duration Text | Stack Count | Caster Name | Duration Bar | Pandemic",
+       "order: the twelve sections are declared in classic's order")
 
     -- ☠ AND BOTH HALVES FILL THEIR COLUMN. The layout pass only resizes an
     -- indented widget otherwise, so a header or a band placed in a column without
@@ -798,7 +798,7 @@ do
               "helpers: ...the classic path still builds the tick exactly as it did")
         -- ☠ THE KEY IS STILL READ. The group gate folds Enabled in whether or not
         -- the checkbox exists, so a pane greys behind a hoisted tick.
-        check(pandemicBody:find("return not supported or gated(db) or not enabled()", 1, true) ~= nil,
+        check(pandemicBody:find("return not supported or noWindow() or gated(db) or not enabled()", 1, true) ~= nil,
               "helpers: ...and the group gate still reads the Enabled key")
     end
 
@@ -1335,6 +1335,7 @@ do
         { label = "Duration Text", key = "buffShowDuration",       name = "Show Duration" },
         { label = "Duration Bar",  key = "buffDurationBarEnabled", name = "Enable Duration Bar" },
         { label = "Pandemic",      key = "buffPandemicEnabled",    name = "Enable" },
+        { label = "Caster Name",   key = "buffCasterName",         name = "Show Caster Name" },
     }
     local UNTICKED = { "Visibility", "Buff Filters", "Order & Limits", "Icon Style",
                        "Layout", "Position", "Stack Count" }
@@ -1360,7 +1361,7 @@ do
           "tick: ...its builder still builds Show Buffs in the body")
     local ticks = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do ticks = ticks + 1 end
-    eq(ticks, 4, "tick: exactly four mounts ask their builder to skip the in-body toggle")
+    eq(ticks, 5, "tick: exactly five mounts ask their builder to skip the in-body toggle")
 
     -- ---- no duplicate in Modern, and classic still builds it ------------
     -- The hoist reaches the checkbox in each of the four: two builders guard

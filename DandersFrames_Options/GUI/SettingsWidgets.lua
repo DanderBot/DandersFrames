@@ -3987,6 +3987,11 @@ function GUI:AnimationTypeNames()
         DF_PIXEL = L["DF Pixel"],
         DF_PROC = L["DF Proc"],
         BLINK = L["Blink"],
+        -- ★ Blizzard's own marching-ants widget, offered alongside ours. CAPABILITY-GATED:
+        -- MarchingAnts_CreateAsChildOf ships in Blizzard_SharedXML from 12.1.5, and offering
+        -- a type the engine cannot build would be an entry that silently renders nothing.
+        -- In this shared list (not beside the dropdown) so a folded card summary can name it.
+        MARCHING_ANTS = MarchingAnts_CreateAsChildOf and L["Marching Ants"] or nil,
     }
 end
 
@@ -4013,16 +4018,21 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- sync with StartAnimation's branches in Frames/Border.lua.
     -- DF_DASH: Frequency = march SPEED (0 = static dashed), Thickness = dash
     -- thickness, Inset = dash inset.
-    local hasFrequency = { DF_PULSATE=1,
+    -- MARCHING_ANTS: Frequency = crawl SPEED (0 = a static outline, the mixin pauses
+    -- itself), Thickness = line width, Inset/Offset position the ring. No Particles,
+    -- Length or Scale — it is one continuous scrolling texture per edge, not a pool of
+    -- discrete pieces, so none of those three has anything to act on.
+    local hasFrequency = { DF_PULSATE=1, MARCHING_ANTS=1,
                            DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
     local hasParticles = { DF_ORBIT=1, DF_PIXEL=1 }
     -- CORNERS_ONLY is hidden from the type dropdown below, but keep its param
     -- entries so an indicator that still carries a saved CORNERS_ONLY value shows
     -- the right controls.
-    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1 }
+    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1, MARCHING_ANTS=1 }
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
-    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
+    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1,
+                             MARCHING_ANTS=1 }
     -- Scale slider = how big the effect draws. Sparkle size on DF Chase; on DF Proc and
     -- DF Flash it multiplies how far the glow reaches past the border. That reach cannot
     -- be a constant: both are a square glow texture stretched over the host, its bright
@@ -4057,6 +4067,11 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- value still renders) but no longer offered as a pickable animation.
     animTypeOptions._order = { "NONE", "BLINK", "DF_ORBIT",
                                "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" }
+    -- Marching Ants (12.1.5, capability-gated) is added by GUI:AnimationTypeNames itself;
+    -- it goes on the end of the order only when the client offers it.
+    if animTypeOptions.MARCHING_ANTS then
+        animTypeOptions._order[#animTypeOptions._order + 1] = "MARCHING_ANTS"
+    end
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
     -- overlay-recoverable animations).

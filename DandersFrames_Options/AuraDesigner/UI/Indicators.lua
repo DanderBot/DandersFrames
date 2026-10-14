@@ -842,7 +842,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "square" then
@@ -981,7 +981,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "bar" then
@@ -1172,7 +1172,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- fontstring, which distort off-square and collapse on a thin bar. A pandemic region
         -- is a real texture anchored to the bar's own edges, so a ring or wash fits it exactly.
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "border" then

@@ -1188,6 +1188,87 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
         end
 
+        -- ── CASTER NAME (12.1.5's SetCasterName).
+        -- ☠ THIS ONE DOES HAVE AN ON/OFF, unlike Stack Count above: the engine writes the
+        -- fontstring only if we bind one, and the region is created only when the setting
+        -- is on. So the toggle is a real gate, not a styling convenience.
+        -- ⚠ DF:UpdateAllFrames, not a LightweightUpdate*: turning it on CREATES a region
+        -- and changes the bind, which the lightweight text paths deliberately do not do.
+        local function ApplyBuffCasterText() DF:UpdateAllFrames() end
+
+        local function BuildBuffCasterGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local function Changed()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end
+            -- Suppressed when the ROW carries this tick, exactly as Dispel Text does.
+            -- Still built in classic, where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Caster Name"], db, "buffCasterName", Changed), 30)
+                enable.keepEnabled = true
+                enable.disableOn = function(d) return not d.showBuffs end
+            end
+            local realm = group:AddWidget(GUI:CreateCheckbox(parent, L["Include Realm Name"], db, "buffCasterRealm", Changed), 30)
+            realm.disableOn = function(d) return not d.buffCasterName end
+            local classCol = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Class"], db, "buffCasterClassColor", Changed), 30)
+            classCol.disableOn = function(d) return not d.buffCasterName end
+            -- ⚠ The static Text Color greys while Color by Class owns it — the same
+            -- contract Duration Text uses under Color by Time. The engine applies the
+            -- class colour itself, so leaving the picker live would offer a setting that
+            -- provably loses.
+            GUI:CreateTextControls(group, db, "buffCaster", {
+                parent         = parent,
+                include        = { color = true },
+                disableOn      = function(d) return not d.buffCasterName end,
+                colorDisableOn = function(d) return d.buffCasterClassColor and true or false end,
+                onChange       = ApplyBuffCasterText,
+                onDrag         = ApplyBuffCasterText,
+            })
+            group.disableChildrenOn = function(d) return not d.showBuffs end
+        end
+
+        local function BuffCasterSummary(d)
+            if not d then return "" end
+            if not d.buffCasterName then return L["Off"] end
+            local parts = {}
+            local anchor = anchorOptions[d.buffCasterAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            if d.buffCasterClassColor then parts[#parts + 1] = L["Class Color"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local casterGroup = GUI:CreateSettingsGroup(self.child, 280)
+            casterGroup:AddWidget(GUI:CreateHeader(self.child, L["Caster Name"]), 40)
+            BuildBuffCasterGroup({
+                group = casterGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(casterGroup, nil, 2)
+        else
+            -- ☠ SHOW CASTER NAME IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle), as Dispel Text does.
+            tools.DeferCard("buffs_caster", function()
+                local band = OpenSection(L["Caster Name"], "buffs_caster", 1, BuffCasterSummary, BuffsOffRow, nil,
+                    BuildBuffCasterGroup, {
+                        db = db, key = "buffCasterName", label = L["Show Caster Name"],
+                        disableOn = BuffsOffRow,
+                        onChanged = function()
+                            self:RefreshStates()
+                            ApplyBuffCasterText()
+                        end,
+                    })
+                BuildBuffCasterGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(band)
+            end)
+        end
+
         -- (No Expiring Indicator group: the pre-12.1 expiring border/tint was driven by a
         -- ~3 Hz ticker reading remaining time, which is SECRET on 12.1. Removed 2026-07-25
         -- rather than left frosted. The 12.1-safe replacement is the DF.Expiration engine
@@ -1404,7 +1485,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     "buffs_appearance", "buffs_border", "buffs_durationbar",
                 } },
                 { label = L["Text"], col = 1, keys = {
-                    "buffs_duration", "buffs_stack",
+                    "buffs_duration", "buffs_stack", "buffs_caster",
                 } },
                 -- Its only card hides without the factory row, so the heading must too.
                 { label = L["Effects"], col = 1, keys = {
@@ -3030,6 +3111,78 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
         end
 
+        -- ===== CASTER NAME (12.1.5's SetCasterName) — the buff page's twin, and the row
+        -- where it earns its keep: "who put this on me" is a debuff question. =====
+        local function ApplyDebuffCasterText() DF:UpdateAllFrames() end
+
+        local function BuildDebuffCasterGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local function Changed()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end
+            if not tools2.hoistToggle then
+                local enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Caster Name"], db, "debuffCasterName", Changed), 30)
+                enable.keepEnabled = true
+                enable.disableOn = function(d) return not d.showDebuffs end
+            end
+            local realm = group:AddWidget(GUI:CreateCheckbox(parent, L["Include Realm Name"], db, "debuffCasterRealm", Changed), 30)
+            realm.disableOn = function(d) return not d.debuffCasterName end
+            local classCol = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Class"], db, "debuffCasterClassColor", Changed), 30)
+            classCol.disableOn = function(d) return not d.debuffCasterName end
+            GUI:CreateTextControls(group, db, "debuffCaster", {
+                parent         = parent,
+                include        = { color = true },
+                disableOn      = function(d) return not d.debuffCasterName end,
+                colorDisableOn = function(d) return d.debuffCasterClassColor and true or false end,
+                onChange       = ApplyDebuffCasterText,
+                onDrag         = ApplyDebuffCasterText,
+            })
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
+        end
+
+        local function DebuffCasterSummary(d)
+            if not d then return "" end
+            if not d.debuffCasterName then return L["Off"] end
+            local parts = {}
+            local anchor = anchorOptions[d.debuffCasterAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            if d.debuffCasterClassColor then parts[#parts + 1] = L["Class Color"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local casterGroup = GUI:CreateSettingsGroup(self.child, 280)
+            casterGroup:AddWidget(GUI:CreateHeader(self.child, L["Caster Name"]), 40)
+            BuildDebuffCasterGroup({
+                group = casterGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(casterGroup, nil, 2)
+        else
+            -- ☠ SHOW CASTER NAME IS THE HEADER'S TICK; the builder skips its own
+            -- (hoistToggle), as Dispel Text does.
+            tools.DeferCard("debuffs_caster", function()
+                local band = OpenSection(L["Caster Name"], "debuffs_caster", 1, DebuffCasterSummary, DebuffsOffRow, nil,
+                    BuildDebuffCasterGroup, {
+                        db = db, key = "debuffCasterName", label = L["Show Caster Name"],
+                        disableOn = DebuffsOffRow,
+                        onChanged = function()
+                            self:RefreshStates()
+                            ApplyDebuffCasterText()
+                            tools.ReflowMounted()
+                        end,
+                    })
+                BuildDebuffCasterGroup({
+                    group = band, parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                    hoistToggle = true,
+                })
+                CloseSection(band)
+            end)
+        end
+
         -- ===== DURATION BAR (a 280 box in column 2 in classic; a Appearance card in Modern) ===== (12.1 factory rows only — mirrors the Buffs page's block;
         -- see there for the sig-split routing note)
         local function BuildDebuffDurationBarGroup(tools2)
@@ -3133,7 +3286,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     "debuffs_appearance", "debuffs_border", "debuffs_important", "debuffs_durationbar",
                 } },
                 { label = L["Text"], col = 1, keys = {
-                    "debuffs_duration", "debuffs_stack", "debuffs_dispeltext",
+                    "debuffs_duration", "debuffs_stack", "debuffs_dispeltext", "debuffs_caster",
                 } },
             })
         end

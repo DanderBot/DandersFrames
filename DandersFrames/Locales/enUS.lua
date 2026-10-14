@@ -2117,6 +2117,21 @@ L["DF Chase"] = true
 L["DF Proc"] = true
 L["DF Flash"] = true
 L["DF Pixel"] = true
+-- No "DF " prefix on purpose: that prefix marks a DF-owned reimplementation, and this
+-- one really is the game's own widget (Blizzard_SharedXML/MarchingAnts, 12.1.5) — the
+-- same border their raid-frame dispel option draws.
+L["Marching Ants"] = true
+-- Caster name (12.1.5 SetCasterName). "Include Realm Name" rather than "Show Realm":
+-- the name is already showing, the question is whether the realm is appended to it.
+L["Caster Name"] = true
+-- Shown (and used as the Enable tooltip) when every spell behind an aura is a MEASURED
+-- no-refresh-window. Names the way out on purpose: the failure this prevents is a healer
+-- wanting "warn me before this drops", finding it under Pandemic rather than Expiration,
+-- and configuring a cue that can never fire.
+L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."] = true
+L["Show Caster Name"] = true
+L["Include Realm Name"] = true
+L["Color by Class"] = true
 L["Hide Intro Flash"] = true
 L["Animation Color"] = true
 L["Animation Frequency"] = true

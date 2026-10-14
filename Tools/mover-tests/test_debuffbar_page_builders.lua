@@ -232,9 +232,9 @@ do
         gotGroups[#gotGroups + 1] = label .. "@" .. col .. ": " .. table.concat(ks, ", ")
     end
     eq(table.concat(gotGroups, " | "),
-       "Content@1: debuffs_visibility, debuffs_filters, debuffs_blacklist, debuffs_order | Layout@2: debuffs_layout, debuffs_position | Appearance@2: debuffs_appearance, debuffs_border, debuffs_important, debuffs_durationbar | Text@1: debuffs_duration, debuffs_stack, debuffs_dispeltext",
+       "Content@1: debuffs_visibility, debuffs_filters, debuffs_blacklist, debuffs_order | Layout@2: debuffs_layout, debuffs_position | Appearance@2: debuffs_appearance, debuffs_border, debuffs_important, debuffs_durationbar | Text@1: debuffs_duration, debuffs_stack, debuffs_dispeltext, debuffs_caster",
        "groups: Content, Layout, Appearance, Text, each over its cards")
-    for _, key in ipairs({ "debuffs_visibility", "debuffs_filters", "debuffs_blacklist", "debuffs_order", "debuffs_appearance", "debuffs_layout", "debuffs_position", "debuffs_border", "debuffs_important", "debuffs_duration", "debuffs_stack", "debuffs_dispeltext", "debuffs_durationbar" }) do
+    for _, key in ipairs({ "debuffs_visibility", "debuffs_filters", "debuffs_blacklist", "debuffs_order", "debuffs_appearance", "debuffs_layout", "debuffs_position", "debuffs_border", "debuffs_important", "debuffs_duration", "debuffs_stack", "debuffs_dispeltext", "debuffs_caster", "debuffs_durationbar" }) do
         check(PAGE:find('tools.DeferCard("' .. key .. '", function()', 1, true) ~= nil,
               "groups: " .. key .. " registers its card for the group mount")
     end
@@ -552,19 +552,21 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Highlight | Duration Text | Stack Count | Dispel Text | Duration Bar",
-       "order: the thirteen cards are declared in classic's order")
+       "Visibility | Debuff Filters | Debuff Blacklist | Order & Limits | Icon Style | Layout | Position | Border | Highlight | Duration Text | Stack Count | Dispel Text | Caster Name | Duration Bar",
+       "order: the fourteen cards are declared in classic's order")
 
     -- ---- one checkbox per setting --------------------------------------
     -- Five ticks, five hoists, every hoist inside a ticked card -- so the classic
     -- boxes still build their checkbox and no card builds it twice.
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
-    eq(hoists, 5, "ticks: exactly five mounts ask their builder to skip the in-body toggle")
+    eq(hoists, 6, "ticks: exactly six mounts ask their builder to skip the in-body toggle")
     local inCards = 0
     for _, g in ipairs(CARDS) do
         if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
     end
+    -- The PTR lane's Caster Name card is ticked too; it has no CARDS row (no golden yet).
+    inCards = inCards + select(2, (sectionBlock("Caster Name")):gsub("hoistToggle = true,", ""))
     eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
 
     -- ☠ NOT VISIBILITY. Show Debuffs is the page's master switch: it stays in the
@@ -613,7 +615,7 @@ do
     -- ---- fourteen classic boxes, in the order they always had ----------
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 14, "classic: fourteen bare 280 boxes, and they are the classic branch's own")
+    eq(bare, 15, "classic: fifteen bare 280 boxes, and they are the classic branch's own")
     local ADDS = { "visibilityGroup, nil, 1", "filterGroup, nil, 1", "blGroup, nil, 1",
                    "debuffOrderGroup, nil, 1", "dedupGroup, nil, 1", "appearanceGroup, nil, 2",
                    "gridGroup, nil, 1", "positionGroup, nil, 1", "borderGroup, nil, 1",

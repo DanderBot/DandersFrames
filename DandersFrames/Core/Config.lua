@@ -1636,6 +1636,20 @@ DF.PartyDefaults = {
     buffStackScale = 1,
     buffStackX = 3,
     buffStackY = -2,
+    -- CASTER NAME (12.1.5's SetCasterName). Default OFF: it is the only aura text that
+    -- can be as wide as the icon, so turning it on for everyone would be a layout change
+    -- nobody asked for. Class colours default ON because that is what makes the name
+    -- readable at a glance; realm names default OFF for the same width reason.
+    buffCasterName = false,
+    buffCasterRealm = false,
+    buffCasterClassColor = true,
+    buffCasterAnchor = "BOTTOM",
+    buffCasterColor = {r = 1, g = 1, b = 1},
+    buffCasterFont = "DF Roboto SemiBold",
+    buffCasterOutline = "SHADOW;OUTLINE",
+    buffCasterScale = 1,
+    buffCasterX = 0,
+    buffCasterY = -12,
     buffWrap = 2,
     showBuffs = true,
 
@@ -1762,6 +1776,18 @@ DF.PartyDefaults = {
     debuffStackScale = 1,
     debuffStackX = 0,
     debuffStackY = 0,
+    -- CASTER NAME — see the buff twin above for why each default is what it is. This is
+    -- the row where it earns its keep: "who put this on me" is a debuff question.
+    debuffCasterName = false,
+    debuffCasterRealm = false,
+    debuffCasterClassColor = true,
+    debuffCasterAnchor = "BOTTOM",
+    debuffCasterColor = {r = 1, g = 1, b = 1},
+    debuffCasterFont = "DF Roboto SemiBold",
+    debuffCasterOutline = "SHADOW;OUTLINE",
+    debuffCasterScale = 1,
+    debuffCasterX = 0,
+    debuffCasterY = -12,
     debuffWrap = 3,
     showDebuffs = true,
 

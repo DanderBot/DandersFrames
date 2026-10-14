@@ -3532,6 +3532,24 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 st.show = true
                 return st
             end)(),
+            -- CASTER NAME (12.1.5 SetCasterName). Same shared TextStyle shape as the
+            -- stack count; the two extra fields are the ENGINE's own options, which it
+            -- resolves from the aura's secret casterGUID — realm suffix and class
+            -- colouring both happen Blizzard-side, so nothing here reads a caster.
+            -- ⚠ Unlike stacks this is opt-in, so `show` is a real key rather than a
+            -- hardcoded true. Anchored below the icon by default because it is the only
+            -- aura text wide enough to collide with everything else on the button.
+            casterName = (function()
+                local ct = DF.TextStyle:BuildSpec(db, prefix .. "Caster", {
+                    baseSize = 9, defaultAnchor = "BOTTOM",
+                    defaultOffsetX = 0, defaultOffsetY = -12,
+                    boxW = iconSize, boxH = iconSize,
+                })
+                ct.show       = db[prefix .. "CasterName"] and true or false
+                ct.showRealm  = db[prefix .. "CasterRealm"] and true or false
+                ct.classColor = db[prefix .. "CasterClassColor"] ~= false
+                return ct
+            end)(),
         },
     }
 end
@@ -3732,6 +3750,22 @@ local function rowStructSig(cfg)
         -- unsupported client (no spec) sigs identically to the feature being off.
         tostring(s.pandemic and s.pandemic.mode),
         tostring(s.pandemic and s.pandemic.flash),
+        -- ☠ CASTER NAME PRESENCE IS STRUCTURAL, and leaving it out is what made the
+        -- setting look STUCK ON. The region is create-once and the fontstring is bound to
+        -- the engine, which then owns its Text and Shown aspects and keeps writing to it.
+        -- The SetShown sweep in styleButton_regions that would otherwise hide it is gated
+        -- on `not slot.AddPandemicRegion` — i.e. PREVIEW SLOTS ONLY, because on a live
+        -- button Blizzard owns visibility and removing a region is supposed to arrive as a
+        -- Rebuild. With this absent from the signature no Rebuild ever fired, the old
+        -- button kept its binding, and turning the setting off did nothing until /reload.
+        -- ★ The general rule, already stated for pandemic above: any create-once region
+        -- depends on "off = never created", and that is only true if its presence moves
+        -- THIS signature.
+        -- ⚠ Only PRESENCE. showRealm and classColor are engine OPTIONS carried by the
+        -- bind, and SetCasterName replaces its display element rather than appending, so
+        -- bindNative re-binds them in place on a restyle — they are cosmetics and must NOT
+        -- be hashed here, or every toggle of them would hand over fresh buttons.
+        tostring(s.casterName and s.casterName.show or false),
     }, "|") .. rowBorderAnimTok(cfg)
 end
 

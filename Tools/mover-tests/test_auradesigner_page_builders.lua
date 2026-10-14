@@ -400,7 +400,7 @@ do
           "bar/Border: the border toolkit is handed the proxy")
     check(groupBody(ICON, "Expiration"):find("AddExpiryAlertControls(g, parent, proxy)", 1, true) ~= nil,
           "icon/Expiration: the expiry controls are handed the proxy")
-    check(groupBody(ICON, "Pandemic"):find("AddPandemicControls(g, parent, proxy)", 1, true) ~= nil,
+    check(groupBody(ICON, "Pandemic"):find("AddPandemicControls(g, parent, proxy, auraName)", 1, true) ~= nil,
           "icon/Pandemic: the pandemic controls are handed the proxy")
 end
 

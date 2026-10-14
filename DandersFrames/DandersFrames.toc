@@ -134,6 +134,10 @@ TestMode\Shim.lua
 # Features
 Features\Auras.lua
 Features\Expiration.lua
+# Measured refresh-window data keyed by spell id. Pure data, no dependencies. Listed before
+# Pandemic.lua for readability only -- Pandemic reads DF.PandemicWindows at CALL time, so
+# this order is not load-bearing.
+Features\PandemicWindows.lua
 # After Auras.lua: BuildSpec resolves a GLYPH through DF:GetExpiryAlertGlyph, which lives there.
 Features\Pandemic.lua
 Features\Highlights.lua

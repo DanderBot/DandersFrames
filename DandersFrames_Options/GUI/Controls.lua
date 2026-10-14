@@ -355,6 +355,31 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     local function isBorder() return mode() == "BORDER" end
     local function enabled() return dbTable[K("Enabled")] and true or false end
     local supported = P:IsSupported()
+    -- ★ SPELL-LEVEL GATE. opts.trackedIds is a callback returning the identity map behind
+    -- THIS aura; a consumer with no per-spell identity (the buff and debuff rows, which are
+    -- a whole row of arbitrary auras) simply passes nothing and the gate never fires.
+    -- ☠ Evaluated per CALL, not cached: the ids change as the user edits the placement's
+    -- tracked spells, and a cached answer would grey a panel the user had just made valid.
+    -- ⚠ Greys rather than HIDES, unlike the shape gating on the bar card. That one is always
+    -- true; this one rests on a sample that is admittedly incomplete, so the control has to
+    -- stay visible and say why — a hidden control cannot be argued with.
+    -- ★ SAMPLE ON OPEN, so the answer is as fresh as it can be at the moment someone is
+    -- actually looking. The sweep learns every 30s, which is fine in the background but
+    -- means a spell you just started tracking can sit unknown for half a minute while you
+    -- stare at the panel. Opening the card is the closest reachable point to "the user just
+    -- added this spell" without hunting the add path through the editor, and it costs one
+    -- pass over auras that are already up.
+    -- ⚠ It can only answer for auras LIVE RIGHT NOW — a spell that is not on you or anyone
+    -- nearby stays unknown, which is the correct answer rather than a failure. In practice a
+    -- healer setting up a HoT cue usually has it rolling.
+    if P.SampleUnits then pcall(P.SampleUnits, P, "player", "target") end
+
+    local function noWindow()
+        if not opts.trackedIds then return false end
+        local ok, ids = pcall(opts.trackedIds)
+        if not ok then return false end
+        return not P:MayHaveWindow(ids)
+    end
     local masterGate = opts.masterGate
     local function gated(db) return masterGate and masterGate(db) or false end
     local function onStructural() refreshStates(); fullUpdate() end
@@ -379,7 +404,14 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         -- On a client without the registrar the toggle itself must go dead, or a user can switch
         -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
         -- master switch greys it too — nothing above it being on means nothing below it applies.
-        w.enable.disableOn = function(db) return not supported or gated(db) end
+        w.enable.disableOn = function(db) return not supported or gated(db) or noWindow() end
+        -- ⚠ The tooltip carries the SPELL reason only. The client reason has its own note
+        -- below and applies to the whole section; this one is about the aura in front of
+        -- you, and a tooltip is where a per-item reason belongs.
+        -- ⚠ Deliberately the SAME string as the note below, not a variant of it. Two
+        -- near-identical sentences are two entries a translator has to notice are meant to
+        -- match, for no reader-facing gain.
+        w.enable.tooltip = L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."]
     end
 
     -- Says why there is no threshold, and why a given spell may never light. Sits directly
@@ -395,6 +427,18 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         L["This game build does not support refresh-window highlights."],
         { tone = "caution", prefix = "Note", width = noteW }))
     w.unsupported.hideOn = function() return supported end
+
+    -- Shown only when every spell behind this aura is a MEASURED no. Its own note rather
+    -- than a variant of the one above, because the two say different things and can be true
+    -- at once — an old client AND an unrefreshable spell.
+    -- ⚠ Names the way out. The whole failure this gate exists to stop is a healer wanting
+    -- "warn me before this drops", finding it under Pandemic because Expiration withholds
+    -- Border and Tint on a bar, and configuring a cue that can never fire. Greying without
+    -- pointing at Expiration would leave them stuck rather than redirected.
+    w.noWindow = group:AddWidget(GUI:CreateNote(parent,
+        L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."],
+        { tone = "caution", prefix = "Note", width = noteW }))
+    w.noWindow.hideOn = function() return not noWindow() end
 
     w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Type"],
         { BORDER = L["Border"], TINT = L["Tint"], _order = { "BORDER", "TINT" } },
@@ -457,9 +501,24 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     w.border = GUI:CreateBorderControls(group, dbTable, P:BorderPrefix(prefix), {
         parent       = parent,
         noShowToggle = true,
+        -- ★ animation joins the house icon-border set. It was absent because the pandemic
+        -- engine stripped spec.border.animation, so these controls would have driven
+        -- nothing; that strip is gone (Features/Pandemic.lua) now that container-hosted
+        -- borders take the declarative path, and on 12.1.5 the engine plays the effect
+        -- only inside the refresh window.
+        -- ⚠ include is opt-in PER KEY — adding one does not disturb the others, but
+        -- omitting one silently drops its control.
+        -- ☠ THE KEY IS `animate`, NOT `animation`. CreateBorderControls tests
+        -- `if include.animate then`; `animation = true` is silently ignored, so the whole
+        -- Border Animation control set is never built and the setting looks absent rather
+        -- than broken. Reported as "where are the pandemic animations?" — the engine side
+        -- was working the whole time and had nothing to drive it.
+        -- ⚠ include is opt-in PER KEY and a wrong key cannot fail loudly, because an
+        -- unknown key is indistinguishable from one deliberately left out.
         include      = {
             inset = true, offset = true, blendMode = true,
             gradient = true, shadow = true, alpha = true,
+            animate = true,
         },
         hideWhen     = function() return not isBorder() end,
         fullUpdate   = fullUpdate,
@@ -504,11 +563,14 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         end
     end
 
-    -- Master gate: an unsupported client, the page's own feature switch, or Enable off greys
-    -- everything below the toggle. Composed here so a caller never has to wrap this and risk
-    -- dropping one of the three.
+    -- Master gate: an unsupported client, a spell with no refresh window, the page's own
+    -- feature switch, or Enable off greys everything below the toggle. Composed here so a
+    -- caller never has to wrap this and risk dropping one of the four.
+    -- ☠ noWindow() belongs here as well as on the toggle. Without it a profile that already
+    -- has Enabled set on an unrefreshable spell would grey the switch and leave every
+    -- control under it live — a section you cannot turn off but can still configure.
     group.disableChildrenOn = function(db)
-        return not supported or gated(db) or not enabled()
+        return not supported or noWindow() or gated(db) or not enabled()
     end
 
     return w
@@ -4350,6 +4412,7 @@ GUI.SectionKindByKey = {
     buffs_border            = "border",
     buffs_duration          = "text",
     buffs_stack             = "text",
+    buffs_caster            = "text",
     buffs_durationbar       = "timer",
     buffs_pandemic          = "effects",
     -- Debuff Bar (Indicators.lua)
@@ -4364,6 +4427,7 @@ GUI.SectionKindByKey = {
     debuffs_duration        = "text",
     debuffs_stack           = "text",
     debuffs_dispeltext      = "text",
+    debuffs_caster          = "text",
     debuffs_durationbar     = "timer",
     -- Missing Buffs (Indicators.lua)
     missingbuffs_appearance = "appearance",

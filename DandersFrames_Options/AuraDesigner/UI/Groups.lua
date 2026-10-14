@@ -266,10 +266,28 @@ P.AddExpiryAlertControls = AddExpiryAlertControls
 -- expiry alert — whose Border/Tint are a |T escape inside a fontstring and so collapse on a
 -- thin bar — a pandemic region is a real texture anchored to the button's own edges, so a
 -- ring or wash fits a bar exactly as well as an icon. Hence no `include` parameter.
-local function AddPandemicControls(g, parent, proxy)
+local function AddPandemicControls(g, parent, proxy, auraName)
     GUI:CreatePandemicControls(g, proxy, {
         parent          = parent,
         anchorOptions   = OPTS.ANCHOR_OPTIONS,
+        -- ★ SPELL-LEVEL GATE — which ids does THIS placement actually render? Resolved the
+        -- same way the render path resolves them, so the panel and the renderer can never
+        -- disagree about what the indicator is tracking.
+        -- ☠ A CLOSURE, NOT A VALUE. The tracked-ID ticks and the spec dropdown both live on
+        -- surfaces this card does not rebuild, so resolving once at build time would freeze
+        -- the verdict — greying a panel the user had just made valid, or leaving one live
+        -- after they narrowed it down to an unrefreshable spell.
+        -- ⚠ `proxy` goes in as the indicator so per-placement mutes narrow the set. That is
+        -- right HERE (we want the ids this indicator draws) and is deliberately the opposite
+        -- of the duplicate check in Cards.lua, which must NOT narrow or a real duplicate
+        -- slips through. Same helper, two different questions.
+        -- ⚠ Other-pool entries are spec-independent, hence the nil spec — mirrors every
+        -- other BuildADIdentityFilters call site.
+        trackedIds      = function()
+            local spec = (not IsOtherTab()) and ResolveSpec() or nil
+            local f = DF:BuildADIdentityFilters(spec, auraName, proxy)
+            return f and f.includeSpellIDs
+        end,
         -- Both systems key off the SAME per-indicator record here, so the collision notes
         -- can compare them directly. The buff/debuff rows have no expiry alert at all and
         -- pass nothing.

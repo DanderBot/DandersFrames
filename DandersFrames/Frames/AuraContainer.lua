@@ -127,7 +127,12 @@ local warnedFilterString = false
 -- ☠ THREE SITES, THREE LATCHES. One `warnedPandemic` covered the border apply, the
 -- region add and the cover add -- so a single early failure in any one of them hid the
 -- other two for the session. Same split, same reasoning, as the dispel pair above.
+-- ⚠ FOUR now, not three: the flash's native hand-over (12.1.5) gets its own latch for
+-- the same reason the other three were split apart — a shared latch means the second
+-- distinct failure is silent, which is the thing this comment used to warn about while
+-- being wrong about it.
 local warnedPandemicBorder, warnedPandemicRegion, warnedPandemicCover = false, false, false
+local warnedPandemicAnim, warnedPandemicBorderAnim = false, false
 
 -- Animations SAFE to run on a container border (Aura Designer) — overlay-mode
 -- frame borders AND row-mode aura buttons (the latter reopened 2026-08-29). These
@@ -144,6 +149,18 @@ local SAFE_OVERLAY_ANIM = {
     DF_PROC        = true,
     DF_FLASH       = true,
     DF_PIXEL       = true,
+    -- ☠ MARCHING_ANTS IS BLIZZARD'S WIDGET, NOT ONE OF OURS, AND IT STILL BELONGS HERE.
+    -- The set's own description says "render entirely on DF-owned child regions" — this one
+    -- does not: MarchingAnts_CreateAsChildOf builds a Blizzard MarchingAntsTemplate frame
+    -- under our animRect. It is safe for the reason the set actually cares about, which is
+    -- the one the description under-states: the motion is a declarative
+    -- TextureCoordTranslation group with no OnUpdate and nothing re-parented onto the aura
+    -- button. Ownership of the art was never the test; per-frame tainted writes were.
+    -- ⚠ ADDING A TYPE TO THE DROPDOWN IS NOT ENOUGH — it must be listed here too, or live
+    -- containers strip it while the AD canvas (which never passes this chokepoint) shows it
+    -- perfectly. That asymmetry is exactly how this was reported: "shows on AD preview but
+    -- not on actual frames".
+    MARCHING_ANTS  = true,
 }
 -- Exposed so non-container consumers that apply a secretRect border directly
 -- (the missing-buff badge) can restrict to the same taint-safe DF-owned set.
@@ -1213,6 +1230,19 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
     checkParkSentinel()
+    -- ★ PANDEMIC WINDOW SAMPLING — rides here rather than owning an event path of its own.
+    -- The two requirements are already satisfied by this ticker: OUT OF COMBAT (the early
+    -- return above), which is the only state where GetRefreshExtendedDuration returns a
+    -- plain testable value rather than a secret, and units in hand — the same player plus
+    -- rotating group member the park sentinel just walked.
+    -- ⚠ Fills gaps only, never re-decides, so running every 30s costs a table lookup per
+    -- aura once each spell is known.
+    -- ⚠ Called through DF.Pandemic rather than an upvalue: Features/Pandemic.lua loads
+    -- AFTER this file, so a file-scope alias would capture nil.
+    if DF.Pandemic and DF.Pandemic.SampleUnits then
+        local g = nextGroupUnit()
+        DF.Pandemic:SampleUnits("player", g)
+    end
     checkOutOfRangeAttribution()
     checkSlotAccumulation()
     checkDarkMismatch()
@@ -2558,7 +2588,28 @@ local function styleButton_regions(slot, config)
                 if slot.dfBorderPandemic then
                     local okA, errA = pcall(function()
                         local pspec = borderSpec.pandemicSpec
-                        pspec.animation = nil   -- same blanket strip as the base ring
+                        -- ★ THE PANDEMIC RING ANIMATES NOW, on the same terms as the base
+                        -- ring. This read `pspec.animation = nil` with the comment "same
+                        -- blanket strip as the base ring" — and the base ring stopped being
+                        -- a blanket strip when animation reopened for opted-in container
+                        -- borders. Left alone it made the frame border the one surface
+                        -- where a configured animation silently did nothing during the
+                        -- refresh window, which is exactly the window it is there to mark.
+                        --
+                        -- ⚠ SAME FILTER, NOT NO FILTER. pandemicBorderSpec copies the base
+                        -- spec wholesale and swaps only `color`, so this table arrives with
+                        -- the RAW animation keys — the chokepoint above ran on the base
+                        -- spec, not on this copy. Re-applying it here is what keeps a stale
+                        -- profile naming a retired effect rendering static rather than
+                        -- erroring, and keeps the adBorderAnim opt-in honest on both rings.
+                        -- ★ Inheriting from the base is the right default rather than a
+                        -- second set of controls: the ring keeps its motion and changes
+                        -- COLOUR in the window, which is what the setting already promises.
+                        local pAnimType = pspec.animation and pspec.animation.type
+                        if not config.adBorderAnim
+                            or not (pAnimType and SAFE_OVERLAY_ANIM[pAnimType]) then
+                            pspec.animation = nil
+                        end
                         if pspec.renderScale == nil then
                             pspec.renderScale = tonumber(config.layout and config.layout.scale) or 1
                         end
@@ -2715,6 +2766,26 @@ local function styleButton_regions(slot, config)
         if DF.SafeSetFont then DF:SafeSetFont(slot.dfName, nameSpec.font, nameSpec.size or 10, nameSpec.outline or "NONE") end
     end
 
+    -- CASTER name region (native SetCasterName bind is in bindNative; 12.1.5).
+    -- ★ THE FIRST TIME "WHO CAST THIS" HAS BEEN AVAILABLE AT ALL. Caster identity was on
+    -- the permanently-dead list — no remap, no candidate filter, nothing. This does NOT
+    -- change that: C_UnitAuras.GetAuraCasterGUID is SecretWhenUnitAuraRestricted, so the
+    -- engine resolves the name, the realm suffix and the class colour on its own side and
+    -- hands us a fontstring it owns. We can SHOW a caster; we still cannot branch on one.
+    -- ⚠ Styled through DF.TextStyle like the stack count, so font/scale/outline/anchor/
+    -- offset/colour all behave the same and hot-apply on restyle. The two ENGINE options
+    -- ride the bind instead, which is why bindNative re-binds when they change.
+    local casterSpec = style.casterName
+    if isRow and casterSpec and casterSpec.show then
+        if not slot.dfCaster then
+            -- Same rung as the spell name and duration: content text, and the three are
+            -- anchored apart rather than stacked.
+            slot.dfCasterHolder = makeHolder(host, LEVELS.DURATION)
+            slot.dfCaster = slot.dfCasterHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        end
+        DF.TextStyle:Apply(slot.dfCaster, casterSpec, slot.dfCasterHolder)
+    end
+
     -- NATIVE dispel border / symbol REGIONS (the SetAuraBorder/SetAuraSymbol bind is in bindNative).
     local dispelSpec = style.dispel
     if dispelSpec then
@@ -2862,6 +2933,12 @@ local function styleButton_regions(slot, config)
         if slot.dfNameHolder then
             slot.dfNameHolder:SetShown((style.spellName and style.spellName.show) and true or false)
         end
+        if slot.dfCasterHolder then
+            -- Turning the caster name off must HIDE it, not merely stop restyling it: the
+            -- region above is create-once and the engine keeps writing text into a bound
+            -- fontstring regardless of what our spec says. Same contract as its neighbours.
+            slot.dfCasterHolder:SetShown((style.casterName and style.casterName.show) and true or false)
+        end
         if slot.dfDispelHolder then
             slot.dfDispelHolder:SetShown((style.dispel and style.dispel.nativeBorder) and true or false)
         end
@@ -2914,9 +2991,19 @@ local function styleButton_regions(slot, config)
                 local back = ag:CreateAnimation("Alpha")
                 back:SetFromAlpha(0.25); back:SetToAlpha(1)
                 back:SetDuration(half); back:SetOrder(2)
-                -- No handle kept: the group is owned by the holder and outlives this
-                -- scope on its own, and there is no legal path that would ever stop it
-                -- (touching it later is a tainted write to a button child).
+                -- ★★ 12.1.5: THE HANDLE IS NOW KEPT, so bindNative can hand this group to
+                -- the engine as a Pandemic ACTIVE animation. It used to be deliberately
+                -- dropped — "there is no legal path that would ever stop it" — and that
+                -- was true right up until Blizzard added one.
+                -- ⚠ Play() STAYS, unconditionally, and is not an else-branch. It is the
+                -- universal fallback (12.1.0, the AD canvas and the test preview all run
+                -- plain frames with no registrar at all), and it costs nothing where the
+                -- registration does land: the engine's first Assignment calls
+                -- StopAnimationGroups on its active list before deciding whether to
+                -- replay, so our self-start is corrected on the first aura either way.
+                -- Registering INSTEAD of playing would mean a failed registration left
+                -- the cue permanently still, which is the worse failure.
+                slot.dfPandemicFlashAG = ag
                 ag:Play()
             end
         end
@@ -3228,14 +3315,41 @@ local function bindNative(slot, config)
         slot:SetDurationBar(slot.dfBar, o)
     end
 
+    -- CASTER NAME (12.1.5). ☠ NOT bind-once, unlike every neighbour here, and that is
+    -- deliberate: SetCasterName's options carry the realm-suffix and class-colour choices,
+    -- and it REPLACES its display element (`self.casterName = PackDisplayElement(...)`)
+    -- rather than appending to a list the way AddDispelTypeTexture and the pandemic
+    -- registrars do. So a re-bind is the sanctioned way to change those two settings, and
+    -- binding once would make both toggles do nothing until something else rebuilt the
+    -- slot — the "the checkbox is inert" bug this file has shipped before.
+    -- ⚠ Value-tracked all the same. A bare re-bind every pass would re-run
+    -- UpdateAuraDisplay on every restyle for settings that almost never change.
+    -- ⚠ pcall'd: a refusal in restricted content leaves the PREVIOUS binding in place,
+    -- which still renders — just with the older options — so failure degrades rather than
+    -- blanking the text.
+    local casterSpec = style.casterName
+    if slot.dfCaster and slot.SetCasterName and casterSpec then
+        local tok = (casterSpec.showRealm and "R" or "r") .. (casterSpec.classColor and "C" or "c")
+        if slot._casterOptTok ~= tok then
+            local okC = pcall(slot.SetCasterName, slot, slot.dfCaster, {
+                showRealmName = casterSpec.showRealm and true or false,
+                useClassColors = casterSpec.classColor and true or false,
+            })
+            if okC then slot._casterOptTok = tok end
+        end
+    end
+
     if slot.dfName and slot.SetSpellName and not slot._boundName then
         slot._boundName = true
         slot:SetSpellName(slot.dfName)
     end
 
     -- PANDEMIC (PTR 8 / 69111). The registrar is a LIST, not a single slot
-    -- (AddPandemicRegion returns an index; RemovePandemicRegion / ClearPandemicRegions
-    -- take one back) — but DF binds exactly one region per button and treats removal as
+    -- (⚠ 12.1.5 changed the shape: AddPandemicRegion no longer returns an index, and
+    -- RemovePandemicRegion takes the REGION back rather than an index. DF never used
+    -- either, so this is a comment fix, not a code one — but adding the same region
+    -- twice now ERRORS instead of silently duplicating, which is what _boundPandemic
+    -- below has always prevented) — but DF binds exactly one region per button and treats removal as
     -- a Rebuild, because re-registering would need secure context again and an
     -- asymmetric add-live/remove-live pair is how the border/dispel binds have gone
     -- wrong before.
@@ -3255,6 +3369,105 @@ local function bindNative(slot, config)
         elseif not warnedPandemicRegion then
             warnedPandemicRegion = true
             DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
+        end
+    end
+
+    -- ★★ PANDEMIC FLASH AS A NATIVE ACTIVE ANIMATION (12.1.5). The flash group is built
+    -- in styleButton_regions and self-started there; handing it over here makes the
+    -- ENGINE play it on window entry and stop it on exit, instead of it looping forever
+    -- on every button.
+    --
+    -- ★ WHY THIS IS WORTH DOING AT ALL — it is not a new effect, it is the same one made
+    -- honest. FrameCreationBatchSize allocates 10 buttons per group up front, so today a
+    -- REPEAT group is being evaluated on buttons no aura is using, plus on every button
+    -- whose aura is nowhere near its refresh window. That is precisely MiniAuras'
+    -- documented reason for deleting their animated glows outright ("there is no way to
+    -- gate an animation per icon"). 12.1.5 is that way.
+    --
+    -- ☠ REGISTER LAST, AFTER AddPandemicRegion. Both stamp the holder, and the region
+    -- bind is the one proven in game; if the animation call is going to be refused on
+    -- some build, it must not take the region bind down with it. Separate pcall, separate
+    -- bind-once flag, stamped AFTER success for the same reason the region's is.
+    --
+    -- ☠ WHAT THE ENGINE STAMPS, AND WHY IT IS SAFE HERE:
+    --   · the group   -> ForbiddenAspect.AddAnimations + QueryAnimationProgress
+    --     ⇒ the group must be COMPLETE before this call (it is — both Alpha legs are
+    --       created in one shot at build), and nothing may ask it whether it is playing
+    --       or how far through it is. DF never does.
+    --   · each animation -> ChangeAnimationTarget + QueryAnimationProgress.
+    --   · each animation's TARGET -> SecretAspect.Alpha.
+    --     ⚠ That last one is the trap worth naming: the target here is the holder, and
+    --     the holder's alpha becomes engine-owned. Verified safe because nothing writes
+    --     it — makeHolder only parents, sizes and levels, and the out-of-range fade rides
+    --     the slot owner's ANCHOR (GetSlotOwnerAlphaHost), which sits above the container
+    --     entirely. ☠ Do NOT point a pandemic animation at a DF alpha carrier.
+    --
+    -- ⚠ Inbound validation also requires the group and every animation to be descendants
+    -- of the button and every animation to resolve a target. Ours are (holder -> button,
+    -- default target = the group's parent region), but the pcall is what makes a build
+    -- that disagrees a logged no-op rather than a broken bind.
+    if slot.dfPandemicFlashAG and slot.AddPandemicActiveAnimation
+        and not slot._boundPandemicAnim then
+        local okA, errA = pcall(slot.AddPandemicActiveAnimation, slot, slot.dfPandemicFlashAG)
+        if okA then
+            slot._boundPandemicAnim = true
+        elseif not warnedPandemicAnim then
+            warnedPandemicAnim = true
+            DF:DebugWarn(DBG, "AddPandemicActiveAnimation failed, flash stays self-driven: %s",
+                tostring(errA))
+        end
+    end
+
+    -- ★★ THE PANDEMIC BORDER'S OWN EFFECT, HANDED OVER THE SAME WAY (12.1.5). Features/
+    -- Pandemic.lua no longer strips spec.border.animation, so a BORDER-mode cue can run
+    -- any DF.Border effect; on a container button those build DECLARATIVE groups
+    -- (border._secretRect selects that path) and stash them on border._declAnims.
+    --
+    -- ★ WHY THIS IS SAFE TO DO ONCE AT INIT. The groups are built on the border's FIRST
+    -- Apply, which is this init pass, and they are never rebuilt afterwards:
+    -- StartAnimation's dedupe returns early for an unchanged spec precisely when
+    -- _declAnims exists ("without _declAnims here the 'driver is dead, restart' arm would
+    -- fire on EVERY re-apply"), and a genuine animation-key change is STRUCTURAL, so it
+    -- arrives as a Rebuild with a fresh button rather than a restyle. One build, one
+    -- registration, for the life of the button.
+    -- ☠ If either of those two properties is ever weakened, this registration goes stale
+    -- and the engine ends up holding stopped orphan groups it will keep replaying, with no
+    -- secure context left to re-register the new ones. They are load-bearing here, not
+    -- incidental.
+    --
+    -- ⚠ Registered as ACTIVE only, deliberately. Enter/Leave are one-shots and DF has no
+    -- user-facing concept of them yet; adding them silently would fire an unconfigured
+    -- burst on every window edge.
+    -- ⚠ Failure is not a visual regression: an unregistered declarative group keeps
+    -- self-playing, and the holder's engine-driven Shown still confines it to the window.
+    -- We lose the "stop between windows" saving, not the cue.
+    -- ⚠ 12.1.5 PTR 2 (69848) stamps SecretAspect VertexColor + TexCoords (Alpha already was)
+    -- on every TARGET of a bound animation. That is harmless here, checked 2026-09-29: a
+    -- secret aspect makes the GETTERS (GetVertexColor / GetTexCoord / GetAlpha) return
+    -- secrets; SetVertexColor and SetTexCoord stay AllowedWhenTainted with no forbidden-aspect
+    -- check, so DF.Border's re-tint and re-crop after binding still land. Nothing in DF reads
+    -- those getters back. Do not "fix" this by moving the tint before the bind.
+    local pborder = slot.dfBorderPandemic
+    if pborder and pborder._declAnims and slot.AddPandemicActiveAnimation
+        and not slot._boundPandemicBorderAnim then
+        local groups = pborder._declAnims
+        local allOK = true
+        for i = 1, #groups do
+            local g = groups[i]
+            -- Each group separately: one effect can build several (DF_ORBIT makes one per
+            -- sparkle), and a single refusal must not strand the rest unregistered.
+            if g and not pcall(slot.AddPandemicActiveAnimation, slot, g) then allOK = false end
+        end
+        -- Only latch on a CLEAN pass. A partial registration must be retryable, and
+        -- AddPandemicActiveAnimation errors on a duplicate, so the retry has to be
+        -- all-or-nothing at the slot level -- which a Rebuild (fresh button, empty lists)
+        -- is, and a restyle is not.
+        if allOK then
+            slot._boundPandemicBorderAnim = true
+        elseif not warnedPandemicBorderAnim then
+            warnedPandemicBorderAnim = true
+            DF:DebugWarn(DBG,
+                "pandemic border animation hand-over incomplete; effect stays self-driven")
         end
     end
 
@@ -5489,6 +5702,15 @@ function Handle:_paintTestSlot(slot, index)
         slot.dfBar:SetMinMaxValues(0, 1); slot.dfBar:SetValue(barFill)
     end
     if slot.dfName then slot.dfName:SetText(dispName or "") end
+    -- Caster name: the live path has the ENGINE write this fontstring off a secret
+    -- casterGUID, and a preview slot has no aura bound, so nothing would ever fill it.
+    -- Paint the player's own name — every previewed aura reads as self-cast anyway, and a
+    -- blank row would make the user think the setting is broken while they are styling it.
+    -- ⚠ Data differs, rendering does not: the region, its TextStyle and its anchor are the
+    -- live ones, so what is being previewed is the real layout.
+    if slot.dfCaster then
+        slot.dfCaster:SetText(UnitName and UnitName("player") or "")
+    end
     -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
     -- ourselves. Custom palette first (the preview mirrors live, where the shared
     -- account dispel colours drive Color-style rings), game palette fallback.
