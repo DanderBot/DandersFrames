@@ -9452,11 +9452,13 @@ end
 -- probe with ONE actuation, restored on its own merits after the demolition took it
 -- out as collateral.
 --
--- WHAT IT IS FOR. `UnitIsVisible` is INSTANCE-scoped, not range-scoped: TRUE for a
--- same-instance member far outside 40yd, FALSE only across instances and phases
--- (field-verified 3-case probe, 2026-07-23). A unit reading false is not in your world
--- at all, so the engine cannot attribute casters for it — and the PLAYER filter token
--- then FAILS OPEN, rendering every caster's aura through an "only mine" pool.
+-- WHAT IT IS FOR. `UnitIsVisible` is a RENDER-range probe: FALSE across instances and
+-- phases, and FALSE for a same-instance member out of render range too (17 raid units at once on a raid join,
+-- data still live -- the 2026-07-23 "instance-scoped" probe tested too few cases). For a
+-- unit genuinely outside your world the engine cannot attribute casters, and the PLAYER
+-- filter token then FAILS OPEN, rendering every caster's aura through an "only mine"
+-- pool. The probe over-reports, which is why the latch is narrowed to source-relative
+-- pools (see below).
 --
 -- ✅ THAT FAIL-OPEN IS MEASURED ON THE CURRENT CLIENT, not inherited belief: with the
 -- viewer outside an instance from a party member, "HELPFUL|PLAYER" rendered a shaman's
@@ -9682,6 +9684,30 @@ function AuraContainer.ReconcileLatches(reason)
     for s in pairs(AuraContainer._slotHandles or {}) do
         if s._visLatched and not slotVisDark(s) then healed = healed + 1 end
         pcall(s._setVisLatch, s)
+    end
+    -- The death latch, re-asked the same way. Its setter takes the verdict rather than
+    -- recomputing it, so hand it the registry's answer for the unit each container is
+    -- bound to NOW; a container whose memo disagrees heals here instead of waiting for a
+    -- death/rez edge that may never come. Same scope as SetUnitDeathLatched.
+    local deathLatched = AuraContainer._deathLatchedUnits
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.config and not h.config.parentDrivenVisibility then
+            local want = deathLatched[h.config.unit] or nil
+            if (h._deathLatched or nil) ~= want then
+                healed = healed + 1
+                pcall(h._setDeathLatch, h, want)
+            end
+        end
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        local unit = s.owner and s.owner.unit
+        if unit then
+            local want = deathLatched[unit] or nil
+            if (s._deathLatched or nil) ~= want then
+                healed = healed + 1
+                pcall(s._setDeathLatch, s, want)
+            end
+        end
     end
 
     -- Silent when there was nothing to do: this runs on every zone-in and every combat
