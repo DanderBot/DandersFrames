@@ -2349,13 +2349,22 @@ local function BuildGlobalView(parent)
         totalHeight = totalHeight + (height or 30)
     end
 
+    -- Cards, like every section in the designer (P.ADCardSection). The kinds are keyed by
+    -- header string for the reason the indicator sections' are.
+    local GLOBAL_KIND = {
+        [L["General"]] = "settings", [L["Sound Alerts"]] = "notifications",
+        [L["Duration Text"]] = "text", [L["Stack Text"]] = "text",
+        [L["Import from Buffs Tab"]] = "autopopulate", [L["Standard Buffs"]] = "filters",
+        [L["Actions"]] = "settings",
+    }
     local function AddGroup(header, buildFn)
-        local group = GUI:CreateSettingsGroup(parent, contentWidth - 10)
-        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
-        buildFn(group)
-        local h = group:LayoutChildren()
-        AddWidget(group, h)
+        local section, group = P.ADCardSection(parent, header, contentWidth - 10,
+            GLOBAL_KIND[header], "adGlobal:" .. header)
+        AddWidget(section, section.layoutHeight)
+        if section.expanded then
+            buildFn(group)
+            AddWidget(group, P.ADCardFinish(group))
+        end
     end
 
     -- ── GENERAL ──
@@ -7370,8 +7379,24 @@ local function pihMakeTools(parent, opts)
     t.groupW  = (parent:GetWidth() or 320) - (t.indent + 18)
     t.parent  = parent
 
-    -- Builds ONE settings group at startY and returns the y below it.
+    -- Builds ONE section at startY and returns the y below it: a card like every other
+    -- section in the designer (P.ADCardSection). gopts.collapseKey names its fold -- these
+    -- titles carry live counts, so the title cannot. No automatic two tracks: the Classes
+    -- list lays out its own grid and sizes its wrapping labels against it.
     function t.group(header, buildFn, startY, gopts)
+        if header and P.ADCardSection then
+            local section, body = P.ADCardSection(parent, header, t.groupW, gopts and gopts.kind,
+                (gopts and gopts.collapseKey) or ("pihelper:" .. header))
+            section:SetPoint("TOPLEFT", t.indent, startY)
+            section:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+            local y = startY - section.layoutHeight
+            if not section.expanded then return y end
+            buildFn(body, t)
+            local h = body:LayoutChildren()   -- includes the card's gap to the next one
+            body:SetPoint("TOPLEFT", t.indent, y)
+            body:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+            return y - h
+        end
         local group = GUI:CreateSettingsGroup(parent, t.groupW, gopts)
         group.padding = 10
         if header then
@@ -8344,7 +8369,7 @@ end
 -- ticks had, found the same way: by asking what USED to call the thing being deleted.
 local function pihBuildSoundBox(parent, yPos, Refresh)
     local t = pihMakeTools(parent, { Refresh = Refresh, indent = 8 })
-    return t.group(L["Sound Alert"], pihAddSound, yPos)
+    return t.group(L["Sound Alert"], pihAddSound, yPos, { collapseKey = "pihelper:sound", kind = "notifications" })
 end
 
 -- The two halves the designer's Effects tab mounts, in the order it mounts them.
@@ -8390,7 +8415,7 @@ S.BuildPIHelperBody = function(parent, opts)
         yPos = t.group(L["Roles"], function(g)
             pihAddRoles(g, t)
             pihAddGateAndNotes(g, t)
-        end, yPos)
+        end, yPos, { collapseKey = "pihelper:roles", kind = "filters" })
 
         -- ☠ COLLAPSIBLE, AND THIRTEEN ROWS IS WHY. Everything else in this panel is
         -- two or three ticks; a class list is as long as the game has classes, and
@@ -8425,11 +8450,11 @@ S.BuildPIHelperBody = function(parent, opts)
             .. ((cdOn == cdTotal) and tostring(cdTotal) or (cdOn .. "/" .. cdTotal))
         yPos = t.group(cdHead, function(g)
             pihAddClasses(g, t)
-        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch", kind = "filters" })
 
         yPos = t.group(L["Additional Filters"], function(g)
             pihAddTriggerSources(g, t)
-        end, yPos)
+        end, yPos, { collapseKey = "pihelper:sources", kind = "filters" })
 
         -- ★★ NAMED PLAYERS, LAST, AND COLLAPSED (2026-09-10). Krathe: "in guild groups it
         -- would be useful to only have the PI alert for the DPS you know who should be getting
@@ -8449,7 +8474,7 @@ S.BuildPIHelperBody = function(parent, opts)
         local pHead = L["Players"] .. (pn > 0 and ("   " .. pn) or "")
         yPos = t.group(pHead, function(g)
             pihAddPlayers(g, t)
-        end, yPos, { collapsible = true, collapseKey = "pihelper:players" })
+        end, yPos, { collapsible = true, collapseKey = "pihelper:players", kind = "autopopulate" })
     end
 
     return yPos
@@ -9201,7 +9226,8 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             local g = entry.widget
             g:ClearAllPoints()
             g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, y)
-            y = y - (g.calculatedHeight or entry.height)
+            -- A card header's slot is the one number its fold changes.
+            y = y - ((g.isCard and g.layoutHeight) or g.calculatedHeight or entry.height)
         end
         if body.dfAD_ReflowCard then body.dfAD_ReflowCard(y) end
     end
@@ -9210,22 +9236,25 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- inside one of these sections now re-flows the card instead of walking past it.
     body.dfAD_ReflowWidgets = ReflowSections
 
-    -- One collapsible box PER CATEGORY — the expanded effect card's section
+    -- One CARD per category (P.ADCardSection) -- the expanded effect card's section
     -- structure (Appearance / Border / Duration Text / Stack Count, same names
-    -- and order as the icon card's AddGroup boxes; group-inapplicable sections
+    -- and order as the icon card's sections; group-inapplicable sections
     -- — Position, Show When Missing, Expiring — have no group-level analogue).
     -- Collapse persists per card per section ("adGroupStyle:<cardKey>:<section>"),
-    -- so each section toggles independently; the toggle rides the widget's
-    -- built-in AuraDesigner_RefreshPage rebuild like the effect cards'.
+    -- the same slot the old boxes used, so each section keeps its fold.
+    local GROUP_SECTION_KIND = {
+        appearance = "appearance", border = "border", duration = "text",
+        stacks = "text", durationbar = "timer",
+    }
     local function AddSection(header, sectionKey, buildFn)
-        local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
-            collapsible = true,
-            collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
-        })
-        g.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        g:AddWidget(GUI:CreateHeader(body, header), GUI.RowHeight.sectionHeader)
+        local section, g = P.ADCardSection(body, header, bodyWidth - 10, GROUP_SECTION_KIND[sectionKey],
+            "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey)
+        section:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+        tinsert(sections, { widget = section, height = section.layoutHeight })
+        by = by - section.layoutHeight
+        if not section.expanded then return end
         buildFn(g)
-        local h = g:LayoutChildren()   -- includes the group's own bottom margin
+        local h = P.ADCardFinish(g)   -- includes the body's gap to the next card
         g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
         tinsert(sections, { widget = g, height = h })
         by = by - h
