@@ -321,7 +321,7 @@ end
 -- "Tracked" = the aura has an indicator the factory actually RENDERS ON THE BUFF SLOT (i.e.
 -- while the aura is PRESENT) on 12.1: a PRESENT-mode placed indicator (icon/square/bar) or a
 -- PRESENT-mode frame-level key (border / healthbar / background). Two deliberate exclusions:
---   * SOUND — now recovered (P4.5: it PLAYS on-apply via C_UnitAuras.AddAuraAppliedSound), but
+--   * SOUND — it plays through C_UnitAuras.AddAuraSound, but
 --     a sound is NOT a visual replacement for the buff icon. A sound-only aura must keep showing
 --     on the buff bar (audio cue + visible icon), so sound is DELIBERATELY excluded from the
 --     dedup union even though it renders (plays). (nametext / healthtext / framealpha remain
@@ -901,8 +901,8 @@ end
 -- negated standard tokens, and a rejected string degrades to a skipped group + DebugWarn
 -- (AuraContainer build loop). STRUCTURAL: the filter string is declared at AddAuraGroup/
 -- AddAuraSlot, so every consumer folds it into its struct sig (toggling rebuilds).
--- NOTE: the on-apply SOUND path can't honour othersOnly (AddAuraAppliedSound has no
--- caster filter) — sounds fire for any caster's application.
+-- NOTE: the SOUND path can't honour othersOnly (AddAuraSound's struct has no caster
+-- filter) — sounds fire for any caster's application.
 -- mine = the SPEC pool (My Buffs tab): ONLY the player's own casts light anything
 -- there (maintainer decision 2026-07-16, overriding the anyone-cast resolution in
 -- design doc §11.1 — "it's literally in the name"; a tester with two same-class
@@ -4324,8 +4324,7 @@ end
 -- volume (plays at the output channel), and NO ApplicationsDecreased, so stack-LOSS has no
 -- trigger. These are the read-free events the API supports; the legacy read-based alerts
 -- (fire WHILE a buff is missing; fire near an expiry THRESHOLD — presence / remaining-time
--- driven) stay sealed on 12.1 (the still-blocked Missing / Expire groups). The old build's
--- apply-only AddAuraAppliedSound is dual-detected as a fallback (Added only). Registration
+-- driven) stay sealed on 12.1 (the still-blocked Missing / Expire groups). Registration
 -- is NOT a secure-frame op but combat-legality is unconfirmed, so (re)registration DEFERS
 -- out of combat (the container OOC/regen discipline). Handles are tracked per (aura, event)
 -- and unregistered on every teardown path — a leaked registration is the failure mode.
@@ -4349,47 +4348,31 @@ local function resolveSoundArg(soundCfg)
     return nil
 end
 
--- The native sound API was RENAMED on the CustomAuraButton build:
---   AddAuraAppliedSound(sound)  ->  AddAuraSound(trigger, sound)   (same UnitAuraSoundInfo
---   struct; the old name is GONE with no alias, so we dual-detect both — the old code went
---   silently no-op on the renamed build). The new form adds a TRIGGER
---   (Enum.UnitAuraSoundTrigger): Added (on apply = the old behaviour), Removed (buff dropped /
---   expired) and ApplicationsIncreased (stack gained). The legacy build is apply-only. There is
---   NO ApplicationsDecreased — stack LOSS has no native trigger. Source: Gethe fa38386c.
+-- DF's event names -> Enum.UnitAuraSoundTrigger.
 local TRIGGER_ENUM_NAME = { applied = "Added", dropped = "Removed", stackGained = "ApplicationsIncreased" }
 
 local function soundAPIAvailable()
-    return (C_UnitAuras and (C_UnitAuras.AddAuraSound or C_UnitAuras.AddAuraAppliedSound)) and true or false
+    return (C_UnitAuras and C_UnitAuras.AddAuraSound) and true or false
 end
 
--- Register ONE native sound for (event, spell). Returns the handle id, or nil (event
--- unsupported by this build / call failed). event = "applied" | "dropped" | "stackGained".
+-- Register ONE native sound for (event, spell). Returns the handle id, or nil when the
+-- call fails. event = "applied" | "dropped" | "stackGained".
 local function registerAuraSound(event, unit, spellID, argKey, argVal, channel)
-    if not C_UnitAuras then return nil end
+    if not (C_UnitAuras and C_UnitAuras.AddAuraSound) then return nil end
     local sound = { unitToken = unit, spellID = spellID, outputChannel = channel }
     sound[argKey] = argVal
-    if type(C_UnitAuras.AddAuraSound) == "function" then
-        local UAST = Enum and Enum.UnitAuraSoundTrigger
-        local trig = UAST and UAST[TRIGGER_ENUM_NAME[event]]
-        if trig == nil then return nil end   -- this build's enum lacks the trigger
-        local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
-        if ok then return id end
-        DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
-        return nil
-    end
-    -- Legacy (pre-rename) build: only the on-apply sound exists.
-    if event == "applied" and type(C_UnitAuras.AddAuraAppliedSound) == "function" then
-        local ok, id = pcall(C_UnitAuras.AddAuraAppliedSound, sound)
-        if ok then return id end
-        DF:DebugWarn(DBG, "AddAuraAppliedSound failed (spell %s): %s", tostring(spellID), tostring(id))
-    end
+    local UAST = Enum and Enum.UnitAuraSoundTrigger
+    local trig = UAST and UAST[TRIGGER_ENUM_NAME[event]]
+    if trig == nil then return nil end
+    local ok, id = pcall(C_UnitAuras.AddAuraSound, trig, sound)
+    if ok then return id end
+    DF:DebugWarn(DBG, "AddAuraSound failed (spell %s, %s): %s", tostring(spellID), tostring(event), tostring(id))
     return nil
 end
 
 local function unregisterAuraSound(id)
-    if id == nil or not C_UnitAuras then return end
-    local rem = C_UnitAuras.RemoveAuraSound or C_UnitAuras.RemoveAuraAppliedSound
-    if type(rem) == "function" then pcall(rem, id) end
+    if id == nil or not (C_UnitAuras and C_UnitAuras.RemoveAuraSound) then return end
+    pcall(C_UnitAuras.RemoveAuraSound, id)
 end
 
 -- The three per-event sounds of one indicator. The flat sc.soundLSMKey/soundFile is the

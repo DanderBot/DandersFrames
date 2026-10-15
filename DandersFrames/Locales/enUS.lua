@@ -2043,7 +2043,6 @@ L["Buff Dropped"] = true
 L["Stack Gained"] = true
 L["Enable Buff-Dropped Sound"] = true
 L["Enable Stack-Gained Sound"] = true
-L["Needs the current game build — these sound triggers aren't available on this client yet."] = true
 L["Enable the checkbox above to use"] = true
 L["FRAME PREVIEW"] = true
 L["Fill Color"] = true

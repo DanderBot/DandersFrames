@@ -1448,10 +1448,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(spacer, 6)
             end
 
-            -- Other Buffs: the on-apply sound path has no caster filter
-            -- (AddAuraAppliedSound), so an other-pool alert also fires for the
-            -- player's OWN cast — and for a spell that My Buffs also tracked,
-            -- both pools' sounds would fire. Surface it (B1 concern 2).
+            -- Other Buffs: the sound API has no caster filter, so an other-pool
+            -- alert also fires for the player's OWN cast — and for a spell that
+            -- My Buffs also tracked, both pools' sounds would fire. Surface it.
             if IsOtherTab() then
                 local obBanner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_anyone",
                     tone = "info",
@@ -1531,10 +1530,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Buff-Dropped + Stack-Gained sounds (native Removed / ApplicationsIncreased
         -- triggers, 12.1). Each has its OWN sound, independently enabled. Distinct from the
         -- blocked Missing Trigger (fires-while-absent) and Expire Alert (near-expiry
-        -- threshold), which still need sealed presence / remaining-time reads. On a pre-
-        -- rename client the triggers are absent — the group shows a note and the sound no-ops.
-        local newSoundTriggers = (C_UnitAuras and C_UnitAuras.AddAuraSound
-            and Enum and Enum.UnitAuraSoundTrigger) and true or false
+        -- threshold), which still need sealed presence / remaining-time reads.
         local function AddEventSoundGroup(header, subKey, enableLabel)
             AddGroup(header, function(g)
                 proxy[subKey] = proxy[subKey] or {}
@@ -1558,11 +1554,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     end
                 end)
                 g:AddWidget(prev, 28)
-                if not newSoundTriggers then
-                    g:AddWidget(GUI:CreateNote(parent,
-                        L["Needs the current game build — these sound triggers aren't available on this client yet."],
-                        { width = contentWidth - 20 }), 40)
-                end
                 if not (ec.enabled == true) then
                     dd:SetAlpha(0.4); dd:EnableMouse(false)
                     prev:SetAlpha(0.4); prev:EnableMouse(false)
