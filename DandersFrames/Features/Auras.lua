@@ -5537,7 +5537,7 @@ function DF:UpdateBlizzardFrameVisibility()
     end
 
     if EditModeManagerFrame and EditModeManagerFrame.PartyFramesSidePanel then
-        ForceHideShow(EditModeManagerFrame.PartyFramesSidePanel, not sideMenuVisible)
+        ForceHideShow(EditModeManagerFrame.PartyFramesSidePanel, not partySideMenuVisible)
     end
 end
 
