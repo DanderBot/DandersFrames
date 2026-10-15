@@ -41,6 +41,8 @@ ignore:
   - DandersUI
   # dev-only test consumer, never shipped
   - DandersMoverDemo
+  # its in-addon twin: the /mover demo frames (also cut from the TOC by do-not-package)
+  - DandersMover/Demo.lua
 
 manual-changelog:
   filename: CHANGELOG.md
