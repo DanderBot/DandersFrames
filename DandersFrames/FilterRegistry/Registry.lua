@@ -812,17 +812,6 @@ function R:IsRecordNarrowed(rec)
     return #self:LiveRecordIDs(rec) < self:RecordIDCount(rec)
 end
 
--- Drop every mute belonging to a record (the row's "track all" reset).
-function R:ClearRecordMutes(rec)
-    if not rec or not DF.db or not DF.db.filterMutedSpellIDs then return end
-    local store = DF.db.filterMutedSpellIDs
-    store[rec.id] = nil
-    if rec.alts then
-        for _, alt in ipairs(rec.alts) do store[alt] = nil end
-    end
-    if not next(store) then DF.db.filterMutedSpellIDs = nil end
-end
-
 -- Read-only: the GUI asks this per row on every list refresh.
 function R:IsPresetModified(presetKey)
     local o = self:ReadOverrides()[presetKey]
@@ -1250,12 +1239,6 @@ local function foldIncludes(self, selection)
     for k in pairs(addP or {}) do out.presets[k] = true end
     for k in pairs(addC or {}) do out.customs[k] = true end
     return out
-end
-
--- Everything an `includes` filter pulls in, as one flat selection -- for a caller that needs to
--- COUNT or LIST what a filter really covers rather than resolve it to a spell map.
-function R:ExpandSelection(selection)
-    return foldIncludes(self, selection)
 end
 
 function R:ResolveSelection(selection, showAll)

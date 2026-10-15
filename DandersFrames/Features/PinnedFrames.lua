@@ -2473,28 +2473,6 @@ function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos, reason)
     self:ApplySetPositionForMode(setIndex, isRaid)
 end
 
--- The legacy position panel's "Anchor To" dropdown. Writes BOTH shapes (the `anchor`
--- DF glues from and the `anchorTo` mirror) and zeroes the offset so the set lands AT
--- the chosen corner (or, for SCREEN, at screen centre) -- the rule the dropdown has
--- always applied. nil anchorTo = SCREEN.
-function PinnedFrames:SetFramesAnchor(set, mode, anchorTo)
-    if not set then return end
-    local pos = set.position
-    if type(pos) ~= "table" then pos = {}; set.position = pos end
-    local growth = GetContainerAnchorPoint(set)
-    local current = MirrorAnchorTo(pos.anchor) or (pos.anchor == nil and pos.anchorTo) or nil
-    if anchorTo and FRAMES_ANCHOR_POINTS[anchorTo] then
-        if current ~= anchorTo or not FramesGlue(pos.anchor) then
-            pos.anchor = { target = "DandersFrames:" .. ((mode == "raid") and "raid" or "party"), mode = "point",
-                           point = growth, relPoint = FRAMES_ANCHOR_POINTS[anchorTo], offsetX = 0, offsetY = 0 }
-        end
-        pos.anchorTo = anchorTo
-    else
-        if current ~= nil then pos.point, pos.x, pos.y = growth, 0, 0 end
-        pos.anchor, pos.anchorTo = nil, nil
-    end
-end
-
 -- Toggle label visibility
 function PinnedFrames:SetShowLabel(setIndex, show)
     local set = GetSetDB(setIndex)

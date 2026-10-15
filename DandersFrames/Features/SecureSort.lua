@@ -214,18 +214,6 @@ function SecureSort:CacheUnitSpec(unit, specID)
     end
 end
 
--- Get cached spec role for a unit (returns 0 if not cached)
-function SecureSort:GetCachedSpecRole(unit)
-    local name = GetCacheableName(unit)
-    if not name then return 0 end
-    
-    local cached = self.specCache[name]
-    if cached then
-        return cached.role
-    end
-    return 0
-end
-
 -- Queue a unit for inspection (to get their spec)
 function SecureSort:QueueInspect(unit)
     if not UnitExists(unit) then return end

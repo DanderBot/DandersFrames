@@ -529,12 +529,3 @@ function Pandemic:BuildSpec(cfg, prefix, ctx)
 
     return spec
 end
-
--- Does this config have a pandemic reveal of a given TYPE? The editor's collision check
--- asks both engines this so the warning logic lives in one vocabulary rather than reaching
--- into each system's keys. nil type = "any".
-function Pandemic:UsesType(cfg, prefix, mode)
-    local m = self:Mode(cfg, prefix)
-    if not m then return false end
-    return mode == nil or m == mode
-end

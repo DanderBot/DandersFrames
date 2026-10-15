@@ -6701,21 +6701,6 @@ function Handle:ApplyStyle(style, layout)
     end
 end
 
--- Structural filter change -> full rebuild (can't mutate a live filter set safely).
--- ☠ PARKING-UNSAFE BY CONSTRUCTION, so it opts out. This changes the filter set
--- WITHOUT going through a consumer's structural signature, so _structKey no longer
--- describes this handle's structure: parking the outgoing container would file it under
--- a key that has just stopped being true, and a later Rebuild presenting that key would
--- re-adopt a container built for a different filter set. Dropping the key disables both
--- halves (no park, no re-adopt) and releasing any existing park stops a stale one being
--- matched later. Zero callers today -- this is a guard for the next one.
-function Handle:SetFilter(filter)
-    self.config.filter = filter
-    self._structKey = nil
-    self:_releaseParked()
-    self:_rebuild()
-end
-
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
 -- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText/
 -- updateInterval, dispel flags). Combat-guarded (defers to regen).
@@ -7834,7 +7819,7 @@ end
 -- otherwise), and an interposed child frame satisfies that while staying levellable.
 --
 -- Test-mode frames are refused (the preview declares its own topology), and consumer
--- styling stays with the caller via GetButton/GetLevelHost.
+-- styling stays with the caller via GetButton.
 
 local SlotHandle = {}
 SlotHandle.__index = SlotHandle
@@ -8193,9 +8178,7 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     return handle
 end
 
-function SlotHandle:GetButton()    return self.button end
-function SlotHandle:GetLevelHost() return self.button and self.button.dfLevelHost or nil end
-function SlotHandle:IsParked()     return self.parked == true end
+function SlotHandle:GetButton() return self.button end
 
 -- ★ DROP-IN COMPATIBILITY with the two places that already treat an AD handle
 -- generically, so migrating a consumer needs no change to either:
@@ -8722,17 +8705,6 @@ function SlotHandle:SetAlpha(alpha)
     return pcall(f.SetAlpha, f, alpha)
 end
 
--- Live z-order, on OUR frame — never on the sealed button. Available for a consumer whose
--- level is NOT already structural; the AD path sets level on the button at create instead
--- (see the header above AcquireSlot) and does not need this.
-function SlotHandle:SetZOrder(level, strata)
-    local host = self:GetLevelHost()
-    if not host then return false end
-    if strata then pcall(host.SetFrameStrata, host, strata) end
-    if level then pcall(host.SetFrameLevel, host, level) end
-    return true
-end
-
 -- There is no way to remove a slot, so release == park. The key is retained precisely so
 -- a later AcquireSlot with the same structure re-adopts this button instead of adding a
 -- second one.
@@ -8834,17 +8806,6 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     -- so a bounce would only re-arm a parse of sample data.
     if not AuraContainer._testMode then reparseContainer(owner.container) end
     return ok
-end
-
--- Census hook for the S4 before/after. Returns live slot count, parked count, total.
-function AuraContainer:GetSlotOwnerStats(frame)
-    local owner = ownerOf(frame)
-    if not owner then return 0, 0, 0 end
-    local live, parked = 0, 0
-    for _, h in pairs(owner.slots) do
-        if h.parked then parked = parked + 1 else live = live + 1 end
-    end
-    return live, parked, live + parked
 end
 
 function AuraContainer:Create(parent, config)

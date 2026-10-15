@@ -474,7 +474,6 @@ L["%ds and above"] = true
 L["%s (Copy)"] = true
 L["%s (Ranks %d-%d)"] = true
 L["%s or %s"] = true
-L["%s settings reset to defaults."] = true
 L["Profile reset to defaults: %s"] = true
 L["(offline)"] = true
 L["+ Import Filter"] = true

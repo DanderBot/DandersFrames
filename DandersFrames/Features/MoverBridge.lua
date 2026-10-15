@@ -52,10 +52,6 @@ function Bridge:RequestScope(scope)
     self.requestedScope = (scope == "raid") and "raid" or "party"
 end
 
-function Bridge:IsAvailable()
-    return Mover:IsEnabled(ADDON_KEY) and true or false
-end
-
 -- ============================================================
 -- RELEVANCE
 -- ============================================================
