@@ -104,7 +104,7 @@
 - (Tooltips) Aura tooltips no longer offer Game Default positioning, which the game's aura tooltip can't do. (by Krathe)
 - (Settings) Switching tabs and pages is faster. (by Krathe)
 - (Settings) The classic settings layout has been removed; the card layout is now the only one. (by Krathe)
-- (Aura Designer) An indicator's settings, the Global tab, group settings and the Power Infusion Helper are now cards, two settings to a row when there's room. (by Krathe)
+- (Aura Designer) An indicator's settings, the Global tab and group settings are now cards, two settings to a row when there's room, and the Power Infusion Helper's sections are cards too. (by Krathe)
 - (Text Designer) An element's Content, Appearance and Position are now cards, two settings to a row when there's room. (by Krathe)
 - (Aura Designer) The Aura and Text Designer previews take only the width they need, giving the settings the rest. (by Krathe)
 
