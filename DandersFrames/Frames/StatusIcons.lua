@@ -1061,8 +1061,7 @@ end
 -- UnitPvpClassification returns an Enum.PvPUnitClassification value
 -- (or -1 outside objective PvP); we only render flags + orbs.
 -- ============================================================
--- ★ Exposed: the preview used to hardcode inv_bannerpvp_02, so the per-classification
--- art (Horde/Alliance/Neutral flags, the four orbs) was unpreviewable.
+-- ★ Exposed so the preview renders the same per-classification art (Horde/Alliance/Neutral flags, orbs) as live.
 DF.PVP_CARRIER_TEXTURES = {
     [0]  = "Interface\\Icons\\inv_bannerpvp_01",  -- FlagCarrierHorde
     [1]  = "Interface\\Icons\\inv_bannerpvp_02",  -- FlagCarrierAlliance

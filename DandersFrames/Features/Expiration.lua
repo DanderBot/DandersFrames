@@ -25,8 +25,6 @@ local addonName, DF = ...
 --
 -- ONE PATHWAY: live rows, test mode and the editor canvas all render the reveal from the
 -- SAME BuildDurationSpec against a real duration — there is no preview-only renderer.
--- (DF:GetExpiryBorderEscape, which composed a static one-frame border sample, is left
--- unused by that change rather than deleted.)
 --
 -- CONTRACT:
 --   cfg      = the settings block holding the expiryAlert* keys (the AD indicator record,

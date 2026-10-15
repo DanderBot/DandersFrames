@@ -1,0 +1,132 @@
+local addonName, NS = ...
+
+-- ============================================================
+-- LOCALE
+-- Keys are the English text. Missing keys fall back to the key itself.
+-- ============================================================
+local L = setmetatable({}, { __index = function(t, k) return k end })
+NS.L = L
+
+-- Strings are added here as tasks introduce them (alphabetical).
+L["%d mover positions reset."] = true
+L["Align"] = true
+L["Anchor"] = true
+L["Anchor %s"] = true
+L["Anchor point %s"] = true
+L["Anchor root"] = true
+L["Anchored"] = true
+L["Anchored to %s"] = true
+L["Anchoring would create a loop."] = true
+L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] = true
+L["Auto"] = true
+L["Auto-pin panels when editing"] = true
+L["Backup"] = true
+L["Backup anchor %s"] = true
+L["Bottom"] = true
+L["Cancel"] = true
+L["Clear backup %s"] = true
+L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."] = true
+L["Close"] = true
+L["Collapse"] = true
+L["Configure"] = true
+L["Copy to %s"] = true
+L["Open this element's own settings."] = true
+L["Fold the strip away to a small tab at the top of the screen."] = true
+L["Drag onto another mover to attach"] = true
+L["Drag onto another mover to set the backup anchor"] = true
+L["Drag to move. Shift locks to horizontal, Ctrl to vertical."] = true
+L["Drop into a zone to re-anchor; pull far away or Detach to free it."] = true
+L["Press Esc or use the top strip to lock."] = true
+L["Center"] = true
+L["Center %s"] = true
+L["DandersMover"] = true
+L["Darkens the game world behind the grid while the movers are open, so the grid and your frames stand out."] = true
+L["Demo cannot be started or stopped in combat."] = true
+L["Demo dynamic target now points at %s."] = true
+L["Demo started. /mover to unlock. /mover demo off | refresh | reset"] = true
+L["Demo stopped."] = true
+L["Detach"] = true
+L["Detach %s"] = true
+L["Detached — backup anchor cleared"] = true
+L["Dim amount"] = true
+L["Dim background"] = true
+L["Discard"] = true
+L["Edge"] = true
+L["Editor"] = true
+L["End"] = true
+L["Free"] = true
+L["Grid"] = true
+L["Grid line thickness"] = true
+L["Grid Size"] = true
+L["hidden"] = true
+L["Hold Shift for 10 units, Ctrl for 100."] = true
+L["How solid the movers are. Lower it to see the frames underneath; outlines, colours and names stay at full strength."] = true
+L["Keyboard nudge"] = true
+L["Left"] = true
+L["Move %s"] = true
+L["Mover Opacity"] = true
+L["Movers cannot be unlocked in combat."] = true
+L["Movers suspended for combat."] = true
+L["No addon named %s has registered movers."] = true
+L["No addons have registered movers yet."] = true
+L["None"] = true
+-- The Target row's EMPTY state. "None" on its own names the state and stops;
+-- this says what to do about it. %s is the chain glyph, dropped in as an inline
+-- texture by the caller -- the escape can never live in the string itself, so
+-- what a translator sees is the sentence with a gap where the icon goes.
+L["None — drag %s to link"] = true
+L["Nudge"] = true
+L["Nudge %s"] = true
+L["Offset X"] = true
+L["Offset Y"] = true
+L["Panel side"] = true
+L["Pin"] = true
+L["Point"] = true
+L["Redo"] = true
+L["Registered addons"] = true
+L["Rel point"] = true
+L["Reset"] = true
+L["Reset %s"] = true
+L["Right"] = true
+L["Save"] = true
+L["Save & Exit"] = true
+L["Scale"] = true
+L["Settings"] = true
+L["Shift: horizontal · Ctrl: vertical · Esc: back out"] = true
+L["Show distance measures"] = true
+L["Show grid"] = true
+L["Show grid snap lines"] = true
+L["Show movers for hidden frames"] = true
+L["Show other addons' movers"] = true
+L["Show snap zones within"] = true
+L["Size of the top strip, the element panel, this window and the text on the movers. Movers themselves always match their frames."] = true
+L["Snap distance"] = true
+L["Snap to frames"] = true
+L["Snap to grid"] = true
+L["Snap to screen"] = true
+L["Snapping"] = true
+L["Snapping, grid and per-addon mover toggles."] = true
+L["Start"] = true
+L["Target"] = true
+L["Top"] = true
+L["Typing in or clicking a mover's panel pins it in place. Off: only the pin button pins."] = true
+L["Redid: %s"] = true
+L["Undid: %s"] = true
+L["Undo"] = true
+L["Unsaved changes"] = true
+L["Usage: /mover [unlock|lock|config|reset]"] = true
+L["Usage: /mover reset all | <addon> — registered: %s"] = true
+L["What this element is anchored to. Picking one does not move it."] = true
+L["Where this element goes while the target above is off screen."] = true
+L["X"] = true
+L["Y"] = true
+L["(backup)"] = true
+L["(hidden)"] = true
+L["(unavailable)"] = true
+L["You have unsaved mover changes."] = true
+
+-- `= true` marks a key as "same as the English text". Convert so lookups return
+-- the string itself; the metatable above only covers keys that are absent.
+for key, value in pairs(L) do
+    if value == true then rawset(L, key, key) end
+end

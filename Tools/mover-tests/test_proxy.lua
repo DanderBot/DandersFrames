@@ -1,0 +1,1405 @@
+local NS = ...
+local R = NS.Registry
+
+-- ============================================================
+-- FRAME STUBS
+-- Proxy.lua only needs frames that remember shown state and swallow every
+-- other call; a __index fallback hands out no-op methods for the rest.
+-- ============================================================
+-- Fx (animation) stubs: a permissive no-op animation group so FadeIn/FadeOut
+-- run their state logic (Show/Hide, transition guards) without any animation.
+local function permissiveAnim()
+    local t = setmetatable({}, { __index = function() return function() end end })
+    t.IsPlaying = function() return false end
+    return t
+end
+local function stubAnimationGroup()
+    local g = permissiveAnim()
+    g.CreateAnimation = function() return permissiveAnim() end
+    return g
+end
+
+local function stubFrame()
+    -- dragging is read as a plain boolean by Proxy:Refresh; without a real
+    -- value the __index fallback would hand back a (truthy) function and
+    -- Refresh would bail before Highlight ran. fxIn/fxOut/tagShown are plain
+    -- values read by Fx and applyLook for the same reason -- and so is
+    -- `hovered`, which Highlight reads off every slab: left absent, EVERY slab
+    -- would repaint as hovered. `_mouse` and `_border` are recorded state, and
+    -- the same fallback would make a never-set one read as truthy.
+    local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
+                fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
+                fxScale = false, fxMove = false, tagShown = false, hovered = false,
+                _mouse = false, _border = false,
+                -- Recorded, not swallowed: the overlay's level (it decides whether
+                -- a slab draws over the frame it stands on), the slab's clamp (the
+                -- off-screen rescue), alpha (the peek and the entrance) and scale
+                -- (the chrome setting) are each only observable as the number
+                -- they were handed. Plain values, because the __index fallback
+                -- would answer an unset one with a truthy function.
+                _level = 0, _clamped = false, _alpha = 1, _scale = 1 }
+    function f:CreateAnimationGroup() return stubAnimationGroup() end
+    function f:Show() self._shown = true end
+    function f:Hide() self._shown = false end
+    function f:IsShown() return self._shown end
+    function f:SetFrameLevel(v) self._level = v end
+    function f:GetFrameLevel() return self._level end
+    function f:SetClampedToScreen(v) self._clamped = v and true or false end
+    function f:SetAlpha(a) self._alpha = a end
+    function f:GetAlpha() return self._alpha end
+    function f:SetScale(s) self._scale = s end
+    function f:GetScale() return self._scale end
+    function f:GetEffectiveScale() return self._scale end
+    function f:SetShown(v) self._shown = v and true or false end
+    function f:GetCenter() return 0, 0 end
+    -- The slab's LAST anchor, recorded: where a slab is drawn is only observable
+    -- as the offset it was handed (the stub resolves no geometry).
+    function f:SetPoint(...) self._lastPoint = { ... } end
+    -- Real sizes, because the slab layout drops the coords/icon/title below
+    -- fixed widths -- a stub that always answered 10 would render every proxy
+    -- in its title-only form and the marker checks below would be meaningless.
+    function f:SetSize(w, h) self._w, self._h = w, h end
+    function f:GetWidth() return self._w end
+    function f:GetHeight() return self._h end
+    function f:GetSize() return self._w, self._h end
+    -- Vertex colour is how the role now reads (the dot), so it is recorded.
+    function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
+    -- The slab OUTLINE, which is what selection, hover and the pin marker all
+    -- speak through. Weight never changes (SEL_WEIGHT == WEIGHT), so applyLook
+    -- always takes the recolour path rather than re-laying the border out.
+    function f:SetBackdropBorderColor(r, g, b, a) self._border = { r, g, b, a } end
+    -- Mouse capture is recorded rather than swallowed: the unlock overlay
+    -- covers the whole screen and must never take it.
+    function f:EnableMouse(v) self._mouse = v and true or false end
+    function f:CreateTexture() return stubFrame() end
+    function f:CreateLine() return stubFrame() end
+    function f:SetScript(name, fn) self._scripts[name] = fn end
+    function f:GetScript(name) return self._scripts[name] end
+    return setmetatable(f, { __index = function() return function() end end })
+end
+
+-- FontString stub with deterministic metrics: 7px per character, and an
+-- unbounded width so the layout's measured-fit fallback is exercised for real.
+-- Records its anchor points so tests can see WHERE the title ended up.
+local function stubFontString()
+    local f = stubFrame()
+    f._text = ""
+    f._points = {}
+    function f:SetText(t) self._text = t or "" end
+    function f:GetText() return self._text end
+    function f:GetStringWidth() return 7 * #self._text end
+    function f:GetUnboundedStringWidth() return 7 * #self._text end
+    -- Recorded: the chrome scale reaches slab text through SetTextScale.
+    function f:SetTextScale(v) self._textScale = v end
+    function f:ClearAllPoints() wipe(self._points) end
+    function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
+    return f
+end
+
+-- The dot's tint against a palette entry.
+local function tinted(tex, color)
+    local v = tex._vertex
+    return v and v[1] == color.r and v[2] == color.g and v[3] == color.b
+end
+CreateFrame = function() return stubFrame() end
+local cursorX, cursorY = 960, 540
+GetCursorPosition = function() return cursorX, cursorY end
+GameTooltip = stubFrame()
+local shiftDown, ctrlDown, altDown = false, false, false
+IsShiftKeyDown = function() return shiftDown end
+IsControlKeyDown = function() return ctrlDown end
+-- Alt is the peek key; Proxy caches the global at load, so it has to exist
+-- BEFORE the load and be driven through this flag afterwards.
+IsAltKeyDown = function() return altDown end
+local COLORS = {
+    textDim    = { r = 0.5,  g = 0.5,  b = 0.5 },
+    text       = { r = 0.9,  g = 0.9,  b = 0.9 },
+    anchorRoot = { r = 0,    g = 1,    b = 0 },
+    anchored   = { r = 0.55, g = 0.40, b = 0.85 },
+    accent     = { r = 0.45, g = 0.45, b = 0.95 },
+    background = { r = 0,    g = 0,    b = 0 },
+    panel      = { r = 0.12, g = 0.12, b = 0.12 },
+    border     = { r = 0.25, g = 0.25, b = 0.25 },
+    danger     = { r = 0.8,  g = 0.2,  b = 0.2 },
+}
+NS.UI = {
+    MEDIA = "",
+    Colors = COLORS,
+    Space = { section = 10 }, RowGap = 14, RowGapTight = 8, RowHeight = { checkbox = 35 },
+    GetAccent = function() return { r = 0, g = 0, b = 1 } end,
+    CreateElementBackdrop = function() end,
+    ApplyPixelBorder = function() end,
+    -- The slab tooltip goes through the kit (never raw GameTooltip); recorded so
+    -- test_mover_tooltips.lua can read what it was handed.
+    ShowTooltip = function(_, owner, spec) NS.UI._lastTip = { owner = owner, spec = spec } end,
+    HideTooltip = function() NS.UI._lastTip = nil end,
+    AddFontRoot = function() end,
+    CreateLabel = function(_, _, opts)
+        local f = stubFontString()
+        if opts and opts.text then f:SetText(opts.text) end
+        return f
+    end,
+    CreateCheckbox = function() return stubFrame() end,
+    -- opts and the enabled state are recorded: the strip's Undo/Redo are the
+    -- only buttons on it whose enabled state is not a setting, and the only way
+    -- to see that is to read it back.
+    CreateButton = function(_, _, opts)
+        local b = stubFrame()
+        b._opts = opts
+        if opts and opts.width then b._w = opts.width end
+        b._enabled = true
+        function b:SetEnabled(v) self._enabled = v and true or false end
+        function b:IsEnabled() return self._enabled end
+        return b
+    end,
+    CreateGlyphButton = function(_, _, opts)
+        local b = stubFrame()
+        if opts and opts.size then b._w, b._h = opts.size, opts.size end
+        return b
+    end,
+}
+NS.Grid = { HidePreview = function() end, HideMeasure = function() end, SetAxisLock = function() end }
+NS.Lib = NS.Lib or { callbacks = { Fire = function() end } }   -- the winner marker the lost-copy guard checks
+-- A QUEUE, not an immediate-run stub: Proxy caches C_Timer at load, and what is
+-- on the global at that moment varies with which suites ran first (test_panel
+-- leaves a run-at-once one behind; a filtered run has none). Timers and tickers
+-- are recorded and only ever fired by the test that wants them, so the stagger,
+-- the legend's next-frame relayout and the peek poll are all deterministic.
+local timers, tickers = {}, {}
+local prevTimer = C_Timer
+C_Timer = {
+    After = function(d, fn) timers[#timers + 1] = { delay = d, fn = fn } end,
+    NewTicker = function(d, fn)
+        local t = { delay = d, fn = fn, cancelled = false }
+        function t:Cancel() self.cancelled = true end
+        tickers[#tickers + 1] = t
+        return t
+    end,
+}
+load_addon_file("Proxy.lua")
+C_Timer = prevTimer
+local P = NS.Proxy
+
+local function elDef(pos)
+    return { title = "x", frame = FakeFrame(960, 540, 100, 40),
+             getPos = function() return pos end, onChanged = function() end }
+end
+
+-- Build only makes proxies for enabled elements, and a rebuild drops a proxy
+-- whose element was turned off mid-session (the /mover config toggle path).
+do
+    -- test_registry.lua (which runs later) asserts the pre-Flush queueing, so
+    -- register directly here and put the readiness flag back afterwards.
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    R:RegisterAddon("X", { title = "X" })
+    R:Register("X", "party", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("X", "raid", elDef({ point = "CENTER", x = 0, y = 0 }))
+
+    P:Build()
+    check(P.proxies["X:party"] and P.proxies["X:raid"], "both proxies built while both enabled")
+
+    R:SetEnabled("X", "party", false)
+    P:DestroyAll()
+    P:Build()
+    check(P.proxies["X:party"] == nil, "disabled element gets no proxy")
+    check(P.proxies["X:raid"] ~= nil and P.proxies["X:raid"]:IsShown(), "enabled element still has a shown proxy")
+    check(P:GetUnlockFrame():IsShown(), "unlock frame shown")
+
+    -- addon filter composes with the toggle
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter("X"))
+    check(P.proxies["X:party"] == nil, "filter does not bypass the toggle")
+
+    -- table filter: listed keys only, none for unlisted or irrelevant elements
+    R:SetEnabled("X", "party", true)
+    R:Register("X", "off", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Get("X:off").isRelevant = function() return false end
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter({ addon = "X", keys = { "party" } }))
+    check(P.proxies["X:party"] ~= nil, "listed key gets a proxy")
+    check(P.proxies["X:raid"] == nil, "unlisted key gets NO proxy (not a dimmed one)")
+    check(P.proxies["X:off"] == nil, "irrelevant unlisted element gets no proxy")
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter("X"))
+    check(P.proxies["X:off"] == nil and P.proxies["X:raid"] ~= nil, "addon filter: relevance decides")
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter({ addon = "X", keys = { "off" } }))
+    check(P.proxies["X:off"] ~= nil, "listed irrelevant key IS proxied (key filter beats isRelevant)")
+    R:Unregister("X", "off")
+
+    -- other addons in a filtered session: zones yes, proxies only with showOtherAddons
+    R:RegisterAddon("Y", { title = "Y" })
+    R:Register("Y", "thing", elDef({ point = "CENTER", x = 300, y = 0 }))
+    NS.db.snapToFrames = true
+    NS.Session = { selected = nil, filter = R:NormalizeFilter({ addon = "X", keys = { "party" } }) }
+    P:DestroyAll()
+    P:Build(NS.Session.filter)
+    check(P.proxies["X:party"] ~= nil and P.proxies["Y:thing"] == nil, "other addon: no proxy by default")
+    P:ShowZones(R:Get("X:party"))
+    local sawY = false
+    for _, z in ipairs(P.dragZones) do if z.target == "Y:thing" then sawY = true end end
+    check(sawY, "other addon's element still offers snap zones")
+    P:HideZones()
+    NS.db.showOtherAddons = true
+    P:DestroyAll()
+    P:Build(NS.Session.filter)
+    check(P.proxies["Y:thing"] ~= nil, "other addon proxied with showOtherAddons")
+    NS.db.showOtherAddons = false
+    NS.Session = nil
+    P:DestroyAll()
+    R:UnregisterAddon("Y")
+
+    -- addon-level toggle removes everything
+    R:SetEnabled("X", nil, false)
+    P:DestroyAll()
+    P:Build()
+    check(next(P.proxies) == nil, "addon off -> no proxies at all")
+
+    -- Refresh on an element with no proxy is a no-op (Bridge:Init -> Lib:Apply path)
+    check(pcall(P.Refresh, P, "X:party"), "Refresh of a missing proxy does not error")
+
+    P:DestroyAll()
+    R:UnregisterAddon("X")
+    R.ready = wasReady
+    NS.db = nil
+end
+
+-- Drag axis locks: Shift pins Y to the drag-start centre, Ctrl pins X, both
+-- held is a free drag. Drives the proxy's OnDragStart/OnUpdate scripts with a
+-- recording Session stub so only the proxy's own maths is under test.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, snapToFrames = false, addons = {} }
+    local got = {}
+    NS.Session = {
+        selected = nil,
+        BeginDrag = function() end,
+        DragTo = function(_, el, x, y) got.x, got.y = x, y; return x, y, nil end,
+    }
+    R:RegisterAddon("D", { title = "D" })
+    -- Proxy centre is FakeFrame (960,540) = UIParent centre -> start centre (0,0).
+    R:Register("D", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local b = P.proxies["D:a"]
+    b.GetCenter = function() return 960, 540 end
+
+    cursorX, cursorY = 960, 540
+    b:GetScript("OnDragStart")(b)
+    local tick = b:GetScript("OnUpdate")
+    check(tick ~= nil, "drag installs an OnUpdate")
+
+    cursorX, cursorY = 1000, 570               -- cursor moved +40, +30
+    shiftDown, ctrlDown = false, false
+    tick(b); eq(got.x, 40, "free drag x"); eq(got.y, 30, "free drag y")
+
+    shiftDown, ctrlDown = true, false
+    tick(b); eq(got.x, 40, "shift: x follows"); eq(got.y, 0, "shift: y pinned to start")
+
+    shiftDown, ctrlDown = false, true
+    tick(b); eq(got.x, 0, "ctrl: x pinned to start"); eq(got.y, 30, "ctrl: y follows")
+
+    shiftDown, ctrlDown = true, true
+    tick(b); eq(got.x, 40, "both: free x"); eq(got.y, 30, "both: free y")
+
+    -- Releasing mid-drag frees the axis again (no first-axis latch).
+    shiftDown, ctrlDown = false, false
+    cursorX, cursorY = 990, 600
+    tick(b); eq(got.x, 30, "released: x free again"); eq(got.y, 60, "released: y free again")
+
+    b.dragging = false
+    b:SetScript("OnUpdate", nil)
+    P:DestroyAll()
+    R:UnregisterAddon("D")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- Role reads off the DOT's tint plus two markers: the link glyph while anchored,
+-- and the root ring for the one case the dot cannot carry -- a root that is
+-- itself anchored, whose dot already wears the anchored colour.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("R", { title = "R" })
+    R:Register("R", "root",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("R", "child", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:root", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    R:Register("R", "grand", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:child", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    R:Register("R", "free",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local root, child, grand, free =
+        P.proxies["R:root"], P.proxies["R:child"], P.proxies["R:grand"], P.proxies["R:free"]
+    check(tinted(root.dot, COLORS.anchorRoot), "root: dot is the anchorRoot green")
+    check(not root.root:IsShown() and not root.link:IsShown(), "root: no ring, no link")
+    check(tinted(child.dot, COLORS.anchored), "child+root: dot is the anchored purple")
+    check(child.link:IsShown() and child.root:IsShown(), "child+root: link on, ring on")
+    check(tinted(grand.dot, COLORS.anchored), "child: dot is the anchored purple")
+    check(grand.link:IsShown() and not grand.root:IsShown(), "child: link on, ring off")
+    check(tinted(free.dot, { r = 0, g = 0, b = 1 }), "free: dot is the host accent")
+    check(not free.root:IsShown() and not free.link:IsShown(), "free: neither")
+    check(P.legend and P.legend:IsShown(), "legend shown for the session")
+
+    -- Narrow slab: the dot gives way to the icon, and a ROOT's ring re-homes
+    -- onto the icon so the root state stays visible without the dot.
+    R:Register("R", "tinyroot", { title = "t", frame = FakeFrame(960, 540, 50, 24),
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    R:Register("R", "tinychild", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:tinyroot", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    P:Build()
+    local tiny = P.proxies["R:tinyroot"]
+    check(not tiny.dot:IsShown() and tiny.icon:IsShown(), "narrow slab: icon shown instead of the dot")
+    check(tiny.root:IsShown(), "narrow root: ring re-homed onto the icon")
+
+    P:DestroyAll()
+    check(not P.legend:IsShown(), "legend hidden on DestroyAll")
+    R:UnregisterAddon("R")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- Measured title fit. The size thresholds are only the fast path: a long title
+-- on a slab that KEEPS the normal layout must still never ellipsise -- parts
+-- drop out (coords, then the dot; the icon never drops) based on the measured
+-- text width. Stub metrics: 7px per character.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("T", { title = "T" })
+    local function def(title, w)
+        return { title = title, frame = FakeFrame(960, 540, w, 40),
+                 getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+                 onChanged = function() end }
+    end
+    -- 200px slab: coords ("0, 0" = 28px) + icon leave 124px for the title.
+    R:Register("T", "short", def("short", 200))                 --  5 ch =  35px: fits
+    -- 140px slab: 64px with coords, 96px without, 116px title-only.
+    R:Register("T", "mid",   def("Party Pinned1", 140))         -- 13 ch =  91px
+    R:Register("T", "long",  def("Party Pinned 1 - NPC", 140))  -- 20 ch = 140px
+    P:Build()
+    local s, m, lg = P.proxies["T:short"], P.proxies["T:mid"], P.proxies["T:long"]
+    check(s.coords:IsShown() and s.icon:IsShown() and s.dot:IsShown(), "short title keeps coords, icon and dot")
+    check(m.icon:IsShown() and m.dot:IsShown() and not m.coords:IsShown(), "long title on a mid slab drops coords first, keeps icon and dot")
+    eq(m.title:GetText(), "Party Pinned1", "dropped-coords title is the full text")
+    check(lg.icon:IsShown() and not lg.dot:IsShown() and not lg.coords:IsShown(),
+        "very long title drops coords AND the dot; the icon stays")
+    eq(lg.title:GetText(), "Party Pinned 1 - NPC", "overflow title is the full text")
+    local pt = lg.title._points[1]
+    check(#lg.title._points == 1 and pt and pt[1] == "TOP" and pt[3] == "BOTTOM",
+        "very long title floats below the slab, never truncated")
+    -- The pill is ON-DEMAND chrome: up only while its slab is the one being
+    -- looked at or moved, so a stack of anchored movers does not pile pills on
+    -- top of each other. (This used to assert it was up at rest -- it only read
+    -- that way because the frame stub answered `hovered` with a truthy
+    -- function; the stub now starts it false, so idle really is idle.)
+    check(lg.tagBg and not lg.tagBg:IsShown(), "floating title: no pill while the slab is idle")
+    P:Highlight("T:long")
+    check(lg.tagBg:IsShown(), "floating title: selecting the slab brings its pill up")
+    check(s.tagBg and not s.tagBg:IsShown(), "in-slab title has no pill")
+    P:DestroyAll()
+    R:UnregisterAddon("T")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- Link-drag target list. A primary link reaches every legal target; a FALLBACK
+-- link also drops the element's own primary, because a backup that is the
+-- primary is not a backup (Session:SetFallback refuses it, so it must not light
+-- up under the cursor either).
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("K", { title = "K" })
+    R:Register("K", "host",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("K", "spare", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("K", "child", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "K:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    local child = R:Get("K:child")
+    local function ids(list)
+        local out = {}
+        for _, t in ipairs(list) do out[t.id] = true end
+        return out
+    end
+    local primary = ids(P:LinkTargets(child))
+    check(primary["K:host"] and primary["K:spare"], "primary link reaches the current target and the spare")
+    check(not primary["K:child"], "a link never reaches the element itself")
+    local fallback = ids(P:LinkTargets(child, "fallback"))
+    check(not fallback["K:host"], "fallback link drops the element's own primary target")
+    check(fallback["K:spare"], "fallback link still reaches everything else")
+    R:UnregisterAddon("K")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- The coords slot's "hidden" comes from Registry:IsTargetAvailable, not the raw
+-- frame's IsShown: a consumer getRect owns visibility (DF's raid element measures
+-- its test-mode preview while the real container is hidden), while elements
+-- without getRect still read the frame's shown state.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("V", { title = "V" })
+    -- Backing frame HIDDEN, but getRect says "this is what is visible" -- the
+    -- DF-raid-in-a-real-raid shape (test container up, real container hidden).
+    local hiddenFrame = FakeFrame(960, 540, 100, 40)
+    hiddenFrame._shown = false
+    R:Register("V", "preview", { title = "p", frame = hiddenFrame,
+        getRect = function() return { x = 50, y = 25, w = 100, h = 40 } end,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    -- No getRect and a hidden frame: the demo's Combat Only shape out of combat.
+    local offscreen = FakeFrame(960, 540, 100, 40)
+    offscreen._shown = false
+    R:Register("V", "off", { title = "o", frame = offscreen,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    P:Build()
+    -- The RECORD's numbers (0, 0), not the visible rect's centre (50, 25): the
+    -- slab repeats what the panel's X/Y boxes show. See the readout block below.
+    eq(P.proxies["V:preview"].coords:GetText(), "0, 0", "getRect visible while frame hidden: coords, not 'hidden'")
+    eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
+    P:DestroyAll()
+    R:UnregisterAddon("V")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- LIVE RESIZE
+-- A slab is exactly as big as the frame it stands in for, so a settings slider
+-- pulled WHILE the movers are unlocked has to show on the slab as it moves. The
+-- lib's moved-target sweep is what notices the resize (Core.lua); this is the
+-- half that puts it on screen -- and it must be a re-MEASURE, not a re-solve:
+-- a free element has no anchor, so its record does not change at all when the
+-- frames inside it get wider.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, snapToFrames = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("Z", { title = "Z" })
+    -- Mutable rects: the tests move them the way a settings sweep moves the
+    -- real ones, and the elements report whatever they currently say.
+    local box   = { x = 0, y = 0, w = 200, h = 80 }
+    local child = { x = 300, y = 0, w = 60, h = 40 }
+    R:Register("Z", "box", { title = "box", frame = FakeFrame(960, 540, 200, 80),
+        getRect = function() return box end,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    R:Register("Z", "child", { title = "child", frame = FakeFrame(960, 540, 60, 40),
+        getRect = function() return child end,
+        getPos = function() return { point = "CENTER", x = 300, y = 0 } end,
+        onChanged = function() end })
+    P:Build()
+    local bBox, bChild = P.proxies["Z:box"], P.proxies["Z:child"]
+    eq(bBox:GetWidth(), 200, "resize: the slab is built at the element's current width")
+
+    -- THE BUG. The element got wider and there is no anchor to re-solve, so the
+    -- record is untouched; only a re-measure can show it.
+    box.w, box.h = 400, 120
+    check(P:SyncElement("Z:box"), "resize: SyncElement runs for a live proxy")
+    eq(bBox:GetWidth(), 400, "resize: the slab takes the element's new width")
+    eq(bBox:GetHeight(), 120, "resize: ...and its new height")
+
+    -- The batch entry point, which is what the sweep uses: several slabs in one
+    -- pass, ids with no proxy skipped rather than erroring.
+    box.w, child.w = 500, 90
+    check(P:SyncMany({ "Z:box", "Z:child", "Z:nope" }), "resize: SyncMany syncs what it can")
+    eq(bBox:GetWidth(), 500, "resize: batch re-measured the first slab")
+    eq(bChild:GetWidth(), 90, "resize: ...and the second")
+    check(not P:SyncMany({ "Z:nope" }), "resize: nothing but unknown ids is a no-op")
+
+    -- ☠ A SLAB UNDER THE CURSOR OWNS ITS OWN GEOMETRY. Its OnUpdate SetPoints it
+    -- to the cursor every frame, so writing size/position from a sweep would
+    -- fight the drag; the drop re-reads the record instead.
+    bChild.dragging = true
+    child.w = 150
+    check(not P:SyncElement("Z:child"), "resize: a dragged slab is skipped")
+    eq(bChild:GetWidth(), 90, "resize: ...and keeps the size the drag is using")
+    check(P:IsDragging(), "resize: IsDragging sees the drag in flight")
+    bChild.dragging = false
+    P:SyncElement("Z:child")
+    eq(bChild:GetWidth(), 150, "resize: the drop lets the pending size through")
+    check(not P:IsDragging(), "resize: IsDragging clears with the drag")
+
+    -- Refresh is still "sync then repaint", and still a no-op for a missing proxy.
+    box.w = 260
+    P:Refresh("Z:box")
+    eq(bBox:GetWidth(), 260, "resize: Refresh still re-measures")
+    check(pcall(P.Refresh, P, "Z:nope"), "resize: Refresh of a missing proxy does not error")
+
+    -- ZONES ARE BUILT PER DRAG from live rects, so a target that resized between
+    -- two drags offers its seats on the NEW rect -- nothing is cached per session.
+    local function zoneFor(id, edge, align)
+        for _, z in ipairs(P.dragZones) do
+            if z.target == id and z.edge == edge and z.align == align then return z end
+        end
+    end
+    P:ShowZones(R:Get("Z:child"))
+    local zBefore = zoneFor("Z:box", "right", "center")
+    check(zBefore ~= nil, "zones: the box offers a right-edge seat")
+    P:HideZones()
+    box.w = 800
+    P:ShowZones(R:Get("Z:child"))
+    local zAfter = zoneFor("Z:box", "right", "center")
+    check(zAfter ~= nil and zAfter.x > zBefore.x, "zones: the next drag measures the box's new width")
+    P:HideZones()
+
+    P:DestroyAll()
+    R:UnregisterAddon("Z")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE STRIP'S SESSION VERBS
+-- Spelled out in words here, and offered again as an icon row on the element
+-- panel. Undo and Redo are the two whose enabled state is not a setting, and
+-- ONE call refreshes both surfaces -- see the RefreshVerbs assertions below.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, showGrid = false, addons = {} }
+    local undone, redone = 0, 0
+    local stack = { entries = 0, redos = 0 }
+    function stack:CanUndo() return self.entries > 0 end
+    function stack:CanRedo() return self.redos > 0 end
+    NS.Session = {
+        selected = nil, undo = stack,
+        Undo = function() undone = undone + 1 end,
+        Redo = function() redone = redone + 1 end,
+    }
+    -- The panel module stands in for the second access point: all this block
+    -- cares about is that the strip's refresh drives it too.
+    local panelRefreshes = 0
+    NS.Panel = {
+        RefreshVerbs = function() panelRefreshes = panelRefreshes + 1 end,
+        IsElementPinned = function() return false end,   -- every slab repaint asks
+    }
+    R:RegisterAddon("S", { title = "S" })
+    R:Register("S", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local f = P.legend
+    check(f.btnUndo and f.btnRedo, "strip: Undo and Redo are on the legend")
+    eq(f.btnUndo._opts.text, NS.L["Undo"], "strip: Undo is labelled from the locale")
+    eq(f.btnRedo._opts.text, NS.L["Redo"], "strip: Redo is labelled from the locale")
+    -- An empty history greys both.
+    check(not f.btnUndo:IsEnabled() and not f.btnRedo:IsEnabled(), "strip: an empty history greys both")
+    stack.entries = 1
+    P:RefreshLegendVerbs()
+    check(f.btnUndo:IsEnabled(), "strip: something to undo enables Undo")
+    check(not f.btnRedo:IsEnabled(), "strip: ...and Redo stays grey until there is a redo")
+    stack.redos = 1
+    P:RefreshLegendVerbs()
+    check(f.btnRedo:IsEnabled(), "strip: a redo branch enables Redo")
+
+    f.btnUndo._opts.onClick()
+    f.btnRedo._opts.onClick()
+    eq(undone, 1, "strip: Undo runs the session's undo")
+    eq(redone, 1, "strip: Redo runs the session's redo")
+
+    -- The verbs take part in the strip's width, so they cannot overlap the dots.
+    local wide = f:GetWidth()
+    check(wide and wide > 0, "strip: the layout measured a width")
+
+    -- ☠ THE SHARED PATH. The panel's copy of Undo/Redo greys off the same
+    -- stack, and it must not be on a schedule of its own -- one refresh, both
+    -- surfaces, or they drift the moment something calls only one of them.
+    check(panelRefreshes > 0, "verbs: refreshing the strip refreshes the panels too")
+    local before = panelRefreshes
+    P:RefreshLegendVerbs()
+    eq(panelRefreshes, before + 1, "verbs: ...on every refresh, not just the first")
+
+    -- ...and the panels go FIRST, so the legend's own early-out cannot skip
+    -- them. Proxy loads before Panel, so a missing module is guarded too.
+    P.legend, before = nil, panelRefreshes
+    P:RefreshLegendVerbs()
+    eq(panelRefreshes, before + 1, "verbs: a session with no strip built still refreshes the panels")
+    NS.Panel = nil
+    check(pcall(P.RefreshLegendVerbs, P), "verbs: no Panel module: the refresh is guarded")
+    P.legend = f
+
+    P:DestroyAll()
+    R:UnregisterAddon("S")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SELECTION SEMANTICS
+-- The unlock overlay covers the WHOLE screen, so it must never take the mouse:
+-- a session that captured it left the camera undraggable and everything behind
+-- the movers unclickable for as long as the movers were unlocked. Empty-space
+-- clicks therefore reach the game, and a ClickSelect that finds nothing under
+-- the cursor does NOTHING -- deselecting is Esc's job now.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    local picked = 0
+    NS.Session = { selected = nil,
+                   Select = function(self, id) self.selected = id; picked = picked + 1 end }
+    R:RegisterAddon("C", { title = "C" })
+    R:Register("C", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    -- The stub starts at false and only EnableMouse moves it, so false here is
+    -- "never enabled" -- nothing turns it off again either.
+    eq(uf._mouse, false, "overlay: the unlock frame never enables the mouse")
+    check(uf:GetScript("OnMouseDown") == nil, "overlay: ...and has no click handler at all")
+
+    -- The stub slab's centre is (0, 0) in SCREEN units, i.e. far from the
+    -- UIParent-centred origin the cursor sits on: nothing is under the cursor.
+    cursorX, cursorY = 960, 540        -- an earlier drag block left it elsewhere
+    NS.Session.selected = "C:one"
+    P:ClickSelect()
+    eq(NS.Session.selected, "C:one", "click over nothing leaves the selection alone")
+    eq(picked, 0, "click over nothing does not reach Select at all")
+
+    -- ...and a click that DOES land on a slab still selects it, so the no-op is
+    -- the empty case only.
+    local b = P.proxies["C:one"]
+    b.GetCenter = function() return 960, 540 end
+    P:ClickSelect()
+    eq(NS.Session.selected, "C:one", "a click on a slab selects it")
+    eq(picked, 1, "...through Select")
+
+    P:DismissAll()
+    eq(uf._mouse, false, "overlay: the dismiss fade has no mouse state to put back")
+    P:DestroyAll()
+    R:UnregisterAddon("C")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE PIN MARKER
+-- The mover keeps ONE panel, so a pinned one is a panel that has stopped
+-- following: the selection may be somewhere else entirely, or nowhere. The dim
+-- white outline at rest is what says which mover that panel belongs to.
+-- It must stay UNDER hover and selection: it is a resting state, not a
+-- highlight, and a marker that outshone the slab under the cursor would make
+-- hover unreadable.
+--
+-- The colour rules are exercised against a stubbed IsElementPinned, so several
+-- ids read as pinned here at once; only the SLAB's rules are under test.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    local pinnedIds = {}
+    -- RefreshVerbs is on the stub because building the strip calls it (the
+    -- panel's verb row greys off the same undo stack); nothing here reads it.
+    NS.Panel = { IsElementPinned = function(_, id) return pinnedIds[id] == true end,
+                 RefreshVerbs = function() end }
+    R:RegisterAddon("M", { title = "M" })
+    for _, key in ipairs({ "sel", "hov", "pin", "plain" }) do
+        R:Register("M", key, elDef({ point = "CENTER", x = 0, y = 0 }))
+    end
+    P:Build()
+    local sel, hov, pin, plain =
+        P.proxies["M:sel"], P.proxies["M:hov"], P.proxies["M:pin"], P.proxies["M:plain"]
+    local function border(b) return b._border or {} end
+
+    hov.hovered = true
+    pinnedIds["M:pin"] = true
+    P:Highlight("M:sel")
+    local s, h, p, n = border(sel), border(hov), border(pin), border(plain)
+    check(s[1] == 1 and s[2] == 1 and s[3] == 1 and s[4] == 1, "selected: a full white outline")
+    check(h[1] == 1 and h[2] == 1 and h[3] == 1, "hovered: white too")
+    eq(h[4], 0.6, "hovered: ...at the softer alpha")
+    check(p[1] == 1 and p[2] == 1 and p[3] == 1, "pinned: the marker is the same white")
+    eq(p[4], 0.4, "pinned: ...at the marker alpha")
+    check(p[4] < h[4], "pinned: the marker sits under hover")
+    check(p[4] < s[4], "pinned: ...and under selection")
+    eq(n[1], COLORS.border.r, "unpinned and untouched: the neutral hairline")
+    eq(n[4], 1, "unpinned: the hairline is opaque")
+    -- White at 0.4 over the dark slab reads brighter than a 0.25 grey at 1, so
+    -- the marker is visible against the outline it replaces.
+    check(p[4] > COLORS.border.r, "pinned: the marker reads brighter than the hairline it replaces")
+
+    -- Precedence: both louder states win outright.
+    pinnedIds["M:sel"] = true
+    pinnedIds["M:hov"] = true
+    P:Highlight("M:sel")
+    eq(border(sel)[4], 1, "pinned AND selected: selection wins")
+    eq(border(hov)[4], 0.6, "pinned AND hovered: hover wins")
+
+    -- The panel closing takes the marker with it.
+    pinnedIds["M:pin"] = nil
+    P:Highlight("M:sel")
+    eq(border(pin)[1], COLORS.border.r, "the marker goes when the pinned panel does")
+
+    -- Proxy loads BEFORE Panel, so the lookup has to survive there being no
+    -- Panel module at all.
+    NS.Panel = nil
+    check(pcall(P.Highlight, P, "M:sel"), "no Panel module: the marker lookup is guarded")
+
+    P:DestroyAll()
+    R:UnregisterAddon("M")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- ESC: ONE LAYER PER PRESS
+-- The link gesture first, then the selection, then the session. Deselecting is
+-- Esc's job now that the overlay does not take clicks, so it must not be
+-- swallowed by the lock.
+--
+-- Session.lua is loaded HERE (the only suite that does): it needs a live Proxy,
+-- which this file has already stubbed and built.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, keyboardNudge = true, addons = {} }
+    -- The one file-scope side effect a headless run has to stand in for: the
+    -- registry callback the session subscribes to. The stub is put straight back
+    -- so no later suite sees it.
+    local prevRegister = NS.Lib.RegisterCallback
+    NS.Lib.RegisterCallback = prevRegister or function() end
+    load_addon_file("Session.lua")
+    NS.Lib.RegisterCallback = prevRegister
+    local Sess = NS.Session
+
+    R:RegisterAddon("E", { title = "E" })
+    R:Register("E", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+
+    -- Lock is the one verb with a real side effect (a popup, or the whole
+    -- teardown), so it is counted rather than performed; everything else -- the
+    -- cancel and the deselect -- runs for real.
+    local locks = 0
+    Sess.Lock = function() locks = locks + 1 end
+    Sess.active = true
+    Sess:EnableKeyboard(true)
+    local uf = P:GetUnlockFrame()
+    local onKey = uf:GetScript("OnKeyDown")
+    check(onKey ~= nil, "esc: the session installs a key handler on the unlock frame")
+
+    -- (0) the exit prompt is up: Esc closes it and nothing else happens.
+    local prevDismiss = rawget(NS.UI, "DismissPopup")
+    local promptOpen = true
+    NS.UI.DismissPopup = function()
+        local was = promptOpen
+        promptOpen = false
+        return was
+    end
+    Sess.selected = "E:one"
+    onKey(uf, "ESCAPE")
+    check(not promptOpen, "esc: an open exit prompt is closed first")
+    eq(Sess.selected, "E:one", "esc: ...and the selection survives it")
+    eq(locks, 0, "esc: ...and the session does not end")
+
+    -- (a) mid-gesture: the link is cancelled and nothing else happens.
+    Sess.linking = { id = "E:one", mode = "primary" }
+    onKey(uf, "ESCAPE")
+    check(Sess.linking == nil, "esc: a live link gesture is cancelled first")
+    eq(Sess.selected, "E:one", "esc: ...and the selection survives it")
+    eq(locks, 0, "esc: ...and the session does not end")
+
+    -- (b) something selected: deselect, still no lock.
+    onKey(uf, "ESCAPE")
+    eq(Sess.selected, nil, "esc: the next press deselects")
+    eq(locks, 0, "esc: ...and still does not lock")
+
+    -- (c) nothing left to back out of: NOW it locks.
+    onKey(uf, "ESCAPE")
+    eq(locks, 1, "esc: with nothing selected, Esc locks the session")
+    NS.UI.DismissPopup = prevDismiss
+
+    Sess:EnableKeyboard(false)
+    check(uf:GetScript("OnKeyDown") == nil, "esc: disabling the keyboard takes the handler off")
+    P:DestroyAll()
+    R:UnregisterAddon("E")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- OVERLAY LEVEL AND THE SLAB CLAMP
+-- Strata orders frames first and LEVEL second, and a UIParent child starts at
+-- level 1 -- so the HIGH overlay sat one level above UIParent and anything else
+-- at HIGH with a few frames of nesting drew over the slabs (DF's personal
+-- targeted-spells block: HIGH, icons four deep). The overlay now takes a real
+-- level of its own, the plates that must sit UNDER the slabs take that level
+-- rather than a literal 1, and the slab is clamped so its handle is reachable
+-- even when the element it stands for has been solved off screen.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, snapToFrames = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("LV", { title = "LV" })
+    R:Register("LV", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("LV", "b", elDef({ point = "CENTER", x = 300, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    check(type(uf._level) == "number" and uf._level >= 100, "overlay: the unlock frame takes a frame level well above UIParent's children")
+    -- ☠ NOT client-clamped any more: SetClampedToScreen clamps FULLY, the element
+    -- is only ever clamped loosely, and the two parted company (see the SLAB
+    -- CLAMP PARITY block below).
+    check(not P.proxies["LV:a"]._clamped, "slab: not client-clamped -- it follows the element's own clamp rule")
+    -- A zone plate sits at the overlay's own level: one below the slabs, but
+    -- never back at 1.
+    P:ShowZones(R:Get("LV:a"))
+    check(P.zoneCount > 0, "zones: the other element offers seats")
+    eq(P.zones[1]._level, uf._level, "zones: a plate takes the overlay's level, not a literal 1")
+    P:HideZones()
+    P:DestroyAll()
+    R:UnregisterAddon("LV")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- COORDS READOUT = THE PANEL'S NUMBERS
+-- The slab used to print its visible rect's CENTRE while the panel's X/Y boxes
+-- print the RECORD (point-relative x/y, or the anchor's offsets). Those differ
+-- whenever the point is not CENTER or the consumer's getRect is offset from its
+-- record -- DF's raid frames sit inside a larger reserved container -- which is
+-- the reported "coordinates on the mover are sometimes wrong, the settings
+-- window's are right". Both now read Solver.Readout.
+-- ============================================================
+do
+    local S = NS.Solver
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("RO", { title = "RO" })
+    -- A container whose record places its TOPLEFT, with the visible frames well
+    -- inside it: the DF raid shape.
+    local freePos = { point = "TOPLEFT", x = -412.6, y = 180.4 }
+    R:Register("RO", "free", { title = "f", frame = FakeFrame(960, 540, 400, 300),
+        getRect = function() return { x = -300, y = 90, w = 180, h = 120 } end,
+        getPos = function() return freePos end, onChanged = function() end })
+    local anchoredPos = { point = "CENTER", x = 10, y = 10,
+        anchor = { target = "RO:free", edge = "bottom", align = "start", offsetX = 5.5, offsetY = -3.4 } }
+    R:Register("RO", "child", { title = "c", frame = FakeFrame(960, 540, 50, 20),
+        getRect = function() return { x = 77, y = -33, w = 50, h = 20 } end,
+        getPos = function() return anchoredPos end, onChanged = function() end })
+    P:Build()
+    local fx, fy = S.Readout(freePos)
+    eq(P.proxies["RO:free"].coords:GetText(), string.format("%d, %d", fx, fy), "readout: a free slab quotes Solver.Readout")
+    eq(P.proxies["RO:free"].coords:GetText(), "-413, 180", "readout: ...which is the record, rounded -- not the rect centre (-300, 90)")
+    local ax, ay = S.Readout(anchoredPos)
+    eq(P.proxies["RO:child"].coords:GetText(), string.format("%d, %d", ax, ay), "readout: an anchored slab quotes Solver.Readout")
+    eq(P.proxies["RO:child"].coords:GetText(), "6, -3", "readout: ...which is the anchor offsets, rounded")
+    P:DestroyAll()
+    R:UnregisterAddon("RO")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SLAB CLAMP PARITY
+-- The slab is placed by Solver.KeepOnScreen -- the rule an anchored solve gets
+-- -- so it sits exactly on its element whenever any of the element is on
+-- screen. Only an element with NOTHING visible gets a slab pulled back in (the
+-- rescue handle). UIParent is 1920x1080, so the screen is +-960 / +-540.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("CL", { title = "CL" })
+    local function reg(key, rect)
+        R:Register("CL", key, { title = key, frame = FakeFrame(960, 540, rect.w, rect.h),
+            getRect = function() return rect end,
+            getPos = function() return { point = "CENTER", x = rect.x, y = rect.y } end,
+            onChanged = function() end })
+    end
+    reg("over", { x = 900, y = -500, w = 300, h = 200 })   -- hangs off the bottom-right
+    reg("gone", { x = 2000, y = 0, w = 100, h = 40 })     -- nothing on screen
+    P:Build()
+    local over = P.proxies["CL:over"]._lastPoint
+    eq(over[4], 900, "clamp: an overhanging element's slab stays on it (x)")
+    eq(over[5], -500, "clamp: ...and (y) -- the frames and their preview never part")
+    local gone = P.proxies["CL:gone"]._lastPoint
+    eq(gone[4], 960 - 50, "clamp: an element with nothing on screen gets a slab pulled flush to the edge")
+    eq(gone[5], 0, "clamp: ...on the axis that was off only")
+    P:DestroyAll()
+    R:UnregisterAddon("CL")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- ALT-PEEK: THE EVENTS DECIDE, THEN A POLL WHILE PEEKING
+-- The release can go missing (an alt-tab out on a held Alt; a burst of fast
+-- presses), and the client's own Alt state can lag a real release by a second
+-- or two. Each Alt is tracked from its own events, so a release restores
+-- whatever the client says; while peeking a ticker clears a peek whose release
+-- never arrived.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("PK", { title = "PK" })
+    R:Register("PK", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    local onEvent = uf:GetScript("OnEvent")
+    check(onEvent ~= nil, "peek: the overlay has its modifier handler")
+    local tickersBefore = #tickers
+
+    -- A press whose payload says DOWN peeks even when the poll has not caught
+    -- up (the client's own state can lag the event).
+    altDown = false
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    check(P.peeking == true, "peek: a press peeks on the event's own payload")
+    check(uf._alpha < 1, "peek: ...and the overlay drops its alpha")
+    eq(#tickers, tickersBefore + 1, "peek: peeking starts the poll")
+    local ticker = tickers[#tickers]
+
+    -- The release is lost (alt-tab). The poll sees Alt up and stands down.
+    altDown = false
+    ticker.fn()
+    check(P.peeking == false, "peek: the poll clears a peek whose release never arrived")
+    eq(uf._alpha, 1, "peek: ...and restores the overlay")
+    check(ticker.cancelled, "peek: standing down cancels the poll")
+
+    -- A release while the OTHER Alt is still held keeps the peek: the payload
+    -- says up, the poll says down.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 1)
+    check(P.peeking == true, "peek: right Alt peeks too")
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 0)
+    check(P.peeking == true, "peek: releasing one Alt with the other held keeps the peek")
+    altDown = false
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 0)
+    check(P.peeking == false, "peek: the last release restores")
+    check(tickers[#tickers].cancelled, "peek: ...and cancels that peek's poll")
+
+    -- Back from an alt-tab the client still reports Alt down. A tap's release
+    -- must restore anyway: the event is the truth, the client state is stale.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    tickers[#tickers].fn()
+    check(P.peeking == true, "peek: a stale 'down' from the client keeps the poll from clearing it...")
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 0)
+    check(P.peeking == false, "peek: ...but one tap's release restores, whatever the client says")
+    eq(uf._alpha, 1, "peek: ...at full alpha")
+    altDown = false
+
+    -- Other keys are ignored outright.
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LSHIFT", 1)
+    check(P.peeking == false, "peek: Shift is not a peek key")
+
+    -- Teardown mid-peek leaves no poll running into the next session.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    check(P.peeking == true, "peek: peeking again")
+    P:DestroyAll()
+    check(P.peeking == false, "peek: DestroyAll clears the peek")
+    check(tickers[#tickers].cancelled, "peek: ...and cancels its poll")
+    R:UnregisterAddon("PK")
+    R.ready = wasReady
+    altDown = false
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE ENTRANCE
+-- Lock fades the whole overlay out (DismissAll); unlock faded only the slabs in,
+-- and DandersFrames re-registers its per-unit targets ~0.1s into every session
+-- (RegistryChanged -> RebuildProxies -> DestroyAll + Build), which reset the
+-- overlay to alpha 1 and cut even that short. So: an animated Build fades the
+-- OVERLAY in, and a mid-session Rebuild remakes the slabs without touching it.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    local fadedIn, cancelled = {}, {}
+    local realFadeIn, realCancel = NS.Fx.FadeIn, NS.Fx.Cancel
+    NS.Fx.FadeIn = function(target, ...) fadedIn[#fadedIn + 1] = target; return realFadeIn(target, ...) end
+    NS.Fx.Cancel = function(target, ...) cancelled[#cancelled + 1] = target; return realCancel(target, ...) end
+    local function count(list, target)
+        local n = 0
+        for _, t in ipairs(list) do if t == target then n = n + 1 end end
+        return n
+    end
+    R:RegisterAddon("EN", { title = "EN" })
+    R:Register("EN", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    local uf = P:GetUnlockFrame()
+
+    -- A plain Build (a rebuild's shape) shows the overlay without a fade.
+    P:Build()
+    check(uf:IsShown(), "entrance: a plain Build shows the overlay")
+    eq(count(fadedIn, uf), 0, "entrance: ...with no fade")
+    P:DestroyAll()
+
+    -- The session-open Build fades the overlay itself in.
+    local timersBefore = #timers
+    P:Build(nil, true)
+    check(uf:IsShown(), "entrance: an animated Build shows the overlay")
+    eq(count(fadedIn, uf), 1, "entrance: ...through a fade-in on the overlay")
+    check(#timers > timersBefore, "entrance: the slabs still queue their stagger on top")
+
+    -- ~0.1s in: the consumer's re-registration rebuilds the slabs. The overlay
+    -- is left alone -- not cancelled, not hidden, event still registered.
+    local cancelsBefore = count(cancelled, uf)
+    -- Slabs are pooled (see SLAB POOL below), so "remade" is proved by the
+    -- release having reset a state it would otherwise have carried over,
+    -- not by a new object.
+    P.proxies["EN:a"].hovered = true
+    R:Register("EN", "b", elDef({ point = "CENTER", x = 200, y = 0 }))
+    P:Rebuild(nil)
+    check(P.proxies["EN:b"] ~= nil, "rebuild: the new element gets a slab")
+    check(P.proxies["EN:a"].hovered ~= true, "rebuild: the slabs really were remade")
+    eq(count(cancelled, uf), cancelsBefore, "rebuild: the overlay's entrance is not cancelled")
+    check(uf:IsShown(), "rebuild: the overlay stays up")
+    eq(count(fadedIn, uf), 1, "rebuild: ...and is not faded in a second time")
+
+    -- Lock -> unlock inside the dismiss fade: the next Build re-opens the
+    -- overlay (cancels the fade-out, restores it) rather than skipping it.
+    P:DismissAll()
+    P:Build(nil, true)
+    check(count(cancelled, uf) > cancelsBefore, "reopen: a Build during the dismiss fade cancels it")
+    eq(count(fadedIn, uf), 2, "reopen: ...and fades the overlay in again")
+
+    P:DestroyAll()
+    NS.Fx.FadeIn, NS.Fx.Cancel = realFadeIn, realCancel
+    R:UnregisterAddon("EN")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- CHROME SCALE
+-- The strip, its folded tab and the toast wear DandersMoverDB.scale; a slab
+-- never does (it is exactly as big as the frame it stands in for). The reader
+-- lives here, next to the chrome, and ApplyChromeScale is the one call that
+-- re-sizes every piece -- the panel's and the settings window's included.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, scale = 1.25 }
+    NS.Session = { selected = nil }
+    eq(NS:ChromeScale(), 1.25, "scale: the reader answers the setting")
+    NS.db.scale = nil
+    eq(NS:ChromeScale(), 1, "scale: ...and 1 when the SV predate it")
+    NS.db.scale = 0
+    eq(NS:ChromeScale(), 1, "scale: ...and 1 for a value that would make the chrome vanish")
+    NS.db.scale = 1.25
+    R:RegisterAddon("SC", { title = "SC" })
+    R:Register("SC", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    eq(P.legend._scale, 1.25, "scale: the strip is built at the setting")
+    eq(P.stripTab._scale, 1.25, "scale: ...and so is its folded tab")
+    eq(P.proxies["SC:a"]._scale, 1, "scale: a slab is never scaled")
+    P:ShowToast("x")
+    eq(P.toast._scale, 1.25, "scale: the toast too")
+
+    local panelApplied, settingsApplied = 0, 0
+    NS.Panel = { ApplyChromeScale = function() panelApplied = panelApplied + 1 end,
+                 IsElementPinned = function() return false end, RefreshVerbs = function() end }
+    NS.Settings = { ApplyChromeScale = function() settingsApplied = settingsApplied + 1 end }
+    NS.db.scale = 0.8
+    P:ApplyChromeScale()
+    eq(P.legend._scale, 0.8, "apply: the strip takes the new value")
+    eq(P.stripTab._scale, 0.8, "apply: ...the tab")
+    eq(P.toast._scale, 0.8, "apply: ...the toast")
+    eq(panelApplied, 1, "apply: ...and the panel is told")
+    eq(settingsApplied, 1, "apply: ...and the settings window")
+    eq(P.proxies["SC:a"]._scale, 1, "apply: the slab is still not scaled")
+
+    -- The next session takes whatever the setting is by then (the settings
+    -- window opens with no session up).
+    P:DestroyAll()
+    NS.db.scale = 1.1
+    P:Build()
+    eq(P.legend._scale, 1.1, "scale: a new session re-reads the setting")
+
+    NS.Panel, NS.Settings = nil, nil
+    P:DestroyAll()
+    R:UnregisterAddon("SC")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SLAB POOL (memory)
+-- WoW never frees a frame. A slab used to be a brand-new Button (plus nine
+-- regions) on every Build after a DestroyAll/Rebuild and was simply dropped on
+-- Remove -- so every unlock, and every mid-session rebuild (DandersFrames
+-- re-registers its targets on unlock and on every sort), leaked one slab per
+-- element for good. Released slabs now wait in a pool and the next Build takes
+-- them back. Proxy caches CreateFrame at load, so the check is by identity:
+-- every slab on screen after the churn must be one the first session made.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("PL", { title = "PL" })
+    R:Register("PL", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("PL", "b", elDef({ point = "CENTER", x = 50, y = 0 }))
+    P:Build()                               -- the first session pays for its slabs
+    local known = {}
+    for _, b in pairs(P.proxies) do known[b] = true end
+    local function allKnown()
+        for _, b in pairs(P.proxies) do if not known[b] then return false end end
+        return next(P.proxies) ~= nil
+    end
+    P:DestroyAll()
+
+    for _ = 1, 5 do P:Build(); P:DestroyAll() end
+    P:Build()
+    check(allKnown(), "pool: five lock/unlock cycles make no new slab frames")
+    for _ = 1, 5 do P:Rebuild() end
+    check(allKnown(), "pool: a mid-session rebuild reuses the slabs it tore down")
+
+    -- A reused slab is the NEW element's slab, not a ghost of the old one.
+    P:DestroyAll()
+    R:Unregister("PL", "b")
+    R:Register("PL", "c", elDef({ point = "CENTER", x = 80, y = 0 }))
+    R:Get("PL:c").title = "Cee"
+    P:Build()
+    local c = P.proxies["PL:c"]
+    check(c ~= nil and known[c], "pool: a new element takes a released slab")
+    check(c ~= nil and c.element == R:Get("PL:c"), "pool: ...which carries its new element")
+    eq(c and c.title:GetText(), "Cee", "pool: ...and its new element's title")
+    check(c and c.dragging == false and c.hovered == false, "pool: ...and no drag or hover left over")
+
+    P:DestroyAll()
+    R:UnregisterAddon("PL")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- REFRESHALL COST (memory)
+-- DragTo calls RefreshAll every rendered frame of a drag. It used to repaint
+-- every slab once PER slab (n*n applyLooks) and each look built a Children()
+-- list just to ask whether it was empty. One repaint now, and no list.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("RA", { title = "RA" })
+    R:Register("RA", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("RA", "b", elDef({ point = "CENTER", x = 50, y = 0 }))
+    R:Register("RA", "c", elDef({ point = "CENTER", x = 90, y = 0 }))
+    P:Build()
+
+    local highlights, lists = 0, 0
+    local realHighlight, realChildren = P.Highlight, R.Children
+    P.Highlight = function(...) highlights = highlights + 1 return realHighlight(...) end
+    R.Children = function(...) lists = lists + 1 return realChildren(...) end
+    P:RefreshAll()
+    P.Highlight, R.Children = realHighlight, realChildren
+    eq(highlights, 1, "refreshAll: three slabs, ONE repaint")
+    eq(lists, 0, "refreshAll: the slab look builds no Children() list")
+
+    -- HasChildren answers what #Children() > 0 did.
+    R:GetPos(R:Get("RA:b")).anchor = { target = "RA:a" }
+    check(R:HasChildren("RA:a") == true, "hasChildren: an anchored child counts")
+    check(R:HasChildren("RA:c") == false, "hasChildren: ...and none is none")
+    eq(R:HasChildren("RA:a"), #R:Children("RA:a") > 0, "hasChildren: agrees with Children()")
+    R:GetPos(R:Get("RA:b")).anchor = nil
+
+    P:DestroyAll()
+    R:UnregisterAddon("RA")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE SLAB TOOLTIP (placement)
+-- Through the kit, and OFF the slab: below it near the top of the screen,
+-- above it lower down. It used to hang off the slab's right edge on raw
+-- GameTooltip, which the client clamps back over the slab (and the cursor)
+-- near the top or right edge. The rule is the real one, cut out of Core.lua;
+-- test_tooltips_mover.lua pins the rule itself.
+-- ============================================================
+do
+    local core = mover_file_source("Core.lua")
+    local s = core:find("local TIP_GAP", 1, true)
+    local e = s and core:find("\nend", core:find("function NS.TooltipAnchor", s, true), true)
+    check(s ~= nil and e ~= nil, "slab tip: NS.TooltipAnchor can be cut out of Core.lua")
+    local rule = {}
+    if s and e then assert(loadstring("local NS = ...\n" .. core:sub(s, e + 4), "@Core.lua:TooltipAnchor"))(rule) end
+    local prevAnchor = NS.TooltipAnchor
+    NS.TooltipAnchor = rule.TooltipAnchor
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("TT", { title = "TT" })
+    R:Register("TT", "a", { title = "Party Frames", frame = FakeFrame(960, 540, 100, 40),
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end, onChanged = function() end })
+    P:Build()
+    local slab = P.proxies["TT:a"]
+    -- The stub slab has no geometry of its own; give it a centre to be judged by.
+    function slab:GetCenter() return 960, 1000 end
+    NS.UI._lastTip = nil
+    slab:GetScript("OnEnter")(slab)
+    local tip = NS.UI._lastTip
+    check(tip ~= nil, "slab tip: hovering a slab shows its tooltip through the kit")
+    eq(tip and tip.owner, slab, "slab tip: owned by the slab")
+    eq(tip and tip.spec.title, "Party Frames", "slab tip: titled with the element")
+    eq(tip and tip.spec.anchor, "ANCHOR_BOTTOM", "slab tip: near the top of the screen it hangs BELOW the slab")
+    function slab:GetCenter() return 960, 100 end
+    slab:GetScript("OnEnter")(slab)
+    tip = NS.UI._lastTip
+    eq(tip and tip.spec.anchor, "ANCHOR_TOP", "slab tip: low on screen it sits ABOVE the slab -- never on it")
+    local lines = tip and #tip.spec.lines or 0
+    slab:GetScript("OnEnter")(slab)
+    eq(#NS.UI._lastTip.spec.lines, lines, "slab tip: a second hover re-fills the same lines, it does not append")
+    slab:GetScript("OnLeave")(slab)
+    eq(NS.UI._lastTip, nil, "slab tip: leaving hides it through the kit")
+    P:DestroyAll()
+    R:UnregisterAddon("TT")
+    R.ready = wasReady
+    NS.TooltipAnchor = prevAnchor
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- MOVER OPACITY
+-- The slab FILL follows DandersMoverDB.moverOpacity; the outline that carries
+-- selection and hover does not, so a selected slab reads as selected at any
+-- setting. Tester report (alpha.12): the old fixed 0.95 fill hid the frames.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, moverOpacity = 0.5 }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("OP", { title = "OP" })
+    R:Register("OP", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("OP", "b", elDef({ point = "CENTER", x = 200, y = 0 }))
+    P:Build()
+    local a, b = P.proxies["OP:a"], P.proxies["OP:b"]
+    local function recordFill(s) function s:SetBackdropColor(r, g, bl, al) self._fill = al end end
+    recordFill(a); recordFill(b)
+
+    P:Highlight(nil)
+    eq(a._fill, 0.5, "opacity: a resting slab's fill is the setting")
+    a.hovered = true
+    P:Highlight(nil)
+    check(a._fill > 0.5 and a._fill <= 1, "opacity: hover lifts the fill a step, so it still stands out")
+    a.hovered = false
+
+    NS.db.moverOpacity = 0.25
+    P:ApplyOpacity()
+    eq(a._fill, 0.25, "opacity: ApplyOpacity repaints every slab live")
+    eq(b._fill, 0.25, "opacity: ...all of them")
+
+    -- Selection is the outline at full white, whatever the fill.
+    NS.Session.selected = "OP:a"
+    P:Highlight("OP:a")
+    local o = a._border
+    check(o and o[1] == 1 and o[2] == 1 and o[3] == 1 and o[4] == 1, "opacity: the selected slab keeps a full-white outline at a faint fill")
+    local rest = b._border
+    check(rest and rest[4] == 1 and rest[1] < 1, "opacity: an unselected slab keeps the neutral hairline, so the two stay distinct")
+    NS.Session.selected = nil
+
+    NS.db.moverOpacity = 0
+    P:ApplyOpacity()
+    eq(a._fill, 0.1, "opacity: clamped to 0.1 -- a slab never vanishes outright")
+    NS.db.moverOpacity = 7
+    P:ApplyOpacity()
+    eq(a._fill, 1, "opacity: clamped to 1 at the top")
+    NS.db.moverOpacity = nil
+    P:ApplyOpacity()
+    eq(a._fill, 0.5, "opacity: saved variables from before the setting read as the 0.5 default")
+
+    P:DestroyAll()
+    R:UnregisterAddon("OP")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SLAB TEXT FOLLOWS THE CHROME SCALE
+-- Tester report (alpha.12): the Scale setting sized the strip and the panel
+-- but not the names ("Party Frames") or the coords on the slabs. The slab
+-- itself stays the size of its frame; its title and coords take the scale.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, scale = 1.3 }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("SC", { title = "SC" })
+    R:Register("SC", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local b = P.proxies["SC:a"]
+    eq(b.title._textScale, 1.3, "slab scale: a new slab's title takes the chrome scale")
+    eq(b.coords._textScale, 1.3, "slab scale: ...and so do its coords")
+    local w, h = b:GetWidth(), b:GetHeight()
+
+    NS.db.scale = 0.8
+    b.layoutKey = 99
+    P:ApplyChromeScale()
+    eq(b.title._textScale, 0.8, "slab scale: moving the setting re-scales the title live")
+    eq(b.coords._textScale, 0.8, "slab scale: ...and the coords")
+    check(b.layoutKey ~= 99, "slab scale: ...and the slab re-measures what fits at the new size")
+    eq(b:GetWidth(), w, "slab scale: the slab itself keeps its frame's width")
+    eq(b:GetHeight(), h, "slab scale: ...and height")
+
+    -- A parked slab picks up a scale that moved while it waited in the pool.
+    P:DestroyAll()
+    NS.db.scale = 1.1
+    P:Build()
+    local again = P.proxies["SC:a"]
+    eq(again.title._textScale, 1.1, "slab scale: a slab re-used from the pool takes the current scale")
+
+    P:DestroyAll()
+    R:UnregisterAddon("SC")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end

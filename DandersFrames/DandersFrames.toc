@@ -1,30 +1,21 @@
-## Interface: 120100
+## Interface: 120105, 16001
 ## Title: DandersFrames
 ## Notes: Custom party/raid frames for WoW Midnight 12.0
 ## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons. Secret aura tracking techniques from Harrek's Advanced Raid Frames (used with permission).
 ## Author: Danders
-## Version: v5.3.3
+## Version: v5.4.0-alpha.17
 ## X-Curse-Project-ID: 1389690
 ## X-Wago-ID: RNL9B46o
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB, DandersFramesDebugDB
 ## SavedVariablesPerCharacter: DandersFramesCharDB
 ## AllowAddOnTableAccess: 1
-## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort
-## Category: Unit Frames
-## Category-deDE: Einheitenfenster
-## Category-esES: Marcos de unidades
-## Category-esMX: Marcos de unidades
-## Category-frFR: Portraits d'unités
-## Category-itIT: Riquadri delle unità
-## Category-koKR: 개체창
-## Category-ptBR: Quadros de unidade
-## Category-ruRU: Рамки юнитов
-## Category-zhCN: 单位框体
-## Category-zhTW: 單位框架
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort, DandersMover
+## Category: Danders
 
 # Libraries
 Libs\LibStub\LibStub.lua
+Libs\DandersUI\DandersUI.xml
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\AceLocale-3.0\AceLocale-3.0.lua
 Libs\AceSerializer-3.0\AceSerializer-3.0.lua
@@ -51,10 +42,26 @@ Locales\zhTW.lua
 DandersFrames.xml
 
 # Core
+# Retail vs WoW Forever flags (DF.IS_FOREVER / DF.IS_MODERN_ENGINE). FIRST: the
+# defaults, the spell database and the profile code below all branch on them.
+Core\ClientFlavor.lua
 Core\Config.lua
+# The defaults-diff engine (DF.Defaults). Pure reads, no state -- it only ever
+# looks at DF.PartyDefaults / DF.RaidDefaults and DF.db, both at CALL time, so
+# it is safe this early. Listed right after Config.lua so the shipped-defaults
+# tables and the thing that compares against them stay together.
+Core\Defaults.lua
 Core\Changelog.lua
 Core\Profile.lua
+# Profiles moving between retail and WoW Forever (Aura Designer park/restore).
+# Pure functions; Core.lua calls them at ADDON_LOADED, Profile.lua after an import.
+Core\FlavorCorrection.lua
 Core.lua
+# The coalescing sink for the five heavy settings sweeps. Must load after
+# Core.lua: it replaces DF:UpdateAll with an arm-stub, and Core.lua defines the
+# real body (as UpdateAll_Now). The other four bodies land later in Frames\*.lua
+# -- fine, both halves are only looked up at runtime.
+Core\ApplyScheduler.lua
 Designer\Presets.lua
 Core\RosterEvents.lua
 # Auto-profile switching engine. Resident because it is live behaviour -- it has
@@ -62,6 +69,12 @@ Core\RosterEvents.lua
 # The page half is in the companion. ☠ Must load after Core.lua: it calls
 # DF:RegisterLocaleRefresh at file scope.
 Core\AutoProfiles.lua
+# The settings undo stack. Resident because it records from the WRITE BRACKET
+# (GUI\GUI.lua's interceptWrite / onSettingWritten hooks), which lives in the
+# resident host -- and because the fences that clear it are profile switches,
+# imports and auto-layout swaps, none of which need the panel to have been
+# opened. Session-scoped: no SavedVariables.
+Core\SettingsUndo.lua
 
 # Debug Console (loads early so all modules can use DF:Debug)
 Debug\DebugConsole.lua
@@ -74,12 +87,12 @@ Debug\Profiler.lua
 # Foreign-attachment scan (/df attached) — diagnoses other addons anchored to our frames
 
 # GUI System
-# GUI toolkit, split from one 13k-line file. Order is load-bearing: GUI.lua
-# creates the GUI table plus GUI._state / GUI._priv, which every later part
-# re-declares aliases from.
+# The widget toolkit is an embedded library under Libs\DandersUI, loaded with
+# the other libraries above. GUI.lua creates DandersFrames' host on it;
+# Compat.lua defines the positional factory signatures the options pages
+# still call. Order is load-bearing.
 GUI\GUI.lua
-GUI\Widgets.lua
-GUI\DFFonts.lua
+GUI\Compat.lua
 # Loads DandersFrames_Options on demand and owns the DF:ToggleGUI stub. The
 # settings panel, both designers, the click-casting UI, test mode and the debug
 # tools all live in that companion now.
@@ -103,6 +116,13 @@ Frames\Icons.lua
 Frames\StatusIcons.lua
 Frames\Init.lua
 Frames\Position.lua
+# Listed here rather than in the Features block below because it is the consumer side of
+# Frames\Position.lua's position records. It only reads DF at Init() time (called from
+# Core.lua's ADDON_LOADED), so nothing here depends on load order.
+Features\MoverBridge.lua
+# Per-unit and per-group anchor targets. Loads after MoverBridge.lua: it publishes its
+# refresh entry points onto DF.MoverBridge at file scope.
+Features\MoverTargets.lua
 Frames\Pets.lua
 
 # Test Mode
@@ -114,6 +134,10 @@ TestMode\Shim.lua
 # Features
 Features\Auras.lua
 Features\Expiration.lua
+# Measured refresh-window data keyed by spell id. Pure data, no dependencies. Listed before
+# Pandemic.lua for readability only -- Pandemic reads DF.PandemicWindows at CALL time, so
+# this order is not load-bearing.
+Features\PandemicWindows.lua
 # After Auras.lua: BuildSpec resolves a GLYPH through DF:GetExpiryAlertGlyph, which lives there.
 Features\Pandemic.lua
 Features\Highlights.lua
@@ -125,6 +149,7 @@ Features\Sort.lua
 Features\SecureSort.lua
 Features\FrameSort.lua
 Features\Dispel.lua
+Features\UnhealableFade.lua
 
 # Aura Designer
 AuraDesigner\Config.lua
@@ -151,6 +176,7 @@ TextDesigner\Migration.lua
 TextDesigner\Preview.lua
 
 # Filter Registry
+FilterRegistry\SpellDB_Forever.lua
 FilterRegistry\SpellDB.lua
 FilterRegistry\Registry.lua
 
@@ -165,6 +191,8 @@ Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua
 
 # Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
+# TEMPORARY: wrong-unit / stuck-hidden scanner. Remove with the file.
+Debug\AuraUnitScan.lua
 
 # Click-Casting System
 ClickCasting\Core.lua

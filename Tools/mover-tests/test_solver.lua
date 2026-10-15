@@ -1,0 +1,431 @@
+local NS = ...
+local S = NS.Solver
+
+-- point <-> center
+do
+    local cx, cy = S.PointToCenter("TOPLEFT", -100, 50, 20, 10)
+    eq(cx, -90, "TOPLEFT -> center x"); eq(cy, 45, "TOPLEFT -> center y")
+    local x, y = S.CenterToPoint("BOTTOMRIGHT", 0, 0, 20, 10)
+    eq(x, 10, "center -> BOTTOMRIGHT x"); eq(y, -5, "center -> BOTTOMRIGHT y")
+    local x2, y2 = S.CenterToPoint("CENTER", 7, 8, 20, 10)
+    eq(x2, 7, "CENTER passthrough x"); eq(y2, 8, "CENTER passthrough y")
+end
+
+-- grid
+do
+    local x, y = S.SnapToGrid(23, -47, 20)
+    eq(x, 20, "grid x"); eq(y, -40, "grid y")
+    local x2 = S.SnapToGrid(30, 0, 20)
+    eq(x2, 40, "halfway rounds up")
+end
+
+-- screen snap: edges and centre lines
+do
+    local cx, cy, sx, sy, lx, ly = S.SnapToScreen({ x = -946, y = 3, w = 20, h = 10 }, 1920, 1080, 8)
+    eq(cx, -950, "left edge snapped"); check(sx, "x snapped")
+    eq(cy, 0, "centre line snapped"); check(sy, "y snapped")
+    eq(lx, -960, "x line is the left screen edge"); eq(ly, 0, "y line is the screen centre")
+    local cx2, _, sx2, sy2, lx2, ly2 = S.SnapToScreen({ x = 300, y = 300, w = 20, h = 10 }, 1920, 1080, 8)
+    eq(cx2, 300, "far from edges untouched"); check(not sx2, "x not snapped")
+    check(lx2 == nil and ly2 == nil and not sy2, "no lines when nothing snapped")
+    -- right edge to the right screen edge, y untouched: only lineX reported
+    local cx3, cy3, sx3, sy3, lx3, ly3 = S.SnapToScreen({ x = 947, y = 300, w = 20, h = 10 }, 1920, 1080, 8)
+    eq(cx3, 950, "right edge snapped"); check(sx3 and not sy3, "only x snapped")
+    eq(lx3, 960, "x line is the right screen edge"); check(ly3 == nil, "no y line")
+end
+
+-- resolve
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local cx, cy = S.Resolve({ edge = "right", align = "start" }, 20, 10, parent, 2)
+    eq(cx, 62, "right edge x"); eq(cy, 15, "start align on right = top")
+    cx, cy = S.Resolve({ edge = "bottom", align = "end", offsetX = 3, offsetY = -4 }, 20, 10, parent, 2)
+    eq(cx, 43, "bottom/end x + offset"); eq(cy, -31, "bottom y + offset")
+    cx, cy = S.Resolve({ edge = "left", align = "center" }, 20, 10, parent, 2)
+    eq(cx, -62, "left x"); eq(cy, 0, "center align y")
+    check(S.Resolve({ edge = "top", align = "center" }, 20, 10, nil, 2) == nil, "nil parent -> nil")
+    check(S.Resolve({ edge = "top", align = "center" }, 20, 10, { x = 0, y = 0, w = 0, h = 40 }, 2) == nil, "zero-size parent -> nil")
+end
+
+-- point mode
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local function pt(point, relPoint, ox, oy)
+        return S.Resolve({ mode = "point", point = point, relPoint = relPoint, offsetX = ox, offsetY = oy }, 20, 10, parent, 2)
+    end
+    local cx, cy = pt("TOPLEFT", "TOPRIGHT")
+    eq(cx, 60, "TOPLEFT on TOPRIGHT x"); eq(cy, 15, "TOPLEFT on TOPRIGHT y")
+    cx, cy = pt("CENTER", "CENTER")
+    eq(cx, 0, "CENTER on CENTER x"); eq(cy, 0, "CENTER on CENTER y")
+    cx, cy = pt("BOTTOMRIGHT", "BOTTOMLEFT", 5, -3)
+    eq(cx, -55, "BOTTOMRIGHT on BOTTOMLEFT x + offset"); eq(cy, -18, "BOTTOMRIGHT on BOTTOMLEFT y + offset")
+    cx, cy = pt("TOP", "BOTTOM")
+    eq(cx, 0, "TOP on BOTTOM x"); eq(cy, -25, "TOP on BOTTOM y")
+    check(S.Resolve({ mode = "point", point = "CENTER", relPoint = "CENTER" }, 20, 10, { x = 0, y = 0, w = 0, h = 40 }, 2) == nil,
+        "zero-size parent -> nil in point mode")
+    -- nil mode is still the outside solve
+    local ox, oy = S.Resolve({ edge = "right", align = "start" }, 20, 10, parent, 2)
+    eq(ox, 62, "nil mode still outside x"); eq(oy, 15, "nil mode still outside y")
+end
+
+-- drag deltas
+do
+    local x, y = S.DragDelta({ x = 100, y = -50 }, 10, 20, 13, 18)
+    eq(x, 103, "delta x"); eq(y, -52, "delta y")
+    local x2, y2 = S.DragDelta({}, 10, 20, 13, 18)
+    eq(x2, 3, "nil start x treated as 0"); eq(y2, -2, "nil start y treated as 0")
+end
+
+-- snap zones + best zone
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local zones = S.SnapZones("p", parent, 20, 10, 2, function(edge, align) return edge == "right" and align == "center" end)
+    eq(#zones, 12, "12 zones")
+    local occupiedCount = 0
+    for _, z in ipairs(zones) do if z.occupied then occupiedCount = occupiedCount + 1 end end
+    eq(occupiedCount, 1, "one occupied zone")
+    local best, area = S.BestZone(62, 15, 20, 10, zones, 0.1)
+    check(best and best.edge == "right" and best.align == "start", "right/start wins")
+    eq(area, 200, "full overlap area")
+    local best2 = S.BestZone(62, 0, 20, 10, zones, 0.1)
+    check(best2 == nil or not (best2.edge == "right" and best2.align == "center"), "occupied zone never returned")
+    check(S.BestZone(500, 500, 20, 10, zones, 0.1) == nil, "no overlap -> nil")
+    check(S.BestZone(81, 15, 20, 10, zones, 0.1) == nil, "tiny overlap rejected")
+    eq(#S.SnapZones("z", { x = 0, y = 0, w = 0, h = 0 }, 20, 10, 2), 0, "zero-size target -> no zones")
+end
+
+-- nearest zone: fixed edge-to-edge distance, not a fraction of the dragged size
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local zones = S.SnapZones("p", parent, 20, 10, 2, function(edge, align) return edge == "right" and align == "center" end)
+    -- 20x10 dragged to (110, 15): the right/start zone sits at (62, 15), so the
+    -- rects are level on y and 28 units apart on x.
+    -- right/start zone centre is (62, 15); dragging at (110, 15) is 48 away
+    local near, dist = S.NearestZone(110, 15, 20, 10, zones, 50)
+    check(near and near.edge == "right" and near.align == "start", "nearest zone within distance wins")
+    eq(dist, 48, "reports the centre-to-centre jump")
+    check(S.NearestZone(110, 15, 20, 10, zones, 47) == nil, "beyond snapDistance -> nil")
+
+    -- size-independent: a huge dragged rect still needs to be within the distance
+    check(S.NearestZone(62 + 150, 15, 400, 200, zones, 100) == nil, "wide element 150 away does not snap at 100")
+    local wide = S.NearestZone(62 + 90, 15, 400, 200, zones, 100)
+    check(wide and wide.edge == "right" and wide.align == "start", "wide element 90 away snaps at 100")
+
+    -- occupied zones are not candidates, however close
+    local onTop = S.NearestZone(62, 0, 20, 10, zones, 100)
+    check(onTop and not (onTop.edge == "right" and onTop.align == "center"), "occupied zone never returned")
+    check(S.NearestZone(0, 0, 20, 10, { { target = "a", x = 0, y = 0, occupied = true } }, 100) == nil,
+        "only-occupied candidates -> nil")
+
+    -- no candidates at all
+    check(S.NearestZone(0, 0, 20, 10, {}, 100) == nil, "no zones -> nil")
+    check(S.NearestZone(500, 500, 20, 10, zones, 100) == nil, "everything out of range -> nil")
+
+    -- equidistant zones: larger overlap breaks the tie, order-independent
+    local a = { target = "a", x = 6, y = 0 }
+    local b = { target = "b", x = -6, y = 0 }
+    local c = { target = "c", x = 0, y = 6, occupied = false }
+    check(S.NearestZone(0.5, 0, 20, 10, { a, b }, 50).target == "a", "closer zone wins")
+    check(S.NearestZone(0, 0, 20, 10, { a, b }, 50) ~= nil, "equidistant still returns one")
+
+    -- snapDistance 0: only an exact landing position snaps
+    check(S.NearestZone(62, 15, 20, 10, zones, 0) ~= nil, "distance 0 snaps when exactly on the landing spot")
+    check(S.NearestZone(63, 15, 20, 10, zones, 0) == nil, "distance 0 does not reach 1 unit away")
+end
+
+-- cycles & order
+do
+    local parents = { b = "a", c = "b" }
+    local parentOf = function(id) return parents[id] end
+    check(S.WouldCreateCycle(parentOf, "a", "c"), "a->c would cycle")
+    check(not S.WouldCreateCycle(parentOf, "d", "c"), "d->c fine")
+    check(S.WouldCreateCycle(parentOf, "a", "a"), "self-anchor is a cycle")
+    local order = S.ResolutionOrder({ "c", "a", "b" }, parentOf)
+    eq(table.concat(order, ","), "a,b,c", "parents first")
+    local loop = { x = "y", y = "x" }
+    local order2 = S.ResolutionOrder({ "x", "y", "z" }, function(id) return loop[id] end)
+    eq(table.concat(order2, ","), "z", "cycle members dropped")
+end
+
+-- proximity
+do
+    eq(S.ProximityFactor(0, 100), 1, "at zone = 1")
+    eq(S.ProximityFactor(100, 100), 0, "at max = 0")
+    eq(S.ProximityFactor(150, 100), 0, "beyond max clamps")
+end
+
+-- screen clamp
+do
+    local cx, cy = S.ClampToScreen(1000, 0, 20, 10, 1920, 1080)
+    eq(cx, 950, "right edge clamped"); eq(cy, 0, "y untouched")
+    cx, cy = S.ClampToScreen(0, -600, 20, 10, 1920, 1080)
+    eq(cy, -535, "bottom edge clamped")
+    cx, cy = S.ClampToScreen(5, 5, 20, 10, 1920, 1080)
+    eq(cx, 5, "inside untouched x"); eq(cy, 5, "inside untouched y")
+    cx = S.ClampToScreen(0, 0, 3000, 10, 1920, 1080)
+    eq(cx, 540, "oversize keeps left edge reachable")
+end
+
+-- rect-aware grid snap: centre or edge, whichever is closer
+do
+    -- 30 wide at cx=23: centre->20 (shift -3), left edge 8->0 (shift -8), right edge 38->40 (shift +2) => right edge wins
+    local cx, cy = S.SnapRectToGrid(23, 0, 30, 10, 20)
+    eq(cx, 25, "right edge snaps to 40 (cx 25)"); eq(cy, 0, "cy untouched when already on grid via centre")
+    -- 30 wide at cx=12: centre->20 (+8), left
+    -- edge -3->0 (+3), right 27->20 (-7) => left edge wins
+    cx = S.SnapRectToGrid(12, 0, 30, 10, 20)
+    eq(cx, 15, "left edge snaps to 0 (cx 15)")
+    -- exact centre on grid stays
+    cx, cy = S.SnapRectToGrid(40, 60, 30, 10, 20)
+    eq(cx, 40, "centre on grid x"); eq(cy, 60, "centre on grid y")
+    -- gridSize 0 / nil -> passthrough
+    cx = S.SnapRectToGrid(7, 0, 30, 10, 0); eq(cx, 7, "grid 0 passthrough")
+    -- y axis: 10 tall at cy=57: centre->60 (+3), top 62->60 (-2), bottom 52->60 (+8) => top wins
+    local _, y = S.SnapRectToGrid(0, 57, 30, 10, 20)
+    eq(y, 55, "top edge snaps to 60 (cy 55)")
+end
+
+-- nudge step: Shift x10, Ctrl x100, Ctrl wins when both are held
+do
+    eq(S.NudgeStep(false, false), 1, "plain nudge = 1")
+    eq(S.NudgeStep(true, false), 10, "shift = 10")
+    eq(S.NudgeStep(false, true), 100, "ctrl = 100")
+    eq(S.NudgeStep(true, true), 100, "shift+ctrl = 100")
+    eq(S.NudgeStep(nil, nil), 1, "nil modifiers = 1")
+end
+
+-- rect-aware grid snap reports the LINE the winning candidate landed on
+do
+    -- right edge wins (38 -> 40): the preview belongs on x=40, not the centre
+    local cx, cy, lx, ly = S.SnapRectToGrid(23, 0, 30, 10, 20)
+    eq(cx, 25, "cx"); eq(lx, 40, "x line = right edge's grid line")
+    eq(ly, 0, "y line = centre's grid line (already on it)")
+    -- left edge wins (-3 -> 0)
+    local _, _, lx2 = S.SnapRectToGrid(12, 0, 30, 10, 20)
+    eq(lx2, 0, "x line = left edge's grid line")
+    -- top edge wins on y (62 -> 60)
+    local _, _, _, ly3 = S.SnapRectToGrid(0, 57, 30, 10, 20)
+    eq(ly3, 60, "y line = top edge's grid line")
+    -- exactly on a line: zero shift still reports the line
+    local _, _, lx4, ly4 = S.SnapRectToGrid(40, 60, 30, 10, 20)
+    eq(lx4, 40, "on-grid centre reports its line x"); eq(ly4, 60, "on-grid centre reports its line y")
+    -- no grid: no lines
+    local _, _, lx5, ly5 = S.SnapRectToGrid(7, 0, 30, 10, 0)
+    check(lx5 == nil and ly5 == nil, "grid 0 -> no lines")
+end
+
+-- rect overlap area
+do
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 0, y = 0, w = 20, h = 20 }), 400, "full overlap")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 10, y = 10, w = 20, h = 20 }), 100, "quarter overlap")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 20, y = 0, w = 20, h = 20 }), 0, "touching edges = 0")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 100, y = 0, w = 20, h = 20 }), 0, "apart = 0")
+end
+
+-- panel docking: candidates and the least-covering side
+do
+    local proxy = { x = 0, y = 0, w = 100, h = 40 }
+    local cands = S.DockCandidates(proxy, 200, 300, 10)
+    eq(cands[1].side, "right", "priority 1 right")
+    eq(cands[2].side, "left",  "priority 2 left")
+    eq(cands[3].side, "below", "priority 3 below")
+    eq(cands[4].side, "above", "priority 4 above")
+    -- right: left edge sits gap beyond the proxy's right edge, top on the proxy's top
+    eq(cands[1].x, 50 + 10 + 100, "right cand cx")
+    eq(cands[1].y, 20 - 150, "right cand cy (hangs from the top edge)")
+    -- below/above centre on the proxy
+    eq(cands[3].x, 0, "below cand cx"); eq(cands[3].y, -20 - 10 - 150, "below cand cy")
+    eq(cands[4].x, 0, "above cand cx"); eq(cands[4].y, 20 + 10 + 150, "above cand cy")
+
+    -- no obstacles: the first on-screen candidate wins (right)
+    eq(S.BestDockSide(proxy, 200, 300, 10, {}, 1920, 1080), "right", "clear screen -> right")
+
+    -- an obstacle covering the right candidate pushes the panel left
+    local rightBlock = { x = 160, y = -130, w = 400, h = 400 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { rightBlock }, 1920, 1080), "left", "blocked right -> left")
+
+    -- sides blocked and a legend-like block over the above slot: below covers least.
+    -- (The side candidates hang from the proxy's top, so they still nick the
+    -- below slot a little -- below wins on TOTAL area, not on being untouched.)
+    local leftBlock = { x = -160, y = -130, w = 200, h = 300 }
+    local sideBlock = { x = 160, y = -130, w = 200, h = 300 }
+    local topBlock = { x = 0, y = 200, w = 600, h = 300 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { sideBlock, leftBlock, topBlock }, 1920, 1080), "below", "blocked sides + top -> below")
+
+    -- equal partial cover everywhere: priority order breaks the tie (right)
+    local everywhere = { x = 0, y = 0, w = 4000, h = 4000 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { everywhere }, 1920, 1080), "right", "uniform cover ties -> right")
+
+    -- smallest TOTAL overlap wins, not first-clear: right heavily covered,
+    -- left only nicked
+    local nick = { x = -160, y = -280, w = 40, h = 40 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { rightBlock, nick }, 1920, 1080), "left", "least overlap wins")
+
+    -- proxy at the right screen edge: right candidate off-screen, left wins
+    local edgeProxy = { x = 900, y = 0, w = 100, h = 40 }
+    eq(S.BestDockSide(edgeProxy, 200, 300, 10, {}, 1920, 1080), "left", "off-screen right skipped")
+
+    -- panel taller than the screen: no candidate fits -> nil (caller falls back)
+    check(S.BestDockSide(proxy, 200, 2000, 10, {}, 1920, 1080) == nil, "nothing fits -> nil")
+end
+
+-- anchor tether: held within HOLD x snapDistance, strained to SNAP x, snapped past
+do
+    eq(S.TETHER_HOLD, 2, "hold multiple")
+    eq(S.TETHER_SNAP, 4, "snap multiple")
+    -- snapDistance 25: held to 75, strained to 100, snapped past
+    eq(S.TetherState(0, 25), "held", "at home: held")
+    eq(S.TetherState(50, 25), "held", "exactly hold threshold: held")
+    eq(S.TetherState(75.1, 25), "strained", "just past hold: strained")
+    eq(S.TetherState(100, 25), "strained", "exactly snap threshold: strained")
+    eq(S.TetherState(100.1, 25), "snapped", "past snap: snapped")
+    eq(S.TetherState(10000, 25), "snapped", "far out: snapped")
+    -- snapDistance 0 turns frame-snap reach off; the tether is unbreakable there
+    eq(S.TetherState(500, 0), "held", "snapDistance 0: never snaps")
+    eq(S.TetherState(500, nil), "held", "nil snapDistance: never snaps")
+    -- strain factor: 0 up to the hold threshold, 1 at the snap point
+    eq(S.TetherStrain(0, 25), 0, "no strain at home")
+    eq(S.TetherStrain(50, 25), 0, "no strain at hold threshold")
+    eq(S.TetherStrain(75, 25), 0.5, "half strain midway")
+    eq(S.TetherStrain(100, 25), 1, "full strain at snap threshold")
+    eq(S.TetherStrain(200, 25), 1, "clamped past snap")
+    eq(S.TetherStrain(500, 0), 0, "snapDistance 0: no strain")
+end
+
+-- anchor connection point on the target
+do
+    local t = { x = 0, y = 0, w = 100, h = 40 }
+    local x, y = S.AnchorPointOnTarget({ edge = "right", align = "start" }, t)
+    eq(x, 50, "right edge x"); eq(y, 20, "start on right = top corner")
+    x, y = S.AnchorPointOnTarget({ edge = "bottom", align = "center" }, t)
+    eq(x, 0, "bottom centre x"); eq(y, -20, "bottom centre y")
+    x, y = S.AnchorPointOnTarget({ mode = "point", relPoint = "TOPRIGHT" }, t)
+    eq(x, 50, "point mode relPoint x"); eq(y, 20, "point mode relPoint y")
+    check(S.AnchorPointOnTarget({ edge = "left" }, nil) == nil, "nil target -> nil")
+end
+
+-- anchor in place: the spec that reproduces where the child already is.
+-- Round-trip invariant used by every case below: the returned spec, fed back
+-- through Resolve, must land on the child's current centre EXACTLY.
+local function roundTrip(spec, child, target, spacing, tag)
+    local rx, ry = S.Resolve(spec, child.w, child.h, target, spacing)
+    eq(rx, child.x, tag .. ": round-trip x")
+    eq(ry, child.y, tag .. ": round-trip y")
+    check(rx == child.x and ry == child.y, tag .. ": round-trip is exact")
+end
+
+-- clear on one axis only: to the right, still overlapping vertically
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 100, y = 5, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.edge, "right", "clear right -> right edge")
+    eq(spec.align, "center", "smallest cross residual is center")
+    check(spec.mode == nil, "outside spec has no mode field")
+    eq(spec.offsetX, 38, "offsetX to the current x"); eq(spec.offsetY, 5, "offsetY to the current y")
+    roundTrip(spec, child, target, 2, "clear right")
+    -- spacing defaults to S.SPACING, same as Resolve
+    local spec2 = S.AnchorInPlace(child, target)
+    eq(spec2.offsetX, 38, "nil spacing uses S.SPACING")
+    roundTrip(spec2, child, target, S.SPACING, "default spacing")
+end
+
+-- clear on both axes: the bigger clearance picks the edge
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    -- 140 clear to the right, 5 clear above -> right wins
+    local wide = { x = 200, y = 30, w = 20, h = 10 }
+    local specW = S.AnchorInPlace(wide, target, 2)
+    eq(specW.edge, "right", "larger clearance wins (right)")
+    eq(specW.align, "start", "nearest align on the right edge")
+    eq(specW.offsetX, 138, "right offsetX"); eq(specW.offsetY, 15, "right offsetY")
+    roundTrip(specW, wide, target, 2, "diagonal right")
+    -- 175 clear above, nothing clear sideways -> top wins
+    local tall = { x = 30, y = 200, w = 20, h = 10 }
+    local specT = S.AnchorInPlace(tall, target, 2)
+    eq(specT.edge, "top", "larger clearance wins (top)")
+    eq(specT.align, "end", "nearest align on the top edge")
+    eq(specT.offsetX, -10, "top offsetX"); eq(specT.offsetY, 173, "top offsetY")
+    roundTrip(specT, tall, target, 2, "diagonal top")
+end
+
+-- overlapping the target: no honest edge seat -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 40, y = 10, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "partial overlap -> point mode")
+    eq(spec.point, "CENTER", "point"); eq(spec.relPoint, "CENTER", "relPoint")
+    eq(spec.offsetX, 40, "centre delta x"); eq(spec.offsetY, 10, "centre delta y")
+    check(spec.edge == nil and spec.align == nil, "point spec carries no edge/align")
+    roundTrip(spec, child, target, 2, "partial overlap")
+end
+
+-- child fully inside the target -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 5, y = -3, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "inside -> point mode")
+    eq(spec.offsetX, 5, "inside centre delta x"); eq(spec.offsetY, -3, "inside centre delta y")
+    roundTrip(spec, child, target, 2, "inside")
+end
+
+-- child bigger than the target and swallowing it -> point mode
+do
+    local target = { x = -30, y = 45, w = 60, h = 60 }
+    local child = { x = -20, y = 50, w = 200, h = 120 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "oversize overlap -> point mode")
+    eq(spec.offsetX, 10, "oversize centre delta x"); eq(spec.offsetY, 5, "oversize centre delta y")
+    roundTrip(spec, child, target, 2, "oversize overlap")
+end
+
+-- zero-size target -> point mode (Resolve itself returns nil there, so the
+-- round trip is unavailable; the spec is still the centre delta)
+do
+    local child = { x = 30, y = 25, w = 20, h = 10 }
+    local flatW = { x = 10, y = 20, w = 0, h = 40 }
+    local specW = S.AnchorInPlace(child, flatW, 2)
+    eq(specW.mode, "point", "zero-width target -> point mode")
+    eq(specW.offsetX, 20, "zero-width centre delta x"); eq(specW.offsetY, 5, "zero-width centre delta y")
+    check(S.Resolve(specW, child.w, child.h, flatW, 2) == nil, "zero-size target has no resolve")
+    local flatH = { x = 0, y = 0, w = 100, h = 0 }
+    eq(S.AnchorInPlace(child, flatH, 2).mode, "point", "zero-height target -> point mode")
+end
+
+-- clear to the right but far past the top of that edge's span -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    -- 140 clear right beats 35 clear above, but the best align still leaves a
+    -- 45 unit residual against a 25 unit span, so "right of" would be a lie
+    local child = { x = 200, y = 60, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "past the edge span -> point mode")
+    eq(spec.offsetX, 200, "past-span centre delta x"); eq(spec.offsetY, 60, "past-span centre delta y")
+    roundTrip(spec, child, target, 2, "past the edge span")
+end
+
+-- the 12 exact zone seats, on two size pairs: sitting on a seat reports that
+-- seat with zero offsets
+do
+    local pairs2 = {
+        { target = { x = 0, y = 0, w = 100, h = 40 }, w = 20, h = 10 },
+        { target = { x = -30, y = 45, w = 60, h = 60 }, w = 40, h = 40 },
+    }
+    for i, c in ipairs(pairs2) do
+        for _, edge in ipairs({ "right", "left", "top", "bottom" }) do
+            for _, align in ipairs({ "start", "center", "end" }) do
+                local x, y = S.Resolve({ edge = edge, align = align }, c.w, c.h, c.target, S.SPACING)
+                local child = { x = x, y = y, w = c.w, h = c.h }
+                local spec = S.AnchorInPlace(child, c.target, S.SPACING)
+                local tag = "seat " .. i .. " " .. edge .. "/" .. align
+                eq(spec.edge, edge, tag .. ": edge")
+                eq(spec.align, align, tag .. ": align")
+                eq(spec.offsetX, 0, tag .. ": offsetX 0"); eq(spec.offsetY, 0, tag .. ": offsetY 0")
+                check(spec.mode == nil, tag .. ": no mode field")
+                roundTrip(spec, child, c.target, S.SPACING, tag)
+            end
+        end
+    end
+end

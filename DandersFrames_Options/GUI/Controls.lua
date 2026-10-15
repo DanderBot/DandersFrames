@@ -1,6 +1,6 @@
 -- Part 4 of the GUI toolkit, split from the original GUI.lua.
 -- These re-declarations are aliases of the SAME objects the first part
--- created; they add no state. See docs/reorg-tools/splits.manifest.
+-- created; they add no state.
 -- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
@@ -11,14 +11,66 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 local S = GUI._state
-local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM =
-      GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM, C_TEXT_CAPTION =
+      GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim,
+      GUI.Colors.textCaption
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local AddOverrideIndicators = GUI._priv.AddOverrideIndicators
 local AddOrderListOverrideIndicators = GUI._priv.AddOrderListOverrideIndicators
+-- The one commit-side page/pane refresh seam, defined in SettingsWidgets.lua
+-- (which loads first). See its header for why it is rawget and why it is on
+-- the commit side of the preview/commit split.
+local RefreshOwnerStates = GUI._priv.RefreshOwnerStates
+
+-- ============================================================
+-- MEDIA MENU ORDER
+-- The texture, font and sound menus list DandersFrames' own media first, then
+-- SharedMedia_MyMedia's (where people keep their personal collection), then
+-- everything else, each group A-Z with a faint line where a group starts. LSM
+-- does not record who registered a name, so the group is read off the FILE
+-- PATH. "Solid" is the texture menus' no-texture choice and leads the list.
+-- ============================================================
+local MEDIA_GROUPS = {
+    "\\addons\\dandersframes\\",
+    "\\addons\\sharedmedia_mymedia\\",
+}
+local function MediaGroup(path)
+    if path == "Solid" then return 0 end
+    if type(path) ~= "string" then return #MEDIA_GROUPS + 1 end
+    local p = path:lower():gsub("/", "\\")
+    for i, home in ipairs(MEDIA_GROUPS) do
+        if p:find(home, 1, true) then return i end
+    end
+    return #MEDIA_GROUPS + 1
+end
+
+-- Sorts a menu's {key, value} list in place; pathOf(option) -> its file path.
+local function SortMedia(list, pathOf)
+    for _, o in ipairs(list) do o.group = MediaGroup(pathOf(o)) end
+    table.sort(list, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        return a.value < b.value
+    end)
+end
+
+-- The line above a row that starts a new group. Made on the first row that
+-- needs one and kept; rows are pooled, so it is shown or hidden every rebuild.
+local function MarkMediaGroup(row, list, i)
+    local starts = i > 1 and list[i].group ~= list[i - 1].group
+    if starts and not row.GroupDivider then
+        local d = row:CreateTexture(nil, "OVERLAY")
+        local ppu = GUI._priv.PixelsPerUnit and GUI._priv.PixelsPerUnit(row)
+        d:SetPoint("TOPLEFT", 4, 0)
+        d:SetPoint("TOPRIGHT", -4, 0)
+        d:SetHeight((ppu and ppu > 0) and (1 / ppu) or 1)
+        d:SetColorTexture(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.35)
+        row.GroupDivider = d
+    end
+    if row.GroupDivider then row.GroupDivider:SetShown(starts) end
+end
 -- ============================================================
 -- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiration panel. Pairs with the
 -- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
@@ -303,6 +355,31 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     local function isBorder() return mode() == "BORDER" end
     local function enabled() return dbTable[K("Enabled")] and true or false end
     local supported = P:IsSupported()
+    -- ★ SPELL-LEVEL GATE. opts.trackedIds is a callback returning the identity map behind
+    -- THIS aura; a consumer with no per-spell identity (the buff and debuff rows, which are
+    -- a whole row of arbitrary auras) simply passes nothing and the gate never fires.
+    -- ☠ Evaluated per CALL, not cached: the ids change as the user edits the placement's
+    -- tracked spells, and a cached answer would grey a panel the user had just made valid.
+    -- ⚠ Greys rather than HIDES, unlike the shape gating on the bar card. That one is always
+    -- true; this one rests on a sample that is admittedly incomplete, so the control has to
+    -- stay visible and say why — a hidden control cannot be argued with.
+    -- ★ SAMPLE ON OPEN, so the answer is as fresh as it can be at the moment someone is
+    -- actually looking. The sweep learns every 30s, which is fine in the background but
+    -- means a spell you just started tracking can sit unknown for half a minute while you
+    -- stare at the panel. Opening the card is the closest reachable point to "the user just
+    -- added this spell" without hunting the add path through the editor, and it costs one
+    -- pass over auras that are already up.
+    -- ⚠ It can only answer for auras LIVE RIGHT NOW — a spell that is not on you or anyone
+    -- nearby stays unknown, which is the correct answer rather than a failure. In practice a
+    -- healer setting up a HoT cue usually has it rolling.
+    if P.SampleUnits then pcall(P.SampleUnits, P, "player", "target") end
+
+    local function noWindow()
+        if not opts.trackedIds then return false end
+        local ok, ids = pcall(opts.trackedIds)
+        if not ok then return false end
+        return not P:MayHaveWindow(ids)
+    end
     local masterGate = opts.masterGate
     local function gated(db) return masterGate and masterGate(db) or false end
     local function onStructural() refreshStates(); fullUpdate() end
@@ -310,16 +387,32 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     local w = {}
     local noteW = GUI:GroupInnerWidth(group)
 
-    w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
-        K("Enabled"), onStructural), 28)
-    -- keepEnabled spares this toggle from the GROUP gate below (so "Enable off" doesn't grey
-    -- the switch you need to turn it back on) — it does NOT spare it from its own disableOn,
-    -- which is why the two compose here rather than fight.
-    w.enable.keepEnabled = true
-    -- On a client without the registrar the toggle itself must go dead, or a user can switch
-    -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
-    -- master switch greys it too — nothing above it being on means nothing below it applies.
-    w.enable.disableOn = function(db) return not supported or gated(db) end
+    -- opts.noEnableToggle: suppress the built-in "Enable" checkbox, for a consumer
+    -- that carries the tick itself — a popout feature row hoists it onto the row and
+    -- would otherwise draw the same switch twice. CreateBorderControls' noShowToggle,
+    -- for the section that owns THIS one. The Enabled key is still read: the group
+    -- gate at the foot of this function folds it in, so everything under the toggle
+    -- greys exactly as it did. The consumer inherits the toggle's own disableOn with
+    -- it — an unsupported client must not be switchable from the row either.
+    if not opts.noEnableToggle then
+        w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
+            K("Enabled"), onStructural), 28)
+        -- keepEnabled spares this toggle from the GROUP gate below (so "Enable off" doesn't grey
+        -- the switch you need to turn it back on) — it does NOT spare it from its own disableOn,
+        -- which is why the two compose here rather than fight.
+        w.enable.keepEnabled = true
+        -- On a client without the registrar the toggle itself must go dead, or a user can switch
+        -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
+        -- master switch greys it too — nothing above it being on means nothing below it applies.
+        w.enable.disableOn = function(db) return not supported or gated(db) or noWindow() end
+        -- ⚠ The tooltip carries the SPELL reason only. The client reason has its own note
+        -- below and applies to the whole section; this one is about the aura in front of
+        -- you, and a tooltip is where a per-item reason belongs.
+        -- ⚠ Deliberately the SAME string as the note below, not a variant of it. Two
+        -- near-identical sentences are two entries a translator has to notice are meant to
+        -- match, for no reader-facing gain.
+        w.enable.tooltip = L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."]
+    end
 
     -- Says why there is no threshold, and why a given spell may never light. Sits directly
     -- under Enable, where the Alert Below slider lives in the Expiration section —
@@ -334,6 +427,18 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         L["This game build does not support refresh-window highlights."],
         { tone = "caution", prefix = "Note", width = noteW }))
     w.unsupported.hideOn = function() return supported end
+
+    -- Shown only when every spell behind this aura is a MEASURED no. Its own note rather
+    -- than a variant of the one above, because the two say different things and can be true
+    -- at once — an old client AND an unrefreshable spell.
+    -- ⚠ Names the way out. The whole failure this gate exists to stop is a healer wanting
+    -- "warn me before this drops", finding it under Pandemic because Expiration withholds
+    -- Border and Tint on a bar, and configuring a cue that can never fire. Greying without
+    -- pointing at Expiration would leave them stuck rather than redirected.
+    w.noWindow = group:AddWidget(GUI:CreateNote(parent,
+        L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."],
+        { tone = "caution", prefix = "Note", width = noteW }))
+    w.noWindow.hideOn = function() return not noWindow() end
 
     w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Type"],
         { BORDER = L["Border"], TINT = L["Tint"], _order = { "BORDER", "TINT" } },
@@ -396,9 +501,24 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     w.border = GUI:CreateBorderControls(group, dbTable, P:BorderPrefix(prefix), {
         parent       = parent,
         noShowToggle = true,
+        -- ★ animation joins the house icon-border set. It was absent because the pandemic
+        -- engine stripped spec.border.animation, so these controls would have driven
+        -- nothing; that strip is gone (Features/Pandemic.lua) now that container-hosted
+        -- borders take the declarative path, and on 12.1.5 the engine plays the effect
+        -- only inside the refresh window.
+        -- ⚠ include is opt-in PER KEY — adding one does not disturb the others, but
+        -- omitting one silently drops its control.
+        -- ☠ THE KEY IS `animate`, NOT `animation`. CreateBorderControls tests
+        -- `if include.animate then`; `animation = true` is silently ignored, so the whole
+        -- Border Animation control set is never built and the setting looks absent rather
+        -- than broken. Reported as "where are the pandemic animations?" — the engine side
+        -- was working the whole time and had nothing to drive it.
+        -- ⚠ include is opt-in PER KEY and a wrong key cannot fail loudly, because an
+        -- unknown key is indistinguishable from one deliberately left out.
         include      = {
             inset = true, offset = true, blendMode = true,
             gradient = true, shadow = true, alpha = true,
+            animate = true,
         },
         hideWhen     = function() return not isBorder() end,
         fullUpdate   = fullUpdate,
@@ -443,11 +563,14 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         end
     end
 
-    -- Master gate: an unsupported client, the page's own feature switch, or Enable off greys
-    -- everything below the toggle. Composed here so a caller never has to wrap this and risk
-    -- dropping one of the three.
+    -- Master gate: an unsupported client, a spell with no refresh window, the page's own
+    -- feature switch, or Enable off greys everything below the toggle. Composed here so a
+    -- caller never has to wrap this and risk dropping one of the four.
+    -- ☠ noWindow() belongs here as well as on the toggle. Without it a profile that already
+    -- has Enabled set on an unrefreshable spell would grey the switch and leave every
+    -- control under it live — a section you cannot turn off but can still configure.
     group.disableChildrenOn = function(db)
-        return not supported or gated(db) or not enabled()
+        return not supported or noWindow() or gated(db) or not enabled()
     end
 
     return w
@@ -610,11 +733,6 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
     return container
 end
 
--- (GUI:CreateExpiringControls removed 2026-07-25 with the pre-12.1 Expiring system:
---  it drove the remaining-time border/tint panel, which is unreadable on the 12.1
---  container path. The 12.1-safe panel is GUI:CreateExpirationControls above --
---  note the near-identical name; that one is current and engine-backed.)
-
 -- ============================================================
 -- GROWTH DIRECTION CONTROL
 -- Three linked dropdowns (Orientation, Wrap, Direction) that
@@ -722,13 +840,19 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         local arrow = btn:CreateTexture(nil, "OVERLAY")
         arrow:SetPoint("RIGHT", -8, 0)
         arrow:SetSize(12, 12)
-        arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+        arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
         arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
         menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+        -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+        -- to the cursor: clicks landing on its padding, its border inset or the empty
+        -- tail below the last item fall straight through and write whatever setting
+        -- happens to sit behind the menu.
+        menuFrame:EnableMouse(true)
         GUI:RegisterMenu(menuFrame)
         menuFrame:SetClampedToScreen(true)
         CreateElementBackdrop(menuFrame)
@@ -742,10 +866,15 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         end)
 
         local menuButtons = {}
+        -- ☠ REUSED BY POSITION, NEVER MADE AGAIN. Rebuild runs on every refresh of
+        -- the control, and it made a fresh button per option each time, hiding the
+        -- old ones -- frames the game never frees. Seven per refresh (2 + 2 + 3) on
+        -- every page with a Growth control, found by the GUI trace's growth probe.
+        local pool = {}
 
         -- Rebuild populates menu items from current options
         frame.Rebuild = function(self, newOptions)
-            for _, mb in ipairs(menuButtons) do mb:Hide() end
+            for _, mb in ipairs(pool) do mb:Hide() end
             wipe(menuButtons)
 
             local sorted = {}
@@ -766,18 +895,21 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
 
             local menuHeight = 0
             for i, opt in ipairs(sorted) do
-                local menuBtn = CreateFrame("Button", nil, menuFrame)
-                menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
-                menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
-                menuBtn:SetHeight(22)
-
-                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                local menuBtn = pool[i]
+                if not menuBtn then
+                    menuBtn = CreateFrame("Button", nil, menuFrame)
+                    menuBtn:SetPoint("TOPLEFT", 2, -2 - (i - 1) * 22)
+                    menuBtn:SetPoint("TOPRIGHT", -2, -2 - (i - 1) * 22)
+                    menuBtn:SetHeight(22)
+                    menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                    menuBtn.Text:SetPoint("LEFT", 8, 0)
+                    menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                    menuBtn.Highlight:SetAllPoints()
+                    pool[i] = menuBtn
+                end
+                menuBtn:Show()
                 menuBtn.Text:SetText(opt.value)
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-                menuBtn.Highlight:SetAllPoints()
                 local c = GetThemeColor()
                 menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
 
@@ -821,6 +953,8 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
                         mb.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                     end
                 end
+                -- Re-raised on every open: see the texture dropdown below.
+                if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menuFrame, btn) end
                 menuFrame:Show()
                 S.currentOpenDropdown = menuFrame
             end
@@ -925,7 +1059,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, lbl)
     end
     
     -- Button - use relative anchoring so it resizes with container
@@ -941,16 +1076,26 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     btn.Preview:SetSize(80, 16)
     
     btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    btn.Text:SetPoint("LEFT", 90, 0)
+    btn.Text:SetPoint("LEFT", btn.Preview, "RIGHT", 6, 0)
     btn.Text:SetPoint("RIGHT", -20, 0)
     btn.Text:SetJustifyH("LEFT")
+    -- One line, truncated: a wrapped name spills out of the 24px button.
+    btn.Text:SetWordWrap(false)
     btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    -- ☠ THE NAME WINS THE ROOM, NOT THE SWATCH. In a half-width card track the
+    -- button is ~170px, and a fixed 80px swatch would leave the name ~60, too
+    -- narrow for "DF Minimalist". The swatch gives way down to 40 first; at the
+    -- 260 the factory was drawn for it is its full 80.
+    btn:SetScript("OnSizeChanged", function(self, w)
+        self.Preview:SetWidth(math.max(40, math.min(80, math.floor(((w or 0) - 100) / 2))))
+    end)
     
     -- Arrow indicator
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local function UpdateText()
@@ -1004,9 +1149,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 -- next to bars that rendered fine, which reads as "DF is broken"
                 -- rather than "this texture is gone".
                 --   Showing the FALLBACK is also the honest preview: it is what the
-                -- bar will actually render. The label independently degrades to
-                -- "Select..." because GetTextureNameFromPath cannot name a dead
-                -- path, so the missing state is still signalled.
+                -- bar will actually render. The label independently names the file
+                -- and tags it "(missing)", so the missing state is still signalled.
                 -- Also applies the texture's tiling: a tiled texture must PREVIEW
                 -- tiled, even though an 80x16 swatch shows a crop of the tile.
                 DF:SafeSetTexture(btn.Preview, val)
@@ -1019,6 +1163,12 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1041,7 +1191,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Placeholder text
@@ -1076,19 +1226,56 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     
     StyleScrollBar(scrollFrame)
 
+    -- ONE PICK OF ONE TEXTURE: what a menu row's click runs, named so the
+    -- modified-default dot's hold-to-reset runs exactly the same thing.
+    local function SelectTexture(key)
+        -- The host bracket (GUI.lua's interceptWrite / onSettingWritten): the
+        -- redirect gate and the override record. Going through the hooks is
+        -- what makes the write visible to everything else wired to them --
+        -- the undo engine among them.
+        if GUI:Call("interceptWrite", dbTable, dbKey, key) then
+            UpdateText()
+            menuFrame:Hide()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(key) end
+            return
+        end
+        dbTable[dbKey] = key
+        -- ...carrying `callback`, this dropdown's own commit, so an undo
+        -- of the pick replays the apply and not only the write.
+        GUI:Call("onSettingWritten", dbTable, dbKey, key, label, callback)
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(key)
+        end
+        UpdateText()
+        menuFrame:Hide()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the pick
+    -- above, and a value named the way the opener names it.
+    container.DotWrite = SelectTexture
+    container.DotAccepts = function(v) return type(v) == "string" end
+    container.FormatDotValue = function(v)
+        if type(v) ~= "string" then return nil end
+        if customOptions then return customOptions[v] end
+        return DF:GetTextureNameFromPath(v) or v:match("([^\\]+)$") or v
+    end
+
     local menuButtons = {}
     local ITEM_HEIGHT = 28
     local MAX_VISIBLE = 8
-    
+
     -- Function to rebuild menu with current textures
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        -- Clear old buttons
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
-        
+
         -- Get fresh texture list (use custom options if provided)
         local options = customOptions or DF:GetTextureList()
         local sortedOptions = {}
@@ -1101,7 +1288,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return o.key end)
         
         -- Resize menu and scroll child
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
@@ -1109,7 +1296,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Hide scrollbar if not needed
+        -- Dead branch: `scrollBar` is never assigned, so this never runs.
         if scrollBar then
             if #sortedOptions <= MAX_VISIBLE then
                 scrollBar:Hide()
@@ -1120,17 +1307,28 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-            
-            -- Texture preview
-            menuBtn.Preview = menuBtn:CreateTexture(nil, "ARTWORK")
-            menuBtn.Preview:SetPoint("LEFT", 4, 0)
-            menuBtn.Preview:SetSize(80, 18)
-            -- Handle "Solid" special case
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Preview = menuBtn:CreateTexture(nil, "ARTWORK")
+                menuBtn.Preview:SetPoint("LEFT", 4, 0)
+                menuBtn.Preview:SetSize(80, 18)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                menuBtn.Text:SetPoint("LEFT", 90, 0)
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
+
+            -- Texture preview. "Solid" is a flat colour; a reused row may carry
+            -- the green preview tint from a texture, so it is reset here.
             if opt.key == "Solid" then
                 menuBtn.Preview:SetColorTexture(0.3, 0.3, 0.3, 1)
+                menuBtn.Preview:SetVertexColor(1, 1, 1)
             else
                 -- Safe setter + tiling, for the reasons on the button swatch above.
                 -- Menu rows are built from REGISTERED media so a dead path is far
@@ -1139,9 +1337,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 DF:SafeSetTexture(menuBtn.Preview, opt.key)
                 menuBtn.Preview:SetVertexColor(0.3, 0.7, 0.3)  -- Green tint for preview
             end
-            
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            menuBtn.Text:SetPoint("LEFT", 90, 0)
+
             menuBtn.Text:SetText(opt.value)
             
             -- Highlight selected item
@@ -1151,55 +1347,34 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
             
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
-            
+
             menuBtn:SetScript("OnClick", function()
-                -- Runtime override protection
-                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
-                    UpdateText()
-                    menuFrame:Hide()
-                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                    return
-                end
-                dbTable[dbKey] = opt.key
-                -- Track override when editing a profile
-                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                    DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
-                end
-                if container.UpdateOverrideIndicators then
-                    container:UpdateOverrideIndicators(opt.key)
-                end
-                UpdateText()
-                menuFrame:Hide()
-                DF:UpdateAll()
-                if callback then callback() end
+                SelectTexture(opt.key)
             end)
 
             table.insert(menuButtons, menuBtn)
         end
     end
-    
+
     -- Search box text changed handler
     searchBox:SetScript("OnTextChanged", function(self)
         RebuildMenu(self:GetText())
     end)
-    
+
     -- Allow escape to close
     searchBox:SetScript("OnEscapePressed", function()
         menuFrame:Hide()
     end)
-    
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
-    
+
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
@@ -1209,6 +1384,12 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia textures
             RebuildMenu()
+            -- ☠ RE-RAISE ON EVERY OPEN. The FULLSCREEN_DIALOG set at creation does
+            -- not last: parking this page in the page dock and adopting it back
+            -- re-parents it, and a re-parent hands every descendant the new
+            -- parent's strata -- so after one tab round trip the menu drew on the
+            -- window's own strata, under the widgets beside and below it.
+            if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menuFrame, btn) end
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             -- Focus search box
@@ -1251,17 +1432,38 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         end)
     end
 
-    -- Refresh override indicators on show
-    container:SetScript("OnShow", function()
+    -- The WHOLE display: the button's caption, its texture swatch and the
+    -- (missing) tag -- all three derived inside UpdateText -- plus the override
+    -- indicators beside the label, which are painted separately. Named once so
+    -- the two callers below cannot drift apart.
+    local function RefreshDisplay()
         UpdateText()
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
-    end)
-    
+    end
+
+    -- Refresh override indicators on show
+    container:SetScript("OnShow", RefreshDisplay)
+
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote this key behind the widget's
+    -- back: a group Reset, a Hold: Defaults preview, or the undo of either.
+    --
+    -- ☠ SAME GAP THE FONT DROPDOWN HAD, AND FOR THE SAME REASON: both are
+    -- hand-rolled preview menus that predate the kit's dropdown and share none
+    -- of its code, so neither inherited its opt-in. Harmless while a texture
+    -- dropdown only ever sat on a page; the Pet Frames Appearance row now mounts
+    -- one inside a popout pane carrying Reset Group and Hold: Defaults, so a
+    -- swatch still previewing the previous texture after a reset is a thing a
+    -- user can see -- and it would stay wrong until the panel was closed and
+    -- reopened and its OnShow fired. Pinned by test_order_lists.lua.
+    container.refreshValue = RefreshDisplay
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
@@ -1272,7 +1474,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             btn.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
     end
-    
+
     -- SEARCH: Register this setting (use current texture list)
     if DF.Search and dbKey and type(dbKey) == "string" then
         local currentOptions = customOptions or DF:GetTextureList()
@@ -1320,7 +1522,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, lbl)
     end
     
     -- Button - use relative anchoring so it resizes with container
@@ -1334,13 +1537,15 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     btn.Text:SetPoint("LEFT", 8, 0)
     btn.Text:SetPoint("RIGHT", -20, 0)
     btn.Text:SetJustifyH("LEFT")
+    -- One line, truncated: a wrapped name spills out of the 24px button.
+    btn.Text:SetWordWrap(false)
     btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     -- Arrow indicator
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local function UpdateText()
@@ -1366,6 +1571,12 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1388,7 +1599,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- Placeholder text
@@ -1423,19 +1634,53 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     
     StyleScrollBar(scrollFrame)
 
+    -- ONE PICK OF ONE FONT: what a menu row's click runs, named so the
+    -- modified-default dot's hold-to-reset runs exactly the same thing.
+    local function SelectFont(key)
+        -- The host bracket, same conversion and same reason as the
+        -- texture dropdown above.
+        if GUI:Call("interceptWrite", dbTable, dbKey, key) then
+            UpdateText()
+            menuFrame:Hide()
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(key) end
+            return
+        end
+        -- Store font NAME in database (not path)
+        dbTable[dbKey] = key
+        -- ...and the commit callback rides along, same as the texture
+        -- dropdown above.
+        GUI:Call("onSettingWritten", dbTable, dbKey, key, label, callback)
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(key)
+        end
+        UpdateText()
+        menuFrame:Hide()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the pick
+    -- above, and a font named the way the opener names it.
+    container.DotWrite = SelectFont
+    container.DotAccepts = function(v) return type(v) == "string" end
+    container.FormatDotValue = function(v)
+        if type(v) == "string" then return DF:GetFontNameFromPath(v) or v end
+    end
+
     local menuButtons = {}
     local ITEM_HEIGHT = 24
     local MAX_VISIBLE = 10
 
     -- Function to rebuild menu with current fonts
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        -- Clear old buttons
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
-        
+
         -- Get fresh font list
         local options = DF:GetFontList()
         local sortedOptions = {}
@@ -1448,7 +1693,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return DF:GetFontPath(o.key) end)
         
         -- Resize menu and scroll child
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
@@ -1456,7 +1701,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Hide scrollbar if not needed
+        -- Dead branch: `scrollBar` is never assigned, so this never runs.
         if scrollBar then
             if #sortedOptions <= MAX_VISIBLE then
                 scrollBar:Hide()
@@ -1467,14 +1712,21 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-            
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY")
-            menuBtn.Text:SetPoint("LEFT", 8, 0)
-            menuBtn.Text:SetPoint("RIGHT", -8, 0)
-            menuBtn.Text:SetJustifyH("LEFT")
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY")
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                menuBtn.Text:SetPoint("RIGHT", -8, 0)
+                menuBtn.Text:SetJustifyH("LEFT")
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
             
             -- Set default font first, then try to use the actual font for preview
             menuBtn.Text:SetFontObject(DFFontHighlightSmall)
@@ -1501,33 +1753,11 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
             
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
-            
+
             menuBtn:SetScript("OnClick", function()
-                -- Runtime override protection
-                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
-                    UpdateText()
-                    menuFrame:Hide()
-                    if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
-                    return
-                end
-                -- Store font NAME in database (not path)
-                dbTable[dbKey] = opt.key
-                -- Track override when editing a profile
-                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                    DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
-                end
-                if container.UpdateOverrideIndicators then
-                    container:UpdateOverrideIndicators(opt.key)
-                end
-                UpdateText()
-                menuFrame:Hide()
-                DF:UpdateAll()
-                if callback then callback() end
+                SelectFont(opt.key)
             end)
             
             table.insert(menuButtons, menuBtn)
@@ -1560,6 +1790,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia fonts
             RebuildMenu()
+            -- Re-raised on every open: see the texture dropdown above.
+            if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menuFrame, btn) end
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             -- Focus search box
@@ -1569,18 +1801,38 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     
     btn:SetScript("OnShow", UpdateText)
     UpdateText()
-    
-    -- Refresh override indicators on show
-    container:SetScript("OnShow", function()
+
+    -- The WHOLE display: the button's caption and its preview font, plus the
+    -- override indicators beside the label. UpdateText alone is half of it --
+    -- the indicators are what say "an auto layout is overriding this key" -- so
+    -- the pair is named once here rather than spelled twice.
+    local function RefreshDisplay()
         UpdateText()
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
-    end)
-    
+    end
+
+    -- Refresh override indicators on show
+    container:SetScript("OnShow", RefreshDisplay)
+
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote this key behind the widget's
+    -- back: a group Reset, a Hold: Defaults preview, or the undo of either.
+    --
+    -- ☠ THIS WAS THE ONE CONTROL IN A FONT PANE THAT DID NOT REPAINT. Every
+    -- other widget a Font Settings group mounts opts in already -- the size
+    -- slider and the outline dropdown through the kit (DandersUI/Widgets.lua),
+    -- the shadow tick through GUI:CreateCheckbox, the colour swatch through
+    -- GUI:CreateColorPicker -- so a Reset Group left this button alone, still
+    -- naming and previewing the previous font, until the panel was closed and
+    -- reopened and its OnShow fired. Pinned by test_order_lists.lua.
+    container.refreshValue = RefreshDisplay
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
@@ -1636,7 +1888,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function UpdateText()
@@ -1650,6 +1902,12 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1672,7 +1930,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 6, 0)
     searchIcon:SetSize(12, 12)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     -- Placeholder text
@@ -1710,11 +1968,12 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local ITEM_HEIGHT = 22
     local MAX_VISIBLE = 10
 
+    -- ☠ ROWS ARE POOLED AND REUSED BY POSITION. The menu is rebuilt on every
+    -- open and every keystroke in its search box; a fresh row per rebuild would
+    -- be frames the game never frees, a whole list of them per open.
+    local rowPool = {}
     local function RebuildMenu(filterText)
-        for _, menuBtn in ipairs(menuButtons) do
-            menuBtn:Hide()
-            menuBtn:SetParent(nil)
-        end
+        for _, menuBtn in ipairs(menuButtons) do menuBtn:Hide() end
         wipe(menuButtons)
 
         local options = DF:GetSoundList()
@@ -1727,7 +1986,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 table.insert(sortedOptions, {key = k, value = v})
             end
         end
-        table.sort(sortedOptions, function(a, b) return a.value < b.value end)
+        SortMedia(sortedOptions, function(o) return DF:GetSoundPath(o.key) end)
 
         local menuHeight = math.min(#sortedOptions, MAX_VISIBLE) * ITEM_HEIGHT + SEARCH_HEIGHT + 8
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
@@ -1743,14 +2002,21 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         end
 
         for i, opt in ipairs(sortedOptions) do
-            local menuBtn = CreateFrame("Button", nil, scrollChild)
-            menuBtn:SetSize(234, ITEM_HEIGHT)
-            menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
-
-            menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            menuBtn.Text:SetPoint("LEFT", 8, 0)
-            menuBtn.Text:SetPoint("RIGHT", -8, 0)
-            menuBtn.Text:SetJustifyH("LEFT")
+            local menuBtn = rowPool[i]
+            if not menuBtn then
+                menuBtn = CreateFrame("Button", nil, scrollChild)
+                menuBtn:SetSize(234, ITEM_HEIGHT)
+                menuBtn:SetPoint("TOPLEFT", 0, -(i - 1) * ITEM_HEIGHT)
+                menuBtn.Text = menuBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                menuBtn.Text:SetPoint("LEFT", 8, 0)
+                menuBtn.Text:SetPoint("RIGHT", -8, 0)
+                menuBtn.Text:SetJustifyH("LEFT")
+                menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+                menuBtn.Highlight:SetAllPoints()
+                rowPool[i] = menuBtn
+            end
+            menuBtn:Show()
+            MarkMediaGroup(menuBtn, sortedOptions, i)
             menuBtn.Text:SetText(opt.value)
 
             -- Highlight selected item
@@ -1761,8 +2027,6 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 menuBtn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             end
 
-            menuBtn.Highlight = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            menuBtn.Highlight:SetAllPoints()
             local c = GetThemeColor()
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
 
@@ -1772,6 +2036,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 menuFrame:Hide()
                 DF:UpdateAll()
                 if callback then callback() end
+                RefreshOwnerStates(parent)
             end)
 
             table.insert(menuButtons, menuBtn)
@@ -1800,6 +2065,8 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         else
             GUI:CloseAllMenus()
             RebuildMenu()
+            -- Re-raised on every open: see the texture dropdown above.
+            if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menuFrame, btn) end
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             searchBox:SetFocus()
@@ -1839,7 +2106,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     local draggingItem = nil
     local dragOffsetY = 0
     
-    -- Check if we should show separate melee/ranged
     local function IsSeparateMeleeRanged()
         if separateMeleeRangedKey and dbTable then
             return dbTable[separateMeleeRangedKey]
@@ -1847,7 +2113,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return true
     end
     
-    -- Get the roles to display
     local function GetDisplayRoles()
         if IsSeparateMeleeRanged() then
             return { "TANK", "HEALER", "MELEE", "RANGED" }
@@ -1890,7 +2155,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return displayRoles
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             local saveOrder = {}
@@ -1913,10 +2177,10 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 container:UpdateOverrideIndicators(saveOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -1926,7 +2190,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return math.max(1, math.min(index, #order))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         local numRoles = #order
@@ -1963,7 +2226,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -1974,7 +2237,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return grip
     end
     
-    -- Create a single role item
     local function CreateRoleItem(role)
         local info = ROLE_INFO[role]
         if not info then return nil end
@@ -2118,7 +2380,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return item
     end
     
-    -- Create all role items
     for _, role in ipairs({"TANK", "HEALER", "MELEE", "RANGED", "DAMAGER"}) do
         roleItems[role] = CreateRoleItem(role)
     end
@@ -2130,7 +2391,14 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     container.Refresh = function()
         UpdateItemPositions()
     end
-    
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group Reset, a press-and-hold preview, or the undo of one. Same
+    -- alias CreateGroupOrderList carries, and for the same reason: the Sorting
+    -- page's Role Priority row wires those verbs, and without it the sweep
+    -- repaints every widget in an open pane EXCEPT this list.
+    container.refreshValue = container.Refresh
+
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then
         local function onReset()
@@ -2149,7 +2417,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -2223,7 +2491,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return ALL_CLASSES
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             dbTable[dbKey] = newOrder
@@ -2237,10 +2504,10 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 container:UpdateOverrideIndicators(newOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -2250,7 +2517,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return math.max(1, math.min(index, #order))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         local numClasses = #order
@@ -2287,7 +2553,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -2298,7 +2564,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return grip
     end
     
-    -- Create a single class item
     local function CreateClassItem(class)
         local info = CLASS_INFO[class]
         if not info then return nil end
@@ -2441,7 +2706,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return item
     end
     
-    -- Create all class items
     for _, class in ipairs(ALL_CLASSES) do
         classItems[class] = CreateClassItem(class)
     end
@@ -2453,7 +2717,12 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
     container.Refresh = function()
         UpdateItemPositions()
     end
-    
+    -- ...and under the group-wide value sweep's one name, exactly as the role
+    -- and group lists carry it: the Sorting page's Class Priority row wires
+    -- Reset Group and Hold: Defaults, and without this alias those write the
+    -- key and leave the thirteen rows showing the order the user had before.
+    container.refreshValue = container.Refresh
+
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then
         local function onReset()
@@ -2472,7 +2741,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -2532,7 +2801,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return {1, 2, 3, 4, 5, 6, 7, 8}
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             dbTable[dbKey] = newOrder
@@ -2546,10 +2814,10 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 container:UpdateOverrideIndicators(newOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -2558,7 +2826,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return math.max(1, math.min(index, 8))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         
@@ -2592,7 +2859,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -2603,7 +2870,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return grip
     end
     
-    -- Create a single group item
     local function CreateGroupItem(groupNum)
         local color = GROUP_COLORS[groupNum]
         
@@ -2746,7 +3012,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return item
     end
     
-    -- Create all group items
     for i = 1, 8 do
         groupItems[i] = CreateGroupItem(i)
     end
@@ -2758,6 +3023,13 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
     container.Refresh = function()
         UpdateItemPositions()
     end
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group Reset, a press-and-hold preview, or the undo of one. The
+    -- Frame page's Group Display Order row wires those verbs, and without the
+    -- alias a reset moved the raid and left the eight rows showing the order
+    -- the user had before it.
+    container.refreshValue = container.Refresh
     
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then
@@ -2777,7 +3049,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -2789,6 +3061,84 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
 
     return container
 end
+
+-- ============================================================
+-- ROSTER WIDGETS -- SHARED LOOK
+-- ------------------------------------------------------------
+-- ⚠ FILE SCOPE, BECAUSE THERE ARE TWO WIDGETS NOW. These were locals inside the dual-column
+-- widget; the compact one below has to look identical to it, and the fastest way for two
+-- lists to stop looking alike is two copies of the paths their icons come from.
+-- ============================================================
+local ROSTER_ROLE_ICONS = {
+    TANK = "Interface\\AddOns\\DandersFrames\\Media\\DF_Tank",
+    HEALER = "Interface\\AddOns\\DandersFrames\\Media\\DF_Healer",
+    DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
+}
+local ROSTER_ROLE_COLORS = {
+    TANK = {0.35, 0.56, 0.82},
+    HEALER = {0.29, 0.62, 0.29},
+    DAMAGER = {0.70, 0.35, 0.35},
+}
+-- ☠ DOUBLE BACKSLASHES. Lua passes an unrecognised escape through as the bare character, so
+-- the single-backslash form is a path to nothing and the client draws an empty square.
+local ROSTER_ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png"
+local ROSTER_ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check.png"
+local ROSTER_ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png"
+
+-- ★ THE GROUP, AS A SORTED LIST OF { name, fullName, class, role, group }.
+-- ⚠ ONE READER FOR BOTH WIDGETS IS THE INTENT, NOT THE STATE: only the compact one calls
+-- this; the dual-column one still has its own copy (GetGroupRoster). The two MUST agree --
+-- including the `-Realm` suffix, so a name one list writes means the same to the other.
+-- ☠ NO `+ 1` ON UnitInRaid. It already returns an index GetRaidRosterInfo takes directly --
+-- Blizzard passes it straight through in both CompactUnitFrame and CompactRaidFrameManager.
+-- The +1 read the NEXT member's subgroup, so every unit reported its neighbour's group and
+-- the last member in the raid got nil and silently fell back to group 1.
+local function RosterSnapshot()
+    local roster = {}
+    local numMembers = GetNumGroupMembers()
+    if numMembers == 0 then
+        local name = UnitName("player")
+        local _, class = UnitClass("player")
+        roster[1] = { name = name, fullName = name .. "-" .. GetRealmName(),
+                      class = class or "WARRIOR", role = "DAMAGER", group = 1 }
+        return roster
+    end
+    local isRaid = IsInRaid()
+    for i = 1, numMembers do
+        local unit = isRaid and ("raid" .. i) or (i == 1 and "player" or "party" .. (i - 1))
+        local name, realm = UnitName(unit)
+        if name then
+            -- ☠ EMPTY STRING AS WELL AS NIL. UnitName returns the realm only when it differs
+            -- from yours, and which of nil / "" it returns for a same-realm unit is not
+            -- something to bet a key on: `realm or GetRealmName()` keeps an empty string, and
+            -- "Bob-" would then be a name that matches nothing and can never be removed.
+            if realm == "" then realm = nil end
+            realm = realm or GetRealmName()
+            local _, class = UnitClass(unit)
+            local role = UnitGroupRolesAssigned(unit)
+            if role == "NONE" then role = "DAMAGER" end
+            local group = 1
+            if isRaid then
+                local raidIndex = UnitInRaid(unit)
+                if raidIndex then
+                    local _, _, subgroup = GetRaidRosterInfo(raidIndex)
+                    group = subgroup or 1
+                end
+            end
+            roster[#roster + 1] = { name = name, fullName = name .. "-" .. realm,
+                                    class = class or "WARRIOR", role = role, group = group }
+        end
+    end
+    table.sort(roster, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        local order = { TANK = 1, HEALER = 2, DAMAGER = 3 }
+        local ar, br = order[a.role] or 3, order[b.role] or 3
+        if ar ~= br then return ar < br end
+        return a.name < b.name
+    end)
+    return roster
+end
+GUI.RosterSnapshot = RosterSnapshot
 
 -- ============================================================
 -- HIGHLIGHT FRAMES ROSTER WIDGET
@@ -2804,8 +3154,8 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- Snapped; see CreateRoleOrderList.
     local ITEM_HEIGHT = SnapLen(parent, 26) or 26
     local ITEM_GAP = SnapLen(parent, 2) or 2
-    local COL_WIDTH = 224  -- Wider columns
-    local COL_GAP = 12     -- Smaller gap between columns
+    local COL_WIDTH = 224
+    local COL_GAP = 12
     
     -- State
     local rosterItems = {}
@@ -2814,23 +3164,11 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local draggingItem = nil
     local dragOffsetY = 0
     
-    -- Custom role icons
-    local ROLE_ICONS = {
-        TANK = "Interface\\AddOns\\DandersFrames\\Media\\DF_Tank",
-        HEALER = "Interface\\AddOns\\DandersFrames\\Media\\DF_Healer",
-        DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
-    }
-    local ROLE_COLORS = {
-        TANK = {0.35, 0.56, 0.82},
-        HEALER = {0.29, 0.62, 0.29},
-        DAMAGER = {0.70, 0.35, 0.35},
-    }
-    
-    -- Icon paths
-    local ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
-    local ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check"
-    local ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close"
-    
+    -- Custom role icons (see the file-scope tables above: one copy, two widgets)
+    local ROLE_ICONS, ROLE_COLORS = ROSTER_ROLE_ICONS, ROSTER_ROLE_COLORS
+    local ICON_ARROW, ICON_CHECK, ICON_CLOSE =
+        ROSTER_ICON_ARROW, ROSTER_ICON_CHECK, ROSTER_ICON_CLOSE
+
     -- ========== LEFT COLUMN: Group Roster ==========
     local leftHeader = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     leftHeader:SetPoint("TOPLEFT", 0, 0)
@@ -2881,7 +3219,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
 
     -- ========== HELPER FUNCTIONS ==========
     
-    -- Get current group roster
     local function GetGroupRoster()
         local roster = {}
         local numMembers = GetNumGroupMembers()
@@ -2907,6 +3244,17 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
             local name, realm = UnitName(unit)
             
             if name then
+                -- ☠ EMPTY STRING AS WELL AS NIL -- the same normalisation RosterSnapshot does,
+                -- and the two readers MUST agree because they key the same player into two
+                -- different stores. UnitName returns the realm only when it differs from yours,
+                -- and which of nil / "" it hands back for a same-realm unit is not something to
+                -- bet a key on: `realm or GetRealmName()` keeps an empty string, so this wrote
+                -- "Bob-" into the pinned list while the helper's list wrote "Bob-YourRealm" for
+                -- the same person -- and "Bob-" matches nothing, so the pinned entry could
+                -- never be un-pinned. (RosterSnapshot's comment states the same hazard; that
+                -- block says it is "ONE READER FOR BOTH WIDGETS", which is the intent rather
+                -- than the state -- only the icon and colour tables were actually shared.)
+                if realm == "" then realm = nil end
                 realm = realm or GetRealmName()
                 local fullName = name .. "-" .. realm
                 local _, class = UnitClass(unit)
@@ -2921,10 +3269,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
                         -- both CompactUnitFrame (GetUnitFrameRaidRole) and
                         -- CompactRaidFrameManager. The +1 read the NEXT member's subgroup, so
                         -- every unit reported its neighbour's group and the last member in the
-                        -- raid got nil and silently fell back to group 1. DF's three other
-                        -- UnitInRaid consumers (TextDesigner/DataSource GetGroupNumber and both
-                        -- Frames/Init sites) already pass it through unmodified; this was the
-                        -- only site that disagreed.
+                        -- raid got nil and silently fell back to group 1. DF's other UnitInRaid
+                        -- consumers (TextDesigner/DataSource GetGroupNumber and the Frames/Init
+                        -- site) already pass it through unmodified; this was the only site that
+                        -- disagreed.
                         local _, _, subgroup = GetRaidRosterInfo(raidIndex)
                         group = subgroup or 1
                     end
@@ -2953,7 +3301,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return roster
     end
     
-    -- Check if player is in highlighted list
     local function IsPlayerHighlighted(fullName)
         local players = getPlayersFunc()
         for _, p in ipairs(players) do
@@ -2962,7 +3309,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return false
     end
     
-    -- Check if player is in current group
     local function IsPlayerInGroup(fullName)
         for _, p in ipairs(currentRoster) do
             if p.fullName == fullName or p.name == fullName then
@@ -2972,7 +3318,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return false, nil
     end
     
-    -- Add player to highlight list
     local function AddPlayer(fullName)
         local players = getPlayersFunc()
         if not IsPlayerHighlighted(fullName) then
@@ -2982,7 +3327,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         end
     end
     
-    -- Remove player from highlight list
     local function RemovePlayer(fullName)
         local players = getPlayersFunc()
         for i, p in ipairs(players) do
@@ -2995,14 +3339,13 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         end
     end
     
-    -- Create grip texture
     local function CreateGripTexture(parentFrame)
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
         
         local icon = grip:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(grip)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder.png")
         icon:SetVertexColor(0.5, 0.5, 0.5, 1)
         grip.icon = icon
         
@@ -3527,7 +3870,234 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     
     -- Initial refresh
     container:Refresh()
-    
+
+    return container
+end
+
+-- ============================================================
+-- COMPACT ROSTER WIDGET -- ONE COLUMN, THE SAME LANGUAGE
+-- ------------------------------------------------------------
+-- ★ THE DUAL-COLUMN WIDGET AT HALF THE WIDTH. Krathe wants the Power Infusion Helper to fire
+-- for named players only -- "in guild groups... only have the PI alert for the DPS you know
+-- who should be getting PI instead of every DPS in the raid who uses a CD" -- built "around"
+-- the pinned-frames list rather than reusing it outright: "as long as it looks and functions
+-- in the same way, but is adjusted for the more narrow width".
+--
+-- ☠ TWO COLUMNS DO NOT FIT AND CANNOT BE MADE TO. The helper lives in the Aura Designer's
+-- right panel: pihMakeTools derives a group width of roughly 254 and its inner content
+-- roughly 230. The dual widget is 460 wide with two 224px panes -- one of its columns alone
+-- is the whole surface. So the two panes become ONE list, and the right-hand button becomes a
+-- TOGGLE rather than an add: click to include, click again to drop.
+--
+-- ⚠ WHAT IS DELIBERATELY NOT HERE:
+--   · The role bulk-add buttons. "No need for an auto add function as you can pick class/role
+--     etc anyway" -- the helper already narrows by role and by class on the same tab, so a
+--     button that adds every DPS would be a third control saying the same thing.
+--   · Drag to reorder. Pinned frames needs an order because the order is the LAYOUT; an
+--     allowlist is a set, and a set with a hand-sorted order invites the reader to think the
+--     order means something.
+--   · The group number. It is the first thing that stops fitting, and the list is sorted by
+--     group anyway, so the grouping is still visible -- just not labelled.
+--
+-- ⚠ CHOSEN-BUT-ABSENT PLAYERS LEAD THE LIST. They are the whole point of typing a name in
+-- (someone not in the group yet), and a list that only ever shows who is present would give
+-- you no way to see -- or remove -- what you had typed. They keep the toggle, and are drawn
+-- dim with no role icon because neither their role nor their class is knowable from here.
+--
+-- opts:
+--   width       the list's width. Defaults to the parent's, less nothing -- the caller knows
+--               its own insets and this widget should not guess them.
+--   rows        visible rows before it scrolls (default 6)
+--   getPlayers  -> array of "Name-Realm"      setPlayers(array)
+--   onChange    called after any edit, for the consumer's own apply
+-- ============================================================
+function GUI:CreateCompactRosterWidget(parent, opts)
+    opts = opts or {}
+    local getPlayers = opts.getPlayers or function() return {} end
+    local setPlayers = opts.setPlayers or function() end
+    local onChange   = opts.onChange
+
+    local W = opts.width or (parent:GetWidth() or 230)
+    local ROW_H = SnapLen(parent, 22) or 22
+    local ROWS = opts.rows or 6
+    local LIST_H = ROW_H * ROWS + 8
+
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(W, LIST_H + 30)
+
+    local listBg = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    listBg:SetPoint("TOPLEFT", 0, 0)
+    listBg:SetPoint("TOPRIGHT", 0, 0)
+    listBg:SetHeight(LIST_H)
+    GUI:CreateElementBackdrop(listBg, { bgColor = GUI.Colors.background })
+
+    local scroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -22, 4)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(W - 30, 1)
+    scroll:SetScrollChild(content)
+    StyleScrollBar(scroll)
+
+    local rows = {}
+
+    local function IsChosen(fullName)
+        for _, p in ipairs(getPlayers()) do
+            if p == fullName then return true end
+        end
+        return false
+    end
+
+    -- ⚠ A NEW ARRAY EVERY TIME, never a mutation of what the getter returned. That table is
+    -- the consumer's stored list; editing it in place would write the profile behind the
+    -- setter's back and skip whatever the setter does about override tracking.
+    local function Toggle(fullName)
+        local out, found = {}, false
+        for _, p in ipairs(getPlayers()) do
+            if p == fullName then found = true else out[#out + 1] = p end
+        end
+        if not found then out[#out + 1] = fullName end
+        setPlayers(out)
+        if onChange then onChange() end
+        container:Refresh()
+    end
+
+    -- One row. `data` is a roster entry, or { fullName = ..., absent = true }.
+    local function BuildRow(data, index)
+        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        row:SetHeight(ROW_H - 2)
+        row:SetPoint("TOPLEFT", 0, -((index - 1) * ROW_H))
+        row:SetPoint("TOPRIGHT", 0, -((index - 1) * ROW_H))
+        GUI:CreateElementBackdrop(row, { outline = false, bgColor = { 0, 0, 0, 0 } })
+
+        local x = 4
+        if not data.absent then
+            local icon = row:CreateTexture(nil, "OVERLAY")
+            icon:SetSize(14, 14)
+            icon:SetPoint("LEFT", 4, 0)
+            icon:SetTexture(ROSTER_ROLE_ICONS[data.role] or ROSTER_ROLE_ICONS.DAMAGER)
+            local rc = ROSTER_ROLE_COLORS[data.role]
+            if rc then icon:SetVertexColor(rc[1], rc[2], rc[3]) end
+            row.icon = icon
+            x = 22
+        end
+
+        local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        nameText:SetPoint("LEFT", x, 0)
+        nameText:SetPoint("RIGHT", -26, 0)
+        nameText:SetJustifyH("LEFT")
+        nameText:SetMaxLines(1)
+        -- ⚠ THE STORED NAME IS "Name-Realm" AND THE ROW SHOWS ONLY THE NAME. The realm is what
+        -- makes the entry unambiguous and it is what a cross-realm raid needs; it is also
+        -- twenty characters this column does not have. An absent entry keeps whatever was
+        -- typed, since there is no roster row to take a short name from.
+        nameText:SetText(data.name or data.fullName)
+        local cc = (not data.absent) and DF:GetClassColor(data.class) or nil
+        if cc then nameText:SetTextColor(cc.r, cc.g, cc.b)
+        else nameText:SetTextColor(0.62, 0.62, 0.62) end
+
+        local chosen = IsChosen(data.fullName)
+        local btn = CreateFrame("Button", nil, row, "BackdropTemplate")
+        btn:SetSize(20, 18)
+        btn:SetPoint("RIGHT", -2, 0)
+        GUI:CreateElementBackdrop(btn)
+        btn.icon = btn:CreateTexture(nil, "OVERLAY")
+        btn.icon:SetSize(11, 11)
+        btn.icon:SetPoint("CENTER", 0, 0)
+
+        local tc = GetThemeColor()
+        local function Paint()
+            chosen = IsChosen(data.fullName)
+            if chosen then
+                btn:SetBackdropColor(tc.r * 0.25, tc.g * 0.25, tc.b * 0.25, 0.9)
+                btn:SetBackdropBorderColor(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 0.9)
+                btn.icon:SetTexture(ROSTER_ICON_CHECK)
+                btn.icon:SetVertexColor(tc.r, tc.g, tc.b)
+                row:SetBackdropColor(tc.r * 0.12, tc.g * 0.12, tc.b * 0.12, 0.5)
+                nameText:SetAlpha(1)
+                if row.icon then row.icon:SetAlpha(1) end
+            else
+                btn:SetBackdropColor(0.15, 0.15, 0.15, 0.8)
+                btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.6)
+                btn.icon:SetTexture(ROSTER_ICON_ARROW)
+                btn.icon:SetVertexColor(0.5, 0.5, 0.5)
+                row:SetBackdropColor(0, 0, 0, 0)
+                nameText:SetAlpha(data.absent and 0.55 or 0.85)
+                if row.icon then row.icon:SetAlpha(0.85) end
+            end
+        end
+        Paint()
+
+        btn:SetScript("OnClick", function() Toggle(data.fullName) end)
+        btn:SetScript("OnEnter", function(self)
+            self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+            -- The full stored name, realm included -- the row could only show half of it.
+            GUI:ShowTooltip(self, {
+                title = data.fullName,
+                lines = { chosen and L["Click to stop watching this player."]
+                                 or L["Click to watch this player."] },
+            })
+        end)
+        btn:SetScript("OnLeave", function() Paint(); GUI:HideTooltip() end)
+
+        row.Paint = Paint
+        return row
+    end
+
+    -- ── ADD BY NAME ──
+    -- ⚠ ONE ROW, because two would cost a line this panel has not got: the field stretches and
+    -- the button is fixed. Enter and the button do the same thing, and the same thing the
+    -- dual-column widget's does -- including appending the player's own realm when none is
+    -- typed, so "Bob" and "Bob-YourRealm" cannot become two entries for one person.
+    local input = CreateFrame("EditBox", nil, container, "BackdropTemplate")
+    input:SetPoint("TOPLEFT", listBg, "BOTTOMLEFT", 0, -6)
+    input:SetPoint("RIGHT", container, "RIGHT", -48, 0)
+    input:SetHeight(22)
+    GUI:StyleEditBox(input, { skipFont = true })
+    input:SetFontObject(DFFontHighlight)
+    input:SetTextInsets(6, 6, 0, 0)
+    input:SetAutoFocus(false)
+    input:SetMaxLetters(50)
+
+    local function Commit()
+        local text = input:GetText()
+        text = text and text:trim() or ""
+        if text ~= "" then
+            if not text:find("-") then text = text .. "-" .. GetRealmName() end
+            if not IsChosen(text) then Toggle(text) else container:Refresh() end
+            input:SetText("")
+        end
+        input:ClearFocus()
+    end
+    input:SetScript("OnEnterPressed", Commit)
+    input:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+
+    local addBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
+    addBtn:SetPoint("LEFT", input, "RIGHT", 4, 0)
+    GUI:StyleButton(addBtn, { width = 42, height = 22, tinted = true, text = L["Add"] })
+    addBtn:SetScript("OnClick", Commit)
+
+    function container:Refresh()
+        for _, r in ipairs(rows) do r:Hide(); r:SetParent(nil) end
+        wipe(rows)
+
+        local roster = RosterSnapshot()
+        local inGroup = {}
+        for _, e in ipairs(roster) do inGroup[e.fullName] = true end
+
+        local list = {}
+        -- Chosen but not here, first -- see the note at the top for why they are shown at all.
+        for _, p in ipairs(getPlayers()) do
+            if not inGroup[p] then list[#list + 1] = { fullName = p, absent = true } end
+        end
+        for _, e in ipairs(roster) do list[#list + 1] = e end
+
+        for i, data in ipairs(list) do rows[i] = BuildRow(data, i) end
+        content:SetHeight(math.max(#list * ROW_H, 1))
+    end
+
+    container:SetScript("OnShow", function(self) self:Refresh() end)
+    container:Refresh()
     return container
 end
 
@@ -3585,11 +4155,10 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         local usable = (f:GetWidth() or 0) - 4
         if usable <= 0 then return end
 
-        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. The old loop gave every
-        -- segment `usable / numSegments`, which was only right because weights produced
-        -- evenly spaced points. Stops carry their own positions, so a 0/50/90 ramp has a
-        -- wide band and a narrow one -- dividing equally would draw a plausible gradient
-        -- that simply is not the one being rendered on the frames.
+        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. Stops carry their own
+        -- positions, so a 0/50/90 ramp has a wide band and a narrow one -- dividing the
+        -- width equally would draw a plausible gradient that simply is not the one being
+        -- rendered on the frames.
         for i = 1, #stops - 1 do
             local s1, s2 = stops[i], stops[i + 1]
             local x0 = 2 + s1.pos * usable
@@ -3637,7 +4206,7 @@ end
 -- SEARCHABLE DROPDOWN WIDGET, KEY-VALUE EDITOR WIDGET and BRANCH EDITOR WIDGET.
 -- There is no CreateSelectableList, CreateSearchableDropdown, CreateKeyValueEditor or
 -- CreateBranchEditor anywhere in the repo -- three of the four described the Wizard
--- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in GUI.lua and
+-- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in Core.lua and
 -- Popup.lua). Four banners in a row with nothing between them read as "these widgets
 -- are somewhere in this file", which costs a search every time.
 
@@ -3663,13 +4232,13 @@ function DF:ToggleGUI()
         else
             GUI.SelectedMode = "party"
         end
+        -- GLOBAL, if the window was closed on it, reopens on it.
+        GUI:SetAccent(GUI.CurrentAccent())
         
-        -- Update theme colors to match selected mode
         if GUI.UpdateThemeColors then
             GUI.UpdateThemeColors()
         end
         
-        -- Show correct content for the selected mode
         if GUI.ShowNormalContent then
             GUI:ShowNormalContent()
         end
@@ -3686,7 +4255,15 @@ function DF:ToggleGUI()
         end
         
         DF.GUIFrame:Show()
-        GUI:RefreshCurrentPage()
+        -- Through the page cache, not a forced rebuild: opening the window
+        -- changes no data, and the rebuild leaked the page on screen on every
+        -- open. Why that is safe is written at GUI.RefreshCurrentPageCached
+        -- (GUI/Panel.lua).
+        if GUI.RefreshCurrentPageCached then
+            GUI.RefreshCurrentPageCached()
+        else
+            GUI:RefreshCurrentPage()
+        end
 
         -- Auto-show changelog on first open after update
         if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
@@ -3762,7 +4339,917 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
 
     group:AddWidget(dd)
 
+    -- ⚠ AND UNDER THE GROUP-WIDE VALUE SWEEP'S NAME AS WELL. A dropdown's own
+    -- refreshValue repaints the CAPTION (DandersUI Sections' RefreshChildValues) and
+    -- knows nothing about the example this function bolted onto it afterwards — so a
+    -- write the widget could not have seen (a popout row's Reset Group, its
+    -- Hold: Defaults, the undo of either) left the example describing a format the
+    -- user no longer has. Chained rather than replaced, so the caption still repaints.
+    local ddRefreshValue = dd.refreshValue
+    dd.refreshValue = function()
+        if ddRefreshValue then ddRefreshValue() end
+        RefreshExample()
+    end
+
     dd.dfExampleText = example
     dd.dfRefreshExample = RefreshExample
     return dd
+end
+
+-- ============================================================
+-- WHICH KIND EACH CARD IS -- the header icon's tag, per section
+-- ------------------------------------------------------------
+-- Keyed by the section's STABLE collapseKey (the second argument of every
+-- page's OpenSection), ☠ never by its title: titles are localised, and several
+-- pages share one ("Appearance", "Border"). The kinds and their textures are
+-- GUI.SectionCard.kinds (SettingsWidgets.lua); a key missing here builds a card
+-- with an empty icon slot. One table so the same kind of section gets the same
+-- kind on every page -- read down a column to check.
+--
+-- ⚠ ONLY WHERE THE KIND IS OBVIOUS. A section that is its page's own thing
+-- (Heal Absorb, the Fading page) is left out on purpose: an icon that has to be
+-- explained is worse than the empty slot. The exception is a page's main
+-- "Settings" card, which all share one kind -- where a feature lives reads the
+-- same on every page.
+-- ============================================================
+GUI.SectionKindByKey = {
+    -- Frame (Options.lua)
+    frame_size              = "size",
+    frame_border            = "border",
+    frame_bordershadow      = "border",
+    frame_layoutdirection   = "layout",
+    frame_raidmode          = "layout",
+    frame_grouplayout       = "layout",
+    frame_flatgrid          = "layout",
+    frame_groupvisibility   = "visibility",
+    frame_grouporder        = "order",
+    frame_fade              = "visibility",
+    -- Visibility / Tooltips / General / Pet Frames (Options.lua)
+    visibility_solo         = "visibility",
+    visibility_framedisplay = "visibility",
+    tooltips_frame          = "tooltips",
+    tooltips_binding        = "tooltips",
+    tooltips_buff           = "tooltips",
+    tooltips_debuff         = "tooltips",
+    tooltips_defensive      = "tooltips",
+    tooltips_auradesigner   = "tooltips",
+    tooltips_resurrection   = "tooltips",
+    general_panelappearance = "appearance",
+    pets_layoutmode         = "layout",
+    pets_size               = "size",
+    pets_appearance         = "appearance",
+    pets_border             = "border",
+    pets_position           = "position",
+    pets_nametext           = "text",
+    pets_healthtext         = "text",
+    -- Buff Bar (Indicators.lua)
+    buffs_visibility        = "visibility",
+    buffs_filters           = "filters",
+    buffs_order             = "order",
+    buffs_appearance        = "appearance",
+    buffs_layout            = "layout",
+    buffs_position          = "position",
+    buffs_border            = "border",
+    buffs_duration          = "text",
+    buffs_stack             = "text",
+    buffs_caster            = "text",
+    buffs_durationbar       = "timer",
+    buffs_pandemic          = "effects",
+    -- Debuff Bar (Indicators.lua)
+    debuffs_visibility      = "visibility",
+    debuffs_filters         = "filters",
+    debuffs_blacklist       = "filters",
+    debuffs_order           = "order",
+    debuffs_appearance      = "appearance",
+    debuffs_layout          = "layout",
+    debuffs_position        = "position",
+    debuffs_border          = "border",
+    debuffs_duration        = "text",
+    debuffs_stack           = "text",
+    debuffs_dispeltext      = "text",
+    debuffs_caster          = "text",
+    debuffs_durationbar     = "timer",
+    -- Missing Buffs (Indicators.lua)
+    missingbuffs_appearance = "appearance",
+    missingbuffs_position   = "position",
+    missingbuffs_border     = "border",
+    missingbuffs_buffs      = "filters",
+    -- Defensive Icon (Indicators.lua)
+    defensiveicon_filters     = "filters",
+    defensiveicon_layout      = "layout",
+    defensiveicon_appearance  = "appearance",
+    defensiveicon_position    = "position",
+    defensiveicon_border      = "border",
+    defensiveicon_duration    = "text",
+    defensiveicon_stack       = "text",
+    defensiveicon_durationbar = "timer",
+    -- Targeted List (Indicators.lua)
+    targetedlist_layout         = "layout",
+    targetedlist_barstyle       = "appearance",
+    targetedlist_barcolor       = "colours",
+    targetedlist_border         = "border",
+    targetedlist_timing         = "timer",
+    targetedlist_showtext       = "text",
+    targetedlist_font           = "text",
+    targetedlist_spellnamepos   = "position",
+    targetedlist_targetnamepos  = "position",
+    targetedlist_durationpos    = "position",
+    targetedlist_interruptpos   = "position",
+    -- Personal Targeted (Indicators.lua)
+    personaltargeted_size            = "size",
+    personaltargeted_content         = "filters",
+    personaltargeted_border          = "border",
+    personaltargeted_duration        = "text",
+    personaltargeted_highlight       = "effects",
+    personaltargeted_highlightshadow = "effects",
+    personaltargeted_highlightanim   = "effects",
+    personaltargeted_interrupt       = "interrupt",
+    -- Sorting / Colours / Health Bar / Resource Bar / Heal Prediction (Auras.lua)
+    sorting_unitframes      = "order",
+    sorting_rolepriority    = "order",
+    sorting_classpriority   = "order",
+    sorting_framesort       = "order",
+    colors_class            = "colours",
+    colors_role             = "colours",
+    colors_dispel           = "colours",
+    colors_bytime           = "colours",
+    health_color            = "colours",
+    health_texture          = "appearance",
+    health_background       = "appearance",
+    health_missing          = "missinghealth",
+    absorbs_healabsorb      = "healabsorb",
+    resource_classfilter    = "filters",
+    resource_size           = "size",
+    resource_position       = "position",
+    resource_appearance     = "appearance",
+    resource_background     = "appearance",
+    resource_border         = "border",
+    resource_colors         = "colours",
+    healpred_floating       = "position",
+    healpred_anchor         = "position",
+    -- Fonts / Group Labels / Pinned Frames (Frames.lua)
+    fonts_global            = "text",
+    fonts_shadow            = "text",
+    grouplabels_format      = "text",
+    grouplabels_font        = "text",
+    grouplabels_position    = "position",
+    pinned_layout           = "layout",
+    pinned_framestyle       = "size",
+    pinned_autopopulate     = "autopopulate",
+    -- Icons / Highlights / Dispel Overlay (Modules.lua)
+    icons_text              = "text",
+    highlights_selection    = "effects",
+    highlights_hover        = "effects",
+    highlights_aggro        = "effects",
+    highlights_threat       = "colours",
+    dispel_border           = "border",
+    dispel_gradient         = "colours",
+    -- Global Settings page (Options.lua)
+    general_language        = "language",
+    general_notifications   = "notifications",
+    general_blizzard        = "visibility",
+    general_minimap         = "minimap",
+    general_framemodes      = "framemodes",
+    -- The card holds pixel-perfect scaling AND the aura update rate, so the icon
+    -- names the category (screen/display settings), not either setting.
+    general_rendering       = "rendering",
+    -- Frame / Pets / Fading (Options.lua)
+    frame_permanentmover    = "position",
+    pets_healthbar          = "health",
+    fading_health           = "health",
+    fading_elements         = "alpha",
+    fading_range            = "range",
+    fading_dead             = "dead",
+    -- Integrations / Absorbs (Auras.lua)
+    integrations_colorpicker = "colorpicker",
+    absorbs_shield          = "shield",
+    -- Debuff Bar (Indicators.lua)
+    debuffs_important       = "important",
+    -- Each page's -- or feature group's -- main "Settings" card, across the files above
+    resource_settings         = "settings",
+    healpred_settings         = "settings",
+    pinned_settings           = "settings",
+    missingbuffs_settings     = "settings",
+    defensiveicon_settings    = "settings",
+    targetedlist_settings     = "settings",
+    personaltargeted_settings = "settings",
+    dispel_settings           = "settings",
+    pets_settings             = "settings",
+    health_reduced            = "settings",   -- under the Reduced Max Health heading
+    grouplabels_settings      = "settings",
+}
+
+-- ============================================================
+-- THE CARD BODY'S TWO TRACKS AND QUIET CAPTIONS (used by the page tools below)
+-- ============================================================
+-- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
+-- not chosen. Every factory in the kit was laid out against a 260 column; at
+-- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
+-- longest word on these pages ("Default (Slot Order)") still fits its opener,
+-- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
+-- Permanent Auras") still sits on one line. Below it they start to truncate.
+-- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
+local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+-- Published for the resize readout (Panel.lua), which predicts the card's
+-- track count mid-drag, before any layout pass has run.
+GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
+
+-- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
+-- sweep's one name, and every db-bound factory carries it (slider, dropdown
+-- and its texture/font/outline variants, checkbox, colour picker); prose,
+-- notes, banners, cross-links, buttons and the growth control do not. Those
+-- take a row of their own, or a wrapping blurb lands beside the control
+-- above it and a 155px growth block squeezes into half a card.
+local function StampFullRows(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
+            w.fullRow = true
+        end
+    end
+end
+
+-- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
+-- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
+-- 55px slider floated on the slider's label line with a hole under it --
+-- and the next row down then read as starting in two different places.
+-- Centring the shorter slot puts its box level with the slider's bar and
+-- value box, which is the line the eye actually compares. Done after the
+-- kit's pass and only on a two-track band, so no other group moves.
+local function CentreShortSlots(group)
+    local rows = {}
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        if w and w:IsShown() and not rawget(w, "fullRow") then
+            local _, _, _, _, y = w:GetPoint(1)
+            if y then
+                local r = rows[y]
+                if not r then r = { h = 0 }; rows[y] = r end
+                r[#r + 1] = entry
+                if (entry.height or 0) > r.h then r.h = entry.height or 0 end
+            end
+        end
+    end
+    for y, r in pairs(rows) do
+        if #r > 1 then
+            for _, entry in ipairs(r) do
+                local dy = math.floor((r.h - (entry.height or 0)) / 2)
+                if dy > 0 then
+                    local w = entry.widget
+                    local p, rel, rp, x = w:GetPoint(1)
+                    w:ClearAllPoints()
+                    w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
+                end
+            end
+        end
+    end
+end
+
+-- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
+-- folds to one column and back, and a resize-grip drag widens or narrows the
+-- card, without the page being rebuilt -- a rebuild would retire the whole
+-- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
+-- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
+-- only the NUMBER is chosen here, off the band's live width, right before
+-- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
+-- or more, one below it.
+--
+-- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
+-- measured against the Debuff Bar's captions; the Global Settings page has
+-- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
+-- caption ran under the checkbox beside it. A control that knows its one-line
+-- width says so (NaturalWidth), and a card holding one too wide for half of
+-- it stays one track. Hidden rows count too, so toggling one never flips the
+-- card's shape.
+local function WidestPairedRow(group)
+    local widest = 0
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        local natural = w and rawget(w, "NaturalWidth")
+        if natural and not rawget(w, "fullRow") then
+            local n = natural(w) or 0
+            if n > widest then widest = n end
+        end
+    end
+    return widest
+end
+
+local function WireTwoTrack(band)
+    band.dfTwoTrack = true
+    local layout = band.LayoutChildren
+    local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
+    band.LayoutChildren = function(self)
+        local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
+        local fits = inner >= SECTION_TWO_TRACK_MIN
+            and (inner - gap) / 2 >= WidestPairedRow(self)
+        self.innerColumns = fits and 2 or nil
+        local h = layout(self)
+        if self.innerColumns then CentreShortSlots(self) end
+        return h
+    end
+end
+
+-- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
+-- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
+-- DFFontHighlightSmall in the SAME colour, and one step of size was all that
+-- told the two apart. So on an opted-in band the caption takes the caption
+-- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
+-- value it labels (the slider's number, the dropdown's choice, the swatch)
+-- keeps its full brightness.
+-- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
+-- in it too the card read as greyed out while every control in it was on.
+--
+-- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
+-- repaints its caption in SetEnabled -- text when on, textDim when off -- on
+-- every state pass, so a one-off paint would be undone the first time the
+-- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
+-- and the "off" colour passes through as it is. Any other colour (an override
+-- marker's) passes straight through. No factory changes, and a caption on any
+-- other page is never touched.
+-- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
+-- whole widget to 0.4, so a second fade on the caption stacked differently per
+-- control and greyed some settings far more than their neighbours.
+--
+-- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
+-- repaint that passed the nil along would keep whatever alpha the caption had.
+--
+-- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
+-- one.
+local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
+local function QuietLabel(fs)
+    if not fs or rawget(fs, "_dfQuiet") then return end
+    fs._dfQuiet = true
+    local set = fs.SetTextColor
+    fs.SetTextColor = function(self, r, g, b, a)
+        if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
+            return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
+        end
+        return set(self, r, g, b, a or 1)
+    end
+    fs:SetTextColor(fs:GetTextColor())
+end
+
+-- A control's caption: the field the kit's slider and dropdown publish, else
+-- the first string the factory created (the texture and font dropdowns build
+-- theirs first and publish nothing), and on a colour picker the first string
+-- on its button, which is where that factory draws it.
+local function firstString(frame)
+    if not frame or not frame.GetRegions then return nil end
+    for _, r in ipairs({ frame:GetRegions() }) do
+        if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
+    end
+    return nil
+end
+local function CaptionOf(w)
+    local fs = rawget(w, "label")
+    if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
+    if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
+        return firstString((w:GetChildren()))
+    end
+    return firstString(w)
+end
+local function QuietLabels(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
+            QuietLabel(CaptionOf(w))
+        end
+    end
+end
+
+-- Published: any surface that stacks its own card bodies (the Aura Designer's
+-- indicator cards) flows them the same way a page's cards do.
+GUI.WireTwoTrack  = WireTwoTrack
+GUI.StampFullRows = StampFullRows
+GUI.QuietLabels   = QuietLabels
+
+-- ============================================================
+-- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
+-- ------------------------------------------------------------
+-- Everything a settings page needs to build its card sections. This is the
+-- ONLY copy: a per-page fork would drift, and the first thing to drift would be
+-- one of the load-bearing notes rather than the code under it. The essays below
+-- are the only place each piece is explained.
+--
+-- USAGE, at the top of a BuildPage builder:
+--
+--     local tools = GUI:CreatePopoutPageTools(self)
+--
+-- WHAT COMES BACK (all closing over this page's own state -- its mounted panes
+-- and its holders -- so two pages built in one session cannot reflow each
+-- other's panels):
+--
+--   OpenSection(...) / CloseSection(...)   -- one card section
+--   RegisterSection(section)               -- joins the Expand/Collapse All roster
+--   SectionControls(parent)                -- the Expand All / Collapse All strip
+--   PopoutContent(buildInto, innerColumns) -> mount, eagerGroup
+--                                          -- a section pin's panel content
+--   ReflowMounted(values)
+--   RowDB()
+--   BandWidth(col)
+--
+-- (2026-09-26: the popout-row, hoisted-control and inline-pane machinery that
+-- used to live here -- ClaimKeys, WireModifiedTick, WireFooter,
+-- RegisterHoistedToggle, RegisterControlRow, the inline arm and INLINE_BOX --
+-- was deleted with the designers' rows pages, its last callers.)
+-- ============================================================
+function GUI:CreatePopoutPageTools(page)
+    if not page then return nil end
+
+    -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
+    -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
+    -- and the settings search registry, which is built
+    -- by re-running every page's builder -- and an open popout from the PREVIOUS
+    -- build is showing widgets wired to the db table THAT build captured. After
+    -- a mode switch that table is the other mode's, so a slider dragged in a
+    -- stale panel writes live settings into the wrong mode. Guarded rather than
+    -- called bare, so an older embedded copy of the pack without the verb cannot
+    -- break the page.
+    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
+
+    -- Retire the previous build's holders. They are deliberately NOT in
+    -- page.children -- anything in that list is laid out into one of the page's
+    -- columns, and these must never appear ON the page -- so DoBuild's own
+    -- retire loop never sees them and this is the only thing that does.
+    if page._popoutHolders then
+        local trash = GUI._trashFrame
+        for _, holder in ipairs(page._popoutHolders) do
+            holder:Hide()
+            holder:ClearAllPoints()
+            if trash then holder:SetParent(trash) end
+        end
+    end
+    page._popoutHolders = {}
+
+    local POPOUT_W = GUI.PopoutContentWidth or 260
+
+    -- Every pane currently mounted in a panel, so a toggle can re-flow the group
+    -- the user is looking at as well as the sections on the page. One list per
+    -- PAGE rather than per group: a write behind one section can change what
+    -- another section's pane is showing, and a stale open panel costs more than
+    -- a repaint.
+    local mounted = {}
+
+    -- Re-flow one mounted group and put the panel back around it. Sized from the
+    -- group's own FRAME height, not LayoutChildren's return, which adds the
+    -- between-groups margin a lone group in a popout has no use for.
+    local function ReflowPane(st, values)
+        local g = st.group
+        if not g then return end
+        g:LayoutChildren()
+        g:RefreshChildStates()
+        -- ☠ AND THE VALUES, when the caller says a write happened that these
+        -- widgets could not have seen. RefreshChildStates is about STATE; a
+        -- checkbox's tick, a slider's thumb and a dropdown's caption are painted
+        -- at build and on OnShow, on the assumption nothing writes a setting
+        -- except the widget bound to it.
+        --
+        -- ⚠ OPT-IN, not on every reflow: this also runs on a hideOn change while
+        -- a slider inside the pane is being dragged, and a value repaint mid-drag
+        -- snaps the thumb from the mouse back to the last committed step.
+        if values and g.RefreshChildValues then g:RefreshChildValues() end
+        if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
+        -- ...and the panel around the pane. The kit fixes a pane's height at
+        -- build, and a hideOn inside this group moves it afterwards.
+        local po = st.po
+        if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
+    end
+
+    -- `values` rides through to ReflowPane: see its header for why a value
+    -- repaint is opt-in rather than part of every reflow.
+    local function ReflowMounted(values)
+        for _, st in ipairs(mounted) do
+            if not (st.po and st.po.closed) then ReflowPane(st, values) end
+        end
+    end
+
+    -- ONE section's panel content, built EAGERLY -- at page build time, into a
+    -- hidden holder -- rather than on first open. Two reasons, either sufficient
+    -- on its own:
+    --   (a) the settings SEARCH registry is built by re-running every page's
+    --       builder, so a widget that does not exist until the user opens a
+    --       popout is a widget search can never find;
+    --   (b) some builders SEED db keys at build time, and moving those writes to
+    --       first-open would move WHEN a profile changes shape, which is exactly
+    --       what the export byte-identity gate measures.
+    --
+    -- The shell runs a row's `build` ONCE PER INSTANCE, so a SECOND instance (pin
+    -- one, close it, pin again) asks for content a second time: the first call
+    -- adopts the pre-built group, every later one builds a fresh one through the
+    -- same builder. Which is why this is a factory rather than one captured
+    -- group -- and why each group carries its own `st`, so the refresh wired into
+    -- group one cannot re-flow group two.
+    --
+    -- `innerColumns` is the pane's own interior grid (DandersUI Sections'
+    -- opts.innerColumns). Omitted = absent = one track.
+    local function PopoutContent(buildInto, innerColumns)
+        local function fresh()
+            local st = {}
+            local holder = CreateFrame("Frame", nil, page.child)
+            st.holder = holder
+            holder:SetSize(POPOUT_W, 1)
+            holder:Hide()
+            page._popoutHolders[#page._popoutHolders + 1] = holder
+            -- chromeless + zero padding: the popout already draws a panel, and a
+            -- faint bordered box inside one reads as a second, smaller panel. The
+            -- width is the popout's own content width, so each control mounts at
+            -- exactly the width it has inline on the page.
+            st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
+                                               { chromeless = true, padding = 0,
+                                                 innerColumns = innerColumns })
+            st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+            -- What a builder's own dropdowns and checkboxes call. Cheap, and
+            -- deliberately NOT a page rebuild: a rebuild retires the section the
+            -- user is clicking through.
+            local reflow = function()
+                ReflowPane(st)
+                page:RefreshStates()
+            end
+
+            -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE, because the widget
+            -- factories reach for it by name. Every one of them ends a write with
+            -- `if parent.RefreshStates then parent:RefreshStates() end`; the page's
+            -- scroll child carries that forwarder (Panel.lua), a bare holder does
+            -- not, so the guard would read nil and silently do NOTHING -- every
+            -- `disableOn` inside a pane stale until the panel was re-opened.
+            --
+            -- ⚠ STATE ONLY, never values: ReflowPane repaints bound values only when
+            -- asked (see its header), and this route never asks. A slider being
+            -- dragged inside the pane writes on every step, so a value repaint here
+            -- would snap the thumb back to the last committed step under the mouse.
+            holder.RefreshStates = reflow
+
+            buildInto(st.group, holder, reflow)
+            return st
+        end
+
+        local pending = fresh()
+        -- Held by name as well: the first mount clears `pending`, and the group
+        -- that comes back beside the mount is the eager one.
+        local eager = pending
+
+        -- The eagerly built group comes back ALONGSIDE the mount function: it is
+        -- the one instance that exists at page-build time.
+        return function(po, pane)
+            local st = pending or fresh()
+            pending = nil
+            st.po, st.pane = po, pane
+            mounted[#mounted + 1] = st
+            st.group:SetParent(pane)
+            st.group:ClearAllPoints()
+            st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
+            st.group:SetWidth(POPOUT_W)
+            -- ☠ THE PANE ANSWERS FOR ITS OWN RE-FLOW, because GUI:RelayoutHost's
+            -- walk has nothing else up here to find. A widget that only learns its
+            -- height AFTER construction -- a measured label, an info banner -- sets
+            -- its slot height a frame late and calls that helper, which re-lays the
+            -- GROUP out and then walks up for something that can re-anchor the
+            -- group's neighbours. On a page that is the page; above a pane it is the
+            -- settings WINDOW, which knows nothing about this panel -- so the group
+            -- would grow and the panel around it keep the height it was given here,
+            -- clipping whatever the widget had just gained. Stamped at the MOUNT
+            -- rather than in fresh(): `pane` is what the walk passes through, and it
+            -- does not exist until a panel opens.
+            pane.dfReflowPane = function() ReflowPane(st) end
+            st.group:Show()
+            ReflowPane(st)
+        end, eager.group
+    end
+
+    -- db as a FUNCTION, which is what the kit contract asks for: the row
+    -- re-resolves on every refresh, so a mode switch is followed rather than
+    -- frozen at the table this build captured.
+    local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+
+    -- The width a full-width band is CONSTRUCTED at, asked for rather than
+    -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
+    -- "both" widgets to. A group cannot be widened for free -- LayoutChildren
+    -- sizes its children off the group's CURRENT width -- so a band built at 280
+    -- and stretched by the layout pass would lay its rows out at the wrong width
+    -- on the build and only correct them on the next refresh. Floored at a box's
+    -- width so a page built before the content frame has a size still gets a sane
+    -- container.
+    -- ⚠ `col` ASKS FOR A COLUMN'S WIDTH RATHER THAN THE PAGE'S. A band that is going to
+    -- be placed in column 1 or 2 has to be BUILT at the column width for the same reason
+    -- the note above gives: its rows lay out against the group's width at build time, so
+    -- a band built full-width and narrowed by the layout pass would draw one pass wrong.
+    -- Answers the full width when the page is in one column, which is also what the pass
+    -- will resize it to -- the two agree because both read GUI.UsesTwoColumns.
+    local function BandWidth(col)
+        local full = math.max(
+            GUI.PageUsableWidth(GUI.PageChildWidth(
+                GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+            GUI.SettingsBox.group)
+        if col and GUI.UsesTwoColumns and GUI.UsesTwoColumns() then
+            return GUI.ColumnWidth()
+        end
+        return full
+    end
+
+    -- ============================================================
+    -- EXPAND ALL / COLLAPSE ALL -- the two verbs a page of folds needs
+    -- ------------------------------------------------------------
+    -- ☠ WHY THIS EXISTS. A converted page is eleven folds, and the only way to
+    -- shut them was eleven presses -- with no way back at all. The missing
+    -- Expand All is what the design critique named: fold everything by hand and
+    -- the page is a wall of headers you must now re-open one at a time.
+    --
+    -- ☠ IT IS THE PAGE'S OWN SECTIONS AND NOBODY ELSE'S. The collapse store is
+    -- ADDON-WIDE -- the Text Designer's cards, the Aura Designer's rows and every
+    -- other page's folds all persist into the same table -- so a bulk verb that
+    -- walked THE STORE would silently unfold half the addon. It walks a list this
+    -- page registered instead, so a key it never created is a key it cannot
+    -- touch.
+    --
+    -- ☠ AND IT RELAYOUTS RATHER THAN REBUILDS. A rebuild retires every widget on
+    -- the page into the trash frame and builds a second copy (Panel.lua's ONE
+    -- RETAINED BUILD PER MODE), which is an enormous cost for a change that moves
+    -- no widget and creates none: the state pass already hides what a shut
+    -- section registered. So the sections are moved with SetExpanded -- the fold
+    -- without the repaint -- and the page pass runs ONCE, at the end.
+    --
+    -- USAGE, for the next page converted -- two lines and no markup:
+    --
+    --     local band = tools.RegisterSection(OpenSection(...))   -- per section
+    --     Add(tools.SectionControls(self.child), 24, "both")     -- once, at the top
+    --
+    -- The strip may be built BEFORE the sections it governs: it closes over the
+    -- list rather than copying it, which is what lets it sit at the top of the
+    -- page while the sections are registered on the way down.
+    local sections = {}
+    local function RegisterSection(section)
+        if section then sections[#sections + 1] = section end
+        return section
+    end
+
+    -- ⚠ ONLY WHAT THE USER CAN SEE. A section carrying a hideOn (the Buff Bar's
+    -- two 12.1-factory extras on a client that draws neither) is not on the page,
+    -- so expanding it moves nothing the user asked about -- and counting it would
+    -- leave Expand All lit with every visible section already open.
+    local function eachVisibleSection(fn)
+        local n = 0
+        for _, s in ipairs(sections) do
+            if s and s:IsShown() and s.SetExpanded then
+                n = n + 1
+                fn(s)
+            end
+        end
+        return n
+    end
+
+    local function SectionControls(parent)
+        local strip = CreateFrame("Frame", nil, parent)
+        strip:SetHeight(22)
+
+        local function ApplyAll(want)
+            local moved = false
+            eachVisibleSection(function(s)
+                if s:SetExpanded(want) then moved = true end
+            end)
+            -- ⚠ ONE PASS, AND ONLY IF SOMETHING ACTUALLY MOVED. The buttons grey
+            -- when they would do nothing, so this is belt and braces -- but a
+            -- state pass over a page of folds is not free and a press that
+            -- changed nothing must cost nothing.
+            if moved and page.RefreshStates then page:RefreshStates() end
+        end
+
+        -- Ghost, because these act on the PAGE rather than on a setting: a solid
+        -- button at the top of a settings page reads as the page's primary
+        -- action, and neither of these is. Same skin the "+ Add set" strip uses.
+        -- The corner-bracket pair (Tools/generate_expand_collapse_icons.py):
+        -- boxes being pulled apart and pushed together, which is what the two
+        -- verbs do to the page. Wider by the glyph and its gap.
+        local function mk(text, want, icon)
+            local b = CreateFrame("Button", nil, strip, "BackdropTemplate")
+            b:SetSize(102, 20)
+            GUI:StyleButton(b, {
+                ghost = true, text = text, font = "DFFontHighlightSmall",
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. icon .. ".png", size = 12 },
+            })
+            b:SetScript("OnClick", function() ApplyAll(want) end)
+            return b
+        end
+        local expandBtn   = mk(L["Expand All"], true, "expand_content")
+        local collapseBtn = mk(L["Collapse All"], false, "collapse_content")
+        -- LEFT-ALIGNED, and deliberately not stretched across the page. The strip
+        -- is Add'd at col "both" so it spans whatever width the window gives it,
+        -- and two buttons pinned to opposite ends of THAT would sit a page apart
+        -- at 1400px. Anchored to the left edge they stay a pair, under the eye
+        -- that is already reading down the left-hand column, and the one-column
+        -- fold moves them not at all.
+        expandBtn:SetPoint("LEFT", strip, "LEFT", 0, 0)
+        collapseBtn:SetPoint("LEFT", expandBtn, "RIGHT", 6, 0)
+
+        -- GREY WHEN THEY WOULD DO NOTHING, rather than hidden: the pair is part
+        -- of the page's furniture and a control that vanishes and returns as the
+        -- user folds things is worse than one that dims. Everything already open
+        -- greys Expand All; everything already shut greys Collapse All; a page
+        -- with no visible section at all greys both.
+        --
+        -- Driven from the page's own state pass, which is the pass that has just
+        -- decided which sections are shown -- so the verdict is never a frame
+        -- stale.
+        -- A FOLDED TIP'S CHIP SITS ON THIS ROW, after Collapse All, rather than on
+        -- a row of its own above it (CreateInfoBanner's dismissKey). The banner
+        -- then takes no room while folded -- its hideOn says so -- and its chip
+        -- shows only where the banner itself would: not when the banner's own
+        -- hideOn hides it.
+        local tips = {}
+        strip.AdoptTip = function(banner)
+            local chip = banner and banner.tipChip
+            if not chip then return end
+            local prev = tips[#tips]
+            chip:SetParent(strip)
+            chip:ClearAllPoints()
+            chip:SetPoint("LEFT", prev and prev.chip or collapseBtn, "RIGHT", 6, 0)
+            banner._chipAway = true
+            local own = banner.hideOn
+            banner.hideOn = function(d) return banner._folded or (own and own(d)) or false end
+            banner.onFoldChanged = function()
+                if page.RefreshStates then page:RefreshStates() end
+            end
+            tips[#tips + 1] = { banner = banner, chip = chip, own = own }
+        end
+
+        strip.refreshContent = function(_, d)
+            local shut, open = 0, 0
+            local n = eachVisibleSection(function(s)
+                if s.expanded then open = open + 1 else shut = shut + 1 end
+            end)
+            expandBtn:SetDisabled(n == 0 or shut == 0)
+            collapseBtn:SetDisabled(n == 0 or open == 0)
+            d = d or (DF.db and DF.db[GUI.SelectedMode])
+            for _, t in ipairs(tips) do
+                local b = t.banner
+                t.chip:SetShown(b._folded and not b._tipsOff
+                    and not (t.own and d and t.own(d)) or false)
+            end
+        end
+        strip.refreshContent()
+        return strip
+    end
+
+    -- ============================================================
+    -- ONE COLLAPSIBLE SECTION -- the card, and the band its controls go in
+    -- ------------------------------------------------------------
+    -- Lifted out of the Buff Bar page when the Debuff Bar was converted, so the
+    -- two pages build their cards through ONE function. Buff Bar's own
+    -- OpenSection / CloseSection are now one-line forwards to these, with the
+    -- same arguments in the same order, so nothing it draws moved.
+    --
+    -- ☠ BOTH ARE PAGE CHILDREN, and that is the whole mechanism. Panel.lua's
+    -- state pass is the only thing that reads `widget.collapsibleSection` and
+    -- hides what a shut section registered; a group nested inside another group
+    -- never reaches it. So the band is Add'd in its own right and REGISTERED to
+    -- the section.
+    --
+    -- ☠ A STABLE collapseKey, NEVER THE TITLE. CreateCollapsibleSection keys its
+    -- SavedVariables slot on whatever it is handed, so a localised or reworded
+    -- title would write a second slot and orphan the first.
+    --
+    -- ⚠ EXPANDED ON A FIRST RUN unless the page asks otherwise (extra.collapsed).
+    -- The user's own folds are what persist after that.
+    --
+    -- ☠ THE PIN IS OPT-IN: passing `builder` is what puts it on the header, and
+    -- a page passes one only for a section that decides how the bar LOOKS. The
+    -- panel holds the section's OWN builder, mounted a second time -- never a
+    -- curated subset.
+    --
+    -- ☠ THE HEADER TICK IS OPT-IN TOO (`toggle`), and a section that passes one
+    -- MUST mount its builder with `hoistToggle = true`, so the in-body copy of
+    -- that checkbox is never built -- the tick exists in the header ONLY.
+    --
+    -- `Add` is the page builder's own Add: these tools are built before the
+    -- page's columns exist, so it is handed in rather than captured.
+    --
+    -- `extra` (every converted card page passes both; nil builds the plain card):
+    --   twoTrack     the band flows its controls two per row when it is wide
+    --                enough (see WireTwoTrack)
+    --   quietLabels  a control's own caption draws dim, so a setting can never
+    --                read as a heading (see QuietLabel)
+    --   kind         overrides the header's kind icon; without it the kind is
+    --                GUI.SectionKindByKey[key] (above), never the title
+    --   collapsed    the card starts SHUT on a first run (a page of many cards
+    --                that reads best as a list of headers -- Icons)
+
+    local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
+        local pin
+        if builder then
+            -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
+            -- PopoutContent builds its first instance HERE, at page-build
+            -- time, and every db-bound factory registers whatever it is
+            -- handed -- so without this the settings registry would carry
+            -- TWO entries for every setting in the section, one from the
+            -- band on the page and one from the panel's copy.
+            --
+            -- ⚠ ONLY THE EAGER ONE NEEDS IT. A later instance -- pin, close,
+            -- pin again -- is built long after Search.RegistryBuilt is set,
+            -- and Search:Register early-returns on that.
+            local Search = DF.Search
+            local held = Search and Search.SuppressRegistration
+            if Search then Search.SuppressRegistration = true end
+            local mount = PopoutContent(function(group, holder, reflow)
+                -- ☠ THE SECTION'S OWN BUILDER, HANDED THE SAME TABLE the band
+                -- gets. `popout = true` is the one field that differs, and it
+                -- picks no controls: DurationFormatRefresh reads it to re-flow
+                -- the PANE rather than re-lay the page out.
+                builder({ group = group, parent = holder, refreshStates = reflow, popout = true })
+            end)
+            if Search then Search.SuppressRegistration = held end
+            pin = {
+                build  = mount,
+                -- ☠ PAGE-QUALIFIED, OUT OF THE PAGE'S OWN TAB LABEL. Two
+                -- pinned panels both titled "Appearance" -- Buff Bar's and
+                -- Debuff Bar's -- are unusable, and comparing exactly those two
+                -- is what the pin is FOR. The separator is punctuation, not
+                -- prose -- both halves are already localised.
+                title  = string.format("%s / %s", page.tabLabel or "", label),
+                window = DF.GUIFrame,
+                clipTo = page,
+                db     = RowDB,
+            }
+        end
+        -- ⚠ card = true: the header and its band draw as ONE card (see opts.card
+        -- in SettingsWidgets.lua).
+        local section = GUI:CreateCollapsibleSection(page.child, label, not (extra and extra.collapsed),
+            BandWidth(col), { collapseKey = key, summary = summaryFn, dimOn = dimFn, pin = pin, card = true, toggle = toggle,
+                           kind = (extra and extra.kind) or GUI.SectionKindByKey[key] })
+        section.hideOn = hideFn
+        -- ⚠ layoutColFill is what makes a surface track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the header bar would stay
+        -- half-width over a full-width band on the one-column fold. The header
+        -- and its band have to declare it as a pair.
+        section.layoutColFill = true
+        -- ...and it joins the page's own roster, which is what the Expand All
+        -- / Collapse All pair walks.
+        RegisterSection(section)
+        Add(section, 36, col)
+        local band = GUI:CreateSettingsGroup(page.child, BandWidth(col), { chromeless = true })
+        band.layoutColFill = true
+        band.hideOn = hideFn
+        band.dfSectionCol = col
+        section:RegisterChild(band)
+        if extra and extra.twoTrack then WireTwoTrack(band) end
+        if extra and extra.quietLabels then band.dfQuietLabels = true end
+        return band
+    end
+
+    -- ☠ THE BAND GOES IN AFTER ITS LAST CONTROL, never beside the header. `Add`
+    -- resolves a widget's slot height ON THE SPOT, so a band Add'd while it is
+    -- still empty is a band the layout pass gives no room to. The two opt-ins
+    -- that read the band's children run here for the same reason: before this
+    -- line the builder has not put anything in it.
+    local function CloseSection(Add, band)
+        if band.dfTwoTrack then StampFullRows(band) end
+        if band.dfQuietLabels then QuietLabels(band) end
+        Add(band, nil, band.dfSectionCol)
+    end
+
+    -- CARD GROUPS. A page whose cards are declared in an order that interleaves
+    -- its groups registers each card's mount with DeferCard, then
+    -- MountCardGroups adds them group by group, each under its header. The
+    -- page's Add order is what a one-column window stacks, so this is what
+    -- keeps a group's cards together there. A registered card in no group
+    -- mounts after the groups, so a new card cannot silently drop off a page.
+    --   groups: { { label = L["..."], col = 1|2, keys = { "card_key", ... },
+    --               hideOn = fn? }, ... }
+    local deferredKeys, deferredMounts = {}, {}
+    local function DeferCard(key, mount)
+        deferredKeys[#deferredKeys + 1] = key
+        deferredMounts[key] = mount
+    end
+    local function MountCardGroups(Add, groups)
+        local mounted = {}
+        for _, grp in ipairs(groups) do
+            local header = GUI:CreateHeader(page.child, grp.label)
+            if grp.hideOn then header.hideOn = grp.hideOn end
+            Add(header, 40, grp.col)
+            for _, key in ipairs(grp.keys) do
+                local mount = deferredMounts[key]
+                if mount and not mounted[key] then
+                    mounted[key] = true
+                    mount()
+                end
+            end
+        end
+        for _, key in ipairs(deferredKeys) do
+            if not mounted[key] then
+                mounted[key] = true
+                deferredMounts[key]()
+            end
+        end
+    end
+
+    return {
+        PopoutContent         = PopoutContent,
+        RowDB                 = RowDB,
+        RegisterSection       = RegisterSection,
+        SectionControls       = SectionControls,
+        OpenSection           = OpenSection,
+        CloseSection          = CloseSection,
+        ReflowMounted         = ReflowMounted,
+        BandWidth             = BandWidth,
+        DeferCard             = DeferCard,
+        MountCardGroups       = MountCardGroups,
+    }
 end

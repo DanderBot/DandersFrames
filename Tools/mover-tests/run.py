@@ -1,0 +1,310 @@
+"""Headless tests for DandersMover's pure modules. Usage: python Tools/mover-tests/run.py [filter]"""
+import sys, pathlib
+try:
+    from lupa import lua51 as lupa_mod      # WoW is Lua 5.1
+except ImportError:
+    import lupa as lupa_mod
+lua = lupa_mod.LuaRuntime(unpack_returned_tuples=True)
+
+HERE = pathlib.Path(__file__).resolve().parent
+ADDON = HERE.parents[1] / "DandersMover"
+loader = lua.eval("function(src, name) return assert((loadstring or load)(src, '@' .. name)) end")
+
+def run(path, *args):
+    return loader(path.read_text(encoding="utf-8"), path.name)(*args)
+
+# The addon's own Libs/ copies are the normal source. Until they exist
+# (Task 1 Step 1 copies them), fall back to the identical DandersFrames copies.
+LIBS = ADDON / "Libs"
+if not (LIBS / "LibStub" / "LibStub.lua").exists():
+    LIBS = HERE.parents[1] / "DandersFrames" / "Libs"
+    print(f"WARNING: DandersMover/Libs missing, loading libs from {LIBS}")
+
+run(HERE / "shim.lua")
+run(LIBS / "LibStub" / "LibStub.lua")
+run(LIBS / "CallbackHandler-1.0" / "CallbackHandler-1.0.lua")
+ns = lua.table()
+# Fx lives in DandersUI (UI.Fx). Load the canonical copy the way the embedded
+# lib would land it -- onto NS.__DandersUI -- so the mover's Fx.lua alias
+# below finds it (headless runs never load DandersUI/Core.lua or a host).
+ns["__DandersUI"] = lua.table()
+ns.Lib = ns.Lib or lua.eval("{ callbacks = { Fire = function() end } }")   # winner marker: the lost-copy guards check NS.Lib
+run(HERE.parents[1] / "DandersUI" / "Fx.lua", "DandersMover", ns)
+
+# ---- the surface style, taken from the REAL Theme.lua -------------------
+# Popout / PopoutRow / Sections all resolve opts.surface through
+# UI.ResolveSurfaceStyle, which Theme.lua owns. In-game the manifest guarantees
+# it (Theme.lua is listed before Round.lua and Popout.lua in DandersUI.xml);
+# headless, nothing loads the theme half, so without this every suite that
+# builds a popout would nil-call on the first adopt.
+#
+# ☠ THE REAL FUNCTIONS, NOT A COPY OF THEM. Theme.lua loads clean under the shim
+# (it declares tables and functions and touches no frame at file scope), so it is
+# loaded into a THROWAWAY namespace and exactly four names are lifted across.
+# Re-implementing the resolver here would mean a test suite that agrees with a
+# stub rather than with the library -- and `false means square, nil means ask the
+# host` is precisely the kind of rule that drifts when it is written twice.
+#
+# The throwaway namespace is what keeps this surgical: Theme.lua also installs
+# CreateElementBackdrop, the pixel border, the colour table and the whole box
+# model, and every suite below stubs its own versions of those. None of that is
+# copied over.
+_theme_ns = lua.table()
+_theme_ui = lua.table()
+_theme_ui["_state"] = lua.table()
+_theme_ui["_priv"] = lua.table()
+_theme_ns["__DandersUI"] = _theme_ui
+run(HERE.parents[1] / "DandersUI" / "Theme.lua", "DandersUI", _theme_ns)
+for _name in ("SurfaceStyle", "ResolveSurfaceStyle", "SetSurfaceStyle", "GetSurfaceStyle"):
+    ns["__DandersUI"][_name] = _theme_ui[_name]
+
+# ⚠ THE PIXEL BORDER IS NOT LIFTED, either half, and the reason is the fake
+# frames rather than the functions. FakeUIFrame's metatable answers EVERY unset
+# key with a no-op function, so the real HidePixelBorder's `frame._pxBorder`
+# comes back truthy and it indexes a function; the real ApplyPixelBorder builds
+# textures and re-derives its weight from GetPhysicalScreenSize, which the shim
+# does not answer. Both are stubbed instead -- ApplyPixelBorder per suite (each
+# wants its own recording), HidePixelBorder here, because the rounded chrome
+# helpers call it on every rounded paint and nothing asserts anything about it
+# beyond "it was taken down".
+ns["__DandersUI"]["HidePixelBorder"] = lua.eval(
+    "function(_, frame) if frame then frame._pxHidden = true end return frame end")
+
+# ...and Round.lua, for the same reason and with less ceremony: the popout's
+# chrome paint calls UI:RemoveRoundedChrome / RemoveRoundedStrip on EVERY paint,
+# square included (each shape has to take the other down -- see _PaintChrome), so
+# every suite that builds a popout needs the module present even though none of
+# the square ones ever draws a curve. It is a base-manifest file that loads
+# before Popout.lua in-game, it declares no frames, and it is idempotent on a
+# re-load -- test_round.lua loads it again under its own UI.MEDIA to pin the
+# texture paths, and that re-load is what those assertions run against.
+run(HERE.parents[1] / "DandersUI" / "Round.lua", "DandersUI", ns)
+
+# DandersUndo-1.0's canonical home moved from DandersMover to DandersUI, so the
+# resident DandersFrames addon gets the lib without the (optional) mover installed.
+run(HERE.parents[1] / "DandersUI" / "Undo.lua", "DandersUI", ns)
+
+for name in ("Locales/enUS.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
+    p = ADDON / name
+    if p.exists():
+        run(p, "DandersMover", ns)
+
+# Tests that need a UI-facing module (Proxy.lua) load it themselves, after
+# stubbing the frame API it touches: load_addon_file("Proxy.lua").
+lua.globals().load_addon_file = lambda name: run(ADDON / name, "DandersMover", ns)
+# The same door for a DandersUI file (Popout.lua). The SAME ns goes in, so the
+# file's `NS.__DandersUI` finds the table Fx already installed onto -- the test
+# stubs the kit surface it needs onto that table first, then loads.
+lua.globals().load_ui_file = lambda name: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", ns)
+# ...and the same door with a ns of the CALLER's choosing. The options manifest's
+# head builds the `NS.__DandersUI` handshake itself, so a test of that handshake
+# has to hand it a FRESH namespace rather than the shared one above.
+lua.globals().load_ui_file_into = lambda name, tns: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", tns)
+# ...and the same door for a DandersFrames file. Same reason it takes its own ns:
+# a DF module's namespace IS the addon table, so a test stubs the DF surface it
+# needs (Debug, the _Now bodies) onto a fresh table and hands that in.
+lua.globals().load_df_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames" / name, "DandersFrames", tns)
+# ...and the same door for an options-companion file. ⚠ Those files take their
+# host off the GLOBAL (`local DF = DandersFrames`), not off the varargs, so the
+# namespace handed in here is inert -- a test of one stubs `DandersFrames`
+# itself before loading. The arg is kept so every door reads the same.
+lua.globals().load_options_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames_Options" / name, "DandersFrames_Options", tns)
+# Source text only, for a compile-only (loadstring) syntax check that must not
+# run the file. Read here rather than in Lua so the path resolves the same way
+# every other load does, whatever the cwd is.
+lua.globals().ui_file_source = lambda name: (HERE.parents[1] / "DandersUI" / name).read_text(encoding="utf-8")
+# ...and the same door for the options companion. A page file is far too tangled
+# in the panel to LOAD headlessly, but a constant it declares (the popout rows'
+# control counts) can still be read out of its source and asserted against what a
+# builder actually mounts -- which beats copying the number into the test and
+# letting the two drift.
+lua.globals().options_file_source = lambda name: (HERE.parents[1] / "DandersFrames_Options" / name).read_text(encoding="utf-8")
+# ...and the same door for the RESIDENT addon, for the same reason in the other
+# direction: a constant declared there (the settings window's default size) has
+# readers on both sides of the load-on-demand split, and a test that copied the
+# number would stop describing what ships the moment one of them moved.
+lua.globals().df_file_source = lambda name: (HERE.parents[1] / "DandersFrames" / name).read_text(encoding="utf-8")
+# ...and the same door for a DandersMover file that cannot be LOADED headless
+# (Core.lua builds its kit host at file scope), so a test cuts one function out.
+lua.globals().mover_file_source = lambda name: (ADDON / name).read_text(encoding="utf-8")
+
+# ============================================================
+# STATIC BAN: lib files never call bare shadowed factory names.
+# DF's host shadows CreateSlider/CreateDropdown/CreateAnchorGrid/CreateCheckbox/
+# CreateEditBox/CreateButton/CreateLabel with POSITIONAL shims, so lib code
+# calling `self:CreateButton(parent, opts)` mis-parses every argument under the
+# DF host. Lib code must use the *Native aliases. This has shipped twice
+# (the popout title label 2026-08-26, the footer buttons 2026-08-27); the grep
+# makes a third time a red suite instead of an in-game error.
+# ============================================================
+import re as _re
+_SHADOWED = "Label|Button|Checkbox|EditBox|Slider|Dropdown|AnchorGrid"
+_ban = _re.compile(r"(?:self|host|po\.host|row\.host|UI)\s*:\s*Create(?:%s)\s*\(" % _SHADOWED)
+_defn = _re.compile(r"function\s+UI\s*:\s*Create(?:%s)\s*\(" % _SHADOWED)
+_viol = []
+for _f in sorted((HERE.parent.parent / "DandersUI").glob("*.lua")):
+    for _n, _line in enumerate(_f.read_text(encoding="utf-8").splitlines(), 1):
+        _c = _line.split("--", 1)[0]
+        if _ban.search(_c) and not _defn.search(_c) and "Native" not in _c:
+            _viol.append(f"{_f.name}:{_n}: {_line.strip()}")
+# ============================================================
+# STATIC BAN: a texture path must escape its backslashes.
+# Lua 5.1 passes an UNRECOGNISED escape through as the bare character, so
+# "Interface\AddOns\..." written with SINGLE backslashes is not a syntax error and
+# is not the path it looks like -- \A, \D, \M and \I are simply dropped and the
+# client is handed "InterfaceAddOnsDandersFramesMediaIconsmenu", a path to
+# nothing, which it draws as an EMPTY SQUARE. Nothing errors and no test fails,
+# which is exactly how it shipped: the template overflow button rendered as a
+# blank square in the settings window with the suite green (2026-08-29).
+# ============================================================
+_tex = _re.compile(r'"Interface\\[^\\\\"]')
+_texviol = []
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+    _base = HERE.parents[1] / _root
+    if not _base.is_dir():
+        continue
+    for _f in sorted(_base.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        for _n, _line in enumerate(_f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            _c = _line.split("--", 1)[0]
+            if _tex.search(_c):
+                _texviol.append(f"{_f.relative_to(HERE.parents[1])}:{_n}: {_line.strip()[:96]}")
+# ============================================================
+# STATIC BAN: a module cannot publish a function it has not declared yet.
+# `P.Foo = Foo` assigns whatever the local holds AT THAT POINT. Put it above the
+# `local function Foo`, and it publishes nil -- silently. Nothing errors at load;
+# the consumer aliases the nil and dies on its first call, several files away
+# from the mistake. The Text Designer's CreateEnableBanner shipped exactly this:
+# the publish sat with its siblings 22 lines above its own declaration, so
+# opening the page threw "attempt to call a nil value" (2026-08-30).
+# ============================================================
+_pub = _re.compile(r"^\s*(P|S)\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*$")
+_dcl = _re.compile(r"^\s*local (?:function )?([A-Za-z_]\w*)\s*(?:=\s*function)?")
+_fwd = []
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+    _base = HERE.parents[1] / _root
+    if not _base.is_dir():
+        continue
+    for _f in sorted(_base.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        _lines = _f.read_text(encoding="utf-8", errors="replace").splitlines()
+        _where = {}
+        for _n, _l in enumerate(_lines, 1):
+            _m = _re.match(r"^\s*local function ([A-Za-z_]\w*)", _l) or                  _re.match(r"^\s*local ([A-Za-z_]\w*)\s*=\s*function", _l)
+            if _m and _m.group(1) not in _where:
+                _where[_m.group(1)] = _n
+        for _n, _l in enumerate(_lines, 1):
+            _m = _pub.match(_l.split("--", 1)[0])
+            if _m:
+                _d = _where.get(_m.group(3))
+                if _d and _d > _n:
+                    _fwd.append(f"{_f.relative_to(HERE.parents[1])}:{_n}: "
+                                f"publishes {_m.group(1)}.{_m.group(2)} = {_m.group(3)}, "
+                                f"declared at line {_d} -- this assigns nil")
+if _fwd:
+    print("FORWARD-PUBLISH BAN: a module published a function before declaring it:")
+    for _v in _fwd:
+        print("  " + _v)
+    raise SystemExit(1)
+
+if _texviol:
+    print("TEXTURE PATH BAN: single-backslash Interface paths resolve to nothing:")
+    for _v in _texviol:
+        print("  " + _v)
+    raise SystemExit(1)
+
+if _viol:
+    print("SHIM-SHADOW BAN: lib code must call the *Native factory aliases:")
+    for _v in _viol:
+        print("  " + _v)
+    sys.exit(1)
+
+# ============================================================
+# STATIC BAN: a Colors entry is a KEYED table, so unpack() on one yields nothing.
+# GUI.Colors.text and friends are { r = , g = , b = }. `unpack()` over that
+# returns NO values, so `SetTextColor(unpack(c))` is `SetTextColor()` -- which
+# throws. Inside a page builder that is not one bad label: the builder dies part
+# way, so whatever it does at its FOOT never runs. On the Filter Designer that
+# foot is the take-down of the old island, and the page shipped (2026-09-15)
+# drawing the island, the new bands and the previous page's widgets over one
+# another. Nothing caught it -- the suite's page tests read source TEXT and never
+# build a real frame, so a runtime throw is invisible to them.
+#
+# Cheap to spot and worth a red suite: use c.r, c.g, c.b.
+# ============================================================
+_unpackban = _re.compile(r"unpack\s*\([^)]*Colors\s*\.")
+_colviol = []
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+    _root = HERE.parents[1] / _dir
+    if not _root.is_dir():
+        continue
+    for _f in sorted(_root.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        for _n, _line in enumerate(_f.read_text(encoding="utf-8").splitlines(), 1):
+            _c = _line.split("--", 1)[0]
+            if _unpackban.search(_c):
+                _colviol.append("%s:%d: %s" % (_f.relative_to(HERE.parents[1]), _n, _line.strip()))
+if _colviol:
+    print("COLOR UNPACK BAN: Colors entries are keyed tables -- use c.r, c.g, c.b:")
+    for _v in _colviol:
+        print("  " + _v)
+    raise SystemExit(1)
+
+# ============================================================
+# STATIC GATE: every shipped Lua file must PARSE.
+# The worst failure in this addon is not a wrong value, it is a file that does
+# not load: Lua reports a parse error against the FILE, so one bad line takes
+# out every feature that file carries, and the error names a line that can be
+# thousands of lines from the edit. Nothing else in this suite catches it --
+# the Lua tests load the handful of files they drive and the rest of the addon
+# is only ever read as TEXT, so a whole page can be unparseable while every
+# assertion here passes. That shipped on 2026-09-15: a mangled string escape in
+# FilterRegistry/UI/Options.lua left 18429 assertions green and the Filter
+# Designer, the spell picker and everything else in that file gone in game.
+#
+# This also catches Lua 5.1's 200-active-locals-per-function ceiling, which is
+# likewise a PARSE error and which DF.BuildFilterDesignerPage sits close to.
+# ============================================================
+_parse = lua.eval("function(s) local f, e = loadstring(s); return (f ~= nil), e end")
+_badparse = []
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+    _root = HERE.parents[1] / _dir
+    if not _root.is_dir():
+        continue
+    for _f in sorted(_root.rglob("*.lua")):
+        # Libs/ is third-party and Libs/DandersUI is a junction back to the
+        # canonical folder already walked above.
+        if "Libs" in _f.parts:
+            continue
+        _ok, _err = _parse(_f.read_text(encoding="utf-8"))
+        if not _ok:
+            _badparse.append("%s: %s" % (_f.relative_to(HERE.parents[1]), _err))
+if _badparse:
+    print("PARSE GATE: a shipped file does not load -- the whole file is dead in game:")
+    for _v in _badparse:
+        print("  " + _v)
+    raise SystemExit(1)
+
+flt = sys.argv[1] if len(sys.argv) > 1 else ""
+for test in sorted(HERE.glob("test_*.lua")):
+    if flt and flt not in test.name:
+        continue
+    print(f"== {test.name}", flush=True)
+    run(test, ns)
+T = lua.globals().T
+print(f"\n{T['pass']} passed, {T['fail']} failed")
+
+# DandersFrames-side headless tests (real helpers extracted from the addon files)
+# live beside these as test_*.py and run as their own processes.
+import subprocess
+py_failed = 0
+for test in sorted(HERE.glob("test_*.py")):
+    if flt and flt not in test.name:
+        continue
+    print(f"== {test.name}", flush=True)
+    if subprocess.run([sys.executable, str(test)]).returncode != 0:
+        py_failed += 1
+sys.exit(1 if (T["fail"] or py_failed) else 0)

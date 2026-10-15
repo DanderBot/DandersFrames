@@ -5,60 +5,226 @@ local DF = DandersFrames
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
+## [5.4.0]
+
+### New Features
+
+- (Aura Designer) New **Power Infusion Helper** for priests, on its own tab in the Aura Designer. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Triggers picks what counts — which classes, and whether trinkets, potions and racials join the cooldowns — and Effects picks how each signal looks: a border, the health bar, the background, the name colour, or an icon. Turn on icons to see what they pressed and how hard the burst is landing. Add a sound if you want one; tanks and healers are skipped unless you say otherwise. (by Maelareth and Krathe)
+- (Aura Designer) If you set up the Power Infusion Helper in an earlier 5.4.0 alpha: it has moved onto its own tab in the Aura Designer, labelled PI Helper, and its settings are now split across Triggers and Effects. Your existing setup is carried over the first time you log in — the Square signal has been retired, so anything using it becomes an icon, and a stray "PI Helper" group left behind by an earlier alpha is cleaned up. Nothing needs doing by hand. (by Krathe)
+- (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon, and your party and raid frames, pinned sets, the personal targeted-spells block and the targeted list all move with it. Snap them to each other or onto other addons' elements, anchor one thing to another (including to individual frames and raid groups) and set a backup anchor that takes over when the main one is hidden. The editor has undo/redo, save/discard, nudge keys, a searchable anchor list, adjustable snap ranges, a grid, and a panel that jumps you to whichever element you are editing. It is the foundation for a shared positioning system across Danders addons.
+- (Settings) The settings pages have been rebuilt. Every section is now a card you open and close by clicking its header, with its settings laid out two to a row when there's room and its current value shown in the corner when it's folded. Each page groups its cards under headings. Features switch on and off right from the card's header, Expand All / Collapse All sit at the top of each page, and hovering a setting's name explains it. Sections that change how something looks can be pinned into their own window, named after their page, so you can set two pages to match side by side. Widen the window and the page splits into two columns; narrow it and it folds back to one.
+- (Aura Designer) Adding to the Aura Designer is now a guided flow right inside the designer: choose Add from a Spell or Add from a Filter, pick how it should look from pictures of your own frame, then pick where it goes. Looks the aura already has, or that a filter can't drive, are marked on their tile. Layout groups and debuff groups are added with one click on their picture.
+- (Frames) Frame Fade now has an on/off switch on its card, so you can turn fading off without touching the alpha values.
+- (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
+- (Settings) A dot beside a setting marks it as changed: amber for a changed default, the tab's colour when an auto layout overrides it. Hover the dot to see the default, and hold-click it to reset; a ring fills while you hold.
+- (Settings) Card headers show a sharp icon for most kinds of settings (appearance, layout, position, visibility, health and more) so they are easier to spot.
+- (Dispel) The dispel type symbol can now show one symbol per dispellable debuff. Set **Max Symbols** (1 to 5) on the Dispel page; at 1 it looks exactly as before, and higher values line up a symbol for each debuff from the corner you picked. The symbols fade with the overlay when a player is out of range or dead. (by Krathe, original idea by JordanKlaers)
+- (Settings) A new **GLOBAL** tab holds the settings shared by Party and Raid: General, Fonts, Nicknames, Integrations, Colors, the Filter Designer, Profiles and the Debug Console, with its own Changed Settings page. (by Krathe)
+- (Settings) Page tips can be closed to a small icon or hidden, and a **Page Tips** setting under GLOBAL > Settings chooses for every page at once. (by Krathe)
+- (Fonts) Apply to All asks whether to apply to Party, Raid or both. (by Krathe)
+- (Debuffs) The Debuff Bar's filters now have a Show and a Hide box for every category, so you can add some debuffs and take others away, even with All Debuffs on. New categories: Important, Raid In Combat, each dispel type (Magic, Curse, Poison, Disease, Bleed), From Any Player and Cast By You. (by Krathe)
+- (Debuffs) Hide Long Debuffs can be set in seconds as well as minutes, and Hide Permanent Auras drops debuffs with no duration. (by Krathe)
+- (Aura Designer) Debuff groups get the same Show and Hide filters, can show debuffs by who cast them, and have a Match setting: Any, or All so a group shows only debuffs that fit every ticked row (for example short non-boss mechanics as big click targets). (by Krathe)
+- (Dispel) The dispel overlay can hide individual dispel types, such as bleeds. (by Krathe)
+- (Auras) Buff and Debuff Bar icons can show the name of who cast them, in their class colour. Off by default. (by Krathe)
+- (Auras) Pandemic now offers the full set of border animations, plays only during the refresh window, and also animates the frame border. DandersFrames learns each aura's refresh window as you play, so more auras get a Pandemic warning over time. (by Krathe)
+- (Borders) New **Marching Ants** border animation. (by Krathe)
+- (Fading) New **Unhealable Fading** card: a player who can't be healed, such as a priest in Spirit of Redemption, is dimmed like an out-of-range player. Off by default. (by Krathe)
+- (Blizzard Frames) Hide Blizzard Player Frame can be set to apply only in a raid group. (by Krathe)
+
+### Bug Fixes
+
+- (Aura Designer) My Buffs now tells you when your specialization isn't supported, instead of silently not saving what you add.
+- (Test Mode) Animate Health no longer churns through memory while it runs.
+- (Highlights) Changes to Selection, Hover and Aggro Highlight settings now show on your frames straight away, instead of only after you hover the frame or change target.
+- (Highlights) Fix highlight borders changing thickness at certain Inset values, most noticeably the Animated Border losing a pixel.
+- (Settings) Fix memory building up each time you resized the settings window, switched between Party and Raid, or used the search box.
+- (Settings) Fix settings boxes going blank after dragging the window's resize corner.
+- (Settings) The settings window can no longer be dragged off the edge of the screen. It now stops at the edge, so it cannot be lost somewhere you can't reach it.
+- (Settings) Changing the settings scale no longer slides the window towards the middle of the screen. It now scales where it sits.
+- (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
+- (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.
+- (Settings) Fix arrows showing as empty boxes on the Changed Settings page and in undo messages.
+- (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
+- (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
+- (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
+- (Blizzard Frames) Fix Blizzard's party frames losing their Edit Mode size when DandersFrames isn't hiding them.
+- (Blizzard Frames) Fix Blizzard's raid frames flickering in and out of range when DandersFrames isn't hiding them.
+- (Click Casting) WoW Forever: each rank of a spell can now be bound on its own. Ranks are labelled in the spell list, and a lower-rank binding casts that rank instead of the highest one.
+- (Buffs) WoW Forever: the buff filters now have a built-in spell list for every class, covering every rank of each spell, so the Buff Bar and Defensive icons work out of the box. Any category that's still empty falls back to the same buffs Blizzard's own raid frames show.
+- (Missing Buffs) WoW Forever: missing buff icons now work for Fortitude, Arcane Intellect, Mark of the Wild and Battle Shout, counting every rank and the group versions.
+- (Filters) WoW Forever: spells in the filter lists show which ranks they cover, and each rank is labelled when you expand a spell.
+- (Sorting) WoW Forever: separating melee and ranged now sorts by class, so Rogues and Warriors no longer end up with the ranged.
+- (Dispel) WoW Forever: diseases no longer go missing from the dispel overlay for Priests.
+- (Range) WoW Forever: low-level healers now get proper out-of-range fading instead of a rough distance check.
+- (Roles) WoW Forever: your role now comes from the group instead of your spec, which doesn't say whether you heal there.
+- (Raid Frames) With party frames turned off, raid frames now fade properly when players are out of range, show target and aggro highlights, and apply their layout and sorting settings. (by Krathe)
+- (Auras) Fix frames showing another player's buffs, debuffs and Aura Designer indicators after someone joined or left the raid. (by Krathe)
+- (Party Frames) Fix a party member's frame sometimes disappearing mid-dungeon, often after someone died, until you reloaded. (by Krathe)
+- (Tooltips) Fix the Raider.IO score appearing twice when hovering party and raid frames. (by Krathe)
+- (Auras) Fix the dispel overlay, dispel symbols and Aura Designer indicators showing the previous player's auras after a roster change mid-fight. (by Krathe)
+- (Aura Designer) Fix a disabled Aura Designer becoming usable again after switching between Party and Raid. (by Krathe)
+- (Pet Frames) Fix an error when ticking a text Shadow checkbox. (by Krathe)
+- (Test Mode) Text Designer text no longer shows while the Text Designer is disabled. (by Krathe)
+- (DandersMover) Fix the Alt peek getting stuck when the game lags. (by Krathe)
+- (DandersMover) The Mover's top bar follows the Settings Font, and its unsaved-changes prompt matches DandersFrames' dialogs. (by Krathe)
+- (Settings) Changing the Settings Font updates buttons and the window title straight away. (by Krathe)
+- (Profiles) Reset Profile to Defaults now resets everything, including the Settings Font. (by Krathe)
+- (Settings) Fix lag while resizing the settings window. (by Krathe)
+- (Settings) Fix cards drawing at the wrong width when the page folds to one column, and long checkbox labels overlapping. (by Krathe)
+- (Settings) Fix memory building up each time a texture, font or sound menu was opened. (by Krathe)
+- (Settings) Fix buttons keeping the previous tab's colour after switching from GLOBAL to Party or Raid, until you hovered them. (by Krathe)
+- (Settings) Setting names on cards are easier to read, and switching a card off now greys all its settings evenly. (by Krathe)
+- (Settings) The column guide shown while resizing the window no longer appears on full-width pages such as the Filter Designer. (by Krathe)
+- (Click Casting) Fix the binding editor opening its Advanced section for every binding instead of only those with a changed priority. (by Krathe)
+- (Settings) Card titles now line up whether or not the card has an on/off switch. (by Krathe)
+- (Settings) Hovering a card's icon now shows all its icons in the usual tooltip, evenly sized. (by Krathe)
+- (Debuffs) Dispellable By Me now allows for dispel talents you haven't taken, the Shaman poison totem and a Dwarf's Stoneform on their own frame, and debuffs you can't dispel no longer go missing from your other ticked categories. (by Krathe)
+- (Aura Designer) Hide Duplicate Debuffs no longer hides debuffs that a debuff group doesn't actually show. (by Krathe)
+- (Debuffs) With All Debuffs off, the Highlight now marks boss, role and priority debuffs that come in through other categories. (by Krathe)
+- (Defensive Icon) The border animation settings are back, so an animation carried over from an older version can be changed or turned off. (by Krathe)
+- (Buffs) Hide Duplicate Buffs now hides only your own casts of a My Buffs spell, so another player's copy of the same buff stays on the bar. (by Krathe)
+- (Auras) Auras on a player who dies or is brought back now hide and return reliably. (by Krathe)
+- (Inspect) Fix Blizzard's inspect window sometimes opening empty in a group. (by Krathe)
+- (Aura Designer) A layout group's Icons Per Row now counts its members, and a member's scale applies inside the group. (by Krathe)
+- (Aura Designer) A group's border settings grey out while Show Border is off. (by Krathe)
+- (Auto Layouts) Global settings can no longer be overridden by a raid auto layout. (by Krathe)
+- (Test Mode) Test frames no longer show the dispel overlay while it is turned off. (by Krathe)
+- (Buffs) The Buff and Debuff Bar's Filters and Blacklist cards grey out with Show Buffs and Show Debuffs, like every other card. (by Krathe)
+- (Text Designer) The filter chip you click now shows as selected. (by Krathe)
+- (Settings) A page that fits the window no longer scrolls, and the Aura and Text Designers no longer scroll as a whole. (by Krathe)
+- (Settings) Designer Preview Scale is now relative to your live frames, so the settings window's own scale no longer shrinks or grows the preview. (by Krathe)
+- (Settings) Switching between Party and Raid while DandersMover is open now finishes the mover session first. (by Krathe)
+
+### Changes
+
+- The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
+- (Debuffs) The Raid debuff category is gone: on debuffs it was the same as Dispellable By Me, so if you had it ticked you'll find Dispellable By Me ticked instead. (by Krathe)
+- (Dispel) The dispel dropdowns now read "Dispellable: By Me / All". (by Krathe)
+- (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
+- (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
+- (Pinned Frames) The "Based on" option is now called "Size & Spacing From", and the note above it explains that auras come from the set's Aura Designer Template, not from this choice. (by Krathe)
+- (Settings) Texture, font and sound menus list DandersFrames' own media first, then MyMedia's. (by Krathe)
+- (Settings) Buff Bar, Debuff Bar and Defensive Icon cards start closed. (by Krathe)
+- (Tooltips) Aura tooltips no longer offer Game Default positioning, which the game's aura tooltip can't do. (by Krathe)
+- (Settings) Switching tabs and pages is faster. (by Krathe)
+- (Settings) The classic settings layout has been removed; the card layout is now the only one. (by Krathe)
+- (Aura Designer) An indicator's settings, the Global tab and group settings are now cards, two settings to a row when there's room, and the Power Infusion Helper's sections are cards too. (by Krathe)
+- (Text Designer) An element's Content, Appearance and Position are now cards, two settings to a row when there's room. (by Krathe)
+- (Aura Designer) The Aura and Text Designer previews take only the width they need, giving the settings the rest. (by Krathe)
+
+## [5.3.3]
+
+### Bug Fixes
+
+* (Aura Designer) Fix every Aura Designer indicator on a player vanishing for the rest of the fight after they die and take a battle res. (by Krathe)
+
+## [5.3.2]
+
+### Bug Fixes
+
+* (Auras) Fix one player's buffs, debuffs and Aura Designer icons all staying blank until a reload, most often after they died and were resurrected. (by Krathe)
+* (Auras) Fix "Only My Buffs" showing other players' buffs on a group member who is in a different instance to you. Those buffs now hide until they are back with you. Group members merely far out of range are unaffected. (by Krathe)
+* (Auras) Fix a group member's buffs, debuffs and Aura Designer indicators staying blank after they walked out of range and back, until combat ended or you reloaded. (by Krathe)
+* (Aura Designer) Fix every Aura Designer icon vanishing until a reload after joining a raid, your own frame included. (by Krathe)
+* (Aura Designer) Fix debuffs appearing in the place of buff indicators, most visibly after swapping to a spec with no Aura Designer setup, until a reload. (by Krathe)
+* (Aura Designer) Fix filter, debuff and layout group icons staying at full brightness on out-of-range players while the indicators next to them faded. (by Krathe)
+* (Aura Designer) Fix indicators showing another player's auras after the group changed — someone leaving, a sort, or entering an arena. Long-lasting buffs could stay stuck on the wrong frame until a reload.
+* (Aura Designer) Fix an indicator lighting on a player who never had the aura while a raid is still forming, and staying wrong until a reload. (by Krathe)
+* (Dispel) "Only Dispellable by You" now updates immediately when you change talents, instead of waiting for a reload — a Shaman's poison dispel follows Poison Cleansing Totem as you swap it in and out. (by Krathe)
+* (Dispel) Fix bleeds showing as dispellable on other players' frames for a Dwarf after group changes — Stoneform only cleanses yourself, so they now mark your own frame only. (by Krathe)
+* (Debuffs) The coloured dispel-type ring on debuff icons now follows Show Border, so turning borders off turns the ring off too. (by Krathe)
+* (Debuffs) Max Debuffs now explains itself: the game applies the limit to each debuff category separately, so the slider shows the real ceiling for your filters instead of a number that could be exceeded. (by Krathe)
+* (Profiles) Fix a profile switch, including an automatic one, stopping part-way through in a large raid and leaving frames on the old profile until a reload. (by Krathe)
+* (Click-Casting) Fix click-casting bindings failing to recover on zone-in for some players, with an error each time. (by Krathe)
+* (Click-Casting) Item bindings no longer rely on game functions that patch 12.1.5 removes. (by Krathe)
+* (Icons) Fix the resurrection icon sometimes not appearing while a group member is being resurrected in Mythic+ or raid. (by Krathe)
+* (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
+* (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
+* (Highlights) Fix the animated and dashed borders stopping part-way along each edge on wide frames.
+* (Test Mode) Fix the Defensives preview staying greyed out after switching the Defensive Icon back on.
+
+### Changes
+
+* (Aura Filters) The built-in spell list is refreshed from the latest raid and dungeon logs: 23 spells added, two dropped, several trinket and item names corrected, and six items that were bundled under one name now list separately.
+* (Aura Filters) A handful of spells go back to their default on or off state in the Filter Designer, because the way they are stored changed.
+* (Aura Designer) Border animations are back on aura icons. Placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Each one is set from its own Border section in the Aura Designer, alongside the colour and thickness. Aura icons always start on the effect's settled loop — only the frame border still plays the opening flash. (by Krathe)
+* (Aura Designer) Debuff Groups have a new **Hide Duplicates Between Groups** switch, on by default, so a debuff matching several groups shows only in the first one that matches. (by Krathe)
+
+## [5.3.1]
+
+### New Features
+
+* (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
+* (Tooltips) Every DF tooltip type now has its own **Show Out of Combat** and **Show In Combat** setting, each offering Show, Hold Shift, Hold Ctrl, Hold Alt or Hidden — so frame tooltips can, for example, appear only while holding Alt out of combat and never in combat. This replaces the Disable In Combat checkboxes for frame and binding tooltips; existing choices carry over. (by Krathe)
+* (Auto Layouts) Layouts can now be renamed. Click a layout's name to open its dialog, which now carries the name alongside the player range. (by Krathe)
+
+### Bug Fixes
+
+* (Targeted Spells) The Targeted List drops a caster's bar the moment it dies — bars no longer linger for a second or two on dead mobs, and a cast with no cast time no longer shows a huge garbage countdown. (by Krathe)
+* (Targeted Spells) Personal targeted icons no longer shuffle sideways as casts start and expire: new casts join at the end, showing icons hold their place, and the row re-centres as icons come and go. Also fixes the Max Icons cap being able to hide the one cast that was actually aimed at you. (by Krathe)
+* (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
+* (Raid Frames) Fix turning Use Group-Based Layout on or off silently re-orienting the raid, so rows stay rows and columns stay columns. (by Krathe)
+* (Auto Layouts) Fix a layout showing a false override on Growth Direction, with a mismatched global and a reset that applied the wrong orientation. (by Krathe)
+* (Dispel) Fix the dispel overlay staying dark on poisons for a Shaman carrying Poison Cleansing Totem. (by Krathe)
+* (Dispel) Fix "Only Dispellable by You" never lighting for bleeds on a Dwarf, whose Stoneform clears them. (by Krathe)
+* (Missing Buffs) Fix missing buff icons going stale and never coming back — most often after a raider walked out of range, and after a wipe. The icons stayed hidden until you re-buffed that player, a fight started, or you reloaded. (by Krathe)
+* (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
+* (Test Mode) Leaving test mode no longer briefly freezes the game while frames return to their real auras.
+
+### Changes
+
+* (Resource Bar) The Size controls now rename themselves to match the bar's orientation, and a new **Adjust For Frame Border** option decides whether a matched bar tucks inside the frame border or spans the full health bar. (by Krathe)
+* (Defensive Icons) The stack count now uses the addon's own font at a smaller size, matching every other piece of DF text. Profiles that set their own font or scale keep it. (by Krathe)
+* (Debuffs) "Any Dispel Type" and "All Dispellable" were the same filter, so they are now one option. (by Krathe)
+* (Test Mode) The Defensives on/off is back in the test panel, alongside the count slider it drives. (by Krathe)
+
 ## [5.3.0]
 
 ### New Features
 
-* (Frames) New **Frame Fade** settings under General > Frame. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values instead — one out of combat, one in combat — so frames can sit faded while you're idle and snap to full the moment a fight starts. "Show In-Combat Fade When Hovering" brings the frames back to their in-combat opacity while your mouse is on one — every frame, or just the hovered one, your choice — so you can still read and click them out of combat. "Use In-Combat Fade In Instances" holds the in-combat opacity for the whole dungeon, raid, arena or battleground visit — no more fading out between pulls in Mythic+. Combines with the out-of-range and health fades.
-* (Test Mode) New **Indicator Info** toggle in the Test Mode panel. With it on, hover any element on a test frame — buff bar, debuff bar, defensive icon, missing buffs, Aura Designer indicators — to highlight it and see its name plus the settings page that controls it. (by Krathe)
+* (Frames) New **Frame Fade** settings under General > Frame. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values — one out of combat, one in — so frames sit faded while you're idle and snap to full when a fight starts. "Show In-Combat Fade When Hovering" brings frames back to their in-combat opacity while your mouse is on one (every frame, or just the hovered one), and "Use In-Combat Fade In Instances" holds the in-combat opacity for the whole dungeon, raid, arena or battleground so you don't fade out between pulls. Combines with the out-of-range and health fades.
+* (Test Mode) New **Indicator Info** toggle in the Test Mode panel. With it on, hover any element on a test frame — buff bar, debuff bar, defensive icon, missing buffs, Aura Designer indicators and layout groups — to highlight it and see its name plus the settings page that controls it. (by Krathe)
 * (Raid Frames) New **Center Mode** for centred group layouts (Frames > Raid Frames > Group Layout). "Fixed" pins your first groups to the anchor and grows extra groups off to one side, so the frames you watch stop sliding sideways as the raid fills and wraps. "Default" keeps the whole block centred. Only applies with a centred Groups Anchor and Groups Before Wrap under 8. (by Krathe)
 * (Raid Frames) "Groups Grow From" and "Row Order" are now a single corner picker: click the corner of the frame area you want the groups to sit in. Cells that can't apply at your current settings are hidden. (by Krathe)
 
 ### Bug Fixes
 
-* (Frames) Fix auras and Aura Designer indicators sometimes staying faded on a group member who is back in range — most often after combat, a phase change or someone reconnecting.
+* (Aura Designer) Fix indicators and effects dying mid-fight and not coming back until a reload — icons frozen with the timer stuck, health-bar recolours vanishing, HoTs "just stopping", or an effect stuck on the wrong people. It was triggered by anything that briefly interrupted identity data during combat: a battle rez, a cinematic, a vehicle, a phase change or a disconnect. (by Krathe)
+* (Aura Designer) Fix your own frame's tracked buffs disappearing for minutes at a time while riding an encounter platform or transport. (by Krathe)
 * (Auras) Fix an error storm on entering an instance after the 18 Aug client update, which also left aura rows, dispel borders and overlays blank until a reload.
-* (Dispel Highlight) Fix the overlay washing whole frames in flat white (or the wrong colour) in dungeons. (by Krathe)
-* (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight, instead of covering the whole frame until you next leave combat. (by Krathe)
-* (Dispel Highlight) Your own dispel colours now apply to the debuff icon border. They were meant to before, but the palette could never be built, so the game's default colours were drawn instead — if your border colours look different after this update, that is the setting working for the first time. (by Krathe)
-* (Dispel Highlight) Dispel colours now update straight away when you switch or import a profile, instead of keeping the previous profile's colours until a reload. (by Krathe)
-* (Dispel Highlight) Fix debuffs with no dispel type showing the wrong overlay colour once you had customised any dispel colour. (by Krathe)
-* (Dispel Highlight) Fix changing the debuff border colour on the Indicators page not reaching your frames. (by Krathe)
+* (Auras) Fix auras and Aura Designer indicators sometimes staying faded on a group member who is back in range — most often after combat, a phase change or someone reconnecting.
+* (Auras) Fix stale auras sticking around until a reload: after a cinematic, after reloading while a group member was a ghost, or when a frame was reused for a different player after a roster change. Aura displays now also re-check their hide conditions every few seconds as a safety net. (by Krathe)
+* (Auras) Auras on a group member who isn't in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display (debuff row, dispel highlight, Aura Designer indicators), not just the buff bar. A newly placed indicator no longer instantly fills with the wrong aura on those members. (by Krathe)
 * (Auras) Fix the debuff row going empty after switching the debuff filter to All Debuffs during a dungeon. (by Krathe)
-* (Party Frames) Frame spacing now snaps to the pixel grid with pixel-perfect on, so elements like the resource bar no longer sit a pixel out on some frames and not others. Applies to party and arena frames. (by Krathe)
-* (Debug Console) "Minimum Log Level" now stops lower-level lines being recorded at all, instead of only hiding them, so raising it keeps a long capture from being pushed out by chatter. Several failure paths that used to log nothing now report. (by Krathe)
-* (Auras) Fix auras staying on screen after a cinematic showing effects that had already gone — including on your own frame, where the defensive and debuff rows could sit stale until a UI reload. (by Krathe)
+* (Auras) Fix an enlarged important debuff making the row wrap one icon early and its tooltip hover area not matching the bigger icon, and fix the debuff preview enlarging every icon when Priority is ticked together with Boss and/or Role. (by Krathe)
+* (Auras) The debuff Icons Per Row slider now greys out under vertical growth, where it has no effect. The warning that category filters can't catch every debuff is back as a caution banner under the All Debuffs switch, shown only while that switch is off. (by Krathe)
+* (Aura Designer) Fix My Buffs / Any Buffs still reporting a spell as tracked in the other pool after all of its effects had been deleted. (by Krathe)
+* (Aura Designer) The health-bar tint's "Show When Missing" mode now honours "Tint Entire Bar", so missing health stays visible instead of the tint covering the whole bar. (by Krathe)
 * (Aura Designer) Fix the Buff Bar still showing after answering "replace my buffs" when enabling the Aura Designer, and the Buff Bar banner's "Enable Buffs" link having the same problem in reverse. (by Krathe)
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
-* (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
-* (Pinned Frames) Fix friendly NPC boss frames showing no auras or Aura Designer indicators at all. (by Krathe)
-* (Pinned Frames) Fix icons set to "Hide In Combat" staying hidden on pinned frames after combat ends. (by Krathe)
-* (Pinned Frames) Fix pinned test frames staying on screen over the real UI when combat starts during Test Mode. (by Krathe)
-* (Pinned Frames) Pinned boss frames now pick up settings changes, highlights, raid target markers, defensive/missing-buff/dispel updates and appearance changes like every other frame. (by Krathe)
-* (Pinned Frames) Pinned test frames now follow raid Test Mode settings changes, and settings changes made while in combat. (by Krathe)
-* (Auras) Fix an enlarged important debuff making the row wrap one icon early (Icons Per Row 3 laying out as 2+1), and its tooltip hover area not matching the bigger icon. (by Krathe)
-* (Auras) Fix the debuff preview enlarging every icon when Priority is ticked together with Boss and/or Role. (by Krathe)
-* (Auras) The debuff Icons Per Row slider now greys out under vertical growth, where it has no effect, like the buff and defensive sliders. (by Krathe)
-* (Resource Bar) Fix the bar vanishing while dragging Offset X/Y with Match Health Bar on, and the size sliders moving the wrong axis on a vertical bar mid-drag. (by Krathe)
-* (Resource Bar) Fix Border Thickness shortening the bar behind an opaque border — it now matches the health bar's length as the option says. (by Krathe)
 * (Aura Designer) Fix the Aura Designer appearing to enable itself when switching between the Party and Raid tabs — the two modes could end up sharing one preset. (by Krathe)
+* (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
+* (Dispel Highlight) Fix the overlay washing whole frames in flat white (or the wrong colour) in dungeons. (by Krathe)
+* (Dispel Highlight) Your own dispel colours now apply to the debuff icon border (they were meant to before, but the palette could never be built — if your border colours look different, that is the setting working for the first time), update straight away when you switch or import a profile, and apply correctly to debuffs with no dispel type. Changing the debuff border colour on the Indicators page now reaches your frames. (by Krathe)
+* (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight instead of covering the whole frame until you next leave combat, and it now accounts for reduced maximum health in dungeons and raids. (by Krathe)
+* (Raid Frames) Group Display Order and My Group First now actually apply to grouped raid layouts — they were being ignored by the final positioning pass. (by Krathe)
+* (Raid Frames) Fix group headers occasionally sized a pixel off with pixel-perfect snapping on, and Center Mode "Fixed" being ignored when entering test mode until a setting was changed. (by Krathe)
+* (Party Frames) Fix "Center" in the position panel not actually centring the party frames. Frame spacing now snaps to the pixel grid with pixel-perfect on, so elements like the resource bar no longer sit a pixel out on some frames and not others (party and arena). (by Krathe)
+* (Pet Frames) Fix the pet frame sometimes not coming back after you die, release and resummon. (by Krathe)
+* (Pinned Frames) Fix friendly NPC boss frames showing no auras or Aura Designer indicators at all, and pinned boss frames not picking up settings changes, highlights, raid target markers or defensive/missing-buff/dispel updates like every other frame. (by Krathe)
+* (Pinned Frames) Fix icons set to "Hide In Combat" staying hidden on pinned frames after combat ends. (by Krathe)
+* (Pinned Frames) Fix pinned test frames staying on screen over the real UI when combat starts during Test Mode, and not following raid Test Mode settings changes or changes made while in combat. (by Krathe)
+* (Pinned Frames) Changing a pinned set's Direction now relabels its grow-from controls to match the new orientation. (by Krathe)
+* (Resource Bar) Fix the bar vanishing while dragging Offset X/Y with Match Health Bar on, the size sliders moving the wrong axis on a vertical bar mid-drag, and Border Thickness shortening the bar behind an opaque border. (by Krathe)
+* (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
 * (Test Mode) The defensive icon now previews by default (Defensive Icons count defaults to 1 instead of 0). (by Krathe)
 * (Text Designer) The Frame Preview now follows frame size and Preview Scale live and stays inside its panel. (by Krathe)
-* (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
-* (Party Frames) Fix "Center" in the position panel not actually centring the party frames. (by Krathe)
-* (Raid Frames) Fix group headers occasionally sized a pixel off with pixel-perfect snapping on. (by Krathe)
-* (Test Mode) Fix Center Mode "Fixed" being ignored when entering test mode until a setting was changed. (by Krathe)
-* (Auras) Auras on a group member who isn't in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display (debuff row, dispel highlight, Aura Designer indicators), not just the buff bar. (by Krathe)
-* (Auras) Fix a dead group member's auras all reappearing if you reloaded your UI while they were a ghost. (by Krathe)
-* (Aura Designer) Fix indicators still showing — or a newly placed indicator instantly filling with the wrong aura — on group members outside your instance. (by Krathe)
-* (Auras) Fix a frame reused for a different player after a roster change keeping the previous player's hidden or shown aura state. (by Krathe)
-* (Auras) Aura displays now re-check their hide conditions every few seconds as a safety net, so a missed game event can no longer leave auras stuck shown or hidden until a reload. (by Krathe)
-* (Debug) Fix the debug console showing an empty window when the log contained certain aura filter text. (by Krathe)
+* (Debug Console) "Minimum Log Level" now stops lower-level lines being recorded at all instead of only hiding them, several failure paths that used to log nothing now report, and the console no longer shows an empty window when the log contains certain aura filter text. (by Krathe)
 
 ### Changes
 
-**If you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.**
-
+* (Raid Frames) **Heads up: if you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.** Drag them where you want them and they will stay. Details below.
 * (Raid Frames) Centred group layouts now sit exactly where the anchor says. An old hidden offset could drag them (and the unlock box) sideways by up to a few hundred pixels at some settings; it has been removed. If your raid frames appear somewhere new, drag them once and they will stay. (by Krathe)
 * (Raid Frames) Profiles using a centred anchor with Groups Before Wrap under 8 are switched to Center Mode "Fixed" automatically where that reproduces the old layout exactly — those frames don't move at all. Profiles the old layout couldn't hold steady are left on "Default" to choose for themselves. (by Krathe)
 * (Raid Frames) "Players Grow From" now reverses the fill order in flat (non-grouped) raid layouts as it always should have. If you had it set to End, players now fill in the opposite order to before. (by Krathe)

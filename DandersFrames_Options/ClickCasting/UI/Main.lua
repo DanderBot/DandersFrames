@@ -144,7 +144,7 @@ function CC:CreateClickCastUI(parent)
     -- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning opens
     -- a popup, and the write happens in that popup's confirm callback, not on the click.
     -- The box stays ticked optimistically while the popup is up, and the popup's CANCEL
-    -- path unchecks it (Dialogs.lua:762, 779, 871, 881, 1024) -- so the click must leave
+    -- path unchecks it (both popups, in Dialogs.lua) -- so the click must leave
     -- the visual alone. An "abort and revert" hook is exactly wrong for this shape: it
     -- would put the box back before the user has answered, and confirming would then
     -- leave click-casting enabled with the box unticked.
@@ -211,7 +211,7 @@ function CC:CreateClickCastUI(parent)
     -- Icon-only button: shared styler owns the backdrop + accent-wash hover and
     -- builds the centred icon. The hook adds the icon-brighten + tooltip.
     DF.GUI:StyleButton(profileCogwheel, {
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings", size = 18, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\settings.png", size = 18, color = C_TEXT_DIM },
     })
 
     profileCogwheel:HookScript("OnEnter", function(self)
@@ -411,7 +411,7 @@ function CC:CreateClickCastUI(parent)
     local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
     searchIcon:SetPoint("LEFT", 4, 0)
     searchIcon:SetSize(10, 10)
-    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+    searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -475,7 +475,7 @@ function CC:CreateClickCastUI(parent)
     local collapseIcon = collapseBtn:CreateTexture(nil, "OVERLAY")
     collapseIcon:SetPoint("CENTER")
     collapseIcon:SetSize(12, 12)
-    collapseIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+    collapseIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
     collapseIcon:SetTexCoord(1, 0, 0, 1)  -- Flip horizontally to point left (expanded state)
     collapseIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     collapseBtn.icon = collapseIcon
@@ -515,7 +515,7 @@ function CC:CreateClickCastUI(parent)
     DF.GUI:StyleButton(clearAllBtn, {
         width = 72, height = 18,
         tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 12 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png", size = 12 },
         text = L["Clear All"],
     })
     clearAllBtn:HookScript("OnEnter", function(self)
@@ -794,7 +794,7 @@ function CC:CreateClickCastUI(parent)
     -- and centred label. Force white icon/label to match the original.
     DF.GUI:StyleButton(newMacroBtn, {
         width = 55, height = 20, primary = true, accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = { r = 1, g = 1, b = 1 } },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 12, color = { r = 1, g = 1, b = 1 } },
         text = L["New"],
     })
     newMacroBtn.Text:SetTextColor(1, 1, 1)
@@ -810,7 +810,7 @@ function CC:CreateClickCastUI(parent)
     -- (neutral C_TEXT icon/label is the styler default).
     DF.GUI:StyleButton(importMacroBtn, {
         width = 60, height = 20, accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download", size = 12, color = C_TEXT },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download.png", size = 12, color = C_TEXT },
         text = L["Import"],
     })
     importMacroBtn:SetScript("OnClick", function()
@@ -824,7 +824,7 @@ function CC:CreateClickCastUI(parent)
     -- Shared styler owns fill/border/hover + the leading icon and centred label.
     DF.GUI:StyleButton(quickMacroBtn, {
         width = 86, height = 20, accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit", size = 12, color = C_TEXT },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png", size = 12, color = C_TEXT },
         text = L["Quick Macro"],
     })
     quickMacroBtn:HookScript("OnEnter", function(self)

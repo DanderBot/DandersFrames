@@ -19,6 +19,8 @@ local TARGET_INFO = CC.TARGET_INFO
 local FRAME_INFO = CC.FRAME_INFO
 local FALLBACK_INFO = CC.FALLBACK_INFO
 local COMBAT_INFO = CC.COMBAT_INFO
+-- A new binding's priority (10 = highest, 1 = lowest). Anything else opens Advanced.
+local DEFAULT_PRIORITY = 5
 
 -- Local alias for shared UI tables (defined in UI/Main.lua)
 -- spellCells is now accessed via CC.spellCells
@@ -129,7 +131,7 @@ function CC:CreateBindingRow(parent, binding, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(10, 10)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
     
     deleteBtn:SetScript("OnEnter", function()
@@ -215,7 +217,10 @@ function CC:CreateBindingRow(parent, binding, index)
     local actionType = binding.actionType or ""
     local isMacro = (actionType == "macro") or (binding.macroId ~= nil)
     local fallback = binding.fallback or {}
-    local fallbackText = isMacro and nil or GetFallbackDisplayText(fallback)
+    -- Explicit if: `isMacro and nil or ...` always evaluated the text, so macros showed
+    -- the fallback line the comment above says to hide.
+    local fallbackText
+    if not isMacro then fallbackText = GetFallbackDisplayText(fallback) end
     -- Fall back to the legacy loadCombat field for freshly-added bindings (the
     -- loadCombat -> combat migration only runs at profile load); map its vocabulary.
     local combatSetting = binding.combat
@@ -482,7 +487,7 @@ function CC:CreateEditBindingPanel()
     DF.GUI:StyleButton(clearBindBtn, {
         tone = "danger",
         text = L["Unbind"],
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close", size = 14 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png", size = 14 },
     })
     clearBindBtn:SetScript("OnClick", function()
         panel.pendingBinding.bindType = nil
@@ -517,11 +522,6 @@ function CC:CreateEditBindingPanel()
     -- row to run and no sound, so the caller's SetScript("OnClick") legitimately replaces
     -- the row's handler rather than working around it. That is a plain frame API call now
     -- the SetScript override is gone, not a hack.
-    --
-    -- (`yOffset` was already unused before this; dropped rather than carried. So were
-    -- the stored `group` and `desc` fields: membership is the targetRadios/combatRadios
-    -- array the caller builds, and the row captures `desc` into its tooltip at
-    -- construction, so neither was ever read back.)
     local function CreateRadioButton(parent, text, desc)
         return DF.GUI:CreateCheckRow(parent, {
             label       = text,
@@ -679,7 +679,7 @@ function CC:CreateEditBindingPanel()
         text = L["Advanced"],
         font = "DFFontNormal",
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png",
             size = 12,
             color = C_TEXT_DIM,
         },
@@ -842,7 +842,7 @@ function CC:CreateEditBindingPanel()
         function()                  -- customGet: return stored priority
             -- Guard: the panel is built once (cached) and CreateSlider reads its
             -- initial value here BEFORE ShowEditBindingPanel assigns pendingBinding.
-            return (panel.pendingBinding and panel.pendingBinding.priority) or 5
+            return (panel.pendingBinding and panel.pendingBinding.priority) or DEFAULT_PRIORITY
         end,
         function(v)                 -- customSet: store priority unchanged
             if panel.pendingBinding then panel.pendingBinding.priority = v end
@@ -908,11 +908,11 @@ function CC:CreateEditBindingPanel()
         local expandedHeight = isMacroOnly and 540 or EXPANDED_HEIGHT
         
         if panel.advancedExpanded then
-            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             advancedContent:Show()
             panel:SetHeight(expandedHeight)
         else
-            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             advancedContent:Hide()
             panel:SetHeight(collapsedHeight)
         end
@@ -929,7 +929,7 @@ function CC:CreateEditBindingPanel()
     saveBtn:SetPoint("BOTTOMRIGHT", -12, 12)
     DF.GUI:StyleButton(saveBtn, {
         width = 90, height = 28, tone = "success", accent = CC.ACCENT,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save", size = 18 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\save.png", size = 18 },
         text = L["Save"],
     })
     saveBtn:SetScript("OnClick", function()
@@ -950,7 +950,7 @@ function CC:CreateEditBindingPanel()
         width = 80, height = 28,
         tone = "danger",
         text = L["Delete"],
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 18 },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png", size = 18 },
     })
     deleteBtn:SetScript("OnClick", function()
         CC:DeleteFromEditBindingPanel()
@@ -1131,8 +1131,9 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             actionType = spellData.actionType or self.ACTION_TYPES.SPELL,
             spellId = spellData.spellId,
             spellName = spellData.spellName or spellData.name,
-            priority = 5,  -- Default priority (10=highest, 1=lowest)
+            priority = DEFAULT_PRIORITY,
         }
+        self:ApplySpellRank(panel.pendingBinding, spellData)
         
         if spellData.isMacro then
             panel.pendingBinding.actionType = self.ACTION_TYPES.MACRO
@@ -1208,7 +1209,8 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     elseif existingBinding and existingBinding.spellId then
         displayName = GetSpellDisplayInfo(existingBinding.spellId, existingBinding.spellName) or displayName
     end
-    panel.spellName:SetText(displayName or L["Unknown"])
+    local rank = spellData.rank or (existingBinding and existingBinding.lowRank and existingBinding.spellRank)
+    panel.spellName:SetText(CC:FormatSpellRankLabel(displayName, rank) or L["Unknown"])
     
     -- Update binding button
     CC:UpdateBindingButtonText()
@@ -1234,8 +1236,8 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
     local fallback = panel.pendingBinding.fallback or { mouseover = false, target = false, selfCast = false }
     local hasAdvancedOptions = fallback.mouseover or fallback.target or fallback.selfCast or fallback.stopSpellTarget
         or fallback.alwaysCast or panel.pendingBinding.targetOnCast ~= nil
-    local currentPriority = panel.pendingBinding.priority or 5
-    if currentPriority ~= 5 then
+    local currentPriority = panel.pendingBinding.priority or DEFAULT_PRIORITY
+    if currentPriority ~= DEFAULT_PRIORITY then
         hasAdvancedOptions = true
     end
     
@@ -1293,7 +1295,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if currentPriority ~= DEFAULT_PRIORITY and not panel.advancedExpanded then
             panel.advancedExpanded = true
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Show()
@@ -1342,7 +1344,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
         if hasAdvancedOptions and not panel.advancedExpanded then
             panel.advancedExpanded = true
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Show()
@@ -1351,7 +1353,7 @@ function CC:ShowEditBindingPanel(spellData, existingBinding, existingIndex)
             -- Collapse if no advanced options
             panel.advancedExpanded = false
             if panel.advancedArrow then
-                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                panel.advancedArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             end
             if panel.advancedContent then
                 panel.advancedContent:Hide()
@@ -1638,7 +1640,7 @@ function CC:ProcessKeybind(bindType, key)
         modifiers = mods,
         scope = defaultScope,
         combat = defaultCombat,
-        priority = 5,  -- Default priority (10=highest, 1=lowest)
+        priority = DEFAULT_PRIORITY,
         -- Default to all frames
         frames = {
             dandersFrames = true,
@@ -1689,6 +1691,7 @@ function CC:ProcessKeybind(bindType, key)
         newBinding.actionType = self.ACTION_TYPES.SPELL
         newBinding.spellId = spellData.spellId
         newBinding.spellName = spellData.spellName or spellData.name
+        self:ApplySpellRank(newBinding, spellData)
     end
     
     -- Hide popup and capture frame
@@ -1762,8 +1765,19 @@ function CC:CommitQuickBindingDirect(newBinding)
     self:RefreshSpellGrid(true)  -- Skip scroll reset to maintain position
 end
 
-function CC:GetBindingsForSpell(spellName, displaySpellId)
+function CC:GetBindingsForSpell(spellName, displaySpellId, spellData)
     local bindings = {}
+
+    -- Forever: match per rank (see SPELL RANKS in Bindings.lua). No override
+    -- chains there, so the display/root matching below doesn't apply.
+    if DF.IS_FOREVER and spellData then
+        for _, binding in ipairs(self.db.bindings) do
+            if binding.spellName and self:BindingMatchesRankedSpell(binding, spellData) then
+                table.insert(bindings, binding)
+            end
+        end
+        return bindings
+    end
     
     -- If we have a displaySpellId, we can match bindings that resolve to the same display
     -- This handles transformation chains like Divine Toll/Holy Bulwark -> Sacred Weapon
@@ -1859,14 +1873,14 @@ function CC:CreateSpellCell(parent, spellData, index)
     name:SetPoint("TOP", icon, "BOTTOM", 0, -2)
     name:SetPoint("BOTTOM", 0, 3)
     name:SetWidth(cellWidth - 4)
-    name:SetText(displayName or spellData.name)
+    name:SetText(CC:FormatSpellRankLabel(displayName or spellData.name, spellData.rank))
     name:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     name:SetWordWrap(true)
     name:SetMaxLines(2)
     
     -- Check for existing binding - just set border color, no text
     -- Pass displaySpellId to match bindings that resolve to the same displayed spell
-    local existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId)
+    local existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId, spellData)
     if #existingBindings > 0 then
         cell:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     end
@@ -1881,7 +1895,7 @@ function CC:CreateSpellCell(parent, spellData, index)
         
         -- Tooltip: the current override spell id, so a talent-replaced spell
         -- describes what it actually casts.
-        local bindings = self.existingBindings or CC:GetBindingsForSpell(spellData.name, self.displaySpellId)
+        local bindings = self.existingBindings or CC:GetBindingsForSpell(spellData.name, self.displaySpellId, spellData)
         DF.GUI:ShowGameTooltip(self, {
             spellID       = self.displaySpellId or spellData.spellId,
             fallbackTitle = spellData.name,
@@ -1903,6 +1917,8 @@ function CC:CreateSpellCell(parent, spellData, index)
                 spellId = spellData.spellId,  -- Base ID for binding
                 name = spellData.name,
                 icon = spellData.icon,
+                rank = spellData.rank,        -- Forever spell ranks
+                lowRank = spellData.lowRank,
             }
             
             if CC.db.options.quickBindEnabled then
@@ -2123,8 +2139,8 @@ function CC:RefreshSpellGrid(skipScrollReset)
             -- Get displaySpellId for proper override matching
             local _, _, aDisplayId = GetSpellDisplayInfo(a.spellId, a.name)
             local _, _, bDisplayId = GetSpellDisplayInfo(b.spellId, b.name)
-            local aBindings = CC:GetBindingsForSpell(a.name, aDisplayId)
-            local bBindings = CC:GetBindingsForSpell(b.name, bDisplayId)
+            local aBindings = CC:GetBindingsForSpell(a.name, aDisplayId, a)
+            local bBindings = CC:GetBindingsForSpell(b.name, bDisplayId, b)
             local aHasBinding = #aBindings > 0
             local bHasBinding = #bBindings > 0
             
@@ -2996,7 +3012,7 @@ function CC:CreateConsumableCell(parent, itemData, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(8, 8)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     deleteBtn:SetScript("OnEnter", function() deleteIcon:SetVertexColor(1, 0.3, 0.3) end)
     deleteBtn:SetScript("OnLeave", function() deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
@@ -3100,7 +3116,7 @@ function CC:CreateConsumableListRow(parent, itemData, index)
     local deleteIcon = deleteBtn:CreateTexture(nil, "OVERLAY")
     deleteIcon:SetPoint("CENTER")
     deleteIcon:SetSize(10, 10)
-    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
+    deleteIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close.png")
     deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     deleteBtn:SetScript("OnEnter", function() deleteIcon:SetVertexColor(1, 0.3, 0.3) end)
     deleteBtn:SetScript("OnLeave", function() deleteIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
@@ -3506,7 +3522,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
     -- Name (use current display name)
     local name = row:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     name:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-    name:SetText(displayName or spellData.name)
+    name:SetText(CC:FormatSpellRankLabel(displayName or spellData.name, spellData.rank))
     if isSpecialAction then
         name:SetTextColor(specialColor.r, specialColor.g, specialColor.b)
     else
@@ -3519,7 +3535,7 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
     if isSpecialAction then
         existingBindings = CC:GetBindingsForAction(actionType)
     else
-        existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId)
+        existingBindings = CC:GetBindingsForSpell(spellData.name, displaySpellId, spellData)
     end
     
     if #existingBindings > 0 then
@@ -3586,6 +3602,8 @@ function CC:CreateSpellListRow(parent, spellData, index, isSpecialAction, action
                     spellId = spellData.spellId,
                     name = spellData.name,
                     icon = spellData.icon,
+                    rank = spellData.rank,        -- Forever spell ranks
+                    lowRank = spellData.lowRank,
                 }
             end
             

@@ -51,11 +51,9 @@ DF.MemTest = {
     enableHealPrediction = true,        -- Frames/Bars.lua
     enableAbsorbs = true,               -- Frames/Bars.lua
     -- Event-driven updates
-    -- (Removed) enableTargetedSpells. Its only reader was the guard at the top of
-    -- DF:ShowTargetedSpellIcon, which went with the group-frame display. The
-    -- surviving Personal Targeted / Targeted List paths never had one, so the flag
-    -- went write-only and its checkbox inert — exactly what the note above warns
-    -- about. Re-add it only together with a real DF:MemTestDisabled guard.
+    -- (Removed) enableTargetedSpells: its only reader went with the group-frame
+    -- display, leaving the flag write-only and its checkbox inert.
+    -- Re-add it only together with a real DF:MemTestDisabled guard.
     enableHealthUpdates = true,         -- Frames/Create.lua  OnEvent
     enablePowerBar = true,              -- Frames/Create.lua  OnEvent
     enableNameUpdates = true,           -- Frames/Create.lua  OnEvent

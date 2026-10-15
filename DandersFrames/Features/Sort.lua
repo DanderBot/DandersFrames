@@ -24,9 +24,8 @@ local function canaccessvalue(v)
     return v ~= nil and not issecretvalue(v)
 end
 
--- NOTE: Previously used reusable tables here, but that caused bugs when
--- SortFrameList was called while iterating over a previous result.
--- Now we return fresh tables each time. The garbage is minimal.
+-- SortFrameList returns a FRESH table each call -- never a reusable one: it can be
+-- called while a previous result is still being iterated. The garbage is minimal.
 
 DF.Sort = {}
 local Sort = DF.Sort
@@ -82,8 +81,10 @@ function Sort:GetUnitRole(unit, db)
             local specID = nil
             
             -- For player, we can get spec directly
-            if UnitIsUnit(unit, "player") then
-                specID = GetSpecializationInfo(GetSpecialization() or 1)
+            -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it
+            -- takes the class branch below like everyone else.
+            if UnitIsUnit(unit, "player") and not DF.IS_FOREVER then
+                specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 1)
             else
                 -- For other players, try to get from inspection cache or guess from class
                 -- Note: In a full implementation, you'd use NotifyInspect/INSPECT_READY
@@ -227,7 +228,8 @@ function Sort:CompareTestData(dataA, dataB, db)
         if db.sortSeparateMeleeRanged then
             -- Check spec ID first (most accurate)
             local specID = data.specID
-            if specID and specID > 0 then
+            -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it sorts by class.
+            if specID and specID > 0 and not DF.IS_FOREVER then
                 return MELEE_SPECS[specID] and "MELEE" or "RANGED"
             end
             
@@ -398,11 +400,11 @@ function Sort:TriggerResort()
     self:ClearCache()
 
     -- ☠ A SecureSort push/trigger block used to sit here, gated on
-    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set:
-    -- SecureSort:Initialize() has no reachable caller (see Features/SecureSort.lua),
-    -- so the whole block was dead and its comment -- "SecureSort is now the only
-    -- system that positions party frames" -- had it exactly backwards. Party frames
-    -- are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
+    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set --
+    -- SecureSort.initialized is only ever assigned false and Features/SecureSort.lua
+    -- has no Initialize function -- so the block was dead and its comment ("SecureSort
+    -- is now the only system that positions party frames") had it backwards. Party
+    -- frames are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
     --
     -- Clearing the unit cache is the real work this function does, and it is live.
 end

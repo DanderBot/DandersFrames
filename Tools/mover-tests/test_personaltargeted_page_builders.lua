@@ -1,0 +1,455 @@
+local NS = ...
+
+-- ============================================================
+-- PERSONAL TARGETED PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
+-- ------------------------------------------------------------
+-- Indicators > Personal Targeted: the Debuff Bar's collapsible CARDS -- two
+-- per row inside a card wide enough, dim captions, the value summary in a shut
+-- card's corner, Expand All / Collapse All at the top:
+--
+--   column 1   "Content"     Settings (holds the PAGE gate in its body),
+--                            Content Types.
+--   column 2   "Layout"      Size (Growth Direction at its foot).
+--              "Appearance"  Border (Show Border is the header's tick).
+--              "Text"        Duration Text.
+--   column 1   "Effects"     Highlight, Highlight Shadow, Highlight
+--                            Animation, Interrupted Visual, X Mark.
+--
+-- ☠ Growth Direction sits at the foot of Size. The highlight is three cards
+-- (ring, shadow, animation) built by three builders from the shared helpers.
+--
+-- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
+--
+-- What that buys, and what it does not:
+--   ✓ the widget CENSUS of each builder.
+--   ✓ that the three highlight builders ask the helpers for the ring, the
+--     shadow and the animation on the same keys, with the same gate.
+--   ✓ each card's column, stable collapse key, summary, grey gate, header tick
+--     and pin; one checkbox per setting; the moved Growth Direction.
+--   ✗ nothing about how any of it LOOKS or behaves in the client.
+-- ============================================================
+
+-- ⚠ NORMALISED TO LF UP FRONT. This page file ships CRLF.
+local SRC = options_file_source("GUI/Pages/Indicators.lua"):gsub("\r\n", "\n")
+
+local KIND = {
+    CreateCheckbox = "checkbox", CreateSlider = "slider",
+    CreateDropdown = "dropdown", CreateColorPicker = "colorpicker",
+    CreateHeader = "header", CreateLabel = "label",
+    CreateSeparator = "separator", CreateButton = "button",
+    CreateGrowthControl = "growth", CreateTextureDropdown = "texturedropdown",
+    CreateTextControls = "textcontrols", CreateBorderControls = "bordercontrols",
+    CreateDurationFormatControls = "durationformat", CreateInfoBanner = "banner",
+    CreateFontDropdown = "fontdropdown", CreateOutlineDropdown = "outlinedropdown",
+    CreateShadowCheckbox = "shadowcheckbox",
+    CreateBorderShadowControls = "bordershadow", CreateAnimationControls = "animation",
+}
+
+-- The body of a `local function <name>(tools2)` at the page builder's own indent.
+local function builderBody(name)
+    local head = "local function " .. name .. "(tools2)"
+    local a = SRC:find(head, 1, true)
+    check(a ~= nil, "source: the page declares " .. name)
+    if not a then return "" end
+    local b = SRC:find("\n        end\n", a, true)
+    check(b ~= nil and b > a, "source: ..." .. name .. " closes at the page builder's indent")
+    return SRC:sub(a, b or a)
+end
+
+local function census(body)
+    local flat = body:gsub("%s+", " ")
+    local starts = {}
+    local i = 1
+    while true do
+        local s, e, kind = flat:find("GUI:(Create%a+)%(", i)
+        if not s then break end
+        if KIND[kind] then starts[#starts + 1] = { s = s, kind = KIND[kind] } end
+        i = e
+    end
+    local out = {}
+    for n, at in ipairs(starts) do
+        local stop = starts[n + 1] and (starts[n + 1].s - 1) or #flat
+        local chunk = flat:sub(at.s, stop)
+        local label = chunk:match('GUI:Create%a+%(%s*[%w_%.]+%s*,%s*L%["([^"]+)"%]') or "(none)"
+        local key   = chunk:match('%f[%w]db,%s*"([%w_]+)"') or "(none)"
+        local h     = tonumber(chunk:match('%)%s*,%s*(%d+)%s*%)'))
+        out[#out + 1] = { kind = at.kind, label = label, key = key, height = h }
+    end
+    return out
+end
+
+local function checkCensus(got, want, tag)
+    eq(#got, #want, tag .. ": control count")
+    for i = 1, math.max(#got, #want) do
+        local g, e = got[i], want[i]
+        if not g then
+            check(false, string.format("%s: row %d missing (wanted %s)", tag, i, e[2]))
+        elseif not e then
+            check(false, string.format("%s: row %d unexpected (%s %s)", tag, i, g.kind, g.label))
+        else
+            eq(g.kind,   e[1], string.format("%s: row %d kind", tag, i))
+            eq(g.label,  e[2], string.format("%s: row %d label", tag, i))
+            eq(g.key,    e[3], string.format("%s: row %d db key", tag, i))
+            eq(g.height, e[4], string.format("%s: row %d slot height", tag, i))
+        end
+    end
+end
+
+local PAGE
+do
+    local a = SRC:find('BuildPage(pagePersonalTargeted, function(self, db, Add, AddSpace, AddSyncPoint)', 1, true)
+    local b = SRC:find('-- Indicators > Icons', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "the Personal Targeted page builder is locatable by its own ends")
+    PAGE = SRC:sub(a or 1, b or 1)
+end
+
+-- ONE CARD'S BLOCK, flattened; `call` is just the OpenSection call. The three
+-- Highlight cards close `band`, `sband` and `aband`.
+local function sectionBlock(labelKey)
+    local a = PAGE:find('OpenSection(L["' .. labelKey .. '"]', 1, true)
+    check(a ~= nil, "source: a card is opened for " .. labelKey)
+    if not a then return "", "" end
+    local b, e = PAGE:find("CloseSection%([sa]?band%)", a)
+    check(b ~= nil, "source: ..." .. labelKey .. "'s band is closed after its controls")
+    local block = PAGE:sub(a, e or a):gsub("%s+", " ")
+    local m = block:find("({ group = band,", 1, true) or block:find("({ group = sband,", 1, true)
+           or block:find("({ group = aband,", 1, true)
+    local call = m and block:sub(1, m) or block
+    call = call:gsub("Build[%w]+%($", "")
+    return block, call
+end
+
+-- ============================================================
+-- 1. THE SHARED MACHINERY, AND THE ROWS GONE
+-- ============================================================
+print("-- Personal Targeted page: the shared machinery and the page-scope vocabulary")
+do
+    check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
+          "tools: ...and takes the shared machinery unconditionally")
+    for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
+                         "WireModifiedTick", "WireFooter", "RegisterHoistedToggle",
+                         "RegisterControlRow", "RefreshAfterGroupWrite", "HoldReason" }) do
+        check(PAGE:find("local function " .. v .. "(", 1, true) == nil,
+              "tools: the page does not re-declare " .. v)
+    end
+    for _, gone in ipairs({ "GUI:CreatePopoutRow(", "tools.PopoutContent(", "tools.ClaimKeys(",
+                            "tools.WireModifiedTick(", "tools.WireFooter(",
+                            "tools.RegisterHoistedToggle(", "tools.RegisterControlRow(",
+                            "GUI:CreateControlRow(", "GatePaneFirstChild", "footerStrip",
+                            "inline = true", "popout = true,", "_COUNT = ", "count =",
+                            "contentBand", "appearanceBand", "effectsBand",
+                            "OnPersonalEnableToggle", "OnPersonalBorderToggle",
+                            "OnPersonalHighlightToggle", "OnPersonalInterruptToggle",
+                            "OnPersonalXMarkToggle" }) do
+        check(PAGE:find(gone, 1, true) == nil, "furniture: " .. gone .. " is gone from the page")
+    end
+
+    local fwd = (PAGE:match("local function OpenSection%(label.-\n        end\n") or ""):gsub("%s+", " ")
+    check(fwd:find("return tools.OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, { twoTrack = true, quietLabels = true })", 1, true) ~= nil,
+          "sections: every card goes through the shared helper, two per row and dim captions")
+    check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
+          "sections: ...and closes through the shared helper too")
+
+    for _, pair in ipairs({ { "Content", "1" }, { "Layout", "2" }, { "Appearance", "2" }, { "Text", "2" }, { "Effects", "1" } }) do
+        local n = 0
+        for _ in PAGE:gmatch('Add%(GUI:CreateHeader%(self%.child, L%["' .. pair[1] .. '"%]%), 40, ' .. pair[2] .. '%)') do n = n + 1 end
+        eq(n, 1, "headers: the " .. pair[1] .. " category header sits in column " .. pair[2] .. ", once")
+    end
+
+    local decls = 0
+    for _ in PAGE:gmatch("local growthOptions = {") do decls = decls + 1 end
+    eq(decls, 1, "vocab: growthOptions is declared exactly once, at page scope")
+    for _, g in ipairs({ "HidePersonalOptions", "HidePersonalDurationOptions", "HidePersonalHighlightOptions",
+                         "HideInterruptOptions", "HideInterruptXOptions", "PersonalOffRow",
+                         "InterruptOffRow", "HighlightOffRow", "PersonalTargetedUpdate" }) do
+        local n = 0
+        for _ in PAGE:gmatch("local function " .. g .. "%(") do n = n + 1 end
+        eq(n, 1, "vocab: " .. g .. " is declared exactly once")
+    end
+    check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
+          "rebuild: the page never rebuilds itself")
+end
+
+-- ============================================================
+-- 2. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
+-- ============================================================
+local PT_SETTINGS = {
+    { "label",    "Shows incoming targeted spells on YOU in the center of your screen.", "(none)", 30 },
+    { "label",    "To reposition: Unlock frames (/df unlock) and drag the mover.",       "(none)", 30 },
+    { "checkbox", "Enable Personal Targeted Spells", "personalTargetedSpellEnabled",       30 },
+    { "checkbox", "Important Spells Only",           "personalTargetedSpellImportantOnly", 30 },
+    { "checkbox", "Show Offscreen Nameplates",       "(none)",                             30 },
+}
+local PT_CONTENT = {
+    { "label",    "Show in content types:",                        "(none)",                                25 },
+    { "checkbox", "Open World",                                    "personalTargetedSpellInOpenWorld",      25 },
+    { "checkbox", "Dungeons",                                      "personalTargetedSpellInDungeons",       25 },
+    { "checkbox", "Raids",                                         "personalTargetedSpellInRaids",          25 },
+    { "checkbox", "Arena",                                         "personalTargetedSpellInArena",          25 },
+    { "checkbox", "Battlegrounds",                                 "personalTargetedSpellInBattlegrounds",  25 },
+    { "label",    "Content type filters configured in Party tab.", "(none)",                                25 },
+}
+local PT_SIZE = {
+    { "slider", "Icon Size", "personalTargetedSpellSize",     55 },
+    { "slider", "Scale",     "personalTargetedSpellScale",    55 },
+    { "slider", "Alpha",     "personalTargetedSpellAlpha",    55 },
+    { "slider", "Spacing",   "personalTargetedSpellSpacing",  55 },
+    { "slider", "Max Icons", "personalTargetedSpellMaxIcons", 55 },
+}
+local PT_BORDER = {
+    { "bordercontrols", "(none)", "personalTargetedSpell", nil },
+}
+local PT_DURATION = {
+    { "checkbox",        "Show Duration",       "personalTargetedSpellShowDuration",    30 },
+    { "checkbox",        "Show Cooldown Swipe", "personalTargetedSpellShowSwipe",       30 },
+    { "fontdropdown",    "Font",                "personalTargetedSpellDurationFont",    55 },
+    { "slider",          "Scale",               "personalTargetedSpellDurationScale",   55 },
+    { "outlinedropdown", "Outline",             "personalTargetedSpellDurationOutline", 55 },
+    { "shadowcheckbox",  "Shadow",              "personalTargetedSpellDurationOutline", 30 },
+    { "slider",          "Offset X",            "personalTargetedSpellDurationX",       55 },
+    { "slider",          "Offset Y",            "personalTargetedSpellDurationY",       55 },
+    { "colorpicker",     "Color",               "personalTargetedSpellDurationColor",   35 },
+}
+-- The highlight's three cards.
+local PT_HL_RING = {
+    { "checkbox",       "Highlight Important Spells", "personalTargetedSpellHighlightImportant", 30 },
+    { "bordercontrols", "(none)",                     "personalTargetedSpellImportant",          nil },
+}
+local PT_HL_SHADOW = {
+    { "bordershadow", "(none)", "personalTargetedSpellImportant", nil },
+}
+local PT_HL_ANIM = {
+    { "animation", "(none)", "personalTargetedSpellImportantBorderAnimation", nil },
+}
+local PT_INTERRUPT = {
+    { "checkbox",    "Show Interrupted Visual", "personalTargetedSpellShowInterrupted",      30 },
+    { "slider",      "Duration",                "personalTargetedSpellInterruptedDuration",  55 },
+    { "colorpicker", "Tint Color",              "personalTargetedSpellInterruptedTintColor", 35 },
+    { "slider",      "Tint Opacity",            "personalTargetedSpellInterruptedTintAlpha", 55 },
+}
+local PT_XMARK = {
+    { "checkbox",    "Show X Mark", "personalTargetedSpellInterruptedShowX",  30 },
+    { "colorpicker", "X Color",     "personalTargetedSpellInterruptedXColor", 35 },
+    { "slider",      "X Size",      "personalTargetedSpellInterruptedXSize",  55 },
+}
+
+-- label, stable collapse key, card column; `dim` = the gate its
+-- header greys on; `pin` = passes its builder; `tick` = its on/off moved into
+-- the header, with the gate the tick itself greys on.
+local CARDS = {
+    { label = "Settings", key = "personaltargeted_settings", col = 1,
+      builder = "BuildPersonalSettingsGroup", golden = PT_SETTINGS, summary = "PersonalSettingsSummary" },
+    { label = "Content Types", key = "personaltargeted_content", col = 1,
+      builder = "BuildPersonalContentGroup", golden = PT_CONTENT, summary = "PersonalContentSummary",
+      dim = "PersonalOffRow" },
+    { label = "Size", key = "personaltargeted_size", col = 2,
+      builder = "BuildPersonalSizeGroup", golden = PT_SIZE, summary = "PersonalSizeSummary",
+      dim = "PersonalOffRow", pin = true, cardBuilder = "BuildPersonalSizeCardGroup" },
+    { label = "Border", key = "personaltargeted_border", col = 2,
+      builder = "BuildPersonalBorderGroup", golden = PT_BORDER, summary = "PersonalBorderSummary",
+      dim = "PersonalOffRow", pin = true, composite = "noShowToggle",
+      tick = { key = "personalTargetedSpellShowBorder", name = "Show Border", gate = "PersonalOffRow" } },
+    { label = "Duration Text", key = "personaltargeted_duration", col = 2,
+      builder = "BuildPersonalDurationGroup", golden = PT_DURATION, summary = "PersonalDurationSummary",
+      dim = "PersonalOffRow", pin = true },
+    { label = "Highlight", key = "personaltargeted_highlight", col = 1,
+      builder = "BuildPersonalHighlightRingGroup", golden = PT_HL_RING, summary = "PersonalHighlightSummary",
+      dim = "PersonalOffRow", pin = true, split = true,
+      tick = { key = "personalTargetedSpellHighlightImportant", name = "Highlight Important Spells", gate = "PersonalOffRow" } },
+    { label = "Highlight Shadow", key = "personaltargeted_highlightshadow", col = 1, band = "sband",
+      builder = "BuildPersonalHighlightShadowGroup", golden = PT_HL_SHADOW, summary = "PersonalHighlightShadowSummary",
+      dim = "HighlightOffRow", pin = true, split = true, composite = "noEnableToggle",
+      tick = { key = "personalTargetedSpellImportantBorderShadowEnabled", name = "Border Shadow", gate = "HighlightOffRow" } },
+    { label = "Highlight Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
+      builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "PersonalHighlightAnimationSummary",
+      dim = "HighlightOffRow", pin = true, split = true },
+    { label = "Interrupted Visual", key = "personaltargeted_interrupt", col = 1,
+      builder = "BuildPersonalInterruptGroup", golden = PT_INTERRUPT, summary = "PersonalInterruptSummary",
+      dim = "PersonalOffRow", pin = true,
+      tick = { key = "personalTargetedSpellShowInterrupted", name = "Show Interrupted Visual", gate = "PersonalOffRow" } },
+    { label = "X Mark", key = "personaltargeted_xmark", col = 1,
+      builder = "BuildPersonalXMarkGroup", golden = PT_XMARK, summary = "PersonalXMarkSummary",
+      dim = "InterruptOffRow", pin = true,
+      tick = { key = "personalTargetedSpellInterruptedShowX", name = "Show X Mark", gate = "InterruptOffRow" } },
+}
+
+for _, g in ipairs(CARDS) do
+    print("-- Personal Targeted page: " .. g.label)
+    local body = builderBody(g.builder)
+    checkCensus(census(body), g.golden, g.label:lower())
+
+    if g.split then
+        -- Declared once and mounted once, by its card. (The pin is handed the
+        -- builder by name, not called.)
+        local calls = 0
+        for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
+        eq(calls, 2, g.label .. ": declared once, mounted by its card only")
+    end
+
+    local block, call = sectionBlock(g.label)
+    check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
+          g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing " .. g.summary)
+    if g.dim then
+        check(call:find(g.summary .. ", " .. g.dim, 1, true) ~= nil, g.label .. ": greys its header on " .. g.dim)
+    else
+        check(call:find("OffRow", 1, true) == nil, g.label .. ": never greys -- it holds the page's switch")
+    end
+    -- `cardBuilder`: the card mounts a wrapper round the builder (Size +
+    -- Growth Direction), and the pin is handed that SAME wrapper.
+    local cardBuilder = g.cardBuilder or g.builder
+    eq(call:find(cardBuilder, 1, true) ~= nil, g.pin == true,
+       g.label .. (g.pin and ": pinnable, from its own builder" or ": decides what SHOWS, so it grows no pin"))
+
+    if g.tick then
+        check(call:find('db = db, key = "' .. g.tick.key .. '", label = L["' .. g.tick.name .. '"]', 1, true) ~= nil,
+              g.label .. ": the header tick is bound to " .. g.tick.key .. " under its own name")
+        check(call:find("disableOn = " .. g.tick.gate, 1, true) ~= nil,
+              g.label .. ": ...greyed on " .. g.tick.gate .. ", the gate its in-body checkbox carried")
+        check(call:find("onChanged = function()", 1, true) ~= nil
+          and call:find("self:RefreshStates()", 1, true) ~= nil
+          and call:find("PersonalTargetedUpdate()", 1, true) ~= nil
+          and call:find("RefreshCurrentPage", 1, true) == nil,
+              g.label .. ": ...committing what its in-body checkbox ran, never a page rebuild")
+        if g.composite then
+            check(body:find(g.composite .. " = tools2.hoistToggle or nil", 1, true) ~= nil,
+                  g.label .. ": the composite is told not to build its own toggle (" .. g.composite .. ")")
+        else
+            local guard = body:find("if not tools2.hoistToggle then", 1, true)
+            local cb = body:find('GUI:CreateCheckbox(parent, L["' .. g.tick.name .. '"]', guard or 1, true)
+            check(guard ~= nil and cb ~= nil and cb > guard,
+                  g.label .. ": the builder builds that checkbox only when not hoisted")
+        end
+    else
+        check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick")
+    end
+
+    local mount = cardBuilder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
+        .. (g.tick and " hoistToggle = true," or "") .. " })"
+    check(block:find(mount, 1, true) ~= nil,
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
+end
+
+-- ============================================================
+-- 3. HIGHLIGHT SETTINGS: THREE CARDS
+-- ============================================================
+print("-- Personal Targeted page: Highlight Settings, as three cards")
+do
+    check(PAGE:find("BuildPersonalHighlightGroup", 1, true) == nil,
+          "split: no single-box highlight builder is left")
+
+    local ring = builderBody("BuildPersonalHighlightRingGroup"):gsub("%s+", " ")
+    check(ring:find('GUI:CreateBorderControls(group, db, "personalTargetedSpellImportant", {', 1, true) ~= nil
+      and ring:find("include = { alpha = true, inset = true, blendMode = true, gradient = true },", 1, true) ~= nil,
+          "split: the ring card asks for the prefix and everything but shadow and animation")
+    for _, same in ipairs({ "noShowToggle = true,", "sizeMin = 0, sizeMax = 8, sizeStep = 1,",
+                            "disableWhen = HidePersonalHighlightOptions,", "fullUpdate = PersonalTargetedUpdate,",
+                            "lightUpdate = PersonalTargetedUpdate,", "lightColors = PersonalTargetedUpdate," }) do
+        check(ring:find(same, 1, true) ~= nil, "split: ...with " .. same)
+    end
+    local shadow = builderBody("BuildPersonalHighlightShadowGroup"):gsub("%s+", " ")
+    check(shadow:find('GUI:CreateBorderShadowControls(tools2.group, db, "personalTargetedSpellImportant", {', 1, true) ~= nil
+      and shadow:find("disableWhen = HidePersonalHighlightOptions,", 1, true) ~= nil,
+          "split: the shadow card builds the toolkit's own shadow block on the same prefix, same gate")
+    local anim = builderBody("BuildPersonalHighlightAnimationGroup"):gsub("%s+", " ")
+    check(anim:find('GUI:CreateAnimationControls(tools2.group, db, "personalTargetedSpellImportantBorderAnimation", {', 1, true) ~= nil
+      and anim:find('typeLabel = L["Border Animation"],', 1, true) ~= nil,
+          "split: the animation card builds the toolkit's own animation block on the same keys and label")
+    check(anim:find("tools2.group.disableChildrenOn = HidePersonalHighlightOptions", 1, true) ~= nil,
+          "split: ...greyed by the same gate, as a group gate (the helper composes none)")
+    -- The three cards open together, ring first.
+    local r = PAGE:find('OpenSection(L["Highlight"]', 1, true)
+    local s = PAGE:find('OpenSection(L["Highlight Shadow"]', 1, true)
+    local a = PAGE:find('OpenSection(L["Highlight Animation"]', 1, true)
+    check(r and s and a and r < s and s < a, "split: Highlight, Highlight Shadow, Highlight Animation, in that order")
+    -- ☠ NEVER "BORDER ..." -- the page has a real Border card, and a pinned
+    -- "Personal Targeted / Border Shadow" read as that border's. The keys are
+    -- the ones the cards shipped with, so a user's folds survive the rename.
+    check(PAGE:find('OpenSection(L["Border Shadow"]', 1, true) == nil
+      and PAGE:find('OpenSection(L["Border Animation"]', 1, true) == nil,
+          "split: no card on the page is titled Border Shadow / Border Animation")
+    check(PAGE:find('OpenSection(L["Highlight Shadow"], "personaltargeted_highlightshadow",', 1, true) ~= nil
+      and PAGE:find('OpenSection(L["Highlight Animation"], "personaltargeted_highlightanim",', 1, true) ~= nil,
+          "split: ...and the renamed cards keep their shipped collapse keys")
+    local ENUS = options_file_source("../DandersFrames/Locales/enUS.lua")
+    for _, k in ipairs({ "Highlight Shadow", "Highlight Animation" }) do
+        check(ENUS:find('L["' .. k .. '"] = true', 1, true) ~= nil, "split: enUS ships L[\"" .. k .. "\"]")
+    end
+end
+
+-- ============================================================
+-- 4. THE CARDS TOGETHER
+-- ============================================================
+print("-- Personal Targeted page: the cards together")
+do
+    local order = {}
+    for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
+    eq(table.concat(order, " | "),
+       "Settings | Content Types | Size | Border | Duration Text | Highlight | Highlight Shadow | Highlight Animation | Interrupted Visual | X Mark",
+       "order: the ten cards open in group order -- Content, Layout, Appearance, Text, Effects")
+    local contentAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)', 1, true)
+    local layAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 2)', 1, true)
+    local sizeAt    = PAGE:find('OpenSection(L["Size"]', 1, true)
+    local appAt     = PAGE:find('Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)', 1, true)
+    local borderAt  = PAGE:find('OpenSection(L["Border"]', 1, true)
+    local textAt    = PAGE:find('Add(GUI:CreateHeader(self.child, L["Text"]), 40, 2)', 1, true)
+    local durAt     = PAGE:find('OpenSection(L["Duration Text"]', 1, true)
+    local fxAt      = PAGE:find('Add(GUI:CreateHeader(self.child, L["Effects"]), 40, 1)', 1, true)
+    local hlAt      = PAGE:find('OpenSection(L["Highlight"]', 1, true)
+    check(contentAt and layAt and sizeAt and contentAt < layAt and layAt < sizeAt, "order: Layout heads Size")
+    check(sizeAt and appAt and borderAt and sizeAt < appAt and appAt < borderAt, "order: Appearance heads Border")
+    check(borderAt and textAt and durAt and borderAt < textAt and textAt < durAt, "order: Text heads Duration Text")
+    check(fxAt and hlAt and fxAt < hlAt, "order: Effects heads Highlight")
+
+    -- ---- Growth Direction moved INTO Size -----------------------------
+    -- ☠ IN THE CARD BUILDER, NOT ADDED TO THE BAND AFTER IT. The pin mounts the
+    -- builder it is handed; a dropdown bolted onto the band after the builder
+    -- never reached a pinned Size panel.
+    local sizeCard = builderBody("BuildPersonalSizeCardGroup")
+    check(sizeCard:find('tools2.group:AddWidget(GUI:CreateDropdown(tools2.parent, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)', 1, true) ~= nil,
+          "growth: Growth Direction sits at the foot of the Size card builder -- it arranges the icons")
+    check(sizeCard:find("ptsGrowth.disableOn = HidePersonalOptions", 1, true) ~= nil,
+          "growth: ...greyed with the page gate")
+    local g1 = sizeCard:find("BuildPersonalSizeGroup(tools2)", 1, true)
+    local g2 = sizeCard:find('L["Growth Direction"]', 1, true)
+    check(g1 and g2 and g1 < g2, "growth: ...after the Size builder's own controls")
+    local size, sizeCall = sectionBlock("Size")
+    check(sizeCall:find("BuildPersonalSizeCardGroup", 1, true) ~= nil
+      and size:find("BuildPersonalSizeCardGroup({ group = band,", 1, true) ~= nil,
+          "growth: the pin and the card mount the same card builder -- a pinned Size panel has Growth Direction")
+    check(size:find("band:AddWidget", 1, true) == nil,
+          "growth: nothing is added to the Size band outside the builder")
+    check(builderBody("BuildPersonalSizeGroup"):find("Growth Direction", 1, true) == nil,
+          "growth: the plain Size builder does not build the dropdown -- the card builder adds it")
+
+    -- ---- one checkbox per setting --------------------------------------
+    local hoists = 0
+    for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
+    eq(hoists, 5, "ticks: exactly five mounts ask their builder to skip the in-body toggle")
+    local inCards = 0
+    for _, g in ipairs(CARDS) do
+        if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
+    end
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's")
+    check((sectionBlock("Settings")):find("personalTargetedSpellEnabled", 1, true) == nil,
+          "ticks: Enable Personal Targeted Spells is not in Settings' header")
+    check(builderBody("BuildPersonalSettingsGroup"):find('L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled"', 1, true) ~= nil,
+          "ticks: ...its builder still builds it in the body")
+    check((sectionBlock("Duration Text")):find('key = "', 1, true) == nil,
+          "ticks: Duration Text has no header tick -- Show Duration does not switch the swipe off")
+
+    -- ---- Expand All / Collapse All --------------------------------------
+    check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
+          "bulk: the page adds the pair at the top, spanning both columns")
+    local stripAt = PAGE:find("tools.SectionControls", 1, true)
+    check(stripAt and contentAt and stripAt < contentAt,
+          "bulk: ...above the first category header")
+
+    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280)", 1, true) == nil,
+          "page: no fixed-width box is left on the page")
+
+    check(PAGE:find('CreateCopyButton(self.child, {"personalTargeted"}, L["Personal Targeted"], "indicators_personal_targeted")', 1, true) ~= nil,
+          "page: the copy button keeps the prefix it owns")
+    check(PAGE:find('{pageId = "indicators_targetedlist", label = L["Targeted List"]}', 1, true) ~= nil,
+          "page: ...and the See Also block still points at the Targeted List")
+end

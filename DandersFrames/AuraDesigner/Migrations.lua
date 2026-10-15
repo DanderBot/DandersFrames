@@ -283,12 +283,11 @@ end
 -- it runs once.
 local function renameBorderTypeKeys(t)
     if type(t) ~= "table" then return end
-    -- The legacy `style` key is what forces the old render path (Indicators.lua's
-    -- `config.style and BuildBorderTypeSpec(...)`), so its presence is what we key
-    -- on.  Crucially we run EVEN WHEN BorderStyle already exists: a block edited in
-    -- the new GUI writes canonical keys but leaves `style` behind, so it must still
-    -- get stripped or it keeps rendering via the legacy builder (the half-migrated
-    -- bug — legacy color/thickness shadowing the GUI's BorderColor/BorderSize).
+    -- The legacy `style` key is what marks a block as unmigrated, so its presence is
+    -- what we key on.  Crucially we run EVEN WHEN BorderStyle already exists: a block
+    -- edited in the new GUI writes canonical keys but leaves `style` behind, so it must
+    -- still get stripped (the half-migrated state -- legacy color/thickness lingering
+    -- beside the GUI's BorderColor/BorderSize).
     if t.style == nil then return end
     local thickness = t.thickness or 2
     local inset     = t.inset or 0
@@ -388,12 +387,11 @@ local function MigrateAuraDesignerIconBorderKeys(modeDb)
     end
 end
 
--- The Designer Presets rework relocated AD aura configs into
--- profile.auraDesignerPresets[name].auras.  MigrateAuraDesignerIconBorderKeys
--- only walks the legacy per-mode modeDb.auraDesigner location, so preset-nested
--- border blocks were never folded — they kept their legacy `style` (rendering via
--- the old builder) while the GUI wrote canonical keys onto them (the half-migrated
--- state).  Walk every preset's auras so those blocks get folded + `style` stripped.
+-- AD aura configs also live in profile.auraDesignerPresets[name].auras.
+-- MigrateAuraDesignerIconBorderKeys only walks the per-mode modeDb.auraDesigner
+-- location, so preset-nested border blocks keep their legacy `style` while the GUI
+-- writes canonical keys onto them (the half-migrated state).  Walk every preset's
+-- auras so those blocks get folded + `style` stripped.
 local function MigrateAuraDesignerPresetBorderKeys(profile)
     local presets = profile and profile.auraDesignerPresets
     if type(presets) ~= "table" then return end
@@ -445,9 +443,7 @@ DF.MigrateAuraDesignerInstancesLazy = MigrateInstancesLazy
 -- and the legacy inline config are all covered AT POINT OF USE, gated by
 -- `_priorityHigherWinsV1`. Fresh configs are born flagged (NewAuraDesignerConfig)
 -- and exports/imports carry the flag on the copied table, so only genuine pre-4.6
--- data is ever flipped — and exactly once. Replaces the old one-shot ADDON_LOADED
--- walker, which misclassified flat auras with no indicators and double-flipped
--- newly-created / imported profiles into corruption.
+-- data is ever flipped — and exactly once.
 local function FlipAuraPriority(auraCfg)
     if type(auraCfg) == "table" and type(auraCfg.priority) == "number" then
         local p = math.floor(auraCfg.priority + 0.5)
@@ -702,8 +698,8 @@ DF.MigrateAuraDesignerIndicatorStrataLazy = MigrateIndicatorStrataLazy
 -- resolves nil-instance indicators through adDB.defaults (resolveDefCBT) so the
 -- stored value actually governs.
 -- MUST be wired into BOTH this editor accessor AND the Factory render runner
--- (Factory.lua ~2270), or the editor shows the new values while live frames render the
--- old ones until a manual re-entry forces a rebuild.
+-- (Factory:SyncFrame), or the editor shows the new values while live frames render
+-- the old ones until a manual re-entry forces a rebuild.
 local function MigrateDefaultRefreshLazy(adDB)
     if type(adDB) ~= "table" or adDB._adDefaultRefreshV1 then return end
     local d = adDB.defaults

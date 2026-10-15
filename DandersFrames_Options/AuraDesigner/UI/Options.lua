@@ -40,12 +40,10 @@ DF.AuraDesigner = DF.AuraDesigner or {}
 DF.AuraDesigner._uiState = S
 DF.AuraDesigner._priv    = P
 
--- Load-time constants. Both used to be assigned inside BuildAuraDesignerPage,
--- which made them mutable and so un-splittable. Neither ever actually varies:
--- every caller arrives as DF.GUI -> SetupGUIPages -> here, and Adapter was only
--- ever assigned DF.AuraDesigner.Adapter. Resolving them at load lets each split
--- part re-declare them as plain aliases -- which is why 412 of this file's
--- reference sites needed no change at all.
+-- Load-time constants. Neither ever varies: every caller arrives as
+-- DF.GUI -> SetupGUIPages -> here, and Adapter is only ever
+-- DF.AuraDesigner.Adapter. Resolving them at load lets each split part
+-- re-declare them as plain aliases.
 -- Both source files load earlier in the TOC, so these are populated here.
 local GUI = DF.GUI
 local Adapter = DF.AuraDesigner.Adapter
@@ -58,7 +56,6 @@ S.selectedSpec = nil         -- Current spec key being viewed
 -- values, zero visual change) so they track any future palette change in
 -- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
 -- populated at parse time.
--- (C_PANEL removed — unreferenced; reclaimed for the 200-locals ceiling.)
 local C_ELEMENT    = DF.GUI.Colors.element
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 
@@ -200,42 +197,83 @@ end
 P.ApplyBackdrop = ApplyBackdrop
 
 -- ============================================================
+-- IS THE HELPER OFFERED AT ALL?
+-- ============================================================
+-- ☠ CLASS, NOT SPEC, AND CONSTANT FOR THE LOGIN. Power Infusion is a priest ability and a
+-- character cannot change class in session -- which is what every caller wants: PoolDefs
+-- decides whether the pool tab exists at all, and the two sweep hooks decide whether a
+-- migration that only touches priest records is worth running.
+-- ⚠ Deliberately NOT gated on the helper EXISTING. A tab that appears only once you have
+-- already added the helper is a tab you cannot use to add it.
+-- ☠☠ IT LIVED IN AuraDesigner/UI/PIHelperPage.lua AND WENT WITH IT, which broke the
+-- feature silently. Every caller reads `DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()`
+-- -- the nil-guard that makes it safe across the LoD split also makes a MISSING definition
+-- indistinguishable from "not a priest". So deleting the page did not error, it just
+-- answered false forever: no pool tab, no sweep, the helper gone from the addon entirely
+-- (field report, 2026-09-17: "no tab in AD, no tab anywhere"). The file's own removal note
+-- named the three symbols it exported for OTHER files and not this one, which is why a grep
+-- of that list came back clean.
+-- ⇒ Here, because this is the Aura Designer UI's base file and the helper is one of its
+-- pool tabs. Every caller resolves it at CALL time, inside a builder, so nothing depends on
+-- where this sits in the TOC.
+function DF.IsPIHelperAvailable()
+    local _, class = UnitClass("player")
+    return class == "PRIEST"
+end
+
+-- ============================================================
 -- COLLAPSIBLE CARD SHELL
 -- The effects list, the groups list and the debuff-category list each build the
--- same thing: a card pinned to the parent's width, a 30px header button on top,
--- and a chevron at its left edge that flips with the expanded state. Past that
--- point the three diverge completely -- a spell icon and type badge, a group
--- name and link count, a list of categories -- so this owns only the shell and
--- hands back the chevron for the caller to anchor its own content to.
+-- same thing: a card pinned to the parent's width, a header button on top, and a
+-- chevron at its left edge that flips with the expanded state. Past that point
+-- the three diverge completely -- a spell icon and type badge, a group name and
+-- link count, a list of categories -- so this owns only the shell.
 --
--- opts = { yPos, expanded, borderColor, chevronColor (default C_TEXT_DIM) }
--- Returns card, header, chevron.
+-- ★ THE SETTINGS PANEL'S CARD LOOK (GUI:CreateCardChrome): one rounded card per
+-- entry, the GUI.SectionCard header height, an accent chevron, a TEXT-coloured
+-- title, a dim right-aligned summary while folded, a hairline over the body and a
+-- hover wash on the header. The chrome draws the title and summary; the caller
+-- places them with chrome:LayoutText once its own furniture is in the header.
+-- ⚠ NO PER-TAB TINT. The amber the Layout Groups / Debuffs cards used to wear on
+-- their chevron and border is gone: colour is for state, and every settings card
+-- takes the accent chevron.
+--
+-- opts = { yPos, expanded }
+-- Returns card, header, chevron, chrome.
 -- ============================================================
-local CARD_HEADER_HEIGHT = 30
-local CHEVRON_EXPANDED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-local CHEVRON_COLLAPSED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
-
 local function CreateCardShell(parent, opts)
-    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local card = CreateFrame("Frame", nil, parent)
     card:SetPoint("TOPLEFT", 8, opts.yPos)
     card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
 
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-    header:SetHeight(CARD_HEADER_HEIGHT)
+    local header = CreateFrame("Button", nil, card)
     header:SetPoint("TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(header, C_ELEMENT, opts.borderColor)
 
-    local chevron = header:CreateTexture(nil, "OVERLAY")
-    chevron:SetSize(12, 12)
-    chevron:SetPoint("LEFT", 8, 0)
-    chevron:SetTexture(opts.expanded and CHEVRON_EXPANDED or CHEVRON_COLLAPSED)
-    local cc = opts.chevronColor or C_TEXT_DIM
-    chevron:SetVertexColor(cc.r, cc.g, cc.b)
-
-    return card, header, chevron
+    local chrome = GUI:CreateCardChrome(card, header, { expanded = opts.expanded })
+    card.dfChrome = chrome
+    return card, header, chrome.chevron, chrome
 end
 P.CreateCardShell = CreateCardShell
+
+-- The header's height and the gap to the next card, read by every card list so
+-- the builders and the stack below cannot drift from the settings cards.
+P.CardHeaderHeight = function() return GUI.SectionCard.header end
+P.CardGap = function() return GUI.SectionCard.gap end
+
+-- The body of an OPEN card: under the header's hairline, inset so the body's own
+-- 8px content inset lands on the card's 12 (GUI.SectionCard.pad). No backdrop --
+-- the body is the card's own fill. Opens the chrome onto it, so the card runs
+-- down to the body's bottom and follows it when the body re-sizes in place.
+local function CreateCardBody(card, header)
+    local inset = GUI.SectionCard.pad - 8
+    local body = CreateFrame("Frame", nil, card, "BackdropTemplate")
+    body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", inset, 0)
+    body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -inset, 0)
+    if card.dfChrome then card.dfChrome:SetExpanded(true, body) end
+    return body
+end
+P.CreateCardBody = CreateCardBody
 
 -- ============================================================
 -- CARD STACK (in-place reflow of a card list)
@@ -252,10 +290,9 @@ P.CreateCardShell = CreateCardShell
 --   stack:Reflow()                                -- after any card's height changes
 --
 -- Reflow reads each card's CURRENT height, so the caller only has to keep the
--- card itself correctly sized. Card gap (5) and the parent's bottom padding (20)
--- mirror the build-time loop exactly.
+-- card itself correctly sized. Card gap (P.CardGap, the settings cards' 8) and the
+-- parent's bottom padding (20) mirror the build-time loop exactly.
 -- ============================================================
-local CARD_GAP = 5
 
 local function CreateCardStack(parent, topY)
     local stack = { cards = {} }
@@ -270,7 +307,7 @@ local function CreateCardStack(parent, topY)
             card:ClearAllPoints()
             card:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
             card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-            y = y - card:GetHeight() - CARD_GAP
+            y = y - card:GetHeight() - P.CardGap()
         end
         parent:SetHeight(max(-y + 20, 200))
         -- Content that SHRANK leaves the scroll frame parked past its new end.
@@ -525,7 +562,7 @@ end
 P.NextGroupName = NextGroupName
 
 -- Create a new debuff category group (C1 data model; C2 wires the UI). Defaults:
--- Boss + Role selected (the classic "important debuffs" baseline), everything
+-- Boss + Role selected (the usual "important debuffs" baseline), everything
 -- else off, Hide Long staged at 5 minutes with Keep Important on. Layout mirrors
 -- the filter-group creation defaults (compact 4x4).
 local function CreateDebuffGroup(name)
@@ -578,12 +615,51 @@ P.GetSpecLayoutGroups = GetSpecLayoutGroups
 -- groups, migrations, the spec dropdown itself) deliberately do not.
 -- ============================================================
 
-S.activeBuffTab = "my"   -- "my" | "debuffs" | "other"
+S.activeBuffTab = "my"   -- "my" | "debuffs" | "other" | "pihelper"
 
+-- ★★★ THE POWER INFUSION HELPER IS A POOL TAB (2026-09-08), NOT A PAGE OF ITS OWN.
+-- ☠ IT WAS A SEPARATE PAGE FOR A DAY AND EVERY VERSION OF IT WAS A WORSE AURA DESIGNER.
+-- I rebuilt the add flow, then the effect list, then both again -- each time a lookalike of
+-- something that already existed twenty lines away. Krathe: "This should function EXACTLY as
+-- AD but with the triggers / effects. It should BE AD not a copy of it."
+-- ⇒ So it is a fourth pool, beside My Buffs / Debuffs / Any Buff. Every surface the designer
+-- already has -- the preview, the add flow, the effect cards, layout groups -- works on it
+-- unchanged, because all of them route through the four functions below. Nothing is
+-- reimplemented, so nothing can drift.
+local function IsPIHelperTab()
+    return S.activeBuffTab == "pihelper"
+end
+P.IsPIHelperTab = IsPIHelperTab
+
+-- ⚠ THE HELPER TAB *IS* THE OTHER POOL, filtered -- so everything that asks "is this the
+-- other pool" must say yes for it. That question is really "does this pool hold any caster's
+-- buffs, shared across specs" (as against My Buffs, which means your own casts on your own
+-- spec), and the helper's records are exactly that: they watch OTHER people's cooldowns.
+-- Answering no would give them My Buffs' caster filter, which is the one place they are
+-- guaranteed to match nothing -- the trap the old add button fell into.
 local function IsOtherTab()
-    return S.activeBuffTab == "other"
+    return S.activeBuffTab == "other" or S.activeBuffTab == "pihelper"
 end
 P.IsOtherTab = IsOtherTab
+
+-- ☠ ...AND THE ONE PLACE THE TWO POOLS PART COMPANY: DOES THE USER GET TO DECIDE THE CASTER
+-- RULE? On Any Buff, yes -- that pool means "any caster including you", so Others Only is the
+-- switch that narrows it and the choice is the whole point.
+-- On the Power Infusion Helper it is not a choice at all. Krathe, 2026-09-09: "we don't need
+-- the others only setting or even note that on the Active indicators either, we only care
+-- about using it on others anyway, it's a pointless option." He is right, and the recipe
+-- already agreed with him: pihCreateSignal STAMPS othersOnly on every effect it builds,
+-- because a helper watching your own cooldowns would be telling you to infuse yourself.
+-- ⇒ The STORED VALUE is unchanged -- it is what makes the effect correct, and the engine
+-- still reads it. What goes is the control that pretends it is up for discussion, and the
+-- suffix on the row that reports a constant as though it were a setting.
+-- ⚠ THE SUFFIX MATTERS AS MUCH AS THE TICK. "PI Helper - Center - Others Only" spends the
+-- row's summary on something true of every helper effect ever created -- the same
+-- constant-on-every-line fault the "Big cooldown" label had.
+local function ShowsOthersOnly()
+    return IsOtherTab() and not IsPIHelperTab()
+end
+P.ShowsOthersOnly = ShowsOthersOnly
 
 -- C2: the Debuffs tab hosts debuff CATEGORY groups (spec-independent, no
 -- spell pool, no placed indicators). Its Effects sub-tab frosts, the spec
@@ -602,6 +678,17 @@ P.EMPTY_POOL = EMPTY_POOL
 -- READ access to the active tab's pool. Never creates adDB.otherAuras.
 -- `spec` is forwarded to GetSpecAuras on the My Buffs tab only.
 local function CurrentAuraPool(spec)
+    -- ☠ A FILTERED VIEW OF THE OTHER POOL, AND IT IS SAFE BECAUSE THE VALUES ARE THE LIVE
+    -- TABLES. Every consumer of this either iterates it or does `CurrentAuraPool()[name]` and
+    -- mutates the record it gets back -- both of which reach the real cfg through the shared
+    -- reference. The only thing a copy would break is adding a NEW record, and that goes
+    -- through CurrentAuraPoolWrite below, which hands back the genuine pool.
+    -- ⚠ So the helper tab shows the designer's own surfaces holding ONLY the helper's
+    -- records: the user's unrelated Any Buff work is not on this tab, and the helper's
+    -- records are hidden from every other one (see CollectAllEffects' includePIH).
+    if S.activeBuffTab == "pihelper" then
+        return (S.PIH_PreviewPool and S.PIH_PreviewPool()) or EMPTY_POOL
+    end
     if S.activeBuffTab == "other" then
         local adDB = GetAuraDesignerDB()
         if adDB and adDB.otherAuras then return GetOtherAuras() end
@@ -615,10 +702,41 @@ local function CurrentAuraPool(spec)
 end
 P.CurrentAuraPool = CurrentAuraPool
 
+-- ☠ A MY BUFFS WRITE WITH NO SPEC IS REFUSED, OUT LOUD (2026-09-22). With no spec
+-- resolved (a non-healer, or a character with no spec yet) GetSpecAuras and
+-- GetSpecLayoutGroups hand back a FRESH EMPTY TABLE on every call. That is right
+-- for a read -- there is nothing to show -- and silently wrong for a write: the
+-- new record lands in a table nobody keeps, with no error and nothing listed.
+-- Every path that CREATES on My Buffs asks this first and stops when it answers
+-- true. Reads are untouched. Any Buff and the helper's pool are spec-independent.
+-- `quiet` skips the chat line for a caller that says it its own way (the
+-- picker's echo). Said once per frame, so one refused click is one line.
+P.RefuseNoSpecWrite = function(quiet)
+    if IsOtherTab() then return false end
+    if ResolveSpec() then return false end
+    if not quiet then
+        local now = GetTime and GetTime() or 0
+        if P.noSpecSaidAt ~= now then
+            P.noSpecSaidAt = now
+            DF:Say(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
+        end
+    end
+    DF:DebugWarn("AD", "Refused a My Buffs write: no spec resolved")
+    return true
+end
+
 -- WRITE access: creates the pool table (the other pool is born lazily on
 -- the first add — drag-drop, picker click, or add-by-ID).
 local function CurrentAuraPoolWrite()
-    if S.activeBuffTab == "other" then return GetOtherAuras() end
+    -- ⚠ THE HELPER WRITES INTO THE REAL OTHER POOL. Its READ view is filtered (see
+    -- CurrentAuraPool), but a new record has to land in the actual store or it would be
+    -- created into a temporary table and vanish on the next redraw -- the one thing the
+    -- filtered view cannot carry.
+    if S.activeBuffTab == "other" or S.activeBuffTab == "pihelper" then return GetOtherAuras() end
+    -- The backstop behind every entry-point guard: the write is refused and said.
+    -- The caller still gets a table (a nil would be a Lua error at the user), but
+    -- it is a throwaway, which is exactly what GetSpecAuras would have handed it.
+    if P.RefuseNoSpecWrite() then return {} end
     return GetSpecAuras()
 end
 
@@ -626,8 +744,12 @@ end
 -- the other-pool record embeds "other:" .. auraName in the name segment
 -- (expandedCards "placed:other:<name>#<id>" / "frame:<type>:other:<name>",
 -- preview slot keys). The auraName itself never carries the prefix.
+-- ⚠ THE HELPER SHARES "other:" DELIBERATELY. The prefix identifies which POOL a record's
+-- name belongs to, and the helper's records are in the other pool -- a prefix of its own
+-- would key the same record two ways, so an effect card expanded on one tab would read as
+-- collapsed on the other.
 local function PoolKeyPrefix()
-    return (S.activeBuffTab == "other") and "other:" or ""
+    return IsOtherTab() and "other:" or ""
 end
 P.PoolKeyPrefix = PoolKeyPrefix
 
@@ -682,10 +804,39 @@ P.GetOtherLayoutGroups = GetOtherLayoutGroups
 -- (Debuffs never reaches these — its Layout Groups tab builds debuff
 -- category groups instead.)
 local function CurrentLayoutGroups()
-    if S.activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
+    -- ⚠ THE STORE IS SHARED WITH THE OTHER POOL and stays whole for both -- this is the
+    -- accessor two LOGIC callers use (GetIndicatorLayoutGroup resolves an indicator's owning
+    -- group, DeleteLayoutGroup removes one by id), and hiding a group from those would make
+    -- the helper's own group unreachable and undeletable. The DISPLAY filter is
+    -- VisibleLayoutGroups below; that is where a tab decides what it shows.
+    if IsOtherTab() then return GetOtherLayoutGroups(false) end
     return GetSpecLayoutGroups()
 end
 P.CurrentLayoutGroups = CurrentLayoutGroups
+
+-- ☠ THE LIST THE DESIGNER SHOWS, WHICH IS NOT THE LIST IT OPERATES ON. The Power Infusion
+-- Helper's icon group carries a `pihSignal` mark and belongs to its own page now
+-- (Auras > Power Infusion Helper), so the designer must not list it: shown there it reads
+-- as a stray group, and deleting it half-dismantles a feature configured elsewhere.
+-- ⚠ FILTERED HERE AND NOT IN CurrentLayoutGroups, deliberately. Two of that function's
+-- callers are LOGIC, not display -- GetIndicatorLayoutGroup resolves an indicator's owning
+-- group and DeleteLayoutGroup removes one by id -- and hiding a group from those would
+-- make the helper's own group unreachable and undeletable by its own remove path. Display
+-- filters belong at the display site; the store stays whole.
+-- ⚠ THE TEST INVERTS ON THE HELPER'S OWN TAB. Everywhere else a helper group is somebody
+-- else's business and is hidden; on the helper tab it is the ONLY business, and the user's
+-- unrelated Any Buff groups are the ones that do not belong. One rule -- "show the groups
+-- this tab is about" -- read in both directions.
+local function VisibleLayoutGroups()
+    local want = IsPIHelperTab()
+    local out = {}
+    for _, g in ipairs(CurrentLayoutGroups()) do
+        local mine = (type(g) == "table" and g.pihSignal) and true or false
+        if mine == want then out[#out + 1] = g end
+    end
+    return out
+end
+P.VisibleLayoutGroups = VisibleLayoutGroups
 
 -- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
 -- SpellDB names resolve through GetSpellDisplay (localized), else the raw key.
@@ -710,11 +861,6 @@ P.OtherPoolDisplayName = OtherPoolDisplayName
 -- one: a spell tracked for ANY spec would double-render for that spec when
 -- also in the shared other pool); "other" walks the flat other pool with
 -- nil-spec identity. Pure — no editor state.
---
--- ⚠ It used to say "exposed for the SDD harness". There is no SDD harness: that
--- comment was the only mention of one anywhere in the repo, and the DF.* export it
--- justified had no readers either. The local below is live and used by
--- CrossPoolTrackedIDs; only the export is gone.
 -- ☠ AN EMPTIED AURA RECORD IS NOT AN ABSENT ONE. Deleting an aura's last effect
 -- leaves its config table behind on purpose: S.CleanupAdHocAura prunes only the
 -- SYNTHETIC records (ad-hoc "#id" and filter-owned "@preset:"/"@custom:"), and its
@@ -1159,9 +1305,6 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- (Removed) the square card's Expiring block -- the Stage 5.2 master enable
-        -- and expiring-border overrides. Same story as the icon card above: none of
-        -- those keys exist any more, so the paragraphs headed nothing.
         -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
         -- strip under/over the square. OFF by default; render fallbacks live in
         -- DF:BuildDurationBarSpec — these seed the editor.
@@ -1296,9 +1439,6 @@ local TYPE_DEFAULTS = {
         BorderAnimationCornerLength = 10,
         -- Draw above the frame's class border (parent+10) / aggro (parent+9).
         drawAboveFrameBorder = true,
-        -- (The "Expiring-border overrides (Stage 5.4)" label that sat here belonged to
-        -- keys that no longer exist -- it was heading showWhenMissing, which is
-        -- unrelated.)
         showWhenMissing = false,
         pandemicColorEnabled = false,
         pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},

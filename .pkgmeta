@@ -19,6 +19,7 @@ enable-nolib-creation: no
 move-folders:
   DandersFrames/DandersFrames: DandersFrames
   DandersFrames/DandersFrames_Options: DandersFrames_Options
+  DandersFrames/DandersMover: DandersMover
 
 ignore:
   - CHANGELOG.md
@@ -35,7 +36,21 @@ ignore:
   # Contributor documentation. Tracked in git so it travels with pull requests,
   # stripped here so it never reaches the packaged addon users download.
   - docs
+  # Canonical source of the shared UI library. It is not an addon: each host
+  # ships its own copy at <host>/Libs/DandersUI (Tools/sync-libs.sh).
+  - DandersUI
+  # dev-only test consumer, never shipped
+  - DandersMoverDemo
+  # its in-addon twin: the /mover demo frames (also cut from the TOC by do-not-package)
+  - DandersMover/Demo.lua
 
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
+
+# CurseForge/Wago relation metadata: stamped on every upload by the packager.
+# Nothing is REQUIRED -- DandersUI is embedded and DandersMover ships in this
+# zip -- but the embedded libraries are credited so the sites link them.
+embedded-libraries:
+  - libstub
+  - callbackhandler

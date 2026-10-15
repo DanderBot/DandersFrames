@@ -22,6 +22,7 @@ local GetOtherAuras = P.GetOtherAuras
 local NextGroupName = P.NextGroupName
 local GetSpecLayoutGroups = P.GetSpecLayoutGroups
 local IsOtherTab = P.IsOtherTab
+local IsPIHelperTab = P.IsPIHelperTab
 local IsDebuffTab = P.IsDebuffTab
 local EMPTY_POOL = P.EMPTY_POOL
 local CurrentAuraPool = P.CurrentAuraPool
@@ -29,6 +30,10 @@ local PoolKeyPrefix = P.PoolKeyPrefix
 local DebuffGroupsRead = P.DebuffGroupsRead
 local GetOtherLayoutGroups = P.GetOtherLayoutGroups
 local CurrentLayoutGroups = P.CurrentLayoutGroups
+-- ☠ THE DISPLAY HALF OF THAT PAIR. CurrentLayoutGroups is the STORE and is what logic reads;
+-- this is what a surface SHOWS. The preview canvas used the store and painted the helper's
+-- group on every pool -- see PIHShowsMark for the whole account.
+local VisibleLayoutGroups = P.VisibleLayoutGroups
 local OtherPoolDisplayName = P.OtherPoolDisplayName
 local EnsureAuraConfig = P.EnsureAuraConfig
 local EnsureTypeConfig = P.EnsureTypeConfig
@@ -42,6 +47,10 @@ local TYPE_DEFAULTS = P.TYPE_DEFAULTS
 
 -- Create a new indicator instance for an aura, returns the instance table
 local function CreateIndicatorInstance(auraName, typeKey)
+    -- ☠ NIL, SAID, WHEN MY BUFFS HAS NO SPEC (Options.lua's P.RefuseNoSpecWrite):
+    -- the instance would land in a table nobody keeps. Every caller already treats
+    -- a nil instance as "nothing was added".
+    if P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return nil end
     local auraCfg = EnsureAuraConfig(auraName)
     if not auraCfg.indicators then
         auraCfg.indicators = {}
@@ -110,9 +119,6 @@ local function RemoveIndicatorInstance(auraName, indicatorID)
     end
 end
 P.RemoveIndicatorInstance = RemoveIndicatorInstance
-
--- (ChangeInstanceType removed — uncalled since the tile-strip type switcher
--- left the v4 redesign; reclaimed for the 200-locals ceiling.)
 
 -- Keys to skip when copying appearance between indicators (identity + placement +
 -- the eye toggle's hidden state — copying appearance must not hide the destination)
@@ -260,10 +266,28 @@ P.AddExpiryAlertControls = AddExpiryAlertControls
 -- expiry alert — whose Border/Tint are a |T escape inside a fontstring and so collapse on a
 -- thin bar — a pandemic region is a real texture anchored to the button's own edges, so a
 -- ring or wash fits a bar exactly as well as an icon. Hence no `include` parameter.
-local function AddPandemicControls(g, parent, proxy)
+local function AddPandemicControls(g, parent, proxy, auraName)
     GUI:CreatePandemicControls(g, proxy, {
         parent          = parent,
         anchorOptions   = OPTS.ANCHOR_OPTIONS,
+        -- ★ SPELL-LEVEL GATE — which ids does THIS placement actually render? Resolved the
+        -- same way the render path resolves them, so the panel and the renderer can never
+        -- disagree about what the indicator is tracking.
+        -- ☠ A CLOSURE, NOT A VALUE. The tracked-ID ticks and the spec dropdown both live on
+        -- surfaces this card does not rebuild, so resolving once at build time would freeze
+        -- the verdict — greying a panel the user had just made valid, or leaving one live
+        -- after they narrowed it down to an unrefreshable spell.
+        -- ⚠ `proxy` goes in as the indicator so per-placement mutes narrow the set. That is
+        -- right HERE (we want the ids this indicator draws) and is deliberately the opposite
+        -- of the duplicate check in Cards.lua, which must NOT narrow or a real duplicate
+        -- slips through. Same helper, two different questions.
+        -- ⚠ Other-pool entries are spec-independent, hence the nil spec — mirrors every
+        -- other BuildADIdentityFilters call site.
+        trackedIds      = function()
+            local spec = (not IsOtherTab()) and ResolveSpec() or nil
+            local f = DF:BuildADIdentityFilters(spec, auraName, proxy)
+            return f and f.includeSpellIDs
+        end,
         -- Both systems key off the SAME per-indicator record here, so the collision notes
         -- can compare them directly. The buff/debuff rows have no expiry alert at all and
         -- pass nothing.
@@ -284,9 +308,9 @@ local function AddPandemicControls(g, parent, proxy)
 end
 P.AddPandemicControls = AddPandemicControls
 
--- Colours-S.page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
+-- Colours page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
 -- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
--- draws from the shared Colours-S.page breakpoints, so the link points there. Fixed-layout note, so
+-- draws from the shared Colours page breakpoints, so the link points there. Fixed-layout note, so
 -- size it to the group's inner width up front (the group advances Y by the height we pass).
 -- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
 local function AddDurationColorsLink(g, parent)
@@ -296,6 +320,35 @@ local function AddDurationColorsLink(g, parent)
     return note
 end
 P.AddDurationColorsLink = AddDurationColorsLink
+
+-- ============================================================
+-- THE INSTANCE FALLBACK CHAIN
+-- What a placed indicator's key reads as when the INSTANCE itself holds no
+-- value of its own: the Global tab's matching default (GLOBAL_DEFAULT_MAP says
+-- which key that is for this type), then what the type ships.
+--
+-- ☠ ONE CHAIN, TWO READERS. The proxy's __index resolves a key with it, and
+-- the proxy's defaults adapter answers "what would this key fall back to" with
+-- it. Restating it in the second reader is how a modified tick ends up
+-- disagreeing with the control sitting next to it -- the tick would be measuring
+-- against a default the control never resolves.
+-- ============================================================
+local function InstanceFallback(inst, k)
+    if not inst or not inst.type then return nil end
+    local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
+    if gdMap then
+        local gdKey = gdMap[k]
+        if gdKey then
+            local adDB = GetAuraDesignerDB()
+            local gd = adDB and adDB.defaults
+            if gd and gd[gdKey] ~= nil then return gd[gdKey] end
+        end
+    end
+    local defaults = TYPE_DEFAULTS[inst.type]
+    if defaults then return defaults[k] end
+    return nil
+end
+P.InstanceFallback = InstanceFallback
 
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
@@ -310,31 +363,53 @@ local function CreateInstanceProxy(auraName, indicatorID)
     -- a fresh proxy, so stashing at construction time is safe.
     local _inst = GetIndicatorByID(auraName, indicatorID, pool())
     local _typeDefaults = _inst and TYPE_DEFAULTS[_inst.type] or nil
-    return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = _typeDefaults }, {
+    -- What the settings-defaults engine asks when it wants to know whether one of
+    -- this record's keys has been touched (DandersFrames/Core/Defaults.lua). It
+    -- is the only way that engine can answer for a designer at all: its other
+    -- branches recognise DF.db.party / DF.db.raid by IDENTITY, and this table is
+    -- a proxy over one indicator instance.
+    --
+    -- ☠ GetStored IS A rawget, DELIBERATELY. Reading `proxy[k]` -- or even
+    -- `inst[k]` on an instance carrying a metatable -- resolves the fallback
+    -- chain, so every key would come back non-nil and the whole panel would
+    -- report as modified. Worse on this proxy than most: __index COPIES a
+    -- table-valued fallback onto the instance on its way past (see below), so a
+    -- read taken to answer "is this modified" would itself be what makes the key
+    -- present. The raw read is what makes that copy harmless -- the copy equals
+    -- what it was copied from, and the engine compares by VALUE.
+    local adapter = {
+        GetDefault = function(k)
+            return InstanceFallback(GetIndicatorByID(auraName, indicatorID, pool()), k)
+        end,
+        GetStored = function(k)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
+            if not inst then return nil end
+            return rawget(inst, k)
+        end,
+        -- Reset unsets rather than writing the resolved value in, so an effect
+        -- goes back to FOLLOWING the Global tab instead of being pinned at
+        -- whatever the Global tab happens to say today.
+        ClearKey = function(k)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
+            if not inst then return end
+            inst[k] = nil
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+    }
+    return setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaults = _typeDefaults,
+        __dfDefaultsAdapter = adapter,
+    }, {
         __index = function(_, k)
             local inst = GetIndicatorByID(auraName, indicatorID, pool())
             if inst then
                 local val = inst[k]
                 if val ~= nil then return val end
             end
-            -- Fall back to global defaults for applicable keys
-            local fallback
-            if inst and inst.type then
-                local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
-                if gdMap then
-                    local gdKey = gdMap[k]
-                    if gdKey then
-                        local adDB = GetAuraDesignerDB()
-                        local gd = adDB and adDB.defaults
-                        if gd and gd[gdKey] ~= nil then fallback = gd[gdKey] end
-                    end
-                end
-                -- Then fall back to TYPE_DEFAULTS
-                if fallback == nil then
-                    local defaults = TYPE_DEFAULTS[inst.type]
-                    if defaults then fallback = defaults[k] end
-                end
-            end
+            -- Fall back to global defaults for applicable keys, then TYPE_DEFAULTS
+            local fallback = InstanceFallback(inst, k)
             -- Copy-on-read: if fallback is a table, copy it into the instance
             -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
             if type(fallback) == "table" and inst then
@@ -364,7 +439,34 @@ local function CreateProxy(auraName, typeKey)
     local function pool() return otherPool and GetOtherAuras() or GetSpecAuras() end
     -- Expose defaults to GUI:CreateColorPicker so its Default button can resolve
     -- AD-specific keys (color/expiringColor/etc.) that aren't in PartyDefaults.
-    return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
+    -- The adapter is the same contract CreateInstanceProxy documents at length,
+    -- over a shorter chain: this record's fallback is TYPE_DEFAULTS and nothing
+    -- else, and the copy-on-read below is the same trap the raw read defuses.
+    local adapter = {
+        GetDefault = function(k)
+            if not defaults then return nil end
+            return defaults[k]
+        end,
+        GetStored = function(k)
+            local auraCfg = pool()[auraName]
+            local typeCfg = auraCfg and auraCfg[typeKey]
+            if not typeCfg then return nil end
+            return rawget(typeCfg, k)
+        end,
+        ClearKey = function(k)
+            local auraCfg = pool()[auraName]
+            local typeCfg = auraCfg and auraCfg[typeKey]
+            if not typeCfg then return end
+            typeCfg[k] = nil
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+    }
+    return setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaults = defaults,
+        __dfDefaultsAdapter = adapter,
+    }, {
         __index = function(_, k)
             local auraCfg = pool()[auraName]
             if auraCfg and auraCfg[typeKey] then
@@ -376,6 +478,13 @@ local function CreateProxy(auraName, typeKey)
             -- Copy-on-read: if fallback is a table, copy it into the config
             -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
             if type(fallback) == "table" then
+                -- No spec on My Buffs: hand the copy back without storing it
+                -- (the read is unchanged; the store it would land in is a throwaway).
+                if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite(true) then
+                    local copy = {}
+                    for fk, fv in pairs(fallback) do copy[fk] = fv end
+                    return copy
+                end
                 local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
                 local copy = {}
                 for fk, fv in pairs(fallback) do copy[fk] = fv end
@@ -385,6 +494,7 @@ local function CreateProxy(auraName, typeKey)
             return fallback
         end,
         __newindex = function(_, k, v)
+            if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return end
             local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
             typeCfg[k] = v
             if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
@@ -406,6 +516,7 @@ local function CreateAuraProxy(auraName)
             return nil
         end,
         __newindex = function(_, k, v)
+            if not otherPool and P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return end
             local auraCfg = EnsureAuraConfig(auraName, pool())
             auraCfg[k] = v
             if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
@@ -423,7 +534,7 @@ P.CreateAuraProxy = CreateAuraProxy
 -- spell icon and collapsible header, with a tooltip explaining why.
 -- ============================================================
 
-local WARNING_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.tga"
+local WARNING_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png"
 
 -- Resolve a warningKey to localized tooltip text. Keys are defined
 -- here rather than Config.lua so they can go through L[] without
@@ -458,14 +569,22 @@ P.GetAuraWarningKey = GetAuraWarningKey
 --             offsetX/Y     -- default 3, 3
 --             size          -- default 16
 --             color         -- { r, g, b } default red { 1.0, 0.25, 0.25 }
+-- ⚠ opts.text: THE SAME BADGE, WITH THE TEXT SUPPLIED RATHER THAN LOOKED UP. Every caller
+-- until now had a config warning KEY, so the text came from GetWarningText. The Power Infusion
+-- Helper's clash warning is composed at render time -- it names the offending effect and how
+-- many others contend -- so there is no key it could be filed under.
+-- ⚠ A key still wins when both are given: a tracking limitation is a fact about the SPELL and
+-- outranks a fact about this configuration. In practice they never collide (a helper record is
+-- filter-owned, so it has no spec entry and no warning key).
 local function AttachWarningBadge(host, warnKey, opts)
     if not host then return end
     local badge = host.dfWarningBadge
-    if not warnKey then
+    local supplied = opts and opts.text
+    if not warnKey and not supplied then
         if badge then badge:Hide() end
         return
     end
-    local tooltipText = GetWarningText(warnKey)
+    local tooltipText = warnKey and GetWarningText(warnKey) or supplied
     if not tooltipText then
         if badge then badge:Hide() end
         return
@@ -585,9 +704,6 @@ local function GetAuraIcon(specKey, auraName)
     return nil
 end
 P.GetAuraIcon = GetAuraIcon
-
--- (CountActiveEffects removed — uncalled since the v4 flat-card redesign;
--- reclaimed for the file-scope 200-locals ceiling.)
 
 -- ============================================================
 -- MULTI-TRIGGER HELPERS
@@ -760,7 +876,7 @@ P.RemoveFrameEffectTrigger = RemoveFrameEffectTrigger
 -- SHARED SPELL PICKER STATE
 -- Every AD picking context (add indicator, layout-group adds,
 -- triggers) opens the shared spell database picker
--- (FilterRegistry/SpellPicker.lua) over the right panel; the
+-- (FilterRegistry/UI/SpellPicker.lua) over the right panel; the
 -- open helpers live below the tab system (OpenADPicker).
 -- ============================================================
 
@@ -783,10 +899,6 @@ P.CloseADPicker = CloseADPicker
 -- Presets in Categories order with live counts, then customs name-sorted. No
 -- Uncategorised option by design — every consumer needs a resolvable include map.
 --
--- Extracted from the filter group card's "+ Add Filter", which owned the only copy.
--- Two more consumers arrived (an effect's trigger list, and a filter OWNING an
--- effect) and forking a 120-line bespoke dropdown three ways was not on.
---
 -- opts = {
 --   anchor    — the button to hang under; clicking it again closes (toggle)
 --   isLinked  — function(kind, key) -> true to leave the candidate out
@@ -800,28 +912,21 @@ local function OpenFilterPicker(opts)
     local anchor = opts.anchor
     local isLinked = opts.isLinked or function() return false end
 
+    -- ☠ WHICH FILTERS, AND IN WHAT ORDER, IS THE REGISTRY'S ANSWER. Presets in
+    -- Categories order then customs name-sorted was written out here and again in
+    -- the full-overlay filter list (FilterRegistry/UI/SpellPicker.lua), and an
+    -- order is a decision that two copies of will drift. R:ListFilters owns it;
+    -- the LABELS stay here, because markup is this surface's business and the
+    -- registry has no business localising anything.
     local candidates = {}
-    for _, cat in ipairs(R.Categories) do
-        if not isLinked("preset", cat.key) then
-            local enabled, total = R:PresetCounts(cat.key)
-            tinsert(candidates, { kind = "preset", key = cat.key,
-                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+    for _, e in ipairs(R:ListFilters(isLinked)) do
+        local label
+        if e.custom then
+            label = format("%s |c%s(%s)|r", e.name, GUI:ToneHex("info"), L["Custom"])
+        else
+            label = format("%s |cff888888(%d/%d)|r", L[e.name], e.enabled, e.total)
         end
-    end
-    local freeCustoms = {}
-    for cfId in pairs(R:ReadStore().customFilters) do
-        if not isLinked("custom", cfId) then tinsert(freeCustoms, cfId) end
-    end
-    sort(freeCustoms, function(a, b)
-        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
-        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
-        if na ~= nb then return na < nb end
-        return a < b
-    end)
-    for _, cfId in ipairs(freeCustoms) do
-        local cf = R:GetCustomFilter(cfId)
-        tinsert(candidates, { kind = "custom", key = cfId,
-            label = format("%s |c%s(%s)|r", (cf and cf.name) or cfId, GUI:ToneHex("info"), L["Custom"]) })
+        tinsert(candidates, { kind = e.kind, key = e.key, label = label })
     end
 
     local dropName = "DFADFilterGroupPicker"
@@ -875,10 +980,8 @@ local function OpenFilterPicker(opts)
     ApplyBackdrop(drop, GUI.Colors.background, GUI.Colors.border)
 
     -- Search box + themed scrollbar, mirroring GUI:CreateDropdown's searchable
-    -- menus (GUI/Widgets.lua) — same construction, same L["Search..."], same
-    -- StyleScrollBar pill. This picker predated opts.searchable and hand-rolled
-    -- a bare ScrollFrame: scrollable but with no scrollbar and no way to narrow
-    -- a long registry list. ScrollFrameTemplate, NOT UIPanelScrollFrameTemplate
+    -- menus (DandersUI/Widgets.lua) — same construction, same L["Search..."], same
+    -- StyleScrollBar pill. ScrollFrameTemplate, NOT UIPanelScrollFrameTemplate
     -- — StyleScrollBar styles the template's .ScrollBar and documents that rule.
     local SEARCH_H = 26
     if not drop._scrollFrame then
@@ -896,7 +999,7 @@ local function OpenFilterPicker(opts)
         local icon = sb:CreateTexture(nil, "OVERLAY")
         icon:SetPoint("LEFT", 6, 0)
         icon:SetSize(12, 12)
-        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
         local dim = GUI.Colors.textDim
         icon:SetVertexColor(dim.r, dim.g, dim.b)
 
@@ -1040,30 +1143,28 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- (GetUngroupedIndicators removed — uncalled since the group picker moved to
 -- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
 
--- Create a new layout group. kind: nil/"members" = classic member arranger
--- (legacy records carry no kind); "filter" = a container-backed group linked to
--- registry filters (stable preset keys / custom ids in filterSelection) with
--- uniform per-group styling (iconSize / maxIcons on top of the shared layout).
-local function CreateLayoutGroup(name, kind)
-    local adDB = GetAuraDesignerDB()
-    if not adDB then return nil end
-    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
-    -- store (born lazily HERE — the first add) with its own id counter.
-    local groups, id
-    if IsOtherTab() then
-        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
-        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
-        id = adDB.nextOtherLayoutGroupID
-        adDB.nextOtherLayoutGroupID = id + 1
-    else
-        groups = GetSpecLayoutGroups()
-        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
-        id = adDB.nextLayoutGroupID
-        adDB.nextLayoutGroupID = id + 1
-    end
+-- ★★ WHAT A NEW LAYOUT GROUP *IS*, IN ONE PLACE (2026-09-10).
+--
+-- ☠ EXTRACTED BECAUSE A SECOND CREATOR DRIFTED FROM IT AND SHIPPED. The Power Infusion
+-- Helper's cooldown-icon group is built directly into adDB.otherLayoutGroups rather than
+-- through CreateLayoutGroup below -- deliberately, and for a good reason: that function picks
+-- its store from the OPEN TAB, which is the one line that put eight stray groups in Krathe's
+-- spec store and took three attempts to clean up. What it also did was hand-write the record,
+-- and a hand-written record omitted `iconSize` and `maxIcons`. Krathe: "Max icons should
+-- default to 4 it's showing blank but seems to look like 8? Icon size is also showing blank on
+-- the slider." Both sliders bind the field directly, so nil draws blank -- and the factory
+-- falls back to 8 for a filter group's max, which is exactly what he was seeing.
+-- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
+-- is how they drifted; there is no longer a field list to copy.
+--
+-- kind: nil/"members" = member arranger (legacy records carry no kind); "filter" = a
+-- container-backed group linked to registry filters (stable preset keys / custom ids in
+-- filterSelection) with uniform per-group styling (iconSize / maxIcons on top of the shared
+-- layout). The caller owns `id` and `name` -- both come from the store it is inserting into.
+local function NewLayoutGroupRecord(id, name, kind)
     local group = {
         id = id,
-        name = name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"),
+        name = name,
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,
@@ -1082,10 +1183,47 @@ local function CreateLayoutGroup(name, kind)
     else
         group.members = {}
     end
+    return group
+end
+P.NewLayoutGroupRecord = NewLayoutGroupRecord
+
+-- Create a new layout group in the ACTIVE TAB's store. See NewLayoutGroupRecord for the
+-- record itself, and for why a second creator exists that does not come through here.
+local function CreateLayoutGroup(name, kind)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return nil end
+    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
+    -- store (born lazily HERE — the first add) with its own id counter.
+    local groups, id
+    if IsOtherTab() then
+        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
+        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
+        id = adDB.nextOtherLayoutGroupID
+        adDB.nextOtherLayoutGroupID = id + 1
+    else
+        -- No spec on My Buffs: refused and said, before the id counter moves.
+        -- AddGroupOfKind (Editor.lua) treats the nil as "nothing was added".
+        if P.RefuseNoSpecWrite and P.RefuseNoSpecWrite() then return nil end
+        groups = GetSpecLayoutGroups()
+        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
+        id = adDB.nextLayoutGroupID
+        adDB.nextLayoutGroupID = id + 1
+    end
+    local group = NewLayoutGroupRecord(id,
+        name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"), kind)
     tinsert(groups, group)
     return group
 end
 P.CreateLayoutGroup = CreateLayoutGroup
+
+-- Drop a group's remembered fold state. Exported for the one kind of caller that removes a
+-- group WITHOUT going through DeleteLayoutGroup: a store-wide sweep, which walks the raw
+-- arrays because the group it is hunting may be in any of them (see pihPurgeStrayMarks in
+-- Cards.lua). The expand table is a file local, so the removal cannot clear it itself.
+local function ForgetGroupExpandState(groupID)
+    expandedGroups[GroupExpandKey(groupID)] = nil
+end
+P.ForgetGroupExpandState = ForgetGroupExpandState
 
 -- Delete a layout group by ID (from the ACTIVE tab's store; the member-
 -- indicator cascade removes from the active pool via RemoveIndicatorInstance's
@@ -1198,14 +1336,6 @@ P.ANCHOR_POSITIONS = ANCHOR_POSITIONS
 -- (S.framePreview declared on the state table)
 -- (S.dragHintText declared on the state table)
 
--- Layout anchors — stored during build
--- (S.contentRightInset and S.origY_framePreview are gone: both were written once in
--- Editor.lua and read nowhere, leftovers of the pre-rework layout.)
-
--- (The DF_AURA_DESIGNER_RESET_GLOBAL popup was retired with the editing-banner
--- "Reset to Global" button — the preset dropdown's "Inherit (Global)" entry now
--- clears a layout's Aura Designer preset override.)
-
 -- ============================================================
 -- UI STATE (v4 redesign — tabbed right panel)
 -- ============================================================
@@ -1302,8 +1432,69 @@ P.BADGE_COLORS = BADGE_COLORS
 
 -- Collect all configured effects into a flat, sorted list
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
-local function CollectAllEffects()
+-- ☠ HELPER-OWNED RECORDS ARE EXCLUDED BY DEFAULT (2026-09-08). A record carrying a
+-- `pihSignal` mark belongs to the Power Infusion Helper, which now has its own page
+-- (Auras > Power Infusion Helper). Krathe's requirement when it moved: "Anything added
+-- should show just on the PI helper page and not in AD itself." Left in this list they
+-- read as stray indicators the user does not remember making, and deleting one there
+-- silently half-dismantles a feature configured somewhere else.
+--
+-- ⚠ AN OPTION, NOT A HARD SKIP, and the difference matters. The helper's own page wants
+-- exactly these rows -- it is the one surface where they ARE the subject -- so the filter
+-- is a caller's choice and the display-name derivation below stays live rather than
+-- becoming unreachable code that looks maintained.
+-- ⚠ Callers that want the designer's behaviour pass nothing: every existing call site
+-- (Cards.lua's Active Indicators list, Rows.lua's) is a designer list and wants them gone.
+-- ☠☠ THE SAME RULE, FOR THE SURFACE THAT NEVER LEARNED IT (2026-09-10).
+-- CollectAllEffects hides helper-owned records from every pool but the helper's; the PREVIEW
+-- CANVAS was written before that rule existed and kept painting them. Krathe: "any buff tab on
+-- AD is showing our PI helper indicators, it should not."
+-- ⚠ THREE LEAKS, ONE CAUSE, and all three are display sites reading a STORE accessor:
+--   · the filter-group placeholder loop read CurrentLayoutGroups (the store) instead of
+--     VisibleLayoutGroups (the display filter) -- the exact split that accessor's own note
+--     describes, applied everywhere except here;
+--   · the placed-instance loop iterated CurrentAuraPool without testing the mark;
+--   · RefreshPreviewEffects did the same for frame-level effects, so a helper BORDER painted
+--     itself over the Any Buff preview.
+-- ⚠ READ IN BOTH DIRECTIONS, exactly like VisibleLayoutGroups: on the helper's own tab the
+-- marked records are the ONLY ones that belong, and the user's unrelated Any Buff work is
+-- what does not. One rule -- "show what this tab is about" -- not two lists of exceptions.
+local function PIHShowsMark(marked)
+    return ((marked and true or false) == IsPIHelperTab())
+end
+P.PIHShowsMark = PIHShowsMark
+
+-- The record this tab may paint, with the frame-level effects it may not removed.
+-- ⚠ PER TYPE KEY, NOT PER RECORD. A helper record is keyed by its filter reference, and
+-- nothing stops the user adding an effect of their own to that same filter from the Any Buff
+-- tab -- so "this record is the helper's" would hide their work along with ours. Same
+-- granularity CollectAllEffects uses.
+-- ⚠ NO COPY IN THE COMMON CASE: a record with nothing to hide is handed straight back, which
+-- is every record in every profile that has never opened the helper.
+-- ☠ A REAL COPY, NOT AN __index PROXY. The painters read auraCfg.border, auraCfg.healthbar and
+-- so on directly, and a metatable would answer every one of those from the original -- hiding
+-- nothing while looking like it did.
+local function PIHVisibleRecord(auraCfg)
+    local hide
+    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
+        local cfg = auraCfg[typeKey]
+        if type(cfg) == "table" and not PIHShowsMark(cfg.pihSignal) then
+            hide = hide or {}
+            hide[typeKey] = true
+        end
+    end
+    if not hide then return auraCfg end
+    local out = {}
+    for k, v in pairs(auraCfg) do
+        if not hide[k] then out[k] = v end
+    end
+    return out
+end
+P.PIHVisibleRecord = PIHVisibleRecord
+
+local function CollectAllEffects(opts)
     local effects = {}
+    local includePIH = opts and opts.includePIH and true or false
 
     local spec = ResolveSpec()
     local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
@@ -1361,15 +1552,22 @@ local function CollectAllEffects()
             -- Placed indicators
             if auraCfg.indicators then
                 for _, indicator in ipairs(auraCfg.indicators) do
+                    if includePIH or not indicator.pihSignal then
                     tinsert(effects, {
                         source      = "placed",
                         auraName    = auraName,
-                        displayName = displayName,
+                        -- Same derivation as the frame-level rows below: a marked indicator
+                        -- (a helper Icon or Square) names itself, from the mark.
+                        -- ⚠ THE RECORD GOES IN TOO, not just the signal: the two helper ICONS
+                        -- differ only in their art, and the type badge says "Icon" for both.
+                        displayName = (indicator.pihSignal and P.PIH_SignalLabel
+                            and P.PIH_SignalLabel(indicator.pihSignal, indicator)) or displayName,
                         indicatorID = indicator.id,
                         typeKey     = indicator.type,
                         config      = indicator,
                         anchor      = indicator.anchor or "CENTER",
                     })
+                    end
                 end
             end
 
@@ -1378,11 +1576,19 @@ local function CollectAllEffects()
             -- 600-spell filter would mean 600 registrations.
             local isFilterOwned = DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) ~= nil
             for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
-                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound") then
+                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound")
+                    and (includePIH or not auraCfg[typeKey].pihSignal) then
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,
-                        displayName = displayName,
+                        -- A marked effect names ITSELF. Without this every effect built on one
+                        -- filter reads identically in the list -- distinguishable only by its
+                        -- type badge, which says what it draws and not what it means.
+                        -- ⚠ DERIVED FROM THE MARK, never a stored string: a saved label
+                        -- is a translated string frozen into the profile, so it would keep the
+                        -- locale it was created in while every other name followed the client.
+                        displayName = (auraCfg[typeKey].pihSignal and P.PIH_SignalLabel
+                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal, auraCfg[typeKey])) or displayName,
                         typeKey     = typeKey,
                         config      = auraCfg[typeKey],
                     })
@@ -1772,6 +1978,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     -- the table but the preview ignores them: the canvas is standalone, not layered over a
     -- unit frame, so there is nothing for a z-order band to mean there.)
     local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(GetAuraDesignerDB())
+    -- A packed member renders as the group flow draws it: scale folded into its size and
+    -- text, because the flow runs the slot at scale 1 (see Factory memberView).
+    if flowParent and Factory.MemberView then
+        effectiveConfig = Factory:MemberView(effectiveConfig, defs)
+    end
     local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defs)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
@@ -1837,9 +2048,8 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         slot:SetFrameStrata(mockFrame:GetFrameStrata())
         slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
     end
-    -- ★ ALPHA. The canvas set size, scale, anchor, strata and level but never alpha, so an
-    -- indicator dropped to 40% rendered full-strength here while the live frame faded it
-    -- correctly — the preview disagreeing with the thing it previews.
+    -- ★ ALPHA. The canvas must apply it too: an indicator dropped to 40% has to fade here
+    -- exactly as the live frame fades it.
     -- Alpha is not in cfg because it is not a style/layout field: live applies it separately
     -- through applyPlacedAlpha, which stashes _dfADBaseAlpha for the OOR fade and writes the
     -- slot's host. The canvas has neither a handle nor an OOR pass, so it reads the SAME
@@ -1855,11 +2065,8 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     -- renders — so the FontString, its font, anchor, offsets, alpha and holder level are
     -- all container-engine output here, not decisions made in this file.
     --
-    -- This used to hand-build a FontString and hand-set its layering. Two separate bugs
-    -- came out of that in one day: the live companion moved and the canvas could not
-    -- follow, because the canvas was never DERIVED from it, only numerically matched. The
-    -- rule is the one that already covers test mode — a preview may differ in DATA, never
-    -- in RENDERING.
+    -- The canvas must be DERIVED from the live companion, never numerically matched to it.
+    -- Same rule as test mode: a preview may differ in DATA, never in RENDERING.
     --
     -- nil (hidden) whenever the live companion would also be absent: alertSlotStyle is the
     -- single gate for both, so "off", "no formatter API" and "show-when-missing" can no
@@ -1947,9 +2154,20 @@ local DEBUFF_CATEGORY_SAMPLES = {
     role         = { -6343, -113746 },        -- Thunder Clap, Mystic Touch
     priority     = { -980, -34914 },          -- Agony, Vampiric Touch
     crowdControl = { -118, -6770, -5782 },    -- Polymorph, Sap, Fear
-    raid         = { -589, -1943 },           -- Shadow Word: Pain, Rupture
     dispellable  = { -339, -51514 },          -- Entangling Roots, Hex
-    _order = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" },
+    important        = { -8122 },             -- Psychic Scream
+    raidInCombat     = { -589 },              -- Shadow Word: Pain
+    magic            = { -118 },              -- Polymorph
+    curse            = { -980 },              -- Agony
+    poison           = { -2818 },             -- Deadly Poison
+    disease          = { -55095 },            -- Frost Fever
+    bleed            = { -1943 },             -- Rupture
+    nonPlayer        = { "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8" },   -- skull marker
+    fromPlayer       = { -57724 },            -- Sated
+    mine             = { -589 },              -- Shadow Word: Pain
+    _order = { "boss", "role", "priority", "crowdControl", "dispellable",
+               "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed",
+               "nonPlayer", "fromPlayer", "mine" },
 }
 
 -- Example icons for a container-backed group's placeholder block, or nil when
@@ -2312,9 +2530,12 @@ local function ApplyMemberGroupFlows(mockFrame, flows)
             -- The group's LAYOUT AND STYLE, from the factory. The style is what carries the
             -- duration-strip reservation into the row stride (stripReservation reads
             -- config.style.bar); passing layout alone padded the canvas's rows differently
-            -- from live's for any group with a duration bar.
+            -- from live's for any group with a duration bar. Every packed member's cell
+            -- goes in too, shown or not, because live sizes its row cap from all of them.
+            local recStyles = {}
+            for i, m in ipairs(f.keys) do recStyles[i] = { style = m.style } end
             local cfg = Factory.BuildGroupFlowConfig
-                and Factory:BuildGroupFlowConfig(mockFrame, f.group)
+                and Factory:BuildGroupFlowConfig(mockFrame, f.group, nil, recStyles)
                 or { layout = Factory:BuildGroupLayout(f.group) }
             AC.FlowSlots(f.box, mockFrame, slots, n, cfg, pp)
         else
@@ -2337,10 +2558,9 @@ end
 -- Exact equality on purpose: everything here comes from one resolver, so any difference
 -- at all means a second writer exists. Rounded only for display.
 -- ============================================================
--- ⚠ THROUGH DF:Out, like every other dump. This printed raw — the only bare print() in
--- either addon outside the Out builder — so it arrived with no title rule, no sections,
--- none of the shared tones and no siblings footer, in the middle of pasted logs where
--- telling one dump from the next is the whole point.
+-- ⚠ THROUGH DF:Out, like every other dump — never a bare print(). Raw output carries no
+-- title rule, no sections, none of the shared tones and no siblings footer, in the
+-- middle of pasted logs where telling one dump from the next is the whole point.
 local function DebugDumpCanvasPins()
     local AC = DF.AuraContainer
     local mockFrame = S.framePreview and S.framePreview.mockFrame
@@ -2469,13 +2689,17 @@ local function RefreshPlacedIndicators()
     -- FILTER GROUP PLACEHOLDERS (My Buffs / Other Buffs): labeled outline
     -- blocks via the shared helper above. Pooled per group id — SEPARATE pool
     -- table per tab (the two id counters can collide, mirror the dgroup pool);
-    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the classic
+    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the
     -- member-group layout.
     do
         local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"
         local fgPool = mockFrame[fgPoolKey]
         if not fgPool then fgPool = {}; mockFrame[fgPoolKey] = fgPool end
-        for _, group in ipairs(specGroups) do
+        -- ⚠ VisibleLayoutGroups, NOT `specGroups`. This is a DISPLAY loop and specGroups is the
+        -- STORE -- it is kept raw above because the placement pass before it is LOGIC (it
+        -- resolves an indicator's owning group and must find one wherever it lives). Reading
+        -- the store here drew the helper's Cooldown Icons group on the Any Buff preview.
+        for _, group in ipairs(VisibleLayoutGroups()) do
             if group.kind == "filter" and group.enabled ~= false then
                 tinsert(placedIndicators,
                     DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8,
@@ -2510,12 +2734,18 @@ local function RefreshPlacedIndicators()
     -- "other:" prefix so the two pools' slots can't collide in the store.
     -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
     -- (keyPrefix hoisted above the group-position pass — same value.)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ AND THE MARK, which this loop never tested: the Any Buff pool holds the
+              -- helper's records too, so every helper icon and square painted itself on the
+              -- designer's own canvas. See PIHShowsMark.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
                 local capturedAura = auraName
                 local capturedID = indicator.id
@@ -2565,7 +2795,7 @@ local function GetOrCreatePreviewCustomBorder(mockFrame, key)
     return pool[key]
 end
 
-local function RefreshPreviewEffects()
+local function RefreshPreviewEffects(opts)
     if not S.framePreview then return end
     local mockFrame = S.framePreview.mockFrame
     if not mockFrame then return end
@@ -2591,10 +2821,8 @@ local function RefreshPreviewEffects()
     end
     mockFrame:SetAlpha(1)
     -- Reset the shared single-target elements to their defaults ONCE, before any
-    -- aura's effects are applied. Previously the background's reset lived in an
-    -- in-loop `elseif`, so a background-less aura could wipe an earlier aura's
-    -- background depending on pairs() iteration order — the intermittent
-    -- "doesn't show on preview" report for Background / Health Bar Color.
+    -- aura's effects are applied. An in-loop reset lets a background-less aura wipe
+    -- an earlier aura's background, depending on pairs() iteration order.
     if S.framePreview.healthBg then
         S.framePreview.healthBg:SetColorTexture(0, 0, 0, 0.4)
     end
@@ -2605,14 +2833,25 @@ local function RefreshPreviewEffects()
     -- Frame-level effects all draw onto the SAME single preview elements (one
     -- healthFill / healthBg / nameText / etc.), so when more than one aura
     -- configures the same type they conflict. The runtime resolves this by
-    -- priority (higher number wins; first claim per type — see prioritySort and
-    -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
+    -- priority (higher number wins; first claim per type — see pickWinner in
+    -- AuraDesigner/Factory.lua). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
     -- in descending-priority order (tiebreak by name) and apply first-wins per type.
+    -- ⚠ THE POOL IS AN ARGUMENT, defaulting to exactly what it always was.
+    -- The Power Infusion Helper's page shows this same canvas but must paint ONLY the
+    -- helper's own records -- the Any Buff pool it shares holds the user's unrelated work
+    -- too, and a preview on a page about one feature that quietly renders another feature's
+    -- effects is worse than no preview. It passes a table holding the SAME cfg tables, so
+    -- every painter below is unchanged and cannot drift from the designer's rendering.
     local sortedAuras = {}
-    for auraName, auraCfg in pairs(CurrentAuraPool()) do
+    for auraName, auraCfg in pairs((opts and opts.pool) or CurrentAuraPool()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
-            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = auraCfg, priority = auraCfg.priority or 5 }
+            -- ⚠ THE HELPER'S FRAME-LEVEL EFFECTS ARE STRIPPED FOR THE DESIGNER, and ONLY the
+            -- helper's -- PIHVisibleRecord hides per type key, so a user's own effect on the
+            -- same filter record still paints. Without it a helper border draws itself over
+            -- the Any Buff preview with no card in the effects list to explain it.
+            local cfg = PIHVisibleRecord(auraCfg)
+            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = cfg, priority = cfg.priority or 5 }
         end
     end
     sort(sortedAuras, function(a, b)
@@ -2634,7 +2873,7 @@ local function RefreshPreviewEffects()
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
         -- ANIMATION: kept, because the live frame-level border animates again (the
-        -- AuraContainer ANIMATION FILTER reopened OVERLAY mode, 2026-08-27) and a preview
+        -- AuraContainer ANIMATION FILTER reopened OVERLAY mode) and a preview
         -- that stripped it would show something the live render does not — the one thing
         -- previews must never do. The overlay here is an editor-owned frame, not a slot
         -- child, so it is a plain DF.Border with no restriction to worry about, and the
@@ -2660,7 +2899,7 @@ local function RefreshPreviewEffects()
         else
             -- Tint: blend original green with the configured color, scaled by alpha
             -- so dragging the colour picker's alpha visibly weakens the tint
-            -- (matches ApplyHealthBar in Indicators.lua: overlay = blend × alpha).
+            -- (matches healthbarBlend in AuraDesigner/Factory.lua: overlay = blend × alpha).
             local effBlend = blend * (clr.a or 1)
             local r = 0.18 * (1 - effBlend) + clr.r * effBlend
             local g = 0.80 * (1 - effBlend) + clr.g * effBlend
@@ -2740,11 +2979,20 @@ S.RefreshPreviewLightweight = function()
     -- Re-apply placed indicator instances using current settings
     -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their
     -- slot; keyPrefix hoisted above the group-position pass — same value)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ THE MARK GATE BELONGS HERE TOO, and leaving it off the lightweight pass undid the
+              -- full pass's fix on the very next slider drag. RenderPreviewIndicator CREATES a pooled
+              -- slot on a miss and this route never calls ClearPlacedIndicators, so an unfiltered walk
+              -- paints the helper's records onto the designer canvas that RefreshPlacedIndicators
+              -- deliberately keeps them off -- the Any Buff pool physically holds them. The
+              -- frame-level half of this same function already filters through PIHVisibleRecord.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
 
                 -- Apply layout group position override if applicable

@@ -399,14 +399,30 @@ end
 -- They coincide only when the user runs the "pixel perfect" UI scale exactly, which
 -- is why this hid for so long. See the pre-snap note in DF:UpdateHighlights.
 --
+-- ☠ BUT THE EFFECTIVE SCALE ALONE IS NOT A DEVICE PIXEL. value * scale is UI units at
+-- scale 1; a real pixel is also physicalHeight/768 of those. Snapping to the former
+-- left thickness 2 at 1440p / 0.5333 as 3.75px and Inset -9/-10 as 9.375px, and the
+-- renderer rounds each edge of a line on its own -- so the drawn thickness changed
+-- with the inset ("Inset -9 or -10 loses 1px", 2026-09). Pixels per unit is the
+-- kit's DandersUI/Theme.lua PixelsPerUnit, identical maths: eff * physH / 768. Keep
+-- the two in step. If the screen size is unusable, fall back to the old scale-only
+-- snap rather than erroring.
+local function HighlightPixelsPerUnit(scale)
+    if not scale or scale <= 0 then return nil end
+    local _, physH = GetPhysicalScreenSize()
+    if not physH or physH <= 0 then return scale end
+    return scale * physH / 768
+end
+
 -- Round UP (with an epsilon for exact integers) rather than to nearest: a thickness
 -- of 1 must never round to 0 device pixels and vanish, and every +1 step on the
 -- slider has to be visible.
 function DF:SnapHighlightThickness(thickness, scale)
-    if not scale or scale <= 0 then return thickness end
-    local px = (thickness or 0) * scale                -- desired thickness in device pixels
+    local ppu = HighlightPixelsPerUnit(scale)
+    if not ppu then return thickness end
+    local px = (thickness or 0) * ppu                  -- desired thickness in device pixels
     px = math.max(1, math.ceil(px - 0.01))
-    return px / scale
+    return px / ppu
 end
 
 -- Inset lands on the physical grid too: a fractional inset makes a 1px edge straddle
@@ -414,8 +430,9 @@ end
 -- minimum and 0 must stay 0.
 function DF:SnapHighlightInset(inset, scale)
     if not inset or inset == 0 then return inset end
-    if not scale or scale <= 0 then return inset end
-    return math.floor(inset * scale + 0.5) / scale
+    local ppu = HighlightPixelsPerUnit(scale)
+    if not ppu then return inset end
+    return math.floor(inset * ppu + 0.5) / ppu
 end
 
 -- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
@@ -511,6 +528,8 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         
     elseif mode == "ANIMATED" or mode == "DASHED" then
         DF:InitAnimatedBorder(ch)
+        -- Thickness and inset are already whole device pixels (snapped above), which
+        -- is what keeps the dashes' thickness independent of the inset.
         ch.animThickness = thickness
         ch.animInset = inset
         ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
@@ -651,10 +670,9 @@ end
 -- retired this cycle. UpdateHighlightStyleColor was removed then; this export was
 -- missed, and kept a comment naming a caller that had just gone away.
 
--- (Removed) UpdateHighlightStyleColor, a per-style colour-only fast path that skipped
--- ApplyHighlightStyle's full tear-down. Its only consumer was the pre-12.1 Aura Designer
--- EXPIRING ticker (~3 Hz), which was deliberately retired this cycle, so the helper and its
--- DF.UpdateHighlightStyleColor export were left with zero callers across both addons.
+-- (Removed) UpdateHighlightStyleColor and its DF export, a colour-only fast path that
+-- skipped ApplyHighlightStyle's full tear-down. Its only consumer, the pre-12.1 Aura
+-- Designer EXPIRING ticker, was retired this cycle, leaving it with zero callers.
 --
 -- ⚠ KEEP THE REASON IT EXISTED. ApplyHighlightStyle is a full rebuild: it hides every edge
 -- texture, hides every dash in the animated border (~80 Hide ops), drops the frame from the
@@ -729,11 +747,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         local frameIndex = nil
         
         -- ★ frame.index is stamped at creation (TestFramePool.CreateTestFrame), so the
-        -- answer is already on the frame. This used to LINEAR-SCAN both test arrays --
-        -- up to 45 identity comparisons per frame per highlight update -- to recover a
-        -- value it was already holding. Party frames are 0-based in the pool and this
+        -- answer is already on the frame. Party frames are 0-based in the pool and this
         -- consumer wants 0-based; raid frames are 1-based, hence the shift.
-        -- (Audit, 2026-08-07.)
         if frame.dfIsTestFrame then
             if frame.isRaidFrame then
                 frameIndex = (frame.index or 1) - 1
@@ -1156,6 +1171,29 @@ end
 -- Expose for external use
 DF.UpdateAllHighlights = UpdateAllHighlights
 
+-- ☠ A SETTINGS COMMIT NEVER REPAINTED THE LIVE HIGHLIGHTS. Every settings widget
+-- commits through DF:UpdateAll (slider release / typed value, dropdown pick, colour
+-- picker close), which lands in UpdateAll_Now. In Test Mode that reaches
+-- RefreshTestFrames -> UpdateTestFrame -> UpdateHighlights, so the preview was right.
+-- On LIVE frames it reaches UpdateAllFrames_Now / UpdateRaidLayout_Now, which only run
+-- ApplyFrameLayout -- no highlight paint -- so the selected frame kept whatever the
+-- drag-time LightweightUpdateHighlight left behind (four solid lines; no Mode, no Frame
+-- Level, nothing for Corners/Glow/Animated/Dashed) until a hover or target change
+-- repainted it. Changing Mode repainted nothing at all.
+-- ★ The same repaint PLAYER_TARGET_CHANGED uses, not a copy of it. Test Mode is skipped:
+-- UpdateAll_Now already repainted the test frames, and UpdateHighlights on a LIVE frame
+-- during Test Mode takes its forced-selection-by-index branch.
+-- ⚠ No combat guard needed: highlights are plain UIParent children, and this is the
+-- exact path the target-change event already runs in combat. In practice the scheduler
+-- holds UpdateAll_Now until PLAYER_REGEN_ENABLED anyway, and that event repaints too.
+if DF.UpdateAll_Now then
+    hooksecurefunc(DF, "UpdateAll_Now", function()
+        -- Same readiness gate as the event handler below.
+        if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) or DF.testMode or DF.raidTestMode then return end
+        UpdateAllHighlights()
+    end)
+end
+
 -- ============================================================
 -- EVENT-DRIVEN HIGHLIGHTS (Replaces timer-based updates)
 -- ============================================================
@@ -1163,10 +1201,7 @@ DF.UpdateAllHighlights = UpdateAllHighlights
 -- Events used:
 --   PLAYER_TARGET_CHANGED - Update all frames (old target loses selection, new gains)
 --   UNIT_THREAT_SITUATION_UPDATE - Update specific unit's frame for aggro changes
---   PLAYER_REGEN_ENABLED - Safety refresh when leaving combat (clears any stuck highlights)
---   GROUP_ROSTER_UPDATE - Safety refresh when group composition changes
---
--- Converted 2025-01-20. See PERFORMANCE_OPTIMIZATIONS.md for details.
+--   PLAYER_REGEN_ENABLED / PLAYER_ENTERING_WORLD - Safety refresh (clears stuck highlights)
 -- ============================================================
 
 local highlightEventFrame = CreateFrame("Frame")
@@ -1176,8 +1211,8 @@ highlightEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 highlightEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
-    -- Safety check - wait for initialization
-    if not DF.partyHeader then return end
+    -- Wait for initialization (any group header; party frames can be disabled).
+    if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) then return end
     
     if event == "PLAYER_TARGET_CHANGED" then
         -- Target changed - need to update ALL frames

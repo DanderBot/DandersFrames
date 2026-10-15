@@ -18,12 +18,17 @@ local headerDebug = DF:MakeDebugPrinter("HEADERS")
 -- Console. Logging cost is one boolean check when disabled.
 -- ============================================================
 
+-- DandersMover is OPTIONAL: nil here means every routing check below falls through to the
+-- legacy movers unchanged. Resolved once at load; the lib is an OptionalDep so it has
+-- already registered with LibStub by now.
+local Mover = LibStub and LibStub("DandersMover-1.0", true)
+
 local function ShortCaller(level)
     -- Returns "filename:line" of the caller `level` frames up.
     -- level=2 -> direct caller of the function that calls ShortCaller.
     local info = debugstack(level or 2, 1, 0)
     if not info then return "?" end
-    -- debugstack format: "...\Frames\Position.lua:1841: in function 'NudgePosition'\n"
+    -- debugstack format: "...\Frames\Position.lua:<line>: in function 'SetPositionRecord'\n"
     local file, line = info:match("([^\\/]+):(%d+):")
     if file then return file .. ":" .. line end
     return "?"
@@ -40,351 +45,6 @@ function DF:LogRaidAnchorWrite(reason, newX, newY)
     local oldX, oldY = db and db.raidAnchorX or 0, db and db.raidAnchorY or 0
     DF:Debug("RAIDPOS", "raidAnchor WRITE [%s] @ %s : (%.1f,%.1f) -> (%.1f,%.1f)",
         tostring(reason), ShortCaller(3), oldX, oldY, newX or 0, newY or 0)
-end
-
--- ============================================================
--- POSITION PANEL MODE DESCRIPTORS
--- ============================================================
--- The position panel (the floating nudge UI shown while unlocking
--- frames) supports multiple targets: party frames, raid frames, the
--- personal targeted spells container, and the Targeted List. Each
--- target has its own db fields and its own "apply" function. The
--- descriptor table below encapsulates those differences so the panel
--- code can stay target-agnostic.
---
--- DF.positionPanelMode selects which descriptor is active. Clicking
--- any mover switches the mode; the panel then re-reads from the
--- descriptor's db fields and nudge operations write back to them.
-
--- Resolve the pinned set the panel is currently targeting (current live mode,
--- auto-layout-overlay aware — same table the runtime and drag handler use).
-local function ResolvePinnedSet()
-    if not (DF.PinnedFrames and DF.PinnedFrames.GetSetForPosition) then return nil end
-    return DF.PinnedFrames:GetSetForPosition(DF.positionPanelPinnedSet or 1)
-end
-
--- "Anchor To" options for the pinned position panel. SCREEN = free placement
--- (default; anchored to UIParent). FRAMES_* glue the set's growth corner to the
--- raid/party frames container at that corner, with X/Y as a fine offset, so the
--- set tracks the frames and pinned↔frames alignment stays locked. The dropdown's
--- label (set in UpdatePositionPanel) names the mode ("Raid"/"Party Frames"); the
--- option text is just the corner. Stored in set.position.anchorTo (nil = SCREEN).
-local PINNED_ANCHOR_OPTIONS = {
-    SCREEN             = L["Screen (Free)"],
-    FRAMES_TOPLEFT     = L["Top Left"],
-    FRAMES_TOP         = L["Top"],
-    FRAMES_TOPRIGHT    = L["Top Right"],
-    FRAMES_LEFT        = L["Left"],
-    FRAMES_CENTER      = L["Center"],
-    FRAMES_RIGHT       = L["Right"],
-    FRAMES_BOTTOMLEFT  = L["Bottom Left"],
-    FRAMES_BOTTOM      = L["Bottom"],
-    FRAMES_BOTTOMRIGHT = L["Bottom Right"],
-    _order = { "SCREEN", "FRAMES_TOPLEFT", "FRAMES_TOP", "FRAMES_TOPRIGHT",
-               "FRAMES_LEFT", "FRAMES_CENTER", "FRAMES_RIGHT",
-               "FRAMES_BOTTOMLEFT", "FRAMES_BOTTOM", "FRAMES_BOTTOMRIGHT" },
-}
-
-local POSITION_MODES = {
-    party = {
-        title = "Party Position",
-        getDB = function() return DF:GetDB() end,
-        xField = "anchorX",
-        yField = "anchorY",
-        apply = function() if DF.UpdateContainerPosition then DF:UpdateContainerPosition() end end,
-        useAccentColor = "accent",  -- main theme color
-    },
-    raid = {
-        title = "Raid Position",
-        getDB = function() return DF:GetRaidDB() end,
-        xField = "raidAnchorX",
-        yField = "raidAnchorY",
-        apply = function() if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end end,
-        logWrites = true,
-        autoProfileX = "raidAnchorX",  -- matches xField; AutoProfilesUI key
-        autoProfileY = "raidAnchorY",
-        useAccentColor = "raid",
-    },
-    personal = {
-        title = "Personal Targeted",
-        getDB = function() return DF:GetDB() end,
-        xField = "personalTargetedSpellX",
-        yField = "personalTargetedSpellY",
-        apply = function()
-            if DF.UpdatePersonalTargetedSpellsPosition then
-                DF:UpdatePersonalTargetedSpellsPosition()
-            end
-            -- Also reposition the personal mover to match
-            if DF.personalTargetedSpellsMover and DF.personalTargetedSpellsMover:IsShown() then
-                local db = DF:GetDB()
-                DF.personalTargetedSpellsMover:ClearAllPoints()
-                DF.personalTargetedSpellsMover:SetPoint("CENTER", UIParent, "CENTER",
-                    db.personalTargetedSpellX or 0, db.personalTargetedSpellY or -150)
-            end
-        end,
-        useAccentColor = "accent",
-    },
-    targetedList = {
-        title = "Targeted List",
-        getDB = function() return DF:GetDB() end,
-        xField = "targetedListX",
-        yField = "targetedListY",
-        apply = function()
-            if DF.UpdateTargetedListLayout then DF:UpdateTargetedListLayout() end
-            -- Also reposition the mover to match
-            if DF.targetedListMoverFrame and DF.targetedListMoverFrame:IsShown() then
-                local db = DF:GetDB()
-                DF.targetedListMoverFrame:ClearAllPoints()
-                DF.targetedListMoverFrame:SetPoint("CENTER", UIParent, "CENTER",
-                    db.targetedListX or 0, db.targetedListY or -10)
-            end
-        end,
-        useAccentColor = "accent",
-    },
-    pinned = {
-        -- Title + accent track the targeted set's name and mode, e.g.
-        -- "NPC (Raid) - Position" in raid orange.
-        title = function()
-            local i = DF.positionPanelPinnedSet or 1
-            local pf = DF.PinnedFrames
-            local label = pf and pf.GetPositionPanelLabel and pf:GetPositionPanelLabel(i)
-            return format(L["%s - Position"], label or format(L["Pinned %d"], i))
-        end,
-        -- Pinned X/Y live NESTED in set.position = {point, x, y}, unlike the flat
-        -- db fields the other modes use. Return a thin proxy so the shared panel
-        -- code (which does db[xField] / db[yField]) keeps working unchanged: x/y
-        -- map to the set's position, and every other key (snapToGrid, gridSize,
-        -- hideDragOverlay…) falls through to the party db where those live.
-        getDB = function()
-            local set = ResolvePinnedSet()
-            local partyDB = DF:GetDB()
-            if not set then return partyDB end
-            set.position = set.position or { point = "CENTER", x = 0, y = 0 }
-            local pos = set.position
-            return setmetatable({}, {
-                __index = function(_, k)
-                    if k == "x" then return pos.x
-                    elseif k == "y" then return pos.y
-                    else return partyDB[k] end
-                end,
-                __newindex = function(_, k, v)
-                    if k == "x" then pos.x = v
-                    elseif k == "y" then pos.y = v
-                    else partyDB[k] = v end
-                end,
-            })
-        end,
-        xField = "x",
-        yField = "y",
-        apply = function()
-            if DF.PinnedFrames and DF.PinnedFrames.ApplySetPosition then
-                DF.PinnedFrames:ApplySetPosition(DF.positionPanelPinnedSet or 1)
-            end
-        end,
-        -- Raid orange when the targeted set is a raid set, party accent otherwise.
-        useAccentColor = function()
-            return (DF.PinnedFrames and DF.PinnedFrames.IsPositionTargetRaid
-                and DF.PinnedFrames:IsPositionTargetRaid()) and "raid" or "accent"
-        end,
-    },
-}
-
--- Accessor helper. Defaults to party mode if something's off.
-local function GetPositionMode()
-    return POSITION_MODES[DF.positionPanelMode] or POSITION_MODES.party
-end
-
--- Whether snap-to-grid is on for the CURRENTLY targeted panel mode. Mirrors the
--- panel checkbox: pinned uses its own flag, every other mode the shared one.
-local function SnapEnabledForPanel()
-    local db = DF:GetDB()
-    if not db then return false end
-    if DF.positionPanelMode == "pinned" then return db.pinnedSnapToGrid and true or false end
-    return db.snapToGrid and true or false
-end
-
--- Show or hide the grid overlay to match the active mode's snap state. Called on
--- panel mode switches so the grid follows pinned-vs-main snap. Only acts while the
--- panel is open (unlocked); locking hides the grid via Lock*Frames.
-local function SyncGridToPanelMode()
-    if not DF.gridFrame then return end
-    if not (DF.positionPanel and DF.positionPanel:IsShown()) then return end
-    if SnapEnabledForPanel() then
-        DF.gridFrame:Show()
-        if DF.gridFrame.RefreshLines then DF.gridFrame.RefreshLines() end
-    else
-        DF.gridFrame:Hide()
-        DF:HideSnapPreview()
-    end
-end
-
--- Exposed so the movers (personal targeted spells, targeted list)
--- can switch the panel target when clicked.
-function DF:SetPositionPanelMode(mode)
-    if not POSITION_MODES[mode] then return end
-    DF.positionPanelMode = mode
-    if DF.positionPanel then
-        if DF.positionPanel.UpdateTheme then DF.positionPanel:UpdateTheme() end
-        DF:UpdatePositionPanel()
-    end
-    SyncGridToPanelMode()
-    -- Highlight whichever pinned handle the panel now drives (or clear them).
-    if DF.PinnedFrames and DF.PinnedFrames.RefreshMoverActiveStates then
-        DF.PinnedFrames:RefreshMoverActiveStates()
-    end
-end
-
-function DF:CreateMoverFrame()
-    -- Cannot create UI elements during combat
-    if InCombatLockdown() then return end
-    
-    -- Don't recreate if already exists
-    if DF.moverFrame then return end
-    
-    -- CRITICAL: Ensure container exists before creating mover
-    if not DF.container then
-        DF:Err("Cannot create mover - DF.container doesn't exist!")
-        return
-    end
-    
-    local mover = CreateFrame("Frame", "DandersFramesMover", DF.container, "BackdropTemplate")
-    mover:SetAllPoints(DF.container)
-    mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; level 100 renders above them
-    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
-    -- This is the party container's mover (raid has its own in Frames/Init.lua),
-    -- so it pins the party pole rather than following the selected mode.
-    DF.GUI:CreateMoverBackdrop(mover, { isRaid = false })
-    mover:EnableMouse(true)
-    mover:SetMovable(true)
-    mover:RegisterForDrag("LeftButton")
-    mover:Hide()
-    
-    local label = mover:CreateFontString(nil, "OVERLAY")
-    label:SetPoint("CENTER")
-    -- Set font explicitly to avoid "Font not set" errors
-    DF.GUI:SetSettingsFont(label, 14, "OUTLINE")
-    label:SetText(L["Party Frames\nDrag to move"])
-    label:SetTextColor(1, 1, 1, 1)
-    
-    DF.moverFrame = mover
-    
-    -- Shared drag state between OnDragStart/OnUpdate/OnDragStop
-    local dragOffsetX, dragOffsetY = 0, 0
-
-    -- Left-click switches the shared position panel to party mode.
-    -- This is necessary because clicking the personal or targeted-list
-    -- mover switches the panel away from party — clicking the party
-    -- mover should bring it back.
-    mover:HookScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("party")
-        end
-    end)
-
-    mover:SetScript("OnDragStart", function(self)
-        -- Switch the position panel to party mode so nudge buttons
-        -- affect the party container.
-        if DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("party")
-        end
-        DF.isDragging = true
-        -- Use saved db position as truth — avoids all GetCenter/GetLeft
-        -- ambiguity on scaled frames. Cursor position in UIParent coords.
-        local db = DF:GetDB()
-        local pScale = UIParent:GetEffectiveScale()
-        local startCursorX, startCursorY = GetCursorPosition()
-        startCursorX = startCursorX / pScale
-        startCursorY = startCursorY / pScale
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        -- The frame's visual center in UIParent coords (known from saved position)
-        local frameCX = screenWidth / 2 + (db.anchorX or 0)
-        local frameCY = screenHeight / 2 + (db.anchorY or 0)
-        local cursorOffX = frameCX - startCursorX
-        local cursorOffY = frameCY - startCursorY
-        -- Initialize shared drag state
-        dragOffsetX = db.anchorX or 0
-        dragOffsetY = db.anchorY or 0
-
-        -- Start OnUpdate to track cursor and sync positions during drag
-        self:SetScript("OnUpdate", function()
-            local cursorX, cursorY = GetCursorPosition()
-            local ps = UIParent:GetEffectiveScale()
-            cursorX = cursorX / ps
-            cursorY = cursorY / ps
-            -- New frame center = cursor + stored offset from cursor to frame center
-            local sw, sh = GetScreenWidth(), GetScreenHeight()
-            dragOffsetX = (cursorX + cursorOffX) - sw / 2
-            dragOffsetY = (cursorY + cursorOffY) - sh / 2
-            -- Apply with frame scale compensation
-            local frameScale = DF.container:GetScale() or 1
-            DF.container:ClearAllPoints()
-            DF.container:SetPoint("CENTER", UIParent, "CENTER", dragOffsetX / frameScale, dragOffsetY / frameScale)
-
-            -- Sync testPartyContainer to container position (for live preview)
-            if DF.testPartyContainer then
-                DF.testPartyContainer:ClearAllPoints()
-                DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", dragOffsetX / frameScale, dragOffsetY / frameScale)
-            end
-
-            -- Snap preview if enabled
-            local snapDb = DF:GetDB()
-            if snapDb.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-                DF:UpdateSnapPreview(DF.container, dragOffsetX, dragOffsetY)
-            end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        DF.isDragging = false
-
-        -- Stop OnUpdate
-        self:SetScript("OnUpdate", nil)
-
-        -- Hide snap preview lines
-        DF:HideSnapPreview()
-
-        -- Use the last computed offset from OnUpdate (stored in shared upvalues)
-        local x, y = dragOffsetX, dragOffsetY
-
-        -- Snap to grid if enabled
-        local db = DF:GetDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-            x, y = DF:SnapToGrid(x, y)
-        end
-
-        -- Apply snapped position
-        local frameScale = DF.container:GetScale() or 1
-        DF.container:ClearAllPoints()
-        DF.container:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
-
-        -- Sync testPartyContainer to final position
-        if DF.testPartyContainer then
-            DF.testPartyContainer:ClearAllPoints()
-            DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
-        end
-
-        -- Save position. (No anchorPoint write: it was read nowhere -- the anchor is
-        -- the literal "CENTER" at every SetPoint that matters.)
-        db.anchorX = x
-        db.anchorY = y
-
-        -- Update position panel
-        DF:UpdatePositionPanel()
-    end)
-    
-    mover:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            DF:LockFrames()
-        end
-    end)
-    
-    DF.moverFrame = mover
-    
-    -- Create grid overlay
-    DF:CreateGridOverlay()
-    
-    -- Create position control panel
-    DF:CreatePositionPanel()
 end
 
 -- ============================================================
@@ -425,7 +85,6 @@ local function RefreshPermMoverActions()
         DF:Say(format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
     end },
     RELOAD_UI         = { label = L["Reload UI"],                  combatSafe = true,  fn = function() ReloadUI() end },
-    RESET_POSITION    = { label = L["Reset Position"],             combatSafe = false, fn = function() DF:ResetPosition() end },
     READY_CHECK       = { label = L["Ready Check"],                combatSafe = true,  fn = function()
         -- 12.0.7 moves DoReadyCheck into C_PartyInfo and Blizzard migrated
         -- their own callers with NO compat shim for the old global — prefer
@@ -647,7 +306,7 @@ function DF:CreatePermanentMover(container, mode)
     handle:SetSize(db.permanentMoverWidth or 20, db.permanentMoverHeight or 20)
     handle:SetFrameStrata("MEDIUM")
     handle:SetFrameLevel(100)
-    -- Chrome only, NOT CreateMoverBackdrop: this handle's colour is a user setting
+    -- Chrome only, not the theme accent: this handle's colour is a user setting
     -- (permanentMoverColor) with its own hover/in-combat lifecycle in
     -- ApplyHandleColors below, so it must not take the theme hue.
     DF.GUI:CreateElementBackdrop(handle, { edgeSize = 1 })
@@ -739,6 +398,15 @@ function DF:CreatePermanentMover(container, mode)
     -- Manual cursor tracking instead of StartMoving() — WoW's StartMoving
     -- doesn't handle scaled frames correctly and causes a position jump
     handle:SetScript("OnDragStart", function(self)
+        -- Lib present: one editing surface. Open a mover session instead of
+        -- dragging raw -- SetPositionRecord PRESERVES a record's `anchor`, so a
+        -- raw drag under a live anchor moves x/y and the next Mover:Apply yanks
+        -- the container back. The raw drag below is the lib-ABSENT fallback only
+        -- (spec Decision 2).
+        if Mover then
+            if isRaid then DF:UnlockRaidFrames() else DF:UnlockFrames() end
+            return
+        end
         if InCombatLockdown() then return end
         self.isDragging = true
         -- Keep fully visible during drag
@@ -815,24 +483,14 @@ function DF:CreatePermanentMover(container, mode)
         local y = (finalCursorY + self._cursorOffY) - screenHeight / 2
 
         if isRaid then
-            DF:LogRaidAnchorWrite("DragMover:OnDragStop", x, y)
-            -- When an auto layout is active, the permanent mover edits THAT layout's
-            -- position (not the base) — otherwise it would silently move the base
-            -- anchors while the layout drives the frames. Falls through to the base
-            -- write when no layout is active (or while editing, where the preview
-            -- path captures it).
-            local routed = DF.AutoProfilesUI and DF.AutoProfilesUI.SetActiveLayoutRaidPosition
-                and DF.AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
-            if not routed then
-                local stopDb = DF:GetRaidDB()
-                stopDb.raidAnchorX = x
-                stopDb.raidAnchorY = y
-                DF:UpdateRaidContainerPosition()
-            end
+            -- The auto-layout routing (and the RAIDPOS log line) now lives in
+            -- DF:SetPositionRecord, so this site keeps its exact behaviour -- an active
+            -- layout still edits THAT layout's position rather than the base anchors --
+            -- while the record and the scalar mirror are written together.
+            DF:SetPositionRecord("raid", { point = "CENTER", x = x, y = y }, "DragMover:OnDragStop")
+            DF:UpdateRaidContainerPosition()
         else
-            local stopDb = DF:GetDB()
-            stopDb.anchorX = x
-            stopDb.anchorY = y
+            DF:SetPositionRecord("party", { point = "CENTER", x = x, y = y })
             DF:UpdateContainerPosition()
         end
     end)
@@ -1220,1015 +878,12 @@ function DF:UpdatePermanentMoverVisibility()
     end
 end
 
--- ============================================================
--- GRID OVERLAY
--- ============================================================
-
-function DF:CreateGridOverlay()
-    local grid = CreateFrame("Frame", "DandersFramesGrid", UIParent)
-    grid:SetAllPoints(UIParent)
-    grid:SetFrameStrata("BACKGROUND")
-    grid:Hide()
-    
-    grid.lines = {}
-    
-    -- Create snap preview lines (shown during drag)
-    local snapPreviewV = grid:CreateTexture(nil, "OVERLAY")
-    snapPreviewV:SetColorTexture(1, 0.2, 0.2, 0.8)  -- Red color
-    snapPreviewV:SetSize(3, GetScreenHeight())
-    snapPreviewV:Hide()
-    grid.snapPreviewV = snapPreviewV
-    
-    local snapPreviewH = grid:CreateTexture(nil, "OVERLAY")
-    snapPreviewH:SetColorTexture(1, 0.2, 0.2, 0.8)  -- Red color
-    snapPreviewH:SetSize(GetScreenWidth(), 3)
-    snapPreviewH:Hide()
-    grid.snapPreviewH = snapPreviewH
-    
-    local function CreateGridLines()
-        -- Clear existing lines
-        for _, line in ipairs(grid.lines) do
-            line:Hide()
-        end
-        grid.lines = {}
-        
-        -- ☠ ALWAYS THE PARTY DB -- gridSize is party-wide (the slider writes it there,
-        -- SnapToGrid and CalculateSnapPreview read it there). Branching on the panel mode
-        -- here meant the DRAWN grid could use a different spacing from the one positions
-        -- actually snap to, which is the worst of the three to have disagreed.
-        local db = DF:GetDB()
-        local gridSize = db and db.gridSize or 20
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        local centerX, centerY = screenWidth / 2, screenHeight / 2
-        
-        -- Vertical lines (from center outward)
-        local x = 0
-        while x <= screenWidth / 2 do
-            -- Right of center
-            local lineR = grid:CreateTexture(nil, "BACKGROUND")
-            lineR:SetColorTexture(1, 1, 1, x == 0 and 0.5 or 0.15)
-            lineR:SetSize(x == 0 and 2 or 1, screenHeight)
-            lineR:SetPoint("CENTER", grid, "CENTER", x, 0)
-            table.insert(grid.lines, lineR)
-            
-            -- Left of center (skip 0 - already drawn)
-            if x > 0 then
-                local lineL = grid:CreateTexture(nil, "BACKGROUND")
-                lineL:SetColorTexture(1, 1, 1, 0.15)
-                lineL:SetSize(1, screenHeight)
-                lineL:SetPoint("CENTER", grid, "CENTER", -x, 0)
-                table.insert(grid.lines, lineL)
-            end
-            
-            x = x + gridSize
-        end
-        
-        -- Horizontal lines (from center outward)
-        local y = 0
-        while y <= screenHeight / 2 do
-            -- Above center
-            local lineT = grid:CreateTexture(nil, "BACKGROUND")
-            lineT:SetColorTexture(1, 1, 1, y == 0 and 0.5 or 0.15)
-            lineT:SetSize(screenWidth, y == 0 and 2 or 1)
-            lineT:SetPoint("CENTER", grid, "CENTER", 0, y)
-            table.insert(grid.lines, lineT)
-            
-            -- Below center (skip 0 - already drawn)
-            if y > 0 then
-                local lineB = grid:CreateTexture(nil, "BACKGROUND")
-                lineB:SetColorTexture(1, 1, 1, 0.15)
-                lineB:SetSize(screenWidth, 1)
-                lineB:SetPoint("CENTER", grid, "CENTER", 0, -y)
-                table.insert(grid.lines, lineB)
-            end
-            
-            y = y + gridSize
-        end
-    end
-    
-    grid:SetScript("OnShow", CreateGridLines)
-    grid.RefreshLines = CreateGridLines
-    
-    DF.gridFrame = grid
-end
-
--- Calculate snap position and return the grid line positions for preview
-function DF:CalculateSnapPreview(x, y, container)
-    -- ☠ ALWAYS THE PARTY DB. gridSize is party-wide -- the slider writes it there and
-    -- DF:SnapToGrid reads it there. This branch used the RAID table in raid mode, so the
-    -- red preview line and the position actually committed on release snapped to two
-    -- different grids the moment the two values diverged.
-    local db = DF:GetDB()
-    local gridSize = db and db.gridSize or 20
-    local snapThreshold = gridSize / 2
-
-    -- Get frame dimensions (account for scale — GetWidth/GetHeight return logical size)
-    local frameScale = container:GetScale() or 1
-    local frameWidth = container:GetWidth() * frameScale
-    local frameHeight = container:GetHeight() * frameScale
-    
-    -- Calculate edges
-    local leftEdge = x - frameWidth / 2
-    local rightEdge = x + frameWidth / 2
-    local topEdge = y + frameHeight / 2
-    local bottomEdge = y - frameHeight / 2
-    
-    -- Find snap X
-    local snapLineX = nil
-    local centerSnapX = math.floor((x / gridSize) + 0.5) * gridSize
-    local leftSnapX = math.floor((leftEdge / gridSize) + 0.5) * gridSize
-    local rightSnapX = math.floor((rightEdge / gridSize) + 0.5) * gridSize
-    
-    local centerDistX = math.abs(x - centerSnapX)
-    local leftDistX = math.abs(leftEdge - leftSnapX)
-    local rightDistX = math.abs(rightEdge - rightSnapX)
-    
-    if centerDistX <= leftDistX and centerDistX <= rightDistX and centerDistX <= snapThreshold then
-        snapLineX = centerSnapX
-    elseif leftDistX <= rightDistX and leftDistX <= snapThreshold then
-        snapLineX = leftSnapX
-    elseif rightDistX <= snapThreshold then
-        snapLineX = rightSnapX
-    end
-    
-    -- Find snap Y
-    local snapLineY = nil
-    local centerSnapY = math.floor((y / gridSize) + 0.5) * gridSize
-    local topSnapY = math.floor((topEdge / gridSize) + 0.5) * gridSize
-    local bottomSnapY = math.floor((bottomEdge / gridSize) + 0.5) * gridSize
-    
-    local centerDistY = math.abs(y - centerSnapY)
-    local topDistY = math.abs(topEdge - topSnapY)
-    local bottomDistY = math.abs(bottomEdge - bottomSnapY)
-    
-    if centerDistY <= topDistY and centerDistY <= bottomDistY and centerDistY <= snapThreshold then
-        snapLineY = centerSnapY
-    elseif bottomDistY <= topDistY and bottomDistY <= snapThreshold then
-        snapLineY = bottomSnapY
-    elseif topDistY <= snapThreshold then
-        snapLineY = topSnapY
-    end
-    
-    return snapLineX, snapLineY
-end
-
--- Update snap preview lines position
-function DF:UpdateSnapPreview(container, overrideX, overrideY)
-    if not DF.gridFrame or not DF.gridFrame:IsShown() then return end
-
-    local x, y
-    if overrideX and overrideY then
-        -- Use caller-provided position (avoids GetCenter ambiguity on scaled frames)
-        x, y = overrideX, overrideY
-    else
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        local centerX, centerY = container:GetCenter()
-        x = centerX - screenWidth / 2
-        y = centerY - screenHeight / 2
-    end
-
-    local snapLineX, snapLineY = DF:CalculateSnapPreview(x, y, container)
-    
-    -- Update vertical preview line
-    if snapLineX then
-        DF.gridFrame.snapPreviewV:ClearAllPoints()
-        DF.gridFrame.snapPreviewV:SetPoint("CENTER", DF.gridFrame, "CENTER", snapLineX, 0)
-        DF.gridFrame.snapPreviewV:Show()
-    else
-        DF.gridFrame.snapPreviewV:Hide()
-    end
-    
-    -- Update horizontal preview line
-    if snapLineY then
-        DF.gridFrame.snapPreviewH:ClearAllPoints()
-        DF.gridFrame.snapPreviewH:SetPoint("CENTER", DF.gridFrame, "CENTER", 0, snapLineY)
-        DF.gridFrame.snapPreviewH:Show()
-    else
-        DF.gridFrame.snapPreviewH:Hide()
-    end
-end
-
--- Hide snap preview lines
-function DF:HideSnapPreview()
-    if DF.gridFrame then
-        if DF.gridFrame.snapPreviewV then DF.gridFrame.snapPreviewV:Hide() end
-        if DF.gridFrame.snapPreviewH then DF.gridFrame.snapPreviewH:Hide() end
-    end
-end
-
-function DF:SnapToGrid(x, y)
-    -- Grid settings are party-wide; edge-snap container depends on mode.
-    local db = DF:GetDB()
-
-    -- Pinned uses a POINT anchor (x/y is the first frame's position, not a centred
-    -- box), so the centre+edge-snapping model below would mis-place it. Snap the
-    -- coordinate itself to the nearest grid line.
-    if DF.positionPanelMode == "pinned" then
-        local gridSize = db.gridSize or 20
-        return math.floor((x / gridSize) + 0.5) * gridSize,
-               math.floor((y / gridSize) + 0.5) * gridSize
-    end
-
-    local container
-    if DF.positionPanelMode == "raid" then
-        container = DF.raidContainer
-    elseif DF.positionPanelMode == "personal" then
-        container = DF.personalTargetedSpellsMover or DF.container
-    elseif DF.positionPanelMode == "targetedList" then
-        container = DF.targetedListMoverFrame or DF.container
-    else
-        container = DF.container
-    end
-    if not container then return x, y end
-    local gridSize = db.gridSize or 20
-    local snapThreshold = gridSize / 2
-
-    -- Get frame dimensions for edge/center snapping (account for scale)
-    local frameScale = container:GetScale() or 1
-    local frameWidth = container:GetWidth() * frameScale
-    local frameHeight = container:GetHeight() * frameScale
-    
-    -- Calculate edges and center positions relative to frame center
-    local leftEdge = x - frameWidth / 2
-    local rightEdge = x + frameWidth / 2
-    local topEdge = y + frameHeight / 2
-    local bottomEdge = y - frameHeight / 2
-    
-    -- Snap X (check center, left edge, right edge)
-    local snappedX = x
-    local centerSnapX = math.floor((x / gridSize) + 0.5) * gridSize
-    local leftSnapX = math.floor((leftEdge / gridSize) + 0.5) * gridSize
-    local rightSnapX = math.floor((rightEdge / gridSize) + 0.5) * gridSize
-    
-    -- Find closest snap point for X
-    local centerDistX = math.abs(x - centerSnapX)
-    local leftDistX = math.abs(leftEdge - leftSnapX)
-    local rightDistX = math.abs(rightEdge - rightSnapX)
-    
-    if centerDistX <= leftDistX and centerDistX <= rightDistX and centerDistX <= snapThreshold then
-        snappedX = centerSnapX
-    elseif leftDistX <= rightDistX and leftDistX <= snapThreshold then
-        snappedX = leftSnapX + frameWidth / 2
-    elseif rightDistX <= snapThreshold then
-        snappedX = rightSnapX - frameWidth / 2
-    end
-    
-    -- Snap Y (check center, top edge, bottom edge)
-    local snappedY = y
-    local centerSnapY = math.floor((y / gridSize) + 0.5) * gridSize
-    local topSnapY = math.floor((topEdge / gridSize) + 0.5) * gridSize
-    local bottomSnapY = math.floor((bottomEdge / gridSize) + 0.5) * gridSize
-    
-    -- Find closest snap point for Y
-    local centerDistY = math.abs(y - centerSnapY)
-    local topDistY = math.abs(topEdge - topSnapY)
-    local bottomDistY = math.abs(bottomEdge - bottomSnapY)
-    
-    if centerDistY <= topDistY and centerDistY <= bottomDistY and centerDistY <= snapThreshold then
-        snappedY = centerSnapY
-    elseif bottomDistY <= topDistY and bottomDistY <= snapThreshold then
-        snappedY = bottomSnapY + frameHeight / 2
-    elseif topDistY <= snapThreshold then
-        snappedY = topSnapY - frameHeight / 2
-    end
-    
-    return snappedX, snappedY
-end
-
--- ============================================================
--- POSITION CONTROL PANEL (shared for party and raid)
--- ============================================================
-
-function DF:CreatePositionPanel()
-    -- Neutral tones + the party accent reuse the shared GUI palette (same numeric
-    -- values, zero visual change). C_RAID is left private because it is the
-    -- per-mode raid override resolved by GetAccentColor() below, not the GUI's
-    -- selected mode.
-    local GUIColors    = DF.GUI.Colors
-    local C_BACKGROUND = GUIColors.background
-    local C_ELEMENT    = GUIColors.element
-    local C_BORDER     = GUIColors.border
-    local C_ACCENT     = GUIColors.accent  -- party purple (matches main GUI)
-    local C_RAID       = {r = 1.0, g = 0.5, b = 0.2, a = 1}
-    local C_TEXT       = GUIColors.text
-    
-    -- Theme color per mode. Raid uses a distinct color; everything
-    -- else shares the party accent.
-    local function GetAccentColor()
-        local mode = GetPositionMode()
-        local accent = mode.useAccentColor
-        if type(accent) == "function" then accent = accent() end
-        if accent == "raid" then return C_RAID end
-        return C_ACCENT
-    end
-
-    -- Helper to get the correct DB based on mode (now delegates to
-    -- the descriptor; retained for minimal-diff in the panel code).
-    local function GetPositionDB()
-        return GetPositionMode().getDB()
-    end
-
-    -- Helper to lock the correct frames based on mode. Personal and
-    -- Targeted List don't have separate lock paths — they go through
-    -- the regular LockFrames which also hides their movers.
-    local function LockCurrentFrames()
-        if DF.positionPanelMode == "raid" then
-            DF:LockRaidFrames()
-        elseif DF.positionPanelMode == "pinned" then
-            -- Pinned rides the global lock, so its Lock button locks EVERYTHING
-            -- that's currently unlocked — not just the live mode. (You can unlock
-            -- raid frames while solo to preview a raid set; locking from the pinned
-            -- panel must then close the raid unlock too, or it's left orphaned.)
-            local lockedAny = false
-            local rdb = DF.GetRaidDB and DF:GetRaidDB()
-            if rdb and not rdb.raidLocked then DF:LockRaidFrames(); lockedAny = true end
-            local pdb = DF:GetDB()
-            if pdb and not pdb.locked then DF:LockFrames(); lockedAny = true end
-            if not lockedAny then
-                -- Nothing flagged unlocked (e.g. test-mode-only) — fall back to live mode.
-                if DF.PinnedFrames and DF.PinnedFrames.currentMode == "raid" then
-                    DF:LockRaidFrames()
-                else
-                    DF:LockFrames()
-                end
-            end
-        else
-            DF:LockFrames()
-        end
-    end
-    
-    -- Main panel - matches main GUI style
-    local panel = CreateFrame("Frame", "DandersFramesPositionPanel", UIParent, "BackdropTemplate")
-    panel:SetSize(300, 294)
-    -- Base height for most modes; pinned mode adds room for the Anchor-To dropdown
-    -- (toggled in UpdatePositionPanel). The bottom Reset/Center/Lock row is anchored
-    -- to BOTTOM, so growing the height pushes it down and opens up the dropdown band.
-    panel.baseHeight = 294
-    panel.pinnedHeight = 312
-    panel:SetPoint("TOP", UIParent, "TOP", 0, -50)
-    panel:SetFrameStrata("FULLSCREEN_DIALOG")
-    panel:SetFrameLevel(100)  -- High level to ensure it's on top
-    DF.GUI:CreatePanelBackdrop(panel, { bgColor = C_BACKGROUND, borderColor = { 0, 0, 0, 1 } })
-    panel:EnableMouse(true)
-    panel:SetMovable(true)
-    panel:RegisterForDrag("LeftButton")
-    panel:SetScript("OnDragStart", panel.StartMoving)
-    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
-    panel:Hide()
-    
-    -- Apply scale from settings when shown
-    panel:SetScript("OnShow", function(self)
-        self:SetScale(DF:GetWindowState().scale or 1.0)
-    end)
-    
-    -- Store for theme updates
-    panel.themedElements = {}
-    
-    local function UpdateTheme()
-        local c = GetAccentColor()
-        for _, elem in ipairs(panel.themedElements) do
-            if elem.UpdateThemeColor then
-                elem:UpdateThemeColor(c)
-            end
-        end
-        -- Update title text based on mode (read from descriptor; a descriptor may
-        -- supply a function for a dynamic title, e.g. the pinned set number).
-        if panel.title then
-            local t = GetPositionMode().title
-            if type(t) == "function" then
-                t = t()
-            elseif t then
-                -- descriptor titles are raw enUS source strings; resolve to the
-                -- active locale here (at display time, after the overlay).
-                t = L[t]
-            end
-            panel.title:SetText(t or L["Position"])
-        end
-    end
-    panel.UpdateTheme = UpdateTheme
-    
-    -- Title (matches main GUI title style)
-    local c = GetAccentColor()
-    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", 15, -12)
-    title:SetText(L["Position"])
-    title:SetTextColor(c.r, c.g, c.b)
-    title.UpdateThemeColor = function(self, col) self:SetTextColor(col.r, col.g, col.b) end
-    table.insert(panel.themedElements, title)
-    panel.title = title
-    
-    -- Close button (simple X like main GUI)
-    local closeBtn = DF.GUI:CreateCloseButton(panel, { onClick = function() LockCurrentFrames() end })
-    closeBtn:SetPoint("TOPRIGHT", -8, -8)
-    
-    -- X Position row
-    local xLabel = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    xLabel:SetPoint("TOPLEFT", 15, -40)
-    xLabel:SetText(L["X Position"])
-    xLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    local xInput = CreateFrame("EditBox", nil, panel, "BackdropTemplate")
-    xInput:SetSize(65, 22)
-    xInput:SetPoint("TOPLEFT", 15, -56)
-    DF.GUI:CreateElementBackdrop(xInput, { bgColor = C_ELEMENT, borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 } })
-    DF.GUI:StyleEditBox(xInput)
-    xInput:SetFontObject("DFFontHighlightSmall")
-    xInput:SetJustifyH("CENTER")
-    xInput:SetAutoFocus(false)
-    xInput:SetScript("OnEnterPressed", function(self)
-        local val = tonumber(self:GetText())
-        if val then
-            local mode = GetPositionMode()
-            local db = mode.getDB()
-            if db then
-                if mode.logWrites then
-                    DF:LogRaidAnchorWrite("PositionPanel:xInput", val, db[mode.yField] or 0)
-                end
-                db[mode.xField] = val
-                if mode.autoProfileX and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                    DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileX, val)
-                    if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
-                        DF.GUI.UpdatePositionOverrideIndicator()
-                    end
-                end
-                mode.apply()
-            end
-            -- Update override indicator in position panel
-            if DF.positionPanel and DF.positionPanel.UpdatePositionOverride then
-                DF.positionPanel.UpdatePositionOverride()
-            end
-        end
-        self:ClearFocus()
-    end)
-    xInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    panel.xInput = xInput
-    
-    -- X Nudge buttons
-    local xMinus = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    xMinus:SetPoint("LEFT", xInput, "RIGHT", 4, 0)
-    DF.GUI:StyleButton(xMinus, { width = 22, height = 22, text = "<" })
-    xMinus:SetScript("OnClick", function() DF:NudgePosition(-1, 0) end)
-
-    local xPlus = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    xPlus:SetPoint("LEFT", xMinus, "RIGHT", 2, 0)
-    DF.GUI:StyleButton(xPlus, { width = 22, height = 22, text = ">" })
-    xPlus:SetScript("OnClick", function() DF:NudgePosition(1, 0) end)
-    
-    -- Y Position row
-    local yLabel = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    yLabel:SetPoint("TOPLEFT", 160, -40)
-    yLabel:SetText(L["Y Position"])
-    yLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    local yInput = CreateFrame("EditBox", nil, panel, "BackdropTemplate")
-    yInput:SetSize(65, 22)
-    yInput:SetPoint("TOPLEFT", 160, -56)
-    DF.GUI:CreateElementBackdrop(yInput, { bgColor = C_ELEMENT, borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 } })
-    DF.GUI:StyleEditBox(yInput)
-    yInput:SetFontObject("DFFontHighlightSmall")
-    yInput:SetJustifyH("CENTER")
-    yInput:SetAutoFocus(false)
-    yInput:SetScript("OnEnterPressed", function(self)
-        local val = tonumber(self:GetText())
-        if val then
-            local mode = GetPositionMode()
-            local db = mode.getDB()
-            if db then
-                if mode.logWrites then
-                    DF:LogRaidAnchorWrite("PositionPanel:yInput", db[mode.xField] or 0, val)
-                end
-                db[mode.yField] = val
-                if mode.autoProfileY and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                    DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileY, val)
-                    if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
-                        DF.GUI.UpdatePositionOverrideIndicator()
-                    end
-                end
-                mode.apply()
-            end
-            -- Update override indicator in position panel
-            if DF.positionPanel and DF.positionPanel.UpdatePositionOverride then
-                DF.positionPanel.UpdatePositionOverride()
-            end
-        end
-        self:ClearFocus()
-    end)
-    yInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    panel.yInput = yInput
-    
-    -- Y Nudge buttons
-    local yMinus = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    yMinus:SetPoint("LEFT", yInput, "RIGHT", 4, 0)
-    DF.GUI:StyleButton(yMinus, { width = 22, height = 22, text = "v" })
-    yMinus:SetScript("OnClick", function() DF:NudgePosition(0, -1) end)
-
-    local yPlus = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    yPlus:SetPoint("LEFT", yMinus, "RIGHT", 2, 0)
-    DF.GUI:StyleButton(yPlus, { width = 22, height = 22, text = "^" })
-    yPlus:SetScript("OnClick", function() DF:NudgePosition(0, 1) end)
-    
-    -- Position Override Row (visible when editing auto profile)
-    local posOverrideRow = CreateFrame("Frame", nil, panel)
-    posOverrideRow:SetSize(270, 20)
-    posOverrideRow:SetPoint("TOPLEFT", 15, -82)
-    posOverrideRow:Hide()
-    panel.posOverrideRow = posOverrideRow
-    
-    -- ☠ THE OVERRIDE MARKER IS THE DOT, NOT THE STAR. Every override control in the
-    -- addon speaks one visual language -- see GUI:CreateOverrideMarker and
-    -- GUI.OVERRIDE_MARKER_COLOR (GUI/Widgets.lua), which the settings pages and the
-    -- nav tabs all render through. This row hand-rolls its marker because it carries
-    -- its own label and Reset button rather than being a bare marker, and it was the
-    -- one site left still drawing the retired star: the drag overlay said "Position
-    -- Overridden" with a different glyph from every other overridden setting on
-    -- screen. Colour comes from the shared constant so there is one source of truth
-    -- even though the texture is drawn here.
-    -- ⚠ The star icon is NOT retired generally -- it is still the feature-callout
-    -- glyph (DandersFrames_Options/GUI/Panel.lua). Do not swap that one.
-    local overrideColor = (DF.GUI and DF.GUI.OVERRIDE_MARKER_COLOR) or { 1, 0.8, 0.2 }
-    local posOverrideDot = posOverrideRow:CreateTexture(nil, "OVERLAY")
-    posOverrideDot:SetSize(12, 12)
-    posOverrideDot:SetPoint("LEFT", 0, 0)
-    posOverrideDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
-    posOverrideDot:SetVertexColor(overrideColor[1], overrideColor[2], overrideColor[3])
-
-    local posOverrideText = posOverrideRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    posOverrideText:SetPoint("LEFT", posOverrideDot, "RIGHT", 4, 0)
-    posOverrideText:SetText(L["Position Overridden"])
-    posOverrideText:SetTextColor(1, 0.8, 0.2)
-    
-    local posResetBtn = CreateFrame("Button", nil, posOverrideRow, "BackdropTemplate")
-    posResetBtn:SetPoint("LEFT", posOverrideText, "RIGHT", 8, 0)
-    DF.GUI:StyleButton(posResetBtn, { width = 70, height = 18, accent = { r = 1, g = 0.8, b = 0.2 } })
-    
-    local posResetIcon = posResetBtn:CreateTexture(nil, "OVERLAY")
-    posResetIcon:SetSize(10, 10)
-    posResetIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh")
-    posResetIcon:SetVertexColor(0.6, 0.6, 0.6)
-
-    local posResetText = posResetBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    posResetText:SetPoint("CENTER", posResetBtn, "CENTER", 6, 0)
-    posResetIcon:SetPoint("RIGHT", posResetText, "LEFT", -2, 0)
-    posResetText:SetText(L["Reset"])
-    posResetText:SetTextColor(0.7, 0.7, 0.7)
-    
-    posResetBtn:HookScript("OnEnter", function(self)
-        posResetIcon:SetVertexColor(1, 0.8, 0.2)
-        posResetText:SetTextColor(1, 0.8, 0.2)
-        DF.GUI:ShowTooltip(self, { title = L["Reset Position to Global"] })
-    end)
-    posResetBtn:HookScript("OnLeave", function(self)
-        posResetIcon:SetVertexColor(0.6, 0.6, 0.6)
-        posResetText:SetTextColor(0.7, 0.7, 0.7)
-        DF.GUI:HideTooltip()
-    end)
-    posResetBtn:SetScript("OnClick", function()
-        if DF.AutoProfilesUI then
-            -- Reset position overrides
-            DF.AutoProfilesUI:ResetProfileSetting("raidAnchorX")
-            DF.AutoProfilesUI:ResetProfileSetting("raidAnchorY")
-            
-            -- Get global values and apply them
-            local globalX = DF.AutoProfilesUI:GetGlobalValue("raidAnchorX") or 0
-            local globalY = DF.AutoProfilesUI:GetGlobalValue("raidAnchorY") or 0
-            
-            local db = GetPositionDB()
-            DF:LogRaidAnchorWrite("PositionPanel:resetOverride", globalX, globalY)
-            db.raidAnchorX = globalX
-            db.raidAnchorY = globalY
-
-            -- Update container position
-            DF:UpdateRaidContainerPosition()
-            
-            -- Update position panel inputs
-            DF:UpdatePositionPanel()
-            
-            -- Update position override indicator in main GUI
-            if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
-                DF.GUI.UpdatePositionOverrideIndicator()
-            end
-        end
-    end)
-    
-    -- Function to update position override visibility
-    panel.UpdatePositionOverride = function()
-        -- Debug mode shows indicator
-        if DF.GUI and DF.GUI.IsOverrideDebugMode and DF.GUI.IsOverrideDebugMode() then
-            posOverrideDot:Show()
-            posOverrideText:SetText("Position (debug)")
-            posResetBtn:Show()
-            posOverrideRow:Show()
-            return
-        end
-        
-        if DF.positionPanelMode ~= "raid" then
-            posOverrideRow:Hide()
-            return
-        end
-        
-        local AutoProfilesUI = DF.AutoProfilesUI
-        if not AutoProfilesUI or not AutoProfilesUI:IsEditing() then
-            posOverrideRow:Hide()
-            return
-        end
-        
-        -- Check if position is overridden
-        local xOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorX")
-        local yOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorY")
-        
-        if xOverridden or yOverridden then
-            posOverrideText:SetText(L["Position Overridden"])
-            posOverrideRow:Show()
-        else
-            posOverrideRow:Hide()
-        end
-    end
-    
-    -- Snap to Grid checkbox
-    local snapContainer = CreateFrame("Frame", nil, panel)
-    snapContainer:SetSize(150, 24)
-    snapContainer:SetPoint("TOPLEFT", 15, -108)
-    
-    local snapCheck = CreateFrame("CheckButton", nil, snapContainer, "BackdropTemplate")
-    snapCheck:SetPoint("LEFT", 0, 0)
-    DF.GUI:StyleCheckButton(snapCheck)
-    snapCheck.UpdateThemeColor = function(self, col)
-        if self.ApplyThemeColor then self.ApplyThemeColor(col) end
-    end
-    table.insert(panel.themedElements, snapCheck)
-    
-    local snapLabel = snapContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    snapLabel:SetPoint("LEFT", snapCheck, "RIGHT", 8, 0)
-    snapLabel:SetText(L["Snap to Grid"])
-    snapLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    snapCheck:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        -- Pinned snap is its own party-db flag (independent of the main-frame snap,
-        -- default off); other modes use the shared snapToGrid.
-        if DF.positionPanelMode == "pinned" then
-            local pdb = DF:GetDB()
-            if pdb then pdb.pinnedSnapToGrid = checked end
-        else
-            -- ☠ THE PARTY DB, not GetPositionDB(). Grid settings are party-wide and every
-            -- reader takes them from DF:GetDB() -- SnapEnabledForPanel, DF:SnapToGrid
-            -- (whose own comment says "grid settings are party-wide"), and the checkbox
-            -- refresh in UpdatePositionPanel. GetPositionDB() resolves to the RAID db in
-            -- raid mode, so ticking Snap to Grid from the raid mover wrote a flag nothing
-            -- reads: the box flipped back off on the next panel refresh, no grid appeared,
-            -- and dragging did not snap.
-            local sdb = DF:GetDB()
-            if sdb then sdb.snapToGrid = checked end
-        end
-        if checked then
-            if DF.gridFrame.RefreshLines then
-                DF.gridFrame:Show()
-                DF.gridFrame.RefreshLines()
-            else
-                DF.gridFrame:Show()
-            end
-        else
-            DF.gridFrame:Hide()
-            -- Hide snap preview lines when disabling
-            DF:HideSnapPreview()
-        end
-        -- Grid Size only matters while snapping; grey it in place when snap is off
-        -- (visible but disabled — never hidden).
-        if panel.RefreshGridSliderEnabled then panel.RefreshGridSliderEnabled() end
-    end)
-    panel.snapCheck = snapCheck
-
-    -- Hide Overlay checkbox
-    local hideOverlayContainer = CreateFrame("Frame", nil, panel)
-    hideOverlayContainer:SetSize(150, 24)
-    hideOverlayContainer:SetPoint("TOPLEFT", 15, -134)
-
-    local hideOverlayCheck = CreateFrame("CheckButton", nil, hideOverlayContainer, "BackdropTemplate")
-    hideOverlayCheck:SetPoint("LEFT", 0, 0)
-    DF.GUI:StyleCheckButton(hideOverlayCheck)
-    hideOverlayCheck.UpdateThemeColor = function(self, col)
-        if self.ApplyThemeColor then self.ApplyThemeColor(col) end
-    end
-    table.insert(panel.themedElements, hideOverlayCheck)
-
-    local hideOverlayLabel = hideOverlayContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    hideOverlayLabel:SetPoint("LEFT", hideOverlayCheck, "RIGHT", 8, 0)
-    hideOverlayLabel:SetText(L["Hide Drag Overlay"])
-    hideOverlayLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    panel.hideOverlayLabel = hideOverlayLabel
-
-    hideOverlayCheck:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        -- Pinned uses its own flag (independent of the main-frame drag overlay);
-        -- every other mode shares the party-wide hideDragOverlay.
-        if DF.positionPanelMode == "pinned" then
-            local pdb = DF:GetDB()
-            if pdb then pdb.pinnedHideMover = checked end
-            if DF.PinnedFrames and DF.PinnedFrames.ApplyMoverOverlayAlpha then
-                DF.PinnedFrames:ApplyMoverOverlayAlpha()
-            end
-            return
-        end
-        DF.hideDragOverlay = checked
-        local partyDB = DF:GetDB()
-        if partyDB then partyDB.hideDragOverlay = DF.hideDragOverlay end
-        -- Apply alpha to whichever mover matches the current mode.
-        local mover
-        if DF.positionPanelMode == "raid" then
-            mover = DF.raidMoverFrame
-        elseif DF.positionPanelMode == "personal" then
-            mover = DF.personalTargetedSpellsMover
-        elseif DF.positionPanelMode == "targetedList" then
-            mover = DF.targetedListMoverFrame
-        else
-            mover = DF.moverFrame
-        end
-        if mover then
-            mover:SetAlpha(DF.hideDragOverlay and 0 or 1)
-        end
-    end)
-    panel.hideOverlayCheck = hideOverlayCheck
-
-    -- Grid Size slider (shared builder; follows the mode theme).
-    -- ☠ THE PARTY DB, same as snapToGrid above. The comment here used to claim
-    -- "party-wide gridSize via GetPositionDB()" -- which is false in raid mode, where
-    -- GetPositionDB() resolves to the raid table. DF:SnapToGrid reads gridSize from
-    -- DF:GetDB(), so a size set from the raid mover was written somewhere nothing reads;
-    -- worse, CalculateSnapPreview DID read the raid value, so the red preview line and the
-    -- committed position snapped to DIFFERENT grids once the two diverged.
-    -- Default 20 matches the refresh code below.
-    local function getGridSize()
-        local db = DF:GetDB()
-        return (db and db.gridSize) or 20
-    end
-    local function setGridSize(val)
-        local db = DF:GetDB()
-        if db then db.gridSize = math.floor(val) end
-        -- Refresh grid lines with new size
-        if DF.gridFrame and DF.gridFrame:IsShown() and DF.gridFrame.RefreshLines then
-            DF.gridFrame.RefreshLines()
-        end
-    end
-
-    local gridContainer = DF.GUI:CreateSlider(panel, L["Grid Size"], 10, 100, 5, nil, nil, nil, nil, nil, getGridSize, setGridSize)
-    gridContainer:SetPoint("TOPLEFT", 15, -164)
-
-    -- External code drives the slider via panel.gridSlider; the builder's
-    -- OnValueChanged keeps its own value box in sync, so gridInput is no longer
-    -- a separate frame (the refresh below uses SetValue only).
-    panel.gridSlider = gridContainer.slider
-    panel.gridInput = nil
-
-    -- Grey the Grid Size slider when Snap to Grid is off (its only consumer).
-    -- Disabled-in-place: stays visible but non-interactive, per the standard
-    -- "grey when the boolean enable is off" rule. Re-applied on snap toggle and
-    -- on every panel refresh (UpdatePositionPanel) so mode switches honour it.
-    panel.RefreshGridSliderEnabled = function()
-        if gridContainer.SetEnabled then
-            gridContainer:SetEnabled(SnapEnabledForPanel())
-        end
-    end
-
-    -- "Anchor To Frames" dropdown — PINNED MODE ONLY (hidden for every other
-    -- mode). Anchors a pinned set to the raid/party frames container at a chosen
-    -- corner so it tracks the frames; X/Y above become a fine offset from that
-    -- corner. Sits in the empty band below the grid slider; no panel resize.
-    local anchorDropdown = DF.GUI:CreateDropdown(
-        panel,
-        L["Anchor To Frames"],
-        PINNED_ANCHOR_OPTIONS,
-        nil, nil,
-        function()
-            -- Re-anchor the targeted set after the choice changes.
-            if DF.PinnedFrames and DF.PinnedFrames.ApplySetPosition then
-                DF.PinnedFrames:ApplySetPosition(DF.positionPanelPinnedSet or 1)
-            end
-            if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
-        end,
-        function()  -- customGet: read the targeted set's anchor mode (nil = SCREEN)
-            local set = ResolvePinnedSet()
-            return (set and set.position and set.position.anchorTo) or "SCREEN"
-        end,
-        function(v)  -- customSet: store on the targeted set (nil for SCREEN default)
-            local set = ResolvePinnedSet()
-            if not set then return end
-            set.position = set.position or { point = "CENTER", x = 0, y = 0 }
-            local newAnchor = (v ~= "SCREEN") and v or nil
-            -- X/Y mean different things per mode: a screen offset from UIParent vs a
-            -- fine offset from the frames-container corner. Carrying a large screen
-            -- offset into frames-anchor mode (or vice versa) would fling the set far
-            -- off the chosen reference — off-screen. So whenever the anchor mode
-            -- changes, reset the offset to 0 so the set lands exactly AT the new
-            -- reference (the chosen corner / screen point); the user nudges from there.
-            if set.position.anchorTo ~= newAnchor then
-                set.position.x = 0
-                set.position.y = 0
-            end
-            set.position.anchorTo = newAnchor
-        end
-    )
-    anchorDropdown:ClearAllPoints()
-    anchorDropdown:SetPoint("TOPLEFT", 15, -204)
-    anchorDropdown:SetWidth(255)
-    anchorDropdown:Hide()
-    panel.anchorDropdown = anchorDropdown
-
-    -- Reset Position button (icon + label via the shared styler).
-    local resetBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    resetBtn:SetPoint("BOTTOMLEFT", 15, 15)
-    DF.GUI:StyleButton(resetBtn, {
-        width = 85, height = 26,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 18, color = C_TEXT, gap = 2 },
-        text = L["Reset"],
-    })
-    resetBtn:SetScript("OnClick", function() DF:ResetPosition() end)
-    
-    -- Center button
-    local centerBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    centerBtn:SetPoint("BOTTOM", 0, 15)
-    DF.GUI:StyleButton(centerBtn, { width = 85, height = 26, text = L["Center"] })
-    centerBtn:SetScript("OnClick", function() DF:CenterFrames() end)
-    
-    -- Lock button (icon + label via the shared styler).
-    local lockBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    lockBtn:SetPoint("BOTTOMRIGHT", -15, 15)
-    DF.GUI:StyleButton(lockBtn, {
-        width = 85, height = 26,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT, gap = 2 },
-        text = L["Lock"],
-    })
-    lockBtn:SetScript("OnClick", function() LockCurrentFrames() end)
-    
-    -- Apply initial theme
-    UpdateTheme()
-    
-    DF.positionPanel = panel
-end
-
-function DF:UpdatePositionPanel()
-    if not DF.positionPanel then return end
-
-    local mode = GetPositionMode()
-    local db = mode.getDB()
-    if not db then return end
-
-    local anchorX = db[mode.xField] or 0
-    local anchorY = db[mode.yField] or 0
-
-    DF.positionPanel.xInput:SetText(string.format("%.0f", anchorX))
-    DF.positionPanel.yInput:SetText(string.format("%.0f", anchorY))
-
-    -- Grid / snap / hideOverlay settings are party-wide and always
-    -- read from the party db regardless of panel mode. Personal and
-    -- Targeted List share the party profile's grid config.
-    local partyDB = DF:GetDB()
-    -- Pinned mode shows its own snap flag (default off); other modes the shared one.
-    if DF.positionPanelMode == "pinned" then
-        DF.positionPanel.snapCheck:SetChecked(partyDB.pinnedSnapToGrid or false)
-    else
-        DF.positionPanel.snapCheck:SetChecked(partyDB.snapToGrid)
-    end
-    -- SetValue drives the shared slider's own value box via OnValueChanged,
-    -- so there's no separate gridInput to update.
-    DF.positionPanel.gridSlider:SetValue(partyDB.gridSize or 20)
-    -- Grid Size greys out when snap is off (boolean-enable grey rule); the snap
-    -- flag is per-mode, so re-apply on every refresh (mode switches land here).
-    if DF.positionPanel.RefreshGridSliderEnabled then
-        DF.positionPanel.RefreshGridSliderEnabled()
-    end
-    if DF.positionPanel.hideOverlayCheck then
-        if DF.positionPanelMode == "pinned" then
-            DF.positionPanel.hideOverlayCheck:SetChecked(partyDB.pinnedHideMover or false)
-        else
-            DF.positionPanel.hideOverlayCheck:SetChecked(partyDB.hideDragOverlay or false)
-        end
-    end
-    -- Pinned sets have a small handle rather than a full drag overlay box, so the
-    -- toggle reads "Hide Mover" there.
-    if DF.positionPanel.hideOverlayLabel then
-        DF.positionPanel.hideOverlayLabel:SetText(
-            DF.positionPanelMode == "pinned" and L["Hide Mover"] or L["Hide Drag Overlay"])
-    end
-
-    -- Pinned-only "Anchor To Frames" dropdown: show in pinned mode, name it for
-    -- the targeted set's mode (Raid/Party), and refresh the selected value.
-    if DF.positionPanel.anchorDropdown then
-        if DF.positionPanelMode == "pinned" then
-            -- Grow the panel so the dropdown sits in its own band between the grid
-            -- slider and the buttons (shrinks back for the other, shorter modes).
-            if DF.positionPanel.pinnedHeight then
-                DF.positionPanel:SetHeight(DF.positionPanel.pinnedHeight)
-            end
-            local raid = DF.PinnedFrames and DF.PinnedFrames.IsPositionTargetRaid
-                and DF.PinnedFrames:IsPositionTargetRaid()
-            if DF.positionPanel.anchorDropdown.label then
-                DF.positionPanel.anchorDropdown.label:SetText(
-                    raid and L["Anchor To Raid Frames"] or L["Anchor To Party Frames"])
-            end
-            if DF.positionPanel.anchorDropdown.UpdateText then
-                DF.positionPanel.anchorDropdown:UpdateText()
-            end
-            DF.positionPanel.anchorDropdown:Show()
-        else
-            DF.positionPanel.anchorDropdown:Hide()
-            if DF.positionPanel.baseHeight then
-                DF.positionPanel:SetHeight(DF.positionPanel.baseHeight)
-            end
-        end
-    end
-
-    -- Update position override indicator if editing profile
-    if DF.positionPanel.UpdatePositionOverride then
-        DF.positionPanel.UpdatePositionOverride()
-    end
-end
-
-function DF:ResetPosition()
-    if DF.positionPanelMode == "raid" then
-        if DF.savedRaidPositionX and DF.savedRaidPositionY then
-            local db = DF:GetRaidDB()
-            DF:LogRaidAnchorWrite("ResetPosition:savedRaid", DF.savedRaidPositionX, DF.savedRaidPositionY)
-            db.raidAnchorX = DF.savedRaidPositionX
-            db.raidAnchorY = DF.savedRaidPositionY
-            DF:UpdateRaidContainerPosition()
-            DF:UpdatePositionPanel()
-            DF:Say(L["Raid position reset."])
-        else
-            DF:Err(L["No saved position to reset to."])
-        end
-    elseif DF.positionPanelMode == "party" or DF.positionPanelMode == nil then
-        if DF.savedPositionX and DF.savedPositionY then
-            local db = DF:GetDB()
-            db.anchorX = DF.savedPositionX
-            db.anchorY = DF.savedPositionY
-            DF:UpdateContainerPosition()
-            DF:UpdatePositionPanel()
-            DF:Say(L["Position reset."])
-        else
-            DF:Err(L["No saved position to reset to."])
-        end
-    else
-        -- personal / targetedList: no "previous" saved state to
-        -- revert to, so reset simply zeroes the position.
-        local mode = GetPositionMode()
-        local db = mode.getDB()
-        if db then
-            db[mode.xField] = 0
-            db[mode.yField] = 0
-            mode.apply()
-            DF:UpdatePositionPanel()
-        end
-    end
-end
-
-function DF:NudgePosition(dx, dy)
-    local mode = GetPositionMode()
-    local db = mode.getDB()
-    if not db then return end
-
-    local newX = (db[mode.xField] or 0) + dx
-    local newY = (db[mode.yField] or 0) + dy
-
-    if mode.logWrites then
-        DF:LogRaidAnchorWrite("NudgePosition", newX, newY)
-    end
-
-    db[mode.xField] = newX
-    db[mode.yField] = newY
-
-    -- Auto-profile override tracking (currently only raid mode uses this)
-    if mode.autoProfileX and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-        DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileX, newX)
-        DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileY, newY)
-        if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
-            DF.GUI.UpdatePositionOverrideIndicator()
-        end
-    end
-
-    mode.apply()
-    DF:UpdatePositionPanel()
-end
-
-function DF:CenterFrames()
-    -- Personal / targetedList / pinned: simple reset to 0,0 since these don't
-    -- have main-frame growth geometry to account for.
-    if DF.positionPanelMode == "personal" or DF.positionPanelMode == "targetedList"
-        or DF.positionPanelMode == "pinned" then
-        local mode = GetPositionMode()
-        local db = mode.getDB()
-        if db then
-            db[mode.xField] = 0
-            db[mode.yField] = 0
-            mode.apply()
-            DF:UpdatePositionPanel()
-        end
-        return
-    end
-    if DF.positionPanelMode == "raid" then
-        local db = DF:GetRaidDB()
-        DF:LogRaidAnchorWrite("CenterFrames", 0, 0)
-        db.raidAnchorX = 0
-        db.raidAnchorY = 0
+-- Center the party or raid frames on screen. mode = "raid" | anything else = party.
+-- Survives Phase C without an in-addon caller: the write is the same record funnel
+-- everything else uses, and external/future callers keep it.
+function DF:CenterFrames(mode)
+    if mode == "raid" then
+        DF:SetPositionRecord("raid", { point = "CENTER", x = 0, y = 0 }, "CenterFrames")
         -- If editing profile, save as override
         if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
             DF.AutoProfilesUI:SetProfileSetting("raidAnchorX", 0)
@@ -2238,62 +893,250 @@ function DF:CenterFrames()
             end
         end
         DF:UpdateRaidContainerPosition()
-        DF:UpdatePositionPanel()
         DF:Say(L["Raid frames centered."])
     else
-        local db = DF:GetDB()
-
-        -- Centering the party is the same 0,0 write every other branch of this function
-        -- makes, and for the same reason: the container is placed by its CENTER
-        -- (UpdateContainerPosition SetPoints "CENTER" to UIParent "CENTER"), and it is
-        -- sized to the FULL five-frame extent regardless of party size -- the same
-        -- 5 * (frameWidth + spacing) - spacing this branch used to compute for itself.
-        -- A full party therefore fills the container exactly and its visual centre IS
-        -- the container centre, so the offset that centres it is zero.
-        --
-        -- ☠ What was here instead applied a growth-anchor correction: START wrote
-        -- -totalWidth/2, END wrote +totalWidth/2. That is a leftward (or rightward) drag
-        -- of half a full row -- roughly 210px at default size -- against a container
-        -- model that no longer exists, from back when the container point was the growth
-        -- edge rather than the centre. Only CENTER, which wrote 0, produced a centred
-        -- result, and CENTER is the default, which is why this survived.
-        --
-        -- Compensating for a PARTIAL party (offsetting by half the unused width) is
-        -- deliberately not done. It would make "Center" depend on who is currently
-        -- grouped, so the frames would move again as people joined -- the same
-        -- roster-dependent instability that was just removed from the raid path, which
-        -- centres the reserved area and leaves it there.
-        db.anchorX = 0
-        db.anchorY = 0
+        -- The container is placed by its CENTER and sized to the full five-frame
+        -- extent regardless of party size, so the offset that centres it is zero.
+        DF:SetPositionRecord("party", { point = "CENTER", x = 0, y = 0 })
         DF:UpdateContainerPosition()
-        DF:UpdatePositionPanel()
         DF:UpdateAllFrames()
-        
         DF:Say(L["Frames centered on screen."])
     end
 end
 
+-- ============================================================
+-- POSITION RECORDS
+-- The one place that knows where a container is supposed to sit.
+-- ============================================================
+-- A record is { point, x, y, anchor } in UIParent units measured from UIParent CENTER --
+-- the shape DandersMover reads through getPos and MUTATES IN PLACE. GetPositionRecord
+-- therefore returns the LIVE db table, never a copy.
+--
+-- The legacy scalars (anchorX/anchorY, raidAnchorX/raidAnchorY) stay as a WRITE-THROUGH
+-- MIRROR for this minor. Two reasons, both load-bearing:
+--   * 30+ resident readers across Init.lua / Headers.lua / Core.lua / AutoProfiles.lua
+--     still read the scalars, and rewriting all of them in one change is how a
+--     positioning regression ships.
+--   * The raid auto-layout overlay can only override TOP-LEVEL SCALAR keys.
+--     ApplyRuntimeProfile deep-copies a whole-table override into a frozen overlay and
+--     the overlay proxy's __newindex only fires for top-level writes, so `db.position.x =
+--     v` would reach neither -- a table-valued override reads stale and loses writes.
+-- DF:SetPositionRecord is the ONLY funnel that writes either shape, so they cannot drift.
+
+-- key   = the db key holding the record; db = the table that DRIVES the display;
+-- fold  = the scalars can move behind the record's back (a raid auto layout overrides
+--         them, or a legacy reader still owns them), so a read folds the effective
+--         scalar in when IT moved rather than the record (see lastNoted below);
+-- route = while the RAID db drives the record, a write is offered to the active auto
+--         layout first (the scalars are layout-overridable).
+local RECORD_SPECS = {
+    party = { key = "position", xKey = "anchorX", yKey = "anchorY", x = 0, y = -325,
+              db = function() return DF:GetDB() end },
+    raid  = { key = "position", xKey = "raidAnchorX", yKey = "raidAnchorY", x = -6.666610717773438, y = -25,
+              db = function() return DF:GetRaidDB() end, fold = true, route = true },
+    -- The personal block is per-mode and driven by the RAID db in a raid / raid test
+    -- (TargetedSpells.lua GetPersonalDB), so the record is read from that same table.
+    personal = { key = "personalTargetedPosition", xKey = "personalTargetedSpellX", yKey = "personalTargetedSpellY",
+                 x = 0, y = -150, fold = true, route = true,
+                 db = function() return DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB() end },
+    targetedList = { key = "targetedListPosition", xKey = "targetedListX", yKey = "targetedListY", x = 0, y = -10,
+                     fold = true, db = function() return DF:GetDB("party") end },
+}
+
+local function recordSpec(mode)
+    return RECORD_SPECS[mode] or RECORD_SPECS.party
+end
+
+-- ☠ WHAT THE RECORD HELD THE LAST TIME DF AND THE SCALAR AGREED, per record table (weak
+-- keys: a profile switch or import swaps the table and the note goes with it).
+--
+-- The raid scalar can legitimately differ from the record for two opposite reasons and
+-- the read path has to tell them apart:
+--   (a) an auto layout overrides raidAnchorX/raidAnchorY (or one just deactivated) --
+--       the SCALAR is the truth and must be folded into the record, or the layout
+--       would not drive the container and the base would not come back afterwards;
+--   (b) DandersMover mutated the record IN PLACE and has not called onChanged yet --
+--       the RECORD is the truth. The lib's every write is `pos = getPos(); pos.x = v;
+--       Notify()`, and Notify calls getPos AGAIN before onChanged, so folding the
+--       scalar in here would erase the drag before DF ever saw it. The raid container
+--       could not be moved by the lib at all.
+-- (b) is exactly "the record no longer holds what we last noted", so that is the test.
+local lastNoted = setmetatable({}, { __mode = "k" })
+
+local function noteRecord(rec, x, y)
+    local m = lastNoted[rec]
+    if not m then
+        m = {}
+        lastNoted[rec] = m
+    end
+    m.x, m.y = x, y
+end
+
+-- True when nobody has mutated the record behind our back since it was last noted. An
+-- un-noted record counts as unchanged: the lib always reads (and so notes) a record
+-- before it touches it, so a pending mutation on a never-seen record cannot exist.
+local function recordUnchanged(rec)
+    local m = lastNoted[rec]
+    return (not m) or (m.x == rec.x and m.y == rec.y)
+end
+
+-- The live record for a mode. Seeds it from the scalars when absent (belt for a profile
+-- that dodged DF:MigrateContainerPositionRecords -- an import, or a downgrade/upgrade
+-- round trip).
+function DF:GetPositionRecord(mode)
+    local spec = recordSpec(mode)
+    local db = spec.db()
+    -- Pre-init (DF.db nil) GetDB hands back the shared DEFAULTS table; hand out a
+    -- throwaway instead so a stray write cannot rewrite the shipped defaults.
+    if not db or db == DF.PartyDefaults or db == DF.RaidDefaults then
+        return { point = "CENTER", x = spec.x, y = spec.y }
+    end
+
+    local rec = db[spec.key]
+    if type(rec) ~= "table" then
+        rec = {
+            point = "CENTER",
+            x = tonumber(db[spec.xKey]) or spec.x,
+            y = tonumber(db[spec.yKey]) or spec.y,
+        }
+        db[spec.key] = rec
+    end
+    rec.point = rec.point or "CENTER"
+
+    if spec.fold then
+        -- ☠ FOLD THE EFFECTIVE SCALAR IN WHEN IT IS THE ONE THAT MOVED. An active auto
+        -- layout overrides raidAnchorX/raidAnchorY (never `position` -- see the header
+        -- note), and DF:GetRaidDB() returns the overlay view, so this is what makes a
+        -- layout's position actually drive the container. The record's stored x/y
+        -- therefore holds the layout's value for as long as that layout is active; it
+        -- self-heals once the layout deactivates, because that read folds the base
+        -- scalar back. The scalars are the authority while a layout is up -- deliberately.
+        -- But only when the RECORD is still what we last noted: a record that moved
+        -- behind our back is a DandersMover in-place mutation waiting for onChanged, and
+        -- it must survive this read (see lastNoted above).
+        local sx, sy = tonumber(db[spec.xKey]), tonumber(db[spec.yKey])
+        if sx and sy then
+            if (sx ~= rec.x or sy ~= rec.y) and recordUnchanged(rec) then
+                rec.x, rec.y = sx, sy
+            end
+            if sx == rec.x and sy == rec.y then
+                noteRecord(rec, sx, sy)
+            end
+        end
+        rec.x = tonumber(rec.x) or spec.x
+        rec.y = tonumber(rec.y) or spec.y
+    else
+        rec.x = tonumber(rec.x) or spec.x
+        rec.y = tonumber(rec.y) or spec.y
+    end
+    return rec
+end
+
+-- The ONE funnel. Writes the record and its scalar mirror together.
+-- `pos` may be the live record itself (DandersMover mutates in place and then calls
+-- onChanged) or a fresh table from a legacy drag handler; both are handled.
+-- `reason` is the DF:LogRaidAnchorWrite label -- pass the call site's name so the RAIDPOS
+-- debug channel keeps reading the way it does today.
+function DF:SetPositionRecord(mode, pos, reason)
+    if type(pos) ~= "table" then return end
+    local spec = recordSpec(mode)
+    local db = spec.db()
+    if not db or db == DF.PartyDefaults or db == DF.RaidDefaults then return end
+
+    local x = tonumber(pos.x) or 0
+    local y = tonumber(pos.y) or 0
+
+    -- Routing applies while the RAID db drives the record: always for raid, and for
+    -- personal only in a raid / raid test (its db() then IS the raid overlay).
+    if spec.route and db == DF:GetRaidDB() then
+        if spec == RECORD_SPECS.raid and DF.LogRaidAnchorWrite then
+            DF:LogRaidAnchorWrite(reason or "SetPositionRecord", x, y)
+        end
+        -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
+        -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
+        -- position; writing the base anchors underneath it does not move anything and
+        -- quietly corrupts the user's base position instead. Falls through when the
+        -- routing declines (no active layout, or mid-edit where the preview path
+        -- captures it). Keep all three call sites in step.
+        local apu = DF.AutoProfilesUI
+        local routed = false
+        if apu then
+            if spec == RECORD_SPECS.raid then
+                -- Refreshes the raid container itself (unchanged Phase A behaviour).
+                routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
+            else
+                -- The caller applies afterwards (mode.apply / onChanged).
+                routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
+            end
+        end
+        if routed then
+            -- The layout took it (override + live overlay). Keep the record on the same
+            -- value and note it, so the next read sees record and effective scalar agree
+            -- rather than a phantom mutation. The base scalars are NOT written -- that is
+            -- the whole point of routing.
+            local live = db[spec.key]
+            if type(live) == "table" then
+                live.x, live.y = x, y
+                noteRecord(live, x, y)
+            end
+            return
+        end
+    end
+
+    local rec = db[spec.key]
+    if type(rec) ~= "table" then
+        rec = {}
+        db[spec.key] = rec
+    end
+
+    if rec == pos then
+        -- The lib mutated the live record in place; just normalise it.
+        rec.point = rec.point or "CENTER"
+        rec.x, rec.y = x, y
+    else
+        -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
+        -- anchor the record already holds. Only the lib's in-place mutation (the
+        -- `rec == pos` branch above, which is where its Detach lands) may clear one.
+        local prev = rec.anchor
+        rec.point = pos.point or "CENTER"
+        rec.x, rec.y = x, y
+        rec.anchor = nil
+        if type(pos.anchor) == "table" then
+            local a = pos.anchor
+            rec.anchor = {
+                target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+                point = a.point, relPoint = a.relPoint,
+                offsetX = a.offsetX, offsetY = a.offsetY,
+            }
+        else
+            rec.anchor = prev
+        end
+    end
+
+    -- The mirror. Every legacy reader takes these.
+    db[spec.xKey], db[spec.yKey] = x, y
+    noteRecord(rec, x, y)
+end
+
 function DF:UpdateContainerPosition()
     local db = DF:GetDB()
-    local x, y = db.anchorX or 0, db.anchorY or 0
+    local rec = DF:GetPositionRecord("party")
+    local point = rec.point or "CENTER"
+    local x, y = rec.x or 0, rec.y or 0
     local scale = db.frameScale or 1.0
 
+    -- Record coordinates are UIParent units, so the /scale division is what converts
+    -- them into the container's own scaled space -- identical to the effective-scale
+    -- ratio DandersMover's Lib.ApplyPosition uses. Unchanged from the scalar version.
     DF.container:SetScale(scale)
     DF.container:ClearAllPoints()
-    DF.container:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
-
-    -- Also update mover if visible (use SetAllPoints to preserve size)
-    -- Mover is a child of container, inherits scale automatically
-    if DF.moverFrame and DF.moverFrame:IsShown() then
-        DF.moverFrame:ClearAllPoints()
-        DF.moverFrame:SetAllPoints(DF.container)
-    end
+    DF.container:SetPoint(point, UIParent, "CENTER", x / scale, y / scale)
 
     -- Also update test container if visible
     if DF.testPartyContainer then
         DF.testPartyContainer:SetScale(scale)
         DF.testPartyContainer:ClearAllPoints()
-        DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+        DF.testPartyContainer:SetPoint(point, UIParent, "CENTER", x / scale, y / scale)
     end
 end
 
@@ -2302,7 +1145,11 @@ function DF:UpdateRaidContainerPosition()
     if InCombatLockdown() then return end
 
     local db = DF:GetRaidDB()
-    local x, y = db.raidAnchorX or 0, db.raidAnchorY or 0
+    -- GetPositionRecord overlays the effective raidAnchorX/raidAnchorY, so an active
+    -- auto layout still drives the container through this read.
+    local rec = DF:GetPositionRecord("raid")
+    local point = rec.point or "CENTER"
+    local x, y = rec.x or 0, rec.y or 0
     local scale = db.frameScale or 1.0
 
     -- ☠ CENTER-anchor compensation, RETIRED 2026-08-18 -- this now always adds (0, 0).
@@ -2342,37 +1189,30 @@ function DF:UpdateRaidContainerPosition()
 
     DF.raidContainer:SetScale(scale)
     DF.raidContainer:ClearAllPoints()
-    DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
+    DF.raidContainer:SetPoint(point, UIParent, "CENTER", cx / scale, cy / scale)
 
-    -- ☠ MOVER AND TEST CONTAINER TAKE THE COMPENSATION TOO — all three read the one
-    -- number ComputeRaidContainerCompensation returns. The previous rule ("the mover
-    -- represents the user's saved position") kept the mover at the raw anchor while
-    -- the content sat at anchor + comp, so with Center alignment and groups-per-row
-    -- below 8 the unlock overlay drew half a group-row away from the frames it claims
-    -- to bound (Aphoex, 2026-08-15). The saved anchor is invisible to users; the
-    -- overlay's entire job is to be WHERE THE FRAMES ARE. Drag stays coherent: the
-    -- drag OnUpdate moves mover + both containers rigidly by the same raw offset, and
-    -- DragStop re-runs this function, so box and content keep one shared baseline
-    -- throughout.
-    -- ⚠ The test container now carries the comp ON THE CONTAINER, mirroring live —
-    -- the test frame calculator no longer folds it into frame offsets. One accounting
-    -- model in both modes; the calculator's testMode comp fork is retired.
-    if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
-        DF.raidMoverFrame:SetScale(scale)
-        DF.raidMoverFrame:ClearAllPoints()
-        DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
-    end
-
+    -- ☠ THE TEST CONTAINER TAKES THE COMPENSATION TOO — both read the one number
+    -- ComputeRaidContainerCompensation returns (Aphoex, 2026-08-15). The comp rides
+    -- ON THE CONTAINER, mirroring live — the test frame calculator no longer folds
+    -- it into frame offsets. One accounting model in both modes; the calculator's
+    -- testMode comp fork is retired.
     if DF.testRaidContainer then
         DF.testRaidContainer:SetScale(scale)
         DF.testRaidContainer:ClearAllPoints()
-        DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
+        DF.testRaidContainer:SetPoint(point, UIParent, "CENTER", cx / scale, cy / scale)
     end
 end
 
 function DF:UnlockFrames()
     if InCombatLockdown() then
         DF:Err(L["Cannot unlock frames during combat."])
+        return
+    end
+
+    -- No DandersMover, no editing surface. The frames still APPLY their record;
+    -- the one fallback for MOVING them is the permanent handle (spec Decision 1b).
+    if not Mover then
+        DF:Say(L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."])
         return
     end
 
@@ -2384,198 +1224,34 @@ function DF:UnlockFrames()
         return
     end
 
-    local db = DF:GetDB()
-
-    -- Ensure container exists
-    if not DF.container then
-        DF:Err(L["Cannot unlock - container doesn't exist!"])
+    -- Only the party scope's keys get proxies (no raid proxy, dimmed or
+    -- otherwise), and they are forced relevant so this works inside a raid.
+    -- The user's per-element toggles prune that list; the container being one of the
+    -- pruned ones is not a reason to refuse, an EMPTY list is.
+    local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("party") or "DandersFrames"
+    if type(filter) == "table" and #filter.keys == 0 then
+        DF:Say(format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Party Frames"]))
         return
     end
-
-    -- Ensure mover frame exists (create if needed)
-    if not DF.moverFrame then
-        DF:CreateMoverFrame()
-    end
-
-    -- Safety check - if mover still doesn't exist, abort
-    if not DF.moverFrame then
-        DF:Err(L["Cannot unlock - failed to create mover frame!"])
-        return
-    end
-    
-    -- Save current position before making changes (for reset button)
-    DF.savedPositionX = db.anchorX or 0
-    DF.savedPositionY = db.anchorY or 0
-    
-    db.locked = false
-    DF.positionPanelMode = "party"  -- Set mode for position panel
-    DF.hideDragOverlay = db.hideDragOverlay or false
-    
-    local scale = db.frameScale or 1.0
-    DF.container:SetScale(scale)
-
-    -- Always use CENTER anchor for positioning
-    DF.container:ClearAllPoints()
-    DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
-    DF.container:Show()  -- Ensure container is visible
-    
-    -- Ensure container has a reasonable size (might be 0 if headers haven't laid out yet)
-    local cWidth, cHeight = DF.container:GetWidth(), DF.container:GetHeight()
-    if cWidth < 50 or cHeight < 50 then
-        -- Use fallback size based on settings
-        local frameWidth = db.frameWidth or 100
-        local frameHeight = db.frameHeight or 50
-        local spacing = db.frameSpacing or 2
-        local horizontal = (db.growDirection == "HORIZONTAL")
-        
-        if horizontal then
-            DF.container:SetSize(5 * (frameWidth + spacing) - spacing, frameHeight)
-        else
-            DF.container:SetSize(frameWidth, 5 * (frameHeight + spacing) - spacing)
-        end
-        
-        headerDebug("Container size was too small, set fallback size")
-    end
-    
-    DF.container:SetMovable(true)
-    
-    -- Ensure mover frame matches container before showing
-    DF.moverFrame:ClearAllPoints()
-    DF.moverFrame:SetAllPoints(DF.container)
-    DF.moverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
-    DF.moverFrame:SetAlpha(1)
-    DF.moverFrame:Show()
-
-    -- Sync testPartyContainer to current position and size
-    if DF.testPartyContainer then
-        DF.testPartyContainer:SetScale(scale)
-        DF.testPartyContainer:ClearAllPoints()
-        DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
-        DF.testPartyContainer:SetSize(DF.container:GetSize())
-    end
-    
-    -- Debug info
-    if DF:DebugActive("HEADERS") then
-        headerDebug("Unlock - container size:", DF.container:GetWidth(), "x", DF.container:GetHeight())
-        headerDebug("Unlock - mover size:", DF.moverFrame:GetWidth(), "x", DF.moverFrame:GetHeight())
-        headerDebug("Unlock - mover strata:", DF.moverFrame:GetFrameStrata())
-    end
-    
-    -- Show personal targeted spells mover if enabled
-    if db.personalTargetedSpellEnabled and DF.ShowPersonalTargetedSpellsMover then
-        DF:ShowPersonalTargetedSpellsMover()
-    end
-
-    -- Show Targeted List mover if enabled
-    if db.targetedListEnabled and DF.ShowTargetedListMover then
-        DF:ShowTargetedListMover()
-    end
-
-    -- Pinned frames ride the global lock: show their drag chrome too. No mode
-    -- gate — SetMoversShown shows the right handles (live movers for the current
-    -- mode, or the test movers when test mode is previewing either mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(true)
-    end
-
-    -- Always refresh grid state from db when unlocking
-    if DF.gridFrame then
-        if db.snapToGrid then
-            -- Refresh grid lines to ensure they match current settings
-            if DF.gridFrame.RefreshLines then
-                DF.gridFrame:Show()
-                DF.gridFrame.RefreshLines()
-            else
-                DF.gridFrame:Show()
-            end
-        else
-            DF.gridFrame:Hide()
-        end
-    end
-    
-    -- Show position panel and update its values from db
-    if DF.positionPanel then
-        DF:UpdatePositionPanel()
-        if DF.positionPanel.UpdateTheme then
-            DF.positionPanel:UpdateTheme()
-        end
-        DF.positionPanel:Show()
-    end
-    
-    -- Update Display tab button if it exists
-    if DF.displayLockButton and DF.displayLockButton.Text then
-        DF.displayLockButton.Text:SetText(L["Lock Frames"])
-    end
-
-    -- Unlock claims test frames for as long as it stays unlocked, so there is a
-    -- full group to position against. It deliberately does NOT snapshot what the
-    -- user had -- that is the user's own claim, tracked separately. The old
-    -- snapshot went stale whenever test mode changed mid-session, in both
-    -- directions (see TestMode/Shim.lua).
-    DF:SetTestModeOwner("party", "unlock", true, true)   -- silent: unlock announces itself
-
-    -- Sync GUI toolbar buttons
-    if DF.GUI then
-        if DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
-        if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
-    end
-
-    -- Hide permanent mover while full overlay is active
-    if DF.permanentPartyMover then DF.permanentPartyMover:Hide() end
-
-    DF:Say(L["Frames unlocked. Drag to move, right-click to lock."])
+    if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
+    Mover:Unlock(filter)
 end
 
 function DF:LockFrames()
+    -- A DandersMover session owns the unlock: end it there and let the Locked callback
+    -- restore db.locked + release the test claim. Returning is not optional -- on the lib
+    -- path that callback is the only thing that restores db.locked.
+    if Mover and Mover:IsUnlocked() then
+        Mover:Lock()
+        return
+    end
+
     local db = DF:GetDB()
     db.locked = true
-    DF.positionPanelMode = nil  -- Clear mode
-    
-    DF.moverFrame:Hide()
 
     -- Restore permanent mover visibility (keeps container movable if enabled)
     DF:UpdatePermanentMoverVisibility()
 
-    -- Hide personal targeted spells mover
-    if DF.HidePersonalTargetedSpellsMover then
-        DF:HidePersonalTargetedSpellsMover()
-    end
-
-    -- Hide Targeted List mover
-    if DF.HideTargetedListMover then
-        DF:HideTargetedListMover()
-    end
-
-    -- ☠ Both hides above are UNCONDITIONAL, unlike the matching shows in
-    -- UnlockFrames which are gated on each feature's enable flag. Keep it that way:
-    -- locking must clear a mover whose feature was switched off while it was up.
-
-    -- Hide pinned drag chrome (lock always hides, regardless of mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(false)
-    end
-
-    -- Stop any OnUpdate for snap preview
-    DF.moverFrame:SetScript("OnUpdate", nil)
-    
-    -- Hide snap preview lines
-    DF:HideSnapPreview()
-    
-    -- Hide grid
-    if DF.gridFrame then
-        DF.gridFrame:Hide()
-    end
-    
-    -- Hide position panel
-    if DF.positionPanel then
-        DF.positionPanel:Hide()
-    end
-    
-    -- Update saved position for next unlock's reset button
-    DF.savedPositionX = db.anchorX or 0
-    DF.savedPositionY = db.anchorY or 0
-    
     -- Update Display tab button if it exists
     if DF.displayLockButton and DF.displayLockButton.Text then
         DF.displayLockButton.Text:SetText(L["Unlock Frames"])
@@ -2587,67 +1263,16 @@ function DF:LockFrames()
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
 
-    -- Release unlock's claim. If the user still wants a preview it stays up; if
-    -- nobody does, this is what hides it. Nothing to go stale either way.
-    DF:SetTestModeOwner("party", "unlock", false, true)  -- silent: lock announces itself
-
     DF:Say(L["Frames locked."])
-end
-
--- ============================================================
--- TARGETED MOVERS -> CURRENT UNLOCK STATE
--- ============================================================
--- Unlock shows these two movers (gated on each feature's enable flag) and Lock
--- hides them, but that pass runs ONLY on the unlock/lock transition. Toggling
--- either feature WHILE unlocked never re-ran it, so both directions were broken
--- and in opposite ways (Aphoex, 2026-08-12):
---
---   enable a feature while unlocked  -> no mover appeared, so the feature was
---                                       there but "the frames aren't movable"
---   disable one while unlocked       -> its mover stayed on screen AND stayed
---                                       draggable, long after the feature was off
---
--- One re-sync serves both, and serves any future caller that changes these flags
--- without going through unlock/lock.
---
--- ⚠ Lock state is read from the main mover's visibility — the same probe the rest
--- of this file uses. There is no separate "unlocked" flag, and inventing one here
--- would be a second source of truth to drift from.
-function DF:RefreshTargetedMovers()
-    local unlocked = DF.moverFrame and DF.moverFrame:IsShown()
-    local db = DF:GetDB()
-
-    -- ☠ The HIDE side must be MOVER-ONLY. The compound HideTargetedListMover /
-    -- HidePersonalTargetedSpellsMover also tear down the test display, so this
-    -- sync -- which runs on every enable toggle, not just on lock/unlock -- was
-    -- killing a preview it does not own: tick Enable with frames LOCKED and test
-    -- mode on, and the bars flashed up (test mode showed them) then vanished (this
-    -- hid them). Test mode owns that display; the mover sync owns the mover. The
-    -- SHOW side stays compound: while unlocked the demo bars ARE the positioning aid.
-    if unlocked and db.personalTargetedSpellEnabled then
-        if DF.ShowPersonalTargetedSpellsMover then DF:ShowPersonalTargetedSpellsMover() end
-    elseif DF.HidePersonalTargetedSpellsMoverOnly then
-        DF:HidePersonalTargetedSpellsMoverOnly()
-    end
-
-    if unlocked and db.targetedListEnabled then
-        if DF.ShowTargetedListMover then DF:ShowTargetedListMover() end
-    elseif DF.HideTargetedListMoverOnly then
-        DF:HideTargetedListMoverOnly()
-    end
 end
 
 -- ============================================================
 -- BLIZZARD EDIT MODE — stand down while it is open
 -- ============================================================
--- Entering /edit left DF half-dressed. The game closes DandersFramesGUI and
--- DandersFramesTestPanel for us -- both are in UISpecialFrames -- but the position
--- panel is NOT, so it stayed up, and behind it the grid, the movers and the test
--- preview all kept running: two grids overlapping and fake party frames sitting on
--- top of Blizzard's own editor. Field-reported.
---
--- The actual gap is that DF had no Edit Mode integration at all; the two windows
--- that did close were closing by accident of UISpecialFrames membership.
+-- Edit Mode closes DandersFramesGUI and DandersFramesTestPanel for us -- both are
+-- in UISpecialFrames -- but the position panel is NOT, so it stays up, and behind
+-- it the grid, the movers and the test preview all keep running on top of
+-- Blizzard's own editor.
 --
 -- Locking is the right response and needs nothing new: LockFrames/LockRaidFrames
 -- already hide the position panel, the grid, the movers and the pinned drag chrome,
@@ -2658,6 +1283,14 @@ end
 -- has just finished rearranging their UI is worse than making them click Unlock.
 local function standDownForEditMode()
     if InCombatLockdown() then return end   -- Edit Mode is unreachable in combat; belt anyway
+
+    -- ☠ THE MOVER SESSION GOES FIRST. Its Locked callback restores db.locked /
+    -- db.raidLocked, so by the time the two blocks below run they correctly see the
+    -- frames as locked and skip LockFrames/LockRaidFrames -- which is what we want,
+    -- because those two would otherwise tear down a legacy overlay that was never built.
+    if Mover and Mover:IsUnlocked() then
+        Mover:Lock()
+    end
 
     local partyDb = DF.GetDB and DF:GetDB()
     if partyDb and not partyDb.locked then
@@ -2691,9 +1324,9 @@ end
 -- POSITION TARGETS — the resolver behind the public API
 -- ============================================================
 -- Core/API.lua's DandersFrames_GetPositionTargets / GetPosition / SetPosition are thin
--- shells over this. The logic lives HERE because POSITION_MODES is a file-local and this
--- is the file that owns what "a position" means; API.lua stays what it already is, a
--- documented wall of global wrappers.
+-- shells over this. The logic lives HERE because this is the file that owns what "a
+-- position" means; API.lua stays what it already is, a documented wall of global
+-- wrappers.
 --
 -- Written for MSUF's Edit Mode (Mapko, 2026-08-06), which wants to drag DF's frames from
 -- its own editor without touching DandersFramesDB_v2.
@@ -2702,17 +1335,19 @@ end
 -- "pinned1".."pinnedN". Renaming one silently breaks an integration that has no way to
 -- detect the change — ADD ids, never rename or repurpose them.
 --
--- ⚠ Scoped deliberately to what was asked for: party, raid, and pinned sets. The panel
--- also moves Personal Targeted and the Targeted List, and those can be added later
--- without breaking anyone (adding an id is safe; removing one is not). They are out of v1
+-- ⚠ Scoped deliberately to what was asked for: party, raid, and pinned sets. Personal
+-- Targeted and the Targeted List also have records and can be added later without
+-- breaking anyone (adding an id is safe; removing one is not). They are out of v1
 -- because each needs its own enabled-state question answered, and a public API is a bad
 -- place to guess.
 --
--- ⚠ TWO STORAGE SHAPES behind one API. party/raid keep a flat CENTER offset in
--- db[xField]/db[yField]; a pinned set keeps {point, x, y} nested in set.position and may
--- ALSO be glued to the frames container (position.anchorTo), in which case x/y are a fine
--- offset from that corner rather than a screen position. GetPosition reports anchorTo so a
--- caller can tell the difference instead of assuming screen coordinates.
+-- ⚠ ONE RECORD SHAPE behind the API now: every target keeps a DandersMover record
+-- {point, x, y, anchor} (party/raid: db.position; pinned: set.position). A pinned set
+-- may be glued to the frames container (a point-mode `anchor` onto DandersFrames:party
+-- /raid, mirrored in the deprecated `anchorTo`), in which case x/y are a fine offset from
+-- that corner rather than a screen position. GetPosition reports both so a caller can
+-- tell the difference instead of assuming screen coordinates. Ids are frozen: pinnedN
+-- resolves against the CURRENT mode; personal / targetedList are not public.
 
 local API_PINNED_PREFIX = "pinned"
 
@@ -2723,36 +1358,45 @@ function DF:ResolvePositionTarget(id)
     if type(id) ~= "string" then return nil end
 
     if id == "party" or id == "raid" then
-        local mode = POSITION_MODES[id]
-        if not mode then return nil end
-        local db = mode.getDB and mode.getDB()
+        local db = (id == "raid") and DF:GetRaidDB() or DF:GetDB()
         if not db then return nil end
+        local rec = DF:GetPositionRecord(id)
         return {
             id      = id,
             kind    = id,
             label   = (id == "raid") and "Raid Frames" or "Party Frames",
             enabled = true,   -- DF always manages these two; there is no per-target toggle
-            point   = "CENTER",   -- both are stored as an offset from UIParent CENTER
+            point   = rec.point or "CENTER",   -- an offset from UIParent CENTER by default
+            -- The DandersMover anchor block, when the container is glued to another
+            -- addon's element. nil = free screen placement, and then x/y are a screen
+            -- position exactly as they always were. A COPY: callers must go through
+            -- SetPosition, and there is no public way to set an anchor yet.
+            anchor  = rec.anchor and {
+                target = rec.anchor.target, mode = rec.anchor.mode,
+                edge = rec.anchor.edge, align = rec.anchor.align,
+                point = rec.anchor.point, relPoint = rec.anchor.relPoint,
+                offsetX = rec.anchor.offsetX, offsetY = rec.anchor.offsetY,
+            } or nil,
             read    = function()
-                local d = mode.getDB()
-                return tonumber(d[mode.xField]) or 0, tonumber(d[mode.yField]) or 0
+                local r = DF:GetPositionRecord(id)
+                return tonumber(r.x) or 0, tonumber(r.y) or 0
             end,
             -- ☠ RAID MUST OFFER THE WRITE TO AutoProfilesUI FIRST, exactly as the drag
             -- handler does. While an auto layout drives the frames it OWNS the position,
             -- and writing raidAnchorX/Y straight to the db moves the BASE anchors
             -- underneath it — the frames do not move, and the user's base position is
-            -- quietly corrupted instead. Fall through to the base write only when the
-            -- routing declines (no active layout, or mid-edit where the preview path
-            -- captures it). This mirrors DragMover:OnDragStop — keep the two in step.
+            -- quietly corrupted instead. That routing now lives inside
+            -- DF:SetPositionRecord, which is also what DragMover:OnDragStop and the
+            -- DandersMover bridge call — one funnel, so the three cannot drift.
             write   = function(x, y)
+                local r = DF:GetPositionRecord(id)
+                DF:SetPositionRecord(id, { point = r.point or "CENTER", x = x, y = y,
+                                           anchor = r.anchor }, "API:SetPosition")
                 if id == "raid" then
-                    local routed = DF.AutoProfilesUI and DF.AutoProfilesUI.SetActiveLayoutRaidPosition
-                        and DF.AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
-                    if routed then return end
+                    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+                else
+                    if DF.UpdateContainerPosition then DF:UpdateContainerPosition() end
                 end
-                local d = mode.getDB()
-                d[mode.xField], d[mode.yField] = x, y
-                if mode.apply then mode.apply() end
             end,
         }
     end
@@ -2765,23 +1409,37 @@ function DF:ResolvePositionTarget(id)
         if not setIndex or setIndex < 1 or setIndex > (pf.MAX_SETS or 0) then return nil end
         local set = pf:GetSetForPosition(setIndex)
         if not set then return nil end
-        set.position = set.position or { point = "CENTER", x = 0, y = 0 }
+        -- The CURRENT mode's set (GetSetForPosition -> IsInRaid / raid test) -- the
+        -- documented contract; do not change it. Read/write through the same helpers
+        -- DandersMover's onChanged and the legacy handles use, so an `anchor` survives
+        -- and x/y keep meaning "the glue offset while glued" (the anchorTo contract).
+        local raid = pf.IsPositionTargetRaid and pf:IsPositionTargetRaid() or false
+        local pos = pf.GetPositionRecord and pf:GetPositionRecord(setIndex, raid) or set.position
+        if not pos then return nil end
         local label = pf.GetPositionPanelLabel and pf:GetPositionPanelLabel(setIndex)
+        local a = pos.anchor
         return {
             id       = id,
             kind     = "pinned",
             setIndex = setIndex,
             label    = label or ("Pinned " .. setIndex),
             enabled  = set.enabled and true or false,
-            point    = set.position.point or "CENTER",
-            anchorTo = set.position.anchorTo,  -- nil = free screen placement
+            point    = pos.point or "CENTER",
+            anchorTo = pos.anchorTo,  -- nil = free screen placement (mirror of a frames `anchor`)
+            anchor   = a and {
+                target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+                point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY,
+            } or nil,
             read     = function()
-                local p = set.position
-                return tonumber(p.x) or 0, tonumber(p.y) or 0
+                return pf.ReadXY(pos)
             end,
             write    = function(x, y)
-                set.position.x, set.position.y = x, y
-                if pf.ApplySetPosition then pf:ApplySetPosition(setIndex) end
+                if pf.CommitSetPosition then
+                    pf:CommitSetPosition(setIndex, raid, { point = pos.point, x = x, y = y })
+                else
+                    pf.WriteXY(set, pos.point, x, y)
+                    if pf.ApplySetPosition then pf:ApplySetPosition(setIndex) end
+                end
             end,
         }
     end

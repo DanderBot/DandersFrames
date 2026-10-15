@@ -3,7 +3,6 @@ local addonName, DF = ...
 -- ============================================================
 -- TEXT DESIGNER - MODULE ENTRY
 -- Feature for designing arbitrary text elements on unit frames.
--- See docs/superpowers/specs/2026-05-22-text-designer-phase1-design.md
 -- ============================================================
 
 

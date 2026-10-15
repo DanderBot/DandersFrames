@@ -52,9 +52,12 @@ function DF:IsFrameSortActive()
     return (partyDB and partyDB.useFrameSort) or (raidDB and raidDB.useFrameSort)
 end
 
--- Convert an array of unit tokens to a comma-separated nameList string
+-- Convert an array of unit tokens to a comma-separated nameList string.
+-- Returns nameList, complete: complete is false when a party member's name is unresolved
+-- (nil, secret or UNKNOWNOBJECT).
 local function UnitsToNameList(units)
     wipe(namesBuf)
+    local complete = true
     for i = 1, #units do
         local unit = units[i]
         local name
@@ -74,6 +77,10 @@ local function UnitsToNameList(units)
             end
         else
             name = GetUnitName(unit, true)
+            if issecretvalue(name) or not name or name == UNKNOWNOBJECT then
+                complete = false
+                name = nil
+            end
         end
         -- Skip nil and secret values (Midnight 12.0 returns opaque secret strings
         -- for some unit names in instanced content; type() == "string" is not
@@ -82,7 +89,7 @@ local function UnitsToNameList(units)
             namesBuf[#namesBuf + 1] = name
         end
     end
-    return tconcat(namesBuf, ",")
+    return tconcat(namesBuf, ","), complete
 end
 
 -- ============================================================
@@ -100,8 +107,21 @@ local function SortPartyFrames(units)
     if not DF.partyHeader then return false end
     if not DF.partyHeader:IsVisible() then return false end
 
-    local nameList = UnitsToNameList(units)
+    local nameList, complete = UnitsToNameList(units)
+    -- The secure header hides any unit missing from nameList, so a partial list would hide
+    -- a member. Show everyone in INDEX order; SchedulePartySortRetry re-sorts later.
+    if not complete then
+        DF:Debug("FRAMESORT", "Party nameList incomplete - using INDEX + retry")
+        DF.partyHeader:SetAttribute("nameList", nil)
+        DF.partyHeader:SetAttribute("sortMethod", "INDEX")
+        DF.partyHeader:SetAttribute("groupBy", nil)
+        DF.partyHeader:SetAttribute("groupingOrder", nil)
+        if DF.ClearHeaderAttributeCache then DF:ClearHeaderAttributeCache(DF.partyHeader) end
+        if DF.SetPartySortIncomplete then DF:SetPartySortIncomplete(true) end
+        return true
+    end
     if nameList == "" then return false end
+    if DF.SetPartySortIncomplete then DF:SetPartySortIncomplete(false) end
 
     DF:Debug("FRAMESORT", "Sorting party frames: %s", nameList)
 

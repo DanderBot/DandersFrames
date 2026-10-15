@@ -79,9 +79,55 @@ jobs:
             git tag "$VERSION"
           fi
 
+      # The repo keeps its comments; the zip ships none (they were ~45% of the Lua
+      # by size). Runs BEFORE the lib sync so the three DandersUI copies are made
+      # from the already-stripped canonical source. Line breaks are preserved, so
+      # error-report line numbers still match the repo. The script compiles every
+      # file before and after and fails the build on any bytecode difference --
+      # nothing is written unless all of them match.
+      - name: Set up Python (comment stripper)
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Strip comments from shipped Lua
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          python -m pip install --quiet lupa
+          python Tools/strip-comments.py --selftest
+          python Tools/strip-comments.py --write
+
+      # DandersUI is a library, not an addon: the canonical source is <repo>/DandersUI
+      # and each host loads its own copy from <host>/Libs/DandersUI. Those copies are
+      # git-ignored (junctions locally), so CI has to materialise them before packaging.
+      - name: Sync embedded libs
+        if: steps.guard.outputs.skip != 'true'
+        # ☠ THE git add -f IS WHAT SHIPS THE LIBRARY. The packager excludes every
+        # UNTRACKED path (release.sh:1133, git ls-files --others) -- .pkgmeta and
+        # .gitignore are irrelevant to that check -- so the synced copies must be
+        # STAGED or the zips ship without DandersUI and every host addon dies at
+        # its LibStub lookup on load (v5.4.0-alpha.2, field-reported). CI-only:
+        # locally these paths are junctions and must never be staged.
+        run: |
+          bash Tools/sync-libs.sh
+          git add -f DandersFrames/Libs/DandersUI DandersFrames_Options/Libs/DandersUI DandersMover/Libs/DandersUI
+
       - name: Package and Release
         if: steps.guard.outputs.skip != 'true'
         uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package DandersMover (standalone CurseForge project)
+        if: steps.guard.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: BigWigsMods/packager@v2
+        with:
+          # ./ prefix is load-bearing: the packager validates the release dir as
+          # "absolute or inside .", and a bare .release-mover fails that check
+          # (v5.4.0-alpha.1's mover upload died on exactly this).
+          args: -m .pkgmeta-mover -r ./.release-mover
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

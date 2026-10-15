@@ -39,11 +39,10 @@ local Border = DF.Border
 -- Create a border widget anchored to `parent` (or opts.anchorTo).
 -- opts:
 --   anchorTo          frame to cover (default: parent)
---   frameLevelOffset  level above parent (default: 2 — NOT 10, which this line claimed
---                     long after the default changed. Any parent that stacks CHILD
+--   frameLevelOffset  level above parent (default: 2). Any parent that stacks CHILD
 --                     FRAMES over its own rect must pass this explicitly: unit and pet
---                     frames pass 10, aura buttons pass DF.AuraButtonLevels.BORDER.
---                     See the note at the default itself for why.)
+--                     frames pass 14, aura buttons pass DF.AuraButtonLevels.BORDER.
+--                     See the note at the default itself for why.
 --   layer             texture draw layer for the solid edges (default: "BORDER")
 --   solidOnly         hot-path SOLID border: skips the SetGradient/CreateColor
 --                     gradient-clear in both Apply (SOLID) and SetColor, so live
@@ -193,6 +192,41 @@ end
 local ANIM_GOLD  = { r = 0.95, g = 0.95, b = 0.32, a = 1 }
 local ANIM_WHITE = { r = 1, g = 1, b = 1, a = 1 }
 
+-- ★★ THE EFFECT'S BLEND MODE, A SETTING RATHER THAN A CONSTANT (2026-09-10).
+--
+-- ☠ THE BUG THIS ANSWERS. Krathe: "if I've set it to red it will show orange when over a
+-- yellow border." DF Chase's sparkles were created with a hardcoded SetBlendMode("ADD"), and
+-- ADD means "add my colour to whatever is behind me" -- so the effect showed its true colour
+-- over the dark icon in the corner of his frame and turned orange the moment it crossed the
+-- yellow border. Working exactly as written, and not what a colour picker promises.
+--
+-- ☠☠ AND IT WAS INCONSISTENT, WHICH IS THE REAL FAULT. When c4b4e5eb replaced LibCustomGlow
+-- with our own effects, each one had a blend mode chosen by hand: DF_ORBIT and DF_PROC got
+-- ADD, and the other three got none at all, which is BLEND. Same colour picker, two different
+-- meanings depending on which effect you happened to pick, and nothing anywhere saying so.
+--
+-- ⚠ THE DEFAULTS ARE EXACTLY WHAT WAS HARDCODED. Nobody's frames change appearance. ADD is
+-- WHY a glow reads as glowing -- the same art in BLEND looks like a flat sticker on a dark
+-- frame -- so the two glow effects keep it and the choice is now the user's to make.
+-- ⚠ DF_PULSATE IS ABSENT ON PURPOSE. It has no textures of its own: it modulates the border's
+-- OWN edges, which already have spec.blendMode. Offering a second blend mode for it would be
+-- two controls over one texture, and the loser would be whichever ran last.
+local ANIM_BLEND_DEFAULT = {
+    DF_ORBIT = "ADD",   -- DF Chase: additive sparkles
+    DF_PROC  = "ADD",   -- DF Proc: additive glow flipbook
+    -- DF_DASH / DF_PIXEL / BLINK / DF_FLASH: BLEND, which is what setting nothing gave them.
+}
+local ANIM_BLEND_VALID = { BLEND = true, ADD = true, MOD = true, DISABLE = true }
+
+-- ⚠ VALIDATED, because this value reaches SetBlendMode, which throws on an unknown string --
+-- and it comes out of SavedVariables, which is to say out of anywhere. An unrecognised mode
+-- falls back to the effect's own default rather than erroring the whole animation pass.
+local function animBlendMode(anim)
+    local want = anim and anim.blendMode
+    if want and ANIM_BLEND_VALID[want] then return want end
+    return (anim and ANIM_BLEND_DEFAULT[anim.type]) or "BLEND"
+end
+
 -- Resolve a colour from either an array {r,g,b,a} or a keyed {r=,g=,b=,a=}
 -- table, so consumers can pass whichever they already store.
 local function readColor(color)
@@ -226,21 +260,14 @@ end
 -- deterministic, so the built keys are cached and reused forever.
 local borderKeyMemo = {}
 
--- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call.
--- 395af09f killed the 37 string concats but left one allocation behind: `k`
--- captured memo and prefix, so a fresh closure was built on every call -- and
--- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
--- of boss).
+-- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call --
+-- BuildSpec runs per bordered element per tick.
 --
 -- THE UPVALUES ARE SHARED, so BuildSpec saves and restores them around its body
--- (see below) and reentrancy is CORRECT rather than merely forbidden. It cannot
--- currently happen -- the body reaches DF:GetClassColor, DF:GetTestUnitData,
--- DF:GetUnitRole and the Border:Resolve* helpers, and none of those calls
--- BuildSpec -- but relying on that was a comment enforcing an invariant nothing
--- checked. A resolver that ever did build a spec would have started reading
--- another prefix's keys: a wrong border, silently, with nothing at the call site
--- to explain it. Stack discipline costs two locals and no allocation, which is
--- cheaper than the assert that would only have caught it on a debug build.
+-- (see below) and reentrancy is CORRECT rather than merely forbidden. Nothing in
+-- the body reenters today, but a resolver that ever built a spec would start
+-- reading another prefix's keys: a wrong border, silently, with nothing at the
+-- call site to explain it.
 local bsMemo, bsPrefix
 local function k(suffix)
     local key = bsMemo[suffix]
@@ -326,12 +353,10 @@ function Border:BuildSpec(dbTable, prefix, ctx)
         blendMode     = dbTable[k("BorderBlendMode")] or "BLEND",
         pixelPerfect  = dbTable.pixelPerfect,
     }
-    -- Gradient is now a STYLE (selected via the Border Style dropdown) rather
-    -- than an independent toggle. The legacy `<prefix>BorderGradientEnabled`
-    -- boolean is migrated to `<prefix>BorderStyle = "GRADIENT"` on db load
-    -- (MigrateFrameBorderKeys / equivalent) but we still honour a stale
-    -- `true` here as a safety net in case the migration hasn't run on some
-    -- code path.
+    -- GRADIENT is a STYLE (the Border Style dropdown). The legacy
+    -- `<prefix>BorderGradientEnabled` boolean is migrated to
+    -- `<prefix>BorderStyle = "GRADIENT"` on db load (MigrateFrameBorderKeys), but a
+    -- stale `true` is still honoured here in case the migration hasn't run.
     if style == "GRADIENT" or dbTable[k("BorderGradientEnabled")] then
         spec.style = "GRADIENT"
         spec.gradient = {
@@ -370,6 +395,10 @@ function Border:BuildSpec(dbTable, prefix, ctx)
             mask         = dbTable[k("BorderAnimationMask")],
             sidesAxis    = dbTable[k("BorderAnimationSidesAxis")],
             cornerLength = dbTable[k("BorderAnimationCornerLength")],
+            -- ⚠ NIL MEANS THE EFFECT'S OWN DEFAULT, not BLEND -- see ANIM_BLEND_DEFAULT. An
+            -- absent key has to keep DF Chase and DF Proc additive, or every existing profile
+            -- would quietly change appearance on the first login after this shipped.
+            blendMode    = dbTable[k("BorderAnimationBlendMode")],
             -- PROC only: play the one-shot "proc start" flash on each start.
             -- Opt-in (default off) because PROC is used here as a CONTINUOUS
             -- border animation that re-applies often; the flash is a one-shot
@@ -496,8 +525,8 @@ end
 
 -- Dispel-type colour for a debuff, via C_UnitAuras.GetAuraDispelTypeColor.
 -- Lazy-builds `DF.debuffBorderCurve` from C_CurveUtil if it isn't already
--- present (Auras.lua / Dispel.lua build the same one independently today;
--- this serves as a shared lazy fallback).
+-- present. DF:GetDispelColorCurve is the ONLY builder of that curve;
+-- Features/Dispel.lua only invalidates it (DF:InvalidateDispelColorCurve).
 -- Account-wide dispel-type colour curve, built from DF.db.dispelColors (edited on
 -- the Colors page; seeded from the old debuff-border palette). Per the API doc,
 -- GetAuraDispelTypeColor "remaps the dispel type to a colour via a curve, with the
@@ -969,26 +998,11 @@ end
 -- ============================================================
 
 
--- Lazy-create the shared OnUpdate driver for custom animations.
---
--- Parenting: normal borders parent the driver to `border`, so it inherits the
--- border's shown-state and stops ticking automatically when the border hides.
--- secretRect borders (AD / aura-container slot children) live inside a
--- CustomAuraButton subtree whose intrinsic onUpdateMode="disabled" suppresses
--- OnUpdate through EVERY descendant -- a driver parented under `border` there
--- would install its OnUpdate but never fire (Blink / DF_PULSATE and the DF
--- particle effects all looked frozen). Host those drivers on UIParent so their
--- OnUpdate actually dispatches; the tick closures capture `border` by reference
--- and keep driving the border's own child textures (render-side SetAlpha /
--- SetPoint on OUR textures -- no secret read, no secure op). Visibility still
--- rides the slot's secret show/hide (the textures are slot children); only the
--- MOTION now comes from the external driver.
---
--- Cost of the external host: the driver no longer auto-hides with the border,
--- so its teardown is EXPLICIT. StopAnimation (below) clears the OnUpdate +
--- Hides it, and the aura-container teardown path calls StopAnimation on every
--- slot border so a de-configured / winner-changed / rebuilt AD border leaves no
--- orphaned ticking driver.
+-- Teardown is EXPLICIT: the shared driver is parented to UIParent, not to a
+-- border, so it does not auto-hide when one hides. StopAnimation unregisters the
+-- border (and the driver hides once the registry empties), and the aura-container
+-- teardown path calls StopAnimation on every slot border, so a de-configured /
+-- winner-changed / rebuilt AD border leaves no orphaned ticking entry.
 -- Shared OnUpdate driver: ONE UIParent-hosted frame ticks a registry of every
 -- animated border, instead of a CreateFrame + OnUpdate per border. secretRect
 -- borders (AD / aura-container slot children) MUST be driven externally — the
@@ -1201,8 +1215,7 @@ end
 --
 -- Inset sign: positive = INWARD (smaller rect, animation closer to centre);
 -- negative = OUTWARD (larger rect, animation further from centre).
--- Matches Border Inset semantics. The previous "Extent" parameter was an
--- outward-only inset (Inset = -Extent).
+-- Matches Border Inset semantics.
 -- (forward-declared above with `local ensureAnimRect` so callers earlier in
 -- the file resolve through the local binding.)
 function ensureAnimRect(border, inset, offsetX, offsetY)
@@ -1272,6 +1285,12 @@ local function setupOrbitParticles(border, anim)
     local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.orbitTex = border.orbitTex or {}
     local tex = border.orbitTex
+    -- ☠ OUTSIDE THE CREATION GUARD, AND THAT IS THE HALF THAT MAKES IT A SETTING. These
+    -- textures are POOLED and reused across every re-apply, so a blend mode set only on the
+    -- `if not t` branch is the mode the first frame happened to be born with -- changing the
+    -- option would do nothing at all until a reload, which reads as the option being broken.
+    -- Same reason SetVertexColor is out here. See animBlendMode.
+    local bm = animBlendMode(anim)
     for i = 1, total do
         local t = tex[i]
         if not t then
@@ -1279,10 +1298,10 @@ local function setupOrbitParticles(border, anim)
             t:SetTexture(ORBIT_SHINE_TEX)
             t:SetTexCoord(ORBIT_SHINE_COORD[1], ORBIT_SHINE_COORD[2], ORBIT_SHINE_COORD[3], ORBIT_SHINE_COORD[4])
             t:SetDesaturated(true)
-            t:SetBlendMode("ADD")
             tex[i] = t
         end
         t:SetParent(host)
+        t:SetBlendMode(bm)
         t:SetVertexColor(r, g, b, a)
         t:Show()
     end
@@ -1700,8 +1719,21 @@ end
 
 -- Redraw all four edges' dashes at a marching offset (counter-clockwise:
 -- bottom → left → top → right, matching the highlight system).
+-- ⚠ STAMPED ON CHANGE, NOT EVERY FRAME. The dash pool is 96 fixed textures and this runs on
+-- the OnUpdate tick, so the mode is compared once and written only when it actually moved.
+-- The pool is created at a fixed size and never grows, so nothing can be born unstamped.
+local function stampDashBlend(border, pool)
+    local bm = border._animBlend or "BLEND"
+    if border._dashBlendApplied == bm then return end
+    border._dashBlendApplied = bm
+    for _, edge in pairs(pool) do
+        for _, d in ipairs(edge) do d:SetBlendMode(bm) end
+    end
+end
+
 local function drawDashes(border, offset, th, inset, r, g, b, a)
     local pool = ensureDashPool(border)
+    stampDashBlend(border, pool)
     local fw, fh = border._knownW or border:GetWidth(), border._knownH or border:GetHeight()
     if not fw or not fh or fw <= 0 or fh <= 0 then return end
     local width  = fw - inset * 2
@@ -1756,6 +1788,7 @@ local function buildDashAnims(border, anim, th, inset, r, g, b, a, marchSpeed)
         for i = 1, count do
             local dashStart = startPos + (i - 1) * P
             local q = marchQuad(e, i)
+            q:SetBlendMode(animBlendMode(anim))
             q:SetColorTexture(r, g, b, a)
             q:ClearAllPoints()
             if ed.horiz then
@@ -1808,6 +1841,10 @@ local function setupPixelParticles(border, anim)
     local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.pixelTex = border.pixelTex or {}
     local tex = border.pixelTex
+    -- ⚠ DF Pixel set NO blend mode, which is BLEND -- so this is the same picture it has
+    -- always drawn, now said out loud and overridable. Half the effects were additive and half
+    -- were not, with nothing anywhere admitting to it; see ANIM_BLEND_DEFAULT.
+    local bm = animBlendMode(anim)
     for i = 1, N do
         local t = tex[i]
         if not t then
@@ -1816,6 +1853,7 @@ local function setupPixelParticles(border, anim)
             tex[i] = t
         end
         t:SetParent(host)
+        t:SetBlendMode(bm)
         t:SetVertexColor(r, g, b, a)
         t:Show()
     end
@@ -1933,6 +1971,7 @@ local function buildPixelAnims(border, anim)
             local at = first + (i - 1) * space
             local q = marchQuad(e, i)
             q:SetTexture(PIXEL_TEX)
+            q:SetBlendMode(animBlendMode(anim))
             q:SetVertexColor(r, g, b, a)
             q:SetSize(ed.sx, ed.sy)
             q:ClearAllPoints()
@@ -1952,11 +1991,10 @@ local function buildPixelAnims(border, anim)
 end
 
 -- ===== DF_PROC (proc flare — DF-owned ProcGlow stand-in) =====
--- Steps Blizzard's proc-loop flipbook atlas BY HAND on the shared driver: the
--- native FlipBook AnimationGroup won't tick inside a container-button subtree
--- (same reason the particle effects use the external driver), so we advance the
--- 6×5 = 30-frame grid ourselves via SetTexCoord. Renders the golden proc glow
--- taint-safe on aura buttons. Parented to the animRect (never the native button).
+-- Steps Blizzard's proc-loop flipbook atlas BY HAND on the shared driver: advances
+-- the 6×5 = 30-frame grid via SetTexCoord (buildProcAnims is the declarative twin
+-- for container borders). Renders the golden proc glow taint-safe on aura buttons.
+-- Parented to the animRect (never the native button).
 local PROC_ATLAS          = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
 local PROC_START_ATLAS    = "UI-HUD-ActionBar-Proc-Start-Flipbook"
 local PROC_ROWS           = 6
@@ -2036,24 +2074,27 @@ local function setupProcGlow(border, anim)
     -- its final frame — so playing the burst fully then swapping to the loop reads
     -- as one smooth motion (no cross-fade). Alpha-only visibility (never IsShown —
     -- a secret boolean on container buttons).
+    -- Applied on every pass, not on the create branch: these textures are pooled and reused,
+    -- so a mode set at birth is the mode the first frame happened to get. See animBlendMode.
+    local bm = animBlendMode(anim)
     local t = border.procTex
     if not t then
         t = host:CreateTexture(nil, "OVERLAY")
-        t:SetBlendMode("ADD")
         border.procTex = t
     end
     t:SetParent(host); t:ClearAllPoints(); t:SetAllPoints(host)
     if border._procAtlas then t:SetTexture(border._procAtlas.file) end
+    t:SetBlendMode(bm)
     t:SetDesaturated(desat); t:SetVertexColor(r, g, b, a)
     local s = border.procStartTex
     if not s then
         s = host:CreateTexture(nil, "OVERLAY")
-        s:SetBlendMode("ADD")
         border.procStartTex = s
     end
     s:SetParent(host); s:ClearAllPoints()
     s:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (needs the rect)
     if border._procStartAtlas then s:SetTexture(border._procStartAtlas.file) end
+    s:SetBlendMode(bm)
     s:SetDesaturated(desat); s:SetVertexColor(r, g, b, a)
     -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
     local showIntro = not anim.procStart
@@ -2127,10 +2168,8 @@ local function procTick(border, anim, dt)
     t:SetAlpha(1)
 end
 
--- DF_PROC, DECLARATIVE. The comment on stepProcFlipbook says the native FlipBook
--- "won't tick inside a container-button subtree" — that was the same wrong reading that
--- retired animation everywhere, and this is its replacement. A FlipBook animation is
--- declarative, so it runs there; only the hand-stepping did not.
+-- DF_PROC, DECLARATIVE. A FlipBook animation is declarative, so it DOES run inside a
+-- container-button subtree; only the per-frame hand-stepping does not.
 --
 -- ★ SetAtlas, NOT SetTexture(info.file). A FlipBook with frame width/height 0 derives
 -- its grid from the region's own texture rect, which is what confines the walk to the
@@ -2192,7 +2231,7 @@ end
 
 -- ===== DF_FLASH (button-glow flash — DF-owned ButtonGlow stand-in) =====
 -- The classic action-button glow METHOD, reimplemented on our shared driver
--- (native Animations don't tick in container-button subtrees): a 0.5s intro where
+-- (buildFlashAnims is the declarative twin for container borders): an intro where
 -- an outer glow collapses (2F→F) while an inner glow expands (F/2→F) under a
 -- bright spark flare, then the inner glow fades out as Blizzard's crawling "ants"
 -- fade in — the outer glow lands at F and STAYS as the steady state, so nothing
@@ -2207,11 +2246,8 @@ local FLASH_ANTS_FW     = 48 / 256    -- one frame's size in UV units
 local FLASH_INTRO_DUR   = 0.8         -- full intro length (the classic glow runs 0.5s on a
                                       -- 45px action button; slower reads right on small aura
                                       -- icons). Glows land at 60%, hand-off fills the rest.
-                                      -- ⚠ Briefly 0.5 during the 2026-08-27 LCG-parity pass,
-                                      -- reverted to the shipped value for a clean A/B
-                                      -- baseline before re-judging. (The side-by-side
-                                      -- harness it was judged against is local-only and
-                                      -- is deliberately not part of the shipped addon.)
+                                      -- ⚠ Kept at the shipped value for a clean A/B baseline; re-judge
+                                      -- side by side against the real thing before retuning.
 local FLASH_FRAME_SCALE = 1.4         -- F: glow frame = icon + 20% each side
 -- Crop rectangles inside the IconAlert sheet (facts of the asset's layout):
 local FLASH_UV_SPARK    = { 0.00781250, 0.61718750, 0.00390625, 0.26953125 }
@@ -2279,7 +2315,11 @@ local function setupFlashGlow(border, anim)
     ants:SetParent(host); ants:ClearAllPoints()
     ants:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (0.85 × F)
     ants:SetTexture(FLASH_ANTS_TEX)
+    -- ⚠ EVERY PASS, on the pooled textures -- see animBlendMode. DF Flash set no mode, so its
+    -- default is the BLEND it has always drawn with.
+    local bm = animBlendMode(anim)
     for _, t in next, { spark, inner, innerOver, outer, outerOver, ants } do
+        t:SetBlendMode(bm)
         t:SetDesaturated(desat); t:SetVertexColor(r, g, b, 1); t:Show()
     end
     border._flashMaxA = a   -- the colour's alpha caps every layer
@@ -2504,6 +2544,117 @@ local function buildFlashAnims(border, anim)
     return true
 end
 
+-- ===== MARCHING_ANTS (Blizzard's own widget, 12.1.5) =====
+-- The one effect in this file DF does not draw. 12.1.5 added
+-- Blizzard_SharedXML/MarchingAnts.lua — MarchingAntsTemplate plus the
+-- MarchingAnts_* constructors — as a general-purpose reusable border. SharedXML
+-- carries no UseSecureEnvironment, so it is ordinary addon-reachable UI code.
+--
+-- ★ WHY IT EARNS A SLOT NEXT TO DF_DASH, which is also marching ants:
+--   · It is the DEFAULT UI's look. Blizzard drive their new raid-frame dispel
+--     ants with it, so "match the game" is now a thing a user can reasonably
+--     want and could not previously have.
+--   · Its motion is four TextureCoordTranslations on wrap-addressed atlases —
+--     the texture scrolls under a fixed quad. DF_DASH instead clips and
+--     translates a POOL of dash textures. Different mechanism, different look
+--     (a continuous crawl versus discrete dashes), and cheaper.
+--   · It is declarative on EVERY host. Unlike our own effects there is no
+--     driver twin to fall back to, so it renders identically on a container
+--     button and on the AD canvas — no _secretRect branch, nothing to diverge.
+--
+-- ☠ NEVER CALL SetInsetCorners / SetInsetLeft / SetInsetRight / SetInsetBottom.
+-- They are BROKEN in the shipped 12.1.5 file: SetInsetsInternal takes
+-- (container, element, elementKey, ...) and then assigns to a bare `self`, which
+-- is a nil global there, and it calls AnchorElement with three arguments when
+-- that function takes two. All four setters throw. There is no SetInsetTop at
+-- all and the file is dotted with FIXME/TODO, so treat the whole family as
+-- unfinished. The offsets are plain fields the mixin reads back off the frame
+-- (elementSetupData -> container[keyOffsetP1X]), so we set them directly and let
+-- SetupAssets do the anchoring — which is also what Blizzard's own dispel
+-- template does, via KeyValues, presumably having hit exactly this.
+--
+-- ⚠ SetupAssets and Play are called EXPLICITLY rather than left to the
+-- template's OnLoad/OnShow. A frame parented under a native aura button inherits
+-- forbidden aspects and is recorded as never getting scripts, so relying on
+-- those handlers would leave the ants unbuilt and still exactly where a
+-- capability check would report success. Both calls are idempotent, so doing
+-- them ourselves costs nothing on hosts where the scripts do run.
+local MARCH_SPEED = 1.25   -- Blizzard's own dispel-ant rate at Frequency 1.
+
+local function hideMarchingAnts(border)
+    if border.antsFrame then border.antsFrame:Hide() end
+end
+
+local warnedAntsBuild = false
+
+local function buildMarchingAnts(border, anim)
+    if not MarchingAnts_CreateAsChildOf then return false end
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+
+    local f = border.antsFrame
+    if not f then
+        -- ⚠ Parent to the animRect and create ONCE. The frame is DF-owned but it
+        -- lives under whatever hosts this border, so on a container button it is
+        -- create-in-secure-context-or-never, like every other region here.
+        local ok, made = pcall(MarchingAnts_CreateAsChildOf, host, "MarchingAntsTemplate", "dfAnts")
+        if not ok or not made then
+            -- ☠ THIS USED TO RETURN SILENTLY, which is the silent-capability-skip
+            -- antipattern: the effect simply does not appear and nothing says why. The
+            -- first field report against this feature ("shows on the AD preview but not on
+            -- live frames") had a different cause — the SAFE_OVERLAY_ANIM allow-list — and
+            -- took a code read to find precisely because BOTH failure paths were quiet.
+            -- One-shot: a refused create will repeat on every button in the batch.
+            if not warnedAntsBuild then
+                warnedAntsBuild = true
+                if DF.DebugWarn then
+                    DF:DebugWarn("AURACONTAINER",
+                        "MarchingAnts create failed on a %s host, effect will not render: %s",
+                        border._secretRect and "container-button" or "DF-owned",
+                        tostring(made))
+                end
+            end
+            return false
+        end
+        border.antsFrame = made
+        f = made
+    end
+    f:SetParent(host)
+    f:ClearAllPoints()
+    f:SetAllPoints(host)
+
+    local th = math.max(1, anim.thickness or 2)
+    pcall(f.SetLineThickness, f, th, th)
+
+    -- Rebuild the atlases every start: thickness and the asset choice both feed
+    -- SetupAssets, and the mixin's own MarkDirty path runs off OnEvent, which we
+    -- cannot rely on here.
+    pcall(f.SetupAssets, f)
+
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
+    if CreateColor then pcall(f.SetColor, f, CreateColor(r, g, b, a)) end
+
+    -- Frequency is the crawl SPEED, matching DF_DASH's convention so the slider
+    -- reads the same way across both ant effects. 0 pauses (the mixin's own
+    -- documented behaviour), which gives a static outline for free.
+    local freq = anim.frequency
+    if freq == nil then freq = 1 end
+    pcall(f.SetSpeed, f, freq * MARCH_SPEED)
+
+    f:Show()
+    -- Explicit, for the reason in the section header. SetSpeed(>0) also calls
+    -- CheckResumePlaying, but that early-outs on IsVisible() which is secret on a
+    -- container button — so it cannot be trusted to have started anything.
+    if f.MarchingAnim then pcall(f.MarchingAnim.Play, f.MarchingAnim) end
+
+    -- Join the declarative registry so StopAnimation stops us, and so
+    -- StartAnimation's dedupe counts this border as genuinely live rather than
+    -- treating it as a dead driver and rebuilding on every re-apply.
+    local groups = border._declAnims or {}
+    if f.MarchingAnim then groups[#groups + 1] = f.MarchingAnim end
+    border._declAnims = groups
+    return true
+end
+
 -- ===== CUSTOM ONUPDATE TICKS =====
 -- Each tick function receives (border, anim, elapsed) and modulates the 4
 -- edge SetAlpha values. Period defaults to anim.frequency-derived; a
@@ -2655,9 +2806,9 @@ end
 -- registerAnimTick/unregisterAnimTick if a DF-owned off-button frame ever
 -- needs the shared driver again.)
 
--- Stop every LCG glow we might have started AND tear down any custom
--- animator state. Cheap: each Stop is a no-op when its glow frame isn't
--- present; the driver Hide is a no-op when no driver exists.
+-- Tear down every animator this border might be running: the shared driver tick,
+-- the declarative groups and the overlay / particle pools. Cheap: each teardown is
+-- a no-op when its textures never existed, as is the driver Hide with no driver.
 function Border:StopAnimation(border)
     if not border then return end
     -- ☠ NEVER-ANIMATED BORDERS: leave without touching a single region.
@@ -2695,6 +2846,7 @@ function Border:StopAnimation(border)
     hidePixelParticles(border)
     hideProcGlow(border)
     hideFlashGlow(border)
+    hideMarchingAnts(border)
     if border.cornerExtras then
         for _, e in ipairs(border.cornerExtras) do e:Hide() end
         border.cornerExtras = nil
@@ -2713,8 +2865,8 @@ function Border:StopAnimation(border)
     -- full opacity on each re-render -- most visibly in the burst of relayouts
     -- when joining a raid whose members are in another zone -- until the next
     -- range tick re-dimmed them. DF_PULSATE is the only effect that touches the
-    -- wrapper alpha (every other effect uses per-edge alpha / overlays / LCG
-    -- glow), and activeAnimation still holds the prior effect here (it's cleared
+    -- wrapper alpha (every other effect uses per-edge alpha or its own overlay
+    -- textures), and activeAnimation still holds the prior effect here (it's cleared
     -- just below), so gate the reset on it.
     if border.activeAnimation == "DF_PULSATE" and border.SetAlpha then
         -- ⚠ RESTORE THE OOR FADE, NOT FULL OPACITY. This block already exists because a
@@ -2761,13 +2913,18 @@ local function animSpecHash(anim)
         tostring(anim.mask),
         tostring(anim.sidesAxis), tostring(anim.cornerLength),
         tostring(anim.procStart),
+        -- ☠ IN THE HASH OR THE SETTING IS INERT. StartAnimation returns early on an unchanged
+        -- hash, so a blend mode missing from here would apply only when some OTHER tunable
+        -- moved -- the "change it and nothing happens, nudge the frequency and it appears"
+        -- symptom this file already carries a note about for the driver check.
+        tostring(anim.blendMode),
         tostring(cr), tostring(cg), tostring(cb), tostring(ca),
     }, "|")
 end
 
--- OnUpdate-driver effects: those whose motion is driven by the shared anim
--- driver's OnUpdate (as opposed to LCG glows or the static shape modes). The dedupe in
--- StartAnimation verifies the driver is actually live for these before no-opping.
+-- OnUpdate-driver effects: those whose motion is driven by the shared anim driver's
+-- OnUpdate (as opposed to the static shape modes). The dedupe in StartAnimation
+-- verifies the driver is actually live for these before no-opping.
 local DRIVER_ANIMS = { DF_DASH = true, DF_PULSATE = true, BLINK = true, DF_ORBIT = true, DF_PROC = true, DF_FLASH = true, DF_PIXEL = true }
 
 function Border:StartAnimation(border, spec)
@@ -2801,6 +2958,13 @@ function Border:StartAnimation(border, spec)
             return
         end
     end
+
+    -- The resolved blend mode, stashed for the paths that cannot reach `anim`: the DF Dash
+    -- OnUpdate tick redraws its pooled quads through drawDashes, which is handed geometry and
+    -- a colour and nothing else. Set here rather than threaded through four call layers.
+    -- ⚠ animSpecHash CARRIES blendMode, so a change to it fails the equality above and reaches
+    -- this line -- without that the setting would look inert until some other tunable moved.
+    border._animBlend = animBlendMode(anim)
 
     -- DF_PULSATE retune-in-place: the spec changed, but if a DF Pulsate is
     -- already running on this border, NEVER tear it down — just update its
@@ -2850,6 +3014,21 @@ function Border:StartAnimation(border, spec)
             tick(b, anim, el)
         end)
         border.activeAnimation = anim.type
+        return
+    end
+
+    -- Marching Ants: Blizzard's own SharedXML widget (12.1.5). Declarative on every
+    -- host, so unlike our effects there is no driver twin to fall through to — if the
+    -- template is missing (12.1.0) or the build fails, the border simply carries no
+    -- animation rather than silently becoming a different effect.
+    -- ☠ The GUI only offers this type when MarchingAnts_CreateAsChildOf exists, so a
+    -- profile can only carry it after having run on a client that had it. Reaching here
+    -- on an older client means a profile came across from a newer one; leaving the
+    -- border un-animated is the correct read of "the effect you picked is not available".
+    if anim.type == "MARCHING_ANTS" then
+        if buildMarchingAnts(border, anim) then
+            border.activeAnimation = anim.type
+        end
         return
     end
 
@@ -2968,11 +3147,10 @@ function Border:StartAnimation(border, spec)
     -- DF Pulsate: soft alpha fade pulse on the border's 4 edges.  Distinct
     -- from the LCG-driven Pulsate (which surrounds the border with a
     -- particle ring) — DF_PULSATE keeps the border itself visible and just
-    -- fades its opacity smoothly between 0.05 and 1.0.  Inherited from
-    -- AD's legacy expiring border pulse; exposed as a first-class animation
-    -- type so it works as either a continuous Border Animation OR as the
-    -- value the new Expiring Animation dropdown will swap in below
-    -- threshold (Stage 5.1d.2+).  Uses the shared anim driver; on
+    -- fades its opacity smoothly between 0.05 and 1.0.  Exposed as a
+    -- first-class animation type so it works as either a continuous Border
+    -- Animation OR as the value the Expiring Animation dropdown swaps in
+    -- below threshold.  Uses the shared anim driver; on
     -- StopAnimation the existing resetEdgeAlphas() restores the edges
     -- back to alpha 1 so the next render is clean.
     if anim.type == "DF_PULSATE" then
@@ -3132,9 +3310,9 @@ end
 --   color         {r,g,b,a} or {r=,g=,b=,a=}; alpha lives in the colour
 --   inset         signed pixels: positive moves edges INSIDE the parent's
 --                 bounds; negative moves them outside. Default 0 (edges flush
---                 with parent corners as set up in :New). Honoured only in
---                 the SOLID 4-edge mode — backdrop-template mode anchors the
---                 backdrop child via SetPoint(-1,1)/(1,-1) implicitly.
+--                 with parent corners as set up in :New). Honoured in every
+--                 mode — the solid edges, the anchor-only texture pieces and
+--                 the backdrop child all re-anchor with it on each Apply.
 --   offsetX       signed pixels: translates the WHOLE border widget along the
 --                 X axis (positive = right). Independent of `inset`, which
 --                 changes the border's relationship to its own bounds.
@@ -3216,9 +3394,9 @@ function Border:Apply(border, spec)
         if border.bd then border.bd:Hide() end
         hideTexPieces(border)
         border.activeTexture = nil
-        -- Tear down any running glow when the border is hidden, otherwise
-        -- the LCG glow keeps rendering around the unit with no visible
-        -- border underneath it.
+        -- Tear down any running animation when the border is hidden, otherwise
+        -- the effect keeps rendering around the unit with no visible border
+        -- underneath it.
         self:StopAnimation(border)
         -- ☠ AND THE SHADOW. Same reasoning as the glow above, and it was missed:
         -- border.shadow is a lazily-created frame parented to border:GetParent(), not to
@@ -3427,8 +3605,6 @@ function Border:Apply(border, spec)
             local bd = border.bd
             -- Re-anchor with the inset offsets on every Apply so texture borders honour
             -- BorderInset and update live, matching the solid/gradient edges above.
-            -- (Previously SetAllPoints(border) once at creation: inset was ignored and
-            -- never updated.) inset == 0 reproduces the old flush layout exactly.
             bd:ClearAllPoints()
             bd:SetPoint("TOPLEFT", border, "TOPLEFT", inset, -inset)
             bd:SetPoint("BOTTOMRIGHT", border, "BOTTOMRIGHT", -inset, inset)

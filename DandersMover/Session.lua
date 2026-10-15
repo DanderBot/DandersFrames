@@ -1,0 +1,773 @@
+local addonName, NS = ...
+-- A copy that lost the LibStub race (a renamed duplicate install) must go
+-- fully inert: Core.lua only sets NS.Lib on the winning copy.
+if not NS.Lib then return end
+
+-- ============================================================
+-- SESSION
+-- The unlock lifecycle. Snapshots on enter, pending edits on the live records,
+-- Save/Discard on exit, suspend/resume around combat, undo stack, keyboard.
+-- ============================================================
+local Sess = { active = false, suspended = false, snapshots = {}, dirty = false, selected = nil }
+NS.Session = Sess
+
+local Registry, Solver, Proxy, Grid, L = NS.Registry, NS.Solver, NS.Proxy, NS.Grid, NS.L
+local Undo = LibStub("DandersUndo-1.0")
+local Lib = NS.Lib
+local pairs, ipairs, format, wipe, sqrt = pairs, ipairs, string.format, wipe, math.sqrt
+local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown
+local C_Timer, debugprofilestop = C_Timer, debugprofilestop
+
+local SCREEN_SNAP = 8
+-- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
+local SNAP_DISTANCE = 25
+
+local function panel(method) if NS.Panel then NS.Panel[method](NS.Panel) end end
+
+-- PERF instrumentation (debug-gated, /mover debug). debugprofilestop() is
+-- wall-clock ms since some epoch; deltas of it are the per-block cost. Kept
+-- permanently: it is a handful of subtractions behind the debug flag, and the
+-- unlock/lock hitch investigation needs real in-game numbers to stay honest.
+local function perfStart()
+    return NS.db and NS.db.debug and debugprofilestop and debugprofilestop() or nil
+end
+local function perfLog(t0, label)
+    if t0 then NS:Debug(format("PERF %s %.1fms", label, debugprofilestop() - t0)) end
+end
+
+function Sess:IsActive() return self.active end
+function Sess:IsSuspended() return self.suspended end
+
+-- ============================================================
+-- APPLY / COMMIT
+-- ============================================================
+-- Push the element's record to its consumer and everything anchored to it.
+local function apply(el, reason)
+    NS:Notify(el, reason)
+    NS:ReapplyDescendants(el.id, "parent")
+    Proxy:RefreshAll()
+    panel("Refresh")
+end
+
+local function restore(el, snap, reason)
+    NS.CopyPos(snap, Registry:GetPos(el))
+    -- An anchored snapshot carries the x/y solved at commit time; re-solve
+    -- against the target's current rect (holds if the target is missing).
+    NS:ResolveElement(el)
+    apply(el, reason)
+end
+
+local function commit(el, before, label)
+    local after = NS.CopyPos(Registry:GetPos(el))
+    Sess.dirty = true
+    Sess.undo:Push({
+        label = format(label, el.title),
+        undo = function() restore(el, before, "undo") end,
+        redo = function() restore(el, after, "redo") end,
+    })
+end
+
+-- ============================================================
+-- LIFECYCLE
+-- ============================================================
+function Sess:Unlock(filter)
+    if self.active then return end
+    if InCombatLockdown() then NS:Print(L["Movers cannot be unlocked in combat."]) return end
+    filter = Registry:NormalizeFilter(filter)
+    self.filter = filter
+    -- Keys named in the filter take part even when their isRelevant() says no, and
+    -- are forced relevant for the whole session (snap + be snapped to). Set BEFORE the
+    -- snapshot walk and before Unlocked fires, so both see the same answer.
+    wipe(NS.forcedRelevant)
+    if filter and filter.keySet then
+        for key in pairs(filter.keySet) do NS.forcedRelevant[Registry.Id(filter.addon, key)] = true end
+    end
+    -- Snapshot everything IN the session, proxied or not: other addons' elements can
+    -- gain a proxy mid-session (showOtherAddons) and Discard must restore them too.
+    wipe(self.snapshots)
+    for _, el in ipairs(Registry:SortedElements()) do
+        if Registry:IsInSession(filter, el) then
+            self.snapshots[el.id] = NS.CopyPos(Registry:GetPos(el))
+        end
+    end
+    self.undo = Undo:New({ limit = 100 })
+    -- The panels re-read the element they are bound to; the legend's Undo/Redo
+    -- buttons re-read whether there is anything left to undo.
+    self.undo.RegisterCallback(self, "Changed", function()
+        panel("Refresh")
+        Proxy:RefreshLegendVerbs()
+    end)
+    self.dirty = false
+    self.selected = nil
+    self.active = true
+    self.suspended = false
+    -- Fire before Build: consumers commonly show preview/test frames from this
+    -- callback, and the proxies must be measured against what the consumer ends
+    -- up showing, not what was on screen a moment earlier. Snapshots are taken
+    -- above so the record is captured before any consumer-side mutation.
+    local tTotal = perfStart()
+    Lib.callbacks:Fire("Unlocked")
+    perfLog(tTotal, "Unlocked callbacks")
+    local tBuild = perfStart()
+    Proxy:Build(filter, true)     -- animate: the overlay fades in, slabs with a stagger
+    perfLog(tBuild, "Proxy:Build")
+    Grid:Refresh()
+    self:EnableKeyboard(true)
+    perfLog(tTotal, "Unlock total (callbacks+build+grid)")
+    -- Anything the consumer only shows on the next frame (secure headers, test
+    -- containers) has no rect yet at Build time; re-measure once it does.
+    C_Timer.After(0, function()
+        if Sess.active and not Sess.suspended then
+            Proxy:RefreshAll()
+            Grid:Refresh()
+            if NS.Panel then NS.Panel:Refresh() end
+        end
+    end)
+end
+
+-- onDone (optional): told whether the session actually ended. With unsaved changes
+-- the prompt makes that asynchronous, and a caller that has to act only once the
+-- session is gone (a host switching what it shows) cannot assume Lock() finished it.
+function Sess:Lock(onDone)
+    if not self.active then
+        if onDone then onDone(true) end
+        return
+    end
+    -- A second Lock while the prompt is up must not drop the first caller: both hear the
+    -- one answer.
+    local prev = self.lockDone
+    if prev and onDone then
+        self.lockDone = function(ended) prev(ended); onDone(ended) end
+    else
+        self.lockDone = onDone or prev
+    end
+    if not self.dirty then self:Finish("save") return end
+    -- The popup frame is shared with the host addon, so remember that this prompt is
+    -- ours: Finish and Escape close only it, never a dialog someone else opened.
+    self.promptOpen = true
+    NS.UI:ShowPopupAlert({
+        title   = L["Unsaved changes"],
+        message = L["You have unsaved mover changes."],
+        buttons = {
+            { label = L["Save"],    onClick = function() Sess.promptOpen = nil; Sess:Finish("save") end },
+            { label = L["Cancel"],  onClick = function() Sess.promptOpen = nil; Sess:CancelLock() end },
+            { label = L["Discard"], onClick = function() Sess.promptOpen = nil; Sess:Finish("discard") end },
+        },
+    })
+end
+
+-- The prompt was backed out of: the session carries on, and whoever asked for the
+-- lock hears that it did not happen.
+function Sess:CancelLock()
+    local cb = self.lockDone
+    self.lockDone = nil
+    if cb then cb(false) end
+end
+
+function Sess:Finish(mode)
+    if not self.active then return end
+    -- Saved or discarded from the strip or panel while the prompt is up: close it, or
+    -- its buttons would act on whatever session is running when they are clicked.
+    if self.promptOpen then
+        self.promptOpen = nil
+        NS.UI:DismissPopup()
+    end
+    local tTotal = perfStart()
+    if mode == "discard" then
+        for id, snap in pairs(self.snapshots) do
+            local el = Registry:Get(id)
+            if el then NS.CopyPos(snap, Registry:GetPos(el)) end
+        end
+        for id in pairs(self.snapshots) do
+            local el = Registry:Get(id)
+            if el then NS:Notify(el, "discard") end
+        end
+    end
+    -- A link gesture in flight owns an OnUpdate on the unlock frame; the
+    -- session must never end with that still running.
+    if self.linking then
+        self.linking = nil
+        Proxy:EndLinkVisual()
+    end
+    self:EnableKeyboard(false)
+    Proxy:DismissAll()            -- fade out, then destroy (combat suspend stays instant)
+    Grid:Hide()
+    panel("Hide")
+    wipe(self.snapshots)
+    wipe(NS.forcedRelevant)
+    self.filter = nil
+    self.active, self.suspended, self.dirty, self.selected = false, false, false, nil
+    -- Clear after the state reset: Clear fires "Changed" -> panel Refresh,
+    -- which must see the session as inactive so it cannot re-show the panel.
+    if self.undo then self.undo:Clear() end
+    local tLocked = perfStart()
+    Lib.callbacks:Fire("Locked")
+    perfLog(tLocked, "Locked callbacks")
+    Lib.callbacks:Fire(mode == "discard" and "Discarded" or "Saved")
+    perfLog(tTotal, "Finish total")
+    local cb = self.lockDone
+    self.lockDone = nil
+    if cb then cb(true) end
+end
+
+function Sess:Toggle() if self.active then self:Lock() else self:Unlock() end end
+
+-- Tear the proxies down and build them again against the current filter: a toggle
+-- changed what should be on screen (an addon/element switch, hidden movers, other
+-- addons' movers). Settings and the legend checkbox both come through here.
+function Sess:RebuildProxies()
+    if not self.active or self.suspended then return end
+    -- A rebuild can follow an element being unregistered mid-session. Proxy:Build
+    -- will not make one for an id that no longer exists, but the selection would
+    -- keep pointing at it -- and the panel docks to the selected proxy.
+    if self.selected and not Registry:Get(self.selected) then self.selected = nil end
+    -- Rebuild, not DestroyAll + Build: the overlay (and an entrance still
+    -- playing on it) stays; only the slabs are remade. Also re-draws the legend.
+    Proxy:Rebuild(self.filter)
+    Grid:Refresh()
+    panel("Refresh")                  -- hides itself when the selection is gone
+end
+
+-- Elements can come and go WHILE a session is open: DandersFrames re-registers
+-- its whole pinned list every time a set is added or removed, so without this a
+-- proxy sits over a container that is not there any more (and a new set gets no
+-- proxy until the next unlock). Debounced to the end of the frame because that
+-- re-registration is a burst of unregister/register calls, not one change.
+local rebuildPending = false
+Lib.RegisterCallback(Sess, "RegistryChanged", function()
+    if rebuildPending or not Sess.active or Sess.suspended then return end
+    rebuildPending = true
+    C_Timer.After(0, function()
+        rebuildPending = false
+        Sess:RebuildProxies()
+    end)
+end)
+
+function Sess:Suspend()
+    if not self.active or self.suspended then return end
+    -- A link gesture cannot survive combat: the unlock frame (and its
+    -- OnUpdate) hides, and a stale `linking` flag would keep the ClickSelect
+    -- guard and the glyph dead after Resume.
+    if self.linking then self:CancelLink() end
+    self.suspended = true
+    Proxy:GetUnlockFrame():Hide()
+    Grid:Hide()
+    panel("Hide")
+    NS:Print(L["Movers suspended for combat."])
+end
+
+function Sess:Resume()
+    if not self.active or not self.suspended then return end
+    self.suspended = false
+    Proxy:GetUnlockFrame():Show()
+    Proxy:RefreshAll()
+    Grid:Refresh()
+    panel("Refresh")
+end
+
+function Sess:Select(id)
+    self.selected = id
+    Proxy:Highlight(id)
+    panel("Refresh")
+end
+
+-- ============================================================
+-- MUTATIONS (each = one undo step)
+-- ============================================================
+local function sizeOf(el)
+    local w, h = Registry:GetSize(el)
+    return w or 24, h or 24
+end
+
+-- Where the element actually is on screen. Falls back to the record's implied
+-- centre when the frame has no rect yet (hidden, or a getFrame that is nil).
+local function visualCenter(el, pos)
+    local rect = Registry:GetRect(el)
+    if rect then return rect.x, rect.y end
+    local w, h = sizeOf(el)
+    return Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
+end
+
+-- Free elements: after a record change, pull the visible rect back on screen.
+-- The consumer must have applied the record first (Notify), so the rect is current.
+local function clampFree(el, pos)
+    local rect = Registry:GetRect(el)
+    if not rect then return end
+    local cx, cy = Solver.ClampToScreen(rect.x, rect.y, rect.w, rect.h, UIParent:GetWidth(), UIParent:GetHeight())
+    pos.x, pos.y = (pos.x or 0) + (cx - rect.x), (pos.y or 0) + (cy - rect.y)
+end
+
+function Sess:Nudge(el, dx, dy)
+    -- The panel is not parked here any more: the nudge BUTTONS auto-pin, which
+    -- is a better answer to "the panel chases my nudges" than a timed hold.
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    if pos.anchor then
+        pos.anchor.offsetX = (pos.anchor.offsetX or 0) + dx
+        pos.anchor.offsetY = (pos.anchor.offsetY or 0) + dy
+        NS:ResolveElement(el)
+    else
+        pos.x, pos.y = (pos.x or 0) + dx, (pos.y or 0) + dy
+        NS:Notify(el, "nudge"); clampFree(el, pos)
+    end
+    apply(el, "nudge")
+    commit(el, before, L["Nudge %s"])
+end
+
+-- Panel edit boxes: free element -> absolute x/y; anchored -> offsets.
+function Sess:SetXY(el, x, y)
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    if pos.anchor then
+        pos.anchor.offsetX, pos.anchor.offsetY = x, y
+        NS:ResolveElement(el)
+    else
+        pos.x, pos.y = x, y
+        NS:Notify(el, "nudge"); clampFree(el, pos)
+    end
+    apply(el, "nudge")
+    commit(el, before, L["Move %s"])
+end
+
+function Sess:SetAnchorPoint(el, point)
+    if el.pointLocked then return end
+    local pos = Registry:GetPos(el)
+    if pos.anchor or pos.point == point then return end
+    local before = NS.CopyPos(pos)
+    -- An element that says where its visible rect sits relative to its record
+    -- (def.visibleOffset) converts through that: the visible centre stays put and
+    -- the record is re-expressed from the new point. The size-based conversion
+    -- below assumes the record's point is a point OF the visible rect, which is
+    -- false for a container larger than what it shows (DF's raid frames).
+    local ox, oy
+    if NS.VisibleOffset then ox, oy = NS.VisibleOffset(el, pos) end
+    local nx, ny
+    if ox then
+        local vx, vy = (pos.x or 0) + ox, (pos.y or 0) + oy
+        pos.point = point
+        nx, ny = NS.VisibleOffset(el, pos)
+        if nx then pos.x, pos.y = vx - nx, vy - ny end
+    end
+    if not nx then
+        pos.point = before.point
+        local w, h = sizeOf(el)
+        local cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
+        pos.point = point
+        pos.x, pos.y = Solver.CenterToPoint(point, cx, cy, w, h)
+    end
+    apply(el, "nudge")
+    commit(el, before, L["Anchor point %s"])
+end
+
+-- Re-anchoring to a new primary keeps whatever backup was already set: the
+-- element's fall-back plan is a separate choice from where it normally sits.
+-- Dropped only when the new primary IS the backup, which would make the two
+-- the same link.
+local function carryFallback(pos, before, targetId)
+    local fb = before.anchor and before.anchor.fallback
+    if not fb or fb.target == targetId then return end
+    pos.anchor.fallback = { target = fb.target, mode = fb.mode, edge = fb.edge, align = fb.align,
+                            point = fb.point, relPoint = fb.relPoint,
+                            offsetX = fb.offsetX, offsetY = fb.offsetY }
+end
+
+function Sess:Anchor(el, targetId, edge, align)
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return false
+    end
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    pos.anchor = { target = targetId, edge = edge, align = align, offsetX = 0, offsetY = 0 }
+    carryFallback(pos, before, targetId)
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+    return true
+end
+
+-- Anchor to a target WITHOUT moving: the picker's verb. Solver.AnchorInPlace
+-- derives the spec that reproduces where the element already sits, so choosing
+-- a parent from the panel is a change of relationship, not of position.
+function Sess:AnchorInPlace(el, targetId)
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    local childRect = Registry:GetRect(el)
+    if not childRect then
+        local cx, cy = visualCenter(el, pos)
+        local w, h = sizeOf(el)
+        childRect = { x = cx, y = cy, w = w, h = h }
+    end
+    local target = Registry:GetTarget(targetId)
+    local targetRect = target and Registry:GetRect(target) or nil
+    if not targetRect then
+        -- Anchoring in place is impossible with no rect: there is no geometry to
+        -- measure a seat against, so nothing can be reproduced. The element HOLDS
+        -- where it is (ResolveElement finds no available anchor) and takes the
+        -- centre-on-centre spec -- the one case where picking a target moves the
+        -- element later, once that target finally appears.
+        pos.anchor = { target = targetId, mode = "point", point = "CENTER", relPoint = "CENTER",
+                       offsetX = 0, offsetY = 0 }
+    else
+        local spec = Solver.AnchorInPlace(childRect, targetRect, Solver.SPACING)
+        pos.anchor = { target = targetId, mode = spec.mode, edge = spec.edge, align = spec.align,
+                       point = spec.point, relPoint = spec.relPoint,
+                       offsetX = spec.offsetX, offsetY = spec.offsetY }
+    end
+    carryFallback(pos, before, targetId)
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
+-- Edit the live spec of an existing anchor: the panel's second anchor row,
+-- whichever pair of fields the mode actually has -- edge/align in outside mode,
+-- point/relPoint in point mode. A change the mode has no field for is dropped
+-- rather than written, so an outside anchor can never grow a stray `point`.
+local SPEC_FIELDS = {
+    outside = { edge = true, align = true },
+    point   = { point = true, relPoint = true },
+}
+
+function Sess:SetAnchorSpec(el, changes)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return end
+    local allowed = SPEC_FIELDS[pos.anchor.mode == "point" and "point" or "outside"]
+    local any = false
+    for k in pairs(changes) do
+        if allowed[k] then any = true else changes[k] = nil end
+    end
+    if not any then return end
+    local before = NS.CopyPos(pos)
+    for k, v in pairs(changes) do pos.anchor[k] = v end
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
+-- ============================================================
+-- LINK DRAG
+-- Press one of the panel's link handles and drag a line onto another element:
+-- the release ties the two together, and nothing moves.
+-- The gesture owns no record state of its own -- Sess.linking is just the id
+-- of the element being linked FROM plus which of the two links is being aimed,
+-- and the commit is the same one the matching dropdown makes (one undo entry).
+-- Esc and right-click cancel; the visual half lives in Proxy.
+--
+-- mode: "primary" (default) re-anchors in place; "fallback" sets the BACKUP
+-- anchor, which takes the primary's whole spec with only the target swapped --
+-- so a backup drop never moves the element either.
+-- ============================================================
+function Sess:BeginLink(el, mode)
+    if not self.active or self.suspended or self.linking then return end
+    -- A backup is only meaningful once there IS a primary to fall back FROM.
+    -- SetFallback would refuse the drop anyway; refusing the gesture keeps the
+    -- handle honest rather than letting a line be dragged to nowhere.
+    if mode == "fallback" and not Registry:GetPos(el).anchor then return end
+    self.linking = { id = el.id, mode = mode or "primary" }
+    Proxy:BeginLinkVisual(el, self.linking.mode)
+end
+
+function Sess:EndLink(targetId)
+    if not self.linking then return end
+    -- Re-read the element: a link can outlive the record it started from
+    -- (RegistryChanged mid-gesture), and the visual must come down either way.
+    local el = Registry:Get(self.linking.id)
+    local mode = self.linking.mode
+    self.linking = nil
+    Proxy:EndLinkVisual()
+    if not (el and targetId) then return end
+    if mode == "fallback" then self:SetFallback(el, targetId)
+    else self:AnchorInPlace(el, targetId) end
+end
+
+function Sess:CancelLink()
+    if not self.linking then return end
+    self.linking = nil
+    Proxy:EndLinkVisual()
+end
+
+function Sess:Detach(el)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return end
+    local before = NS.CopyPos(pos)
+    pos.anchor = nil
+    apply(el, "detach")
+    commit(el, before, L["Detach %s"])
+end
+
+-- The backup anchor: where the element goes when its primary target is not on
+-- screen. It takes the primary's whole spec with only the target swapped --
+-- the same seat on a different parent -- so the element keeps its shape of
+-- attachment either way.
+function Sess:SetFallback(el, targetId)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return end
+    -- Same as the primary is a no-op, not a mistake worth a message.
+    if targetId == pos.anchor.target then return end
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local before = NS.CopyPos(pos)
+    local a = pos.anchor
+    a.fallback = { target = targetId, mode = a.mode, edge = a.edge, align = a.align,
+                   point = a.point, relPoint = a.relPoint,
+                   offsetX = a.offsetX, offsetY = a.offsetY }
+    -- Only actually moves the element if the primary is already unavailable,
+    -- which is exactly when the backup is meant to take over.
+    NS:ResolveElement(el)
+    apply(el, "fallback")
+    commit(el, before, L["Backup anchor %s"])
+end
+
+function Sess:ClearFallback(el)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor or not pos.anchor.fallback then return end
+    local before = NS.CopyPos(pos)
+    pos.anchor.fallback = nil
+    apply(el, "fallback")
+    commit(el, before, L["Clear backup %s"])
+end
+
+function Sess:Center(el)
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    -- Move the record by whatever it takes to put the visible rect on 0,0.
+    local cx, cy = visualCenter(el, pos)
+    pos.anchor = nil
+    pos.x, pos.y = (pos.x or 0) - cx, (pos.y or 0) - cy
+    apply(el, "center")
+    commit(el, before, L["Center %s"])
+end
+
+function Sess:Reset(el)
+    if not el.default then return self:Center(el) end
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    NS.CopyPos(el.default, pos)
+    if pos.anchor then NS:ResolveElement(el) end
+    apply(el, "reset")
+    commit(el, before, L["Reset %s"])
+end
+
+-- Copy this element's record onto its declared twin (def.twin = "addon:key"):
+-- party container onto raid container, pinned N onto the other mode's N. The
+-- twin takes the whole record -- anchor included, unless carrying it over
+-- would create a cycle, in which case the twin lands free at the same
+-- coordinates. One undo entry, named for the twin.
+function Sess:CopyToTwin(el)
+    local twin = el.twin and Registry:Get(el.twin)
+    if not twin then return end
+    local dst = Registry:GetPos(twin)
+    local before = NS.CopyPos(dst)
+    NS.CopyPos(Registry:GetPos(el), dst)
+    if dst.anchor and Registry:WouldCreateCycle(twin.id, dst.anchor.target) then dst.anchor = nil end
+    -- The backup is dropped on its own if only IT would loop; the primary stays.
+    if dst.anchor and dst.anchor.fallback and Registry:WouldCreateCycle(twin.id, dst.anchor.fallback.target) then
+        dst.anchor.fallback = nil
+    end
+    if dst.anchor then NS:ResolveElement(twin) end
+    apply(twin, "copy")
+    commit(twin, before, L["Copy to %s"])
+end
+
+-- The toast needs the entry's label, and Undo/Redo POP the entry -- so Peek
+-- before popping, and only toast when something was actually undone/redone.
+function Sess:Undo()
+    if not self.undo then return end
+    local label = self.undo:Peek()
+    if self.undo:Undo() and label then
+        Proxy:ShowToast(format(L["Undid: %s"], label))
+    end
+end
+
+function Sess:Redo()
+    if not self.undo then return end
+    local label = self.undo:PeekRedo()
+    if self.undo:Redo() and label then
+        Proxy:ShowToast(format(L["Redid: %s"], label))
+    end
+end
+
+-- ============================================================
+-- DRAG
+-- ============================================================
+function Sess:BeginDrag(el)
+    local pos = Registry:GetPos(el)
+    self.dragBefore = NS.CopyPos(pos)
+    self.dragStartPos = NS.CopyPos(pos)
+    self.dragStartCx, self.dragStartCy = visualCenter(el, pos)
+    -- Anchored: arm the tether. Pull is measured from the RESOLVED anchor
+    -- position, which is exactly where the element sits at drag start (the
+    -- record was solved). Proxy reads this table to draw the strain.
+    if pos.anchor then
+        local a = pos.anchor
+        self.tether = { target = a.target,
+                        spec = { mode = a.mode, edge = a.edge, align = a.align,
+                                 point = a.point, relPoint = a.relPoint },
+                        homeX = self.dragStartCx, homeY = self.dragStartCy,
+                        state = "held", strain = 0, snapped = false }
+    else
+        self.tether = nil
+    end
+end
+
+function Sess:DragTo(el, cx, cy)
+    local db = NS.db
+    local w, h = sizeOf(el)
+    -- Frame zones are tested on the RAW cursor position and win outright; grid
+    -- and screen snapping only apply when no zone is hit. Quantising first would
+    -- make zones on off-grid targets unreachable (a 20px grid vs a zone at y=150).
+    local zone
+    if db.snapToFrames and #Proxy.dragZones > 0 then
+        zone = Solver.NearestZone(cx, cy, w, h, Proxy.dragZones, db.snapDistance or SNAP_DISTANCE)
+    end
+    if zone then
+        cx, cy = zone.x, zone.y
+        Grid:HidePreview()
+    else
+        -- The preview lines sit on the grid / screen line each axis actually
+        -- snapped to (an edge or the centre), not on the element's centre.
+        -- Screen snap runs last, so its line wins on an axis it moved.
+        local lineX, lineY
+        if db.snapToGrid then cx, cy, lineX, lineY = Solver.SnapRectToGrid(cx, cy, w, h, db.gridSize) end
+        if db.snapToScreen then
+            local sx, sy, lx, ly
+            cx, cy, sx, sy, lx, ly = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)
+            if sx then lineX = lx end
+            if sy then lineY = ly end
+        end
+        if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
+    end
+    -- ☠ A ZONE PREVIEWS WHERE THE DROP WILL SEAT IT. The drop solves the anchor,
+    -- and an anchored solve only pulls back an element with nothing on screen
+    -- (NS.KeepOnScreen) -- a seat that overhangs an edge keeps its overhang. The
+    -- preview used to clamp the zone fully on screen instead, so a zone near an
+    -- edge showed the frames in one place and the release put them in another.
+    -- Tall elements hit it first (a Column of party frames at a scale above 1).
+    if zone then
+        cx, cy = NS.KeepOnScreen(cx, cy, w, h)
+    else
+        cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+    end
+    Grid:ShowMeasure(cx, cy, w, h)
+    -- Tether strain-and-snap: pulling an anchored element past the thresholds
+    -- (Solver.TETHER_HOLD/SNAP x snapDistance, measured from the resolved
+    -- anchor position) first strains the tether, then snaps it -- the element
+    -- is free from that moment and EndDrag's spring-back no longer applies.
+    local t = self.tether
+    if t and not t.snapped then
+        local dist = sqrt((cx - t.homeX) ^ 2 + (cy - t.homeY) ^ 2)
+        local snapR = db.snapDistance or SNAP_DISTANCE
+        t.state = Solver.TetherState(dist, snapR)
+        t.strain = Solver.TetherStrain(dist, snapR)
+        if t.state == "snapped" then
+            t.snapped = true
+            Proxy:SnapTether(el)
+        end
+    end
+    local pos = Registry:GetPos(el)
+    pos.anchor = nil
+    pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
+    NS:Notify(el, "drag")
+    NS:ReapplyDescendants(el.id, "parent")
+    Proxy:RefreshAll()
+    return cx, cy, zone
+end
+
+function Sess:EndDrag(el, cx, cy, zone)
+    local before = self.dragBefore or NS.CopyPos(Registry:GetPos(el))
+    local tether = self.tether
+    self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
+    self.tether = nil
+    local pos = Registry:GetPos(el)
+    if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
+    -- ⚠ THE ZONES ARE A SNAPSHOT. Proxy:ShowZones collects them once at drag
+    -- start and nothing re-collects during the drag, so a target that went off
+    -- screen (or out of the registry) mid-drag still has its zone under the
+    -- cursor. Its rect is whatever it was; a solve against it lands the element
+    -- somewhere the preview never showed. Refused here: the drop goes through
+    -- as a plain move to the spot the preview DID show.
+    if zone and not Registry:IsTargetAvailable(Registry:GetTarget(zone.target)) then zone = nil end
+    if zone then
+        pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
+        carryFallback(pos, before, zone.target)
+        pos.point = "CENTER"
+        NS:ResolveElement(el)
+    elseif before.anchor and not (tether and tether.snapped) then
+        -- The anchor SURVIVED the drag (never pulled past the snap threshold):
+        -- dropped outside every zone, it springs back and re-solves. Nothing
+        -- changed, so no undo entry. A snapped tether skips this branch -- the
+        -- element detached mid-drag and the drop commits it as free.
+        NS.CopyPos(before, pos)
+        NS:ResolveElement(el)
+        apply(el, "reapply")
+        self:Select(el.id)
+        return
+    end
+    apply(el, zone and "anchor" or "drag")
+    local label = zone and L["Anchor %s"] or (before.anchor and L["Detach %s"] or L["Move %s"])
+    -- Pulled free of a record that also named a backup: the backup went with the
+    -- primary, and that is worth saying out loud -- it is a link the user set up
+    -- deliberately and would otherwise notice only much later.
+    if not zone and before.anchor and before.anchor.fallback then
+        Proxy:ShowToast(L["Detached — backup anchor cleared"])
+    end
+    commit(el, before, label)
+    self:Select(el.id)
+end
+
+-- ============================================================
+-- KEYBOARD
+-- Esc backs out one layer at a time: a live link gesture, then the selection,
+-- then the session. Arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y =
+-- undo/redo.
+-- Only ever enabled while the unlock frame is shown, which never happens in combat.
+--
+-- Esc IS the deselect now: the unlock overlay no longer takes clicks (it covered
+-- the whole screen, so owning the mouse made the world unclickable for the whole
+-- session), and a click on empty space therefore goes to the game.
+-- ============================================================
+local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
+
+function Sess:EnableKeyboard(on)
+    local f = Proxy:GetUnlockFrame()
+    f:EnableKeyboard(on)
+    if not on then f:SetScript("OnKeyDown", nil) return end
+    f:SetScript("OnKeyDown", function(frame, key)
+        local handled = false
+        if key == "ESCAPE" then
+            -- Innermost thing first, one layer per press: the link gesture, then
+            -- the selection (the following panel closes on the Refresh that
+            -- follows), then the session itself. Ending the whole session out
+            -- from under an open gesture or a selected mover would be a
+            -- surprise -- and with the overlay no longer taking clicks, this is
+            -- the only way to deselect. The exit prompt, when it is up, is the
+            -- innermost of all: Escape closes it as Cancel would.
+            if NS.UI:DismissPopup() then -- closed the prompt (or any dialog on top)
+                if Sess.promptOpen then Sess:CancelLock() end
+                Sess.promptOpen = nil
+            elseif Sess.linking then Sess:CancelLink()
+            elseif Sess.selected then Sess:Select(nil)
+            else Sess:Lock() end
+            handled = true
+        elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
+            local el = Registry:Get(Sess.selected)
+            if el then
+                local step = Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown())
+                Sess:Nudge(el, ARROWS[key][1] * step, ARROWS[key][2] * step)
+                handled = true
+            end
+        elseif IsControlKeyDown() and key == "Z" then Sess:Undo(); handled = true
+        elseif IsControlKeyDown() and key == "Y" then Sess:Redo(); handled = true
+        end
+        frame:SetPropagateKeyboardInput(not handled)
+    end)
+end

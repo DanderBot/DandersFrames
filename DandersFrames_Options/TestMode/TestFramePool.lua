@@ -148,10 +148,6 @@ function DF:CreateTestFramePool()
     end
     
     DF.testFramePoolInitialized = true
-    -- (Removed) a pool-created announcement gated on DF.debugMode. That flag went
-    -- with the debug rework and is written nowhere, so the branch was unreachable.
-    -- Not re-homed onto the console because TestMode has no trace category at all —
-    -- see the coverage note in the commit; adding one is a change, not a cleanup.
 end
 
 -- ============================================================

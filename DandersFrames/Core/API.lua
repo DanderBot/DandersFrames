@@ -37,8 +37,8 @@ function DandersFrames_Export(profileKey)
         -- that is what gets written to disk.
         --
         -- Reachable throws inside the window: next() on a non-table colour/linkedSections
-        -- table (legacy or import-corrupted profiles), DF:DeepCopy (no cycle guard), and
-        -- LibSerialize on an unserializable value.
+        -- table (legacy or import-corrupted profiles) and LibSerialize on an
+        -- unserializable value.
         --
         -- pcall, then restore, then re-raise nothing -- a failed export returns nil, which
         -- is this function's documented failure value.
@@ -121,8 +121,15 @@ function DandersFrames_Import(str, profileKey)
             local actualName = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or targetName
             
             -- Refresh the GUI if it's open
-            if DF.GUIFrame and DF.GUIFrame:IsShown() and DF.GUI and DF.GUI.RefreshCurrentPage then
-                DF.GUI:RefreshCurrentPage()
+            -- ApplyImportedProfile returns true only after its FullProfileRefresh,
+            -- which already rebuilt the page on screen; a second rebuild here only
+            -- leaked it. Through the cache when the settings companion offers it.
+            if DF.GUIFrame and DF.GUIFrame:IsShown() and DF.GUI then
+                if DF.GUI.RefreshCurrentPageAfterFullRefresh then
+                    DF.GUI.RefreshCurrentPageAfterFullRefresh()
+                elseif DF.GUI.RefreshCurrentPage then
+                    DF.GUI:RefreshCurrentPage()
+                end
             end
             
             return true, actualName
@@ -140,10 +147,15 @@ function DandersFrames_Import(str, profileKey)
     end
     
     -- Update frames
-    if DF.UpdateAll then
-        DF:UpdateAll()
+    -- ⚠ SYNC SEAM. This is the external (Wago / UI-pack) import API: it returns
+    -- true to a caller that then treats the profile as applied, so the sweep has
+    -- to have landed before the return, not one frame later. `_Now`, not the
+    -- arm-stub. (The normal path above goes through FullProfileRefresh, which is
+    -- synchronous for the same reason.)
+    if DF.UpdateAll_Now then
+        DF:UpdateAll_Now()
     end
-    
+
     return true
 end
 
@@ -1015,25 +1027,39 @@ end
 -- Returns: table, or nil if the id is unknown. Fields:
 --   point     string  anchor point the offset is measured from (usually "CENTER")
 --   x, y      number  offset from that point on UIParent, in UI units
+--   anchor    table   Only when the frame is glued to another element through
+--                     DandersMover: { target = "Addon:key", mode, edge, align, point,
+--                     relPoint, offsetX, offsetY }. nil means free screen placement, and
+--                     then x/y are a screen position exactly as before. For party/raid
+--                     x/y are ALWAYS valid absolute coordinates. For a PINNED set glued to
+--                     the frames container (anchor.target = "DandersFrames:party"/"raid",
+--                     mode "point") x/y are the glue OFFSET from that corner -- the same
+--                     meaning `anchorTo` has always given them.
 --   anchorTo  string  PINNED ONLY, and only when the set is glued to the frames
 --                     container — then x/y are a fine offset from that corner rather
 --                     than a screen position. nil means free screen placement.
+--                     ⚠ DEPRECATED for one release: `anchor` is the general form and
+--                     covers every target kind. Read `anchor` first and fall back to
+--                     `anchorTo`; `anchorTo` will be removed in the following minor.
 -- ⚠ The returned table is a COPY. Mutating it changes nothing; call SetPosition.
 function DandersFrames_GetPosition(targetID)
     if not (DF and DF.ResolvePositionTarget) then return nil end
     local t = DF:ResolvePositionTarget(targetID)
     if not (t and t.read) then return nil end
     local x, y = t.read()
-    return { point = t.point, x = x, y = y, anchorTo = t.anchorTo }
+    return { point = t.point, x = x, y = y, anchor = t.anchor, anchorTo = t.anchorTo }
 end
 
 -- Move one frame.
 -- Parameters:
 --   targetID: an id from DandersFrames_GetPositionTargets
---   position: table with numeric x and y (the shape GetPosition returns). `point` and
---             `anchorTo` are IGNORED — changing a frame's anchor corner or gluing a
---             pinned set to the container are DF-side layout decisions, not something an
---             external editor should flip as a side effect of a drag.
+--   position: table with numeric x and y (the shape GetPosition returns). `point`,
+--             `anchor` and `anchorTo` are IGNORED — changing a frame's anchor corner,
+--             gluing a pinned set to the container, or re-anchoring a container to
+--             another addon's element are DF-side layout decisions, not something an
+--             external editor should flip as a side effect of a drag. An existing
+--             `anchor` is PRESERVED across a SetPosition; use DandersMover's own UI
+--             (/mover) to attach or detach one.
 -- Returns: boolean success, string reason on failure
 --   "BAD_ARGS"     targetID or position was not usable
 --   "UNKNOWN_ID"   no such target
@@ -1057,10 +1083,5 @@ function DandersFrames_SetPosition(targetID, position)
     -- cannot drift from what DF's own dragging does.
     t.write(x, y)
 
-    -- Keep DF's own position panel honest if the user has it open: it reads the same
-    -- fields, and without this it would show the pre-move numbers until reopened.
-    if DF.UpdatePositionPanel and DF.positionPanel and DF.positionPanel:IsShown() then
-        DF:UpdatePositionPanel()
-    end
     return true
 end

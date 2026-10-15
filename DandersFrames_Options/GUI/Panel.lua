@@ -13,6 +13,16 @@ local L = DF.L
 local S = GUI._state
 local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.accent, GUI.Colors.raid, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+-- The window's own ground. Only the window is drawn in it -- every panel inside
+-- is C_PANEL over it -- which is why it has not been needed in this file before.
+local C_BACKGROUND = GUI.Colors.background
+-- The BINDS tab's own accent. Not in GUI.Colors because it is not a MODE colour
+-- the theme tracks (party purple / raid orange are); it is one tab's identity.
+-- Hoisted out of its StyleButton call because the shared underline needs to wear
+-- it too, and the two must not be able to disagree.
+local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
+-- The GLOBAL tab's: see THE GLOBAL TAB in GUI/GUI.lua.
+local C_GLOBAL = GUI.GlobalAccent
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -21,6 +31,109 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
+
+-- ============================================================
+-- THE CONTENT CORRIDOR
+-- ------------------------------------------------------------
+-- Every number between the right edge of a widget on a page and the right edge
+-- of the settings window, in one table -- because the popout a feature row opens
+-- DOCKS OUTSIDE THAT EDGE and runs a beam back to the row, so this stack is the
+-- length of that beam and it was five literals in four functions.
+--
+--   window edge -> content box      windowPad  (paired with the nav's own left
+--                                              margin: the two boxes sit at the
+--                                              same distance from the window)
+--   content box -> page viewport    inset on the left/top/bottom, GUTTER on the
+--                                   right
+--   the gutter                      is the SCROLLBAR's, and now holds it
+--   page viewport -> first widget   SettingsBox.colMargin, both sides
+--
+-- ☠ THE GUTTER WAS BEING PAID FOR TWICE. The scroll CHILD was built at
+-- `content:GetWidth() - 30` -- the page's two 8px insets plus 14 of scrollbar
+-- room -- so page content stopped 14px short of the viewport it sits in. But
+-- ScrollFrameTemplate anchors its bar OUTSIDE the ScrollFrame, so the bar was
+-- never in that 14: it sat beyond the viewport, in the page's own inset and the
+-- window's margin, while the 14 stayed blank. The corridor carried the
+-- scrollbar's width twice and showed it once.
+--
+-- Now the RIGHT edge of the viewport is inset by the gutter instead of by
+-- `inset`, the bar is pinned into that gutter against the content box (the
+-- idiom the settings nav has used by hand since it was built -- see navPad
+-- below), and the child fills the viewport. Same bar, same air beside it, 8px
+-- of blank returned to the page and 14px of it now occupied by something you
+-- can see.
+local PageBox = {
+    windowPad = 12,   -- window edge -> the nav pane / the content box
+    navGap    = 8,    -- nav pane -> content box
+    inset     = 8,    -- content box -> page viewport (left / top / bottom)
+    gutter    = GUI.Scroll.gutter,  -- ...and on the right, where the bar lives
+}
+GUI.PageBox = PageBox
+-- The column geometry is the KIT's (settings groups are its widgets), so it
+-- lives in the shared metrics beside the group width it is derived from.
+local SettingsBox = GUI.SettingsBox
+
+-- The page viewport's width, and therefore its scroll child's, for a given
+-- content-box width. THREE sites need it -- CreateSubTab at build time,
+-- PageRefreshStates on every layout, and the column maths -- so none of them
+-- may carry its own copy of the arithmetic.
+function GUI.PageChildWidth(contentWidth)
+    return (contentWidth or 0) - PageBox.inset - PageBox.gutter
+end
+-- ...and the width a page's WIDGETS get: the child less the page's own left and
+-- right margins. This is what a layoutCol "both" widget is stretched to, so it
+-- is also what a PAGE has to be able to ask for -- a full-width settings group
+-- built at its constructed 280 and only widened by the layout pass would lay its
+-- children out at 260 on the build and not correct them until the next refresh.
+-- Derived here rather than copied there, for the reason PageChildWidth exists.
+-- ★ DOES THE PAGE HAVE TWO COLUMNS RIGHT NOW? Lifted out of the layout pass so a
+-- widget that has to be CONSTRUCTED at a column width can ask the same question the
+-- pass will answer when it places that widget.
+-- ☠ NOT "collapse when the columns touch" but "collapse when either column stops
+-- fitting" -- minCol deliberately exceeds a box's own width so the page folds back to
+-- one column BEFORE the two would overlap, leaving a gutter at the cutover.
+function GUI.UsesTwoColumns()
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    return contentWidth >= (GUI.SettingsBox.minCol * 2 + GUI.SettingsBox.colGutter)
+       and (math.floor(contentWidth / 2) + GUI.SettingsBox.group) <= childWidth
+end
+
+-- ★ THE WIDTH ONE COLUMN GETS. The same arithmetic the layout pass uses for an
+-- indented widget, published so a band can be built at it rather than built wide and
+-- shrunk -- a group cannot be widened or narrowed for free, because LayoutChildren
+-- sizes its children off the group's CURRENT width (see tools.BandWidth).
+-- ⚠ Floored at a box's width for the same reason BandWidth is: a page built before
+-- the content frame has a size still gets a sane container.
+function GUI.ColumnWidth()
+    local usable = GUI.PageUsableWidth(GUI.PageChildWidth(
+        GUI.contentFrame and GUI.contentFrame:GetWidth() or 0))
+    return math.max(math.floor((usable - GUI.SettingsBox.colGutter) / 2),
+                    GUI.SettingsBox.group)
+end
+
+function GUI.PageUsableWidth(childWidth)
+    return (childWidth or 0) - 2 * SettingsBox.colMargin
+end
+
+-- ★ WHERE COLUMN 2 STARTS, in the page CHILD's x: the content box's midpoint. Its own
+-- helper so the layout pass and the resize guide below read ONE number.
+function GUI.Column2X(contentWidth)
+    return math.floor((contentWidth or 0) / 2)
+end
+
+-- ★ WHERE THE TWO COLUMNS SPLIT, in the page CHILD's x -- the centre of the gap
+-- between column 1's right edge (a band filling its column: colMargin + ColumnWidth)
+-- and column 2's left edge (Column2X). nil while the page has one column. Read by the
+-- resize grip's guide line, so the line sits where the split lands after release.
+-- ⚠ A boxed page's fixed-width boxes (Profiles, Debug) are SettingsBox.group wide rather than
+-- ColumnWidth, so their gap is wider on the left; column 2's start is the same either way.
+function GUI.ColumnSplitX()
+    if not GUI.UsesTwoColumns() then return nil end
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local col1Right = SettingsBox.colMargin + GUI.ColumnWidth()
+    return (col1Right + GUI.Column2X(contentWidth)) / 2
+end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
@@ -60,14 +173,482 @@ function GUI:RegisterScaledSurface(f)
     f:SetScale((ws and ws.scale) or 1)
 end
 
-local function ApplyGUIScale(frame, value)
+-- ☠☠ keepPlace: SCALE ABOUT THE WINDOW, NOT ABOUT THE SCREEN CENTRE.
+-- The window carries a single CENTER-to-UIParent point, so SetScale multiplies the
+-- anchor OFFSET along with everything else and the window walks toward or away from
+-- the middle of the screen as you drag the slider. Reported 2026-09-16: "it always
+-- scales from the center of the screen -- can it scale independently?"
+-- ⇒ Read the centre in UIParent units before, then re-anchor to the same screen point
+-- after. A SetPoint offset is in the ANCHORED frame's OWN units, so the displacement
+-- has to be divided back by the new effective scale -- that conversion is the whole
+-- trick, and getting it backwards moves the window the wrong way by the ratio.
+-- ⚠ OPT-IN, AND THAT IS NOT TIDINESS. This function also runs once at build time
+-- (ApplyGUIScale(frame, savedScale)) right after the saved position is restored, where
+-- "keep the on-screen place" would re-anchor the window away from the very position it
+-- was just given. Only the slider asks for it.
+-- ⚠ THE MAIN FRAME ONLY. TestPanel, DFPopupFrame and the registered surfaces place
+-- themselves and must not be re-anchored.
+-- ⚠ THE CALLER SAVES. The re-anchor rewrites point/relPoint/x/y, so whoever asks for
+-- keepPlace has to persist the new position or the saved one is stale until the next
+-- drag; the slider calls SaveWindowPos for exactly that reason.
+local function ApplyGUIScale(frame, value, keepPlace)
+    local cx, cy, ue
+    if frame and keepPlace and frame.GetCenter then
+        local fx, fy = frame:GetCenter()
+        ue = UIParent:GetEffectiveScale()
+        if fx and ue and ue > 0 then
+            local fe = frame:GetEffectiveScale()
+            -- The window's centre, in UIParent units, before anything moves.
+            cx, cy = fx * fe / ue, fy * fe / ue
+        end
+    end
     if frame then frame:SetScale(value) end
-    if DF.positionPanel then DF.positionPanel:SetScale(value) end
+    if cx then
+        local fe = frame:GetEffectiveScale()
+        local ux, uy = UIParent:GetCenter()
+        if fe and fe > 0 and ux then
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "CENTER",
+                           (cx - ux) * ue / fe, (cy - uy) * ue / fe)
+        end
+    end
     if DF.TestPanel then DF.TestPanel:SetScale(value) end
     local popup = _G and _G.DFPopupFrame
     if popup then popup:SetScale(value) end
     for _, f in ipairs(GUI._scaledSurfaces) do
         f:SetScale(value)
+    end
+    for _, fn in pairs(GUI._windowScaleListeners) do pcall(fn) end
+end
+
+-- ☠ A DESIGNER PREVIEW IS A RULER, SO THE WINDOW'S SCALE MUST NOT REACH IT. The mock
+-- frame lives inside the settings window and inherits its scale, so at a 60% window a
+-- Preview Scale of 1.0 drew the frame at 60% of the live one and the preview stopped
+-- being a true-size reference (Aphoex, a16 #6). Previews multiply their scale by this
+-- to divide the window's back out, and register a refresh so a slider drag re-fits them.
+GUI._windowScaleListeners = GUI._windowScaleListeners or setmetatable({}, { __mode = "k" })
+
+function GUI.PreviewUnscale()
+    local ws = DF.GetWindowState and DF:GetWindowState()
+    local s = tonumber(ws and ws.scale) or 1
+    return (s > 0) and (1 / s) or 1
+end
+
+function GUI.OnWindowScaleChanged(owner, fn)
+    if owner and fn then GUI._windowScaleListeners[owner] = fn end
+end
+
+-- ★ THE WIDTH THE LAYOUT PASS GIVES A WIDGET, or nil when it keeps its own.
+-- ☠ ONE FUNCTION, ASKED TWICE. A settings group lays its children out off its
+-- CURRENT width, so PageRefreshStates sizes every group to this BEFORE its
+-- LayoutChildren runs, and the placement loop sizes everything to it after.
+-- Sized only in the loop, a fold to one column or back left each card laid out
+-- for the old width until the next refresh: two tracks spilling out of a card
+-- that had just narrowed, or a widened card's controls still at the narrow
+-- width, wrapping.
+-- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A boxed page's
+-- boxes (Profiles, Debug) are built at a FIXED width and sit in a column wider
+-- than themselves; sizing those to the column would restyle them. Only a band that declares it wants to FILL its column is resized --
+-- to the column with two, and to the WHOLE usable width with one, which is
+-- what makes the two-column layout a presentation of the same page rather
+-- than a second one.
+local function LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+    -- true is one level (20px), a number is that many levels.
+    local indentOffset = 0
+    if widget.indent then
+        indentOffset = type(widget.indent) == "number" and widget.indent * 20 or 20
+    end
+    if widget.layoutCol == "both" then
+        return usableWidth - indentOffset
+    elseif indentOffset > 0 then
+        -- An indented widget keeps its column's right edge.
+        return math.floor((usableWidth - SettingsBox.colGutter) / 2) - indentOffset
+    elseif widget.layoutColFill then
+        return usesTwoColumns and GUI.ColumnWidth() or usableWidth
+    end
+    return nil
+end
+
+-- ============================================================
+-- PAGE STATE REFRESH
+-- ------------------------------------------------------------
+-- The hideOn / disableOn / refreshContent sweep plus the two-column reflow,
+-- run for every widget on the open page. It is the settings window's half of
+-- the apply path: one write from a control drives this over the whole page.
+--
+-- ☠ ONE SHARED FUNCTION, not a closure built per page. It used to be defined
+-- inside BuildPage, which made it unreachable from DF and therefore
+-- unmeasurable -- the profiler resolves its targets as paths against DF, so a
+-- per-page local can never be one. Published as GUI.PageRefreshStates below,
+-- and pages DISPATCH through that name rather than capturing this value (see
+-- the assignment in BuildPage for why).
+--
+-- The parameter is named `self` because it IS the page and the body is the
+-- former closure verbatim: renaming it would have put 250 lines of noise in a
+-- diff whose whole point is that nothing changed.
+local function PageRefreshStates(self)
+    if not self.children then return end
+    local db = DF.db[GUI.SelectedMode]
+    if not db then return end
+
+    -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
+    -- BUILDS itself at a column width has to agree with the pass that POSITIONS it
+    -- about whether there are two columns at all, and two copies of this condition
+    -- is how they would come to disagree by one pixel at the cutover.
+    local usesTwoColumns = GUI.UsesTwoColumns()
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    -- The width a page's widgets actually have, DERIVED rather than a literal:
+    -- the scroll child (see GUI.PageChildWidth) less the page's own left and
+    -- right margins.
+    --
+    -- Through GUI.PageUsableWidth, because a PAGE needs the same number: a
+    -- full-width feature band has to be BUILT at the width this loop is about to
+    -- stretch it to, or its first layout runs at the constructed 280.
+    local usableWidth = GUI.PageUsableWidth(childWidth)
+
+    -- First pass: handle SettingsGroups - layout their children and calculate heights
+    for _, widget in ipairs(self.children) do
+        if widget.isSettingsGroup then
+            -- At the width the placement loop below will give it, FIRST: see
+            -- LayoutWidthFor.
+            local w = LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+            if w then widget:SetWidth(SnapLen(widget, w)) end
+            -- Layout children within the group (handles hideOn internally)
+            widget:LayoutChildren()
+            -- Process disableOn for group children
+            widget:RefreshChildStates()
+        end
+    end
+    
+    -- Second pass: handle regular widgets and group visibility
+    for _, widget in ipairs(self.children) do
+        -- Keep any blocked-overlay (top-level widget or group) in sync.
+        -- Skip SettingsGroup children - they're handled by their parent group
+        if widget.settingsGroup then
+            -- Already handled by group's LayoutChildren
+        elseif widget.isSettingsGroup then
+            -- For groups, check collapsible section state AND group-level hideOn
+            local shouldHide = false
+            
+            -- Check if parent collapsible section is collapsed
+            if widget.collapsibleSection and not widget.collapsibleSection.expanded then
+                shouldHide = true
+            end
+            
+            -- Check group's own hideOn
+            if not shouldHide and widget.hideOn then
+                shouldHide = widget.hideOn(db)
+            end
+            
+            if shouldHide then
+                -- ...and the box is TOLD it is going, because hiding a subtree
+                -- tells nothing inside it. A popout docked to a row in this box
+                -- is not a child of the box (it hangs off UIParent so it can
+                -- draw outside the window) and neither is the accent outline it
+                -- traces on that row, so both would stay exactly where they are
+                -- over whatever the re-flow moves up. The group forwards this to
+                -- its children; see DandersUI/Sections.lua's LAYOUT-HIDDEN
+                -- CONTRACT.
+                local wasShown = widget:IsShown()
+                widget:Hide()
+                if wasShown and GUI.NotifyLayoutHidden then
+                    GUI:NotifyLayoutHidden(widget)
+                end
+            else
+                widget:Show()
+            end
+        else
+            -- Regular widget processing
+            if widget.disableOn then
+                local shouldDisable = widget.disableOn(db)
+                if widget.SetEnabled then
+                    widget:SetEnabled(not shouldDisable)
+                end
+            end
+            
+            -- Check if widget should be hidden
+            local shouldHide = false
+            
+            -- First check if parent collapsible section is collapsed
+            if widget.collapsibleSection and not widget.collapsibleSection.expanded then
+                shouldHide = true
+            end
+            
+            -- Then check widget's own hideOn
+            if not shouldHide and widget.hideOn then
+                shouldHide = widget.hideOn(db)
+            end
+            
+            if shouldHide then
+                -- Same announcement as the group branch above, and for the same
+                -- reason: a popout row laid straight on the page (rather than in
+                -- a box) is hidden here, and it has a panel to take down with it.
+                local wasShown = widget:IsShown()
+                widget:Hide()
+                if wasShown and GUI.NotifyLayoutHidden then
+                    GUI:NotifyLayoutHidden(widget)
+                end
+            else
+                widget:Show()
+                -- Call refreshContent hook for dynamic content updates
+                if widget.refreshContent then
+                    widget:refreshContent(db)
+                end
+            end
+        end
+    end
+    
+    -- Determine column layout based on content area width.
+    -- Two-column settings groups are SettingsBox.group wide and placed at
+    -- x = colMargin, while column 2 starts at contentWidth/2 — so they begin to
+    -- overlap once contentWidth drops below ~570. minCol must exceed the group
+    -- width (was a stale 270) so the layout collapses to one column BEFORE the
+    -- columns touch, leaving a small gutter at the cutover instead of
+    -- overlapping for the last few pixels.
+    --
+    -- ☠ AND THAT WAS ONLY HALF THE TEST. Two columns need two things to be true
+    -- and only the first was ever checked:
+    --
+    --   1. the columns must not touch      -- the minCol rule above
+    --   2. column 2 must FIT IN THE VIEWPORT, which is NOT the content box: it
+    --      is the content box less the page's inset and the scrollbar gutter,
+    --      and column 2 is pinned to the CONTENT's midpoint. So the further the
+    --      viewport is inset, the sooner floor(contentWidth/2) + a group's width
+    --      runs off the right of the rect the ScrollFrame clips to.
+    --
+    -- Rule 1 alone let the cutover clip. It always did -- a column-2 box lost its
+    -- last pixel at the exact threshold -- and it went unnoticed at 1px; with the
+    -- viewport now stopping at the scrollbar rather than 6px past it, the same
+    -- unchecked condition would have cut up to 7px off the box's right border.
+    -- The layout is not "collapse when the columns touch", it is "collapse when
+    -- either column stops fitting", so it now says so. (GUI.UsesTwoColumns,
+    -- asked at the top of this function.)
+
+    -- Check if editing banner is active (adds 50px at top)
+    local bannerOffset = 0
+    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+        bannerOffset = 50
+    end
+    
+    -- Layout - adjust column positions based on available width
+    local x1, maxY = SettingsBox.colMargin, 0
+    local col2X = usesTwoColumns and GUI.Column2X(contentWidth) or x1
+    -- The page's TOP margin, deliberately still a literal: it happens to equal
+    -- colMargin today, and tying the vertical rhythm to a horizontal number is
+    -- how one edit moves the other axis by accident.
+    local y1, y2 = -5 - bannerOffset, -5 - bannerOffset
+    
+    -- First, position any right-aligned elements (like Copy buttons) at absolute top-right
+    for _, widget in ipairs(self.children) do
+        if widget.rightAlign and widget:IsShown() then
+            widget:ClearAllPoints()
+            -- Both offsets snapped: this widget is the HEAD of the
+            -- Reset/Sync/Copy chain, so a fraction here is inherited by
+            -- every button to its left, and the buttons are no longer
+            -- nudged back onto the grid individually.
+            widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
+                SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
+        end
+    end
+    
+    -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
+    --
+    -- MEASURE the row and add a fixed pad rather than assuming a height, so the
+    -- gap below the buttons is identical on every page by construction.
+    --
+    -- The scan is gated on IsShown(), matching the positioning loop above: a
+    -- page carrying a HIDDEN right-aligned widget must not reserve space for it
+    -- and open with an empty band above its first box.
+    local RIGHT_ROW_PAD = 14
+    local rightRowH = 0
+    for _, widget in ipairs(self.children) do
+        if widget.rightAlign and widget:IsShown() then
+            rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
+        end
+    end
+    if rightRowH > 0 then
+        -- Snapped for the same reason every other layout number is: an
+        -- unsnapped offset puts everything below it off the pixel grid.
+        local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
+        y1 = y1 - reserve
+        y2 = y2 - reserve
+    end
+    
+    for _, widget in ipairs(self.children) do
+        -- Skip widgets that belong to a SettingsGroup (they're positioned by the group)
+        if widget.settingsGroup then
+            -- Do nothing - parent group handles positioning
+        elseif widget.rightAlign then
+            -- Already positioned above, skip
+        elseif widget.isSyncPoint then
+            -- Sync point: align both columns to the lowest Y position
+            local syncY = math.min(y1, y2)
+            y1 = syncY
+            y2 = syncY
+        elseif widget:IsShown() then
+            -- For SettingsGroups, use calculated height
+            local h = widget.layoutHeight or 0
+            if widget.isSettingsGroup and widget.calculatedHeight then
+                h = widget.calculatedHeight
+            end
+            
+            widget:ClearAllPoints()
+
+            -- Set height for frame-based widgets (like header containers)
+            if widget.text and widget.SetHeight and h > 0 then
+                widget:SetHeight(h)
+            end
+            
+            -- Apply indent offset if specified (for child/sub-options)
+            -- Supports: true (20px), or a number for multiple levels (e.g. 2 = 40px)
+            local indentOffset = 0
+            if widget.indent then
+                if type(widget.indent) == "number" then
+                    indentOffset = widget.indent * 20
+                else
+                    indentOffset = 20
+                end
+            end
+            
+            -- Snap the offsets and widths this loop hands out, for the same
+            -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
+            -- straight onto the page (a banner, a full-width note, a
+            -- collapsible section) never passes through a group, so this is
+            -- the only place its geometry can be put on the grid. See SnapLen.
+            local snapX = SnapLen(widget, x1 + indentOffset)
+
+            if widget.layoutCol == "both" then
+                local startY = math.min(y1, y2)
+                widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
+                y1 = startY - h
+                y2 = startY - h
+            elseif widget.layoutCol == 2 and usesTwoColumns then
+                widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
+                                SnapLen(widget, y2))
+                y2 = y2 - h
+            else
+                -- Column 1, or column 2 when in single-column mode
+                widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
+                y1 = y1 - h
+            end
+            local w = LayoutWidthFor(widget, usesTwoColumns, usableWidth)
+            if w then widget:SetWidth(SnapLen(widget, w)) end
+            
+            local currentBottom = math.min(y1, y2)
+            if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
+        end
+    end
+    local contentH = maxY + 40 + bannerOffset
+
+    -- FOOTER: the See-Also bar is designed as one, so on a page whose
+    -- content does not fill the viewport it should sit at the BOTTOM
+    -- rather than floating halfway down with dead space under it. On a
+    -- page that does fill (or overflow) the viewport it already lands at
+    -- the end of the flow, which reads correctly -- so this only moves it
+    -- when there is spare room, and the long-page case is untouched.
+    --
+    -- Done by stretching the scroll child to the viewport height and
+    -- anchoring the footer to the child's BOTTOM: the child is what the
+    -- flow is measured against, so this keeps the footer inside the
+    -- scrolled content (it still scrolls with a long page) instead of
+    -- floating over it.
+    local footer
+    for _, w in ipairs(self.children) do
+        if w.isPageFooter and w:IsShown() then footer = w break end
+    end
+    -- ☠ THE STRETCH MUST FOLLOW THE VIEWPORT'S HEIGHT, not be taken once here. This
+    -- pass re-runs on content and WIDTH changes only, so a page stretched to one
+    -- height kept it through a vertical resize of the window or a return from the
+    -- page dock at another height -- and the difference became scroll range on a page
+    -- that fits (only pages with a See Also footer ever stretch, which is the tell).
+    -- The flow geometry is kept so the OnSizeChanged hook can redo just this part.
+    if footer then
+        local _, _, _, fx, fy = footer:GetPoint(1)
+        self._footerFit = { footer = footer, flowH = contentH, x = fx, y = fy,
+            x1 = x1, width = usableWidth }
+        if not self._footerFitHooked then
+            self._footerFitHooked = true
+            self:HookScript("OnSizeChanged", function(page) GUI.FitPageFooter(page) end)
+        end
+    else
+        self._footerFit = nil
+    end
+    self.child:SetHeight(contentH)
+    if footer then GUI.FitPageFooter(self) end
+
+    -- Update scroll child width to match the page viewport. GUI.PageChildWidth,
+    -- not a second copy of the arithmetic: CreateSubTab sizes the child the same
+    -- way at build time, and these two drifting apart is what a shared helper is
+    -- for.
+    if self.child and GUI.contentFrame then
+        self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
+    end
+end
+GUI.PageRefreshStates = PageRefreshStates
+
+-- ONE PREVIEW WIDTH FOR BOTH DESIGNERS. The Aura Designer's preview must fit its
+-- Click / Drag / Right-click hint rows on one line each; the Text Designer uses the same
+-- width so the two pages read as one design. Measured once off the hint strings
+-- (same font, same badge arithmetic as CreateFramePreview), floored at 300.
+-- ⚠ One probe for the session, made on first use: an unloaded-font call returns
+-- uncached and the next call measures again, and a FontString per call would pile up
+-- on UIParent.
+local designerPreviewW, designerPreviewProbe
+function GUI.DesignerPreviewWidth()
+    if designerPreviewW then return designerPreviewW end
+    local probe = designerPreviewProbe
+    if not probe then
+        probe = UIParent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        probe:Hide()
+        designerPreviewProbe = probe
+    end
+    local need = 300
+    for _, row in ipairs({
+        { L["Click"],       L["an indicator on the frame to expand its settings"] },
+        { L["Drag"],        L["a placed indicator to reposition it on the frame"] },
+        { L["Right-click"], L["a placed indicator to remove it from the frame"] },
+    }) do
+        probe:SetText(row[1])
+        local badgeW = math.max((probe:GetStringWidth() or 0) + 10, 20)
+        probe:SetText(row[2])
+        local w = 8 + badgeW + 5 + math.ceil(probe:GetUnboundedStringWidth() or 0) + 8
+        if w > need then need = w end
+    end
+    -- Only cache a real measurement: before fonts load a string measures 0.
+    if need > 300 then designerPreviewW = need end
+    return need
+end
+
+-- An ISLAND page (the designers) is exactly one viewport tall and scrolls only inside
+-- its own panels. Its RefreshStates sets that, but RefreshStates does not run on every
+-- height change, so the child is held to the viewport on resize too -- a stale taller
+-- child is page-level scroll on a page that must never scroll.
+function GUI.PinChildToViewport(page)
+    if not page or page._childPinned then return end
+    page._childPinned = true
+    page:HookScript("OnSizeChanged", function(p)
+        if p.child then p.child:SetHeight(p:GetHeight()) end
+    end)
+end
+
+-- Seat a page's See Also footer for the viewport's CURRENT height: at the bottom with
+-- the child stretched to fill when the content is shorter than the viewport, back at
+-- its place in the flow when it is not.
+function GUI.FitPageFooter(page)
+    local fit = page and page._footerFit
+    if not (fit and page.child) then return end
+    local footer = fit.footer
+    local viewH = page:GetHeight() or 0
+    footer:ClearAllPoints()
+    if viewH > fit.flowH then
+        page.child:SetHeight(viewH)
+        footer:SetPoint("BOTTOMLEFT", page.child, "BOTTOMLEFT",
+            SnapLen(page.child, fit.x1), SnapLen(page.child, GUI.Space.footer))
+        footer:SetWidth(SnapLen(footer, fit.width))
+    else
+        page.child:SetHeight(fit.flowH)
+        footer:SetPoint("TOPLEFT", fit.x or 0, fit.y or 0)
     end
 end
 
@@ -75,7 +656,36 @@ function DF:CreateGUI()
     if DF.GUIFrame then return end
     
     -- Default and saved sizes
-    local defaultWidth, defaultHeight = 760, 520
+    --
+    -- ★ 640x600, AND ONLY THE DEFAULT. A first-run window is 120px narrower and
+    -- 80px taller than the 760x520 it was -- an interim step toward the slim
+    -- shell, and the height is what pays for the width: a narrower page is a
+    -- longer one.
+    --
+    -- ⚠ IT STAYS SINGLE-COLUMN, and it already was. The cutover is 590 CONTENT
+    -- pixels (SettingsBox.minCol * 2 + colGutter), which is a 777px window once
+    -- the two margins, the 155 nav and its gap are paid for -- so 760 was under
+    -- it too. Narrowing to 640 does not change the column count of any page; it
+    -- just stops the window claiming 120px it was not laying anything out in.
+    --
+    -- ⚠ NOBODY WHO ALREADY HAS A WINDOW MOVES. guiDb.width/height are read
+    -- below and win outright -- these two are what a profile with no stored size
+    -- falls back to, which after the account-wide move (see DF:GetWindowState)
+    -- means a fresh install and nothing else.
+    --
+    -- ...and the RESIZE FLOOR is untouched at 520x400, deliberately: the default
+    -- is not a minimum, and a user who wants it smaller than it opens should
+    -- keep being able to drag it there. See normalMinWidth below, and
+    -- ApplyPageWidthBounds, which raises the floor to 850 on the wide pages --
+    -- opening one of those from a 640 window widens it.
+    --
+    -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
+    -- `/df resetgui` writes the default back into the window state from Core.lua,
+    -- which can run before this companion has ever loaded -- so a literal here
+    -- and a literal there were free to disagree, and a reset would "restore the
+    -- default" to a size the addon no longer ships.
+    local defaultWidth  = GUI.WindowDefaults.width
+    local defaultHeight = GUI.WindowDefaults.height
     local minWidth, minHeight = 520, 400
     local maxWidth, maxHeight = 1200, 900
     
@@ -89,23 +699,86 @@ function DF:CreateGUI()
     -- Main frame (matching old addon approach - no BackdropTemplate in CreateFrame)
     local frame = CreateFrame("Frame", "DandersFramesGUI", UIParent)
     frame:SetSize(savedWidth, savedHeight)
+    -- ☠ NEVER OFF THE EDGE. The same call the popouts make (DandersUI/Popout.lua's
+    -- constructor), and for the same reason: Blizzard enforces it live during
+    -- StartMoving, so every drag handle on this window -- the title bar, the bottom
+    -- bar, deck 2 -- is covered without any of them knowing about it.
+    -- ⚠ BEFORE THE RESTORE BELOW, ON PURPOSE. A position saved at one resolution and
+    -- restored at a smaller one comes back off-screen, and that path trusts the saved
+    -- numbers with no bounds check at all -- which is why /df resetgui is advertised in
+    -- the login message as the fix for a window nobody can find. Setting the clamp
+    -- first gives the restore a chance to be pulled back on.
+    -- ⚠ UNVERIFIED that the clamp fires for a programmatic SetPoint rather than only
+    -- for StartMoving. If a saved off-screen position still comes back off-screen, this
+    -- needs explicit arithmetic instead, and there is nothing in the kit to reuse for it
+    -- (the only explicit clamp there is y-only and wants a window+row pair).
+    frame:SetClampedToScreen(true)
     -- Restore saved position, or default to center
     if guiDb.point and guiDb.x then
         frame:SetPoint(guiDb.point, UIParent, guiDb.relPoint or "CENTER", guiDb.x, guiDb.y)
     else
         frame:SetPoint("CENTER")
     end
-    frame:SetFrameStrata("DIALOG")  -- Match old addon
-    frame:SetToplevel(true)         -- Match old addon
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
     frame:SetMovable(true)
     frame:SetResizable(true)
     frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
     frame:EnableMouse(true)
     ApplyGUIScale(frame, savedScale)
     -- Note: Dragging is handled by titleBar, not main frame
-    CreatePanelBackdrop(frame)
+    -- =========================================================================
+    -- THE WINDOW'S SHAPE
+    -- -------------------------------------------------------------------------
+    -- ROUNDED, at whatever radius the consumer declared (GUI.lua's
+    -- SetSurfaceStyle call, off Theme.lua's UI.SurfaceStyle -- R8 today). This is
+    -- the outermost surface of the whole settings shell, so it is the one that
+    -- has to agree with the popouts, the feature rows and the group boxes inside
+    -- it: a rounded panel standing in a square window reads as a mistake rather
+    -- than as a look, which is precisely what the in-game trial found when the
+    -- window was the one surface it did not reach.
+    --
+    -- The COLOURS are CreatePanelBackdrop's, verbatim -- C_BACKGROUND over a hard
+    -- black edge -- so the only thing that changed is the corner. Declaring
+    -- nothing falls back to that exact call, which is what DandersMover's window
+    -- still gets.
+    local SURFACE = GUI:GetSurfaceStyle()
+    if SURFACE then
+        GUI:ApplyRoundedChrome(frame, {
+            radius      = SURFACE.radius,
+            borderWidth = SURFACE.borderWidth,
+            fill        = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b,
+                            C_BACKGROUND.a or 0.95 },
+            border      = { 0, 0, 0, 1 },
+        })
+    else
+        CreatePanelBackdrop(frame)
+    end
     frame:Hide()
     DF.GUIFrame = frame
+    GUI:AddFontRoot(frame)   -- the tabs and header follow a Settings Font change
+
+    -- Entrance fade (DandersUI UI.Fx, reached through the GUI host). OnShow
+    -- covers EVERY path that shows the window -- DF:ToggleGUI, the test-mode
+    -- reopen (TestMode.lua) and Core.lua's debug path. The matching fade-OUT
+    -- lives on the close button below and on the DF:ToggleGUI wrapper at the
+    -- foot of this file; Esc (UISpecialFrames) hides directly and stays
+    -- instant, as does the mover bridge's close-on-unlock.
+    --
+    -- ★ AND IT IS WHERE THE CURRENT PAGE COMES BACK OUT OF THE PAGE DOCK. The
+    -- OnHide below parks it; this adopts it. Hooked on the FRAME rather than
+    -- bolted onto DF:ToggleGUI because several paths show this window directly
+    -- without going through a SelectTab afterwards (Core.lua's debug open, the
+    -- mover bridge, the test-mode reopen), and a window that came back blank on
+    -- any one of them would be a far worse bug than the one being fixed.
+    -- AdoptPage no-ops when the page is not parked, so this is free on the paths
+    -- that never parked it.
+    frame:HookScript("OnShow", function(f)
+        if GUI.AdoptPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
+        end
+        GUI.Fx.FadeIn(f, 0.3)
+    end)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -115,58 +788,175 @@ function DF:CreateGUI()
         local AutoProfilesUI = DF.AutoProfilesUI
         if AutoProfilesUI and AutoProfilesUI:IsEditing() then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
+            -- ...which also skips its InvalidateAllPages. The builds made while
+            -- editing show the LAYOUT's values (frame previews at its size), and
+            -- opening the window no longer rebuilds the page on screen (DF:ToggleGUI
+            -- goes through the cache), so they are thrown away here instead.
+            if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
         end
+        -- Popout rows stand OUTSIDE this frame, so hiding the window does not
+        -- hide them -- they would be left floating over the game with nothing to
+        -- dock against. CloseAll, not CloseUnpinned: a pinned panel is pinned
+        -- loose from the ROW, not from the window, and the window going away
+        -- takes it too. Every path that hides the panel lands here -- the cross,
+        -- Escape, /df, and the combat auto-close -- so this is the one place it
+        -- needs saying. Guarded for an older embedded copy of the pack.
+        if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("windowClosed") end
+        -- ...and the header's own popout, which is not a row and so is not in
+        -- that store. Same reasoning exactly: it stands outside this frame, so
+        -- hiding the window does not take it, and it would be left floating over
+        -- the game docked to an edge that is no longer there. It is pinnable, so
+        -- the shell's source-death close (which only fires for unpinnable
+        -- popouts) will never do it either.
+        if GUI.ScalePopout and not GUI.ScalePopout.closed then
+            GUI.ScalePopout:Close("windowClosed")
+        end
+
+        -- Park the page that was on screen (see THE PAGE DOCK). With the window
+        -- closed nothing needs it in the tree, and leaving it there is one more
+        -- subtree the next Show has to walk. It is NOT hidden -- its own shown
+        -- flag stays set, so the OnShow hook above brings it straight back
+        -- visible with a single SetParent and needs no state of its own.
+        if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
+        end
+        -- ...and the page cover, if the window was closed inside a switch's fade
+        -- (see THE PAGE FADE): a stopped fade never runs the callback that hides
+        -- it, and it would open over the page next time.
+        if GUI._pageCover then GUI._pageCover:Hide() end
     end)
     
-    -- Title bar (handles dragging like old addon)
-    -- Uses FULLSCREEN_DIALOG strata so it stays above dropdown menus and popups,
-    -- allowing the window to be dragged even when settings panels are open.
-    local titleBar = CreateFrame("Frame", nil, frame)
-    titleBar:SetHeight(30)
-    titleBar:SetPoint("TOPLEFT", 0, 0)
-    titleBar:SetPoint("TOPRIGHT", -30, 0)
-    titleBar:EnableMouse(true)
-    titleBar:RegisterForDrag("LeftButton")
-    titleBar:SetScript("OnDragStart", function() frame:StartMoving() end)
-    titleBar:SetScript("OnDragStop", function()
+    -- =========================================================================
+    -- THE TWO-DECK HEADER
+    -- -------------------------------------------------------------------------
+    -- The window's chrome is TWO strips, and they answer two different
+    -- questions. Deck 1 is IDENTITY -- what am I looking at, whose settings are
+    -- these, and the three window-level affordances (scale, changelog, close).
+    -- Deck 2 is OPERATION -- which mode am I editing, and the verbs that act on
+    -- it (undo/redo, Test, Unlock).
+    --
+    -- The band they occupy is NOT new. The old header already ran 0..-64: a
+    -- title strip at 0..-30 and an unnamed row of toolbar buttons at -32..-56,
+    -- anchored to the window rather than to anything, with the UI Scale slider
+    -- parked at its right end. So this is a re-HOUSING, not a growth -- the two
+    -- decks are the same 64px, the content still starts at -64, and the window's
+    -- default height is untouched. (The delegation spec assumed a single-row
+    -- header and budgeted ~26px for the second; the budget was already spent.)
+    --
+    -- ⚠ BOTH DECKS DRAG. The title strip always did; the toolbar row never did,
+    -- which made half the window's chrome a dead zone.
+    --
+    -- Deck 1 keeps FULLSCREEN_DIALOG strata so the window stays draggable even
+    -- with a dropdown or popup open. Deck 2 deliberately does NOT: its children
+    -- are the mode tabs and the Test/Unlock buttons, which have always lived at
+    -- the window's own DIALOG strata, and promoting them would raise them over
+    -- page menus that open upward into the header band.
+    -- =========================================================================
+    local function SaveWindowPos()
         frame:StopMovingOrSizing()
         -- Save position so it persists across sessions
         local point, _, relPoint, x, y = frame:GetPoint()
         local ws = DF:GetWindowState()
         ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
-    end)
+    end
+
+    local titleBar = CreateFrame("Frame", nil, frame)
+    titleBar:SetHeight(30)
+    titleBar:SetPoint("TOPLEFT", 0, 0)
+    -- Full width. The whole right-hand cluster sits at frame level 210 against
+    -- this strip's 200, so every control still takes its own clicks and every
+    -- GAP between them drags the window.
+    titleBar:SetPoint("TOPRIGHT", 0, 0)
+    titleBar:EnableMouse(true)
+    titleBar:RegisterForDrag("LeftButton")
+    titleBar:SetScript("OnDragStart", function() frame:StartMoving() end)
+    titleBar:SetScript("OnDragStop", SaveWindowPos)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
-    
+    GUI.HeaderDeck1 = titleBar
+
+    -- ---- deck 1's strip ------------------------------------------------
+    -- The raised fill and the hairline under it, drawn exactly the way a popout
+    -- draws its own title strip and off the same UI.PopoutTitle tokens -- so the
+    -- window's chrome and the chrome of every panel that docks beside it are one
+    -- idiom rather than two that happen to sit next to each other.
+    --
+    -- ⚠ ON THE FRAME, NOT ON THE DECK, and that is what makes the rounded case
+    -- work at all: a child frame's textures draw above EVERY layer of its parent,
+    -- so a fill anchored to deck 1 would paint straight over the window's own
+    -- top corners and square them off. On the frame it lands between the rounded
+    -- fill and the rounded ring -- see ApplyRoundedStrip.
+    --
+    -- ★ THIS IS A LOOK CHANGE BEYOND THE CORNERS. The header had no strip of any
+    -- kind before; deck 1 now reads as chrome rather than as the top of the body,
+    -- and the hairline says where the identity deck ends. Both modes get it, for
+    -- the trial's own reason: a strip that existed only when rounded would make
+    -- the two shapes differ by more than their shape.
+    local titleFill = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+    titleFill:SetPoint("TOPLEFT", titleBar, "TOPLEFT", 0, 0)
+    titleFill:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    titleFill:SetColorTexture(C_PANEL.r, C_PANEL.g, C_PANEL.b, GUI.PopoutTitle.fill)
+    GUI.HeaderDeck1Fill = titleFill
+
+    local titleSep = frame:CreateTexture(nil, "ARTWORK", nil, 2)
+    titleSep:SetPoint("BOTTOMLEFT", titleBar, "BOTTOMLEFT", 0, 0)
+    titleSep:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    titleSep:SetHeight(1)
+    titleSep:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, GUI.PopoutTitle.sepAlpha)
+    GUI.HeaderDeck1Sep = titleSep
+
+    if SURFACE then
+        titleFill:Hide()
+        GUI:ApplyRoundedStrip(frame, titleBar, SURFACE.radius,
+            { C_PANEL.r, C_PANEL.g, C_PANEL.b, GUI.PopoutTitle.fill })
+    end
+
+    -- ★ THE PRODUCT LABEL AND THE BUILD TAG ARE TWO STRINGS NOW, not one
+    -- concatenation. The name is the product label -- theme-coloured, and the
+    -- SEAM the future product dropdown opens from (it becomes the opener; the
+    -- tag stays put beside it). The version follows it dim and small, because
+    -- "which build am I on" is reference information, not the window's title.
     local title = titleBar:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     title:SetPoint("LEFT", 12, 0)
+    title:SetText("DandersFrames")
+    GUI.HeaderProductLabel = title      -- ← seam: the product dropdown's opener
     local versionStr = DF.VERSION or "Unknown"
     local channelTags = { alpha = " |cffff8800alpha|r", beta = " |cffff8800beta|r" }
     local channelTag = channelTags[DF.RELEASE_CHANNEL] or ""
-    title:SetText("DandersFrames " .. versionStr .. channelTag)
+    local versionTag = titleBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    versionTag:SetPoint("LEFT", title, "RIGHT", 6, 0)
+    versionTag:SetText(versionStr .. channelTag)
+    versionTag:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     local c = GetThemeColor()
     title:SetTextColor(c.r, c.g, c.b)
     title.UpdateTheme = function()
         local nc = GetThemeColor()
         title:SetTextColor(nc.r, nc.g, nc.b)
     end
-    
+
     -- Close button with icon
-    local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function() frame:Hide() end })
-    closeBtn:SetPoint("TOPRIGHT", -8, -5)
+    local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function()
+        -- Fade, then hide. FadeOut's cancel semantics make this safe against a
+        -- re-Show mid-fade (the deferred Hide is skipped).
+        GUI.Fx.FadeOut(frame, 0.25, function() frame:Hide() end)
+    end })
+    -- ⚠ THE 5-ARGUMENT FORM, where this was `SetPoint("TOPRIGHT", -8, -5)`. Same
+    -- anchor -- the implicit relative frame IS the parent -- but written out, so
+    -- the corner-clearance pass below can read it back and re-issue it.
+    closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -5)
     closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     closeBtn:SetFrameLevel(210)
 
     -- Info button (changelog)
     local infoBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    infoBtn:SetPoint("TOPRIGHT", -32, -5)
+    infoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -32, -5)   -- 5-arg: see closeBtn
     infoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     infoBtn:SetFrameLevel(210)
     -- Icon-only changelog button via the shared styler (backdrop + hover); the hook
     -- brightens the icon to the theme colour on hover.
     GUI:StyleButton(infoBtn, {
         width = 20, height = 20,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\notes", size = 16, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\notes.png", size = 16, color = C_TEXT_DIM },
     })
     infoBtn:HookScript("OnEnter", function(self)
         local tc = GetThemeColor()
@@ -175,6 +965,118 @@ function DF:CreateGUI()
     infoBtn:HookScript("OnLeave", function(self)
         self.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
+
+    -- ---- clearance for the arc -----------------------------------------
+    -- The cross's square hover box sits in the window's top-right corner box, and
+    -- once that corner is an arc it reads as a corner laid over a corner. The
+    -- shared inset moves it inboard by half the radius, which takes it out of the
+    -- corner box at every radius that has art (see UI:InsetTitleButton).
+    --
+    -- BOTH buttons, and only these two: they are the only members of the right
+    -- cluster anchored absolutely to the window's TOPRIGHT -- the scale glyph and
+    -- the profile chip chain leftward off them -- so shifting the pair by the
+    -- same amount moves the whole cluster without changing a single gap in it.
+    -- A no-op when nothing is rounded, because the inset for a nil radius is 0.
+    GUI:InsetTitleButton(closeBtn, SURFACE and SURFACE.radius or nil)
+    GUI:InsetTitleButton(infoBtn,  SURFACE and SURFACE.radius or nil)
+
+    -- =========================================================================
+    -- DECK 1 RIGHT CLUSTER: profile chip, scale, changelog, close
+    -- -------------------------------------------------------------------------
+    -- Chained right-to-left off the close button, so the cluster's right edge is
+    -- fixed and it grows leftward into the title's space -- the same direction
+    -- the UI Scale row used to grow for the same reason (a long label has room
+    -- on the left and none on the right).
+    -- =========================================================================
+
+    -- ⤢ UI SCALE. A WINDOW option, so it lives where the window's own options
+    -- live: behind this glyph, in a popout. Forward-declared because the popout
+    -- is built further down, after the pieces it docks against exist.
+    local OpenScalePopout
+    local scaleBtn = GUI:CreateGlyphButton(frame, {
+        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
+        width = 20, height = 20, iconSize = 15,
+        color    = C_TEXT_DIM,
+        tooltip  = { title = L["Scale"], lines = { L["Scale the settings window."] } },
+        onClick  = function() OpenScalePopout() end,
+    })
+    scaleBtn:SetPoint("TOPRIGHT", infoBtn, "TOPLEFT", -4, 0)
+    scaleBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+    scaleBtn:SetFrameLevel(210)
+    GUI.ScaleButton = scaleBtn
+
+    -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
+    -- and it used to be answerable only by walking to the Profiles page. The
+    -- chip is the shared inline dropdown -- same opener, same menu, same
+    -- keyboard-free click -- reading and writing through the profile system's
+    -- own accessors (DF:GetProfiles / DF:GetCurrentProfile / DF:SetProfile), so
+    -- a switch from here is the same switch the Profiles page performs.
+    -- menuAlign RIGHT: the opener sits near the window's right edge and the menu
+    -- is usually wider, so surplus width grows leftward instead of off-screen.
+    -- _order, not the dropdown's default alphabetical sort: DF:GetProfiles
+    -- already orders the list the way the Profiles page shows it (Default
+    -- pinned first, the rest alphabetical), and the two must not disagree.
+    local function BuildProfileOptions()
+        local order = {}
+        local options = { _order = order }
+        for _, name in ipairs(DF:GetProfiles()) do
+            order[#order + 1] = name
+            options[name] = { value = name, text = name }
+        end
+        return options
+    end
+    local profileChip = GUI:CreateDropdown(
+        titleBar, "", BuildProfileOptions(),
+        nil, nil, nil,
+        function() return DF:GetCurrentProfile() end,          -- customGet
+        function(name)                                          -- customSet
+            if name == DF:GetCurrentProfile() then return end
+            DF:SetProfile(name)
+            -- SetProfile ended in FullProfileRefresh, which already rebuilt the page.
+            if GUI.RefreshCurrentPageAfterFullRefresh then GUI.RefreshCurrentPageAfterFullRefresh() end
+        end,
+        { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
+    )
+    profileChip:SetSize(126, 20)
+    profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
+    profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
+    GUI.ProfileChip = profileChip
+
+    -- The runtime auto-layout overlay, said in the header's own voice. When an
+    -- auto layout is driving the live raid frames the profile named on the chip
+    -- is not the whole story, and the addon has exactly one glyph for "something
+    -- is overriding this" -- the shared override marker. Same dot, same colour,
+    -- same tooltip shape as the one beside Unlock.
+    local profileOverrideStar = GUI:CreateOverrideMarker(titleBar, 12)
+    profileOverrideStar:SetPoint("RIGHT", profileChip, "LEFT", -2, 0)
+    profileOverrideStar.tooltipText = L["Set by the active auto layout"]
+
+    -- Repainted from UpdateThemeColors, which every mode switch and every
+    -- window show already runs -- the two moments the answer can have changed
+    -- without this window being open to see it.
+    local function UpdateProfileChip()
+        -- UpdateText, NOT RebuildOptions: the MENU already rebuilds itself from
+        -- optionsFunc on every open, and the opener's caption falls back to the
+        -- raw value for a name the build-time list never had -- so a profile
+        -- created since then still reads correctly, without paying for a menu
+        -- row rebuild on every mode switch.
+        if profileChip.UpdateText then profileChip:UpdateText() end
+        local AP = DF.AutoProfilesUI
+        local layout = AP and AP.IsLayoutActive and AP:IsLayoutActive()
+            and AP.GetActiveLayoutName and AP:GetActiveLayoutName()
+        if layout then
+            profileOverrideStar.tooltipSubText = format(L["Layout: %s"], layout)
+        end
+        GUI:ShowLayoutOverrideMarker(profileOverrideStar, layout)
+    end
+    GUI.UpdateProfileChip = UpdateProfileChip
+
+    -- The title yields to the cluster rather than running under it: at the
+    -- window's 520 minimum a long build tag and a long profile name would
+    -- otherwise overlap. Two anchors + no wrap means the tag clips instead.
+    versionTag:SetPoint("RIGHT", profileOverrideStar, "LEFT", -8, 0)
+    versionTag:SetJustifyH("LEFT")
+    versionTag:SetWordWrap(false)
 
     -- Changelog overlay (covers full content area below title bar)
     local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -205,21 +1107,18 @@ function DF:CreateGUI()
     -- =========================================================================
     -- CHANGELOG — RENDERED, NOT DUMPED
     -- =========================================================================
-    -- ★ This used to be one EditBox holding the whole markdown as colour-coded
-    -- text: every release, every section, every entry at the same size and
-    -- weight — a wall. It now renders the same CHANGELOG.md structure as typed
-    -- pieces (the shape EllesmereUI's patch-notes page uses, reached from the
-    -- same complaint): a version title with a hairline underline, caps section
-    -- labels, feature CARDS (category as the accent-coloured title, wrapping
-    -- body, faint panel behind, 2px accent line on top) and compact fix ROWS
-    -- (accent bullet, category chip, wrapping dim body). Hierarchy comes from
-    -- size and alpha, and from actual space between things.
+    -- ★ Renders the CHANGELOG.md structure as typed pieces: a theme-tinted
+    -- version BAND per release, caps section headings over a hairline, feature
+    -- CALLOUTS (left accent rail with a star, category as the title, wrapping
+    -- body, and a chevron only when the category links to a settings page) and
+    -- compact fix ROWS (accent bullet, wrapping dim body) grouped under one
+    -- caps sub-heading per category. Hierarchy comes from size and alpha, and
+    -- from actual space between things.
     --
-    -- The data pipeline is untouched: DF.CHANGELOG_TEXT is still the generated
-    -- markdown, parsed here into version → section → entry. Only the newest
-    -- releases render up front (frames cost more than a text box); "Show older
-    -- releases" appends the next batch. All pieces are pooled so reopening or
-    -- resizing rebuilds without leaking frames.
+    -- DF.CHANGELOG_TEXT is the generated markdown, parsed here into version →
+    -- section → entry. Only the newest releases render up front (frames cost
+    -- more than a text box); "Show older releases" appends the next batch. All
+    -- pieces are pooled so reopening or resizing rebuilds without leaking frames.
     -- =========================================================================
     local CL_INITIAL_VERSIONS = 5
     local CL_BATCH_VERSIONS   = 5
@@ -268,8 +1167,8 @@ function DF:CreateGUI()
     -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
     -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
     -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
-    -- ⚠ Not every category has a page (Test Mode is a toolbar button; Debug
-    -- has a console tab): those cards stay static, on purpose.
+    -- ⚠ Not every category has a page (Test Mode is a toolbar button): those
+    -- cards stay static, on purpose.
     local CL_NAV = {
         auradesigner = "auras_auradesigner",
         auras = "auras_buffs", buffs = "auras_buffs", buffbar = "auras_buffs",
@@ -327,8 +1226,8 @@ function DF:CreateGUI()
     clChild:SetWidth(100)
     clScroll:SetScrollChild(clChild)
 
-    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (backdrop frame),
-    -- "sep" (separator frame). Everything is parented to clChild.
+    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (callout Button),
+    -- "sep" (separator), "band" (version band). Everything is parented to clChild.
     local clPool, clUsed = {}, {}
     local function acquire(kind)
         local p = clPool[kind]; if not p then p = {}; clPool[kind] = p end
@@ -360,10 +1259,10 @@ function DF:CreateGUI()
                 obj.star = obj:CreateTexture(nil, "OVERLAY")
                 obj.star:SetSize(14, 14)
                 obj.star:SetPoint("TOPLEFT", 10, -9)
-                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star.png")
                 obj.chev = obj:CreateTexture(nil, "OVERLAY")
                 obj.chev:SetSize(14, 14)
-                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
                 obj.title = obj:CreateFontString(nil, "OVERLAY")
                 obj.body  = obj:CreateFontString(nil, "OVERLAY")
                 obj.by    = obj:CreateFontString(nil, "OVERLAY")
@@ -541,14 +1440,11 @@ function DF:CreateGUI()
                         end
                         y = y - 4
                     else
-                        -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
-                        -- start of every sentence, so "Bars" appeared six times in a row
-                        -- and each line began with a coloured word the eye had to parse
-                        -- past. Now: a stable sort by category (authored order kept within
-                        -- one), ONE small caps sub-heading per category, and plain
-                        -- wrapping bullets under it with a little leading. Same scan-
-                        -- ability a category column would give, without spending a fixed
-                        -- column's width on every row.
+                        -- ROWS, GROUPED BY CATEGORY: a stable sort by category (authored order
+                        -- kept within one), ONE small caps sub-heading per category, and plain
+                        -- wrapping bullets under it with a little leading. Same scannability a
+                        -- category column would give, without spending a fixed column's width on
+                        -- every row.
                         local ordered = {}
                         for i, e in ipairs(sec.entries) do ordered[i] = { e = e, i = i } end
                         table.sort(ordered, function(a, b)
@@ -658,14 +1554,116 @@ function DF:CreateGUI()
     resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    -- A live size readout while the grip is held: the window's size, and how
+    -- many page columns that gives and how wide each is -- the number the
+    -- two-per-row cards switch on. Repainted only when a number moves.
+    local lastW, lastH
+    local function InnerTracks(cardW)
+        local min = GUI.SectionTwoTrackMin
+        local pad = GUI.SectionCard and GUI.SectionCard.pad or 12
+        if not min then return 1 end
+        return ((cardW or 0) - 2 * pad >= min) and 2 or 1
+    end
+    -- ★ THE COLUMN SPLIT GUIDE. A thin accent line over the page, drawn while the grip
+    -- is held, where the page's two columns will split at this width -- the centre of
+    -- the gap between them, read from GUI.ColumnSplitX, which is built from the same
+    -- helpers the layout pass places the columns with. Gone with one column, gone on
+    -- release. ONE frame and ONE texture, made on the first drag and re-pointed after:
+    -- nothing is allocated while dragging. Never takes the mouse -- it lies over the
+    -- page the user is sizing.
+    local splitGuide, splitLine
+    -- Whether the visible page puts anything in column 2. The designers and Nicknames
+    -- draw full width, so the width has no split on them to show. Asked of the
+    -- widgets rather than a page list so a page that gains or drops a second column
+    -- needs no edit here. The same skips as the layout pass: a right-aligned Copy
+    -- button is added as column 2 but sits above the columns, and a page with nothing
+    -- to copy (the Filter Designer) adds an empty zero-height frame there instead.
+    local function PageUsesColumn2()
+        local page = GUI.CurrentPageName and GUI.Pages and GUI.Pages[GUI.CurrentPageName]
+        if not (page and page.children) then return false end
+        for _, widget in ipairs(page.children) do
+            if widget.layoutCol == 2 and not widget.rightAlign
+               and not widget.settingsGroup and widget:IsShown() then
+                local h = widget.layoutHeight or 0
+                if widget.isSettingsGroup and widget.calculatedHeight then
+                    h = widget.calculatedHeight
+                end
+                if h > 0 then return true end
+            end
+        end
+        return false
+    end
+    local function UpdateSplitGuide()
+        local content = GUI.contentFrame
+        -- Click casting draws its own panel in place of the page, with no columns.
+        local x = content and GUI.SelectedMode ~= "clicks" and GUI.ColumnSplitX
+                  and PageUsesColumn2() and GUI.ColumnSplitX() or nil
+        if not x then
+            if splitGuide then splitGuide:Hide() end
+            return
+        end
+        if not splitGuide then
+            splitGuide = CreateFrame("Frame", nil, content)
+            splitGuide:EnableMouse(false)
+            splitGuide:SetAllPoints(content)
+            splitLine = splitGuide:CreateTexture(nil, "OVERLAY")
+        end
+        -- Above the page's own widgets, which stack a few levels over the box.
+        splitGuide:SetFrameLevel(content:GetFrameLevel() + 100)
+        local c = GetThemeColor()
+        splitLine:SetColorTexture(c.r, c.g, c.b, 0.35)
+        -- One DEVICE pixel wide, its left edge on the grid. The x is the page child's,
+        -- and the child starts at the page viewport, `inset` in from the content box.
+        local ppu = GUI._priv.PixelsPerUnit and GUI._priv.PixelsPerUnit(splitGuide)
+        local lineW = (ppu and ppu > 0) and (1 / ppu) or 1
+        local inset = SnapLen(content, PageBox.inset) or PageBox.inset
+        local left = SnapLen(splitGuide, inset + x - lineW / 2)
+        splitLine:ClearAllPoints()
+        splitLine:SetPoint("TOPLEFT", content, "TOPLEFT", left, -inset)
+        splitLine:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", left, inset)
+        splitLine:SetWidth(lineW)
+        splitGuide:Show()
+    end
+    local function HideSplitGuide()
+        if splitGuide then splitGuide:Hide() end
+    end
+
+    local function ShowSizeReadout(owner)
+        local w, h = math.floor(frame:GetWidth() + 0.5), math.floor(frame:GetHeight() + 0.5)
+        if w == lastW and h == lastH then return end
+        lastW, lastH = w, h
+        -- Only when a number moved, like the readout: the split cannot move otherwise.
+        UpdateSplitGuide()
+        local cols = GUI.UsesTwoColumns and GUI.UsesTwoColumns() and 2 or 1
+        -- One column spans both halves and the gutter between them.
+        local half = GUI.ColumnWidth and GUI.ColumnWidth() or 0
+        local colW = (cols == 2) and half or (2 * half + (GUI.SettingsBox and GUI.SettingsBox.colGutter or 0))
+        GUI:ShowTooltip(owner, {
+            title = format("%d × %d", w, h),
+            anchor = "ANCHOR_TOPLEFT",
+            lines = {
+                format("%s: %d · %d px", L["Columns"], cols, math.floor(colW)),
+                -- Developer readout: settings per row inside a two-per-row card
+                -- (Debuff Bar) at this column width. Same test the card runs.
+                format(L["Inside cards: %d per row"], InnerTracks(colW)),
+            },
+        })
+    end
     resizeHandle:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             frame:StartSizing("BOTTOMRIGHT")
+            lastW, lastH = nil, nil
+            self:SetScript("OnUpdate", ShowSizeReadout)
         end
     end)
+    -- The window closing under a held grip (Esc) never delivers the mouse-up, so the
+    -- guide is taken down with the grip as well as on release.
+    resizeHandle:HookScript("OnHide", HideSplitGuide)
     resizeHandle:SetScript("OnMouseUp", function(self, button)
+        self:SetScript("OnUpdate", nil)
+        HideSplitGuide()
+        GUI:HideTooltip()
         frame:StopMovingOrSizing()
-        -- Save new size
         local ws = DF:GetWindowState()
         ws.width, ws.height = frame:GetWidth(), frame:GetHeight()
         -- Update content layout
@@ -674,59 +1672,97 @@ function DF:CreateGUI()
             if DF.ClickCast and DF.ClickCast.RefreshSpellGrid then
                 DF.ClickCast:RefreshSpellGrid(true)
             end
-        elseif GUI.RefreshCurrentPage then
-            GUI:RefreshCurrentPage()
+        elseif GUI.RelayoutCurrentPage then
+            -- ☠ RE-LAY, NEVER REBUILD. A resize changes the page's SIZE, not its content,
+            -- and RefreshCurrentPage rebuilds -- leaking the whole previous page into
+            -- GUI._trashFrame on every release of this grip. See RelayoutCurrentPage.
+            GUI.RelayoutCurrentPage()
         end
     end)
     
-    -- Party/Raid mode toggle buttons
-    local btnParty = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    -- Head of the toolbar chain (Party <- Raid <- Clicks <- Test <- Unlock), so
-    -- this offset is what every button along it inherits.
-    btnParty:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -32))
-    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
-    GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
+    -- =========================================================================
+    -- DECK 2 (operation): mode tabs left, verbs right
+    -- -------------------------------------------------------------------------
+    -- The strip the mode tabs and Test/Unlock have always drawn in, now an
+    -- actual frame -- which is what lets it DRAG (the buttons are its children,
+    -- so they take their own clicks and the gaps between them move the window)
+    -- and what lets the two clusters be anchored to its edges rather than to
+    -- absolute offsets into the window.
+    --
+    -- ⚠ NO STRATA OF ITS OWN. See the header note on deck 1: these buttons must
+    -- stay at the window's DIALOG strata, where they have always been.
+    -- =========================================================================
+    local deck2 = CreateFrame("Frame", nil, frame)
+    deck2:SetPoint("TOPLEFT", 0, -30)
+    deck2:SetPoint("TOPRIGHT", 0, -30)
+    deck2:SetHeight(30)
+    deck2:EnableMouse(true)
+    deck2:RegisterForDrag("LeftButton")
+    deck2:SetScript("OnDragStart", function() frame:StartMoving() end)
+    deck2:SetScript("OnDragStop", SaveWindowPos)
+    deck2:SetFrameLevel(frame:GetFrameLevel() + 1)
+    GUI.HeaderDeck2 = deck2
+
+    -- Global / Party / Raid / Binds
+    local btnGlobal = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    -- Head of the LEFT chain (Global <- Party <- Raid <- Clicks), so this offset
+    -- is what every button along it inherits. The +1 lifts the 24px button off
+    -- deck 2's centre onto the row the header has always used.
+    btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)
+    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
+    -- label colour and the cell. `tabStripe = false` on all four: the underlines
+    -- are ONE bar that glides between them (modeUnderline below), not stripes
+    -- switching off here and on there.
+    GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI.GlobalButton = btnGlobal
+
+    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)
+    GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
-    
-    local btnRaid = CreateFrame("Button", nil, frame, "BackdropTemplate")
+
+    local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
-    GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnRaid, { tab = true, tabStripe = false, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
-    
+
     -- Click Casting tab button
-    local btnClicks = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
-    GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
 
+    -- ONE underline for the three mode tabs, which GLIDES from the tab that was
+    -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
+    -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
+    -- UpdateThemeColors drives it, right where the three SetActive calls are.
+    local modeUnderline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })
+    GUI.ModeUnderline = modeUnderline
+
     -- =========================================================================
-    -- TEST MODE BUTTON (next to CLICKS tab)
+    -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
+    -- -------------------------------------------------------------------------
+    -- The verbs. They sit at the opposite end of the deck from the mode tabs, so
+    -- the tabs read as tabs and the verbs as verbs.
+    --
+    -- ⚠ ANCHORED RIGHT-TO-LEFT, and the marker anchors AFTER the button it
+    -- belongs to, so the cluster's right edge is fixed while a translated
+    -- "Unlock"/"Test" grows the chain leftward into empty deck. Every offset is
+    -- still snapped for the reason the old left-hand chain was: nothing
+    -- position-corrects these after the fact, so a fraction anywhere in the
+    -- chain accumulates along it.
+    --
+    -- The marker keeps its place immediately RIGHT of Unlock, so the space it
+    -- needs is reserved whether it is showing or not: the 33 below is the 12 of
+    -- window margin, plus the 4 of gap and the 17 from Unlock's edge to the
+    -- dot's (the marker's hit frame is 3px larger than the dot on each side).
     -- =========================================================================
-    local btnTest = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    -- Snapped gap + snapped width below: the toolbar is a CHAIN (Clicks <- Test
-    -- <- Unlock <- override marker) and controls are not position-corrected after
-    -- the fact, so every offset and width in the chain has to be a whole number
-    -- of device pixels or the fraction accumulates rightwards.
-    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", SnapLen(btnTest, 12), 0)
-    GUI:StyleButton(btnTest, {
-        width = 75, height = 24,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
-        text = L["Test"],
-    })
-    GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
-    btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    -- Content-fit width (less dead space)
-    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
-    GUI.TestButton = btnTest
-    
-    -- =========================================================================
-    -- LOCK/UNLOCK BUTTON (next to Test button)
-    -- =========================================================================
-    local btnLock = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnLock:SetPoint("LEFT", btnTest, "RIGHT", SnapLen(btnLock, 4), 0)
+
+    local btnLock = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnLock:SetPoint("RIGHT", deck2, "RIGHT", SnapLen(btnLock, -33), 1)
     GUI:StyleButton(btnLock, {
         width = 80, height = 24,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock.png", size = 18, color = C_TEXT_DIM },
         text = L["Unlock"],
     })
     GUI:SetSettingsFont(btnLock.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
@@ -735,21 +1771,185 @@ function DF:CreateGUI()
     -- button (real label set in UpdateLockButtonState).
     btnLock:SetWidth(SnapLenUp(btnLock, math.ceil(btnLock.Text:GetStringWidth()) + 38))
     GUI.LockButton = btnLock
-    
+
     -- Position override marker (shown next to the lock button when the frame
     -- position is overridden in the layout being edited). Shared marker helper →
-    -- dot + hover tooltip, one colour with every other override marker.
-    local positionOverrideStar = GUI:CreateOverrideMarker(frame, 14)
+    -- dot + hover tooltip, in the auto-layout colour (GUI:ShowLayoutOverrideMarker).
+    local positionOverrideStar = GUI:CreateOverrideMarker(deck2, 14)
     positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", SnapLen(positionOverrideStar, 4), 0)
-    positionOverrideStar.tooltipText = L["Override active"]
-    positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
+    positionOverrideStar.tooltipText = L["Set by this auto layout"]
+    positionOverrideStar.tooltipSubText = L["This layout moves the frames."]
     GUI.PositionOverrideStar = positionOverrideStar
-    
-    -- Function to update position override indicator
+
+    local btnTest = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnTest:SetPoint("RIGHT", btnLock, "LEFT", SnapLen(btnTest, -4), 0)
+    GUI:StyleButton(btnTest, {
+        width = 75, height = 24,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off.png", size = 18, color = C_TEXT_DIM },
+        text = L["Test"],
+    })
+    GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
+    btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Content-fit width (less dead space)
+    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
+    GUI.TestButton = btnTest
+
+    -- ★ UNDO / REDO. The head of the verb cluster, and the leftmost pair, so
+    -- nothing anchors past them -- which is what makes the "hide them" arm below
+    -- leave no hole in the header.
+    --
+    -- ⚠ THE GATE STAYS. `DF.SettingsUndo` is a RESIDENT module and this is the
+    -- load-on-demand companion, so the two halves can be different builds (a
+    -- user who updated one folder and not the other). A visible button that
+    -- cannot do anything is worse than no button.
+    --
+    -- Forward-declared because the two glyphs take their onClick at build time
+    -- and the verbs need the buttons to grey themselves afterwards.
+    local DoUndo, DoRedo
+    local btnRedo = GUI:CreateGlyphButton(deck2, {
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\redo.png",
+        width = 22, height = 22, iconSize = 16,
+        color = C_TEXT_DIM,
+        tooltip = { title = L["Redo"] },
+        onClick = function() if DoRedo then DoRedo() end end,
+    })
+    btnRedo:SetPoint("RIGHT", btnTest, "LEFT", SnapLen(btnRedo, -12), 0)
+    local btnUndo = GUI:CreateGlyphButton(deck2, {
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\undo.png",
+        width = 22, height = 22, iconSize = 16,
+        color = C_TEXT_DIM,
+        tooltip = { title = L["Undo"] },
+        onClick = function() if DoUndo then DoUndo() end end,
+    })
+    btnUndo:SetPoint("RIGHT", btnRedo, "LEFT", SnapLen(btnUndo, -4), 0)
+    GUI.UndoButton, GUI.RedoButton = btnUndo, btnRedo
+    if not DF.SettingsUndo then
+        btnUndo:Hide()
+        btnRedo:Hide()
+    else
+        local Undo = DF.SettingsUndo
+
+        -- ---- what the toast says -------------------------------------
+        --
+        -- The verb plus the widget's own name, and -- only when it is cheap and
+        -- readable -- what the value moved between. NUMBERS ONLY: a colour is a
+        -- table and a font is a path, and neither belongs on a one-line toast.
+        -- Booleans are skipped too. The locale has an "Off" but no "On" (the
+        -- one is a dropdown option, the other has never been needed), and
+        -- inventing a string to decorate a toast would be a translation burden
+        -- for a detail the setting's own name already implies.
+        --
+        -- %.4g, because a slider step lands on 0.30000000000000004 as readily as
+        -- on 0.3 and the toast has to read like the number the user set.
+        --
+        -- ☠ THE ARROW IS AN ICON, NOT A CHARACTER. This read "(%.4g → %.4g)" and
+        -- the → came out as an empty box in game: the panel draws in the user's
+        -- Settings Font and the shipped default ("DF Roboto SemiBold") has no
+        -- arrows in it. Same failure as the CJK squares, one Unicode block along.
+        -- Built once, outside Detail: it is a constant string and the toast fires
+        -- on every undo keypress.
+        local toastArrow = GUI:InlineIcon("chevron_right", 10, C_TEXT_DIM)
+        local function Detail(entry)
+            if type(entry.old) == "number" and type(entry.new) == "number" then
+                return string.format(" (%.4g %s %.4g)", entry.old, toastArrow, entry.new)
+            end
+            return ""
+        end
+
+        local function Announce(pattern, entry)
+            if not entry then return end
+            GUI:ShowToast({
+                parent = frame,
+                text = string.format(pattern, entry.label or "") .. Detail(entry),
+            })
+        end
+
+        function DoUndo()
+            local ok, entry = Undo:Undo()
+            if ok then Announce(L["Undid: %s"], entry) end
+        end
+
+        function DoRedo()
+            local ok, entry = Undo:Redo()
+            if ok then Announce(L["Redid: %s"], entry) end
+        end
+
+        -- ---- grey when there is nothing left to do -------------------
+        -- Driven off the stack's own "Changed" callback (push, undo, redo and
+        -- clear all fire it), so a profile switch that wipes the stack greys the
+        -- pair without this file knowing profiles exist. Run once here too: a
+        -- freshly built header has an empty stack.
+        local undoOwner = {}
+        local function RefreshUndoButtons()
+            btnUndo:SetGlyphEnabled(Undo:CanUndo())
+            btnRedo:SetGlyphEnabled(Undo:CanRedo())
+        end
+        RefreshUndoButtons()
+        local stack = Undo:GetStack()
+        if stack and stack.RegisterCallback then
+            stack.RegisterCallback(undoOwner, "Changed", RefreshUndoButtons)
+        end
+
+        -- ---- the keys ------------------------------------------------
+        -- Ctrl-Z undoes; Ctrl-Shift-Z and Ctrl-Y both redo. The same bindings
+        -- the mover's session uses, so the two editors do not disagree.
+        --
+        -- ☠ SetPropagateKeyboardInput IS PROTECTED IN COMBAT for an insecure
+        -- frame, and unlike the mover's unlock overlay THIS window can be open
+        -- in a fight. So the keyboard is only ever armed while the window is
+        -- shown AND out of combat: OnShow arms it, OnHide disarms it, and the
+        -- watcher below disarms on the way into combat and re-arms on the way
+        -- out. With the keyboard off the handler never runs, so the protected
+        -- call is never reached rather than being guarded inside it.
+        --
+        -- ⚠ ESCAPE STAYS PROPAGATED, which is what still closes the window: it
+        -- is not handled here, so the frame is told to pass it on and
+        -- UISpecialFrames gets it.
+        --
+        -- ⚠ NO EDIT-BOX FOCUS SWEEP, and none is needed -- a focused EditBox
+        -- takes keyboard input itself and the parent frame's OnKeyDown never
+        -- sees the keystroke. That is why the mover's session, which types into
+        -- the same kind of field, does not have one either.
+        local function OnUndoKeyDown(f, key)
+            local handled = false
+            if IsControlKeyDown() then
+                if key == "Z" then
+                    if IsShiftKeyDown() then DoRedo() else DoUndo() end
+                    handled = true
+                elseif key == "Y" then
+                    DoRedo()
+                    handled = true
+                end
+            end
+            f:SetPropagateKeyboardInput(not handled)
+        end
+
+        local function ArmUndoKeys(on)
+            if on and InCombatLockdown() then on = false end
+            frame:EnableKeyboard(on and true or false)
+            frame:SetScript("OnKeyDown", on and OnUndoKeyDown or nil)
+        end
+
+        frame:HookScript("OnShow", function() ArmUndoKeys(true) end)
+        frame:HookScript("OnHide", function() ArmUndoKeys(false) end)
+
+        local undoCombatWatcher = CreateFrame("Frame")
+        undoCombatWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+        undoCombatWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+        undoCombatWatcher:SetScript("OnEvent", function(_, event)
+            if event == "PLAYER_REGEN_DISABLED" then
+                ArmUndoKeys(false)
+            elseif frame:IsShown() then
+                ArmUndoKeys(true)
+            end
+        end)
+    end
+
+
     local function UpdatePositionOverrideIndicator()
         -- Debug mode shows indicator
         if S.overrideDebugMode then
-            positionOverrideStar:Show()
+            GUI:ShowLayoutOverrideMarker(positionOverrideStar, true)
             return
         end
         
@@ -768,11 +1968,7 @@ function DF:CreateGUI()
         local xOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorX")
         local yOverridden = AutoProfilesUI:IsSettingOverridden("raidAnchorY")
         
-        if xOverridden or yOverridden then
-            positionOverrideStar:Show()
-        else
-            positionOverrideStar:Hide()
-        end
+        GUI:ShowLayoutOverrideMarker(positionOverrideStar, xOverridden or yOverridden)
     end
     GUI.UpdatePositionOverrideIndicator = UpdatePositionOverrideIndicator
     
@@ -799,7 +1995,7 @@ function DF:CreateGUI()
         if layoutActive and isLocked then
             btnLock.dfDisabled = true
             btnLock.Text:SetText(L["Unlock"])
-            btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock")
+            btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock.png")
             btnLock:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.5)
             btnLock:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
             btnLock.Text:SetTextColor(0.4, 0.4, 0.4)
@@ -810,7 +2006,7 @@ function DF:CreateGUI()
         btnLock.dfDisabled = false
 
         btnLock.Text:SetText(isLocked and L["Unlock"] or L["Lock"])
-        btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLocked and "lock" or "lock_open"))
+        btnLock.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (isLocked and "lock" or "lock_open") .. ".png")
         
         if not isLocked then
             -- Unlocked - active/selected toggle look (white text/icon like the others)
@@ -824,7 +2020,6 @@ function DF:CreateGUI()
             btnLock.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
         
-        -- Update position override indicator
         UpdatePositionOverrideIndicator()
     end
     GUI.UpdateLockButtonState = UpdateLockButtonState
@@ -882,90 +2077,198 @@ function DF:CreateGUI()
     end)
     
     -- =========================================================================
-    -- UI SCALE SLIDER (top right, always visible with larger min frame size)
-    -- =========================================================================
-    local scaleContainer = CreateFrame("Frame", nil, frame)
-    scaleContainer:SetSize(155, 24)
-    scaleContainer:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -32)
-    
-    -- ★ ANCHORED FROM THE RIGHT, so a longer label grows LEFTWARD into empty title-bar
-    -- space instead of pushing the slider and the percentage out of a fixed-width box.
+    -- UI SCALE — A POPOUT, NOT A PERMANENT ROW
+    -- -------------------------------------------------------------------------
+    -- ★ THE WINDOW'S OWN OPTIONS GO IN THE POPOUT CONTAINER, the same one a
+    -- feature row on a page opens. Behind the ⤢ in deck 1 the scale slider costs
+    -- 20px and reappears in one click.
     --
-    -- The container is 155px and pinned TOPRIGHT, and this row used to flow the other way
-    -- -- label at the container's LEFT, slider anchored to the label's right, percentage
-    -- to the slider's right. In English "UI Scale:" fits and the row lands inside the box;
-    -- German "UI Skalierung:" is far wider, so everything after it was shoved past the
-    -- right edge of the window. Reversing the chain (percentage pinned RIGHT, slider left
-    -- of it, label left of that) makes the row's right edge fixed and its left edge free,
-    -- which is the direction there is room in.
-    local scaleLabel = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    scaleLabel:SetText(L["UI Scale:"])
-    scaleLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local scaleSlider = CreateFrame("Slider", nil, scaleContainer, "BackdropTemplate")
-    scaleSlider:SetSize(65, 14)
-    scaleSlider:SetOrientation("HORIZONTAL")
-    scaleSlider:SetMinMaxValues(0.6, 1.4)
-    scaleSlider:SetValueStep(0.05)
-    scaleSlider:SetObeyStepOnDrag(true)
-    scaleSlider:SetValue(savedScale)
-    CreateElementBackdrop(scaleSlider)
-    
-    -- Thumb texture
-    local thumb = scaleSlider:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(12, 14)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 1)
-    scaleSlider:SetThumbTexture(thumb)
-    
-    -- The RIGHT-hand end of the reversed chain: percentage pinned to the container's right
-    -- edge, slider to its left, label to the slider's left. Declared here rather than at
-    -- each widget's creation so the whole chain reads in one place.
-    local scaleValue = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    -- ⚠ FIXED WIDTH, because the slider hangs off this string's LEFT edge. Unsized,
-    -- the string narrows when "100%" drops to "95%" and the whole chain -- slider
-    -- included -- shifts under the cursor MID-DRAG, the exact drift the comment on
-    -- OnValueChanged below exists to prevent. Wide enough for "100%".
-    scaleValue:SetWidth(34)
-    scaleValue:SetJustifyH("RIGHT")
-    scaleValue:SetPoint("RIGHT", scaleContainer, "RIGHT", 0, 0)
-    scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -4, 0)
-    scaleLabel:SetPoint("RIGHT", scaleSlider, "LEFT", -6, 0)
-    scaleValue:SetText(string.format("%.0f%%", savedScale * 100))
-    scaleValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    -- Only update text while dragging (not main frame scale - that causes cursor drift)
-    -- But DO update popup panels live
-    scaleSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
-        scaleValue:SetText(string.format("%.0f%%", value * 100))
-        -- Update popup panels live (they don't cause cursor drift)
-        ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
-    end)
-    
-    -- Apply scale only on mouse release to avoid cursor drift issues
-    scaleSlider:SetScript("OnMouseUp", function(self)
-        local value = math.floor(self:GetValue() * 20 + 0.5) / 20
-        ApplyGUIScale(frame, value)
-        DF:GetWindowState().scale = value
-        -- A new scale changes how many device pixels a UI unit covers, so
-        -- every border on screen has to be re-derived at the new thickness.
-        -- This is the ONLY action that does: nothing else in the GUI writes
-        -- windowState.scale, and moving or resizing the window leaves it alone.
-        GUI:RefreshPixelBorders()
-    end)
+    -- The control itself is a VERBATIM move: same range, same 0.05 step, same
+    -- split between OnValueChanged (text + panels, live) and OnMouseUp (the
+    -- window itself, once the mouse is off it), for the cursor-drift reason the
+    -- comments below have always given. Only its parent changed.
+    --
+    -- ⚠ Built LAZILY, on the first click. Everything downstream reads the scale
+    -- from DF:GetWindowState() rather than from the `savedScale` this function
+    -- captured at window-build time, because by the time the popout is first
+    -- opened that capture can be several changes stale (/df resetgui, another
+    -- session's saved value).
+    --
+    -- ⚠ NOT a registered scaled surface. In `outsideOf` mode the popout shell
+    -- syncs its own scale to the window's (Popout:_SyncWindowScale), so
+    -- registering it would scale it twice.
+    -- =========================================================================
+    local scalePopout
+    OpenScalePopout = function()
+        -- Second click on the glyph closes it, like any toggle.
+        if scalePopout and not scalePopout.closed and scalePopout:IsShown() then
+            scalePopout:Close("api")
+            return
+        end
+        scalePopout = GUI:CreatePopout({
+            key      = "df.uiscale",
+            title    = L["Scale"],
+            icon     = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full.png",
+            width    = 150,
+            pinnable = true,
+            build    = function(po, content)
+                local current = (DF:GetWindowState().scale) or 1
 
-    GUI.ScaleSlider = scaleSlider
-    GUI.ScaleContainer = scaleContainer
+                local scaleSlider = CreateFrame("Slider", nil, content, "BackdropTemplate")
+                scaleSlider:SetHeight(14)
+                scaleSlider:SetOrientation("HORIZONTAL")
+                scaleSlider:SetMinMaxValues(0.6, 1.4)
+                scaleSlider:SetValueStep(0.05)
+                scaleSlider:SetObeyStepOnDrag(true)
+                scaleSlider:SetValue(current)
+                CreateElementBackdrop(scaleSlider)
+
+                -- Thumb texture
+                local thumb = scaleSlider:CreateTexture(nil, "OVERLAY")
+                thumb:SetSize(12, 14)
+                thumb:SetColorTexture(0.5, 0.5, 0.5, 1)
+                scaleSlider:SetThumbTexture(thumb)
+
+                local scaleValue = content:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                -- ⚠ FIXED WIDTH, because the slider hangs off this string's LEFT edge.
+                -- Unsized, the string narrows when "100%" drops to "95%" and the whole
+                -- chain -- slider included -- shifts under the cursor MID-DRAG, the exact
+                -- drift the comment on OnValueChanged below exists to prevent. Wide
+                -- enough for "100%".
+                scaleValue:SetWidth(34)
+                scaleValue:SetJustifyH("RIGHT")
+                -- Same reversed chain the header row used -- percentage pinned to the
+                -- right edge, slider filling everything left of it -- for the same
+                -- reason: the readout's width is fixed and the slider's is what has
+                -- room to give. Both centred on the content strip.
+                scaleValue:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                scaleSlider:SetPoint("LEFT", content, "LEFT", 0, 0)
+                scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -6, 0)
+                scaleValue:SetText(string.format("%.0f%%", current * 100))
+                scaleValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+                -- Only update text while dragging (not main frame scale - that causes
+                -- cursor drift). But DO update popup panels live.
+                scaleSlider:SetScript("OnValueChanged", function(self, value)
+                    value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
+                    scaleValue:SetText(string.format("%.0f%%", value * 100))
+                    -- Update popup panels live (they don't cause cursor drift)
+                    ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
+                end)
+
+                -- Apply scale only on mouse release to avoid cursor drift issues
+                scaleSlider:SetScript("OnMouseUp", function(self)
+                    local value = math.floor(self:GetValue() * 20 + 0.5) / 20
+                    -- keepPlace: hold the window where it is on screen rather than
+                    -- letting the scale walk it toward the middle. See ApplyGUIScale.
+                    ApplyGUIScale(frame, value, true)
+                    -- ...and persist what that re-anchor just wrote, or the saved
+                    -- position stays on the pre-scale point until the next drag.
+                    SaveWindowPos()
+                    DF:GetWindowState().scale = value
+                    -- A new scale changes how many device pixels a UI unit covers, so
+                    -- every border on screen has to be re-derived at the new thickness.
+                    -- This is the ONLY action that does: nothing else in the GUI writes
+                    -- windowState.scale, and moving or resizing the window leaves it alone.
+                    GUI:RefreshPixelBorders()
+                    -- ☠ AND THE PAGE IS RE-LAID AT THE NEW SCALE, because until now
+                    -- nothing did (the Compact-layout blanking, reported 2026-09-16,
+                    -- still there after the alpha.9 memo fix). Every offset, width and
+                    -- height on the page was chosen through SnapLen at the OLD pixels-
+                    -- per-unit, and neither this path nor a scroll -- the two things
+                    -- the user reports as trigger and repair -- runs a line of layout.
+                    -- So after a rescale the page was left on geometry derived for a
+                    -- scale it is no longer drawn at, and whatever was wrong stayed
+                    -- wrong until something unrelated happened to re-anchor it. A
+                    -- relayout re-places every widget (ClearAllPoints + SetPoint) at
+                    -- numbers snapped for the scale actually on screen, which is the
+                    -- state a resize already leaves the page in.
+                    -- ⚠ RE-LAY, NEVER REBUILD: RefreshCurrentPage leaks the whole page
+                    -- into GUI._trashFrame. See RelayoutCurrentPage.
+                    if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
+                end)
+
+                -- The shell derives the popout's height from what build mounted
+                -- (Popout:_Resize), so the content strip has to state its own.
+                content:SetHeight(20)
+                -- Published for /df resetgui, which pushes 1.0 back into the control
+                -- after resetting the saved state. Nil until the popout is first
+                -- opened, and that call is nil-guarded -- a slider built later reads
+                -- the reset value out of the window state anyway.
+                GUI.ScaleSlider = scaleSlider
+            end,
+        })
+        -- Docked OUTSIDE the window beside the glyph, like a feature row's panel.
+        -- The placement centres the panel on its SOURCE and clamps it into the
+        -- window's vertical span, so a source in the header lands at the top of
+        -- the window's right edge -- which is where a header control's panel
+        -- should be, no forced side needed.
+        scalePopout:Follow(scaleBtn, { outsideOf = frame })
+        GUI.ScalePopout = scalePopout
+    end
     -- =========================================================================
-    -- END TOP BAR CONTROLS
+    -- END HEADER CONTROLS
     -- =========================================================================
     
+    -- The GUI debug category's trace of a page switch: one line per switch, each
+    -- step's milliseconds, then when the NEXT frame began -- work a step defers
+    -- (an OnShow, a timer, a size change) lands between the two.
+    local switchMarks
+    local function SwitchMark(label)
+        if not switchMarks then return end
+        local t = debugprofilestop()
+        switchMarks[#switchMarks + 1] = format("%s %.1f", label, t - switchMarks.last)
+        switchMarks.last = t
+    end
+
+    -- Every ThemeListeners list under `frame`, repainted to the host accent.
+    local repaintNodes = 0
+    local function RepaintTree(frame, depth)
+        if type(frame) ~= "table" or depth > 40 then return end
+        repaintNodes = repaintNodes + 1
+        local list = rawget(frame, "ThemeListeners")
+        if type(list) == "table" then
+            for _, w in ipairs(list) do
+                if type(w) == "table" and w.UpdateTheme then w:UpdateTheme() end
+            end
+        end
+        if frame.GetChildren then
+            local kids = { frame:GetChildren() }
+            for i = 1, #kids do RepaintTree(kids[i], depth + 1) end
+        end
+    end
+
     local function UpdateThemeColors()
         -- Mode buttons use the shared underline-tab style; SetActive drives the
-        -- underline + accent label (each button's per-mode accent set at creation).
-        btnParty:SetActive(GUI.SelectedMode == "party")
-        btnRaid:SetActive(GUI.SelectedMode == "raid")
-        btnClicks:SetActive(GUI.SelectedMode == "clicks")
+        -- accent label + the cell (each button's per-mode accent set at creation).
+        -- GLOBAL showing means none of the three is: the mode under it is only
+        -- remembered, not active.
+        local globalView = GUI.GlobalView and true or false
+        btnGlobal:SetActive(globalView)
+        btnParty:SetActive(not globalView and GUI.SelectedMode == "party")
+        btnRaid:SetActive(not globalView and GUI.SelectedMode == "raid")
+        btnClicks:SetActive(not globalView and GUI.SelectedMode == "clicks")
+        -- The frame mode GLOBAL returns to when it is entered from BINDS.
+        if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then
+            GUI._lastFrameMode = GUI.SelectedMode
+        end
+        -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
+        -- the three is active and wearing that tab's own accent from the moment
+        -- it sets off.
+        --
+        -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
+        -- the note below the function), and a glide nobody can see would only
+        -- leave the bar mid-flight for the next visible one to start from.
+        local activeMode = (globalView and btnGlobal)
+            or (GUI.SelectedMode == "raid" and btnRaid)
+            or (GUI.SelectedMode == "clicks" and btnClicks)
+            or btnParty
+        local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)
+            or (activeMode == btnRaid and C_RAID)
+            or (activeMode == btnClicks and C_CLICKS)
+            or C_ACCENT
+        modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
+        SwitchMark("t:modes")
 
         -- Test button look via the shared toggle styling (matches how the Lock
         -- button is refreshed below). The old inline version painted a stray
@@ -983,6 +2286,7 @@ function DF:CreateGUI()
         -- the ThemeListeners loop below never reaches it either — refresh its hover
         -- wash to the current mode accent here alongside Test/Lock.
         if infoBtn and infoBtn.UpdateTheme then infoBtn.UpdateTheme() end
+        SwitchMark("t:toolbar")
         
         -- Show/hide Test and Lock buttons based on mode
         if GUI.SelectedMode == "clicks" then
@@ -994,38 +2298,81 @@ function DF:CreateGUI()
         end
         
         title.UpdateTheme()
-        
+        SwitchMark("t:title")
+        -- Deck 1's chip: the profile list can have changed (created, deleted,
+        -- renamed on the Profiles page) and so can the auto-layout overlay, and
+        -- neither event has a reason to reach into the header on its own. This
+        -- runs on every mode switch and on every window show, which is every
+        -- moment the header is about to be looked at.
+        UpdateProfileChip()
+        SwitchMark("t:profile")
+
         -- Update active tab
         local nc = GetThemeColor()
+        -- ⚠ GUI.navMarker, not the local: the nav is built ~400 lines BELOW this
+        -- function, so the upvalue does not exist yet at this point in the file
+        -- and a bare `navMarker` here would resolve as a global. (modeUnderline
+        -- above is fine -- deck 2 is built first.) Guarded for the same reason:
+        -- this can run before the nav exists.
+        local rail = GUI.navMarker
         for name, btn in pairs(GUI.Tabs) do
             if btn.isActive and not btn.disabled then
-                btn.accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
+                -- The rail is already ON this row (SelectTab put it there); a mode
+                -- switch only has to repaint it, which must NOT move it.
+                if rail then rail:SetTo(btn, nc, true) end
                 btn.Text:SetTextColor(nc.r, nc.g, nc.b)
                 btn.Text:SetAlpha(1)
             elseif btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
                 btn.Text:SetAlpha(1)
-                if btn.accent then btn.accent:Hide() end
+                if rail then rail:ClearIf(btn) end
             end
         end
         
+        SwitchMark("t:nav")
         -- Update theme listeners
+        -- ☠ THE WHOLE BUILD, when it was painted in another accent. A page is
+        -- built in whichever tab's accent is up -- the search index builds every
+        -- page from wherever the user is -- and a widget registers on its OWN
+        -- parent's list (the Expand All strip, a card, a section), which the
+        -- page-level list below never reaches. Only the active build is walked:
+        -- the other mode's build is parked under the same page.child, and
+        -- painting it here would leave it in this accent when it comes back.
         if GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName] then
             local page = GUI.Pages[GUI.CurrentPageName]
-            if page.child and page.child.ThemeListeners then
-                for _, widget in ipairs(page.child.ThemeListeners) do
-                    if widget.UpdateTheme then widget:UpdateTheme() end
+            local built = page.children
+            local stamp = format("%.3f,%.3f,%.3f", nc.r, nc.g, nc.b)
+            -- ⚠ ONLY WHEN THE COLOUR CHANGED, the page's own list included. On a
+            -- full page the walk is most of what a tab switch costs (Frame:
+            -- ~150ms), and a page already in the right colour needs none of it.
+            GUI._lastRepaintNodes = nil
+            if built and not GUI._holdPageRepaint and built._themedAccent ~= stamp then
+                built._themedAccent = stamp
+                repaintNodes = 0
+                -- The PAGE FRAME, not the build's Add()ed children: a page that
+                -- places its own frames (the Filter Designer's panels, its New and
+                -- Import rows) hangs them here, outside that list. The other mode's
+                -- parked build is under it too and is painted with it, so its
+                -- stamp is cleared: it is repainted in its own colour when it is
+                -- next shown.
+                if page.child then RepaintTree(page.child, 0) end
+                for _, slot in pairs(page._modeBuilds or {}) do
+                    if slot.children then slot.children._themedAccent = nil end
                 end
+                GUI._lastRepaintNodes = repaintNodes
             end
+            SwitchMark("t:page")
         end
         
         -- Update test panel if open (but don't trigger circular updates)
         if DF.TestPanel and DF.TestPanel:IsShown() then
             DF.TestPanel:UpdateStateNoCallback()
         end
+        SwitchMark("t:testpanel")
         
         -- Update lock button state
         UpdateLockButtonState()
+        SwitchMark("t:lock")
     end
     GUI.UpdateThemeColors = UpdateThemeColors
 
@@ -1057,7 +2404,7 @@ function DF:CreateGUI()
         local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
         btnTest:SetActive(panelOpen)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            .. (userWants and "preview" or "preview_off"))
+            .. (userWants and "preview" or "preview_off") .. ".png")
         -- White text/icon in both states (state shown by the toggle border/fill).
         btnTest.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         btnTest.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -1082,7 +2429,49 @@ function DF:CreateGUI()
     -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
     -- to themeColor@0.5 rather than the neutral border.
 
+    -- GLOBAL: the mode under it is left exactly as it is (see THE GLOBAL TAB in
+    -- GUI/GUI.lua), so there is no test-mode or unlock hand-over to make here.
+    btnGlobal:SetScript("OnClick", function()
+        if GUI.GlobalView then return end
+        GUI:EnterView(true)
+        GUI.SelectTab(GUI:LastTabInView())
+    end)
+
+    -- Back from GLOBAL to the mode it sat on. No mode changes, so the switch in
+    -- the handlers below -- the sync, the locks, the test hand-over, a new search
+    -- index, a second refresh of the page and of every override dot -- has
+    -- nothing to do. This is GLOBAL's own path, the other way.
+    -- ☠ A MODE SWITCH MUST NOT OVERLAP A MOVER SESSION. The handlers below lock the
+    -- departing mode and carry test mode across, but with unsaved moves the lock is only a
+    -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
+    -- session's claim against the wrong mode: test frames stuck on screen, or both groups
+    -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
+    -- Not for the mover's own Configure (MoverBridge.openOptionsPage clicks these buttons
+    -- mid-session on purpose, flagged by _moverOwnedClick), and not for a click on the
+    -- mode already showing, which switches nothing.
+    local function DeferForMoverSession(btn, mode)
+        if GUI._moverOwnedClick then return false end
+        if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end
+        local B = DF.MoverBridge
+        if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
+        B:EndSessionThen(function() btn:Click() end)
+        return true
+    end
+    local function LeaveGlobalTo(mode)
+        if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
+        GUI:EnterView(false)
+        GUI.SelectTab(GUI:LastTabInView())
+        return true
+    end
+
     btnParty:SetScript("OnClick", function()
+        if DeferForMoverSession(btnParty, "party") then return end
+        if LeaveGlobalTo("party") then return end
+        -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
+        -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
+        GUI.GlobalView = false
+        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
+        -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
 
         -- Carry test mode across the mode switch (raid test -> party test)
@@ -1091,12 +2480,11 @@ function DF:CreateGUI()
         if GUI.SelectedMode == "raid" then
             -- Lock raid frames if unlocked. LockRaidFrames owns the WHOLE transition:
             -- the db flag, the container, the mover, grid, panel and pinned chrome.
-            -- ⚠ This block used to stamp raidLocked = true and poke the container
-            -- ITSELF before calling -- so when LockRaidFrames' combat guard refused,
-            -- the db said locked while every mover stayed on screen for the rest of
-            -- the fight, and the Lock button then offered Unlock. In combat the state
-            -- now stays consistently UNLOCKED (the guard says so in chat) and the
-            -- user locks after regen; the direct SetMovable poke also fought
+            -- ⚠ Do NOT stamp raidLocked or poke the container here before calling: when
+            -- LockRaidFrames' combat guard refuses, the db would say locked while every
+            -- mover stayed on screen for the rest of the fight, and the Lock button then
+            -- offered Unlock. In combat the state stays UNLOCKED (the guard says so in
+            -- chat) and the user locks after regen. A direct SetMovable poke also fights
             -- UpdatePermanentMoverVisibility, which owns container movability.
             local raidDb = DF:GetRaidDB()
             if not raidDb.raidLocked then
@@ -1117,14 +2505,21 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "party"
+        GUI:SetAccent(GUI.GetThemeColorFor(false))
         if DF.Search then
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
         end
+        -- The page on screen is still the OTHER mode's build until the refresh
+        -- below swaps it; repainting it here would be undone on the way back.
+        GUI._holdPageRepaint = true
         UpdateThemeColors()
+        GUI._holdPageRepaint = nil
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
-        GUI:RefreshCurrentPage()
+        -- Cached, not forced: a mode switch shows the other mode's build if it
+        -- is still good rather than trashing the page and building a new one.
+        GUI:RefreshCurrentPageForModeSwitch()
 
         -- Keep test mode active when switching modes (just switch which mode it runs in).
         -- Carried as the USER's claim: they had a preview up and are still asking for
@@ -1148,6 +2543,12 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        if DeferForMoverSession(btnRaid, "raid") then return end
+        if LeaveGlobalTo("raid") then return end
+        -- Leaving GLOBAL, if it was up -- see the Party handler.
+        GUI.GlobalView = false
+        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
+        -- this file), so that mode's retained page builds stay valid.
         DF:SyncLinkedSections()
 
         -- Carry test mode across the mode switch (party test -> raid test)
@@ -1177,14 +2578,20 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "raid"
+        GUI:SetAccent(GUI.GetThemeColorFor(true))
         if DF.Search then
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
         end
+        -- See the Party handler.
+        GUI._holdPageRepaint = true
         UpdateThemeColors()
+        GUI._holdPageRepaint = nil
         GUI:ShowNormalContent()
         GUI:UpdateTabAvailability()
-        GUI:RefreshCurrentPage()
+        -- Cached, not forced: a mode switch shows the other mode's build if it
+        -- is still good rather than trashing the page and building a new one.
+        GUI:RefreshCurrentPageForModeSwitch()
 
         -- Keep test mode active when switching modes (just switch which mode it runs in).
         -- Carried as the USER's claim: they had a preview up and are still asking for
@@ -1203,6 +2610,8 @@ function DF:CreateGUI()
     
     -- Click Casting tab click handler
     btnClicks:SetScript("OnClick", function()
+        if DeferForMoverSession(btnClicks) then return end
+        GUI.GlobalView = false
         -- Clean up any test/unlock state from previous mode
         if GUI.SelectedMode == "party" then
             local partyDb = DF:GetDB()
@@ -1226,6 +2635,7 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "clicks"
+        GUI:SetAccent(GUI.GetThemeColorFor(false))
         if DF.Search then 
             DF.Search:HideResults()
         end
@@ -1245,8 +2655,8 @@ function DF:CreateGUI()
     -- fractional baseline -- which is what is left of the nav ghost now that the
     -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -64))
-    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, 12), SnapLen(frame, 36))
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, 36))
     tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
@@ -1255,8 +2665,13 @@ function DF:CreateGUI()
     -- SEARCH BAR
     -- =========================================================================
     local searchBar = nil
-    local navPad = SnapLen(tabFrame, 4) or 4
-    local navRight = SnapLen(tabFrame, -14) or -14
+    -- ★ THE PRECEDENT THE PAGES NOW FOLLOW. The nav has pinned its own bar into
+    -- its own gutter since it was built, and these were the two literals that did
+    -- it: 4 of air beside the bar, 14 of room reserved for bar-plus-air. They are
+    -- GUI.Scroll.pad and GUI.Scroll.gutter exactly -- same values, now the same
+    -- numbers, so the nav and the pages cannot be retuned apart.
+    local navPad = SnapLen(tabFrame, GUI.Scroll.pad) or GUI.Scroll.pad
+    local navRight = SnapLen(tabFrame, -GUI.Scroll.gutter) or -GUI.Scroll.gutter
     local tabScrollStartY = -navPad
     if DF.Search then
         searchBar = DF.Search:CreateSearchBar(tabFrame)
@@ -1269,7 +2684,13 @@ function DF:CreateGUI()
     tabScroll:SetPoint("TOPLEFT", navPad, tabScrollStartY)
     tabScroll:SetPoint("BOTTOMRIGHT", navRight, navPad)
 
-    StyleScrollBar(tabScroll)
+    -- OVERLAY, like the pages' bars: the nav and the page are the two panes the
+    -- user is looking at while they work, they are pinned into gutters of exactly
+    -- the same width, and a hairline on one beside a full bar on the other would
+    -- read as a mistake. Every OTHER scroll pane in the addon (dialogs, pickers,
+    -- the changelog) keeps the plain bar -- those are places you arrive at to
+    -- scroll, where the bar being obvious is the point.
+    StyleScrollBar(tabScroll, { overlay = true })
     -- Custom positioning for tab scrollbar
     if tabScroll.ScrollBar then
         tabScroll.ScrollBar:ClearAllPoints()
@@ -1335,6 +2756,18 @@ function DF:CreateGUI()
         navHover.owner = nil
     end
 
+    -- ...and ONE selection rail for the whole nav, by the same argument as the
+    -- plate above it: the left accent bar used to be a texture on every row,
+    -- switched off on the row being left and on on the row being entered, and two
+    -- textures changing in one frame is a pair nothing can synchronise. This one
+    -- bar GLIDES vertically between rows instead (UI:CreateSelectionMarker).
+    --
+    -- Parented to tabContainer, the SCROLL CHILD, so it scrolls with the rows it
+    -- marks -- and hides with whichever row it is on when a category collapses,
+    -- which the marker arranges for itself.
+    local navMarker = GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })
+    GUI.navMarker = navMarker
+
 
     -- Content area (right side) - no BackdropTemplate in CreateFrame
     -- ★ THE content panel, and therefore the ancestor of every page viewport --
@@ -1356,14 +2789,140 @@ function DF:CreateGUI()
     -- perfect and the surface it is clipped against is what is wrong. Krathe
     -- spotted the symmetry before the numbers did.
     local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, 8), 0)
+    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, PageBox.navGap), 0)
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
-        SnapLen(frame, -12), SnapLen(frame, 36))
+        SnapLen(frame, -PageBox.windowPad), SnapLen(frame, 36))
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
+
+    -- The page fade's cover: two flat layers in the window's and the content
+    -- area's own background colours, which together are what shows behind a page.
+    -- Inset by the border so the content edge does not blink. No mouse: it lies
+    -- over the page being clicked. See THE PAGE FADE.
+    local pageCover = CreateFrame("Frame", nil, content)
+    local coverInset = SnapLen(content, 1) or 1
+    pageCover:SetPoint("TOPLEFT", coverInset, -coverInset)
+    pageCover:SetPoint("BOTTOMRIGHT", -coverInset, coverInset)
+    pageCover:SetFrameLevel(content:GetFrameLevel() + 500)
+    pageCover:EnableMouse(false)
+    local coverBg = pageCover:CreateTexture(nil, "BACKGROUND")
+    coverBg:SetAllPoints()
+    local coverTint = pageCover:CreateTexture(nil, "BORDER")
+    coverTint:SetAllPoints()
+    pageCover:Hide()
+    GUI._pageCover = pageCover
+    local function PlayPageCover()
+        -- ☠ The window is ROUNDED CHROME when SURFACE is on and has no backdrop to
+        -- ask -- calling GetBackdropColor there errored and cut the tab switch
+        -- off halfway. Its fill is the one ApplyRoundedChrome was handed above.
+        local r, g, b, a
+        if frame.GetBackdropColor then
+            r, g, b, a = frame:GetBackdropColor()
+        else
+            r, g, b, a = C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, C_BACKGROUND.a or 0.95
+        end
+        coverBg:SetColorTexture(r or 0, g or 0, b or 0, a or 1)
+        local cr, cg, cb, ca = content:GetBackdropColor()
+        coverTint:SetColorTexture(cr or 0, cg or 0, cb or 0, ca or 0)
+        pageCover:SetAlpha(1)
+        pageCover:Show()
+        GUI.Fx.FadeOut(pageCover, 0.12, function() pageCover:Hide() end)
+    end
+
     GUI.tabFrame = tabFrame
-    
+
+    -- =========================================================================
+    -- THE PAGE DOCK
+    -- -------------------------------------------------------------------------
+    -- ☠ EVERY BUILT PAGE USED TO STAY PARENTED TO `content`, SHOWN OR NOT, and
+    -- that is what made opening the settings window take EIGHT SECONDS. Settings
+    -- search indexes by BUILDING every page (Search:BuildFullRegistry), so one
+    -- search leaves all 34 of them fully populated -- 700+ widgets, plus the
+    -- Aura/Text Designer machinery -- hanging hidden off this one frame. From
+    -- then on GUIFrame:Show() measured 7774ms and Hide() about 2000ms, with only
+    -- ~52 of our own OnShow handlers firing in the whole 7.7s: the cost is the
+    -- ENGINE walking that hidden subtree for visibility, not Lua we run.
+    -- Reparenting the non-current pages away dropped the same Show to 90ms.
+    --
+    -- So a page that is not the one on screen lives HERE instead: a detached,
+    -- permanently hidden frame with no parent at all, outside the window's tree
+    -- entirely. Deliberately NOT GUI._trashFrame -- trash means dead and never
+    -- coming back (that is where a rebuild retires a page's old children); the
+    -- dock means alive and parked, and every page in it is expected back.
+    --
+    -- ☠ A PARKED PAGE IS PINNED TO THE DOCK AT A FIXED SIZE, NOT LEFT ANCHORED TO
+    -- `content`. Anchored there, every step of a resize-grip drag re-resolves
+    -- every built page's whole subtree: the window resizes about its centre, so
+    -- every rect under `content` moves each frame, and the resize stutters once
+    -- enough pages have been opened with their cards expanded, or after the
+    -- Changed Settings page has listed a lot. Pinned, a
+    -- parked page still measures at a real size and can be BUILT in place, which
+    -- is what search's index pass does to all 34 of them; it is the size the page
+    -- last had, and AdoptPage puts it back on `content` at the current one.
+    GUI._pageDock = CreateFrame("Frame")
+    GUI._pageDock:Hide()
+    GUI._pageDock:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+    GUI._pageDock:SetSize(1, 1)
+    GUI:AddFontRoot(GUI._pageDock)   -- parked pages follow a font change too
+
+    -- Move a page out of the window's frame tree. Idempotent and cheap; the page
+    -- is expected to be hidden already (every caller hides first).
+    --
+    -- ★ A PARKED PAGE IS ALWAYS AT ALPHA 1, and this is the one place that can
+    -- guarantee it: if anything ever fades a page, Fx.Cancel stops it and restores
+    -- the resting alpha, so no path can leave a page in the dock half-faded to come
+    -- back translucent later. Free when nothing is animating.
+    function GUI:ParkPage(page)
+        if not page or page._parked then return end
+        if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end
+        local w, h = page:GetWidth(), page:GetHeight()
+        if not (w and w > 0 and h and h > 0) then
+            local inset = page._contentInset or PageBox.inset
+            local gutter = page._contentGutter or PageBox.gutter
+            w = (content:GetWidth() or 0) - inset - gutter
+            h = (content:GetHeight() or 0) - 2 * inset
+        end
+        page:SetParent(GUI._pageDock)
+        page:ClearAllPoints()
+        page:SetPoint("TOPLEFT", GUI._pageDock, "TOPLEFT", 0, 0)
+        page:SetSize(w, h)
+        page._parked = true
+        page._parkedW = w
+    end
+
+    -- ...and bring it back, re-asserting the anchors rather than trusting them to
+    -- have survived the round trip.
+    --
+    -- ⚠ Scale comes back WITH the parent. The dock sits at 1.0 while the window
+    -- is scaled, and a page must never register as a scaled surface (it is INSIDE
+    -- the window, so it would be scaled twice -- see RegisterScaledSurface), so
+    -- re-parenting is the whole of it: the page re-inherits the window's scale
+    -- chain and nothing caches an effective scale while it is parked.
+    --
+    -- Early-out when the page is not parked, so callers on hot paths
+    -- (RefreshCurrentPage, the window's OnShow) can call it unconditionally.
+    --
+    -- Returns true when the page comes back at a different width than it was
+    -- parked at (the window was resized meanwhile): its rows were laid out
+    -- against the old width, and the caller re-lays them.
+    function GUI:AdoptPage(page)
+        if not page or not page._parked then return false end
+        page:SetParent(content)
+        page._parked = nil
+        local inset = page._contentInset or PageBox.inset
+        -- The RIGHT edge is the gutter, not the inset -- the scrollbar lives
+        -- between the viewport and the content box's edge. Stored beside the
+        -- inset for the same reason it is: a parked page has to come back at the
+        -- width it was built at, and search builds every page while parked.
+        local gutter = page._contentGutter or PageBox.gutter
+        page:ClearAllPoints()
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
+        local w = page:GetWidth()
+        return (w and page._parkedW and math.abs(w - page._parkedW) > 0.5) and true or false
+    end
+
     -- =========================================================================
     -- CLICK CASTING PANEL (full width, replaces normal content when active)
     -- =========================================================================
@@ -1514,33 +3073,36 @@ function DF:CreateGUI()
     
     -- Store min width references for tab switching
     local normalMinWidth = minWidth  -- 520
-    -- Shared minimum width for the "wide" pages (Binds/Click Casting, Aura
-    -- Designer, Text Designer, Pinned Frames) — their two-panel / tab-strip
-    -- layouts squash below this.
+    -- Shared minimum width for the "wide" pages (Binds/Click Casting and every
+    -- page in WIDE_PAGES).
     local wideMinWidth = 850
 
-    -- Pages whose two-panel / tab-strip layouts squash below wideMinWidth.
+    -- Pages drawn full width rather than in card columns. They fit 640, but read
+    -- as a sliver of a tool there, so opening one widens the window to 850.
     -- ☠ Hoisted to panel scope on purpose. This lived INSIDE SelectTab, which meant
     -- (a) it was rebuilt on every tab click, and (b) ShowNormalContent could not see it --
     -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
     -- still the visible one, and it could then be dragged narrow. Any new consumer of the
     -- wide-page rule reads THIS table; do not re-declare a local copy.
     local WIDE_PAGES = {
-        auras_auradesigner   = true,  -- two-panel preview + controls
-        auras_filterdesigner = true,  -- Aura Filters: two-column preset list + spell list
-        text_designer        = true,  -- two-panel preview + controls
+        auras_auradesigner   = true,  -- preview + tabbed bands
+        auras_filterdesigner = true,  -- filter row + spell list
+        text_designer        = true,  -- preview + tabbed bands
         general_pinnedframes = true,  -- tab strip + active-set meter
         general_nicknames    = true,  -- wide add-row (Match+Char+Nick+Add) + list columns
     }
 
     -- Apply the right minimum for a page id, expanding if we are currently under it.
+    -- Returns whether the page is a wide one, and whether the window just widened.
     local function ApplyPageWidthBounds(name)
         local wanted = WIDE_PAGES[name] and wideMinWidth or normalMinWidth
         frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
+        local widened = false
         if frame:GetWidth() < wanted then
             frame:SetWidth(wanted)
+            widened = true
         end
-        return WIDE_PAGES[name]
+        return WIDE_PAGES[name], widened
     end
 
     -- Function to show normal Party/Raid content
@@ -1550,9 +3112,8 @@ function DF:CreateGUI()
         if content then content:Show() end
 
         -- Restore the minimum width FOR THE PAGE WE ARE RETURNING TO -- not a blanket
-        -- normalMinWidth. This used to reset to 520 unconditionally, so coming back from
-        -- BINDS onto a wide page (Aura Filters, AD/TD, Pinned) left that page draggable
-        -- down to 520 and squashed.
+        -- normalMinWidth: resetting to 520 unconditionally leaves a wide page we are
+        -- returning to draggable down to 520 and squashed.
         ApplyPageWidthBounds(GUI.CurrentPageName)
 
         -- Update tab availability for current mode (greys out tabs for disabled modes)
@@ -1583,6 +3144,75 @@ function DF:CreateGUI()
     end
     
     -- =========================================================================
+    -- WHICH TAB A PAGE IS ON -- GLOBAL, or Party/Raid (see THE GLOBAL TAB in
+    -- GUI/GUI.lua)
+    -- =========================================================================
+    -- Is this nav row in the sidebar for the tab now showing?
+    function GUI:IsTabInView(btn)
+        if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
+        return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
+    end
+
+    -- A category's pages in the order the sidebar reads them: its declared order
+    -- (SetNavOrder) first, then anything it does not name.
+    local function TabsInOrder(cat)
+        local placeable, out, taken = {}, {}, {}
+        for _, btn in ipairs(cat.children) do placeable[btn] = true end
+        for _, entry in ipairs(cat.navSpec or {}) do
+            local btn = type(entry) == "string" and GUI.Tabs[entry]
+            if btn and placeable[btn] then out[#out + 1] = btn; taken[btn] = true end
+        end
+        for _, btn in ipairs(cat.children) do
+            if not taken[btn] then out[#out + 1] = btn end
+        end
+        return out
+    end
+
+    function GUI:FirstTabInView()
+        for _, catName in ipairs(GUI.CategoryOrder or {}) do
+            local cat = GUI.Categories[catName]
+            if cat then
+                for _, btn in ipairs(TabsInOrder(cat)) do
+                    if GUI:IsTabInView(btn) then return btn.tabName end
+                end
+            end
+        end
+    end
+
+    -- The page this tab showed last, else its first.
+    function GUI:LastTabInView()
+        local last = GUI.GlobalView and GUI._lastGlobalPage or GUI._lastModePage
+        local btn = last and GUI.Tabs[last]
+        if btn and GUI:IsTabInView(btn) then return last end
+        return GUI:FirstTabInView()
+    end
+
+    -- Show GLOBAL (true) or the Party/Raid tab under it (false). From BINDS it
+    -- steps back onto the frame mode BINDS was entered from.
+    -- ⚠ IT SELECTS NO PAGE: the caller does, which is why the redirect off a page
+    -- that is not on this tab is held off around ShowNormalContent.
+    function GUI:EnterView(global)
+        if GUI.SelectedMode == "clicks" then
+            GUI.SelectedMode = GUI._lastFrameMode or "party"
+        end
+        if not switchMarks and DF.DebugActive and DF:DebugActive("GUI") then
+            local t0 = debugprofilestop()
+            switchMarks = { last = t0, t0 = t0 }
+        end
+        GUI.GlobalView = global and true or false
+        GUI:SetAccent(GUI.CurrentAccent())
+        SwitchMark("accent")
+        local held = GUI._redirectingTab
+        GUI._redirectingTab = true
+        GUI:ShowNormalContent()
+        GUI._redirectingTab = held
+        SwitchMark("sidebar")
+        -- ⚠ NO REPAINT HERE. Every caller selects a page next, and SelectTab ends
+        -- in one; a repaint now would walk the page being LEFT in the new accent,
+        -- and walk it again the next time it is shown in its own.
+    end
+
+    -- =========================================================================
     -- SEARCH RESULTS PANEL (inside content area)
     -- =========================================================================
     if DF.Search then
@@ -1593,6 +3223,28 @@ function DF:CreateGUI()
     GUI.Pages = {}
     
     local function SelectTab(name)
+        -- The trace EnterView started is finished here; a switch nested inside
+        -- this one (a redirect) only adds to it.
+        local ownsTrace = false
+        if DF.DebugActive and DF:DebugActive("GUI") then
+            if not switchMarks then
+                local t0 = debugprofilestop()
+                switchMarks = { last = t0, t0 = t0, owned = true }
+                ownsTrace = true
+            elseif not switchMarks.owned then
+                switchMarks.owned = true
+                ownsTrace = true
+            end
+        end
+        -- ★ A PAGE LIVES ON ONE TAB, and asking for it goes there: search results,
+        -- cross-links and every "open in Filter Designer" land here, from either
+        -- side and from BINDS.
+        if GUI.Tabs[name] and (GUI.IsGlobalPage(name) ~= (GUI.GlobalView == true)
+                               or GUI.SelectedMode == "clicks") then
+            GUI:EnterView(GUI.IsGlobalPage(name))
+            SwitchMark("view")
+        end
+
         -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
         -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
         -- single-slot tracker) while leaving the menu's own shown flag set. Come back to
@@ -1622,9 +3274,46 @@ function DF:CreateGUI()
             GUI.pendingSectionBadges[leavingTab] = nil
         end
 
-        for k, page in pairs(GUI.Pages) do page:Hide() end
+        -- Popout rows: leaving the page invalidates the rows the open panel is
+        -- ABOUT -- the row it is tethered to is about to be hidden, and the
+        -- controls inside it belong to a page nobody is looking at. UNPINNED
+        -- only: a panel the user deliberately pinned loose is theirs to keep
+        -- across a page change, which is the whole difference between the two
+        -- verbs. Guarded for an older embedded copy of the pack.
+        if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
+
+        -- ★ THE PAGE FADE.
+        -- ------------------------------------------------------------
+        -- The old page goes at once, and the new one is shown under a COVER in the
+        -- empty panel's own colours that lifts away, so the page fades in.
+        -- ☠ NO PAGE IS ANIMATED -- NOT EVEN THE OUTGOING ONE. Starting an alpha
+        -- animation on a page costs in proportion to everything on it: measured
+        -- with the GUI trace, the Debuff Bar's fade-in ~175ms and the Filter
+        -- Designer's fade-out ~80-95ms, on every switch. A crossfade was tried with
+        -- only the old page animated and still read as sluggish on the big pages.
+        -- The cover is two textures, whatever the page holds.
+        --
+        -- ⚠ ONLY WHEN THERE IS SOMETHING TO FADE FROM: a visible outgoing page, a
+        -- different one arriving, and a window already on screen. The FIRST page
+        -- of a window-open gets nothing -- the window itself is fading in around
+        -- it, and a second fade inside that one only reads as slow.
+        local leaving = leavingTab and GUI.Pages[leavingTab]
+        local crossfade = frame:IsShown() and leavingTab ~= name
+            and leaving and leaving:IsShown() and true or false
+
+        -- Hide every page, and PARK the ones we are not about to show. Hiding
+        -- alone is what the eight-second window open was made of: a hidden page
+        -- still parented under the window is a subtree the engine walks on every
+        -- Show and Hide of it. See THE PAGE DOCK.
+        for k, page in pairs(GUI.Pages) do
+            page:Hide()
+            if k ~= name then GUI:ParkPage(page) end
+        end
+        SwitchMark("leave")
+        -- The rail is not cleared here: it is about to be GLIDED onto the new row
+        -- further down, and taking it off screen first is exactly the blink the
+        -- shared marker exists to remove.
         for k, btn in pairs(GUI.Tabs) do
-            if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
             if btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
@@ -1659,7 +3348,13 @@ function DF:CreateGUI()
         -- page so its content lays out at the final width instead of building narrow and
         -- staying squashed until a resize. (WIDE_PAGES + ApplyPageWidthBounds live at panel
         -- scope so ShowNormalContent shares them -- see the note there.)
-        if ApplyPageWidthBounds(name) then
+        local isWide, widened = ApplyPageWidthBounds(name)
+        local pageNow = GUI.Pages[name]
+        -- ⚠ Only when the window just widened, or the page's first showing. The
+        -- nudge re-flows the whole page twice, and on every visit it made each
+        -- entry into a wide page (Global's Filter Designer and Nicknames) slow.
+        if isWide and (widened or (pageNow and not pageNow._widthSettled)) then
+            if pageNow then pageNow._widthSettled = true end
             -- Belt-and-braces: re-assert the width next frame so size-dependent
             -- layout settles without a manual resize. A page can build at a
             -- pre-layout width (tabs overflow the panel / cards squashed); nudging
@@ -1680,17 +3375,46 @@ function DF:CreateGUI()
                 DF.Search.CurrentSection = nil
             end
             
+            -- Out of the dock and back under the content frame BEFORE the Show,
+            -- so it is never shown while detached (and so RefreshCached below
+            -- builds against the real geometry).
+            SwitchMark("bounds")
+            local resized = GUI:AdoptPage(GUI.Pages[name])
             GUI.Pages[name]:Show()
+            SwitchMark("show")
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
+            local before = GUI.Pages[name].children
             GUI.Pages[name]:RefreshCached()
-            if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
+            -- A changed list without a reason is the other mode's saved build
+            -- swapped in, not a build.
+            SwitchMark((GUI.Pages[name].children == before) and "cached"
+                or (GUI._lastBuildReason and ("BUILT(" .. GUI._lastBuildReason .. ")"))
+                or "swapped")
+            GUI._lastBuildReason = nil
+            if GUI.Pages[name].RefreshStates then
+                GUI.Pages[name]:RefreshStates()
+                -- Back at a new width: the second pass RelayoutCurrentPage explains.
+                if resized then GUI.Pages[name]:RefreshStates() end
+            end
+            SwitchMark("states")
+        end
+
+        -- The fade itself, AFTER the incoming page has been adopted, shown, rebuilt
+        -- and re-stated. Everything expensive about a tab switch happens between
+        -- those lines, and a fade started before it would simply stall on the
+        -- build -- and would show a frame of half-laid-out page while it did.
+        -- Nothing renders between the Show above and the cover here: it is all
+        -- one frame.
+        if crossfade then
+            PlayPageCover()
+            SwitchMark("cover")
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
-            if GUI.Tabs[name].accent then
-                GUI.Tabs[name].accent:Show()
-                GUI.Tabs[name].accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
-            end
+            -- The rail glides down (or up) from the row being left. Instant while
+            -- the window is hidden -- the first SelectTab of a session runs before
+            -- it is ever shown, and a glide out of a stale row is worse than none.
+            navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())
             GUI.Tabs[name].Text:SetTextColor(nc.r, nc.g, nc.b)
             GUI.Tabs[name].isActive = true
             -- Mark "New" badge as seen
@@ -1716,11 +3440,92 @@ function DF:CreateGUI()
             end
         end
         GUI.CurrentPageName = name
+        -- What each tab comes back to.
+        if GUI.Tabs[name] then
+            if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end
+        end
+        SwitchMark("nav")
         UpdateThemeColors()
+        if ownsTrace and switchMarks then
+            SwitchMark(GUI._lastRepaintNodes and format("theme(walked %d)", GUI._lastRepaintNodes) or "theme")
+            local t0 = switchMarks.t0
+            DF:Debug("GUI", "switch to %s: %s | total %.1fms", name,
+                table.concat(switchMarks, " | "), debugprofilestop() - t0)
+            switchMarks = nil
+            C_Timer.After(0, function()
+                DF:Debug("GUI", "switch to %s: next frame began at +%.1fms", name, debugprofilestop() - t0)
+            end)
+        end
     end
     GUI.SelectTab = SelectTab
-    
+
+    -- ★★★ RE-LAY THE CURRENT PAGE WITHOUT REBUILDING IT -- for a change of SIZE, not of
+    -- content.
+    --
+    -- ☠☠ WHY THIS EXISTS: RefreshCurrentPage REBUILDS, AND EVERY REBUILD LEAKS. It calls
+    -- page:Refresh(), which is DoBuild: every widget on the page is hidden and parked in
+    -- GUI._trashFrame, and a fresh set is built. WoW never collects a frame, and nothing
+    -- ever empties the trash -- so each rebuild keeps the whole previous page, and the Lua
+    -- tables and closures hanging off it, alive until /reload. Measured in game
+    -- (2026-09-18): the rebuild allocates ~804 KB a call; the relayout below, 35 KB.
+    -- The resize grip ran the rebuild on every release -- one click on it leaked a page.
+    -- Reported as "memory climbs in both Options and DandersMover when resizing, and
+    -- only /reload gives it back": the kit's options half bills to Options, its base
+    -- half to whichever addon's embedded copy won the load race.
+    --
+    -- ⚠ RefreshStates IS RUN TWICE, AND THE SECOND PASS IS NOT A MISTAKE. Inside it the
+    -- groups lay their rows out FIRST and the layout loop sets their widths AFTER. After a
+    -- resize that order lays every row out against the OLD width and only then widens the
+    -- group around it -- the rows are a pass behind. The rebuild used to hide that, because
+    -- it constructs each band at the new width to begin with. The second pass lays the rows
+    -- out against the widths the first pass just set. Two relayouts still cost a fraction
+    -- of one rebuild, and leak nothing.
+    -- ⚠ WHAT IT SKIPS, ON PURPOSE: the rebuild itself, the theme recolour and the modified-
+    -- setting marks. A resize changes none of what those read.
+    -- ⚠ A PAGE THAT BAKES A WIDTH INTO ITS BUILD needs its own OnSizeChanged to follow a
+    -- resize now, because nothing rebuilds it any more. The Filter Designer and the Aura
+    -- Designer already carry one; a page that reads wrong after a resize and fixes itself
+    -- on a tab change is the symptom of one that does not.
+    GUI.RelayoutCurrentPage = function()
+        if DF.Search and DF.Search.LayoutResults
+            and DF.Search.ResultsPanel and DF.Search.ResultsPanel:IsShown() then
+            DF.Search:LayoutResults()
+        end
+        if GUI.SelectedMode == "clicks" then return end
+        local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
+        if not page then return end
+        GUI:AdoptPage(page)
+        if page.RefreshStates then
+            page:RefreshStates()
+            page:RefreshStates()
+        end
+        -- ☠ CLIENT WORKAROUND, NOT A FIX OF OURS: NUDGE THE SCROLL 1px AND BACK.
+        -- After a resize-grip drag some inline panes were left with NO RECT at all
+        -- (GetRect() -> nil on the holder and everything under it) while their plate,
+        -- anchors, sizes, levels and visibility were all correct -- so the box drew
+        -- empty until a scroll. Measured in game 2026-09-19; UpdateScrollChildRect and
+        -- re-setting the SAME offset both did nothing, lifting the frame level did
+        -- nothing, a real 1px move and back repaired every pane. A scroll-offset
+        -- change makes the client re-resolve every rect under the scroll child.
+        -- Next frame, so it lands after the relayout's own anchor changes settle.
+        -- Moves away from whichever end the page is sitting at, so it never clamps.
+        if page.GetVerticalScroll and C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if not page:IsVisible() then return end
+                local v = page:GetVerticalScroll() or 0
+                page:SetVerticalScroll(v > 0 and v - 1 or v + 1)
+                page:SetVerticalScroll(v)
+            end)
+        end
+    end
+
     GUI.RefreshCurrentPage = function()
+        -- Consumed FIRST, before any return: set only for the span of one call by
+        -- GUI.RefreshCurrentPageForModeSwitch, and a flag left standing would turn
+        -- every later "data changed" refresh into a cache hit.
+        local cached = GUI._refreshCurrentPageCached
+        GUI._refreshCurrentPageCached = nil
+
         -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.
         -- The results panel is not a page, so the page loop below never reaches it — yet
         -- it lays out in the same two columns and needs the same recompute when the
@@ -1738,7 +3543,20 @@ function DF:CreateGUI()
             return
         end
         if GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName] then
-            GUI.Pages[GUI.CurrentPageName]:Refresh()
+            -- Belt and braces for the reopen path: DF:ToggleGUI shows the window
+            -- and then calls this, and the window's OnShow has already adopted
+            -- the page by the time we get here -- but refreshing a page that is
+            -- still in the dock would lay out against nothing, so make sure.
+            -- No-ops when it is not parked.
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
+            local page = GUI.Pages[GUI.CurrentPageName]
+            -- "all" (GUI.RefreshCurrentPageAfterFullRefresh) takes an opted-out
+            -- page through the cache too: it was rebuilt a moment ago.
+            if cached and (cached == "all" or not page.singleModeBuild) and page.RefreshCached then
+                page:RefreshCached()
+            else
+                page:Refresh()
+            end
             if GUI.Pages[GUI.CurrentPageName].RefreshStates then
                 GUI.Pages[GUI.CurrentPageName]:RefreshStates()
             end
@@ -1749,6 +3567,58 @@ function DF:CreateGUI()
         -- A designer preset bar can need re-reading even when its page skipped
         -- the rebuild (the sharing glyph tracks the OTHER mode's preset).
         if GUI.RefreshDesignerPresetBars then GUI:RefreshDesignerPresetBars() end
+    end
+
+    -- ★ THE PARTY/RAID TABS' REFRESH: everything RefreshCurrentPage does, but the
+    -- page goes through the CACHE instead of a forced rebuild. A switch changes no
+    -- data -- it changes which mode's build is shown -- and the forced rebuild here
+    -- was the leak (see ONE RETAINED BUILD PER MODE, above BuildPage).
+    -- ⚠ Through GUI:RefreshCurrentPage, by NAME, and a flag rather than an argument:
+    -- the Auto Layouts UI wraps that function (UpdateEditingBanner/UpdatePageOffset
+    -- after it) and its wrapper passes no arguments through.
+    GUI.RefreshCurrentPageForModeSwitch = function()
+        GUI._refreshCurrentPageCached = true
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
+    end
+
+    -- ★ THE SAME CACHED REFRESH FOR OPENING THE WINDOW (DF:ToggleGUI). Opening
+    -- changes no data either, and the forced rebuild it used to run leaked the
+    -- page on screen on every open. It is safe because everything that can
+    -- REPLACE a table a build is bound to while the window is closed invalidates:
+    --   * a profile switch / reset / copy / import -> FullProfileRefresh ->
+    --     InvalidateAllPages (window shown or not). Its combat early-return skips
+    --     that, but a switch or import re-wraps DF.db and a raid reset swaps the
+    --     real raid table -- both caught by BuildDbMatches below;
+    --   * the Party/Raid sync (DF:UpdateAll runs it, window open or not) now
+    --     copies INTO the destination's tables, so nothing is replaced -- see
+    --     THE SYNC KEEPS TABLES at the bottom of this file;
+    --   * leaving auto-layout editing by closing the window invalidates (the
+    --     window's OnHide);
+    --   * the mover, DandersMover and the API position calls write in place.
+    -- Values written while closed are repainted by each widget's own OnShow.
+    -- An opted-out page (singleModeBuild) still rebuilds, as before.
+    GUI.RefreshCurrentPageCached = function()
+        GUI._refreshCurrentPageCached = true
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
+    end
+
+    -- ★ FOR A CALLER THAT HAS JUST RUN DF:FullProfileRefresh (a profile switch,
+    -- copy, reset or import from inside the window). That already invalidated
+    -- every page AND rebuilt the one on screen, so the caller's own follow-up
+    -- RefreshCurrentPage was a second rebuild -- a second page leaked per click.
+    -- Through the cache instead, opted-out pages included ("all"): the build is a
+    -- moment old. ⚠ IN COMBAT FullProfileRefresh returns before any of that, so
+    -- there the caller's rebuild is the only refresh and it is kept.
+    GUI.RefreshCurrentPageAfterFullRefresh = function()
+        if InCombatLockdown() then
+            GUI:RefreshCurrentPage()
+            return
+        end
+        GUI._refreshCurrentPageCached = "all"
+        GUI:RefreshCurrentPage()
+        GUI._refreshCurrentPageCached = nil
     end
 
     -- Invalidate EVERY page's build cache so the next time each tab is shown it
@@ -1855,13 +3725,11 @@ function DF:CreateGUI()
         btn.tabName = name
         btn.categoryName = categoryName
         
-        -- Left accent bar
-        btn.accent = btn:CreateTexture(nil, "OVERLAY")
-        btn.accent:SetPoint("TOPLEFT", 0, 0)
-        btn.accent:SetPoint("BOTTOMLEFT", 0, 0)
-        btn.accent:SetWidth(3)
-        btn.accent:Hide()
-        
+        -- ★ NO LEFT ACCENT BAR OF ITS OWN. The selected row's 3px rail is the
+        -- nav's ONE shared marker (navMarker), glided onto this row when it is
+        -- selected -- see the note beside it. A row that carried its own would
+        -- put two bars on screen during the glide.
+
         btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         btn.Text:SetPoint("LEFT", 24, 0)
         btn.Text:SetText(label)
@@ -1909,22 +3777,47 @@ function DF:CreateGUI()
         -- problem; the surface they are clipped against was.
         --
         -- Nothing corrects it afterwards -- this frame is anchored by TWO
-        -- corners, so even the geometry correction that used to exist skipped it
-        -- (nudging a two-corner frame resizes it rather than moving it). The one
-        -- surface every page is measured against was the one it could not touch.
+        -- corners, and nudging a two-corner frame resizes it rather than moving it.
         -- Snapping the OFFSETS is the fix that works for a two-corner frame:
         -- correct the numbers going in, since the box itself can't be nudged.
-        local inset = SnapLen(content, 8) or 8
-        page:SetPoint("TOPLEFT", inset, -inset)
-        page:SetPoint("BOTTOMRIGHT", -inset, inset)
+        --
+        -- ⚠ `content` IS NAMED EXPLICITLY, and the inset is kept on the page.
+        -- A page is reparented to the page dock whenever it is not the one on
+        -- screen (see THE PAGE DOCK), and these two points have to keep pointing
+        -- at the content frame across that trip -- a parked page that measured
+        -- zero could not be built, and search builds all of them. GUI:AdoptPage
+        -- re-asserts exactly these two lines from page._contentInset and
+        -- page._contentGutter.
+        --
+        -- ★ THE RIGHT EDGE IS THE GUTTER, NOT THE INSET -- see THE CONTENT
+        -- CORRIDOR at the head of this file. The viewport stops where the
+        -- scrollbar begins, the bar is pinned into the strip between there and
+        -- the content box's edge, and the child then fills the viewport instead
+        -- of stopping another 14px short of it for a bar that was never drawn
+        -- inside it.
+        local inset = SnapLen(content, PageBox.inset) or PageBox.inset
+        local gutter = SnapLen(content, PageBox.gutter) or PageBox.gutter
+        page._contentInset = inset
+        page._contentGutter = gutter
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
 
-        StyleScrollBar(page)
+        -- OVERLAY (see the nav's bar for why these two and nothing else). The
+        -- gutter it is pinned into is unchanged: the WIDE state still fills
+        -- bar+pad exactly, and the idle state leaves part of it as air.
+        StyleScrollBar(page, { overlay = true })
+        -- Against `content`, not against the page: the bar hugs the CONTENT
+        -- BOX's inner right edge, which is the window's own margin away from the
+        -- window edge. Left on ScrollFrameTemplate's own anchors it floated
+        -- outside the viewport at whatever offset the template picks, which is
+        -- how the corridor ended up carrying the gutter twice.
+        GUI.PinScrollBar(page, content, -inset, inset)
 
         local child = CreateFrame("Frame", nil, page)
         -- Snapped for the same reason: content is positioned against this child,
         -- so a fractional width put every right edge inside it off-grid too
         -- (pixelcheck reported w-0.16).
-        child:SetSize(SnapLen(page, (content:GetWidth() or 0) - 30) or 1, 1)
+        child:SetSize(SnapLen(page, GUI.PageChildWidth(content:GetWidth() or 0)) or 1, 1)
         page:SetScrollChild(child)
         page.child = child
         page.tabName = name
@@ -2050,22 +3943,39 @@ function DF:CreateGUI()
             return rows
         end
 
+        -- What a category shows on the tab now up: its pages on this tab (see
+        -- GUI:IsTabInView -- GLOBAL's pages, or Party/Raid's, less party-only ones
+        -- in raid), and a caption only where one of those follows it. A category
+        -- left with nothing is hidden, header and all: GLOBAL has no Bars, Party
+        -- and Raid no Debug.
+        local function ViewRows(rows)
+            local out, caption = {}, nil
+            for _, btn in ipairs(rows) do
+                if btn.isNavCaption then
+                    caption = btn
+                elseif GUI:IsTabInView(btn) then
+                    if caption then out[#out + 1] = caption; caption = nil end
+                    out[#out + 1] = btn
+                end
+            end
+            return out
+        end
+
         for _, catName in ipairs(GUI.CategoryOrder) do
             local cat = GUI.Categories[catName]
             if cat then
-                cat:ClearAllPoints()
-                cat:SetPoint("TOPLEFT", 0, y)
-                cat:SetPoint("TOPRIGHT", 0, y)
-                cat:SetHeight(catStride)
-                y = y - catStride
-
                 local rows = NavRows(cat)
-                if cat.expanded then
-                    for _, btn in ipairs(rows) do
-                        -- Party-only tabs are hidden entirely in raid mode.
-                        if btn.partyOnly and GUI.SelectedMode == "raid" then
-                            btn:Hide()
-                        else
+                for _, btn in ipairs(rows) do btn:Hide() end
+                local shown = ViewRows(rows)
+                cat:SetShown(#shown > 0)
+                if #shown > 0 then
+                    cat:ClearAllPoints()
+                    cat:SetPoint("TOPLEFT", 0, y)
+                    cat:SetPoint("TOPRIGHT", 0, y)
+                    cat:SetHeight(catStride)
+                    y = y - catStride
+                    if cat.expanded then
+                        for _, btn in ipairs(shown) do
                             local stride = btn.isNavCaption and capStride or tabStride
                             btn:Show()
                             btn:ClearAllPoints()
@@ -2074,10 +3984,6 @@ function DF:CreateGUI()
                             btn:SetHeight(stride)
                             y = y - stride
                         end
-                    end
-                else
-                    for _, btn in ipairs(rows) do
-                        btn:Hide()
                     end
                 end
             end
@@ -2104,11 +4010,177 @@ function DF:CreateGUI()
     -- Store category order
     GUI.CategoryOrder = {}
     
-    -- (Removed) CreateTab — "legacy single tab support", a thin wrapper over
-    -- CreateSubTab("tools", ...). Every page registers through CreateSubTab directly
-    -- now, so it had no callers.
+    -- ============================================================
+    -- ONE RETAINED BUILD PER MODE
+    -- ------------------------------------------------------------
+    -- ☠☠ WHY THIS EXISTS: A PARTY/RAID SWITCH USED TO LEAK A WHOLE PAGE. The cache
+    -- below was keyed on ONE mode, so every switch was a cache miss: DoBuild parked
+    -- every widget on the page in GUI._trashFrame and built a fresh set. WoW never
+    -- collects a frame and nothing ever empties the trash, so each switch kept the
+    -- previous page (~800 KB measured, 2026-09-18) alive until /reload -- in the
+    -- Options addon AND in whichever addon's embedded DandersUI copy won the load
+    -- race. Reported as "memory climbs every time I flip Party/Raid".
+    --
+    -- So a page now keeps AT MOST ONE BUILD PER MODE. The build on screen lives in
+    -- the page's own fields exactly as before (children, builtForMode, cacheValid,
+    -- ...); switching mode HIDES it and parks those fields in
+    -- page._modeBuilds[itsMode], then loads the incoming mode's slot back into the
+    -- same fields. A slot that is still valid is shown again and re-stated; one
+    -- that is not (or none at all) is rebuilt by the ordinary DoBuild, which is the
+    -- only thing that ever trashes a build. Memory is bounded at "every page built
+    -- at most twice", not "once per click".
+    --
+    -- ⚠ VALUES STAY FRESH WITHOUT A REBUILD because every db-bound factory repaints
+    -- its value from its bound table on its own OnShow (SettingsWidgets.lua: the
+    -- checkbox's UpdateState, the slider's ReadValue, the dropdown's UpdateText,
+    -- the swatch's UpdateSwatch). Hiding a build and showing it again fires those.
+    -- What OnShow can NOT fix is a widget holding a TABLE that has since been
+    -- REPLACED, so every path that replaces one invalidates: a profile switch, a
+    -- mode reset or copy and a section copy all end in FullProfileRefresh ->
+    -- InvalidateAllPages; the party/raid Sync copies INTO the destination's
+    -- tables rather than replacing them (THE SYNC KEEPS TABLES, bottom of this
+    -- file), so it needs no invalidation at all; and page:Refresh() -- the "data
+    -- changed" call -- invalidates the page's other-mode build too. _builtDb and
+    -- _builtRealDb are the belt: a build whose mode table is no longer the live
+    -- one is never served (BuildDbMatches).
+    --
+    -- ⚠ A PAGE THAT KEEPS PER-BUILD STATE OUTSIDE THESE FIELDS must either list it
+    -- in page.modeBuildFields (swapped with the build) or opt out with
+    -- page.singleModeBuild = true, which keeps the old one-build behaviour exactly
+    -- (rebuild on every switch). The opted-out pages say why at their CreateSubTab.
+    -- ============================================================
+    -- The fields that belong to ONE build rather than to the page. _popoutHolders
+    -- is the page tools' (GUI:CreatePopoutPageTools): the holders are off-page
+    -- frames that build retires on its NEXT build, so they must travel with the
+    -- build or the raid build would trash the party build's.
+    local MODE_BUILD_FIELDS = {
+        "children", "builtForMode", "builtForDisabled", "builtCacheKey", "cacheValid",
+        "_builtDb", "_popoutHolders", "_pendingShown",
+        -- What this build registered with search, so the index can take it
+        -- rather than build the page again (page.GetIndexEntries, below).
+        "_searchEntries",
+        "_builtRealDb",
+    }
+
+    -- ★ IS THIS BUILD STILL BOUND TO THE LIVE MODE TABLE? _builtDb alone cannot
+    -- say so for RAID: DF.db.raid is always the same auto-profile proxy, and a raid
+    -- reset or copy re-points the proxy at a new real table underneath it
+    -- (Core.lua's WrapDB, `mt.__realTable = value`) without changing the proxy.
+    -- A widget bound to the proxy itself still reads through, but anything a
+    -- builder read OFF it (a gradient's stop list, a class filter) is the old
+    -- table's. So the real table is compared too. A plain table is its own.
+    local function RealModeTable(db)
+        local mt = getmetatable(db)
+        return (mt and mt.__realTable) or db
+    end
+    local function BuildDbMatches(build, db)
+        return build._builtDb == db and build._builtRealDb == RealModeTable(db)
+    end
+
+    -- Park a list of widgets in the trash frame: hide, detach anchors, and
+    -- reparent so they leave the GUI frame hierarchy entirely. WoW cannot GC
+    -- frames, but a detached subtree is not traversed during drag layout
+    -- recalculation. The ONLY place a build is retired.
+    local function RetireChildren(children)
+        if not children then return end
+        local trash = GUI._trashFrame
+        for _, child in ipairs(children) do
+            child:Hide()
+            child:ClearAllPoints()
+            if trash then child:SetParent(trash) end
+        end
+    end
+
+    -- Pages in GUI/Pages/Modules.lua that opt out (page.singleModeBuild), named
+    -- here by tab rather than flagged at their CreateSubTab:
+    --   profiles_auto         -- its disabled scrim and sidebar hint are single
+    --                            frames re-anchored to the LATEST build, and its
+    --                            content follows the auto-layout editing state.
+    --   profiles_importexport -- its buttons reach their edit boxes through page
+    --                            fields (self.exportEditBox, ...) only the latest
+    --                            build owns.
+    --   debug_console         -- registers ONE live edit box with the console per
+    --                            build and keeps self.filterRows.
+    local SINGLE_MODE_TABS = {
+        profiles_auto = true,
+        profiles_importexport = true,
+        debug_console = true,
+    }
 
     local function BuildPage(page, builderFunc)
+        if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end
+        -- Move the build on screen into its mode's slot, hidden. Anchors and
+        -- parent are kept -- it is coming back.
+        local function StashActiveBuild(self)
+            local mode = self.builtForMode
+            if not self.children then return end
+            if not mode then
+                -- A build nobody can name the mode of can never be served again.
+                RetireChildren(self.children)
+                self.children = nil
+                return
+            end
+            local slot = {}
+            for _, k in ipairs(MODE_BUILD_FIELDS) do slot[k] = self[k] end
+            if self.modeBuildFields then
+                for _, k in ipairs(self.modeBuildFields) do slot[k] = self[k] end
+            end
+            slot.themeListeners = self.child and self.child.ThemeListeners
+            -- Which top-level children were up, so they come back as they were --
+            -- a group's own rows are in this list too and RefreshStates leaves
+            -- their visibility to the group. A build swapped in and straight back
+            -- out again has not been re-shown yet; keep the record it came with.
+            if not slot._pendingShown then
+                local shown = {}
+                for i, child in ipairs(self.children) do
+                    shown[i] = child:IsShown() and true or false
+                end
+                slot._pendingShown = shown
+            end
+            for _, child in ipairs(self.children) do child:Hide() end
+            self._modeBuilds = self._modeBuilds or {}
+            self._modeBuilds[mode] = slot
+        end
+
+        -- Load `mode`'s slot into the page's fields (or clear them for a fresh
+        -- build). Nothing is SHOWN here: the caller decides whether the build is
+        -- still good, and a build about to be rebuilt should not fire its OnShows.
+        local function LoadModeBuild(self, mode)
+            local slots = self._modeBuilds
+            local slot = slots and slots[mode]
+            if slots then slots[mode] = nil end
+            slot = slot or {}
+            for _, k in ipairs(MODE_BUILD_FIELDS) do self[k] = slot[k] end
+            if self.modeBuildFields then
+                for _, k in ipairs(self.modeBuildFields) do self[k] = slot[k] end
+            end
+            if self.child then self.child.ThemeListeners = slot.themeListeners or {} end
+        end
+
+        -- Make `mode`'s build the active one. No-op when it already is.
+        local function SwapToMode(self, mode)
+            if self.builtForMode == mode then return end
+            if self.children then
+                -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST. An open popout shows widgets
+                -- wired to the OUTGOING mode's table; left open over the other
+                -- mode's page, a slider dragged in it writes into the wrong mode.
+                -- The rebuild this replaces closed them (CreatePopoutPageTools).
+                if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("modeSwitch") end
+                StashActiveBuild(self)
+            end
+            LoadModeBuild(self, mode)
+        end
+
+        -- Show the children a swapped-in build had up when it was put away.
+        local function RestorePendingShown(self)
+            local shown = self._pendingShown
+            if not shown then return end
+            self._pendingShown = nil
+            for i, child in ipairs(self.children or {}) do
+                if shown[i] then child:Show() end
+            end
+        end
+
         -- Internal: construct all widget frames for the current mode.
         -- Called on first visit and whenever the cache is invalidated.
         -- Always finishes by calling RefreshStates() so callers don't need to.
@@ -2116,19 +4188,25 @@ function DF:CreateGUI()
             local db = DF.db[GUI.SelectedMode]
             if not db then return end
 
-            -- Retire old children: hide, detach anchors, and reparent to the
-            -- trash frame so they leave the GUI frame hierarchy entirely.
-            -- WoW cannot GC frames, but a detached subtree is not traversed
-            -- during drag layout recalculation.
-            if self.children then
-                local trash = GUI._trashFrame
-                for _, child in ipairs(self.children) do
-                    child:Hide()
-                    child:ClearAllPoints()
-                    if trash then child:SetParent(trash) end
-                end
+            -- Bring this mode's previous build (if any) in, so the retire below
+            -- takes THAT one and the other mode's build stays parked.
+            if not self.singleModeBuild then
+                SwapToMode(self, GUI.SelectedMode)
+                self._pendingShown = nil
             end
+
+            RetireChildren(self.children)
             self.children = {}
+            -- The retired build's search entries go with it: a build that errors
+            -- part-way must not offer the index the old build's list.
+            self._searchEntries = nil
+            if not self.singleModeBuild then
+                -- Marked in progress, so a builder that errors part-way leaves an
+                -- invalid build of THIS mode (retired next time) rather than one
+                -- still claiming whatever the previous build was.
+                self.builtForMode = GUI.SelectedMode
+                self.cacheValid = false
+            end
             self.child.ThemeListeners = {}
             -- Propagate RefreshStates to child so widgets can call it
             self.child.RefreshStates = function() self:RefreshStates() end
@@ -2181,7 +4259,7 @@ function DF:CreateGUI()
             -- of rendering any controls. Whitelisted pages (General, Profiles,
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
-                local banner = GUI:CreateInfoBanner(parent, { tone = "info" })
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "mode_disabled", notice = true, tone = "info" })
                 banner:SetText(GUI.SelectedMode == "raid"
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))
@@ -2190,6 +4268,10 @@ function DF:CreateGUI()
                 self.builtForMode = GUI.SelectedMode
                 self.builtForDisabled = true
                 self.cacheValid = true
+                self._builtDb = db
+                self._builtRealDb = RealModeTable(db)
+                -- A banner registers nothing, and neither would an index build of it.
+                self._searchEntries = {}
                 self:RefreshStates()
                 return
             end
@@ -2213,17 +4295,66 @@ function DF:CreateGUI()
                 table.insert(self.children, sync)
             end
 
+            -- ★ REMEMBER WHAT THIS BUILD REGISTERS WITH SEARCH (Search:Register's
+            -- capture). Stamped under this page's own tab, whoever called: the
+            -- index sets the tab itself, but a Refresh from a setting's callback
+            -- would otherwise stamp whatever tab the last index step left behind.
+            -- Both are put back afterwards, so nothing outside the build sees a
+            -- difference. ⚠ A builder that errors leaves the capture pointing at
+            -- its list until the next build restores over it; entries registered
+            -- in between land in a list nothing reads. Harmless, and not worth a
+            -- pcall that would move every builder error's traceback.
+            local Search = DF.Search
+            local capture = {}
+            local prevCapture, prevTab, prevTabLabel, prevSection
+            if Search then
+                prevCapture = Search._captureEntries
+                prevTab, prevTabLabel, prevSection =
+                    Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection
+                Search._captureEntries = capture
+                Search.CurrentTab = self.tabName
+                Search.CurrentTabLabel = self.tabLabel or self.tabName
+                Search.CurrentSection = nil
+            end
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
+            if Search then
+                Search._captureEntries = prevCapture
+                Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection =
+                    prevTab, prevTabLabel, prevSection
+            end
+            self._searchEntries = capture
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
+            self._builtDb = db
+            self._builtRealDb = RealModeTable(db)
+            -- ★ A PAGE WHOSE CONTENT IS DERIVED FROM DATA ANOTHER PAGE EDITS can
+            -- register a key for what it drew (GUI.PageCacheKeys[tabName]);
+            -- RefreshCached rebuilds when the key has moved. Only the Changed
+            -- Settings ledger does -- see Features/ChangedSettings.lua.
+            local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
+            self.builtCacheKey = keyFn and keyFn() or nil
             self:RefreshStates()
         end
 
         -- Invalidate this page's cache so the next RefreshCached() rebuilds.
-        page.Invalidate = function(self)
-            self.cacheValid = false
-            self.builtForMode = nil
+        -- ★ BOTH MODES' BUILDS, unless a mode is named. Nothing is trashed here:
+        -- an invalid build is retired by the DoBuild that replaces it, so no build
+        -- can be parked in the trash twice.
+        page.Invalidate = function(self, mode)
+            if self.singleModeBuild then
+                self.cacheValid = false
+                self.builtForMode = nil
+                return
+            end
+            -- builtForMode is KEPT: it names the mode the children on the page
+            -- belong to, which is what lets a switch park them rather than lose them.
+            if mode == nil or self.builtForMode == mode then self.cacheValid = false end
+            if self._modeBuilds then
+                for m, slot in pairs(self._modeBuilds) do
+                    if mode == nil or m == mode then slot.cacheValid = false end
+                end
+            end
         end
 
         -- Cache-aware refresh — used ONLY by tab switching. If the cached build
@@ -2235,16 +4366,34 @@ function DF:CreateGUI()
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
 
+            -- Put the build on screen away and bring this mode's in, if the page
+            -- was last built for the other mode. Nothing is trashed by this.
+            if not self.singleModeBuild then SwapToMode(self, GUI.SelectedMode) end
+
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
+            -- ⚠ Asked only when everything else says the cache is good, so a page
+            -- with no key -- every page but one -- pays one table lookup for it.
+            local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
-               and self.builtForDisabled == isDisabled then
+               and self.builtForDisabled == isDisabled
+               and (self.singleModeBuild or BuildDbMatches(self, db))
+               and (not keyFn or keyFn() == self.builtCacheKey) then
+                -- A build swapped back in comes back up as it was put away; its
+                -- widgets re-read their values on the OnShow this fires.
+                RestorePendingShown(self)
                 self:RefreshStates()
                 return
             end
 
             -- Cache miss: build fresh for this mode.
             -- DoBuild sets cacheValid and calls RefreshStates() before returning.
+            -- Which test failed, for the GUI trace's BUILT mark.
+            GUI._lastBuildReason = (not self.cacheValid and "invalid")
+                or (self.builtForMode ~= GUI.SelectedMode and "mode")
+                or (self.builtForDisabled ~= isDisabled and "disabled")
+                or (not self.singleModeBuild and not BuildDbMatches(self, db) and "db")
+                or "key"
             DoBuild(self)
         end
 
@@ -2252,263 +4401,59 @@ function DF:CreateGUI()
         -- invoke it after mutating data (adding/removing list items, reset/copy/
         -- sync, profile changes, etc.) and rely on the page being reconstructed.
         -- Only tab switching uses the cache, via RefreshCached().
+        -- ★ IT REBUILDS THE CURRENT MODE ONLY -- and invalidates the page's other-
+        -- mode build, because "data changed" is exactly what that build cannot have
+        -- seen. It is retired when it is next rebuilt, not now.
         page.Refresh = function(self)
             local db = DF.db[GUI.SelectedMode]
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
             DoBuild(self)
+            if self._modeBuilds then
+                for _, slot in pairs(self._modeBuilds) do slot.cacheValid = false end
+            end
         end
 
-        page.RefreshStates = function(self)
-            if not self.children then return end
+        -- The settings SEARCH index's rebuild (Search:_BeginRegistryBuild). It has
+        -- to re-run the builder -- registration happens there -- but it changes no
+        -- data, so unlike Refresh() it leaves the other mode's build valid.
+        page.RefreshForIndex = function(self)
             local db = DF.db[GUI.SelectedMode]
             if not db then return end
-            
-            -- First pass: handle SettingsGroups - layout their children and calculate heights
-            for _, widget in ipairs(self.children) do
-                if widget.isSettingsGroup then
-                    -- Layout children within the group (handles hideOn internally)
-                    widget:LayoutChildren()
-                    -- Process disableOn for group children
-                    widget:RefreshChildStates()
-                end
-            end
-            
-            -- Second pass: handle regular widgets and group visibility
-            for _, widget in ipairs(self.children) do
-                -- Keep any blocked-overlay (top-level widget or group) in sync.
-                -- Skip SettingsGroup children - they're handled by their parent group
-                if widget.settingsGroup then
-                    -- Already handled by group's LayoutChildren
-                elseif widget.isSettingsGroup then
-                    -- For groups, check collapsible section state AND group-level hideOn
-                    local shouldHide = false
-                    
-                    -- Check if parent collapsible section is collapsed
-                    if widget.collapsibleSection and not widget.collapsibleSection.expanded then
-                        shouldHide = true
-                    end
-                    
-                    -- Check group's own hideOn
-                    if not shouldHide and widget.hideOn then
-                        shouldHide = widget.hideOn(db)
-                    end
-                    
-                    if shouldHide then
-                        widget:Hide()
-                    else
-                        widget:Show()
-                    end
-                else
-                    -- Regular widget processing
-                    if widget.disableOn then
-                        local shouldDisable = widget.disableOn(db)
-                        if widget.SetEnabled then
-                            widget:SetEnabled(not shouldDisable)
-                        end
-                    end
-                    
-                    -- Check if widget should be hidden
-                    local shouldHide = false
-                    
-                    -- First check if parent collapsible section is collapsed
-                    if widget.collapsibleSection and not widget.collapsibleSection.expanded then
-                        shouldHide = true
-                    end
-                    
-                    -- Then check widget's own hideOn
-                    if not shouldHide and widget.hideOn then
-                        shouldHide = widget.hideOn(db)
-                    end
-                    
-                    if shouldHide then
-                        widget:Hide()
-                    else
-                        widget:Show()
-                        -- Call refreshContent hook for dynamic content updates
-                        if widget.refreshContent then
-                            widget:refreshContent(db)
-                        end
-                    end
-                end
-            end
-            
-            -- Determine column layout based on content area width.
-            -- Two-column settings groups are 280px wide and placed at x=5 (right
-            -- edge 285), while column 2 starts at contentWidth/2 — so they begin to
-            -- overlap once contentWidth drops below ~570. minColumnWidth must exceed
-            -- the 280 group width (was a stale 270) so the layout collapses to one
-            -- column BEFORE the columns touch, leaving a ~10px gutter at the cutover
-            -- instead of overlapping for the last ~10px.
-            local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
-            local minColumnWidth = 285  -- ≥ the 280 group width + a small gutter
-            local usesTwoColumns = contentWidth >= (minColumnWidth * 2 + 20)
-            
-            -- Account for scrollbar and padding when calculating usable width
-            local usableWidth = contentWidth - 40  -- Extra padding for scrollbar
-            
-            -- Check if editing banner is active (adds 50px at top)
-            local bannerOffset = 0
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                bannerOffset = 50
-            end
-            
-            -- Layout - adjust column positions based on available width
-            local x1, maxY = 5, 0
-            local col2X = usesTwoColumns and math.floor(contentWidth / 2) or x1
-            local y1, y2 = -5 - bannerOffset, -5 - bannerOffset
-            
-            -- First, position any right-aligned elements (like Copy buttons) at absolute top-right
-            for _, widget in ipairs(self.children) do
-                if widget.rightAlign and widget:IsShown() then
-                    widget:ClearAllPoints()
-                    -- Both offsets snapped: this widget is the HEAD of the
-                    -- Reset/Sync/Copy chain, so a fraction here is inherited by
-                    -- every button to its left, and the buttons are no longer
-                    -- nudged back onto the grid individually.
-                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
-                        SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
-                end
-            end
-            
-            -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
-            --
-            -- This used to subtract a flat 40 with the comment "button height ~26 +
-            -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
-            -- exactly 26 tall got a different gap under it, so the first box sat at
-            -- a different height on every page and the row appeared to shift.
-            -- Measure the row instead and add a fixed pad, so the gap below the
-            -- buttons is identical everywhere by construction.
-            --
-            -- The scan is ALSO gated on IsShown() now, matching the positioning loop
-            -- above. It was not, so a page carrying a HIDDEN right-aligned widget
-            -- still reserved the 40 and opened with an empty band above its first
-            -- box -- the pages Krathe saw "starting further down" with nothing there.
-            local RIGHT_ROW_PAD = 14
-            local rightRowH = 0
-            for _, widget in ipairs(self.children) do
-                if widget.rightAlign and widget:IsShown() then
-                    rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
-                end
-            end
-            if rightRowH > 0 then
-                -- Snapped for the same reason every other layout number is: an
-                -- unsnapped offset puts everything below it off the pixel grid.
-                local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
-                y1 = y1 - reserve
-                y2 = y2 - reserve
-            end
-            
-            for _, widget in ipairs(self.children) do
-                -- Skip widgets that belong to a SettingsGroup (they're positioned by the group)
-                if widget.settingsGroup then
-                    -- Do nothing - parent group handles positioning
-                elseif widget.rightAlign then
-                    -- Already positioned above, skip
-                elseif widget.isSyncPoint then
-                    -- Sync point: align both columns to the lowest Y position
-                    local syncY = math.min(y1, y2)
-                    y1 = syncY
-                    y2 = syncY
-                elseif widget:IsShown() then
-                    -- For SettingsGroups, use calculated height
-                    local h = widget.layoutHeight or 0
-                    if widget.isSettingsGroup and widget.calculatedHeight then
-                        h = widget.calculatedHeight
-                    end
-                    
-                    widget:ClearAllPoints()
-
-                    -- Set height for frame-based widgets (like header containers)
-                    if widget.text and widget.SetHeight and h > 0 then
-                        widget:SetHeight(h)
-                    end
-                    
-                    -- Apply indent offset if specified (for child/sub-options)
-                    -- Supports: true (20px), or a number for multiple levels (e.g. 2 = 40px)
-                    local indentOffset = 0
-                    if widget.indent then
-                        if type(widget.indent) == "number" then
-                            indentOffset = widget.indent * 20
-                        else
-                            indentOffset = 20
-                        end
-                    end
-                    
-                    -- Snap the offsets and widths this loop hands out, for the same
-                    -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
-                    -- straight onto the page (a banner, a full-width note, a
-                    -- collapsible section) never passes through a group, so this is
-                    -- the only place its geometry can be put on the grid. See SnapLen.
-                    local snapX = SnapLen(widget, x1 + indentOffset)
-
-                    if widget.layoutCol == "both" then
-                        local startY = math.min(y1, y2)
-                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
-                        -- Set width to span both columns (with scrollbar padding)
-                        widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
-                        y1 = startY - h
-                        y2 = startY - h
-                    elseif widget.layoutCol == 2 and usesTwoColumns then
-                        widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
-                                        SnapLen(widget, y2))
-                        -- Reduce width for indented widgets to maintain alignment
-                        if indentOffset > 0 and widget.SetWidth then
-                            local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                        end
-                        y2 = y2 - h
-                    else
-                        -- Column 1, or column 2 when in single-column mode
-                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
-                        -- Reduce width for indented widgets to maintain alignment
-                        if indentOffset > 0 and widget.SetWidth then
-                            local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                        end
-                        y1 = y1 - h
-                    end
-                    
-                    local currentBottom = math.min(y1, y2)
-                    if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
-                end
-            end
-            local contentH = maxY + 40 + bannerOffset
-
-            -- FOOTER: the See-Also bar is designed as one, so on a page whose
-            -- content does not fill the viewport it should sit at the BOTTOM
-            -- rather than floating halfway down with dead space under it. On a
-            -- page that does fill (or overflow) the viewport it already lands at
-            -- the end of the flow, which reads correctly -- so this only moves it
-            -- when there is spare room, and the long-page case is untouched.
-            --
-            -- Done by stretching the scroll child to the viewport height and
-            -- anchoring the footer to the child's BOTTOM: the child is what the
-            -- flow is measured against, so this keeps the footer inside the
-            -- scrolled content (it still scrolls with a long page) instead of
-            -- floating over it.
-            local footer
-            for _, w in ipairs(self.children) do
-                if w.isPageFooter and w:IsShown() then footer = w break end
-            end
-            if footer then
-                local viewH = self:GetHeight() or 0
-                if viewH > contentH then
-                    contentH = viewH
-                    footer:ClearAllPoints()
-                    footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
-                        SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
-                    footer:SetWidth(SnapLen(footer, usableWidth))
-                end
-            end
-
-            self.child:SetHeight(contentH)
-
-            -- Update scroll child width to match content area
-            if self.child and GUI.contentFrame then
-                self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
-            end
+            DoBuild(self)
         end
+
+        -- ★ THE SEARCH INDEX'S WAY OUT OF REBUILDING THIS PAGE. The entries the
+        -- page's build for the CURRENT mode registered (DoBuild's capture), or nil
+        -- when there is no such build that RefreshCached would serve as it stands.
+        -- Read-only: the build may be the one on screen or the one parked in
+        -- _modeBuilds, and nothing is swapped, shown or re-stated to answer.
+        -- ⚠ Every test RefreshCached makes, and one more: a page with a content
+        -- cache key (GUI.PageCacheKeys) always answers nil -- its key can be a
+        -- function of the index itself, and asking it from here would recurse.
+        page.GetIndexEntries = function(self)
+            local mode = GUI.SelectedMode
+            local db = DF.db[mode]
+            if not db then return nil end
+            if GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName] then return nil end
+            local build
+            if self.builtForMode == mode then
+                build = self
+            elseif self._modeBuilds then
+                build = self._modeBuilds[mode]
+            end
+            if not build or not build.cacheValid or build.builtForMode ~= mode then return nil end
+            if not self.singleModeBuild and not BuildDbMatches(build, db) then return nil end
+            if build.builtForDisabled ~= GUI:IsTabDisabledForCurrentMode(self.tabName) then return nil end
+            return build._searchEntries
+        end
+
+        -- ☠ DISPATCHED BY NAME, not captured. The profiler instruments a target
+        -- by REPLACING DF.GUI.PageRefreshStates, and every page is built the
+        -- first time the window opens -- long before a profiling run starts --
+        -- so a page holding the function VALUE would keep calling the unwrapped
+        -- original and the target would read zero calls forever.
+        page.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
     end
     
     -- Trash frame: detached from the GUI hierarchy. Old page children are
@@ -2522,12 +4467,15 @@ function DF:CreateGUI()
     -- ☠ THE ONLY DEFINITION. A second one used to exist earlier in this same function and
     -- was shadowed by this one at every panel build; the guard below came from that copy.
     -- Callers guard the FUNCTION but not the TABLE, so the guard has to live here.
-    function GUI:InvalidateAllPages()
+    -- `mode` (optional): only that mode's builds -- for a write that touched the
+    -- other mode's settings and nothing else (see SettingsUndo). Omitted = both.
+    function GUI:InvalidateAllPages(mode)
         if not self.Pages then return end
         for _, page in pairs(self.Pages) do
-            if page.Invalidate then page:Invalidate() end
+            if page.Invalidate then page:Invalidate(mode) end
         end
     end
+
 
     -- Invalidate a single page by name.
     function GUI:InvalidatePage(name)
@@ -2553,11 +4501,114 @@ function DF:CreateGUI()
     -- Apply tab availability for current mode (greys out disabled-mode tabs)
     GUI:UpdateTabAvailability()
 
-    -- Select first subtab
-    if GUI.CategoryOrder[1] then
-        local firstCat = GUI.Categories[GUI.CategoryOrder[1]]
-        if firstCat and firstCat.children[1] then
-            SelectTab(firstCat.children[1].tabName)
+    -- The first page of the tab the window opens on (Party or Raid; GLOBAL only
+    -- once the user goes there).
+    local first = GUI:FirstTabInView()
+    if first then SelectTab(first) end
+end
+
+-- ============================================================
+-- FADED CLOSE FOR /df
+-- DF:ToggleGUI (GUI/Controls.lua) hides an open window instantly on the
+-- close half of its toggle. Wrap it here -- this file loads after Controls.lua
+-- (companion TOC order) -- so `/df` on an open window fades it out (0.25s,
+-- DandersUI UI.Fx) before hiding, matching the close button above.
+-- Guards:
+--  * `/df` again while the fade-out runs REOPENS (cancels the fade and fades
+--    back in) instead of stacking a second close -- a double-toggle can never
+--    strand the window mid-fade.
+--  * Esc (UISpecialFrames) and any direct :Hide() stay instant; hiding
+--    mid-fade stops the animation and FadeOut skips its deferred Hide.
+--  * The open half is untouched -- it delegates to the original, so mode
+--    detection, accent, changelog-on-update all behave exactly as before.
+-- ============================================================
+local origToggleGUI = DF.ToggleGUI
+function DF:ToggleGUI(...)
+    local f = DF.GUIFrame
+    if f and f:IsShown() then
+        if f.fxOut and f.fxOut:IsPlaying() then
+            GUI.Fx.FadeIn(f, 0.3)
+            return
+        end
+        GUI.Fx.FadeOut(f, 0.25, function() f:Hide() end)
+        return
+    end
+    return origToggleGUI(self, ...)
+end
+
+-- ============================================================
+-- THE SYNC KEEPS TABLES
+-- DF:CopySectionSettingsRaw (Core/Profile.lua) is the Party/Raid Sync's copy:
+-- DF:SyncLinkedSections runs it for every synced page on every mode switch AND
+-- on every DF:UpdateAll, window open or not. It gives each table-valued key it
+-- copies a NEW table (DF:DeepCopy), and a page build bound to the table it
+-- replaced would then show, and write into, a table nothing reads any more --
+-- which is why every switch used to invalidate (and so rebuild, leaking) every
+-- synced page's retained build of the other mode. See ONE RETAINED BUILD PER
+-- MODE, above BuildPage.
+--
+-- Wrapped HERE, in the companion, because the copy itself stays exactly as it
+-- is: this runs it, then pours each replacement back INTO the table it replaced
+-- and puts that table back, so the data is the copy's and every reference to the
+-- old table -- a retained page build, a search card, an undo entry -- sees it.
+-- The same move the auto layouts make when they restore a whole-table override
+-- (Core/AutoProfiles.lua, DeepReplaceInPlace), for the same reason. Nothing is
+-- retained before the companion loads, so the resident copy alone is fine then.
+-- ⚠ Only tables the copy REPLACED are touched: a scalar key, a key the proxy
+-- refused to write (an auto-profile override guard), a key the section does not
+-- own and a key that was not a table before all come out exactly as the copy
+-- left them. Written to the REAL table, like the copy's own writes land there.
+-- ============================================================
+do
+    local function ReplaceInPlace(dst, src, seen)
+        if seen[dst] then return end
+        seen[dst] = true
+        for k, v in pairs(src) do
+            local cur = rawget(dst, k)
+            if type(v) == "table" and type(cur) == "table" and cur ~= v then
+                ReplaceInPlace(cur, v, seen)
+            else
+                dst[k] = v
+            end
+        end
+        for k in pairs(dst) do
+            if src[k] == nil then dst[k] = nil end
+        end
+    end
+
+    local origCopySectionSettingsRaw = DF.CopySectionSettingsRaw
+    if origCopySectionSettingsRaw then
+        function DF:CopySectionSettingsRaw(prefixes, srcMode, ...)
+            local db = DF.db
+            local destMode = ((srcMode or "party") == "party") and "raid" or "party"
+            local dest = db and db[destMode]
+            if type(dest) ~= "table" then
+                return origCopySectionSettingsRaw(self, prefixes, srcMode, ...)
+            end
+            local mt = getmetatable(dest)
+            local real = (mt and mt.__realTable) or dest
+            -- Every table the copy could replace, by key, before it runs. Only the
+            -- section's own keys: this runs on every UpdateAll, and the copy
+            -- touches nothing else.
+            local owns = DF.SectionOwnsKey
+            local before
+            for k, v in pairs(real) do
+                if type(v) == "table" and (not owns or owns(DF, prefixes, k)) then
+                    before = before or {}
+                    before[k] = v
+                end
+            end
+            local r1, r2 = origCopySectionSettingsRaw(self, prefixes, srcMode, ...)
+            if before then
+                for k, old in pairs(before) do
+                    local new = rawget(real, k)
+                    if type(new) == "table" and new ~= old then
+                        ReplaceInPlace(old, new, {})
+                        real[k] = old
+                    end
+                end
+            end
+            return r1, r2
         end
     end
 end

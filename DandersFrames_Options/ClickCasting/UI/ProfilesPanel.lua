@@ -77,11 +77,10 @@ function CC:CreateProfilesPanelContent()
     local newBtn = CreateSmallButton(btnRow, L["New"], 10)  -- Width will be set by anchors
     newBtn:SetPoint("LEFT", 0, 0)
     newBtn:SetPoint("RIGHT", btnRow, "CENTER", -2, 0)
-    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
-    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(newBtn, {
         text = L["New"], accent = themeColor, tinted = true,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add.png", size = 12, color = C.text },
     })
     newBtn:SetScript("OnClick", function()
         CC:ShowNewProfileDialog()
@@ -92,7 +91,7 @@ function CC:CreateProfilesPanelContent()
     copyBtn:SetPoint("RIGHT", 0, 0)
     DF.GUI:StyleButton(copyBtn, {
         text = L["Copy"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\content_copy.png", size = 12, color = C.text },
     })
     copyBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
@@ -112,7 +111,7 @@ function CC:CreateProfilesPanelContent()
     renameBtn:SetPoint("RIGHT", btnRow2, "CENTER", -2, 0)
     DF.GUI:StyleButton(renameBtn, {
         text = L["Rename"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit.png", size = 12, color = C.text },
     })
     renameBtn:SetScript("OnClick", function()
         if CC.selectedProfileName then
@@ -129,7 +128,7 @@ function CC:CreateProfilesPanelContent()
     -- border + hover scripts and the hand-attached icon texture.
     DF.GUI:StyleButton(deleteBtn, {
         text = L["Delete"], tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete", size = 12, color = { r = 1, g = 0.5, b = 0.5 } },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\delete.png", size = 12, color = { r = 1, g = 0.5, b = 0.5 } },
     })
     deleteBtn.text:SetTextColor(1, 0.5, 0.5)
     deleteBtn:SetScript("OnClick", function()
@@ -153,11 +152,10 @@ function CC:CreateProfilesPanelContent()
     local exportBtn = CreateSmallButton(ioRow, L["Export"], 10)
     exportBtn:SetPoint("LEFT", 0, 0)
     exportBtn:SetPoint("RIGHT", ioRow, "CENTER", -2, 0)
-    -- Leading icon + persistent accent tint (replaces the hand-rolled texture and
-    -- the post-StyleButton SetBackdropColor that used to clobber the styler).
+    -- Leading icon + persistent accent tint.
     DF.GUI:StyleButton(exportBtn, {
         text = L["Export"], accent = themeColor, tinted = true,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\upload.png", size = 12, color = C.text },
     })
     exportBtn:SetScript("OnClick", function()
         CC:ShowExportDialog()
@@ -168,7 +166,7 @@ function CC:CreateProfilesPanelContent()
     importBtn:SetPoint("RIGHT", 0, 0)
     DF.GUI:StyleButton(importBtn, {
         text = L["Import"], accent = themeColor,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download", size = 12, color = C.text },
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\download.png", size = 12, color = C.text },
     })
     importBtn:SetScript("OnClick", function()
         CC:ShowImportDialog()
@@ -412,9 +410,7 @@ function CC:RefreshProfilesPanel()
     local yOffset = 0
     
     -- Both row states ride the shared styler, so the hover is the same theme wash
-    -- as every other button in the addon. These rows used to hand-roll a flat
-    -- 0.15 grey in OnEnter and restate all three rest fills in OnLeave, which is
-    -- how they ended up as the one hover that ignored the theme entirely.
+    -- as every other button in the addon.
     --   SELECTED (what Rename/Delete act on) -> SetActive's accent fill + border
     --   ACTIVE   (the profile actually in use) -> green rest border + the dot
     -- Two separate cues, so a row that is selected but NOT active still reads
@@ -525,7 +521,7 @@ function CC:RefreshProfilesPanel()
         -- No `or 1` mask: with spec unresolved, GetProfileForLoadout(1, ...) would
         -- return SPEC 1's assignment and this label would claim "[Linked]" or name
         -- an "[Override]" profile that isn't yours. Report nothing instead.
-        local specIndex = GetSpecialization()
+        local specIndex = C_SpecializationInfo.GetSpecialization()
         local loadoutID = 0
         if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
             loadoutID = C_ClassTalents.GetActiveConfigID() or 0
@@ -584,7 +580,7 @@ function CC:RefreshLoadoutAssignments()
     local numSpecs = self:GetNumSpecs()
     
     for specIndex = 1, numSpecs do
-        local _, specName, _, specIcon = GetSpecializationInfo(specIndex)
+        local _, specName, _, specIcon = C_SpecializationInfo.GetSpecializationInfo(specIndex)
         if specName then
             -- Spec header
             local specHeader = CreateFrame("Frame", nil, self.loadoutContent, "BackdropTemplate")
@@ -748,9 +744,8 @@ end
 -- PROFILE DIALOGS
 -- =========================================================================
 
--- These all used to be Blizzard StaticPopups raised above our UI by hand, because
--- the settings window sits at FULLSCREEN_DIALOG and a StaticPopup opens behind it.
--- DF's own popup lives at that strata already, so the raise helper is gone.
+-- Use DF's own popup, not a Blizzard StaticPopup: the settings window sits at
+-- FULLSCREEN_DIALOG and a StaticPopup opens behind it.
 
 function CC:ShowNewProfileDialog()
     DF.GUI:PromptName({

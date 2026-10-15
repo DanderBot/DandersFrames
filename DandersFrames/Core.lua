@@ -212,24 +212,13 @@ function DF:CmdPath(word)
     return (DF.EVERYDAY_COMMANDS[word] and "/df " or "/df debug ") .. word
 end
 
--- (Removed) DF:IsDebugCommand. Written so "the listing, the Siblings footer and the
--- help text can never disagree", but each of those was subsequently rewritten to
--- read what it needs directly — the listing walks the two registries itself and
--- Out:Siblings uses DF:CmdPath — leaving it with zero callers.
-
 -- ============================================================
 -- /df SUBCOMMAND REGISTRY
 -- ============================================================
 -- The /dfXXX half of "/df debug" is generated from DebugCommands above, so it
--- cannot drift. The /df SUBCOMMAND half used to be eight hand-written print()
--- lines carrying the comment "keep in sync with this handler" — and it had
--- drifted BOTH ways: it advertised "/df debug auratimer", which was never
--- implemented, while omitting ~45 subcommands that were (pixelcheck, gapcheck,
--- navprobe, idgate, ppdump, zorder, localewarn, every test*, …).
---
--- This registry is now the single source for that listing. Adding a branch to
--- the dispatcher without registering it here means it stays invisible, so
--- register alongside the branch.
+-- cannot drift. This registry is the single source for the /df SUBCOMMAND half:
+-- adding a branch to the dispatcher without registering it here means it stays
+-- invisible, so register alongside the branch.
 --
 -- `args` documents the argument shape for the listing ("<sec>", "on|off"),
 -- nil for bare commands. `dev` hides it on release builds, matching the slash
@@ -417,18 +406,15 @@ DF.COMMAND_SIBLINGS = {
     auras     = { "<unit>" },
     auradata  = { "<unit>" },
     dispel    = { "<unit>", "ids", "render" },
-    -- No args. NOT here to avoid a nil index -- Out:Siblings opens with
-    -- `if not list then return self end`, so a missing key was always safe; the
-    -- rationale this pair used to carry was describing a hazard the function does not
-    -- have. They stay because both ARE looked up, and an explicit empty list says
-    -- "checked, takes nothing" where a missing key says nothing at all.
+    -- No args, and NOT here to avoid a nil index -- Out:Siblings opens with
+    -- `if not list then return self end`, so a missing key is always safe. All three
+    -- ARE looked up, and an explicit empty list says "checked, takes nothing" where
+    -- a missing key says nothing at all.
     idgate    = {},
     guiwidth  = {},
     adpin     = {},
     gapcheck  = { "all", "clear" },
-    -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
-    -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
-    -- asked.
+    guiperf   = { "start", "stop", "report" },
     admissing = { "mark" },
     -- The dev list here MUST stay in step with HEADER_MUTATORS in Frames/Headers.lua,
     -- which is what actually refuses them on a release build. Listing one without
@@ -437,8 +423,6 @@ DF.COMMAND_SIBLINGS = {
     pinned    = { "info", "test", "reinit", "bosstest <1-8>", "bossspawn demo" },
     range     = { "stats", "spell", "dump", "clear" },
     sort      = { "refresh", "clear" },
-    -- /dfsecure was retired with the secure-sort half (its handler never armed); no
-    -- sibling entry, so nothing advertises a command that no longer registers.
     flatraid  = { "info", "reinit", "test" },
     -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
     -- table — that is its entire job — so a Siblings footer would repeat it.
@@ -503,13 +487,6 @@ end
 -- ============================================================
 -- DEBUG COMMAND GROUPING
 -- ============================================================
--- /df debug used to print three sections split by REGISTRATION MECHANISM —
--- "Support / diagnostics" and "Dev tools" (both from RegisterDebugSlash) and
--- "/df diagnostics" (from RegisterDebugSub). That is an implementation detail
--- nobody reading the list cares about: it put /df debug auras and /df debug auradata in
--- different sections while they answer the same question, and it made the
--- first and third sections look like they should be one list.
---
 -- The split that matters is WHO RUNS IT (dev gate) and WHAT IT IS ABOUT
 -- (subsystem). Both registries resolve their group from the one map below, so
 -- there is a single place to edit and anything unmapped lands visibly in
@@ -542,6 +519,7 @@ DF.DEBUG_GROUP_OF = {
     casthistory = "click", clearhistory = "click", resetconflict = "click",
 
     pixelcheck = "gui", gapcheck = "gui", navprobe = "gui", guiwidth = "gui",
+    guiperf = "gui",
     tdmirror = "gui", colorhook = "gui", overridedebug = "gui", atlas = "gui",
     icons = "gui",
 
@@ -556,22 +534,17 @@ DF.DEBUG_GROUP_OF = {
 }
 
 -- `hidden` keeps a command ANSWERING, and registered here, but off the /df debug
--- listing. Two reasons qualify:
+-- listing. One reason qualifies: it is an everyday command already listed by
+-- /df help (test, reset, lock...). Each command should be documented in exactly
+-- ONE list -- the one its audience reads -- or the two drift apart.
 --
 -- ⚠ REGISTERING IS WHAT PUTS THE WORD IN DEBUG_SUB_KNOWN -- that is the real,
 -- checkable reason to register a hidden command, and it is why /df debug <word> does
--- not load the settings companion for a branch that lives in this addon. These notes
--- used to say "for the drift check"; there is no drift check. Nothing anywhere
--- compares the two registries against the dispatcher, so four comments were leaning
--- on a safety net that does not exist. (auditspells and exportaudit ARE drift checks,
--- of curation data and export categories -- unrelated to command registration.)
---   1. It is an everyday command already listed by /df help (test, reset, lock...).
---      Each command should be documented in exactly ONE list — the one its audience
---      reads — or the two drift apart, which is how pixelcheck ended up in both.
---   2. (Removed 2026-07-29) There used to be a second reason: console-migration
---      signposts that toggled nothing. Those commands are gone rather than hidden
---      — a command whose whole job is to say "this moved" is one more spelling to
---      learn, and the console page already says where tracing lives.
+-- not load the settings companion for a branch that lives in this addon. Do NOT
+-- register "for the drift check": there is no drift check. Nothing anywhere
+-- compares the two registries against the dispatcher. (auditspells and exportaudit
+-- ARE drift checks, of curation data and export categories -- unrelated to command
+-- registration.)
 function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
     table.insert(DF.DebugSubCommands, { cmd = cmd, desc = desc, dev = devOnly, args = args, hidden = hidden })
     -- Registering IS the gate. Populated here rather than at the branch so a
@@ -591,8 +564,8 @@ end
 -- which is load-bearing.
 --
 -- ☠ WHY THIS LIVES IN Core.lua AND NOT IN Debug/MemoryTest.lua
--- The flag table is declared at TOC line 160; every consumer of it loads
--- earlier (Border 91, Icons 99, Auras 110, AD Factory 125, TD Render 134). The
+-- The flag table is declared in the on-demand companion (Debug/MemoryTest.lua);
+-- every consumer (Border, Auras, AD Factory, TD Render, ...) loads earlier. The
 -- old idiom was `DF.MemTest and not DF.MemTest.enableX`, which reads a MISSING
 -- key as nil -> `not nil` -> true -> DISABLED. So any window where a consumer
 -- knew about a flag the table did not yet declare silently switched that system
@@ -645,10 +618,21 @@ end
 -- During slider drag: only update the one property (e.g., just frame height)
 -- On slider release: perform full frame update to ensure everything is in sync
 
--- Debug flag for slider updates (enable the GUI category in the debug console)
-
--- Track active slider dragging state
-DF.sliderDragging = false
+-- Track active slider dragging state.
+--
+-- ⚠ REFCOUNTED, not a boolean. More than one surface can hold a drag open at
+-- once -- the colour picker's bars announce themselves through the same two
+-- hooks now, and a picker opened from a settings page can be dragged while some
+-- other widget is mid-gesture. With a plain boolean, whichever one released
+-- FIRST cleared the flag for both, and every "am I dragging?" reader below went
+-- false while a bar was still being held.
+--
+-- `DF.sliderDragging` stays a DERIVED BOOLEAN and is what everything reads
+-- (Core.lua's health-colour gate, GUI.lua's isDragging hook, TestMode's throttle
+-- and its frame-count slider). Nothing outside this section should read the
+-- count.
+DF.sliderDragCount = 0          -- how many surfaces are holding a drag open
+DF.sliderDragging = false       -- derived: sliderDragCount > 0
 DF.sliderLightweightFunc = nil  -- The lightweight update function to call during drag
 DF.sliderLightweightName = nil  -- Name of the lightweight function for debug
 DF.sliderUpdateCallCount = 0    -- Call counter for debugging
@@ -662,12 +646,20 @@ local lastSizeUpdate = 0
 -- funcName: optional name for debug output
 -- usePreviewMode: if true, hide frame elements for better performance
 function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
+    DF.sliderDragCount = (DF.sliderDragCount or 0) + 1
     DF.sliderDragging = true
+
+    -- ONE lightweight slot, last writer wins. Two overlapping drags cannot both
+    -- be previewed through a single slot, and the second one is the one the
+    -- user is actually moving. A drag that supplies no lightweight (the colour
+    -- picker's bars) therefore CLEARS the slot -- which is correct: the outgoing
+    -- function was for a bar nobody is holding any more.
     DF.sliderLightweightFunc = lightweightFunc
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
-    
-    DF:Debug("GUI", "Slider drag START - %s%s",
+
+    DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
+        DF.sliderDragCount,
         lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
             or "no lightweight function (will skip until release)",
         usePreviewMode and " (PREVIEW MODE)" or "")
@@ -675,16 +667,37 @@ end
 
 -- Called when a slider stops being dragged (mouse up)
 function DF:OnSliderDragStop()
-    DF:Debug("GUI", "Slider drag STOP - %s lightweight calls, now FULL UpdateAll()",
-        tostring(DF.sliderUpdateCallCount))
-    
-    DF.sliderDragging = false
+    local count = (DF.sliderDragCount or 0) - 1
+    if count < 0 then
+        -- A stop with no matching start. Floored rather than allowed to go
+        -- negative, or the next real drag would have to climb back to 1 before
+        -- sliderDragging read true again.
+        DF:DebugWarn("GUI", "Slider drag STOP with no drag held - refcount underflow")
+        count = 0
+    end
+    DF.sliderDragCount = count
+    DF.sliderDragging = count > 0
+
+    DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
+        count, tostring(DF.sliderUpdateCallCount))
+
+    -- Still someone holding a bar: keep the lightweight slot and do NOT run the
+    -- test-mode catch-up below, which is the "the gesture is over" pass.
+    if count > 0 then return end
+
     DF.sliderLightweightFunc = nil
     DF.sliderLightweightName = nil
-    
-    -- Perform full update now that dragging has stopped
+
+    -- ⚠ RAID TEST MODE ONLY. The generic full sweep is no longer requested from
+    -- here: the widget kit's release path calls the `refreshNow` hook, which
+    -- asks for exactly the same "all" and coalesces with whatever the setting's
+    -- own callback scheduled. The old `else DF:UpdateAll()` arm was therefore a
+    -- duplicate request and is gone.
+    --
+    -- This branch is NOT a duplicate and must stay: "all" does not cover
+    -- UpdateAllRaidPetFrames, so removing it would leave the raid test preview's
+    -- pet frames stale for the rest of the drag.
     local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-    
     if isRaidMode and DF.raidTestMode then
         if DF.UpdateRaidTestFrames then
             DF:UpdateRaidTestFrames()
@@ -692,27 +705,17 @@ function DF:OnSliderDragStop()
         if DF.UpdateAllRaidPetFrames then
             DF:UpdateAllRaidPetFrames()
         end
-    else
-        DF:UpdateAll()
-        -- UpdateAll already calls UpdateAllPetFrames
     end
 end
 
--- Called during slider value changes
--- If dragging with a lightweight function, call it directly (throttled)
--- If dragging without lightweight function, skip entirely until release
--- If not dragging, call UpdateAll directly (no throttle)
+-- ⚠ DEPRECATED -- A PLAIN ALIAS FOR DF:UpdateAll(), and deleted next minor.
+-- Point new code at DF:UpdateAll() directly.
+--
+-- The throttle it is named for is the apply scheduler's job now: DF:UpdateAll()
+-- is an arm-stub, so repeat calls inside one rendered frame coalesce on their
+-- own (Core\ApplyScheduler.lua). Callers reaching this through the GUI `refresh`
+-- hook request a full "all" per call, which the sink collapses into one pass.
 function DF:ThrottledUpdateAll()
-    if DF.sliderDragging then
-        if DF.sliderLightweightFunc then
-            -- During drag with lightweight function, call it (has its own throttle)
-            DF.sliderLightweightFunc()
-        end
-        -- If no lightweight func, just skip until release
-        return
-    end
-    
-    -- Not dragging - just call UpdateAll directly
     DF:UpdateAll()
 end
 
@@ -1949,8 +1952,6 @@ function DF:LightweightUpdateFrameLevel(elementType)
         vehicle      = "vehicleIcon",
         raidRole     = "raidRoleIcon",
         summon       = "summonIcon",
-        -- These two had a slider and an export entry but no live consumer: their
-        -- Frame Level only ever applied in test mode. Wired here 2026-07-25.
         bgCarrier    = "bgCarrierIcon",
         combat       = "combatIcon",
         ping         = "pingIcon",
@@ -2041,9 +2042,10 @@ function DF:GetUnitRole(unit)
     -- fallback still runs if the player's own role ever reads secret. Callers
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
+    -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
     if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
-       and GetSpecialization and GetSpecializationRole then
-        local spec = GetSpecialization()
+       and GetSpecializationRole and not DF.IS_FOREVER then
+        local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
     end
     return role
@@ -2551,8 +2553,8 @@ function DF:LightweightUpdateBackgroundColor()
         -- strings that were discarded on the spot.
         --
         -- ⚠ Its sibling frame.dfCurrentBgTexture IS a real guard and stays: it is
-        -- tested at Frames/Update.lua:385 before re-applying a texture. The two names
-        -- read alike, which is most of why this one survived.
+        -- tested in Frames/Update.lua (ApplyFrameLayout) before re-applying a texture.
+        -- The two names read alike, which is most of why this one survived.
 
         -- Determine class color for CLASS mode
         local cr, cg, cb = 0, 0, 0
@@ -2811,11 +2813,6 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     IterateFramesInMode(mode, UpdateFrame)
 end
 
--- Update dispel overlay colors directly (for test mode preview only)
--- IMPORTANT: Only updates test mode frames to preserve secret color handling on live frames
--- (DF:LightweightUpdateDispelColors was removed with the dispel Custom Colors
--- mode, 2026-07-11 — its per-type picker callbacks were its only callers.)
-
 
 -- ============================================================
 -- UTF-8 STRING HELPERS
@@ -3019,8 +3016,6 @@ function DF:DebugAuraFilters(unit)
             pcall(function() spellId = auraData.spellId or "?" end)
 
             -- Real signature: ShouldDisplayBuff(unitCaster, spellId, canApplyAura).
-            -- The old call passed the whole auraData table as unitCaster, which
-            -- fell through to the final `else` and returned false for everything.
             if AuraUtil.ShouldDisplayBuff then
                 local ok, result = pcall(function()
                     return AuraUtil.ShouldDisplayBuff(auraData.sourceUnit, auraData.spellId, auraData.canApplyAura)
@@ -3189,8 +3184,7 @@ end
 -- ⚠ The "/dfarena" alias below is the REGISTRY SPELLING, not a working bind: it is
 -- /df-prefixed, so RegisterDebugSlash routes it to DebugSlashBySub["arena"] and
 -- deliberately creates no SLASH_ global (only non-/df aliases like "/rl" get one).
--- Typing "/dfarena" does nothing. That is the intended shape — one command form —
--- but it read as a promise, so both the comment above and CLAUDE.md claimed it worked.
+-- Typing "/dfarena" does nothing. That is the intended shape: one command form.
 -- Requires being in a raid group to see frames
 -- ============================================================
 DF:RegisterDebugSlash("DFARENA", "Toggle arena test mode (raid group)", false, "/dfarena")
@@ -3245,7 +3239,6 @@ function DF:GetCurrentMode()
     return "party"
 end
 
--- Deep copy helper (also defined in Profile.lua, but needed here too)
 -- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
 
 -- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
@@ -3349,7 +3342,9 @@ end
 do
     local MIN_INTERFACE = 120100  -- 12.1.0
     local clientToc = select(4, GetBuildInfo())
-    if type(clientToc) == "number" and clientToc < MIN_INTERFACE then
+    -- WoW Forever reports 16001 but runs the 12.1 engine and is supported
+    -- (Core\ClientFlavor.lua), so it must not trip the older-client warning.
+    if type(clientToc) == "number" and clientToc < MIN_INTERFACE and not DF.IS_FOREVER then
         local guardFrame = CreateFrame("Frame")
         guardFrame:RegisterEvent("PLAYER_LOGIN")
         guardFrame:SetScript("OnEvent", function(self)
@@ -3505,10 +3500,10 @@ end
 -- green bar the user can fix in two clicks; the failure mode of over-reaching is silently
 -- rewriting a texture choice someone made on purpose.
 --
--- ☠ AND IT REFUSES TO RUN ON AN EMPTY REGISTRY. The valid set is built from LSM's live
--- registrations, so if this ever ran before Config.lua registered ours, EVERY DF path
--- would look unrecognised and the pass would rewrite the lot. Below a plausible count it
--- bails WITHOUT stamping the flag, so it simply tries again next login.
+-- ☠ AND IT REFUSES TO RUN ON AN EMPTY MANIFEST. The valid set is DF.SHIPPED_MEDIA (built
+-- by Config.lua), NOT LSM's live registrations, so if this ever ran before that was
+-- filled, EVERY DF path would look unrecognised and the pass would rewrite the lot. On a
+-- missing or empty manifest it bails at once, so it simply tries again next login.
 local TEXTURE_REPAIR_KEYS = {
     "healthTexture", "backgroundTexture", "missingHealthTexture", "reducedMaxHealthTexture",
     "absorbBarTexture", "healAbsorbBarTexture", "healPredictionTexture",
@@ -3722,9 +3717,6 @@ function DF:MigrateAuraBorderKeys(modeDb)
             modeDb[p .. "BorderSize"] = modeDb[p .. "BorderThickness"]
         end
     end
-    -- (The buffExpiringBorderPulsate -> ...AnimationType migration was removed with the
-    -- pre-12.1 Expiring system on 2026-07-25 — both keys are gone, so there is nothing
-    -- left to migrate between.)
 end
 
 -- ============================================================
@@ -3975,6 +3967,261 @@ function DF:MigrateHealPredictionBelowAbsorb()
     end
 end
 
+-- Rewrite ONE position record's pinned anchor strings from the pre-uid key format
+-- ("DandersFrames:party.pinned3" -- no dot before the number) to the uid format
+-- ("DandersFrames:party.pinned.3"). The addon key is the literal MoverBridge registers
+-- under; a string naming any other addon is not ours to touch.
+--
+-- ⚠ A string naming a set that NO LONGER EXISTS is left exactly as it is. Rewriting it
+-- would hand it to whatever set later takes that uid; left alone it simply never
+-- resolves, and DandersMover's answer to an unresolvable target is that the child HOLDS
+-- its position. `hasSet(scope, n)` is the caller's existence test for its own profile.
+local function MigratePinnedAnchorKeys(pos, hasSet)
+    if type(pos) ~= "table" then return end
+    local function fix(block)
+        if type(block) ~= "table" or type(block.target) ~= "string" then return end
+        local scope, n = block.target:match("^DandersFrames:(party)%.pinned(%d+)$")
+        if not scope then
+            scope, n = block.target:match("^DandersFrames:(raid)%.pinned(%d+)$")
+        end
+        if not scope then return end
+        n = tonumber(n)
+        if not n or not hasSet(scope, n) then return end
+        block.target = "DandersFrames:" .. scope .. ".pinned." .. n
+    end
+    fix(pos.anchor)
+    fix(pos.anchor and pos.anchor.fallback)
+end
+
+-- ☠ SEEDS A KEY THAT HAS A SHIPPED DEFAULT, so this MUST run before the defaults
+-- backfill -- see the wiring note at the call site. `position` is in PartyDefaults
+-- (and therefore in the generated RaidDefaults), so if the backfill runs first it
+-- stamps {CENTER, 0, -325} into every profile and the "position == nil" presence gate
+-- can never pass again: every existing user's saved anchor would be silently replaced
+-- by the default. This is the same failure MigrateHealthColorStops documents.
+--
+-- Seeds db.party.position from anchorX/anchorY and db.raid.position from
+-- raidAnchorX/raidAnchorY. The scalars STAY as a write-through mirror for this minor
+-- (DF:SetPositionRecord is the funnel); this migration only gives the record its
+-- initial value so nothing moves on the upgrade login.
+-- Phase B: also seeds personalTargetedPosition (both modes) and targetedListPosition (party), and runs the pinned record migration.
+function DF:MigrateContainerPositionRecords()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+
+    local function seed(modeDb, key, xKey, yKey, defX, defY)
+        if type(modeDb) ~= "table" then return end
+        -- Presence gate, not a value gate: a record that already exists is the user's.
+        if type(modeDb[key]) == "table" then return end
+        modeDb[key] = {
+            point = "CENTER",
+            x = tonumber(modeDb[xKey]) or defX,
+            y = tonumber(modeDb[yKey]) or defY,
+        }
+    end
+
+    -- ☠ UIParent's size is NOT trustworthy at ADDON_LOADED -- what it reads there is
+    -- not the size the UI runs at, and the pinned corner fold baked it into every
+    -- corner-referenced set (a TOPRIGHT set landed ~1280 short and was clamped into
+    -- the bottom-left corner). Hand the pinned walk a size only once PLAYER_ENTERING_WORLD
+    -- has passed (DF.uiGeometryTrusted); before that it defers the corner term on the
+    -- record (pendingRef) and this function is simply run again from there.
+    local uiW, uiH = DF:GetTrustedUIParentSize()
+
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        -- Per PROFILE, not per run: an inactive profile is reached by the login
+        -- battery's whole-table walk, but an imported one arrives later, and a per-run
+        -- guard would skip it forever. (Same reasoning as MigrateHealPredictionBelowAbsorb.)
+        if type(profile) == "table" and not profile._moverPositionRecordsV1 then
+            seed(profile.party, "position", "anchorX", "anchorY", 0, -325)
+            seed(profile.raid, "position", "raidAnchorX", "raidAnchorY", -6.666610717773438, -25)
+
+            -- ⚠ DEFENSIVE ONLY -- this walk deletes, it does not migrate. `position` is
+            -- deliberately NOT an auto-layout override key: ApplyRuntimeProfile deep-copies
+            -- a whole-table override into a frozen overlay, and the overlay proxy's
+            -- __newindex only fires for TOP-LEVEL key writes, so `db.position.x = v` would
+            -- reach neither -- a table-valued override reads stale and loses writes. Raid
+            -- layouts keep overriding the SCALARS (raidAnchorX/raidAnchorY). Strip a
+            -- `position` override that leaked in from a future build rather than letting it
+            -- activate and freeze the raid container.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.position = nil
+                end)
+            end
+
+            profile._moverPositionRecordsV1 = true
+        end
+
+        -- V2 (Phase B): the personal targeted block (both modes -- the raid copy drives
+        -- it in a raid) and the targeted list (party only). Same presence gate, same
+        -- override strip (personalTargetedPosition is on NON_OVERRIDABLE_KEYS; the
+        -- scalars stay the layout's lever).
+        if type(profile) == "table" and not profile._moverPositionRecordsV2 then
+            seed(profile.party, "personalTargetedPosition", "personalTargetedSpellX", "personalTargetedSpellY", 0, -150)
+            seed(profile.raid,  "personalTargetedPosition", "personalTargetedSpellX", "personalTargetedSpellY", 0, -150)
+            seed(profile.party, "targetedListPosition", "targetedListX", "targetedListY", 0, -10)
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.personalTargetedPosition = nil
+                    layout.overrides.targetedListPosition = nil
+                end)
+            end
+            profile._moverPositionRecordsV2 = true
+        end
+
+        -- Phase C: the in-house drag grid and position panel died with the legacy
+        -- movers. Delete their five per-mode prefs so stale values cannot linger in
+        -- SVs (their defaults are gone, so nothing re-stamps them and an old export
+        -- would otherwise re-introduce them), and retire the RESET_POSITION quick
+        -- action (its target, DF:ResetPosition, died with the panel).
+        if type(profile) == "table" and not profile._moverLegacyPrefsRemovedV1 then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    m.gridSize, m.snapToGrid, m.pinnedSnapToGrid = nil, nil, nil
+                    m.pinnedHideMover, m.hideDragOverlay = nil, nil
+                    if m.permanentMoverActionLeft == "RESET_POSITION" then m.permanentMoverActionLeft = "NONE" end
+                    if m.permanentMoverActionRight == "RESET_POSITION" then m.permanentMoverActionRight = "NONE" end
+                    if m.permanentMoverActionShiftLeft == "RESET_POSITION" then m.permanentMoverActionShiftLeft = "NONE" end
+                    if m.permanentMoverActionShiftRight == "RESET_POSITION" then m.permanentMoverActionShiftRight = "NONE" end
+                end
+            end
+            -- Same rule as every value migration in this battery: reach the raid
+            -- auto-layout overrides too, or a stale override key survives inside the
+            -- one place the sweep could not see.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.gridSize = nil
+                    layout.overrides.snapToGrid = nil
+                    layout.overrides.pinnedSnapToGrid = nil
+                    layout.overrides.pinnedHideMover = nil
+                    layout.overrides.hideDragOverlay = nil
+                end)
+            end
+            profile._moverLegacyPrefsRemovedV1 = true
+        end
+
+        -- Phase D: STABLE PINNED-SET UIDS. RemoveSet compacts pf.sets (table.remove),
+        -- so a DandersMover element keyed by INDEX silently re-points at a different
+        -- set the moment an earlier one is deleted -- and any child anchored to it
+        -- follows the wrong frames. The uid is the one thing that survives compaction.
+        -- It is ONLY a mover element key: the index stays the addon's handle everywhere
+        -- else (frame names, runtime arrays, pinned.N.<setting> overrides, the options
+        -- tab, the Wago pinnedN alias).
+        --
+        -- Stamping in ARRAY ORDER makes uid == index on this first pass, which is what
+        -- lets the saved anchor strings (and the DandersMoverDB toggles, renamed in the
+        -- account-level tail below) map straight across with nothing to look up.
+        if type(profile) == "table" and not profile._pinnedUidsV1 then
+            local function hasSet(scope, n)
+                local p = profile[scope] and profile[scope].pinnedFrames
+                return (p and p.sets and p.sets[n]) and true or false
+            end
+
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local pfr = profile[modeKey] and profile[modeKey].pinnedFrames
+                if type(pfr) == "table" and type(pfr.sets) == "table" then
+                    local maxUid = 0
+                    for i, set in ipairs(pfr.sets) do
+                        if type(set) == "table" then
+                            if type(set.uid) ~= "number" then set.uid = i end
+                            if set.uid > maxUid then maxUid = set.uid end
+                        end
+                    end
+                    -- Only ever RAISE the counter. A profile that already handed uids
+                    -- out past the array length must not re-issue them.
+                    if not pfr.nextUid or pfr.nextUid <= maxUid then
+                        pfr.nextUid = maxUid + 1
+                    end
+                end
+            end
+
+            -- Every record in this profile that can carry an anchor: the two container
+            -- records, the two targeted displays, and each pinned set's own record.
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    MigratePinnedAnchorKeys(m.position, hasSet)
+                    MigratePinnedAnchorKeys(m.personalTargetedPosition, hasSet)
+                    MigratePinnedAnchorKeys(m.targetedListPosition, hasSet)
+                    local pfr = m.pinnedFrames
+                    if type(pfr) == "table" and type(pfr.sets) == "table" then
+                        for _, set in ipairs(pfr.sets) do
+                            if type(set) == "table" then
+                                MigratePinnedAnchorKeys(set.position, hasSet)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Same rule as every migration in this battery: reach the raid auto-layout
+            -- overrides too. The V1/V2 blocks above STRIP these record keys, but an
+            -- override that leaked in from a future build or an import can still carry
+            -- one, and a layout is the one place a sweep never sees.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    MigratePinnedAnchorKeys(layout.overrides.position, hasSet)
+                    MigratePinnedAnchorKeys(layout.overrides.personalTargetedPosition, hasSet)
+                    MigratePinnedAnchorKeys(layout.overrides.targetedListPosition, hasSet)
+                end)
+            end
+
+            profile._pinnedUidsV1 = true
+        end
+
+        -- Pinned records: self-gated (per pinnedFrames table / per record shape), so
+        -- it runs every time -- an imported pinnedFrames table is caught on the next
+        -- pass without a flag to clear. See PinnedFrames.MigrateProfileRecords.
+        if type(profile) == "table" and DF.PinnedFrames and DF.PinnedFrames.MigrateProfileRecords then
+            DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
+        end
+
+        -- Global settings captured as raid auto-layout overrides: runs every time for the
+        -- same reason, since an import can bring one back. See GLOBAL_KEYS (AutoProfiles).
+        if type(profile) == "table" and DF.StripGlobalLayoutOverrides then
+            DF:StripGlobalLayoutOverrides(profile)
+        end
+    end
+
+    -- Phase D tail: move what lives OUTSIDE the profiles across to the uid key format.
+    -- ACCOUNT-LEVEL, hence the flag on the SV root rather than on a profile: the two
+    -- things being renamed are the DandersMoverDB per-element toggle (a set the user
+    -- switched off in /mover config must stay off) and any record a third-party addon
+    -- already registered against the old key.
+    --
+    -- ☠ MUST RUN BEFORE MoverBridge:Init, and it does: this whole battery runs from
+    -- ADDON_LOADED well above the Init call. RenameKey REFUSES a rename onto a key that
+    -- is already registered, so once the bridge has registered the new dotted keys this
+    -- would silently do nothing.
+    --
+    -- The lib is optional: with it absent the flag is left unset, so a later login (with
+    -- it installed) still completes the rename. uid == index after the backfill above,
+    -- which is why 1..4 maps straight across with nothing to look up.
+    if DandersFramesDB_v2 and not DandersFramesDB_v2._pinnedUidRenameV1 then
+        local Mover = LibStub and LibStub("DandersMover-1.0", true)
+        if Mover and Mover.RenameKey then
+            for _, scope in ipairs({ "party", "raid" }) do
+                for i = 1, 4 do
+                    Mover:RenameKey("DandersFrames", scope .. ".pinned" .. i, scope .. ".pinned." .. i)
+                end
+            end
+            DandersFramesDB_v2._pinnedUidRenameV1 = true
+        end
+    end
+end
+
+-- UIParent's size in its own units, or nil until the UI has been through its first
+-- frame after PLAYER_ENTERING_WORLD (every login handler, including any addon that
+-- sets a pixel-perfect scale, has run by then). Read by the pinned record migration;
+-- nil makes it defer the UIParent-corner fold rather than bake in a wrong size.
+function DF:GetTrustedUIParentSize()
+    if not DF.uiGeometryTrusted or not UIParent then return nil end
+    local w, h = UIParent:GetWidth(), UIParent:GetHeight()
+    if type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then return nil end
+    return w, h
+end
+
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -4014,18 +4261,6 @@ function DF:MigrateOORTextAlpha()
         end
     end
 end
--- One-shot per-profile, two independently-guarded steps so a profile already
--- through step 1 still receives step 2.
---
--- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
--- import path trusted it -- clearing BOTH guards on every import so the payload got
--- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
--- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
--- legacy inset from a value the user set after migrating, so re-running it destroyed
--- those settings profile-wide. Re-arming step 2's guard is now conditional on the
--- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
---
--- Anything added here must state which of the two shapes it is.
 -- Step existing centred-and-wrapping raid layouts onto Center Mode = Fixed, so their
 -- frames stay where they have always been instead of picking up the corrected Default.
 --
@@ -4083,6 +4318,18 @@ function DF:MigrateRaidCenterMode()
     end
 end
 
+-- One-shot per-profile, two independently-guarded steps so a profile already
+-- through step 1 still receives step 2.
+--
+-- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
+-- import path trusted it -- clearing BOTH guards on every import so the payload got
+-- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
+-- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
+-- legacy inset from a value the user set after migrating, so re-running it destroyed
+-- those settings profile-wide. Re-arming step 2's guard is now conditional on the
+-- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
+--
+-- Anything added here must state which of the two shapes it is.
 function DF:MigrateBorderInsetFold()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -4233,8 +4480,8 @@ function DF:MigrateAbsoluteFrameLevels()
         -- stored 51 that nothing would ever revisit -- Config defaults only fill MISSING
         -- keys. Correct that one value in place.
         --
-        -- Deliberately NOT folded into V1: V1 also shifts targetedSpell by +30 and the AD
-        -- default by +40, so re-running it under a new flag would double-shift both.
+        -- Deliberately NOT folded into V1: V1 also shifts the AD default by +40, so
+        -- re-running it under a new flag would double-shift it.
         --
         -- Only touches the exact broken value, and only on a profile V1 has stamped, so a
         -- fresh install (already 65) and a deliberate non-51 choice are both left alone.
@@ -4340,8 +4587,7 @@ end
 -- profile did not carry it and got shifted:
 --   * MigrateAbsoluteFrameLevels  -- auraDesigner.defaults.indicatorFrameLevel
 --     40 -> 80 (already ABSOLUTE in Config; the render's own `or 40` fallback proves
---     it). It also shifted targetedSpellFrameLevel until that key's reader went with
---     the group display and the addend was removed.
+--     it).
 --   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
 -- On a fresh install the AD value was then folded into the Party/Raid designer
 -- preset on first login, making it permanent.
@@ -4366,6 +4612,20 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- the same reason as the rest: a fresh profile must never be re-migrated, and here
     -- that matters because 12 is a value the slider can reach deliberately.
     _healPredBelowAbsorbV1  = true,
+    -- Born with `position` already in the defaults, so there is nothing to seed. Stamped
+    -- for the standard reason: a fresh profile must never be re-migrated, and here that
+    -- matters because the migration would otherwise re-derive the record from the scalars
+    -- on a profile whose record the user may already have moved.
+    _moverPositionRecordsV1 = true,
+    -- Phase B: born with personalTargetedPosition / targetedListPosition in the defaults.
+    _moverPositionRecordsV2 = true,
+    -- Phase C: born without the five grid prefs (their defaults are deleted), so the
+    -- sweep has nothing to do on a fresh profile. Stamped for the standard reason.
+    _moverLegacyPrefsRemovedV1 = true,
+    -- Phase D: a fresh profile's sets get their uids from EnsureSetUid on first read,
+    -- and it carries no pre-uid anchor strings to rewrite. Stamped for the standard
+    -- reason -- a fresh profile must never be re-migrated.
+    _pinnedUidsV1 = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
@@ -4462,14 +4722,10 @@ function DF:MigrateTargetedSpellImportantBorder()
     end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
         if type(profile) == "table" then
-            -- Group/party Targeted Spells. Guarded independently from personal so a
-            -- profile already through this step still receives the personal one.
-            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It mapped the
-            -- old highlight keys onto targetedSpellImportantBorder*, which has no
-            -- readers now the group display is gone. Conditional on the legacy key, so
-            -- unlike the frame-level addend it only touched old profiles — but it still
-            -- wrote keys nothing will read. The _tsImportantBorderV1 flag is left on
-            -- profiles that already have it; it is never read again.
+            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It wrote
+            -- targetedSpellImportantBorder* keys that have no readers now the group
+            -- display is gone. The _tsImportantBorderV1 flag is left on profiles that
+            -- already have it; it is never read again.
             -- Personal Targeted Spell — LIVE, do not touch.
             if not profile._personalTsImportantBorderV1 then
                 for _, modeKey in ipairs({ "party", "raid" }) do
@@ -4619,6 +4875,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Ensure structure exists
         if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
         if not DandersFramesDB_v2.currentProfile then DandersFramesDB_v2.currentProfile = "Default" end
+
+        -- Profiles copied in from the OTHER game version (retail <-> WoW Forever) park
+        -- their Aura Designer data before anything below reads or migrates it. Early on
+        -- purpose: the designer migrations then only ever see this version's data.
+        if DF.FlavorCorrection then DF.FlavorCorrection.RunLoginPass(DandersFramesDB_v2) end
         -- (Removed) wizardConfigs was seeded here for WizardBuilder.lua, which is
         -- gone. Nothing ever READ the table — it was write-only even while the
         -- builder was reachable — so there is nothing to migrate. Any key already
@@ -4828,6 +5089,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- ☠ HERE, WITH THE OTHER PRESENCE-GATED MIGRATIONS, AND FOR THE SAME REASON.
+        -- `position` is a new key WITH A SHIPPED DEFAULT (PartyDefaults, and therefore the
+        -- generated RaidDefaults). The defaults backfill further down walks EVERY profile
+        -- and seeds missing keys -- so run after it, this migration's "position == nil"
+        -- gate is already closed and every user's saved anchor is quietly replaced by the
+        -- shipped default. Exactly the failure MigrateHealthColorStops above describes.
+        -- Runs for every profile itself, so it is not inside RunLegacyKeyAdoption.
+        if DF.MigrateContainerPositionRecords then
+            DF:MigrateContainerPositionRecords()
+        end
+
         -- ☠ MUST RUN HERE, BEFORE FRAMES ARE BUILT. This used to sit in the
         -- C_Timer.After(0.5) block far below, which is half a second AFTER the
         -- frames are created — so every bar rendered with the dead path first,
@@ -4899,11 +5171,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         DF.loadedPartyEnabled = DF.db.partyEnabled ~= false
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
 
-        -- Apply user's Settings Panel font (safe no-op if GUI/DFFonts.lua hasn't loaded yet;
-        -- SetupGUIPages also calls this again after the GUI frame exists)
-        if DF.GUI and DF.GUI.ApplySettingsFont then
-            DF.GUI:ApplySettingsFont()
-        end
+        -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
+        -- loaded; the Settings Font dropdowns re-apply it through the same call)
+        DF:SyncSettingsFont()
 
         -- Ensure auraBlacklist table exists (profile-level, shared across party/raid)
         if not DF.db.auraBlacklist then
@@ -5029,16 +5299,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- are stripped by the v5 legacy-aura cleanup below.
 
 
-        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to
-        -- live here and below. Unlike every other migration they were not
-        -- no-ops on fresh defaults: a profile reset wipes the migration flags
-        -- along with everything else, so on the next reload both stamps
-        -- re-fired and overwrote the freshly reset filters with 4.0.9-era
-        -- values (All Debuffs off, Big/External Defensives on). Their one-time
-        -- job is long done — upgraded profiles carry the flags, fresh/reset
-        -- profiles get the current Config defaults. Migrations added here MUST
-        -- be no-ops on a fresh default profile (derive from legacy values;
-        -- never unconditional writes behind a profile-stored flag).
+        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to live
+        -- here and below. Unlike every other migration they were not no-ops on fresh
+        -- defaults: a profile reset wipes the migration flags, so both stamps re-fired
+        -- and overwrote the freshly reset filters. Migrations added here MUST be
+        -- no-ops on a fresh default profile (derive from legacy values; never
+        -- unconditional writes behind a profile-stored flag).
 
         -- Migrate the single border dropdown to the Style + Texture split.
         -- Previously borderTexture held either "SOLID" (the built-in border) or an
@@ -5423,7 +5689,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Stage 5.1b: rename per-aura icon border keys to canonical
         -- ShowBorder / BorderSize / BorderInset.  Idempotent; safe to
         -- run on already-migrated configs.  Defined in
-        -- AuraDesigner/Options.lua; load order guarantees that file
+        -- AuraDesigner/Migrations.lua; load order guarantees that file
         -- has registered DF.MigrateAuraDesignerIconBorderKeys by here.
         if DF.MigrateAuraDesignerIconBorderKeys then
             DF.MigrateAuraDesignerIconBorderKeys(DF.db.party)
@@ -5482,6 +5748,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if modeDb and modeDb.directDebuffDispellableMode == "ANY" then
                         modeDb.directDebuffDispellableMode = "ALL"
                     end
+                    -- The Raid row is gone: on a debuff Blizzard's RAID flag is "the
+                    -- player can dispel it", so once talent-corrected it was exactly
+                    -- Dispellable By Me. EQUALITY-gated (its default is false, so only a
+                    -- user's tick moves), and each login for the same reason as above.
+                    if modeDb and mode == "raid" and DF.MigrateRaidDebuffOverrides then
+                        DF:MigrateRaidDebuffOverrides(modeDb, profile.raidAutoProfiles)
+                    end
+                    if modeDb and DF.MigrateRaidDebuffRow then DF:MigrateRaidDebuffRow(modeDb) end
                     -- ☠ THE TOOLTIP VISIBILITY MIGRATION MOVED OUT OF HERE, and the
                     -- page-wide Hold To Show fan-out went with it (it produces what
                     -- the conversion consumes) — see DF:MigrateTooltipVisibility,
@@ -5943,7 +6217,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Expose the v5 legacy passes for the profile-import path (mirrors the
         -- MigrateAuraDesignerToInstances export above). Without this, a v4
         -- export imported at runtime shows a wrong dispel-enable state and
-        -- retired animation values until the next reload (all four passes only
+        -- retired animation values until the next reload (these passes only
         -- re-ran at ADDON_LOADED). Walks the RAW profile tables only — DF.db
         -- is proxied by the time an import runs, and the current profile is in
         -- DandersFramesDB_v2.profiles anyway. Each pass is flag-gated or
@@ -6049,16 +6323,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:InitializeFrames()
         end
 
+        -- Hand the party and raid containers to DandersMover, if it is installed.
+        -- DF.MoverBridge only exists when LibStub("DandersMover-1.0", true) resolved, so
+        -- this is the whole optional-dependency gate. After InitializeFrames because the
+        -- hooks it installs target functions that must already have been called at least
+        -- once for the containers to exist.
+        if DF.MoverBridge then
+            DF.MoverBridge:Init()
+        end
+
     elseif event == "PLAYER_LOGIN" then
-        -- (Removed) a disabled third-party compatibility popup that ran here. It had been
-        -- gated off behind a literal `false` once the issue it existed for was resolved, and
-        -- kept in case it were ever needed again — but git keeps it perfectly well, and the
-        -- dead flag did not stop its text shipping in readable addon Lua.
+        -- (Removed) a disabled third-party compatibility popup that ran here.
         -- Restore with: git log -S nephUIPopupEnabled
-        -- ⚠ The remaining mentions of that addon elsewhere are INTEROPERABILITY, not this:
-        -- ClickCasting/Core.lua names it among addons that register into ClickCastFrames,
-        -- and Frames.lua carries its frame-name patterns so click casting works with it.
-        -- Those stay.
+        -- ⚠ The remaining mentions of that addon elsewhere are INTEROPERABILITY, not
+        -- this: ClickCasting/Core.lua names it among addons that register into
+        -- ClickCastFrames, and ClickCasting/Frames.lua carries its frame-name patterns
+        -- so click casting works with it. Those stay.
         
         -- ☠ (Removed) DF.raidBuffFilteringReady = true, and its claim to "enable raid
         -- buff filtering now that we're past ADDON_LOADED (avoids secret value errors
@@ -6090,11 +6370,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Frame state
         -- headers and dispel are registered in BOTH registries — RegisterDebugSlash
         -- (which supplies the /dfXXX alias) and here (which supplies the argument
-        -- hint). The old three-section listing printed each one twice and it read as
-        -- deliberate because the copies sat in different sections; grouping by
-        -- subsystem put them side by side and the duplication was obvious. Hidden
-        -- here, with the argument hint folded into the slash description, so the
-        -- entry survives in the registries but appears once in the listing.
+        -- hint). Hidden here, with the argument hint folded into the slash
+        -- description, so the entry survives in the registries but appears once.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
         sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
@@ -6121,7 +6398,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- either; these are reached THROUGH it and have to match it.
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
-        sub("idgate",       "engine gate mirror + group canaries ('probe' toggles them)", true)
+        sub("idgate",       "aura latches, slot audit and the latch trail", true)
         sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -6143,6 +6420,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("gapcheck",     "GUI spacing probe (add 'all' or 'clear')", true, "[all|clear]")
         sub("navprobe",     "nav menu row probe", true, "[n]")
         sub("guiwidth",     "GUI width dump", true)
+        sub("guiperf",      "count the hook calls a settings change drives", true, "<start|stop|report>")
         sub("tdmirror",     "Text Designer mirror state", true)
         -- Performance
         sub("profiler",     "open the profiler UI")
@@ -6156,11 +6434,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("casthistory",  "cast history")
         sub("clearhistory", "clear the cast history buffer")
         -- Ongoing traces still on their own flag (console migration pending)
-        -- (Removed) a "HIDDEN: both are console-migration signposts" rationale that
-        -- described two sub() entries below it. There were none -- the entries it
-        -- justified were deleted on 2026-07-29, and RegisterDebugSub's own header
-        -- records that decision ("Those commands are gone rather than hidden"). The
-        -- block outlived them and read as documentation for the next two entries.
         -- Config repair
         sub("resetgui",     "reset GUI scale, size and position", nil, nil, true)
         sub("resetconflict", "moved to /df debug cc resetconflict", nil, nil, true)
@@ -6800,6 +7073,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- While an auto layout is active, base-position unlock is blocked
                 -- (matches the disabled toolbar button) — point users to the active
                 -- layout's own Unlock button so they don't move the base by accident.
+                -- ⚠ The guard stays IN FRONT of the routing: the block is about which
+                -- position is being edited, not about which overlay draws it.
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive() then
                     local name = DF.AutoProfilesUI.GetActiveLayoutName and DF.AutoProfilesUI:GetActiveLayoutName()
                     DF:Say(string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
@@ -6811,11 +7086,19 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "reset" then
                 DF:ResetFullProfile()
             elseif msg == "resetgui" then
-                -- Reset GUI scale, size, and position to defaults
+                -- Reset GUI scale, size, and position to defaults.
+                --
+                -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. This used to say 760x520
+                -- twice, in a file on the OTHER side of the load-on-demand split
+                -- from the window builder that also said it -- so the two were
+                -- free to drift, and "reset to default" would then restore a size
+                -- the addon no longer ships. GUI.WindowDefaults is resident
+                -- precisely so both readers can have it.
+                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 640, height = 600 }
                 local ws = DF:GetWindowState()
                 ws.scale = 1.0
-                ws.width = 760
-                ws.height = 520
+                ws.width = wd.width
+                ws.height = wd.height
                 ws.point = nil
                 ws.relPoint = nil
                 ws.x = nil
@@ -6823,12 +7106,26 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUIFrame then
                     DF.GUIFrame:ClearAllPoints()
                     DF.GUIFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-                    DF.GUIFrame:SetSize(760, 520)
+                    DF.GUIFrame:SetSize(wd.width, wd.height)
                     DF.GUIFrame:SetScale(1.0)
                     if DF.GUI and DF.GUI.ScaleSlider then
                         DF.GUI.ScaleSlider:SetValue(1.0)
                     end
                     DF.GUIFrame:Show()
+                    -- Same tail as the resize handle's OnMouseUp: a programmatic
+                    -- SetSize is still a resize, and without the refresh the
+                    -- current page keeps the OLD width's layout until the user
+                    -- happens to drag the corner (reported on Changed Settings,
+                    -- whose full-width rows made the stale width obvious).
+                    if DF.GUI then
+                        if DF.GUI.SelectedMode == "clicks" then
+                            if DF.ClickCast and DF.ClickCast.RefreshSpellGrid then
+                                DF.ClickCast:RefreshSpellGrid(true)
+                            end
+                        elseif DF.GUI.RefreshCurrentPage then
+                            DF.GUI:RefreshCurrentPage()
+                        end
+                    end
                 end
                 DF:Say(L["GUI reset to default size, scale, and position."])
             elseif msg == "pixelcheck" then
@@ -6860,6 +7157,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     DF:Say("GUI module not loaded.")
                 end
+            elseif msg == "guiperf" or msg:match("^guiperf%s+%a+$") then
+                -- Counts the hook calls one settings change drives, at DandersUI's
+                -- UI:Call chokepoint. Start, drag a slider, stop -- the report says
+                -- how many full applies that single drag cost.
+                if DF.GUIPerf then
+                    DF:GUIPerf(msg:match("^guiperf%s+(%a+)$"))
+                else
+                    DF:Say("GUI module not loaded.")
+                end
             elseif msg == "overrides" then
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.PrintOverrides then
                     DF.AutoProfilesUI:PrintOverrides()
@@ -6886,11 +7192,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 cmd("/df reset", L["reset party + raid profiles to defaults"], "BAD")
                 cmd("/df console", L["open the debug console page"])
                 cmd("/df debug", L["list debug commands (on/off toggles debug logging)"])
-                -- pixelcheck / navprobe / gapcheck used to be listed here as well
-                -- as in the generated /df debug listing. They are dev diagnostics,
-                -- not everyday commands, so help now points at the one list that
-                -- is generated and cannot drift instead of duplicating a subset
-                -- of it by hand.
+                -- Dev diagnostics (pixelcheck / navprobe / gapcheck) are deliberately not
+                -- listed here: help points at the one generated /df debug listing rather
+                -- than duplicating a subset of it by hand.
             elseif msg == "test" then
                 -- The test panel lives in the load-on-demand companion.
                 -- Deliberate user command -> load it; the old nil-guard made
@@ -6958,11 +7262,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             -- and the Debug page's category descriptions on the same
                             -- screen were already raw, so the two disagreed.
                             --
-                            -- ⚠ Time-sensitive, which is why it is not a style nit: the
-                            -- packager's -S flag uploads English source strings to the
-                            -- portal on the next build. Once developer text is in front
-                            -- of translators for ten languages, removing it is a portal
-                            -- cleanup rather than a git revert.
+                            -- ⚠ Time-sensitive, which is why it is not a style nit: CurseForge
+                            -- discovers English source strings server-side from the uploaded
+                            -- package, so developer text reaches the portal on the next build.
+                            -- Once it is in front of translators for ten languages, removing it
+                            -- is a portal cleanup rather than a git revert.
                             o:Line(DF.DEBUG_GROUP_NAMES[g], "NEUTRAL")
                             for _, r in ipairs(rows) do
                                 -- One typeable form per row, in O.CMD.
@@ -6975,10 +7279,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if dev then printSection(true, L["Dev tools (alpha/beta builds only)"]) end
             elseif msg == "debug on" or msg == "debug off" then
                 local newState = msg == "debug on"
-                -- The else branch used to set DF.debugEnabled, which nothing read,
-                -- and then reported success either way — so with the console module
-                -- missing this said "Debug logging enabled" while enabling nothing.
-                -- Say what actually happened instead.
+                -- With the console module missing there is nothing to enable, so report
+                -- the failure rather than claiming success.
                 if not DF.DebugConsole then
                     DF:Err(L["Debug console module not loaded."])
                     return
@@ -7001,14 +7303,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.DebugRestedIndicator then
                     DF:DebugRestedIndicator()
                 end
-            -- (Removed) /df debug debugraidbuffs. It dumped DF:GetRaidBuffIcons() and
-            -- checked the player's buffs against it. That cache existed for ONE
-            -- purpose — matching raid buffs by icon texture when the spell ID is
-            -- secret — and that fallback was never wired to anything: the cache had
-            -- no reader but this dump. 12.1 solved the same problem the other way,
-            -- via the native excludeSpellIDs union with real spell IDs
-            -- (missingBuffHideFromBar, Features/Auras.lua), so the icon-matching
-            -- approach is superseded, not merely unused. Helper deleted with it.
             elseif msg == "auradata" then
                 -- Live aura DATA enumeration (pre-container: reads via C_UnitAuras).
                 -- Renamed off "auras" so /df debug auras can be the container-era pipeline
@@ -7052,15 +7346,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- text is always a width fault; this says WHICH frame caused it.
                 if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
             elseif msg == "idgate" or msg:match("^idgate%s") then
-                -- Post-demolition (69465): "idgate" prints everything — handles/slots
-                -- classification, the per-group-member engine mirror, canary readings
-                -- and the always-on gate trail; works in combat (reads only).
-                -- "idgate probe" TOGGLES group-wide canaries (no unit arg);
-                -- "idgate probe show" toggles the eyeball placement.
-                local probeArgs = msg:match("^idgate%s+probe%s*(.-)%s*$")
-                if probeArgs and DF.AuraContainer and DF.AuraContainer.DebugGateProbe then
-                    DF.AuraContainer.DebugGateProbe(probeArgs)
-                elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
+                -- Every container's latches and filters, the slot-enable audit and the
+                -- always-on latch trail; reads only, so it works in combat.
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
             elseif msg == "dispelcap" then
@@ -7561,7 +7849,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Live: every shown frame with any dispel state; Test: shown test frames
                 if DF.IterateAllFrames then
                     DF:IterateAllFrames(function(f)
-                        if f and f:IsShown() and (f.dfDispelOverlay or f.dispelFactory) then
+                        if f and f:IsShown() and (f.dfDispelOverlay or f.dispelFactory or f.dispelIconRow) then
                             dumpFrame(f, tostring(f.unit))
                         end
                     end)
@@ -7619,10 +7907,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Add convenient /rl reload command
-        -- (Removed) a superseded paragraph that argued the opposite of the one below --
-        -- that /rl "was the only one absent from /df debug" and that "being listed
-        -- costs nothing". The code implements the decision below, not that one, and
-        -- two stacked rationales reading in opposite directions is worse than either.
         -- NOT via RegisterDebugSlash: /rl is universal muscle memory, so listing it
         -- under /df debug spends a row telling people something they already know.
         -- It is also the one command with no "/df debug <name>" form, which made it
@@ -7756,12 +8040,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         DF:UpdateLiveRaidFrames()
                     end
                 else
-                    if DF.UpdateAllFrames then
-                        DF:UpdateAllFrames()
+                    -- _Now: login/init seam. The click-cast registration, the
+                    -- rested indicator and the flat-layout pass below all run
+                    -- in this same tick and expect the frames to exist and be
+                    -- laid out already.
+                    if DF.UpdateAllFrames_Now then
+                        DF:UpdateAllFrames_Now()
                     end
                 end
             end
-            
+
             -- Register click casting now that frames are ready
             if DF.RegisterClickCastFrames then
                 DF:RegisterClickCastFrames()
@@ -7792,30 +8080,26 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Flat layout refresh to ensure correct positioning on load
             local raidDb = DF:GetRaidDB()
             if IsInRaid() and not raidDb.raidUseGroups and not InCombatLockdown() then
+                -- _Now: login/init seam. UpdateRaidGroupLabels immediately below
+                -- reads the header positions these two produce ("needs headers
+                -- to be positioned first").
                 if DF.headersInitialized then
-                    DF:ApplyHeaderSettings()
+                    DF:ApplyHeaderSettings_Now()
                 end
-                if DF.UpdateRaidLayout then
-                    DF:UpdateRaidLayout()
+                if DF.UpdateRaidLayout_Now then
+                    DF:UpdateRaidLayout_Now()
                 end
             end
-            
+
             -- Update raid group labels (needs headers to be positioned first)
             if DF.UpdateRaidGroupLabels then
                 DF:UpdateRaidGroupLabels()
             end
         end)
 
-        -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
-        -- setup wizard used to fire here, 5s after login, offering to turn the
-        -- feature on. It could not stay: the feature was force-disabled at load and
-        -- its settings page had left the sidebar, so the wizard would have sold a
-        -- feature that could neither run nor be configured, and its "Open settings"
-        -- button would have landed on a page with no nav row.
-        --
-        -- 2026-07-30: DF:ShowTargetedSpellSetupWizard is now gone too, with the rest
-        -- of the group-frame feature, so there is nothing left to restore here. The
-        -- saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
+        -- (Removed) Targeted Spells setup wizard: the group-frame feature and
+        -- DF:ShowTargetedSpellSetupWizard are both gone, so there is nothing to restore.
+        -- The saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
         -- alone (stripping saved keys is a separate call).
 
     elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
@@ -7915,6 +8199,25 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- it, so they would all sit visible for the rest of the pull.
         DF.playerInCombat = UnitAffectingCombat("player") and true or false
 
+        -- ☠ FINISH THE PINNED CORNER FOLD HERE, NOT AT ADDON_LOADED. UIParent's size
+        -- is only trustworthy once the UI has rendered a frame after this event (see
+        -- DF:GetTrustedUIParentSize). Pure data: the containers already sit on the
+        -- right spot through pendingRef, so nothing is re-anchored and combat is
+        -- irrelevant. Retries on the next tick while UIParent still reads unsized.
+        if not DF.uiGeometryTrusted then
+            local function FoldPinnedRecords()
+                DF.uiGeometryTrusted = true
+                local w, h = DF:GetTrustedUIParentSize()
+                if not w then
+                    DF.uiGeometryTrusted = nil
+                    C_Timer.After(0.1, FoldPinnedRecords)
+                    return
+                end
+                DF:Debug("LAYOUT", "Pinned record fold: UIParent %.1fx%.1f", w, h)
+                if DF.MigrateContainerPositionRecords then DF:MigrateContainerPositionRecords() end
+            end
+            C_Timer.After(0, FoldPinnedRecords)
+        end
         -- Same reasoning for the tracked dead state: PLAYER_DEAD/ALIVE/UNGHOST are the
         -- only writers, so a /reload while dead (or releasing and running back through a
         -- zone change) would leave it nil and the debuff row in its ALIVE shape while the
@@ -7986,6 +8289,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
         end
 
+        if DF.pendingPlayerFrameUpdate then
+            DF.pendingPlayerFrameUpdate = nil
+            DF:UpdateDefaultPlayerFrame()
+        end
+
         -- Pet work the lockdown blocked, on any track. Two flags rather than one
         -- because they cost differently: a visibility replay only needs the show/hide
         -- pass re-run, while a position replay re-parents and re-anchors every pet
@@ -8053,6 +8361,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Apply queued updates after combat
+        -- Left on the arm-stub deliberately: DF:UpdateAll() now just marks the
+        -- "all" kind dirty, so this replay folds into the apply scheduler's own
+        -- drain (Core\ApplyScheduler.lua) instead of running a second full sweep
+        -- beside it. The scheduler has its own PLAYER_REGEN_ENABLED re-queue for
+        -- work it held back during combat; this is the older needsUpdate path
+        -- that the _Now bodies still set, and the two now converge on one pass.
         if DF.needsUpdate then
             DF.needsUpdate = false
             DF:UpdateAll()
@@ -8224,12 +8538,14 @@ end)
 -- UPDATE ALL
 -- ============================================================
 
-function DF:UpdateAll()
+-- The real body. DF:UpdateAll() is now an arm-stub that coalesces requests
+-- through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:UpdateAll_Now()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return
     end
-    
+
     DF:SyncLinkedSections()
 
     -- Invalidate aura layout so all frames re-apply layout on next aura update
@@ -8257,8 +8573,11 @@ function DF:UpdateAll()
         end
     elseif DF.testMode then
         -- In party test mode, update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        -- ⚠ _Now, not the stub: this body already runs FROM the scheduler's
+        -- drain, so re-arming here would push the work one more frame out on
+        -- every single pass -- forever.
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         if DF.RefreshTestFrames then
             DF:RefreshTestFrames()
@@ -8269,23 +8588,24 @@ function DF:UpdateAll()
         end
     elseif editingRaid then
         -- Editing raid settings (not in test mode), update raid layout
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        -- _Now for the same reason as the branch above.
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
     elseif IsInRaid() and not (DF.IsInArena and DF:IsInArena()) then
         -- In a live raid: update raid layout AND header visibility
         -- (UpdateHeaderVisibility may also fire from Headers.lua's REGEN handler
         -- via pendingVisibilityUpdate — that's harmless, the call is idempotent)
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
         if DF.UpdateHeaderVisibility then
             DF:UpdateHeaderVisibility()
         end
     else
         -- Default: update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         -- Update rested indicator
         if DF.UpdateRestedIndicator then
@@ -8293,8 +8613,6 @@ function DF:UpdateAll()
         end
     end
     
-    -- FIX 2025-01-20: Refresh private aura anchors (boss debuffs) when settings change
-    -- This is needed for profile switches where overlay size may have changed
 end
 
 -- ============================================================
@@ -8304,6 +8622,8 @@ end
 -- ============================================================
 
 function DF:FullProfileRefresh()
+    -- Before the combat gate: the panel font is chrome, not protected frames.
+    DF:SyncSettingsFont()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return
@@ -8379,8 +8699,8 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE RAID CONTAINER POSITION ===
-    -- Use UpdateRaidContainerPosition so raidMoverFrame and testRaidContainer
-    -- are synced in the same call (and CENTER-anchor compensation is applied).
+    -- Use UpdateRaidContainerPosition so testRaidContainer and the DandersMover
+    -- bridge hook stay in sync (and CENTER-anchor compensation is applied).
     -- Falls back to direct SetPoint if the function isn't loaded yet.
     if DF.raidContainer then
         local scale = raidDB.frameScale or 1.0
@@ -8433,19 +8753,26 @@ function DF:FullProfileRefresh()
     -- === RECONFIGURE HEADER ORIENTATION ===
     -- Must be called before layout updates so headers use the new profile's
     -- growDirection, growthAnchor, and selfPosition settings
-    if DF.ApplyHeaderSettings then
-        DF:ApplyHeaderSettings()
+    -- ⚠ SYNC SEAM. A profile switch/import/reset must have LANDED by the time
+    -- this function returns -- the rest of the body (FlatRaidFrames layout, the
+    -- Aura Designer re-drive, the container reposition, the GUI rebuild) reads
+    -- the state these three produce, and the external API returns to its caller
+    -- straight after. So these are the `_Now` bodies, not the arm-stubs.
+    -- Their source order (headers, frames, raidLayout) is also NOT the drain
+    -- order, which is the second reason it cannot go through the sink.
+    if DF.ApplyHeaderSettings_Now then
+        DF:ApplyHeaderSettings_Now()
     end
 
     -- === UPDATE LAYOUTS ===
     -- Update party layout (this handles positioning, visibility, etc.)
-    if DF.UpdateAllFrames then
-        DF:UpdateAllFrames()
+    if DF.UpdateAllFrames_Now then
+        DF:UpdateAllFrames_Now()
     end
-    
+
     -- Update raid layout
-    if DF.UpdateRaidLayout then
-        DF:UpdateRaidLayout()
+    if DF.UpdateRaidLayout_Now then
+        DF:UpdateRaidLayout_Now()
     end
 
     -- Re-apply Aura Designer indicators from the new profile: re-syncs the
@@ -8557,8 +8884,6 @@ function DF:FullProfileRefresh()
         DF:UpdateAllAuras()
     end
     
-    -- === REFRESH PRIVATE AURAS ===
-    
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then
         DF:UpdateRestedIndicator()
@@ -8567,8 +8892,9 @@ function DF:FullProfileRefresh()
     -- === REFRESH NAME TRUNCATION ===
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
-    if DF.RefreshAllVisibleFrames then
-        DF:RefreshAllVisibleFrames()
+    -- _Now: same sync seam as the three above.
+    if DF.RefreshAllVisibleFrames_Now then
+        DF:RefreshAllVisibleFrames_Now()
     end
 
     -- === UPDATE MINIMAP BUTTON ===
@@ -8600,9 +8926,6 @@ function DF:FullProfileRefresh()
     end
 end
 
--- (Removed) WIZARD SETTINGS APPLICATION — DF:ApplyWizardSettingsMap and its
--- orphaned local strsplit. It applied a wizard's settingsMap to the DB, was
--- called only from the popup wizard's CompleteWizard, and went with that runtime.
 -- ============================================================
 -- MINIMAP BUTTON (using LibDBIcon)
 -- ============================================================
@@ -8746,13 +9069,27 @@ end
 -- ========================================
 -- Hide/Show Default Player Frame
 -- ========================================
-function DF:UpdateDefaultPlayerFrame()
+-- Read from the party table on purpose: the setting is global (written to both modes) and
+-- a raid auto layout can never override it, so there is one answer however the group is
+-- shaped. "Only in a raid group" is that global choice, not a per-layout one.
+function DF:ShouldHideDefaultPlayerFrame()
     local db = DF:GetDB()
-    if not db then return end
-    
-    -- Hide default player frame when the option is checked (independent of solo mode)
-    local shouldHide = db.hideDefaultPlayerFrame
-    
+    if not (db and db.hideDefaultPlayerFrame) then return false end
+    if db.hideDefaultPlayerFrameRaidOnly then return IsInRaid() and true or false end
+    return true
+end
+
+function DF:UpdateDefaultPlayerFrame()
+    if not DF:GetDB() then return end
+    -- PlayerFrame is protected: a change that lands in combat (joining a raid mid-fight)
+    -- waits for PLAYER_REGEN_ENABLED instead of being dropped.
+    if InCombatLockdown() then
+        DF.pendingPlayerFrameUpdate = true
+        return
+    end
+
+    local shouldHide = DF:ShouldHideDefaultPlayerFrame()
+
     if shouldHide then
         -- Hide the default player frame using the standard method
         if PlayerFrame and not InCombatLockdown() then
@@ -8761,8 +9098,7 @@ function DF:UpdateDefaultPlayerFrame()
             -- Use a hook to keep it hidden
             if not DF.playerFrameHooked then
                 hooksecurefunc(PlayerFrame, "Show", function(self)
-                    local db = DF:GetDB()
-                    if db and db.hideDefaultPlayerFrame then
+                    if DF:ShouldHideDefaultPlayerFrame() then
                         if not InCombatLockdown() then
                             self:Hide()
                         end

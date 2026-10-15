@@ -412,9 +412,8 @@ RESOLVERS.group = function(elem, source)
             end
         end
     end
-    -- ★ ONE line per group element, carrying both counts. `parts < items` is the whole
-    -- diagnostic -- items were dropped -- and it used to require reading this line against
-    -- an entry line further up. Stated directly, and the entry line is gone.
+    -- ★ ONE line per group element, carrying both counts. `parts < items` is the
+    -- whole diagnostic -- items were dropped.
     if DF:DebugActive("TD") then
         DF:Debug("TD", "group resolver: elem id=%s items=%d parts=%d",
             tostring(elem.id), #elem.groupItems, #parts)

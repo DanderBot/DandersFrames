@@ -237,11 +237,12 @@ function AE:CandidateFilters(row)
     for _, flag in ipairs(AE.FLAGS) do
         if row.flags and row.flags[flag] ~= nil then cf[flag] = row.flags[flag]; any = true end
     end
-    -- ⚠ 0 IS A REAL VALUE HERE, not "off". maxDuration = 0 is DF's own slot park lock
-    -- (see AuraContainer.SLOT_PARK_CF) and it must match NOTHING — the engine's own
+    -- ⚠ 0 IS A REAL VALUE HERE, not "off". maxDuration = 0 WAS DF's slot park lock until
+    -- 12.1.5's SetAuraSlotEnabled replaced it, and it must match NOTHING — the engine's own
     -- comment is that a max-duration filter "implicitly always filters out permanent
     -- auras", and 0 additionally fails every timed aura. Testing `~= nil` rather than
-    -- truthiness is what lets this tool prove that park actually parks.
+    -- truthiness is what let this tool prove that park actually parked, and it stays
+    -- because maxDuration is a candidate filter a user may legitimately want to probe.
     if row.maxDuration ~= nil then cf.maxDuration = row.maxDuration; any = true end
     if row.includeDispel and next(row.includeDispel) then
         cf.includeDispelTypes = row.includeDispel; any = true

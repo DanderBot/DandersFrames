@@ -3,12 +3,11 @@ local addonName, DF = ...
 -- ============================================================
 -- AURA DESIGNER — NATIVE FACTORY BRIDGE (P4.x)
 --
--- The 12.1 revival path for the Aura Designer. On live (pre-12.1) clients the
--- legacy AuraDesigner\Engine.lua read-path still drives every indicator; on 12.1
--- the aura-read API is sealed, so that engine renders nothing. This bridge rebuilds
--- AD indicators on the Blizzard-driven container system (DF.AuraContainer) instead:
--- identity comes from the STATIC per-spec spell-ID whitelist (Config.SpellIDs), and
--- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
+-- The 12.1 revival path for the Aura Designer. On 12.1 the aura-read API is sealed,
+-- so AD indicators are rebuilt on the Blizzard-driven container system
+-- (DF.AuraContainer): identity comes from the STATIC per-spec spell-ID whitelist
+-- (Config.SpellIDs), and Blizzard drives each slot's secret show/hide — we only
+-- attach art. Zero secret reads.
 --
 -- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3 + P4.4): gates, identity->includeSpellIDs,
 -- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (fill cover + flat
@@ -56,12 +55,10 @@ local OTHER_PREFIX = "other:"
 -- dedup/sound paths silently skip such records; this names the culprit once instead of
 -- spamming per frame per aura event. Guards B2's picker contract.
 local otherIdentWarned = {}
--- ⚠ `where` names the POOL, because this now fires for BOTH. It used to be gated to the
--- Other pool (`pool == 2` / `keyPrefix ~= ""`), so a SPEC-pool record whose identity failed
--- to resolve rendered nothing with no log at all -- the silent-capability-skip class this
--- codebase has a standing rule against. That is also the dominant failure mode after a
--- dangling @custom:/@preset: reference, i.e. precisely what somebody would be trying to
--- diagnose when they turn debug on.
+-- ⚠ `where` names the POOL: this fires for BOTH pools, so a SPEC-pool record whose
+-- identity fails to resolve must log too -- the silent-capability-skip class this
+-- codebase has a standing rule against. A dangling @custom:/@preset: reference is the
+-- dominant failure mode, i.e. precisely what somebody would be diagnosing with debug on.
 local function warnOtherUnresolved(auraName, where)
     if not otherIdentWarned[auraName] then
         otherIdentWarned[auraName] = true
@@ -595,8 +592,8 @@ local function auraHasTrackedIndicator(auraCfg)
     local inds = auraCfg.indicators
     if inds then
         for _, ind in ipairs(inds) do
-            -- Bars ignore missing mode entirely (no duration data when absent — legacy
-            -- Engine.lua:510), so a bar always renders present and always dedups.
+            -- Bars ignore missing mode entirely (no duration data when absent), so a bar
+            -- always renders present and always dedups.
             if ind.enabled ~= false and not ind.othersOnly
                 and (ind.type == "bar" or not ind.showWhenMissing) then return true end
         end
@@ -682,10 +679,27 @@ function DF:GetADTrackedSpellIDs(frame, db)
 
     local specAuras = adDB.auras and adDB.auras[spec]
 
-    local union
+    -- ☠ TWO MAPS, BECAUSE THE POOLS DO NOT SEE THE SAME CASTERS. My Buffs (the spec pool,
+    -- and the spec tab's filter groups) renders "HELPFUL|PLAYER" -- only YOUR casts -- while
+    -- Other Buffs renders any caster. A single caster-agnostic exclude hid another player's
+    -- copy of a My-Buffs spell from the buff bar as well, so it showed nowhere. `union`
+    -- holds what is shown whoever cast it; `mineOnly` what is shown only for your casts,
+    -- which the buff row excludes from its PLAYER half alone.
+    -- ⚠ Self-only auras on your own frame drop the caster filter (resolvePoolMode), so
+    -- they count as any-caster there. Inlined: resolvePoolMode is declared below this
+    -- function, and calling it from here would compile as a nil global.
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    local onOwnFrame = frame.unit and UnitIsUnit and UnitIsUnit(frame.unit, "player")
+    local union, mineOnly
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
-            union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            local selfOnly = onOwnFrame and Adapter and Adapter.IsSelfOnlyAura
+                and Adapter:IsSelfOnlyAura(spec, auraName)
+            if selfOnly then
+                union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            else
+                mineOnly = unionTrackedIdentity(spec, auraName, auraCfg, mineOnly)
+            end
         end
     end
 
@@ -740,9 +754,15 @@ function DF:GetADTrackedSpellIDs(frame, db)
                         and not group.othersOnly then
                         local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
                         if res.kind == "include" and res.map then
+                            -- Spec-tab groups render your casts only (g == 1).
                             for id in pairs(res.map) do
-                                union = union or {}   -- only allocate when the map has entries
-                                union[id] = true
+                                if g == 1 then
+                                    mineOnly = mineOnly or {}
+                                    mineOnly[id] = true
+                                else
+                                    union = union or {}   -- only allocate when the map has entries
+                                    union[id] = true
+                                end
                             end
                         end
                     end
@@ -750,7 +770,12 @@ function DF:GetADTrackedSpellIDs(frame, db)
             end
         end
     end
-    return union   -- nil when nothing is tracked -> caller unions nothing
+    -- An id shown for any caster already covers your own casts.
+    if mineOnly and union then
+        for id in pairs(union) do mineOnly[id] = nil end
+    end
+    if mineOnly and not next(mineOnly) then mineOnly = nil end
+    return union, mineOnly   -- nil when nothing is tracked -> caller unions nothing
 end
 
 -- ============================================================
@@ -768,7 +793,74 @@ end
 -- whatever mode either side runs — simplest rule). NO CYCLE by construction:
 -- this reads group.selection tables only — it never calls the record resolver,
 -- and the AD facade path (buildDebuffGroupRecords below) never consults claims.
-local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" }
+local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable",
+    "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed" }
+
+-- ☠ A GROUP CLAIMS A CATEGORY ONLY WHEN IT SHOWS ALL OF IT. A claim takes the whole
+-- category off the bar (or a later group), so a group that narrows it -- any Hide tick,
+-- Hide Permanent, or Hide Long on a category Keep Important does not protect -- would
+-- leave the narrowed-out debuffs shown nowhere (a Boss + Hide Permanent group dropped
+-- every permanent boss debuff from the bar). The exact remainder is not expressible:
+-- candidate filters have maxDuration but no minimum, so "longer than X" cannot be kept.
+-- A narrowed group therefore claims nothing and its debuffs may show in both places.
+local KEEP_IMPORTANT_CATEGORIES = { boss = true, role = true, priority = true }
+local GROUP_HIDE_KEYS = {
+    "hideBoss", "hideRole", "hidePriority", "hideImportant", "hideRaidInCombat",
+    "hideCrowdControl", "hideRaid", "hideDispellable",
+    "hideMagic", "hideCurse", "hidePoison", "hideDisease", "hideBleed",
+    "hideNonPlayer", "hidePlayer", "hideMine",
+}
+local MATCH_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable",
+    "important", "raidInCombat", "magic", "curse", "poison", "disease", "bleed",
+    "nonPlayer", "fromPlayer", "mine" }
+local function groupShowsAllOf(sel, k)
+    if sel.hidePermanent then return false end
+    -- Match All with two or more categories shows their intersection: it narrows each.
+    -- (Dispel types OR into one term, so they count once between them.)
+    if sel.matchAll then
+        local n, typed = 0, false
+        for i = 1, #MATCH_CATEGORIES do
+            local c = MATCH_CATEGORIES[i]
+            if sel[c] then
+                local isType = c == "magic" or c == "curse" or c == "poison" or c == "disease" or c == "bleed"
+                if not (isType and typed) then n = n + 1 end
+                if isType then typed = true end
+            end
+        end
+        if n > 1 then return false end
+    end
+    for i = 1, #GROUP_HIDE_KEYS do
+        if sel[GROUP_HIDE_KEYS[i]] then return false end
+    end
+    if sel.hideLong and not (KEEP_IMPORTANT_CATEGORIES[k] and sel.keepImportant ~= false) then
+        return false
+    end
+    return true
+end
+
+-- Fold one group's claims into `claimed` (created on first claim); returns it.
+local function foldGroupClaims(sel, claimed)
+    for i = 1, #CLAIMABLE_CATEGORIES do
+        local k = CLAIMABLE_CATEGORIES[i]
+        if sel[k] and groupShowsAllOf(sel, k) then
+            claimed = claimed or {}
+            claimed[k] = true
+        end
+    end
+    -- ★ DISPEL MODE rides along with the claim (2026-08-30). The consumer has to know
+    -- WHICH TOKEN to subtract: a PLAYER-mode group shows only what you can dispel, a
+    -- strict subset of DISPELLABLE, so negating the superset would delete every
+    -- dispellable-by-someone-else debuff from the row and leave it displayed nowhere.
+    -- Set only when a group runs ALL/ANY -- it renders the whole superset.
+    -- ⚠ "ANY" is a retired stored value that imported profiles still carry (see the
+    -- dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
+    if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY")
+        and groupShowsAllOf(sel, "dispellable") then
+        claimed = claimed or {}
+        claimed.dispellableAll = true
+    end
+    return claimed
+end
 function DF:GetClaimedDebuffCategories(frame, db)
     if not frame then return nil end
     if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
@@ -792,28 +884,7 @@ function DF:GetClaimedDebuffCategories(frame, db)
     local claimed
     for _, group in ipairs(groups) do
         if type(group) == "table" and group.enabled ~= false and type(group.selection) == "table" then
-            local sel = group.selection
-            for i = 1, #CLAIMABLE_CATEGORIES do
-                local k = CLAIMABLE_CATEGORIES[i]
-                if sel[k] then
-                    claimed = claimed or {}
-                    claimed[k] = true
-                end
-            end
-            -- ★ DISPEL MODE rides along with the claim (2026-08-30). The claim
-            -- itself stays mode-AGNOSTIC as documented above, but the consumer has
-            -- to know WHICH TOKEN to subtract: a PLAYER-mode group shows only what
-            -- you can dispel, a strict subset of DISPELLABLE, so negating the
-            -- superset would delete every dispellable-by-someone-else debuff from
-            -- the row and leave it displayed nowhere at all. Set when ANY claiming
-            -- group runs ALL/ANY — that group renders the whole superset, so the
-            -- superset becomes safe to negate.
-            -- ⚠ "ANY" is a retired stored value that imported profiles still carry
-            -- (see the dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
-            if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
-                claimed = claimed or {}
-                claimed.dispellableAll = true
-            end
+            claimed = foldGroupClaims(group.selection, claimed)
         end
     end
     return claimed   -- nil when no group claims anything -> row builds untouched
@@ -837,10 +908,9 @@ end
 -- design doc §11.1 — "it's literally in the name"; a tester with two same-class
 -- players saw indicators fire for the other player's buffs). The OTHER pool is
 -- unchanged: anyone-cast, or "HELPFUL|!PLAYER" when the effect is othersOnly.
--- ACCEPTED consequence: the buff-bar dedup exclude map is caster-agnostic, so with
--- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
--- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
--- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+-- The buff-bar dedup follows that split: GetADTrackedSpellIDs returns My Buffs ids
+-- separately, and the buff row hides them only from its PLAYER half, so another
+-- player's cast of a My-Buffs-tracked spell stays on the bar.
 -- SELF_ONLY: a third `mine` value, not a boolean. See resolvePoolMode below for what
 -- it means and why it exists; checked FIRST because a truthy string would otherwise
 -- fall into the My Buffs branch, and it deliberately ignores othersOnly (an Other-pool
@@ -939,9 +1009,8 @@ local function wantsPandemicColor(cfg)
     return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
 end
 
--- Health-bar overlay alpha per mode — the exact semantics of the legacy Indicators:ApplyHealthBar (that module is gone;
--- this is now the only implementation, so the comparison is against behaviour, not source)
--- (Indicators.lua:1325-1329), read from CONFIG only:
+-- Health-bar overlay alpha per mode — the semantics of the removed legacy
+-- Indicators:ApplyHealthBar (this is now the only implementation), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
 -- Used by the FLAT whole-bar tint path and to derive the fill cover's alpha. The cover path
@@ -957,7 +1026,7 @@ end
 -- The container nests anchor -> native AuraContainer -> AuraSlot button, each a default
 -- +1 child, and the painted regions hang off the BUTTON — so an overlay's visual lands at
 --     anchor level + frameLevelOffset + 2
--- (same measured arithmetic as Frames/Create.lua:672-679). A condition-chain GATE hands
+-- (same measured arithmetic as Frames/Create.lua). A condition-chain GATE hands
 -- its mirror host back one level deeper still (a plain child frame of the button):
 --     anchor level + frameLevelOffset + 3
 -- That +2/+3 is derived from the code's default-child nesting, not from a live /fstack —
@@ -965,9 +1034,9 @@ end
 --
 --   * AD_HEALTHBAR_COVER_OFFSET seats the Health Bar Color cover (both variants: fill
 --     cover and whole-bar tint). Intended seat is healthBar+1 — above the real fill,
---     BELOW the attached absorb bar at healthBar+2 (Bars.lua:790/:1036) and the +2 power
---     bar, exactly where the legacy tint sat — so -1 + 2 nesting = +1. The old value (1)
---     landed the cover at healthBar+3, occluding the absorb shield (bug #1027).
+--     BELOW the attached absorb bar (DF:ResolveAbsorbBarLevel in Frames/Bars.lua) and
+--     the power bar, exactly where the legacy tint sat — so -1 + 2 nesting = +1. The old
+--     value (1) landed the cover at healthBar+3, occluding the absorb shield (bug #1027).
 --   * AD_CHAIN_GATE_OFFSET makes a chain gate LEVEL-NEUTRAL: -3 + 3 nesting parks the
 --     gate's mirror host at the anchor's own level, so the FINAL visual link — created on
 --     that host with the consumer's own offset — seats exactly where the flat path puts
@@ -1063,10 +1132,9 @@ end
 -- duplicate StatusBar outright, which is why the earlier mirror could never work. See the
 -- HEALTH FILL COVER note in Frames/AuraContainer.lua.
 -- Level: AD_HEALTHBAR_COVER_OFFSET + the 2-level container nesting = healthBar+1 (above
--- the real fill, below the +2 absorb/power bars), exactly where the legacy tint sat. This
--- comment used to claim "offset 1 = healthBar+1" — wrong by the nesting: offset 1 landed
--- the cover at healthBar+3, over the absorb shield (bug #1027). Colour/texture/alpha are
--- static config.
+-- the real fill, below the absorb/power bars), exactly where the legacy tint sat. Offset 1
+-- would land the cover at healthBar+3, over the absorb shield (bug #1027). Colour/texture/
+-- alpha are static config.
 local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter, opts)
     return {
         unit = unit,
@@ -1087,15 +1155,14 @@ end
 -- Build a whole-frame BORDER container config. mode="overlay": the slot covers the unit
 -- frame; DF.Border (secretRect, static art only — animations are forbidden on native
 -- buttons and stripped engine-side) renders as a child of the slot and inherits the slot's
--- secret visibility. levelOffset 10 lifts the ring above the class border (frame+10 inside
--- the slot) so it reads as an AD border, mirroring the legacy draw-above default
--- (Indicators.lua:1145-1147). Z-order polish is a P4.7 concern.
+-- secret visibility. levelOffset seats the ring relative to the class border (frame+10
+-- inside the slot) so it reads as an AD border — see drawAbove below for the exact value.
 -- drawAbove (the indicator's `drawAboveFrameBorder`, default true) picks which side of the
 -- frame's own class/role border this ring lands on. That border is a DF.Border child at
--- frame+10 (Frames/Border.lua:69), so 10 put the two at the SAME level and left the order to
--- creation sequence -- the toggle's whole point. 11 = definitively above (the legacy
--- draw-above default), 9 = definitively tucked underneath. Wired 2026-07-25; the flag rides
--- the border structSig so toggling it rebuilds with the new offset.
+-- frame+10 (Border:New in Frames/Border.lua), so 10 put the two at the SAME level and left
+-- the order to creation sequence -- the toggle's whole point. 11 = definitively above (the
+-- legacy draw-above default), 9 = definitively tucked underneath. The flag rides the border
+-- structSig so toggling it rebuilds with the new offset.
 -- `pandemicSpec` renders a SECOND ring on the same button in the pandemic colour,
 -- gated by the engine's refresh window (AuraContainer: PANDEMIC BORDER TWIN).
 -- Structural by presence, like the tint covers: its holder is created in the secure init.
@@ -1170,7 +1237,7 @@ local function buildBorderSpec(frame, borderCfg)
     --     blocked the paint in the first place.
     --   * solidOnly is about secret COLOURS, not rects -- it skips CreateColor/SetGradient
     --     because those taint on secret values (debuff dispel tints). The gradient pickers are
-    --     STATIC config, and Border.lua:195 skips the ctx colour paths entirely for GRADIENT,
+    --     STATIC config, and Border:BuildSpec skips the ctx colour paths entirely for GRADIENT,
     --     so no secret can reach them. secretRect is the rect flag, and only TEXTURE needs it.
     -- The three gradient controls are therefore UNFROSTED (AuraDesigner/Options.lua) to find out
     -- what actually happens. If it still renders solid in game, the real cause is something not
@@ -1277,7 +1344,7 @@ end
 -- renders on its own presence-gated container; see collectFrameTints), because a static
 -- pick meant a lower-priority buff could never colour the bar even when it was the ONLY
 -- buff present — presence is secret, so the pick cannot ask what is actually on the unit.
--- priority is static config (Engine.lua:502, default 5); ties broken by
+-- priority is static config (default 5); ties broken by
 -- pool (spec pool wins — byte-identical to the old name order when the other pool is empty)
 -- then aura name, for a deterministic, non-flapping winner. `validate(typeCfg)` gates which
 -- blocks count (e.g. border must be enabled). Read-free.
@@ -1317,8 +1384,6 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
     return bestKey, bestCfg, bestMap, bestPrio, bestPool
 end
 
--- Tear down every container in a per-type store that is not the current winner (winner
--- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
 -- Destroy everything an entry owns. A condition-chain entry holds N handles, not one —
 -- released INNERMOST FIRST so a link is never orphaned by its host disappearing under it.
 local function destroyEntry(entry)
@@ -1336,6 +1401,8 @@ local function destroyEntry(entry)
     entry.handle = nil
 end
 
+-- Tear down every container in a per-type store that is not the current winner (winner
+-- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
 local function teardownExcept(store, keepName)
     for auraName, entry in pairs(store) do
         if auraName ~= keepName then
@@ -1536,8 +1603,8 @@ end
 -- legacy icon:SetPoint(anchor, frame, anchor, offsetX, offsetY) + SetSize(size, size).
 -- ============================================================
 
--- Stable per-indicator key (mirrors what Engine's key builder produced: "auraName#id"; Engine.lua no longer
--- has that helper -- it defines only ResolveSpec / ClearFrame / ForceRefreshAllFrames). keyPrefix is
+-- Stable per-indicator key ("auraName#id", mirroring the key builder the Engine no longer
+-- has). keyPrefix is
 -- "" for the spec pool, OTHER_PREFIX for the Other Buffs pool — one shared store, no
 -- cross-pool collisions ("other:<name>#<id>" vs "<name>#<id>").
 local function placedKey(keyPrefix, auraName, indicator)
@@ -1612,7 +1679,7 @@ local function buildPlacedBorderSpec(frame, indicator, hideIcon, knownSize, defs
 end
 
 -- Cheap RAW-config border gate (no BuildSpec, no allocation) — the same predicate the built
--- spec keys off (Border.lua:217, enabled = ShowBorder ~= false), plus not-hideIcon (a ring
+-- spec keys off (Border:BuildSpec, enabled = ShowBorder ~= false), plus not-hideIcon (a ring
 -- around a hidden icon is force-disabled). Used PER-TICK for the structural border-on
 -- decision; the real spec is built ONLY on (re)build / restyle, never every pass (FIX C).
 local function placedBorderOn(indicator, hideIcon)
@@ -1643,6 +1710,11 @@ local PLACED_BORDER_KEYS = {
     "BorderAnimationInset", "BorderAnimationOffsetX", "BorderAnimationOffsetY",
     "BorderAnimationMask", "BorderAnimationSidesAxis", "BorderAnimationCornerLength",
     "BorderAnimationProcStart",
+    -- ⚠ ADDED 2026-09-10 WITH THE SETTING ITSELF. Every scalar BuildSpec folds into
+    -- spec.animation belongs here or the border goes stale until /reload -- and this one
+    -- is also STRUCTURAL below, because a container button's animation groups are frozen
+    -- at build and cannot be retuned in place.
+    "BorderAnimationBlendMode",
     -- Colour-source keys: not exposed by the AD border UI today (source is always CUSTOM),
     -- but hashed defensively so an imported profile or a future class/role border option
     -- can't leave the border stale until /reload.
@@ -1698,6 +1770,7 @@ local function rawBorderAnimStructTok(t, borderOn)
         .. "," .. tostring(t.BorderAnimationSidesAxis)
         .. "," .. tostring(t.BorderAnimationCornerLength)
         .. "," .. tostring(t.BorderAnimationProcStart)
+        .. "," .. tostring(t.BorderAnimationBlendMode)
         .. "," .. colSig(t.BorderAnimationColor)
 end
 
@@ -1744,11 +1817,11 @@ end
 -- Shared styleable duration-text spec for EVERY placed indicator (icon / square / bar). The
 -- countdown is filled secret-safe by native SetDurationText (Blizzard formats the remaining
 -- time C-side; no Lua read). "Color by Time Remaining" (P4.4) routes through the #205 discrete
--- BUCKET formatter (the factory duration formatter -- the file-local GetDurationFormatter in
--- Features/Auras.lua; there is no DF:GetFactoryDurationFormatter -- |cRRGGBB escapes baked into the native
+-- BUCKET formatter (the file-local GetDurationFormatter in Features/Auras.lua --
+-- |cRRGGBB escapes baked into the native
 -- NumericRuleFormatter bands, evaluated C-side against the SECRET remaining time: red <5s /
 -- orange <15s / yellow <60s / green fresh — the same thresholds the buff/debuff rows use). The
--- smooth per-percent curve stays dead on container buttons (buckets only). When colour-by-time
+-- native colour CURVE paints it on 68914+, buckets only on the older fallback. When colour-by-time
 -- owns the colour the spec leaves `color` nil so DF.TextStyle never stomps the escapes; a static
 -- duration colour applies only when colour-by-time is off. NOTE: the colorByTime flag is part of
 -- the STRUCTURAL signature — SetDurationText binds the formatter ONCE per slot, so a toggle must
@@ -1780,7 +1853,7 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
     -- Resolve the indicator's Duration Format (default NUMBER — bare "45" / "2m" / "1h",
-    -- the same default the buff/debuff/defensive rows use). Classic formats come back as
+    -- the same default the buff/debuff/defensive rows use). Plain formats come back as
     -- a plain formatter; the percent family (PERCENT / SECONDS_PERCENT, PTR-7 #5) comes
     -- back as a SetTextFormat spec instead. The formatter also carries colour-by-time
     -- buckets + hide-above blanking when set — hide-above never composes with the
@@ -1871,14 +1944,10 @@ end
 -- payload below the threshold and an EMPTY string above it (C-side band
 -- evaluation against the SECRET remaining time, zero Lua reads).
 --
--- Delivery mechanism — in-game probe history:
---   * a243064 parented the region OUTSIDE the button subtree (unit frame):
---     soft-rejected — the binding neither errored nor drove it.
---   * 014b1bb bound a button-child region as a SECOND SetDurationText on the
---     indicator's own button: REPLACE semantics — the second bind killed the
---     indicator's duration text (and above the threshold the alert's empty
---     band renders nothing, so NO text rendered at all). One duration binding
---     per button is the rule.
+-- Delivery constraints, proven in game:
+--   * a region parented OUTSIDE the button subtree is never driven by the binding.
+--   * a SECOND SetDurationText on the same button REPLACES the first, killing the
+--     indicator's own duration text. ONE duration binding per button is the rule.
 -- The mechanism is therefore an invisible COMPANION SLOT per alerted
 -- indicator — see the EXPIRY ALERT COMPANION SLOT section further down (after
 -- the layout builders it borrows). The indicator's own button carries exactly
@@ -1890,9 +1959,8 @@ end
 -- engine (Features/Expiration.lua) so the frame-level indicators can share the same
 -- secret-safe reveal. These thin locals keep the factory's own call sites reading the
 -- same, passing the icon side as the engine's geometry.baseSize (BORDER auto-match reads
--- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec /
--- BuildDurationSpec (via alertSlotStyle), so the factory no longer needs its own
--- effectiveAlertSize/Anchor.
+-- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec
+-- (via alertSlotStyle), so the factory no longer needs its own effectiveAlertSize/Anchor.
 local function alertElemMode(indicator) return DF.Expiration:Mode(indicator) end
 -- geom (from alertGeometry, defined after resolveBarSize) carries the target's shape: a square
 -- { baseSize } for icons/squares, or a rectangular { width, height } for bars. Defaults to the
@@ -1994,7 +2062,18 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
         -- Every sibling path (square fill above, filter/debuff groups, missing badge)
         -- already used 0.
         local inset = borderSpec and borderArtInset(borderSpec) or 0
-        style.icon = { show = not hideIcon, inset = inset }
+        -- ★ staticSpellID: PIN THE ART TO ONE SPELL, whatever aura matched.
+        -- ☠ IT IS THE CONTAINER'S OWN FIELD, NOT A NEW ONE. AuraContainer's styleButton has
+        -- honoured iconSpec.staticSpellID since the curated-art work -- it was simply never
+        -- reachable from a placed indicator, because nothing wrote it onto one.
+        -- ⚠ WHO WRITES IT: the Power Infusion Helper, on its Icon surface, with Power
+        -- Infusion's own id. Its trigger is a list of other people's cooldowns and its
+        -- MESSAGE is "infuse this player" -- so the picture must not be whichever cooldown
+        -- happened to match, which is the scope objection that got Icon cut once already.
+        -- ⚠ NOT VALIDATED HERE. A number is what the container asks for and an unknown one
+        -- resolves to no texture, which is the same outcome as the field being absent.
+        local staticID = tonumber(indicator.staticSpellID)
+        style.icon = { show = not hideIcon, inset = inset, staticSpellID = staticID }
     end
 
     -- Cooldown swipe: Blizzard drives it from the matched aura's Duration object
@@ -2095,14 +2174,11 @@ end
 -- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 40.
 --
 -- ⚠ The returned value is ABSOLUTE (an offset from the unit frame, like every other
--- *FrameLevel setting since 09d6743). Callers pass it through as frameLevelOffset and
--- NOTHING adds a base to it — the `or 40` is a fallback for a MISSING key, not a baseline
--- that gets summed in. This comment used to claim "callers add 40 for placed, 41 for the
--- alert companion", which was true before the absolute-level change and has misled at
--- least two readers since into hunting a hidden offset that does not exist.
--- (The alert companion really does add 13 — see buildAlertCompanionConfig — but that is a
--- deliberate ONE FULL ROW over its own indicator, not a base. It was +1 until it turned out
--- a row is 13 levels thick, which parked the alert inside its own indicator's band.)
+-- *FrameLevel setting). Callers pass it through as frameLevelOffset and NOTHING adds a
+-- base to it — the `or 40` is a fallback for a MISSING key, not a baseline that gets
+-- summed in.
+-- (The alert companion does add a lift on top — see Factory.AlertLift — but that is a
+-- deliberate clearance over its own indicator, not a base.)
 local function resolveLevel(indicator, defLevel)
     return tonumber(indicator and indicator.frameLevel) or defLevel or 40
 end
@@ -2261,23 +2337,35 @@ local function buildPlacedConfig(frame, unit, map, indicator, isSquare, borderSp
     }
 end
 
--- STRUCTURAL signature: candidateFilters (declared at build), icon-vs-square, and which
--- REGIONS exist — hideIcon, stacks on/off, duration text on/off, border on/off — plus
--- frameLevel (set once at Create) and the duration-text FORMAT KEY (SetDurationText binds the
--- colour-by-time bucket formatter once per slot, so a colorByTime toggle must Rebuild to
--- re-bind it). styleButton_regions only ever CREATES regions (never hides/removes them), so
--- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
--- the old region visible. A change here forces a whole-container Rebuild (slots can't be
--- patched). Cosmetic styling of a live region is coSig.
--- STRUCTURAL signature: CREATE-ONLY properties only. A change here costs a full
--- teardown+recreate -- and teardown can only Hide(), because WoW never destroys frames,
--- so every rebuild permanently strands the container plus a 10-frame batch per group
--- (AddAuraGroup always creates FrameCreationBatchSize frames up front). Anything the
--- native API can mutate live therefore MUST stay out of this sig or it leaks on every
--- edit. The tracked spell-ID map used to live here; it is live-tunable via
--- candidateFilters and now rides placedTuningSig.
+-- STRUCTURAL signature: CREATE-ONLY properties only — icon-vs-square and which REGIONS
+-- exist (hideIcon, stacks on/off, duration text on/off, border on/off), plus frame level
+-- and strata (both set once at Create). styleButton_regions only ever CREATES regions
+-- (never hides/removes them), so toggling a region OFF must Rebuild the container to drop
+-- it; a plain ApplyStyle would leave the old region visible. Cosmetic styling of a live
+-- region is coSig.
+--
+-- A change here costs a full teardown+recreate -- and teardown can only Hide(), because WoW
+-- never destroys frames, so every rebuild permanently strands the container plus a 10-frame
+-- batch per group (AddAuraGroup always creates FrameCreationBatchSize frames up front).
+-- Anything the native API can mutate live therefore MUST stay out of this sig or it leaks
+-- on every edit: the tracked spell-ID map and the filter string ride placedTuningSig, and
+-- the duration-text format key rides placedCoSig.
 local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs)
+    -- ⚠ DERIVED HERE RATHER THAN PASSED. Both call sites already hand over the indicator, and
+    -- an eighth positional argument on a seven-argument sig is how the wrong value gets passed
+    -- at one of two sites and nobody notices for a month. A square never binds an icon, so the
+    -- question only means anything on the icon branch.
+    local staticArt = (not isSquare) and tonumber(indicator.staticSpellID) and true or false
     return (isSquare and "sq" or "ic")
+        -- ★ PINNED ART IS STRUCTURAL, and it is structural for a BIND-ONCE reason rather than
+        -- a region one. bindNative registers slot.dfIcon with Blizzard's SetIcon exactly once
+        -- per slot (slot._boundIcon) and skips that registration when the spec pins a spell --
+        -- because a bound icon is repainted from the matched aura, which is the one thing a
+        -- pinned picture must not do. A slot pooled from one kind to the other would keep the
+        -- binding decision it was created with, so the two kinds must never share a slot.
+        -- ⚠ THE FLAG, NOT THE ID. Changing WHICH spell is pinned only needs the texture set
+        -- again (ApplyStyle does that); changing WHETHER one is pinned changes the binding.
+        .. "|" .. (staticArt and "sa" or "")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")
@@ -2316,14 +2404,11 @@ end
 -- tracked spell-ID map becomes config.candidateFilters ({ includeSpellIDs = map }), and
 -- the native SetAuraGroupCandidateFilters mutates that in place — so a selection edit is
 -- an ApplyTuning, never a Rebuild. A placed indicator pins max = 1 (buildPlacedConfig)
--- and has no per-indicator sort. Mirrors the filter-group path's tuningSig, which has
--- worked this way since Wave 1.
+-- and has no per-indicator sort. Mirrors the filter-group path's tuningSig.
 --
--- ★ `filt` joined the tuning half on 2026-08-04. The filter string used to be
--- creation-frozen, so "Others Only" cost a teardown+recreate for a string change;
--- SetAuraGroup/SlotFilterString mutate it live and the engine now pushes it from
--- applyGroupTuning. Every AD family declares exactly ONE record, so its key set can
--- never move — which is the condition that makes this legal (add-only topology).
+-- ★ `filt` rides here too: SetAuraGroup/SlotFilterString mutate the filter string live
+-- and the engine pushes it from applyGroupTuning. Legal because every AD family declares
+-- exactly ONE record, so its key set can never move (add-only topology).
 -- Shared by every AD family, so all seven call sites pass their own poolFilter result.
 local function placedTuningSig(map, filt)
     return includeSig(map) .. "|f=" .. tostring(filt or "")
@@ -2777,10 +2862,8 @@ function Factory.AlertLift(indicator)
     return Factory.ALERT_ROW_LIFT
 end
 
--- THE alert's render, as ONE table. The live companion slot and the AD canvas preview
--- BOTH take their style from here, so the reveal can never be styled two ways. It used to
--- be built live from BuildDurationSpec and on the canvas from a separate path, and that
--- split is exactly how the two drifted apart on layering twice over.
+-- THE alert's render, as ONE table. The live companion slot and the AD canvas preview BOTH
+-- take their style from here, so the reveal can never be styled two ways.
 --
 -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
 -- only wraps it in AuraContainer plumbing. geom (alertGeometry) is the target's shape — a
@@ -2788,12 +2871,9 @@ end
 --
 -- nil = no reveal, for any of three reasons: the master toggle is off / the type is unset
 -- (Expiration:Mode), the pre-12.1 formatter API is missing, or the indicator is
--- SHOW-WHEN-MISSING. That last gate used to live only on the canvas path, so live built a
--- companion for missing-mode indicators anyway — and since the companion is a NORMAL
--- (non-inverted) container, it revealed while the aura was PRESENT, i.e. exactly when the
--- indicator under it was hidden. A floating alert over nothing. "Warn me before this runs
--- out" and "show me while this is absent" are contradictory settings; the canvas and the
--- surrounding comments already treated it as nonsensical, so live now agrees with them.
+-- SHOW-WHEN-MISSING. That last gate must stay on BOTH paths: the companion is a NORMAL
+-- (non-inverted) container, so on a missing-mode indicator it would reveal while the aura
+-- was PRESENT — a floating alert over nothing, exactly when the indicator is hidden.
 local function alertSlotStyle(indicator, geom)
     if indicator.showWhenMissing then return nil end
     local dur = DF.Expiration:BuildDurationSpec(indicator,
@@ -2840,14 +2920,10 @@ end
 
 -- Canvas twin of the companion. The AD editor has no container row to layer inside — it
 -- paints a single PREVIEW SLOT — so the alert there is a second preview slot laid over the
--- indicator's, taking the SAME style table. Options.lua then only has to position it: the
--- FontString, its font, anchor, offsets, alpha and holder level all come from the shared
--- spec via styleButton_regions, exactly as they do live.
---
--- That is the whole point of this function existing. The canvas used to hand-build its own
--- FontString and hand-set the layering to a literal that merely happened to match the live
--- one; when the live number moved, the canvas could not follow, because it was never
--- derived from it. Two bugs came out of that in one day.
+-- indicator's, taking the SAME style table. The editor (AuraDesigner/UI/Groups.lua) then
+-- only has to position it: the FontString, its font, anchor, offsets, alpha and holder
+-- level all come from the shared spec via styleButton_regions, exactly as they do live —
+-- never hand-built on the canvas, or the two drift the moment a live number moves.
 function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     local style = alertSlotStyle(indicator, geom)
     if not style then return nil end
@@ -2900,7 +2976,9 @@ local function alertCompanionCoSig(frame, indicator, isBar, alpha, defs)
         "sx=" .. tostring(sx), "sy=" .. tostring(sy),
         -- scale is icon/square-only (the bar has no global for it, and buildBarLayout reads
         -- it raw), so this passes `defs` not `gdefs` — on a bar both resolve identically.
-        "sc=" .. tostring(tonumber(defOf(indicator, "scale", isBar and nil or defs, 1)) or 1),
+        -- (Was `isBar and nil or defs`, which always yields defs; written out so the
+        -- expression says what it does. Same result either way, per the note above.)
+        "sc=" .. tostring(tonumber(defOf(indicator, "scale", defs, 1)) or 1),
         "fo=" .. tostring(defOf(indicator, "durationFont", gdefs, nil)),
         "al=" .. tostring(alpha),
     }, "|")
@@ -2979,14 +3057,10 @@ end
 -- mirror the live Rebuild rule).
 -- ============================================================
 -- Editor-canvas sample for the expiry-alert element (cfg.alertPreview). This is a WHOLE
--- PREVIEW-SLOT CONFIG, not a bare spec: Options.lua lays a second preview slot over the
--- indicator's and styles/paints it through StylePreviewSlot/PaintPreviewSlot, the same
--- pipeline the indicator itself and the group blocks already use.
---
--- It used to hand back only the duration spec, leaving the canvas to build its own
--- FontString and pick its own layering — a second renderer for one feature, and the reason
--- the two drifted. nil (no slot) whenever the live companion would also be absent, since
--- both now ask alertSlotStyle.
+-- PREVIEW-SLOT CONFIG, not a bare spec: the editor (AuraDesigner/UI/Groups.lua) lays a
+-- second preview slot over the indicator's and styles/paints it through StylePreviewSlot/
+-- PaintPreviewSlot, the same pipeline the indicator itself and the group blocks already use.
+-- nil (no slot) whenever the live companion would also be absent: both ask alertSlotStyle.
 local function buildAlertPreview(indicator, layout, entries, geom)
     return Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
 end
@@ -3356,6 +3430,57 @@ function Factory:MemberSize(ind, defs)
     return math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24)
 end
 
+-- ☠ A PACKED MEMBER HAS NO SCALE OF ITS OWN. A loose placement renders inside a container
+-- SetScale'd by its scale; a member shares the group's one container, so the only places
+-- its scale can live are its cell size and its text. This view folds scale into exactly
+-- what SetScale would have grown (size, text scale, text offsets) and reports scale 1, so
+-- every builder that reads the member renders it at its scaled size. Border thickness stays
+-- in pixels. Read with the same caller baselines buildPlacedStyle uses (duration 1.2,
+-- stack offset 2/-2). Views are reused per indicator and refreshed in place: this runs on
+-- the per-aura-event sync path.
+local memberView
+do
+    local memberViews = setmetatable({}, { __mode = "k" })
+    function memberView(ind, defs)
+        local sc = tonumber(defOf(ind, "scale", defs, 1)) or 1
+        if sc == 1 then return ind end
+        local v = memberViews[ind]
+        if not v then
+            v = setmetatable({}, { __index = ind })
+            memberViews[ind] = v
+        end
+        v.scale         = 1
+        v.size          = math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24) * sc
+        v.durationScale = (tonumber(defOf(ind, "durationScale", defs, 1.2)) or 1.2) * sc
+        v.durationX     = (tonumber(defOf(ind, "durationX", defs, 0)) or 0) * sc
+        v.durationY     = (tonumber(defOf(ind, "durationY", defs, 0)) or 0) * sc
+        v.stackScale    = (tonumber(defOf(ind, "stackScale", defs, 1)) or 1) * sc
+        v.stackX        = (tonumber(defOf(ind, "stackX", defs, 2)) or 2) * sc
+        v.stackY        = (tonumber(defOf(ind, "stackY", defs, -2)) or -2) * sc
+        return v
+    end
+end
+
+-- The member as the group flow renders it (see memberView) — the canvas styles its packed
+-- slots from this so they match the live buttons.
+function Factory:MemberView(ind, defs)
+    return memberView(ind, defs)
+end
+
+-- ☠ THE ROW CAP IS A WIDTH, NOT A COUNT. The engine wraps when the running row width
+-- passes `wrap` cells of layout.size, so that size has to be the members' own cell or
+-- "Icons Per Row" counts wrong: members smaller than the group's fallback 24 fit an extra
+-- icon per row. The largest member is the cell, so uniform members wrap exactly at the
+-- setting and a mixed group never wraps before it.
+function Factory.MemberFlowCell(recs)
+    local cell
+    for _, r in ipairs(recs) do
+        local s = r.size or (r.style and r.style.layout and r.style.layout.size)
+        if s and (not cell or s > cell) then cell = s end
+    end
+    return cell
+end
+
 -- A member's PER-RECORD STYLE, in the shape recordGroupLayout reads (Frames/AuraContainer):
 -- layout.size gives the record its own cell, layoutIndex fixes its order in the flow. This
 -- is the same style buildMemberGroupConfig declares per record; the button half is omitted
@@ -3366,7 +3491,7 @@ end
 -- for a declared cell first (GetElementSize) and only measures the button when there is
 -- none. Stamp this on the slot as dfImpRecStyle and the shared flow does the rest.
 function Factory:MemberRecordStyle(ind, defs, memberIdx)
-    return { layout = { size = self:MemberSize(ind, defs) }, layoutIndex = memberIdx }
+    return { layout = { size = self:MemberSize(memberView(ind, defs), defs) }, layoutIndex = memberIdx }
 end
 
 -- The CONFIG a group's flow is laid out with: its layout AND its style.
@@ -3374,9 +3499,14 @@ end
 -- duration strip's height, and that reservation is folded into elementHeight — so a config
 -- carrying layout alone silently drops the padding live applies, and every row of a group
 -- with a duration bar sat tighter on the canvas than on the frame.
-function Factory:BuildGroupFlowConfig(frame, group, wrapDefault)
+-- records: a member group's packed record styles, so the row cap uses the members' own
+-- cell exactly as buildMemberGroupConfig does (memberFlowCell).
+function Factory:BuildGroupFlowConfig(frame, group, wrapDefault, records)
+    local layout = buildFilterGroupLayout(group, wrapDefault)
+    local cell = records and Factory.MemberFlowCell(records)
+    if cell then layout.size = cell end
     return {
-        layout = buildFilterGroupLayout(group, wrapDefault),
+        layout = layout,
         style  = buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
     }
 end
@@ -3530,6 +3660,8 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             },
         }
     end
+    local layout = buildFilterGroupLayout(group)
+    layout.size = Factory.MemberFlowCell(recs) or layout.size
     return {
         unit = frame.unit,
         mode = "row",
@@ -3547,7 +3679,7 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
         tooltips = adTooltipsOn(frame, "tooltipADIndicatorsEnabled"),
         adBorderAnim = true,
         frameLevelOffset = (defs and defs.level) or 40,
-        layout = buildFilterGroupLayout(group),
+        layout = layout,
         style = buildFilterGroupStyle(group, borderSpec),
     }
 end
@@ -3646,9 +3778,34 @@ end
 -- the row's semantics. Field driver: one debuff rendered once per overlapping group
 -- ("the same 1 debuff x 4/5", Drasvin, 5.3.1).
 local dgroupFacade = {}
-local function buildDebuffGroupRecords(group, claimed)
+-- Selection key -> the row's flat key, for the categories past the first six and
+-- the Hide column. A missing selection key reads false, so a group saved before
+-- these existed builds exactly as it did.
+local DGROUP_FLAG_KEYS = {
+    important = "debuffFilterImportant", raidInCombat = "debuffFilterRaidInCombat",
+    magic = "debuffFilterMagic", curse = "debuffFilterCurse", poison = "debuffFilterPoison",
+    disease = "debuffFilterDisease", bleed = "debuffFilterBleed",
+    -- Who Cast It shows. Not claimable (CLAIMABLE_CATEGORIES), so the bar keeps
+    -- showing these too: a group usually narrows them (Hide Boss, Hide Long), and
+    -- claiming the whole category would drop the rest from the bar with nothing
+    -- left to show them.
+    nonPlayer = "debuffFilterNonPlayer", fromPlayer = "debuffFilterPlayer", mine = "debuffFilterMine",
+    hideBoss = "debuffHideBoss", hideRole = "debuffHideRole", hidePriority = "debuffHidePriority",
+    hideImportant = "debuffHideImportant", hideRaidInCombat = "debuffHideRaidInCombat",
+    hideCrowdControl = "debuffHideCrowdControl", hideRaid = "debuffHideRaid",
+    hideDispellable = "debuffHideDispellable",
+    hideMagic = "debuffHideMagic", hideCurse = "debuffHideCurse", hidePoison = "debuffHidePoison",
+    hideDisease = "debuffHideDisease", hideBleed = "debuffHideBleed",
+    hideNonPlayer = "debuffHideNonPlayer", hidePlayer = "debuffHidePlayer", hideMine = "debuffHideMine",
+    hidePermanent = "debuffHidePermanent",
+}
+local function buildDebuffGroupRecords(group, claimed, selfOnly)
     local sel = group.selection
     if type(sel) ~= "table" then return nil end
+    -- Lazy, like the other AD migrations: groups have no startup walk. Same result
+    -- either way (the builder reads a stray Raid tick as By Me); this clears it so the
+    -- editor, which no longer has a Raid row, never holds an invisible tick.
+    if DF.MigrateRaidDebuffRow and (sel.raid or sel.hideRaid) then DF:MigrateRaidDebuffRow(sel, true) end
     wipe(dgroupFacade)
     dgroupFacade.directDebuffShowAll          = false
     dgroupFacade.debuffFilterBoss             = sel.boss and true or false
@@ -3663,11 +3820,20 @@ local function buildDebuffGroupRecords(group, claimed)
     -- minutes -> maxDur nil, exactly as on the row (no duplicate guard here).
     dgroupFacade.debuffMaxDurationMinutes     = sel.hideLongMinutes or 5
     dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
+    dgroupFacade.debuffMaxDurationUnit        = sel.hideLongUnit or "MINUTES"
+    dgroupFacade.debuffMaxDurationSeconds     = sel.hideLongSeconds or 5
+    for selKey, rowKey in pairs(DGROUP_FLAG_KEYS) do
+        dgroupFacade[rowKey] = sel[selKey] and true or false
+    end
+    -- A group with nothing picked renders nothing, whatever it hides (the row would
+    -- fall back to show-all).
+    dgroupFacade.debuffEmptyShowsNothing      = true
+    dgroupFacade.debuffMatchAll               = sel.matchAll and true or false
     -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the resolver's own
     -- `== false` opt-out can never fire here — the CALLER gates: the sync loop passes
     -- claimed only while adDB.debuffGroupDedup (the Debuff Groups tab's own toggle,
     -- independent of the row's) is on.
-    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed) or nil
+    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed, selfOnly) or nil
 end
 
 -- Version-keyed record cache (mirror of fgroupResCache): building records walks
@@ -3695,17 +3861,26 @@ local function claimCtx(claimed)
     if claimed.dispellableAll then s = s .. "dispellableAll," end
     return s
 end
-local function resolveDebuffGroup(group, claimed)
+local function resolveDebuffGroup(group, claimed, selfOnly)
     local ver = DF.auraLayoutVersion or 0
     -- Claims join the cache key: a group's records now depend on the groups ABOVE it.
     -- The fold derives purely from adDB (groups list + the preset-level
     -- debuffGroupDedup toggle), so within one auraLayoutVersion it is deterministic
     -- for every frame and mode; the ctx guard covers the one edit the version bump
     -- can miss (a toggle write racing a sync before its refresh chain lands).
+    -- selfOnly (a Dwarf's own frame: Stoneform bleeds count as By Me) is the other
+    -- input, kept in its own slot so the player's frame and everyone else's don't evict
+    -- each other on every sync pass.
     local ctx = claimCtx(claimed)
-    local c = dgroupResCache[group]
-    if c and c.version == ver and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
-    local records = buildDebuffGroupRecords(group, claimed)
+    local slot = selfOnly and "self" or "other"
+    local byGroup = dgroupResCache[group]
+    if not byGroup or byGroup.version ~= ver then
+        byGroup = { version = ver }
+        dgroupResCache[group] = byGroup
+    end
+    local c = byGroup[slot]
+    if c and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
+    local records = buildDebuffGroupRecords(group, claimed, selfOnly)
     -- ☠ EMPTY IS NOT NIL DOWNSTREAM. When claims swallow a non-empty selection the
     -- resolver returns an EMPTY ARRAY (render nothing) — but cfg.filter = {} would be
     -- mapped back to show-all by normalizeFilters, the exact fail-open the row parks
@@ -3714,7 +3889,7 @@ local function resolveDebuffGroup(group, claimed)
     if records and #records == 0 then records = nil end
     local structSig = records and DF.DebuffFilterRecordsStructSig and DF:DebuffFilterRecordsStructSig(records) or ""
     local tuningSig = records and DF.DebuffFilterRecordsTuningSig and DF:DebuffFilterRecordsTuningSig(records) or ""
-    dgroupResCache[group] = { version = ver, ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
+    byGroup[slot] = { ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
     return records, structSig, tuningSig
 end
 
@@ -3746,14 +3921,12 @@ end
 
 -- ============================================================
 -- MEMBER LAYOUT GROUPS — position arranger (12.1 port)
--- A member ("classic") layout group arranges its members' PLACED indicators in
+-- A member layout group arranges its members' PLACED indicators in
 -- a grid computed from the group's settings (anchor / offset / grow direction /
--- icons per row / spacing). Legacy applied this at render time over the ACTIVE
--- members only (the legacy Engine group-offset pass, since removed — icons compacted as auras came
--- and went); on 12.1 aura presence is SECRET, so slots are STATIC: each member
--- owns the grid cell of its member index, exactly matching the editor preview
--- (Options.lua RefreshPlacedIndicators). An absent (or eye-hidden) member
--- leaves its cell empty — no compaction, by design (read-free).
+-- icons per row / spacing). On 12.1 aura presence is SECRET, so slots are STATIC: each
+-- member owns the grid cell of its member index (no compaction as auras come and go),
+-- exactly matching the editor preview (AuraDesigner/UI/Groups.lua RefreshPlacedIndicators).
+-- An absent (or eye-hidden) member leaves its cell empty — by design (read-free).
 --
 -- Mechanics: positions are recomputed per SyncFrame pass from the LIVE group
 -- tables (cheap arithmetic — group edits apply immediately, no version cache to
@@ -3919,7 +4092,7 @@ end
 -- config; Blizzard's secret show/hide drives the push.
 --
 -- SCOPE: icon / square (placed) and border / healthbar / background (frame-level). BARS are
--- excluded — legacy has no missing mode for bars (no duration data when absent, Engine.lua:510),
+-- excluded — legacy has no missing mode for bars (no duration data when absent),
 -- and the GUI never offered showWhenMissing for a bar. Cooldown / duration text / stacks are
 -- NOT rendered on a missing indicator (nothing to count when the aura is absent).
 --
@@ -3928,7 +4101,7 @@ end
 -- in any handle's self.buttons, so _teardownContainer's StopAnimation loop never reaches it — an
 -- animated badge would leave an orphaned ticker running forever. So every missing badge-border
 -- spec is hard-nilled (spec.animation = nil), exactly the missing-buff badge precedent
--- (Features/Auras.lua:3122). (StopAnimation is not cleanly reachable from the AD missing teardown
+-- (Features/Auras.lua, styleMissingBadge). (StopAnimation is not cleanly reachable from the AD missing teardown
 -- for the same "badge isn't in self.buttons" reason, so hard-nil is the correct choice here.)
 -- ============================================================
 
@@ -3950,9 +4123,9 @@ local function primaryADSpellID(spec, auraName)
     return p
 end
 
--- Static icon texture for a missing indicator (mirrors the legacy Engine synthetic-aura builder, which no longer exists): the
--- AD IconTextures override, else C_Spell.GetSpellTexture on the static primary ID, else the
--- generic question-mark fallback. Read-free (config + a static spell-ID texture lookup).
+-- Static icon texture for a missing indicator: the AD IconTextures override, else
+-- C_Spell.GetSpellTexture on the static primary ID, else the generic question-mark
+-- fallback. Read-free (config + a static spell-ID texture lookup).
 local function missingIconTexture(spec, auraName)
     local tex = DF.AuraDesigner.IconTextures and DF.AuraDesigner.IconTextures[auraName]
     if not tex then
@@ -4009,8 +4182,8 @@ local function stylePlacedMissingBadge(h, frame, spec, auraName, indicator, isSq
     local hideIcon = defOf(indicator, "hideIcon", defs, false) and true or false
 
     -- Border (config, read-free) — animation ALWAYS stripped on a missing badge (orphan-ticker
-    -- hazard; see section header + Auras.lua:3122). buildPlacedBorderSpec returns nil when the
-    -- border resolves off (or hideIcon), matching the present path.
+    -- hazard; see section header + styleMissingBadge in Features/Auras.lua). buildPlacedBorderSpec
+    -- returns nil when the border resolves off (or hideIcon), matching the present path.
     local borderSpec = buildPlacedBorderSpec(frame, indicator, hideIcon, nil, defs)
     if borderSpec then borderSpec.animation = nil end
     local artInset = borderSpec and borderArtInset(borderSpec) or 0
@@ -4378,11 +4551,6 @@ end
 -- self-buffs, so narrowing is always on: `Factory._helperSoundNarrow` is read but no longer
 -- written, the switch having gone with the test commands. Set it false from a debug session
 -- if a cast-on-others buff ever needs registering.
--- Every id in the map is now a real spell. It did not used to be: an earlier ownership marker
--- rode here as a synthetic id and had to be filtered back out, because registering a sound on it
--- armed a trigger that could never fire AND made the registration count look healthy while
--- nothing was listening. The mark moved onto the container config (`dfGate`), so the whole
--- exclusion went with it.
 local function helperSoundMapFor(unit, map)
     if not map then return nil end
     local R = DF.FilterRegistry
@@ -4428,13 +4596,16 @@ function Factory:SetHelperSoundsArmed(frame, armed, map, cfg)
     -- Power Infusion back onto the priest.
     if UnitIsUnit(frame.unit, "player") then return 0, "own unit (never registered, by design)" end
 
-    -- ☠ ROLE EXCLUSION HOLDS HERE TOO. The visual gate skips excluded roles at the
-    -- container funnel, which sound never passes through -- without this, a tank's cooldown
-    -- played the cue while nothing marked them: a signal with nobody to act on. Checked at
-    -- arm time, the same staleness window as everything else on this path.
-    if DF.AuraContainer and DF.AuraContainer.IsHelperRoleExcluded
-        and DF.AuraContainer.IsHelperRoleExcluded(frame.unit) then
-        return 0, "role excluded"
+    -- ☠ THE PER-UNIT NARROWINGS HOLD HERE TOO -- role, and now the named-player allowlist.
+    -- The visual gate applies them at the container funnel, which sound never passes through:
+    -- without this a tank's cooldown played the cue while nothing marked them, a signal with
+    -- nobody to act on. Checked at arm time, the same staleness window as everything else on
+    -- this path.
+    -- ⚠ ONE VERB (IsHelperUnitExcluded), not a test per narrowing, so a third one added later
+    -- cannot reach the visuals and miss the sound -- which is exactly how this one started.
+    if DF.AuraContainer and DF.AuraContainer.IsHelperUnitExcluded
+        and DF.AuraContainer.IsHelperUnitExcluded(frame.unit) then
+        return 0, "unit excluded (role or player list)"
     end
 
     local argKey, argVal = resolveSoundArg(cfg or {})
@@ -4507,9 +4678,7 @@ end
 
 -- Published for the editor canvas, which has to split a group's members exactly the way
 -- the renderer does — packed members flow inside the group's box, the rest take a grid
--- cell. It kept its own spelling of this predicate (with a comment on each telling the
--- reader they must stay identical, which is not a mechanism), so make it the same
--- function. Three callers now, not "two" as the note above once said.
+-- cell. Same function as the renderer's predicate, so the two cannot drift.
 function Factory:MemberRenderable(ind)
     return memberRenderable(ind)
 end
@@ -4554,7 +4723,7 @@ end
 --               are spec-scoped, so the other pool always passes false and
 --               memberEffective returns the raw record).
 -- Module-level (not a SyncFrame closure) to keep the per-aura-event hot path
--- allocation-free. Body otherwise byte-identical to the pre-B1 placed loop.
+-- allocation-free.
 -- ============================================================
 -- Expiry-alert companions ride the same `placed`/`live` stores under
 -- "<key>:alert" keys (syncAlertCompanion) — the shared end-of-pass sweep
@@ -4564,8 +4733,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
     local poolMine = keyPrefix == ""
     -- Members of a layout group are drawn by that group's OWN container, where the
     -- engine can pack them (syncMemberGroupList). Skipping them here is what stops
-    -- them being drawn a second time as pinned single-slot containers — which is
-    -- also what used to hold their positions fixed.
+    -- them being drawn a second time as pinned single-slot containers.
     local claimed = claimedGroupMembers(groups, auras, keyPrefix)
     for auraName, auraCfg in pairs(auras) do
         -- ☠ `mine` from here down is the RESOLVED pool mode for THIS aura, not the raw
@@ -4800,14 +4968,12 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 -- BEFORE the call means this branch never retries, so it is
                                 -- only correct because BOTH handle kinds store-then-defer in
                                 -- lockdown and replay at regen (Handle via _registerRegen,
-                                -- SlotHandle via _slotRegen). This comment used to claim the
-                                -- slot side self-deferred when it did not — that was bug
-                                -- #1024. testEntries rides along so a test-mode rebuild
-                                -- previews the NEW selection, not a stale one — same pairing
-                                -- as the filter-group path. borderSpec is nil here on purpose:
-                                -- ApplyTuning reads only the trio, and the cosmetic branch
-                                -- below owns the style (building a spec here would be thrown
-                                -- away).
+                                -- SlotHandle via _slotRegen). testEntries rides along so a
+                                -- test-mode rebuild previews the NEW selection, not a stale
+                                -- one — same pairing as the filter-group path. borderSpec is
+                                -- nil here on purpose: ApplyTuning reads only the trio, and
+                                -- the cosmetic branch below owns the style (building a spec
+                                -- here would be thrown away).
                                 entry.tuningSig = tuningSig
                                 local cfg = buildPlacedConfig(frame, frame.unit, map, eff, isSquare, nil, defs, mine)
                                 placedTune(entry.handle, cfg)
@@ -4843,8 +5009,7 @@ end
 -- keyPrefix — "" (spec-keyed groups) or OTHER_PREFIX (the flat other store);
 -- prefixed into the "fgroup:<prefix><id>" key so the two id counters can
 -- never collide in the store. Module-level (not a SyncFrame closure) to keep
--- the per-aura-event hot path allocation-free; body otherwise identical to
--- the pre-split A5 loop.
+-- the per-aura-event hot path allocation-free.
 -- ============================================================
 -- Collect a layout group's renderable members, in the user's configured ORDER.
 -- Returns nil when the group has nothing to draw, so the caller leaves the key
@@ -4872,6 +5037,7 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
             local map = ids and ids.includeSpellIDs
             if map then
+                ind = memberView(ind, defs)
                 local isSquare = ind.type == "square"
                 local borderOn = placedBorderOn(ind, ind.hideIcon)
                 recs = recs or {}
@@ -5188,11 +5354,9 @@ end
 
 -- ============================================================
 -- MULTI-TINT HEALTH BAR / BACKGROUND  (one container per configured tint)
--- These two used to run through pickWinner — ONE static winner per type — which meant a
--- lower-priority buff could never colour the bar even when it was the ONLY buff present
--- (presence is secret; a config-time pick cannot ask what is on the unit). Field report
--- 2026-08-13. Now every configured tint gets its own engine presence-gated container, so
--- whichever buff is actually up colours the frame. When SEVERAL are up at once the
+-- Every configured tint gets its own engine presence-gated container, so whichever buff
+-- is actually up colours the frame — presence is secret, so a config-time single winner
+-- cannot ask what is on the unit. When SEVERAL are up at once the
 -- arbitration is DRAW ORDER: the family shares one frame level (the healthBar+1 cover
 -- band is a single level wide — the attached absorb at +2 is a hard ceiling, bug #1027 —
 -- so there is no room for a level ladder), and same-level render order follows frame
@@ -5449,8 +5613,8 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
     end
     local r, g, b, a = readADColor(colorCfg)
     local mode = slower(cfg.mode or "replace")
-    -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
-    -- replace mode always uses the fill-matched mirror.
+    -- Whole-bar flat tint only exists in tint mode (mirror the "Tint Entire Bar"
+    -- checkbox in Indicators.lua): replace mode always uses the fill-matched cover.
     local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
 
     -- The tracked map AND the filter string are live-tunable (overlay slots take
@@ -5494,7 +5658,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             end
         end
     else
-        -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
+        -- FILL COVER PATH — texture anchored to the real bar's fill (no feed, no reads).
         local alpha = (mode == "replace") and 1 or healthbarBlend(mode, cfg.blend, a)
         local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
         local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
@@ -5669,6 +5833,9 @@ end
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported()) then return end
+    -- For the stale-container recorder: tells whether SyncFrame ever ran for this frame.
+    -- GetTime, not date(): this is the per-UNIT_AURA path; the recorder formats the age.
+    frame.dfADLastSyncAt = GetTime()
 
     -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
     -- transition, then stay quiet. Merely skipping the sync would leave every
@@ -5723,9 +5890,9 @@ function Factory:SyncFrame(frame)
         return
     end
 
-    -- Same lazy migrations UpdateFrame runs, so adDB.auras[spec] is in the shape we read.
+    -- Lazy migrations run here so adDB.auras[spec] is in the shape we read.
     -- Priorities: winner pick honours auraCfg.priority. Border-key fold: the border winner
-    -- reads canonical border keys via DF.Border:BuildSpec (mirror Engine.lua:391-401).
+    -- reads canonical border keys via DF.Border:BuildSpec.
     if (not adDB._specScopedV1 or not adDB._specScopedV2) and DF.MigrateAuraDesignerSpecScope then
         DF.MigrateAuraDesignerSpecScope(adDB)
     end
@@ -5754,7 +5921,7 @@ function Factory:SyncFrame(frame)
     -- UNIT RETARGET (roster churn): frames are reused across units, but every container's
     -- unit is declared at Create and none of the sigs carry it — so re-point any live handle
     -- whose unit no longer matches the frame (mirror DriveMissingBuffFactory's h:SetUnit pass;
-    -- SetUnit self-defers to regen in combat). Cheap per-pass: one config read per handle.
+    -- SetUnit applies in combat too). Cheap per-pass: one config read per handle.
     do
         local u = frame.unit
         for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
@@ -5827,7 +5994,7 @@ function Factory:SyncFrame(frame)
                                              asMissing, sublevel, rank, auraKey)
                 end)
         else
-            -- No health-bar tints configured → the mirror bars are gone; drop the refs.
+            -- No health-bar tints configured → the containers are gone; drop the refs.
             teardownExcept(hb, nil)
             store.healthbarOrder = nil
         end
@@ -5882,7 +6049,7 @@ function Factory:SyncFrame(frame)
         if not bd then bd = {}; store.border = bd end
 
         -- Cheap RAW-config gate (no BuildSpec, no allocation on the hot path): BuildSpec
-        -- keys `enabled` off exactly this key (Border.lua:217 → enabled = ShowBorder ~= false),
+        -- keys `enabled` off exactly this key (Border:BuildSpec → enabled = ShowBorder ~= false),
         -- so the winner set is identical to a full-spec enabled check. Stacked-mode entries
         -- are excluded here — they opt OUT of the single-ring contest and are stood up below,
         -- so a Stacked ring never suppresses the Priority-mode winner or vice versa.
@@ -6211,28 +6378,18 @@ function Factory:SyncFrame(frame)
             -- exactly (enabled + selection table, records not required).
             local dedupOn = adDB.debuffGroupDedup ~= false
             local claimedSoFar
+            -- Asked every sync: the frame may have been reassigned to or from the player.
+            -- The records differ, so the struct/tuning sigs below carry the change.
+            local racialSelf = DF.IsRacialDispelSelf and DF:IsRacialDispelSelf(frame.unit) or false
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.enabled ~= false then
                     -- Version-cached: within one auraLayoutVersion this is a table
                     -- lookup; the resolve + record serialization run once per version.
                     local records, recStructSig, recTuningSig =
-                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil)
+                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil, racialSelf)
                     -- Fold AFTER resolving: a group is never claimed against itself.
                     if dedupOn and type(group.selection) == "table" then
-                        local sel = group.selection
-                        for ci = 1, #CLAIMABLE_CATEGORIES do
-                            local ck = CLAIMABLE_CATEGORIES[ci]
-                            if sel[ck] then
-                                claimedSoFar = claimedSoFar or {}
-                                claimedSoFar[ck] = true
-                            end
-                        end
-                        -- Mode travels with the claim here too — see the same fold in
-                        -- GetClaimedDebuffCategories for why the token must match.
-                        if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
-                            claimedSoFar = claimedSoFar or {}
-                            claimedSoFar.dispellableAll = true
-                        end
+                        claimedSoFar = foldGroupClaims(group.selection, claimedSoFar)
                     end
                     if records then
                         local key = "dgroup:" .. tostring(group.id)
@@ -6299,8 +6456,8 @@ function Factory:SyncFrame(frame)
         end
     end
 
-    -- ---- SOUND (native on-apply registrations) --------------------------------------
-    -- Reconcile C_UnitAuras.AddAuraAppliedSound registrations to the sound-indicator config
+    -- ---- SOUND (native per-event registrations) --------------------------------------
+    -- Reconcile C_UnitAuras.AddAuraSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
     -- Skipped in test mode: previews must not register real on-apply sounds.
     if not (DF.testMode or DF.raidTestMode) then
@@ -6398,10 +6555,23 @@ function Factory:DebugDumpADGate()
                                 -- convention later. The CF park constant is now the only
                                 -- thing that darkens a slot, so it is the only honest
                                 -- source for this column.
+                                -- ★ NOW AN ENGINE READ, NOT AN INFERENCE. The CF park is
+                                -- retired too (see AuraContainer's SLOT_PARK_CF tombstone):
+                                -- a dark slot carries its own filter AND its own
+                                -- candidates, so both would report every parked slot as
+                                -- shown. IsAuraSlotEnabled answers the question directly
+                                -- instead of asking what we last pushed, which is the whole
+                                -- reason this column has been wrong twice.
                                 local pf = h and h._pushedFilter
-                                local parkCF = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_CF
-                                local darkCF = parkCF ~= nil and h and h._cfPushed == parkCF
-                                hShown = (pf == nil) and "-" or (darkCF and "false" or "true")
+                                local cc = h and h.owner and h.owner.container
+                                local darkEn
+                                if cc and cc.IsAuraSlotEnabled then
+                                    local okR, en = pcall(cc.IsAuraSlotEnabled, cc, h.key)
+                                    local secretEn = issecretvalue and issecretvalue(en) or false
+                                    if okR and not secretEn then darkEn = not en end
+                                end
+                                hShown = (pf == nil) and "-"
+                                    or (darkEn == nil and "?" or (darkEn and "false" or "true"))
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter
@@ -6523,7 +6693,7 @@ end
 -- secret show/hide drive it read-free. It works for effects that ARE a child region drawn
 -- over the frame (tint textures, a border ring). It does NOT extend to these three:
 --
---  * framealpha (ref the legacy Indicators:ApplyFrameAlpha; that module is gone) — reduces the WHOLE unit frame's alpha on
+--  * framealpha — reduces the WHOLE unit frame's alpha on
 --    presence. There is no additive-child equivalent to reducing a frame's alpha (an overlay
 --    darkens, it can't make the frame transparent — and the plan forbids approximation).
 --    The only mechanism would be an OnShow/OnHide hook on a slot child calling frame:SetAlpha
@@ -6533,10 +6703,8 @@ end
 --    re-assert alpha every update) with no arbitration layer. → casualty. P4.7 overlays the
 --    framealpha type's controls (and its Expiring group).
 --
---  * nametext / healthtext — RECOVERED (colour-by-cover). Originally written off: the
---    real fontstring can't be recoloured (presence-gated call on a secret), and a clone
---    was thought impossible for health text ("the string is secret in combat"). Both
---    conclusions fell to the secret-passthrough finding: FontStrings ACCEPT secret
+--  * nametext / healthtext — RECOVERED (colour-by-cover). The real fontstring can't be
+--    recoloured (presence-gated call on a secret), but FontStrings ACCEPT secret
 --    values, so the Text Designer feeds a duplicate cover FontString the SAME resolved
 --    font + SafeText value it gives the real element (glyph-identical by construction,
 --    zero reads — TextDesigner/Render.lua EnableMirrors), and the cover rides an AD

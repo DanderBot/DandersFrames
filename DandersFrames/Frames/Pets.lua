@@ -536,8 +536,7 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
     if unit ~= frame.unit then return end
 
     if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-        -- The pet's own first health tick after being summoned is what closes the
-        -- UNIT_PET race; before this it repainted a frame nobody had shown.
+        -- The pet's own first health tick after being summoned closes the UNIT_PET race.
         if not recoverIfHidden(frame) then
             DF:UpdatePetHealth(frame)
         end
@@ -1019,9 +1018,7 @@ end
 
 -- `testName` is the only preview fork and it is pure DATA: the name a fabricated pet
 -- token cannot answer. Truncation (petNameMaxLength) and the Text Designer hand-off
--- below then run identically for both — the preview used to do neither, so a pet name
--- longer than the limit rendered full-length in test and clipped live, and pet name
--- text was invisible to the Text Designer preview entirely.
+-- below then run identically for both.
 function DF:UpdatePetName(frame, testName)
     if not frame or not frame.unit then return end
     if testName == nil and not UnitExists(frame.unit) then return end
@@ -1094,8 +1091,7 @@ function DF:UpdatePetFrame(frame)
         DF:SetPetFrameVisible(frame, false)
     end
 
-    -- Edge-triggered: both arms used to log unconditionally, so every pet frame
-    -- reported its visibility on every roster/pet event whether or not it moved.
+    -- Edge-triggered: log only when visibility flips, not on every roster/pet event.
     if frame.dfLastPetVisible ~= shouldShow then
         frame.dfLastPetVisible = shouldShow
         DF:Debug("PET", "UpdatePetFrame: %s %s (unitExists=%s ownerDead=%s)",
@@ -1110,9 +1106,7 @@ function DF:UpdatePetFrameTestMode(frame)
 
     -- Fake name -> the LIVE name renderer. Only the name itself is fabricated; the
     -- legacy-text suppression, petNameMaxLength truncation and Text Designer hand-off
-    -- all come from DF:UpdatePetName. This block used to SetText directly and did none
-    -- of those three: "Water Elemental" showed in full in the preview while live
-    -- clipped it to the configured length, and pet name text never reached the TD.
+    -- all come from DF:UpdatePetName. Do not SetText the preview name directly here.
     local petNames = {"Wolf", "Cat", "Bear", "Imp", "Voidwalker", "Felguard", "Water Elemental", "Ghoul", "Treant", "Earth Elemental"}
     local index = 1
     if frame.unit:match("partypet(%d+)") then
@@ -1151,9 +1145,8 @@ function DF:UpdatePetFrameTestMode(frame)
         end
     end
 
-    -- Health text through the LIVE renderer, supplying only the percentage. The
-    -- preview used to format its own string with math.floor, which truncates where
-    -- live's "%.0f" rounds.
+    -- Health text through the LIVE renderer, supplying only the percentage, so the
+    -- preview cannot drift from live's "%.0f" rounding.
     DF:ApplyPetHealthText(frame, DF:GetFrameDB(frame), healthPercent * 100)
 
     -- The Text Designer hand-offs live does after health and name. Without these the

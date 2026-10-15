@@ -2,7 +2,6 @@ local addonName, DF = ...
 
 -- ============================================================
 -- FLAT RAID FRAMES - PinnedFrames-style implementation
--- Replaces the legacy raidCombinedHeader system
 -- Uses SecureGroupHeaderTemplate with nameList for explicit control
 -- ============================================================
 
@@ -153,8 +152,7 @@ function FlatRaidFrames:BuildSortedNameList()
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    -- ★ ONE SHARED TABLE (Core/Config.lua). This used to be a local copy; see the
-    -- header there for the three-way disagreement it caused.
+    -- ★ ONE SHARED TABLE (Core/Config.lua), never a local copy.
     local meleeSpecs = DF.MELEE_SPECS
     
     local meleeClasses = DF.MELEE_CLASSES
@@ -173,9 +171,9 @@ function FlatRaidFrames:BuildSortedNameList()
         -- which is precisely why the header path consults it first.
         local specID
         if UnitIsUnit(unit, "player") then
-            local spec = GetSpecialization()
+            local spec = C_SpecializationInfo.GetSpecialization()
             if spec then
-                specID = GetSpecializationInfo(spec)
+                specID = C_SpecializationInfo.GetSpecializationInfo(spec)
             end
         else
             local cache = DF.SecureSort and DF.SecureSort.specCache
@@ -191,7 +189,8 @@ function FlatRaidFrames:BuildSortedNameList()
             end
         end
         
-        if specID and specID > 0 then
+        -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it sorts by class.
+        if specID and specID > 0 and not DF.IS_FOREVER then
             return meleeSpecs[specID] and "MELEE" or "RANGED"
         end
         
@@ -1475,10 +1474,8 @@ SlashCmdList["DFFLATRAID"] = function(msg)
         DF:Say("Flat raid tracing is in the debug console", "enable the FLATRAID category", "NEUTRAL")
 
     elseif msg == "info" or msg == "" then
-        -- Both halves of the flat-raid picture in one paste. These used to be
-        -- two commands: /dfflatstate dumped the container and DB settings while
-        -- /dfflatraid info dumped the header attributes. Neither was much use
-        -- without the other.
+        -- Both halves of the flat-raid picture in one paste: the container and DB
+        -- settings plus the header attributes.
         FlatRaidFrames:DebugPrint()
 
     elseif msg == "reinit" then

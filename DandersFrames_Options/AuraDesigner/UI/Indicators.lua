@@ -50,6 +50,55 @@ local function CountTypeColorConfigs(typeKey)
     return n
 end
 
+-- ============================================================
+-- "SOMETHING STRUCTURAL CHANGED HERE: REDRAW WHAT SHOWS IT"
+-- ------------------------------------------------------------
+-- Fifteen controls in this file reveal or hide a sibling when they are toggled --
+-- the pandemic colour picker, the icon's text-only mode, every sound sub-control.
+-- On the CARD that means a full page rebuild, which is fine there: the card is
+-- rebuilt and re-expanded in place. One verb, so every such control says it the
+-- same way. (It also used to re-flow a popout pane in place; that arm went with
+-- the rows page on 2026-09-26. `host` is still accepted, unused, so the call
+-- sites need not change.)
+local function ADStructuralRedraw(host)
+    DF:AuraDesigner_RefreshPage()
+end
+P.ADStructuralRedraw = ADStructuralRedraw
+
+-- ONE CARD SECTION, for every surface in the designer that stacks its own sections (an
+-- indicator's settings, the Global tab, a group card): the same card every settings page
+-- draws, over a chromeless body the caller fills. Returns the header and the body; the
+-- caller places both, and builds the body only while the card is open.
+-- ☠ A FOLD REBUILDS THE DESIGNER, NOT A RE-FLOW. These surfaces size themselves once, at
+-- build, and the designer has always answered a fold with a full redraw (GUI.lua's
+-- onSectionToggled hook) -- so a shut card builds no body at all.
+local function ADCardSection(parent, header, width, kind, collapseKey)
+    local section = GUI:CreateCollapsibleSection(parent, header, true, width, {
+        card = true, collapseKey = collapseKey, kind = kind,
+    })
+    section.Toggle = function(self)
+        self:SetExpanded(not self.expanded)
+        ADStructuralRedraw(parent)
+    end
+    local body = GUI:CreateSettingsGroup(parent, width, { chromeless = true })
+    section:RegisterChild(body)   -- the card's body: its inset, its gap, its fold
+    if not section.expanded then body:Hide() end
+    return section, body
+end
+
+-- After the caller filled the body: two settings per row once the card is wide enough,
+-- quiet captions -- the page cards' own helpers (Controls.lua) -- then lay it out.
+local function ADCardFinish(body)
+    if GUI.StampFullRows then
+        GUI.StampFullRows(body)
+        GUI.QuietLabels(body)
+        GUI.WireTwoTrack(body)
+    end
+    return body:LayoutChildren()
+end
+P.ADCardSection = ADCardSection
+P.ADCardFinish = ADCardFinish
+
 -- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
 -- The colour wash is handed to the engine's refresh-window driver (Factory
 -- wantsPandemicColor -> AuraContainer bindNative), so it shows only while a refresh
@@ -70,7 +119,7 @@ local function AddPandemicColor(g, parent, proxy, RPL)
         -- STRUCTURAL: enabling emits a SECOND container, and its engine bind needs
         -- secure context -> a full refresh, not a restyle.
         DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-        DF:AuraDesigner_RefreshPage()   -- the colour picker below appears/disappears
+        ADStructuralRedraw(parent)   -- the colour picker below appears/disappears
     end)
     cb.hideOn = function() return proxy.showWhenMissing and true or false end
     cb.tooltip = L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
@@ -118,13 +167,41 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- host to hang the next gate on. So it is greyed rather than left live over a render
     -- path that silently ignores it.
     local function GateSWM(cb)
-        if not (cb and auraName and P.GetEffectConditionGroups) then return end
+        if not cb then return end
+        -- ☠ NEVER ON A HELPER SIGNAL. Show-when-missing reroutes the effect down the
+        -- missing-mode build, which the Power Infusion Helper's cooldown gate cannot reach
+        -- (applyGroupTuning refuses mode == "missing") -- ticking it here would silently
+        -- exempt the effect from "hide while Power Infusion is on cooldown", with nothing on
+        -- screen to say so. Greyed with the reason, per the house rule.
+        if proxy and proxy.pihSignal then
+            cb:SetEnabled(false)
+            cb.tooltip = L["Not available on a Power Infusion Helper signal."]
+            return
+        end
+        if not (auraName and P.GetEffectConditionGroups) then return end
         local groups = P.GetEffectConditionGroups(auraName, typeKey)
         if groups and #groups > 1 then
             cb:SetEnabled(false)
             cb.tooltip = L["Not available while this effect has more than one condition group."]
         end
     end
+
+    -- ☠ A HELPER EFFECT HAS NOTHING TO COUNT. Krathe, 2026-09-09: "the PI 'icon' has stacks
+    -- but PI does not have stacks, you only get 1 charge so that setting should at least be
+    -- off by default if not hidden."
+    -- ⚠ AND IT IS WORSE THAN A DEAD SETTING ON THE ICON: that icon's art is PINNED to Power
+    -- Infusion while the aura it matched is somebody's cooldown, so a stack count there would
+    -- be a number describing a spell the picture is not of.
+    -- ⚠ THE WHOLE GROUP GOES, not just the tick. Stack Font, Scale, Outline, Anchor and Offset
+    -- are six controls for a number that is never drawn -- leaving them and unticking one is
+    -- how a panel fills up with settings that do nothing.
+    -- ⚠ HIDDEN, NOT GREYED, and that is the opposite call from GateSWM above -- deliberately.
+    -- Show When Missing is greyed WITH A REASON because ticking it would silently break the
+    -- cooldown gate, and the user needs to know why they cannot. Stacks are not broken, they
+    -- are irrelevant, and a greyed control invites a "why?" that has no interesting answer.
+    -- ⚠ The stored value is forced false as well (pihCreateSignal stamps it, pihSweep step 7
+    -- backfills), so what renders and what is stored agree rather than relying on this.
+    local pihNoStacks = (proxy and proxy.pihSignal) and true or false
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -147,7 +224,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         for _, entry in ipairs(widgets) do
             local w = entry.widget
             local h
-            if w.calculatedHeight then
+            if w.isCard then
+                -- A card header's slot is the one number its fold changes.
+                h = w.layoutHeight or entry.height
+            elseif w.calculatedHeight then
                 -- SettingsGroup tracks its current height after LayoutChildren.
                 h = w.calculatedHeight
             else
@@ -160,107 +240,122 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         parent:SetHeight(y)
     end
 
+    -- ONE section: a card stacked into the indicator card (ADCardSection) -- cards
+    -- inside a card, as the GUI rework asked of the designers (a16 #4).
+    -- Kind is keyed off the HEADER STRING here only because these headers are the
+    -- section's identity in this file already (swmGroup below); the page cards key it
+    -- off a stable section key, which these sections have never had.
+    local SECTION_KIND = {
+        [L["Position"]] = "position", [L["Appearance"]] = "appearance",
+        [L["Border"]] = "border", [L["Duration Text"]] = "text", [L["Stack Count"]] = "text",
+        [L["Expiration"]] = "timer", [L["Pandemic"]] = "effects", [L["Duration Bar"]] = "timer",
+        [L["Show When Missing"]] = "visibility", [L["Tracked IDs"]] = "filters",
+        [L["Size & Orientation"]] = "size", [L["Sound Alert"]] = "notifications",
+        [L["Buff Dropped"]] = "notifications", [L["Stack Gained"]] = "notifications",
+        [L["Power Infusion Helper"]] = "important",
+    }
     local function AddGroup(header, buildFn, showSummary)
-        local group = GUI:CreateSettingsGroup(parent, contentWidth - 10, {
-            collapsible = true,
-            showSummary = showSummary or false,
-        })
-        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
-        buildFn(group)
-        local h = group:LayoutChildren()
-        AddWidget(group, h)
+        local section, group = ADCardSection(parent, header, contentWidth - 10,
+            SECTION_KIND[header], "adSection:" .. header)
+        AddWidget(section, section.layoutHeight)
+        if section.expanded then
+            buildFn(group)
+            AddWidget(group, ADCardFinish(group))
+        end
         -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
-        return group
+        return group, section
     end
 
 
     -- ── COPY FROM (placed indicators only: icon, square, bar) ──
     if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then
-        local copyContainer = CreateFrame("Frame", nil, parent)
-        copyContainer:SetHeight(36)
+        local function BuildCopyFrom()
+            local copyContainer = CreateFrame("Frame", nil, parent)
+            copyContainer:SetHeight(36)
 
-        local copyLabel = copyContainer:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(copyLabel, 8, "")
-        copyLabel:SetPoint("TOPLEFT", 1, -1)
-        copyLabel:SetText(L["COPY APPEARANCE FROM"])
-        copyLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            local copyLabel = copyContainer:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(copyLabel, 8, "")
+            copyLabel:SetPoint("TOPLEFT", 1, -1)
+            copyLabel:SetText(L["COPY APPEARANCE FROM"])
+            copyLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-        local capturedAuraName = auraName
-        local capturedIndicatorID = indicatorID
-        local capturedTypeKey = typeKey
+            local capturedAuraName = auraName
+            local capturedIndicatorID = indicatorID
+            local capturedTypeKey = typeKey
 
-        -- Build the list of other placed indicators of the same type as the
-        -- dropdown's options (rebuilt on each open via optionsFunc so newly-added
-        -- indicators appear). Keyed by a synthetic id -> a captured source table;
-        -- picking one copies its appearance. The opener stays "Select indicator..."
-        -- (it's an action picker, not a value selector), achieved by a customGet
-        -- that always returns that label string (no matching option key).
-        local copySources = {}
-        local function BuildCopyFromOptions()
-            wipe(copySources)
-            local isOther = IsOtherTab()
-            local spec = (not isOther) and ResolveSpec() or nil
-            local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
-            local displayNames = {}
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    displayNames[info.name] = info.display
+            -- Build the list of other placed indicators of the same type as the
+            -- dropdown's options (rebuilt on each open via optionsFunc so newly-added
+            -- indicators appear). Keyed by a synthetic id -> a captured source table;
+            -- picking one copies its appearance. The opener stays "Select indicator..."
+            -- (it's an action picker, not a value selector), achieved by a customGet
+            -- that always returns that label string (no matching option key).
+            local copySources = {}
+            local function BuildCopyFromOptions()
+                wipe(copySources)
+                local isOther = IsOtherTab()
+                local spec = (not isOther) and ResolveSpec() or nil
+                local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
+                local displayNames = {}
+                if trackable then
+                    for _, info in ipairs(trackable) do
+                        displayNames[info.name] = info.display
+                    end
                 end
-            end
 
-            -- Sources come from the SAME pool as the destination card (the
-            -- active tab's) — CopyIndicatorAppearance resolves both ends
-            -- through the pool-routed GetIndicatorByID.
-            local sources = {}
-            for srcAura, auraCfg in pairs(CurrentAuraPool(spec)) do
-                if type(auraCfg) == "table" and auraCfg.indicators then
-                    for _, ind in ipairs(auraCfg.indicators) do
-                        if ind.type == capturedTypeKey then
-                            -- Skip self
-                            if not (srcAura == capturedAuraName and ind.id == capturedIndicatorID) then
-                                tinsert(sources, {
-                                    auraName = srcAura,
-                                    displayName = isOther and OtherPoolDisplayName(srcAura)
-                                        or displayNames[srcAura] or srcAura,
-                                    indicatorID = ind.id,
-                                })
+                -- Sources come from the SAME pool as the destination card (the
+                -- active tab's) — CopyIndicatorAppearance resolves both ends
+                -- through the pool-routed GetIndicatorByID.
+                local sources = {}
+                for srcAura, auraCfg in pairs(CurrentAuraPool(spec)) do
+                    if type(auraCfg) == "table" and auraCfg.indicators then
+                        for _, ind in ipairs(auraCfg.indicators) do
+                            if ind.type == capturedTypeKey then
+                                -- Skip self
+                                if not (srcAura == capturedAuraName and ind.id == capturedIndicatorID) then
+                                    tinsert(sources, {
+                                        auraName = srcAura,
+                                        displayName = isOther and OtherPoolDisplayName(srcAura)
+                                            or displayNames[srcAura] or srcAura,
+                                        indicatorID = ind.id,
+                                    })
+                                end
                             end
                         end
                     end
                 end
-            end
-            sort(sources, function(a, b) return a.displayName < b.displayName end)
+                sort(sources, function(a, b) return a.displayName < b.displayName end)
 
-            local options = { _order = {} }
-            for i, src in ipairs(sources) do
-                local key = "src" .. i
-                copySources[key] = src
-                options[key] = { text = src.displayName }
-                options._order[i] = key
-            end
-            return options
-        end
-
-        local copyDrop = GUI:CreateDropdown(
-            copyContainer, "", BuildCopyFromOptions(),
-            nil, nil, nil,
-            function() return L["Select indicator..."] end,   -- customGet (static opener)
-            function(key)                                      -- customSet (action)
-                local src = copySources[key]
-                if src then
-                    CopyIndicatorAppearance(src.auraName, src.indicatorID, capturedAuraName, capturedIndicatorID)
-                    DF:AuraDesigner_RefreshPage()
+                local options = { _order = {} }
+                for i, src in ipairs(sources) do
+                    local key = "src" .. i
+                    copySources[key] = src
+                    options[key] = { text = src.displayName }
+                    options._order[i] = key
                 end
-            end,
-            { inline = true, optionsFunc = BuildCopyFromOptions }
-        )
-        copyDrop:SetPoint("TOPLEFT", 0, -12)
-        copyDrop:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
-        copyDrop:SetHeight(20)
+                return options
+            end
 
-        AddWidget(copyContainer, 38)
+            local copyDrop = GUI:CreateDropdown(
+                copyContainer, "", BuildCopyFromOptions(),
+                nil, nil, nil,
+                function() return L["Select indicator..."] end,   -- customGet (static opener)
+                function(key)                                      -- customSet (action)
+                    local src = copySources[key]
+                    if src then
+                        CopyIndicatorAppearance(src.auraName, src.indicatorID, capturedAuraName, capturedIndicatorID)
+                        ADStructuralRedraw(parent)
+                    end
+                end,
+                { inline = true, optionsFunc = BuildCopyFromOptions }
+            )
+            copyDrop:SetPoint("TOPLEFT", 0, -12)
+            copyDrop:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
+            copyDrop:SetHeight(20)
+
+            AddWidget(copyContainer, 38)
+        end
+        BuildCopyFrom()
     end
 
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
@@ -532,6 +627,73 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --
         -- ★ Frame Level and Alpha are the canaries: they belong to Appearance on every type,
         -- without exception. If a review finds either anywhere else, the card has drifted.
+        -- ★★★ THE HELPER'S OWN TWO QUESTIONS, AND THEY LEAD FOR THE REASON SHOW WHEN MISSING
+        -- USUALLY DOES: they are prior to everything below. "Which picture is this" and "what
+        -- is it allowed to show" decide what the indicator IS; the rest decide how it looks.
+        -- ⚠ ONE GROUP, HELPER ONLY. They are meaningless on an ordinary icon (whose picture is
+        -- its spell's by definition) and would be two dead rows on every other card.
+        -- ⚠ THE ICON ONLY, of all the helper's surfaces. A border or a square looks the same
+        -- whichever trigger fired, so "which one is this" has no answer to give there -- the
+        -- icon is the only surface that carries the information, and therefore the only one
+        -- where choosing between several matters. If it ever generalises, both verbs already
+        -- take a record rather than assuming one.
+        if pihNoStacks then   -- the same "this is a helper effect" test; see its note
+            local pihRec
+            do
+                local pool = CurrentAuraPool()
+                local auraCfg = pool and pool[auraName]
+                for _, x in ipairs((type(auraCfg) == "table" and auraCfg.indicators) or {}) do
+                    if x.id == indicatorID then pihRec = x; break end
+                end
+            end
+            if pihRec then
+                AddGroup(L["Power Infusion Helper"], function(g)
+                    -- ⚠ customGet/customSet, not a db key: the stored value is a SPELL ID or
+                    -- nil rather than a boolean, and the field that does the work is the field
+                    -- the control reads. Same shape as the border card's "own border" tick.
+                    local artCb = GUI:CreateCheckbox(parent,
+                        L["Show the triggering cooldown's icon"], nil, nil,
+                        function() if RPL then RPL() end end,
+                        function() return pihRec.staticSpellID == nil end,
+                        function(v) P.PIH_SetIconShowsAura(pihRec, v) end)
+                    artCb.tooltip = L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."]
+                    g:AddWidget(artCb, 28)
+
+                    -- ★★ THE SAME FOUR SOURCES THE COOLDOWN ICONS GROUP HAS (2026-09-10).
+                    -- Krathe: "yes build the icon block the same". This was ONE tick --
+                    -- "Ignore trinkets, potions and racials" -- over all three amplifiers at
+                    -- once, which is the same mechanism (per-record mutes) at a coarser
+                    -- grain. Nothing to migrate: a record saved by that tick carries exactly
+                    -- the mutes these read, so "all three ignored" reads back as three off.
+                    -- ⚠ SUBTRACTIVE, and the footer says so. A placed effect is keyed by one
+                    -- filter reference and can only narrow what that resolves to -- showing
+                    -- something Triggers is NOT watching needs a filter of its own, which is
+                    -- what the group is for. So a source Triggers has off is GREYED here
+                    -- rather than hidden: hiding it would make the two cards disagree about
+                    -- how many sources this feature has.
+                    for _, d in ipairs({
+                        { key = "cooldowns", label = L["Class Cooldowns"] },
+                        { key = "trinkets",  label = L["Trinkets"] },
+                        { key = "potions",   label = L["Potions"] },
+                        { key = "racials",   label = L["Racials"] },
+                    }) do
+                        local key = d.key
+                        local cb = GUI:CreateCheckbox(parent, d.label, nil, nil,
+                            function() if RPL then RPL() end end,
+                            function() return P.PIH_IconSourceOn(pihRec, key) end,
+                            function(v) P.PIH_SetIconSourceOn(pihRec, key, v) end)
+                        if not P.PIH_IconSourceAvailable(key) then
+                            if cb.SetEnabled then cb:SetEnabled(false) end
+                            cb.tooltip = L["Switch this on under Triggers first — the helper is not watching it."]
+                        end
+                        g:AddWidget(cb, 28)
+                    end
+                    g:AddWidget(GUI:CreateNote(parent,
+                        L["This icon only. It can show less than the Triggers tab watches, never more."]), 34)
+                end)
+            end
+        end
+
         AddGroup(L["Show When Missing"], function(g)
             local desatCb
             local function UpdateDesatState()
@@ -562,7 +724,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -580,7 +742,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- (gated on proxy.hideIcon below) — matching the runtime, which
             -- force-disables both borders in this mode.
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
         end)
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
@@ -701,6 +863,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Stack Count sits with Duration Text: they are the two TEXT elements on an icon,
         -- and tuning either means reading them as a pair.
+        -- ⚠ ...and neither exists on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -712,6 +876,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the square card). Closes
         -- the run of things drawn ON the icon, and keeps all three duration/count elements
         -- together rather than stranding the bar below the conditional reveals.
@@ -725,7 +890,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "square" then
@@ -747,7 +912,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -842,6 +1007,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             UpdateHideAboveState()
         end)
         -- Stack Count sits with Duration Text — see the icon card for why.
+        -- ⚠ ...and is skipped on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -853,6 +1020,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the icon card)
         AddDurationBarGroup()
         -- The two conditional reveals, adjacent, in the same order and last, as on every
@@ -861,7 +1029,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "bar" then
@@ -873,7 +1041,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -889,7 +1057,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local mh = proxy.matchFrameHeight
                 proxy.matchFrameWidth = mh
                 proxy.matchFrameHeight = mw
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Width"], 0, 200, 1, proxy, "width"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, proxy, "height"), 54)
@@ -913,7 +1081,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- The local stays `texColorsGroup` only because the |H link route below is keyed
         -- "dfADScroll:texcolors" and renaming that would break saved links in old tooltips.
         local colorModeDrop
-        local texColorsGroup = AddGroup(L["Appearance"], function(g)
+        local texColorsGroup, texColorsSection = AddGroup(L["Appearance"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
             -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
@@ -1030,6 +1198,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local maxS = S.tabScrollFrame:GetVerticalScrollRange() or 0
                 S.tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
             end
+            local function jumpToColorMode()
+                GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
+                    flash = { border = true } })   -- a single control: fill + outline
+            end
+            -- The rebuilt card's own jump, for a click that had to open Appearance first.
+            S.adJumpToColorMode = jumpToColorMode
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
             -- known before AddWidget — else it falls back to a fixed slot the text overflows.
@@ -1037,11 +1211,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Appearance."], link), {
                 width = innerW,
                 onLinkClick = function()
+                    -- ⚠ A SHUT APPEARANCE CARD NEVER RAN ITS BUILDER, so there is nothing
+                    -- here to scroll to. Open it (a fold is a redraw), then jump with the
+                    -- targets the rebuilt card published.
+                    if texColorsSection and not texColorsSection.expanded then
+                        texColorsSection:SetExpanded(true)
+                        ADStructuralRedraw(parent)
+                        C_Timer.After(0, function()
+                            if S.adJumpToColorMode then S.adJumpToColorMode() end
+                        end)
+                        return
+                    end
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
                     -- (LinkToSetting flashes target.widget — pass the group instead to flash the
                     -- whole section).
-                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
-                        flash = { border = true } })   -- a single control: fill + outline
+                    jumpToColorMode()
                 end,
             })
             g:AddWidget(note, note.layoutHeight or 34)
@@ -1052,7 +1236,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- fontstring, which distort off-square and collapse on a thin bar. A pandemic region
         -- is a real texture anchored to the bar's own edges, so a ring or wash fits it exactly.
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "border" then
@@ -1068,7 +1252,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
-                    -- RESTORED 2026-08-27 (removed in the 12.1 retirement, 961d1e13).
                     -- This border is the whole-frame presence ring, drawn on an
                     -- OVERLAY-mode container — the one surface the AuraContainer
                     -- ANIMATION FILTER reopens, because it is a single ring per frame.
@@ -1115,7 +1298,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1143,7 +1326,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_healthbar_multi",
                     tone = "info",
                     text = L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1157,7 +1340,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 -- Rebuild so the Blend % slider's hideOn re-evaluates and the
                 -- group's height recomputes for the new visible-widget set.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
@@ -1181,7 +1364,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1198,7 +1381,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_background_multi",
                     tone = "info",
                     text = L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
                 })
@@ -1210,7 +1393,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(spacer, 6)
             end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
@@ -1225,7 +1408,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1253,7 +1436,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 topSpacer:SetHeight(4)
                 g:AddWidget(topSpacer, 4)
 
-                local banner = GUI:CreateInfoBanner(parent, {
+                local banner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_group",
                     tone = "caution",
                     text = L["Sound alerts only work when you are in a group."],
                 })
@@ -1270,7 +1453,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- player's OWN cast — and for a spell that My Buffs also tracked,
             -- both pools' sounds would fire. Surface it (B1 concern 2).
             if IsOtherTab() then
-                local obBanner = GUI:CreateInfoBanner(parent, {
+                local obBanner = GUI:CreateInfoBanner(parent, { dismissKey = "ad_sound_anyone",
                     tone = "info",
                     text = L["Sound alerts play when anyone gains this buff, including your own casts."],
                 })
@@ -1287,14 +1470,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 if not proxy.enabled and DF.AuraDesigner.SoundEngine then
                     DF.AuraDesigner.SoundEngine:StopAura(auraName)
                 end
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
 
             -- The flat sound below is the APPLIED sound (native Added trigger). This toggle
             -- silences it independently of the Buff-Dropped / Stack-Gained events below.
             if proxy.appliedEnabled == nil then proxy.appliedEnabled = true end
             g:AddWidget(GUI:CreateCheckbox(parent, L["Play when the buff is applied"], proxy, "appliedEnabled", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
 
             -- Sound picker (searchable scrollable dropdown)
@@ -1357,7 +1540,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 proxy[subKey] = proxy[subKey] or {}
                 local ec = proxy[subKey]
                 g:AddWidget(GUI:CreateCheckbox(parent, enableLabel, ec, "enabled", function()
-                    DF:AuraDesigner_RefreshPage()
+                    ADStructuralRedraw(parent)
                 end), 28)
                 local dd = GUI:CreateSoundDropdown(parent, L["Sound"], ec, "soundLSMKey", function()
                     local path = DF:GetSoundPath(ec.soundLSMKey)
@@ -1392,93 +1575,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
     end
 
-    -- ============================================================
-    -- 12.1 AURA-SYSTEM STATUS OVERLAYS (P4.7 GUI pass)
-    -- Frost the AD effect-settings the 12.1 Blizzard aura system can't drive.
-    -- Every block gates on DF:FactoryOwnsAD(d). Only
-    -- the settings GROUPS built above are targeted — the trigger tags (the
-    -- working "which aura" layer) live in `parent` above `startY` and are left
-    -- alone. "roadmap" = temporary (delete the single call site when the port
-    -- lands); "limitation" = permanent (secret-value casualty).
-    -- ============================================================
-
-    if typeKey == "icon" or typeKey == "square" then
-        -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
-        -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
-        -- the read-free missing-mode container (static spell icon / colour square while absent).
-        -- The whole-type roadmap and the Show-When-Missing roadmap overlays are gone. Two
-        -- surgical blocks remain:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-        --   * Min Stacks to Show — REMOVED 2026-07-25 (was a permanent limitation, then a
-        --     confirmed no-op). Stack counts render on the native no-formatter path (a
-        --     formatter would receive the SECRET application count and trap — see
-        --     Features/Auras.lua's stacks-formatter warning), so a custom minimum other than
-        --     the native "shown at >1" is not expressible. The control, its key and its
-        --     defaults are gone rather than frosted.
-        --   * Duration "Colour by Time" — P4.4 SHIPPED: the duration text now colours by
-        --     time via the native bucket formatter (C-side |c escapes), so the roadmap
-        --     overlay is gone and the control is fully editable under the factory.
-    elseif typeKey == "bar" then
-        -- P4.4 SHIPPED: the bar renders on the container engine (native SetDurationBar fill
-        -- + texture/colour/orientation + border + duration text). The whole-type roadmap
-        -- overlay is gone. One surgical block remains:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-    elseif typeKey == "sound" then
-        -- P4.5 SHIPPED: the sound indicator plays natively via C_UnitAuras.AddAuraSound.
-        -- The Sound Alert group (picker / volume / preview) and the per-event groups
-        -- (Applied / Buff Dropped / Stack Gained) are all live and unblocked.
-        -- REMOVED 2026-07-25 -- Missing Trigger and Expire Alert. "Alert WHILE the buff is
-        -- absent" is presence-driven and no native hook fires during absence; "alert as the
-        -- buff FADES" is remaining-time-driven. Both were permanently frosted, and Expire
-        -- Alert's intent is now served natively by Buff Dropped (the Removed trigger), so
-        -- the groups and their ten inert keys are gone rather than left as dead controls.
-    elseif typeKey == "nametext" or typeKey == "healthtext" then
-        -- RECOVERED (colour-by-cover): the base Color works — the Text Designer keeps a
-        -- glyph-identical coloured cover in sync with the real element (Render mirrors)
-        -- and the aura slot's secret visibility shows it on presence. Two surgical blocks:
-        --   * Show When Missing is not built for text covers at all - the checkbox is
-        --     simply never created for them. A cover is SetAllPoints onto the real
-        --     FontString, so its screen rect belongs to the text it mirrors; missing mode
-        --     hides by MOVING a badge, so parking/pushing could never change what shows.
-        --     (Same control SHIPPED for border/healthbar/background, whose art really does
-        --     live inside the window.) Candidate path if it is ever wanted:
-        --     SetAlphaFromBoolean(presence, 0, 255) on the mirror - on SimpleRegion as well
-        --     as SimpleFrame, AllowedWhenTainted, and taking both alphas makes inversion
-        --     free. Open question is sourcing `presence` as a SECRET BOOLEAN we can pass
-        --     through without reading: an unrun in-game probe.
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-    elseif typeKey == "healthbar" or typeKey == "background" or typeKey == "border" then
-        -- Base effect settings (colour / mode / style) work on the container
-        -- engine. Two surgical blocks on top:
-        --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
-        --     unreadable on the container path, so it is gone rather than frosted. The
-        --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
-        --   * Show When Missing — P4.5 SHIPPED: the effect now renders via the read-free
-        --     missing-mode container (tint / ring shown while the buff is absent), so the
-        --     roadmap overlay is gone and the checkbox is fully editable under the factory.
-        --   * Tint Entire Bar (healthbar only) — NO LONGER blocked. The filled health-mirror
-        --     bar makes the current-health-fill variant (tintWholeBar=false) expressible
-        --     read-free, so both settings work under the factory.
-        --   * Gradient border style -- UNFROSTED 2026-07-25 to test the claim behind it.
-        --     The frost said gradient "needs a resolved rect to compute its direction+
-        --     extent" and so degrades to solid on a secret-anchored slot. Re-reading
-        --     Border.lua that looks wrong on two counts: the gradient path measures
-        --     NOTHING (it is SetColorTexture + SetGradient on SetPoint-anchored edges --
-        --     no GetWidth/GetHeight anywhere in Apply), and Apply's gradient branch is
-        --     gated on `style == "GRADIENT" and gradient and CreateColor` with no
-        --     _solidOnly check, so the slot's solidOnly flag never blocked the paint.
-        --     solidOnly is about secret COLOURS (CreateColor taints on them), which the
-        --     gradient pickers are not -- they are static config. secretRect is the flag
-        --     that handles rects, and only TEXTURE style needs it. If gradient still
-        --     renders solid in game, the cause is something not yet found and the block
-        --     should come back with the real reason recorded.
-    end
+    -- What the effect settings above deliberately do NOT offer, because the 12.1 aura
+    -- container cannot drive it -- so nobody re-adds one as a dead control:
+    --   * No Expiring group on any type: remaining time is secret. DF.Expiration (the
+    --     Expiry Alert group) is the 12.1-safe replacement.
+    --   * No Min Stacks to Show: counts render on the native no-formatter path (a
+    --     formatter would receive the secret count -- see Features/Auras.lua), so only
+    --     the native "shown at >1" is expressible.
+    --   * Sound has no Missing Trigger or Expire Alert: no native hook fires while a
+    --     buff is absent, and fading is remaining-time-driven. Buff Dropped covers the
+    --     expire case natively.
+    --   * Text covers have no Show When Missing: a cover is SetAllPoints onto the real
+    --     FontString, and missing mode hides by moving a badge, which cannot change what
+    --     a text cover shows. A possible path is SetAlphaFromBoolean(presence, 0, 255)
+    --     on the mirror, if a secret presence boolean can be sourced (unprobed).
+    --   * Gradient border style is NOT greyed out: the gradient paint measures no rect
+    --     and its colours are static config, so a secret-anchored slot can draw it. If it
+    --     renders solid in game, the cause is something else and should be recorded.
 
     totalHeight = totalHeight + 8  -- bottom padding
     parent:SetHeight(totalHeight)

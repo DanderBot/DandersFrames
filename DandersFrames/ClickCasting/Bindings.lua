@@ -4,8 +4,6 @@ local addonName, DF = ...
 local CC = DF.ClickCast
 local L = DF.L
 
--- Local aliases for shared constants (defined in Constants.lua)
-
 -- Local aliases for helper functions (defined in Profiles.lua)
 local GetCombatCondition = function(b) return CC.GetCombatCondition(b) end
 local BuildModifierPrefix = function(m) return CC.BuildModifierPrefix(m) end
@@ -78,7 +76,9 @@ end
 -- button + held-modifier resolution, and the macro type is not in the
 -- SecureUnitButton gate's expectBinding set — so the 12.0.7 None-drop still
 -- never fires. RE-CHECK EACH PTR BUILD; delete this path once click is fixed.
-local CLICK_DELEGATE_BROKEN = select(4, GetBuildInfo()) >= 120100
+-- The 12.1 engine (DF.IS_MODERN_ENGINE), which includes WoW Forever: it reports
+-- 16001 but ships the 12.1.5 click path. UNVERIFIED on Forever in game.
+local CLICK_DELEGATE_BROKEN = DF.IS_MODERN_ENGINE
 
 local CLICK_BUTTON_NAME = { ["1"] = "LeftButton", ["2"] = "RightButton",
                             ["3"] = "MiddleButton", ["4"] = "Button4", ["5"] = "Button5" }
@@ -218,7 +218,6 @@ local function GetSpellDisplayInfo(baseSpellId, baseSpellName)
             displaySpellId = overrideId
             local overrideInfo = C_Spell.GetSpellInfo(overrideId)
             if overrideInfo then
-                -- Debug: Log when an override is found
                 displayName = overrideInfo.name or displayName
                 displayIcon = overrideInfo.iconID
             end
@@ -298,38 +297,19 @@ function CC:GetBindingDisplayIcon(binding)
     return QM
 end
 
--- (Removed) CC:MigrateBindingsToRootSpells — the one-time rewrite of saved
--- bindings to root spell ids. It guarded on DandersFrames_ClickCastDB, a
--- global that never existed (the real DB is DandersFramesClickCastingDB), so
--- it silently no-opped for every user since it shipped. Superseded anyway:
--- root/override resolution happens live at bind time via C_Spell.GetBaseSpell
--- / GetOverrideSpell (see trueRootId below), so stored ids no longer need a
--- one-shot rewrite.
-
 -- Check if a binding should be active based on load conditions
 function CC:ShouldBindingLoad(binding)
-    -- Per-spec click casting is done via loadout-assigned profiles. The old
-    -- per-binding loadSpec field was config no UI ever wrote (import-only),
-    -- and reading GetSpecialization() here made the binding list silently
-    -- wrong whenever spec data was not resolved yet (cold login) -- retired
-    -- in favor of the profile system.
+    -- Per-spec click casting is done via loadout-assigned profiles, not via a
+    -- per-binding field read here.
     --
     -- Combat conditions are checked dynamically via state drivers / macro
     -- conditionals, not here.
     --
-    -- `~= false`, NOT `not not`. A binding with no `enabled` field at all was
-    -- read three different ways: the map grouping and the special-action and
-    -- item paths all treat absent as enabled (`enabled ~= false`), while this
-    -- helper treated it as disabled. So for a key whose bindings ALL lack the
-    -- field, the spell/macro builder dropped every one, produced no macro text,
-    -- and the key got no map entry -- completely dead, while the binding list
-    -- showed it as present and enabled.
-    --
-    -- Reachable because nothing normalizes the field on the way in: the login
-    -- pass fixes up `frames`/`fallback`/`combat` but not `enabled`, and profile
-    -- import inserts bindings verbatim. Absent now means enabled everywhere,
-    -- which matches the majority of the existing paths and the UI's own
-    -- backwards-compatibility default.
+    -- `~= false`, NOT `not not`. A binding with no `enabled` field at all must
+    -- count as enabled: the map grouping and the special-action and item paths
+    -- all treat absent as enabled, and nothing normalizes the field on the way
+    -- in (the login pass fixes up `frames`/`fallback`/`combat` but not
+    -- `enabled`, and profile import inserts bindings verbatim).
     return binding.enabled ~= false
 end
 
@@ -698,21 +678,15 @@ function CC:ApplyBindings()
         --
         -- The header wipe near the top of this function kills the live hover, and
         -- nothing can put it back until that frame's own snippet has been rebuilt.
-        -- The tail of the batch walker did that -- but the walker yields between
-        -- batches, and `pairs` order is arbitrary, so a hovered frame landing late
-        -- in the iteration stayed dead for the rest of that sweep, and every
-        -- DF-bound key fell through to the action bar meanwhile (the reporter's
-        -- "4" cast their action-bar spell instead of the DF one).
+        -- The batch walker yields between batches and `pairs` order is arbitrary, so
+        -- a hovered frame landing late in the iteration stays dead for the rest of
+        -- that sweep (~6s measured), with every DF-bound key falling through to the
+        -- action bar meanwhile. Processing this frame first collapses that to the
+        -- synchronous first batch.
         --
-        -- Field-measured in LFR with a full third-party frame suite loaded,
-        -- 2026-08-02: 500 registered frames per sweep, 240 of them from a single
-        -- other addon -- worth noting the batching below was sized for the
-        -- "100-150+" its own comment assumes. Two sweeps
-        -- ran seconds apart, ~392 frame-applies each: 12:37:37-38 in about a
-        -- second, then 12:37:49-54 taking about six. So the worst observed dead
-        -- window is ~6s within a single sweep, NOT the whole span between them.
-        -- Processing this frame first collapses it to the synchronous first
-        -- batch either way.
+        -- Sweeps of ~500 registered frames have been measured with a full
+        -- third-party frame suite loaded -- well above the "100-150+" the batching
+        -- below assumes.
         local hovered = self.currentHoveredFrame
         if hovered and hovered.IsMouseOver and hovered:IsMouseOver() then
             for i = 2, #allFrames do
@@ -840,18 +814,12 @@ function CC:ApplyBindings()
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()
 
-                    -- ONE line per sweep. This used to be three INFO lines per
-                    -- frame, and a sweep walks every registered frame -- with a
-                    -- full UI suite loaded that is ~590 frames, so ~1770 entries in a
-                    -- second or two. At maxLines = 10000 that let a handful of
-                    -- sweeps evict the entire history: two separate attempts to
-                    -- capture a reported bug (2026-08-02) came back holding only
-                    -- sweep noise, having flushed the hover and PreClick lines
-                    -- around the actual failure -- and in one case the reload
-                    -- marker too. A debug log whose loudest writer destroys the
-                    -- evidence is worse than no log. The hovered-frame WARNs and
-                    -- every per-frame warning still fire; only the routine
-                    -- per-frame INFO chatter is folded into this.
+                    -- ONE line per sweep. Per-frame INFO chatter would flood the debug log:
+                    -- a sweep walks every registered frame (~590 with a full UI suite), so a
+                    -- handful of sweeps evict the entire history at maxLines = 10000 and
+                    -- destroy the evidence a capture was taken for. The hovered-frame WARNs
+                    -- and every per-frame warning still fire; only the routine per-frame INFO
+                    -- chatter is folded into this.
                     DF:Debug("CLICK", "ApplyBindings sweep: %d frames in %dms",
                         applied, (GetTime() - sweepStart) * 1000)
                 end
@@ -879,8 +847,6 @@ end
 
 -- GLOBAL BINDING SUPPORT (On Hover & Global Scopes)
 -- ============================================================
-
--- Pool of secure action buttons for global bindings
 
 -- ============================================================
 
@@ -960,25 +926,6 @@ function CC:CreateHovercastButton()
         DF:Debug("CLICK", "Hovercast PostClick: button=%s isDown=%s", tostring(mouseButton), tostring(isDown))
     end)
 end
-
--- SetupHovercastButtonAttributes was removed here (2026-08-02): it wrote
--- attributes nothing could ever read.
---
--- It named its slots with GetVirtualButtonName ("type-shiftmouse3"), while the
--- bindings that actually reach this button are installed by
--- BuildHovercastSetupScript using GetHovercastSuffix ("type-dfmouseshift3").
--- Two disjoint namespaces on one button, so no click or key ever resolved to
--- anything it set. Its clear loop had the same problem in reverse: it cleared
--- type1..5 / spell1..5 / macrotext1..5, which nothing on this button writes,
--- so its own attributes accumulated untouched for the session. The button is
--- also EnableMouse(false), so it cannot be physically clicked either.
---
--- Deleting it also closes an unbounded leak: it called AddCombatConditional on
--- the hovercast button, appending to a dfAttrDriverList that nothing ever
--- unregistered or cleared, growing on every ApplyBindings for the whole session.
---
--- The real hovercast path is ApplyGlobalBindings -> BuildHovercastSetupScript,
--- which is unaffected.
 
 -- Get the suffix for a binding (like Clique's GetBindingPrefixSuffix)
 -- For global bindings, returns something like "dfbuttonshiftf" or "dfmouseshift3"
@@ -1251,8 +1198,6 @@ function CC:GetBindingKeyString(binding)
             if num then
                 mapped = "BUTTON" .. num
             else
-                -- Was `:gsub("BUTTON", "BUTTON")` — a no-op that read as
-                -- deliberate normalisation. It only ever uppercased.
                 mapped = binding.button:upper()
             end
         end
@@ -1305,8 +1250,13 @@ function CC:FindDuplicateBinding(newBinding, excludeIndex)
             if newBinding.actionType == existing.actionType then
                 if newBinding.actionType == CC.ACTION_TYPES.SPELL then
                     -- For spells, check spell name or ID
-                    sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
-                                 (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    if DF.IS_FOREVER and (newBinding.lowRank or existing.lowRank) then
+                        -- Different ranks are different actions
+                        sameAction = (newBinding.lowRank and existing.lowRank and newBinding.spellId == existing.spellId) or false
+                    else
+                        sameAction = (newBinding.spellName and newBinding.spellName == existing.spellName) or
+                                     (newBinding.spellId and newBinding.spellId == existing.spellId)
+                    end
                 elseif newBinding.actionType == CC.ACTION_TYPES.MACRO then
                     -- For macros, check macro ID or name
                     sameAction = (newBinding.macroId and newBinding.macroId == existing.macroId) or
@@ -1383,10 +1333,8 @@ function CC:SetEnabled(enabled)
     -- This is critical for allowing Clique/Clicked to work when we're disabled
     --
     -- The OnEnter snippet reads this attribute to decide whether to run at all,
-    -- so if the write is skipped the DB says enabled and every hover no-ops. It
-    -- used to be skipped silently in combat with no deferral: toggling click
-    -- casting on during a fight left it dead until something else happened to
-    -- rewrite the attribute, while the UI reported it working.
+    -- so if the write is skipped the DB says enabled and every hover no-ops --
+    -- hence the combat deferral below rather than a silent skip.
     if self.header then
         if not InCombatLockdown() then
             -- Normalise: the snippets gate on `~= true`, so a truthy non-boolean
@@ -1492,9 +1440,6 @@ function CC:GetBindingActionText(binding)
         return "Open Menu"
     elseif actionType == self.ACTION_TYPES.FOCUS then
         return "Focus Unit"
-    -- The FOLLOW branch was removed: ACTION_TYPES has no FOLLOW member, so the
-    -- comparison was `actionType == nil` and a binding with no action type at
-    -- all displayed as "Follow Unit" instead of falling through to "Unknown".
     elseif actionType == self.ACTION_TYPES.ASSIST then
         return "Assist Unit"
     else
@@ -1541,7 +1486,11 @@ function CC:GetActionDisplayString(binding)
     if binding.actionType == CC.ACTION_TYPES.SPELL then
         -- Get current display name (accounts for talent overrides)
         local displayName = GetSpellDisplayInfo(binding.spellId, binding.spellName)
-        return displayName or binding.spellName or "No Spell"
+        displayName = displayName or binding.spellName
+        if displayName and binding.lowRank then
+            displayName = CC:FormatSpellRankLabel(displayName, binding.spellRank)
+        end
+        return displayName or "No Spell"
     elseif binding.actionType == CC.ACTION_TYPES.MACRO then
         -- Try to get macro name from stored macro or binding
         if binding.macroId then
@@ -1650,8 +1599,8 @@ function CC:GetAllPlayerSpells()
     
     -- Current spec ID for structural identification — the FIRST return of
     -- GetSpecializationInfo, never the localized name.
-    local currentSpecIndex = GetSpecialization()
-    local currentSpecID = currentSpecIndex and GetSpecializationInfo(currentSpecIndex) or nil
+    local currentSpecIndex = C_SpecializationInfo.GetSpecialization()
+    local currentSpecID = currentSpecIndex and C_SpecializationInfo.GetSpecializationInfo(currentSpecIndex) or nil
 
     for tabIndex = 1, numTabs do
         local skillLineInfo = C_SpellBook.GetSpellBookSkillLineInfo(tabIndex)
@@ -1724,7 +1673,9 @@ function CC:GetAllPlayerSpells()
                                 -- This handles cases where the spellbook entry itself is an override
                                 -- e.g., Chrono Flames (431443) -> Living Flame (361469)
                                 local trueRootId = baseSpellId
-                                if C_Spell.GetBaseSpell then
+                                -- Forever: no override chains, and each rank must keep its
+                                -- own ID (so it isn't folded into another rank)
+                                if C_Spell.GetBaseSpell and not DF.IS_FOREVER then
                                     local baseId = C_Spell.GetBaseSpell(baseSpellId)
                                     if baseId and baseId ~= baseSpellId then
                                         trueRootId = baseId
@@ -1760,6 +1711,16 @@ function CC:GetAllPlayerSpells()
                                         end
                                     end
                                     
+                                    -- Forever: rank text ("Rank 2") and whether a higher
+                                    -- rank is known (see SPELL RANKS)
+                                    local rank, lowRank
+                                    if DF.IS_FOREVER then
+                                        local subName = spellBookItemInfo.subName
+                                        rank = (subName and subName ~= "") and subName or nil
+                                        lowRank = C_SpellBook.IsSpellBookItemLowRank
+                                            and C_SpellBook.IsSpellBookItemLowRank(slotIndex, bookType) or nil
+                                    end
+
                                     spellsByDisplayId[displaySpellId] = {
                                         spell = {
                                             name = baseName,           -- Root spell name for binding
@@ -1769,6 +1730,8 @@ function CC:GetAllPlayerSpells()
                                             category = useCategory,
                                             categoryPriority = useCategoryPriority,
                                             tabName = useTabName,
+                                            rank = rank,
+                                            lowRank = lowRank,
                                         },
                                         isRoot = isRoot,
                                     }
@@ -1791,9 +1754,16 @@ function CC:GetAllPlayerSpells()
         if a.categoryPriority ~= b.categoryPriority then
             return a.categoryPriority < b.categoryPriority
         end
+        if a.name == b.name then
+            -- Ranks of one spell: highest first
+            local ra = tonumber(a.rank and a.rank:match("%d+")) or 0
+            local rb = tonumber(b.rank and b.rank:match("%d+")) or 0
+            if ra ~= rb then return ra > rb end
+            return (a.spellId or 0) > (b.spellId or 0)
+        end
         return a.name < b.name
     end)
-    
+
     return results
 end
 
@@ -1930,6 +1900,62 @@ local function GetLocalizedSpellName(spellId)
     return nil
 end
 
+-- ============================================================
+-- SPELL RANKS (WoW Forever)
+-- Classic-style clients list every rank of a spell separately, all under the
+-- same name, and a bare "/cast Name" always casts the HIGHEST rank. So a
+-- lower-rank binding is stored with lowRank (+ its rank text as a fallback) and
+-- casts "Name(Rank N)"; a top-rank binding stays a bare name so it moves up to
+-- each new rank as it is learned. Bindings made before this have no lowRank
+-- and keep behaving as top-rank. Retail never sets any of these fields.
+-- ============================================================
+
+-- Copy the rank fields from a spell-list entry onto a new binding
+function CC:ApplySpellRank(binding, spellData)
+    if not (DF.IS_FOREVER and binding and spellData) then return end
+    if spellData.lowRank then
+        binding.lowRank = true
+        binding.spellRank = spellData.rank
+    else
+        binding.lowRank = nil
+        binding.spellRank = nil
+    end
+end
+
+-- Rank text for a lower-rank binding, or nil when it should cast the bare name
+local function GetBindingRankText(binding)
+    if not (DF.IS_FOREVER and binding and binding.lowRank) then return nil end
+    local rank = binding.spellId and C_Spell.GetSpellSubtext and C_Spell.GetSpellSubtext(binding.spellId)
+    if not rank or rank == "" then rank = binding.spellRank end
+    if not rank or rank == "" then return nil end
+    return rank
+end
+
+-- The name a macro should /cast for this binding: "Name(Rank N)" or "Name"
+local function GetCastSpellName(binding, name)
+    if not name then return nil end
+    local rank = GetBindingRankText(binding)
+    return rank and (name .. "(" .. rank .. ")") or name
+end
+
+-- Label for the UI: "Name (Rank N)" for a ranked entry/binding
+function CC:FormatSpellRankLabel(name, rank)
+    if DF.IS_FOREVER and name and rank and rank ~= "" then
+        return name .. " (" .. rank .. ")"
+    end
+    return name
+end
+
+-- Does this binding cast the given spell-list entry? Forever only: a lower-rank
+-- binding matches its exact rank; any other binding casts the top rank, so it
+-- matches only the entry that is not a lower rank.
+function CC:BindingMatchesRankedSpell(binding, spellData)
+    if binding.lowRank then
+        return binding.spellId == spellData.spellId
+    end
+    return binding.spellName == spellData.name and not spellData.lowRank
+end
+
 -- Get the player's available resurrection spells (returns localized names)
 function CC:GetPlayerResurrectionSpells()
     local _, playerClass = UnitClass("player")
@@ -1985,7 +2011,6 @@ function CC:IsResurrectionSpell(spellName, spellId)
 end
 
 -- Debug command to test resurrection spell detection
--- Note: If this doesn't work, use /dfrestest instead (defined in Core.lua)
 SlashCmdList["DFCCRES"] = function(msg)
     -- Safety check
     if not CC or not CC.RESURRECTION_SPELL_NAMES then
@@ -2035,8 +2060,6 @@ end
 function CC:GetSmartResurrectionParts(spellName, targetType, mountedStr)
     local mode = self.profile and self.profile.options and self.profile.options.smartResurrection or "disabled"
     mountedStr = mountedStr or ""
-    
-    -- Debug
     
     if mode == "disabled" then return nil end
     
@@ -2115,9 +2138,6 @@ function CC:GetItemCount(itemId)
     return C_Item.GetItemCount(itemId) or 0
 end
 
--- Build macro text for a single binding
--- This handles all action types and conditions
--- forGlobalBinding: if true, only use fallback settings (not appliesToFrames) for targeting
 -- Resolve whether a binding should also target the unit it casts on.
 -- A per-binding override (true/false) wins; otherwise inherit the global
 -- "Target unit when click-casting" setting. nil = inherit.
@@ -2208,6 +2228,10 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
             end
         end
         
+        -- Lower-rank binding (Forever): cast that exact rank. Added after the
+        -- resurrection checks above, which match on the bare name.
+        spellName = GetCastSpellName(binding, spellName)
+
         -- Check what fallback options are enabled
         -- For frame click-casting to work, we ALWAYS need @mouseover when binding applies to frames
         -- because WoW sets the frame's unit as mouseover when you hover/click it
@@ -2484,6 +2508,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell
         local isResSpell = CC:IsResurrectionSpell(spell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        spell = GetCastSpellName(friendlyBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = friendlyBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2510,6 +2536,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell (e.g., Soulstone can be used on hostile? unlikely but consistent)
         local isResSpell = CC:IsResurrectionSpell(spell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        spell = GetCastSpellName(hostileBinding, spell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = hostileBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2534,6 +2562,8 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         -- Check if this is a resurrection spell
         local isResSpell = CC:IsResurrectionSpell(anySpell)
         local lifeCondition = isResSpell and ",dead" or ",nodead"
+        -- Rank suffix after the name-based resurrection check (Forever)
+        anySpell = GetCastSpellName(anyBinding, anySpell)
         
         -- Check if binding applies to frames (if so, always need mouseover - unless forGlobalBinding)
         local frames = anyBinding.frames or { dandersFrames = true, otherFrames = true }
@@ -2563,7 +2593,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     if friendlyBinding and friendlyBinding.spellName then
         local fb = friendlyBinding.fallback or {}
         if fb.selfCast then
-            local friendlySpell = GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName
+            local friendlySpell = GetCastSpellName(friendlyBinding, GetLocalizedSpellName(friendlyBinding.spellId) or friendlyBinding.spellName)
             local combatCond = GetCombatCondition(friendlyBinding)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, "[@player" .. combatStr .. "] " .. friendlySpell)
@@ -2575,7 +2605,7 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     -- the self-cast clause above resolves first when enabled.
     for _, b in ipairs({friendlyBinding, hostileBinding, anyBinding}) do
         if b and b.fallback and b.fallback.alwaysCast and b.spellName then
-            local spell = GetLocalizedSpellName(b.spellId) or b.spellName
+            local spell = GetCastSpellName(b, GetLocalizedSpellName(b.spellId) or b.spellName)
             local combatCond = GetCombatCondition(b)
             local combatStr = combatCond == "combat" and ",combat" or (combatCond == "nocombat" and ",nocombat" or "")
             table.insert(parts, (combatStr ~= "" and ("[" .. combatStr:sub(2) .. "] ") or "") .. spell)
@@ -2586,15 +2616,10 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
     -- Mounted / flying suppression.
     --
     -- The single-binding builder stamps ",nomounted,noflying" into every clause
-    -- it emits. This builder never computed it at all, so "disable while
-    -- mounted" worked for every key with ONE binding and silently did nothing
-    -- for every key with two or more -- the user sees the option working, right
-    -- up until the key they care about happens to have a friendly/hostile split.
-    --
-    -- Applied as a post-pass over the finished clause list rather than threaded
-    -- through the ten separate concatenations above: one place to be correct,
-    -- and it covers the unconditional [] and terminal always-cast forms that a
-    -- per-site edit would have missed.
+    -- it emits. This builder applies it as a post-pass over the finished clause
+    -- list rather than threading it through the ten separate concatenations
+    -- above: one place to be correct, and it covers the unconditional [] and
+    -- terminal always-cast forms that a per-site edit would have missed.
     local mountedStr = ""
     if self.db and self.db.global and self.db.global.disableWhileMounted then
         mountedStr = ",nomounted,noflying"
@@ -2677,10 +2702,6 @@ end
 -- Debounced; the resolver clears its own flag on success and self-defers in
 -- combat via the deferred-work queue. No-op in steady state, so the extra
 -- triggers (spec/spell events, loading screens, arena prep) cost nothing.
---
--- The binding map itself is no longer spec-dependent: retiring the per-binding
--- loadSpec field removed the only path by which a cold-start build could drop
--- bindings, so there is no provisional-map half to resolve any more.
 function CC:ResolveColdStartProfile(reason)
     if not self.loadoutCheckUnresolved then return end
     if not (self.db and self.db.enabled) then return end
@@ -2696,12 +2717,6 @@ end
 
 function CC:BuildUnifiedMacroMap()
     local macroMap = {}
-
-    -- No cold-start guard needed here any more: the map used to be spec-
-    -- dependent because ShouldBindingLoad dropped loadSpec-scoped bindings while
-    -- GetSpecialization() was still nil, so a map built and cached in that window
-    -- silently lost them. Retiring the per-binding loadSpec field removed that
-    -- dependency entirely -- this build reads no spec state at all.
 
     -- Group all bindings by their key string
     local keyGroups = {}
@@ -2748,16 +2763,12 @@ function CC:BuildUnifiedMacroMap()
             -- separate question from how the action behaves ON a frame.
             --
             -- On a frame these use native WoW handling (type="target" etc), so
-            -- macroText stays nil deliberately. But the hovercast script skips
-            -- any entry with no macro text at all, so "focus, with a target
-            -- fallback" worked while hovering a frame and did nothing at all
-            -- while hovering nothing -- despite the fallback being the entire
-            -- reason that key needs a global bind. BuildMacroTextForBinding has
-            -- had working /focus and /assist branches the whole time; nothing
-            -- ever reached them, because this break fires first.
+            -- macroText stays nil deliberately. The hovercast script skips any entry
+            -- with no macro text at all, so an action with a target fallback needs a
+            -- globalMacroText or its global bind does nothing.
             --
             -- Only for the actions that have a macro form. target and menu do
-            -- not: /target cannot reach cross-instance players (the note below)
+            -- not: /target cannot reach cross-instance players (the note above)
             -- and there is no macro equivalent of the unit menu, so those two
             -- correctly remain frame-only.
             local specialType = specialBinding.actionType
@@ -2789,10 +2800,8 @@ function CC:BuildUnifiedMacroMap()
                 
                 DF:Debug("CLICK", "Item: %s\n%s", tostring(keyString), tostring(macroText))
             else
-                -- ★ "A binding that shows in the list and does nothing is worse than one
-                -- that says why" -- this file's own words, at a sibling failure elsewhere.
-                -- Both macro-build failures dropped the key from the map in silence, so it
-                -- looked configured in the UI and was simply dead in play.
+                -- Warn rather than dropping the key in silence: a binding that shows in
+                -- the list and does nothing is worse than one that says why.
                 DF:DebugWarn("CLICK", "Item %s dropped: BuildMacroTextForBinding returned nothing",
                     tostring(keyString))
             end
@@ -2984,8 +2993,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     end
 
     -- Check if this frame has ANY bindings that apply to it — BEFORE the
-    -- destructive clear below, so a provisional (cold-start) map can bail out
-    -- without touching the frame's existing state.
+    -- destructive clear below, so a frame with no bindings is never stripped.
     local hasAnyBindings = false
     local isDandersFrame = frame.dfIsDandersFrame == true
     local isBlizzardFrame = frame.dfIsBlizzardFrame == true
@@ -3009,27 +3017,12 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
         end
     end
 
-    -- If no bindings apply to this frame, clean it up. (There used to be a
-    -- provisional-map bailout here for a map built while spec data was still
-    -- unresolved; retiring the per-binding loadSpec field removed the only way
-    -- the map could be spec-dependent, so an empty map now always means the
-    -- user's config, never a cold-start drop.)
+    -- If no bindings apply to this frame, clean it up.
     if not hasAnyBindings then
         self:ClearBindingsFromFrame(frame)
         if isDandersFrame then
             -- Hand our own frames back to plain targeting, exactly as the else
             -- branch does for everyone else's.
-            --
-            -- This used to call RegisterForClicks() with NO arguments, which
-            -- registers no clicks at all -- so the type1/type2 "safety net" the
-            -- old comment relied on could never fire: the button no longer
-            -- received a click to resolve them with. And the manifest clear
-            -- immediately above had already removed those attributes anyway.
-            --
-            -- Reachable with an "other frames only" profile (every binding with
-            -- frames.dandersFrames unchecked): the user's own party and raid
-            -- frames stopped responding to left-click targeting entirely, with no
-            -- message, until a binding that targets them was re-enabled.
             --
             -- RestoreBlizzardDefaults puts back what CaptureOriginalClickBindings
             -- recorded -- for our frames that is what InitializeHeaderChild set --
@@ -3840,7 +3833,7 @@ SlashCmdList["DFCCLOADOUT"] = function()
     DF:Out("Click-Casting", "loadout")
     
     -- These are functions, not methods - don't use : syntax
-    local specIndex = CC.GetCurrentSpec and CC.GetCurrentSpec() or GetSpecialization() or 0
+    local specIndex = CC.GetCurrentSpec and CC.GetCurrentSpec() or C_SpecializationInfo.GetSpecialization() or 0
     local loadoutID = CC.GetCurrentLoadoutConfigID and CC.GetCurrentLoadoutConfigID() or 0
     local loadoutName = CC.GetLoadoutName and CC.GetLoadoutName(loadoutID) or "Unknown"
     local currentProfile = CC:GetActiveProfileName()
@@ -4031,11 +4024,6 @@ end
 -- ============================================================
 -- /df debug cc — one entry point for click-casting diagnostics
 -- ============================================================
--- These were eleven separate /dfccXXX commands, each dumping one adjacent slice
--- of the same subsystem. Nobody remembers eleven names, and click-casting is our
--- highest-volume bug source, so the one thing a user must be able to do is find
--- the dump. The handlers are unchanged — only the way in is.
---
 -- Resolved through SlashCmdList at CALL time, so it does not matter that three
 -- of these handlers live in other files loaded after this one.
 -- Which addon owns each frame's click-casting registration. Distinct from
@@ -4109,9 +4097,7 @@ SlashCmdList["DFCC"] = function(msg)
             -- reporting "dev only": a hidden command must not advertise itself.
             if e[1] == word and (not e[3] or dev) then
                 -- The handlers register when the companion loads. A deliberate
-                -- command -> load it, then retry the lookup. The old branch
-                -- errored with "click-casting module not loaded", which was
-                -- false (only the UI wasn't) and never self-healed.
+                -- command -> load it, then retry the lookup.
                 local handler = SlashCmdList[e[2]]
                 if not handler and DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded() then
                     handler = SlashCmdList[e[2]]

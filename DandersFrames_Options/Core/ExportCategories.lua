@@ -17,11 +17,8 @@ local DF = DandersFrames
 DF.ExportCategories = {
     -- Frame positions on screen
     position = {
-        -- (Removed) "anchorPoint" -- gone from the defaults too. It was never read,
-        -- so exporting it only carried a dead value between profiles.
         "anchorX",
         "anchorY",
-        "hideDragOverlay",
         "permanentMover",
         "permanentMoverActionLeft",
         "permanentMoverActionRight",
@@ -38,6 +35,11 @@ DF.ExportCategories = {
         "permanentMoverPullTimerDuration",
         "permanentMoverShowOnHover",
         "permanentMoverWidth",
+        -- The DandersMover record. Exported alongside the anchorX/anchorY +
+        -- raidAnchorX/raidAnchorY mirror so a round-trip carries both shapes; if a
+        -- string predates this key, DF:GetPositionRecord re-seeds the record from the
+        -- imported scalars on first read.
+        "position",
         "raidAnchorX",
         "raidAnchorY",
         "raidEnabled",
@@ -50,10 +52,10 @@ DF.ExportCategories = {
         "frameScale",
         "frameSpacing",
         "frameWidth",
-        "gridSize",
         "growDirection",
         "growthAnchor",
         "hideDefaultPlayerFrame",
+        "hideDefaultPlayerFrameRaidOnly",
         "hidePlayerFrame",
         "locked",
         "pixelPerfect",
@@ -83,7 +85,6 @@ DF.ExportCategories = {
         "restedIndicatorOffsetX",
         "restedIndicatorOffsetY",
         "restedIndicatorSize",
-        "snapToGrid",
         "soloMode",
         "sortAlphabetical",
         "sortByClass",
@@ -329,6 +330,17 @@ DF.ExportCategories = {
         "buffStackScale",
         "buffStackX",
         "buffStackY",
+        -- Caster name (12.1.5) — see the debuff twin below.
+        "buffCasterName",
+        "buffCasterRealm",
+        "buffCasterClassColor",
+        "buffCasterAnchor",
+        "buffCasterColor",
+        "buffCasterFont",
+        "buffCasterOutline",
+        "buffCasterScale",
+        "buffCasterX",
+        "buffCasterY",
         "buffWrap",
         "debuffAlpha",
         "debuffAnchor",
@@ -380,6 +392,7 @@ DF.ExportCategories = {
         "debuffDurationFormat",
         "debuffDurationColor",
         "debuffStackColor",
+        "debuffCasterColor",
         "debuffDurationHideAboveEnabled",
         "debuffDurationHideAboveThreshold",
         "debuffDurationHideOnPermanent",
@@ -394,7 +407,33 @@ DF.ExportCategories = {
         "debuffFilterPriority",
         "debuffFilterRaid",
         "debuffFilterRole",
+        "debuffFilterBleed",
+        "debuffFilterCurse",
+        "debuffFilterDisease",
+        "debuffFilterImportant",
+        "debuffFilterMagic",
+        "debuffFilterMine",
+        "debuffFilterPlayer",
+        "debuffFilterPoison",
+        "debuffFilterRaidInCombat",
         "debuffGrowth",
+        "debuffHideBoss",
+        "debuffHideBleed",
+        "debuffHideCurse",
+        "debuffHideDisease",
+        "debuffHideImportant",
+        "debuffHideMagic",
+        "debuffHideMine",
+        "debuffHidePoison",
+        "debuffHideRaidInCombat",
+        "debuffHideCrowdControl",
+        "debuffHideDispellable",
+        "debuffHideNonPlayer",
+        "debuffHidePermanent",
+        "debuffHidePlayer",
+        "debuffHidePriority",
+        "debuffHideRaid",
+        "debuffHideRole",
         "debuffHideSwipe",
         "debuffImportantBadge",
         "debuffImportantBadgeColor",
@@ -409,6 +448,8 @@ DF.ExportCategories = {
         "debuffMaxDurationEnabled",
         "debuffMaxDurationKeepImportant",
         "debuffMaxDurationMinutes",
+        "debuffMaxDurationSeconds",
+        "debuffMaxDurationUnit",
         "debuffOffsetX",
         "debuffOffsetY",
         "debuffPaddingX",
@@ -423,6 +464,17 @@ DF.ExportCategories = {
         "debuffStackScale",
         "debuffStackX",
         "debuffStackY",
+        -- Caster name (12.1.5). ☠ Must be listed here or a shared profile silently drops
+        -- them and the importer sees a caster row that is off for no visible reason.
+        "debuffCasterName",
+        "debuffCasterRealm",
+        "debuffCasterClassColor",
+        "debuffCasterAnchor",
+        "debuffCasterFont",
+        "debuffCasterOutline",
+        "debuffCasterScale",
+        "debuffCasterX",
+        "debuffCasterY",
         "debuffWrap",
         "defensiveFilterSelection",
         "directBuffOnlyMine",
@@ -458,7 +510,13 @@ DF.ExportCategories = {
         "dispelIconOffsetY",
         "dispelIconPosition",
         "dispelIconSize",
+        "dispelIconMax",
         "dispelOverlayDispelType",
+        "dispelOverlayHideMagic",
+        "dispelOverlayHideCurse",
+        "dispelOverlayHidePoison",
+        "dispelOverlayHideDisease",
+        "dispelOverlayHideBleed",
         "dispelOverlayEnabled",
         "dispelShowBorder",
         "dispelShowGradient",
@@ -693,6 +751,10 @@ DF.ExportCategories = {
         "personalTargetedSpellSpacing",
         "personalTargetedSpellX",
         "personalTargetedSpellY",
+        -- DandersMover record (the scalars above are its mirror). A pre-record string
+        -- carries only the scalars; MergeCategorySettings drops the profile's own
+        -- record then, so the import path re-seeds it from the merged scalars.
+        "personalTargetedPosition",
     },
     -- Targeted List page
     targetedList = {
@@ -775,6 +837,7 @@ DF.ExportCategories = {
         "targetedListX",
         "targetedListY",
         "targetedListZoomIcon",
+        "targetedListPosition",   -- DandersMover record; see personalTargetedPosition
     },
     -- Legacy name/status/health text & fonts
     text = {
@@ -999,6 +1062,9 @@ DF.ExportCategories = {
         "fadeDeadPowerBar",
         "fadeDeadStatusText",
         "fadeDeadUseCustomColor",
+        "fadeUnhealableAlpha",
+        "fadeUnhealableColor",
+        "fadeUnhealableEnabled",
         "frameBorderBlendMode",
         "frameBorderColor",
         "frameBorderColorSource",
@@ -1021,6 +1087,7 @@ DF.ExportCategories = {
         "frameFadeAlpha",
         "frameFadeAlphaInCombat",
         "frameFadeAlphaOutOfCombat",
+        "frameFadeEnabled",
         "frameFadeHoverScope",
         "frameFadeInstanceUsesCombat",
         "frameFadeHoverUsesCombat",
@@ -1181,8 +1248,6 @@ DF.ExportCategories = {
     -- Pinned frame sets
     pinnedFrames = {
         "pinnedFrames",
-        "pinnedHideMover",
-        "pinnedSnapToGrid",
     },
     -- Aura Designer config (preset library travels with this category)
     -- ☠ auraDesignerEnabled MUST travel with it. The enable moved off the preset and
@@ -1307,9 +1372,7 @@ DF.ExportCategoryInfo = {
     },
 }
 
--- (DF.ExportPresets removed: it was defined here and referenced nowhere. The export
--- page's quick-picks are declared inline at GUI/Pages/Modules.lua, and drifted out of
--- sync with this table long ago -- two sources for one list, one of them unread.)
+-- Export-page quick-picks are declared inline in GUI/Pages/Modules.lua, not here.
 
 -- ===========================================
 -- HELPER FUNCTIONS
@@ -1431,6 +1494,25 @@ function DF:MergeCategorySettings(profile, imported, categories, exportedCategor
             end
         end
     end
+
+    -- ☠ SAME CLASS AS THE STOPS ABOVE: a pre-record payload carries anchorX/anchorY and
+    -- raidAnchorX/raidAnchorY but no `position`, and the profile's own record survives
+    -- the merge and shadows them -- the container reads the record, so the import
+    -- "works" and the frames never move to the imported spot. Drop the record when the
+    -- scalars came in without one; DF:ApplyImportedProfile re-seeds it from the merged
+    -- scalars before its defaults backfill (and DF:GetPositionRecord does the same on
+    -- first read as a belt). Gated on `copied` for the reason the stops block gives.
+    if not copied.position and (copied.anchorX or copied.anchorY
+        or copied.raidAnchorX or copied.raidAnchorY) then
+        profile.position = nil
+    end
+    -- Phase B records, same class.
+    if not copied.personalTargetedPosition and (copied.personalTargetedSpellX or copied.personalTargetedSpellY) then
+        profile.personalTargetedPosition = nil
+    end
+    if not copied.targetedListPosition and (copied.targetedListX or copied.targetedListY) then
+        profile.targetedListPosition = nil
+    end
 end
 
 -- ============================================================
@@ -1451,30 +1533,15 @@ DF.ExportLocalOnly = {
     minimapIcon = true,                                 -- minimap button state
     useSecureHeaders = true,                            -- internal escape hatch (no GUI)
 
-    -- (Removed) five dead-legacy declarations: frameBorderAlpha, auraSourceMode,
-    -- defensiveIconShowSwipe, highlightFrames, resurrectionIconHideInCombat. They
-    -- hedged against cleanup PRs that had not landed yet — "still present in Config
-    -- defaults on this branch but no longer read anywhere". Those PRs have landed:
-    -- none of the five is a Config key any more, and only frameBorderAlpha still
-    -- exists as a name anywhere (as a signature FIELD derived from
-    -- frameBorderColor.a in Frames/Bars.lua — an unrelated symbol). With no default
-    -- to suppress, the entries suppressed nothing.
 }
 
 -- Keys that legitimately appear in category lists WITHOUT a Config default
--- (GUI-write-only keys where nil is meaningful — plus top-level/legacy
--- carriers). roleBorderColor* left this set with the profile-root roleColors
--- move (the legacy per-mode keys no longer export; roleColors rides the
--- full-export payload like classColors).
+-- (GUI-write-only keys where nil is meaningful -- plus top-level/legacy carriers).
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
     auraDesignerEnabled = true,                         -- lazy by design, no Config default
     textDesigner = true,                                -- legacy inline table
-    -- (Removed) auraDesigner, defensiveIconBorderColorSource and
-    -- missingBuffIconBorderColorSource. All three now HAVE Config defaults, so the
-    -- allowlist no longer suppressed anything for them — they resolve as normal
-    -- exported keys with defaults. textDesigner stays: it genuinely has none.
     raidPlayerGroupFirst = true,
     raidAutoProfiles = true,                            -- top-level key, special-cased in Profile.lua
     -- Config.lua lists this as `= nil` (documentation only — a nil assignment

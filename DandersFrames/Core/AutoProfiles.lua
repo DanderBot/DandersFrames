@@ -21,17 +21,13 @@ local format = string.format
 
 -- ============================================================
 -- OVERRIDE KEY LABELS
--- The override tooltip and /df debug overrides both list which settings a layout has
--- overridden. They used to print the RAW saved key -- "auraDesignerPreset",
--- "buffBorderSize" -- so users were shown internal camelCase identifiers. Noise at
--- best, and actively misleading where a key's wording no longer matches the UI:
--- the designer keys still say "preset" ON PURPOSE (they are exported, so renaming
--- them would cost a saved-profile migration to change a name nobody should have
--- been seeing) while the UI now calls those Templates.
---
--- Derived labels can't be translated -- they come from an identifier, not a string
--- table -- but that is no worse than the raw key they replace, and the cases where
--- the wording actually matters are pinned to real locale keys below.
+-- The override tooltip and /df debug overrides both list which settings a layout
+-- has overridden, as derived labels rather than the raw camelCase keys.
+-- The designer keys still say "preset" ON PURPOSE -- they are exported, so
+-- renaming them would cost a saved-profile migration -- while the UI now calls
+-- those Templates.
+-- Derived labels can't be translated (they come from an identifier, not a string
+-- table); the cases where the wording matters are pinned to real locale keys below.
 -- ============================================================
 
 -- Prettifying these would be WRONG, not merely ugly.
@@ -171,6 +167,30 @@ local PINNED_OVERRIDABLE = {
 local NON_OVERRIDABLE_KEYS = {
     raidLocked = true,
     locked = true,
+    -- A table-valued record cannot be a layout override (the overlay proxy's __newindex
+    -- only fires for top-level scalar writes, so it would read stale and lose writes).
+    -- personalTargetedSpellX/Y -- the scalars -- are what a layout overrides; the record
+    -- folds the effective scalar in on read (DF:GetPositionRecord).
+    personalTargetedPosition = true,
+}
+
+-- ☠ GLOBAL SETTINGS ARE NOT A LAYOUT'S TO CHANGE. These are written to both modes at once
+-- and mostly read from party alone, so a raid layout override was either dead (the player
+-- frame hide reads party, never raid) or split one setting into two (pixel perfect). A
+-- layout also has nothing to fall back to for them when it ends. So they are never stored
+-- as overrides, and an edit made while editing a layout is kept as the global change it
+-- is (ExitEditing), instead of being thrown away with the layout's preview.
+local GLOBAL_KEYS = {
+    hideBlizzardPartyFrames = true,
+    hideBlizzardRaidFrames = true,
+    hideDefaultPlayerFrame = true,
+    hideDefaultPlayerFrameRaidOnly = true,
+    showBlizzardSideMenu = true,
+    showMinimapButton = true,
+    pixelPerfect = true,
+    fontShadowOffsetX = true,
+    fontShadowOffsetY = true,
+    fontShadowColor = true,
 }
 
 -- True unless `key` is non-overridable: a pinned key (pinned.N.setting) whose
@@ -182,8 +202,21 @@ local function IsKeyOverridable(key)
     if setting then
         return PINNED_OVERRIDABLE[setting] == true
     end
-    if NON_OVERRIDABLE_KEYS[key] then return false end
+    if NON_OVERRIDABLE_KEYS[key] or GLOBAL_KEYS[key] then return false end
     return true
+end
+
+-- Drop any global-key override a layout already carries (captured before GLOBAL_KEYS
+-- existed). ApplyRuntimeProfile already skips them; this is so the layout list stops
+-- counting and showing them.
+function DF:StripGlobalLayoutOverrides(profile)
+    if not (DF.ForEachRaidLayoutOverride and type(profile) == "table") then return end
+    DF.ForEachRaidLayoutOverride(profile, function(holder)
+        local o = holder and holder.overrides
+        if type(o) == "table" then
+            for key in pairs(GLOBAL_KEYS) do o[key] = nil end
+        end
+    end)
 end
 
 -- ============================================================
@@ -213,9 +246,10 @@ local function RefreshOverrideTabMap()
     {"oor",                 "display_fading",       L["Fading"]},
     {"dead",                "display_fading",       L["Fading"]},
     {"offline",             "display_fading",       L["Fading"]},
+    {"fadeUnhealable",      "display_fading",       L["Fading"]},
     {"pet",                 "display_pets",         L["Pet Frames"]},
     -- General (specific before generic)
-    {"fontShadow",          "general_fonts",        L["Global Fonts"]},
+    {"fontShadow",          "general_fonts",        L["Fonts"]},
     {"groupLabel",          "general_labels",       L["Group Labels"]},
     {"raidTestFrameCount",  "general_frame",        L["Frame"]},
     {"raidUseGroups",       "general_frame",        L["Frame"]},
@@ -354,7 +388,7 @@ local function RaidTextMigrated()
     -- The TD legacy migration flags migratedFromLegacy on whatever owns raid text.
     -- Preset build: the current raid preset, OR the canonical "Raid" preset the
     -- migration always materialises (covers a raid mode repointed elsewhere).
-    -- Pre-preset build (alpha.6): inline db.raid.textDesigner.
+    -- Pre-preset build: inline db.raid.textDesigner.
     if DF.GetTextDesignerPresets then
         if DF.GetModeTextDesigner then
             local td = DF:GetModeTextDesigner("raid")
@@ -1008,8 +1042,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- If a key is nil, backfill a default so both the snapshot and set are consistent.
     -- Only `enabled` is overridable (PINNED_OVERRIDABLE = {enabled}), and the loop
     -- below reads PINNED_DEFAULTS only for the keys it iterates — so this table needs
-    -- just `enabled`. (It previously listed ~13 dead keys, incl. a keepOfflinePlayers
-    -- default that contradicted the real Config/Options default.)
+    -- just `enabled`.
     local PINNED_DEFAULTS = {
         enabled = false,
     }
@@ -1135,21 +1168,6 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         if DF.PositionTestRaidContainer then
             DF:PositionTestRaidContainer()
         end
-        -- If the mover is visible (frames unlocked), sync its position and scale
-        -- to match the freshly-positioned test container. The profile overrides
-        -- applied above may include a different raidAnchorX/Y or frameScale, so
-        -- the mover needs to follow the container or it will appear offset.
-        if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
-            local moverDb = DF:GetRaidDB()
-            local moverScale = moverDb.frameScale or 1.0
-            DF.raidMoverFrame:SetScale(moverScale)
-            DF.raidMoverFrame:ClearAllPoints()
-            DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
-        end
-        -- Refresh position panel inputs to reflect the newly-applied override anchor/scale
-        if DF.positionPanel and DF.positionPanel:IsShown() and DF.UpdatePositionPanel then
-            DF:UpdatePositionPanel()
-        end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()
         end
@@ -1249,6 +1267,11 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                     DF:DebugWarn("AUTOPROFILE", "ExitEditing: removed stale pinnedFrames direct override key")
                 end
             elseif not IsKeyOverridable(key) then
+                -- A global edited mid-session already went to party; keep raid's copy
+                -- too by moving it into the snapshot the restore below writes back.
+                if GLOBAL_KEYS[key] then
+                    self.globalSnapshot[key] = DeepCopyValue(GetRaidValue(key))
+                end
                 -- Transient/never-override key (e.g. raidLocked) — never store it,
                 -- and self-heal any override an earlier build captured.
                 if overrides[key] ~= nil then
@@ -1303,7 +1326,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
         -- Remove orphan keys created during editing that aren't tracked overrides
         local orphansRemoved = 0
         for key in pairs(DF._realRaidDB) do
-            if self.globalSnapshot[key] == nil and not overrides[key] then
+            if self.globalSnapshot[key] == nil and not overrides[key] and not GLOBAL_KEYS[key] then
                 DF._realRaidDB[key] = nil
                 orphansRemoved = orphansRemoved + 1
             end
@@ -1362,22 +1385,6 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     if DF.raidTestMode then
         if DF.PositionTestRaidContainer then
             DF:PositionTestRaidContainer()
-        end
-        -- Sync mover position/scale to match the restored base anchor.
-        -- EvaluateAndApply above may have re-applied a runtime overlay, so
-        -- DF:GetRaidDB() here reflects whichever values are now authoritative.
-        if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
-            local moverDb = DF:GetRaidDB()
-            local moverScale = moverDb.frameScale or 1.0
-            DF.raidMoverFrame:SetScale(moverScale)
-            DF.raidMoverFrame:ClearAllPoints()
-            DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (moverDb.raidAnchorX or 0) / moverScale, (moverDb.raidAnchorY or 0) / moverScale)
-        end
-        -- Refresh position panel inputs to reflect the restored anchor/scale values.
-        -- EvaluateAndApply above may have re-applied a runtime overlay, so
-        -- DF:GetRaidDB() is already authoritative at this point.
-        if DF.positionPanel and DF.positionPanel:IsShown() and DF.UpdatePositionPanel then
-            DF:UpdatePositionPanel()
         end
         if DF.RefreshTestFramesWithLayout then
             DF:RefreshTestFramesWithLayout()
@@ -1902,18 +1909,26 @@ end
 -- Mirrors what the toolbar Unlock flow persists, minus the snapshot/diff machinery
 -- (a single scalar position key needs none — ApplyRuntimeProfile rebuilds the
 -- overlay from profile.overrides on the next layout re-eval).
-function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+-- The primitive: write any x/y scalar PAIR into the active layout's override + live
+-- overlay. No refresh -- the caller applies. Used for raidAnchorX/Y (below) and for
+-- personalTargetedSpellX/Y (DF:SetPositionRecord("personal") in a raid).
+function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)
     if self:IsEditing() then return false end
     local p = self.activeRuntimeProfile
     if not p then return false end
     p.overrides = p.overrides or {}
-    p.overrides.raidAnchorX = x
-    p.overrides.raidAnchorY = y
+    p.overrides[xKey] = x
+    p.overrides[yKey] = y
     -- Reflect immediately so GetRaidDB() (overlay view) returns the new value.
     if DF.raidOverrides then
-        DF.raidOverrides.raidAnchorX = x
-        DF.raidOverrides.raidAnchorY = y
+        DF.raidOverrides[xKey] = x
+        DF.raidOverrides[yKey] = y
     end
+    return true
+end
+
+function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+    if not self:SetActiveLayoutRaidPair("raidAnchorX", "raidAnchorY", x, y) then return false end
     if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
     return true
 end
@@ -2147,6 +2162,15 @@ function AutoProfilesUI:EvaluateAndApply()
         return
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
+
+    -- ☠ THE UNDO FENCE, and it belongs BELOW the two no-change guards above --
+    -- not at the head of this function. Evaluation runs on every roster change,
+    -- zone change and combat drop; clearing there would wipe the user's undo
+    -- history every time somebody joined the group. Only a layout that ACTUALLY
+    -- swaps (including none -> layout and layout -> none, both of which reach
+    -- this line) changes what the raid settings under an entry mean.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
 
     DF:Debug("AUTOPROFILE", "EvaluateAndApply: switching \"%s\" -> \"%s\"", oldName, newName)
     DF:Debug("RAIDPOS", "AutoProfile SWITCH: \"%s\" -> \"%s\" (raid size=%d)", oldName, newName, GetNumGroupMembers())
@@ -2509,8 +2533,8 @@ end
 -- Defining them as no-ops here is what lets those call sites stay untouched;
 -- the companion overwrites all four with the real versions when it loads.
 --
--- Written out one by one rather than generated in a loop so that grep and
--- lod_gate_check.py can both see them, same as TestMode/Shim.lua.
+-- Written out one by one rather than generated in a loop so that grep can see
+-- them, same as TestMode/Shim.lua.
 function AutoProfilesUI:RefreshEditingUI() end
 function AutoProfilesUI:RefreshTabOverrideStars() end
 function AutoProfilesUI:ShowSidebarHint() end

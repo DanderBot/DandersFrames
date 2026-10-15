@@ -17,6 +17,7 @@ local P = GUI._priv
 -- Aliases of objects the toolkit created; they add no state.
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+local C_NOTICE = GUI.Colors.notice
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local AddOverrideIndicators = P.AddOverrideIndicators
@@ -27,6 +28,29 @@ local PromptPresetName = P.PromptPresetName
 local OUTLINE_FLAG_ORDER = P.OUTLINE_FLAG_ORDER
 local LayoutPixelBorder = P.LayoutPixelBorder
 local pixelBordered = P.pixelBordered
+
+-- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE, and every widget factory owes it
+-- one call. `RefreshStates` is stamped on whatever a control was parented to --
+-- the page's scroll child (Panel.lua) or a popout pane's holder (the stamp in
+-- Controls.lua's CreatePopoutPageTools) -- and running it is what re-reads every
+-- `disableOn` on the page AND every popout row's summary line. A factory that
+-- skips it leaves both stale until something unrelated refreshes: the reported
+-- rows that "don't update until a tab change" are exactly the widget families
+-- that never made this call (font/texture/sound dropdowns, colour pickers,
+-- drag-reorder lists).
+--
+-- ⚠ COMMIT ONLY, NEVER PREVIEW. A slider fires once per step crossed and a
+-- colour wheel once per mouse-move frame; the addon splits preview from commit
+-- precisely so those do no page-wide work, and this belongs on the commit side
+-- of that split.
+--
+-- rawget, not a plain read: headless the shim answers any unset field with a
+-- truthy no-op function, so a plain `if parent.RefreshStates` passes for the
+-- wrong reason and a test could never see the seam go missing.
+local function RefreshOwnerStates(parent)
+    if parent and rawget(parent, "RefreshStates") then parent:RefreshStates() end
+end
+P.RefreshOwnerStates = RefreshOwnerStates
 
 -- ---- from GUI.lua ----
 -- Sync a widget's slot height into its host SettingsGroup and re-flow. Used by any
@@ -82,6 +106,19 @@ function GUI:RelayoutHost(widget, slotHeight)
             p.dfAD_ReflowWidgets()
             return
         end
+        -- ☠ A POPOUT PANE NEXT, for the card's reason one host along. A pane is not a
+        -- page: the walk would run straight past it to the settings WINDOW, which
+        -- knows nothing about the panel, so the group's own LayoutChildren above
+        -- would be the only thing that happened -- the group knows its new height and
+        -- the PANEL around it still has the one it was given at mount, clipping the
+        -- bottom of the pane by exactly what the widget grew.
+        -- GUI:CreatePopoutPageTools stamps this on the pane it mounts a group into,
+        -- and it is the same ReflowPane the toolkit runs after a hideOn change: the
+        -- group re-flows, the pane is re-sized to it, and the panel re-syncs.
+        if type(p.dfReflowPane) == "function" then
+            p.dfReflowPane()
+            return
+        end
         if type(p.RefreshStates) == "function" and p.children then
             p:RefreshStates()
             return
@@ -122,6 +159,8 @@ end
 function GUI:IsTabDisabledForCurrentMode(tabName)
     if not tabName then return false end
     if GUI.AlwaysAccessiblePages[tabName] then return false end
+    -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
+    if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
     if GUI.SelectedMode == "party" and DF.db and DF.db.partyEnabled == false then return true end
     if GUI.SelectedMode == "raid"  and DF.db and DF.db.raidEnabled  == false then return true end
     return false
@@ -146,18 +185,22 @@ function GUI:UpdateTabAvailability()
         end
     end
 
-    -- Refresh the sidebar so party-only tabs (e.g. Visibility) hide/show for
-    -- the current mode.
+    -- Refresh the sidebar for the tab now up: GLOBAL's pages or Party/Raid's,
+    -- and party-only ones (e.g. Visibility) hidden in raid.
     if GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
 
-    -- If the active tab just became hidden (party-only while in raid), move to a
-    -- safe always-present tab so the user isn't left on a hidden/empty page.
-    if not GUI._redirectingTab and GUI.SelectedMode == "raid" and GUI.CurrentPageName then
+    -- If the page on screen is not in that sidebar any more (GLOBAL left for
+    -- Party or Raid, or a party-only page in raid), move to the page this tab
+    -- showed last, so the user is never left on a page they cannot see listed.
+    if not GUI._redirectingTab and GUI.CurrentPageName and GUI.IsTabInView and GUI.SelectTab then
         local cur = GUI.Tabs[GUI.CurrentPageName]
-        if cur and cur.partyOnly and GUI.SelectTab then
-            GUI._redirectingTab = true
-            GUI.SelectTab("general_settings")
-            GUI._redirectingTab = false
+        if cur and not GUI:IsTabInView(cur) then
+            local to = GUI:LastTabInView()
+            if to then
+                GUI._redirectingTab = true
+                GUI.SelectTab(to)
+                GUI._redirectingTab = false
+            end
         end
     end
 end
@@ -170,12 +213,22 @@ function GUI:RefreshPixelBorders()
     end
 end
 
-function GUI:CreateHeader(parent, text)
+-- opts.keepSearchSection: a heading INSIDE a card's body (AFK Icon > Timer
+-- Text) must not become the search section, or every control after it --
+-- the rest of the card -- would be indexed under it rather than the card.
+function GUI:CreateHeader(parent, text, opts)
     -- Use a frame container so we can position text at bottom (padding above)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(200, 25)
     container:Show()
     container.rowKind = "header"
+    -- The kit's "this is a section header" contract (DandersUI/Sections.lua --
+    -- see the note on the group gate). rowKind already says header, but that is
+    -- a LAYOUT-RUN kind: the two row factories deliberately set no rowKind at
+    -- all so RowCompact's run-tightening cannot see them, so it is not a field a
+    -- non-row widget can borrow to mean "header". This one carries only the
+    -- meaning, and the kit reads nothing else about the host to grey a group.
+    container.isSectionHeader = true
     -- Factory-owned slot, and fixed so ResolveRowHeight ignores whatever the call
     -- site passes. Headers were handed 25 in collapsible groups and 40 in plain
     -- ones -- the same widget, two rhythms, across ~200 sites. Owning it here
@@ -201,80 +254,252 @@ function GUI:CreateHeader(parent, text)
     container.GetText = function() return h:GetText() end
     
     -- SEARCH: Track current section
-    if DF.Search then
+    if DF.Search and not (opts and opts.keepSearchSection) then
         DF.Search:SetCurrentSection(text)
     end
 
     return container
 end
 
---- Attach a small live preview swatch to a header built by GUI:CreateHeader —
---- the plain-header counterpart of a collapsible section's SetPreviewIcons, for
---- sections whose setting produces ONE small piece of art (the important-debuff
---- corner marker). It sits immediately right of the title rather than at the
---- group's right edge: a lone swatch only reads as "this is the thing this
---- section makes" when it sits with the words.
----
---- `layers` draws 1..N textures in order with their own colours, because the real
---- art is often layered (the marker is a tinted disc plus a tinted glyph) — a
---- one-texture swatch would preview a white blob and lie about the colours, which
---- is the exact fault the section-preview swatches were corrected for.
----
---- Greying: pass dimmed=true and every layer desaturates and drops alpha, matching
---- the icon sections' `desaturate` convention. Drive it from the owning header's
---- `refreshContent` so RefreshChildStates keeps it live (see CreateSettingsGroup).
-function GUI:AttachHeaderSwatch(header, size, layerCount)
-    if not header or not header.text then return nil end
-    if header.swatch then return header.swatch end
-    local SZ = size or 16
-    local sw = CreateFrame("Frame", nil, header)
-    sw:SetSize(SZ, SZ)
-    sw:SetPoint("LEFT", header.text, "RIGHT", 6, 0)
-    sw.layers = {}
-    for i = 1, (layerCount or 2) do
-        -- Ascending sublevel so layer 2 draws over layer 1 (disc, then glyph).
-        local t = sw:CreateTexture(nil, "OVERLAY", nil, i)
-        t:SetAllPoints()
-        t:Hide()
-        sw.layers[i] = t
-    end
-    --- layers: { { texture = path, color = {r,g,b,a}? }, ... }
-    sw.SetSwatch = function(self, layers, dimmed)
-        for i, t in ipairs(self.layers) do
-            local d = layers and layers[i]
-            if d and d.texture then
-                t:SetTexture(d.texture)
-                t:SetDesaturated(dimmed and true or false)
-                -- ⚠ AFTER the texture call — SetTexture/SetAtlas reset vertex colour.
-                -- Same trap documented on the section preview swatches.
-                if dimmed then
-                    t:SetVertexColor(0.5, 0.5, 0.5, 0.55)
-                elseif d.color then
-                    t:SetVertexColor(d.color.r or 1, d.color.g or 1, d.color.b or 1, d.color.a or 1)
-                else
-                    t:SetVertexColor(1, 1, 1, 1)
-                end
-                t:Show()
-            else
-                t:Hide()
-            end
-        end
-    end
-    header.swatch = sw
-    return sw
-end
-
 -- Collapsible section for grouping related settings.
 -- Collapsed state is persisted in DandersFramesDB_v2.collapsedGroups keyed by
 -- `text` (shared store with CreateSettingsGroup's collapsible header), so the
 -- user's fold preference survives reloads.
-function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
+--
+-- ☠ opts.collapseKey NAMES THAT STORE SLOT OUTRIGHT, and anything whose title
+-- is not a hard-coded English constant must pass one. Keying on the TITLE means a
+-- localised heading writes a second slot, a reworded one orphans the old slot, and
+-- a title built from user data (a spell name, a group name) adds one PERMANENT
+-- profile key per record -- a schema change smuggled in under a re-presentation.
+--
+-- opts also takes `summary`, `dimOn`, `pin`, `card` and `toggle` -- see where
+-- they are read, below.
+--
+-- ============================================================
+-- opts.card -- ONE CARD PER SECTION (opt-in; Buff Bar only today)
+-- ------------------------------------------------------------
+-- Without it a section is a thin bar with an accent title, and the band of
+-- controls it folds is a separate block floating under it. With it the header
+-- and that band read as ONE card: one fill, one rounded ring, a hairline between
+-- the header and the body, and a fixed gap to the next card.
+--
+-- ☠ THE BAND IS STILL A SEPARATE PAGE CHILD, and the card does not change that.
+-- Panel.lua's state pass is the only thing that hides what a shut section
+-- registered, so the band has to stay a page child it can reach. The card is
+-- drawn instead as a rounded surface whose TEXTURES live on the header (so they
+-- sit under every control in the band, which are a frame level above) and whose
+-- RECT is an invisible frame ANCHORED from the header's top to the band's
+-- bottom. Pure anchors: nothing reads a rect mid-layout, so the double
+-- RefreshStates, the one-column fold at narrow widths and a resize-grip drag all
+-- move the card with the frames it is pinned to.
+--
+-- ⚠ THE FIRST SETTINGS GROUP REGISTERED IS THE BODY, and it takes the card's
+-- inset and gap (see RegisterChild). Shut, or with no body, the card is the
+-- header alone, fully rounded.
+--
+-- ⚠ NOBODY ELSE MOVES. Every number below is read only under `card`.
+GUI.SectionCard = {
+    header      = 40,   -- header row height
+    edge        = 12,   -- chevron's inset from the card's left edge
+    chevron     = 10,   -- chevron size
+    titleGap    = 8,    -- chevron -> title (with the kind icon: chevron -> icon)
+    icon        = 16,   -- the kind icon's slot, reserved on EVERY card
+    iconGlyph   = 14,   -- ...and the glyph centred in it
+    iconGap     = 8,    -- icon slot -> tick
+    titleLead   = 12,   -- icon slot or tick -> title: room for the modified dot, the
+                        -- same gap a body checkbox leaves before its label
+    -- ============================================================
+    -- THE KIND ICON'S COLOUR -- the one switch.
+    --   false  dim (C_TEXT_DIM): the icon reads as furniture beside the title
+    --   true   the mode's accent, the chevron's colour, re-tinted on a
+    --          party/raid switch and a theme repaint the way the chevron is
+    -- Greyed (the section's feature is off) it goes 0.5 grey either way, with
+    -- the title and the chevron.
+    -- ============================================================
+    iconAccent  = true,
+    pad         = 12,   -- the body's inset (left, right, bottom -- and top)
+    gap         = 8,    -- card -> next card
+    radius      = 6,    -- a radius the kit has baked art for (Round.lua RADII)
+    pin         = 24,   -- the pin's square
+    pinIcon     = 14,   -- ...and the glyph inside it
+    pinEdge     = 8,    -- the pin's inset from the card's right edge
+    borderAlpha = 0.6,  -- of C_BORDER, over C_PANEL
+    lineAlpha   = 0.4,  -- the header/body hairline: a shade under the border
+    -- of C_HOVER. Capped by the summary's contrast, not by taste: the dim text
+    -- has to stay >= 4.5:1 on the HOVERED header too, and 0.75 (the row
+    -- plates' hover) takes it to ~4.4.
+    hoverAlpha  = 0.6,
+    -- of C_HOVER, AT REST: the header is always its own strip, a step lighter
+    -- than the body, and hover lifts it one step more (panel 0.12 -> header
+    -- ~0.155 -> hovered ~0.18). Below hoverAlpha, so the hovered header stays
+    -- the brightest the summary's contrast was checked against.
+    headerAlpha = 0.35,
+    cornersAll  = { tl = true, tr = true, bl = true, br = true },
+    cornersTop  = { tl = true, tr = true },
+}
+
+-- ============================================================
+-- opts.kind -> THE CARD HEADER'S ICON. One table, every kind.
+-- ------------------------------------------------------------
+-- A card names the KIND of section it is (opts.kind = "layout") and gets the
+-- glyph here between its chevron and its title. The kind is set by the caller
+-- per section -- ☠ NEVER derived from the title, which is localised. A kind not
+-- in this table draws no icon. White 64x64 PNG glyphs, tinted at runtime --
+-- named WITH ".png": an extensionless path resolves to .blp/.tga only.
+--
+-- ⚠ filter_header, NOT filter_alt: the old filter_alt is drawn smaller and
+-- fainter than its siblings and is used elsewhere, so the headers get a copy
+-- refitted to the same ink box as the rest.
+do
+    local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+    GUI.SectionCard.kinds = {
+        appearance = ICONS .. "palette.png",
+        layout     = ICONS .. "grid_view.png",
+        size       = ICONS .. "open_in_full.png",
+        position   = ICONS .. "open_with.png",
+        visibility = ICONS .. "visibility.png",
+        text       = ICONS .. "text_fields.png",
+        colours    = ICONS .. "format_color_fill.png",
+        filters    = ICONS .. "filter_header.png",
+        tooltips   = ICONS .. "chat_info.png",
+        effects    = ICONS .. "auto_awesome.png",
+        border     = ICONS .. "border_style.png",
+        order      = ICONS .. "swap_vert.png",
+        timer      = ICONS .. "timer.png",
+        settings   = ICONS .. "tune.png",
+        language   = ICONS .. "language.png",
+        notifications = ICONS .. "notifications.png",
+        colorpicker = ICONS .. "colorize.png",
+        shield     = ICONS .. "shield.png",
+        important  = ICONS .. "priority_high.png",
+        minimap    = ICONS .. "map.png",
+        framemodes = ICONS .. "dashboard.png",
+        rendering  = ICONS .. "display_settings.png",
+        autopopulate = ICONS .. "group_add.png",
+        health     = ICONS .. "favorite.png",
+        missinghealth = ICONS .. "heart_minus.png",
+        healabsorb = ICONS .. "shield_with_heart.png",
+        alpha      = ICONS .. "transition_fade.png",
+        range      = ICONS .. "social_distance.png",
+        interrupt  = ICONS .. "flash_off.png",
+        -- The plain outline skull: a slashed or badged one blurs to a blob at
+        -- card size.
+        dead       = ICONS .. "skull.png",
+    }
+end
+
+-- ============================================================
+-- THE CARD'S MODIFIED MARK: something in this card is not what it would
+-- otherwise be. Same dot, same place as a control's (the title's top-left), so
+-- a shut card says what its controls would: the raid accent when any control
+-- in it is an auto-layout override, amber when only defaults are changed.
+--
+-- The count asks every control in the body its own UpdateModifiedDot, the
+-- predicate its dot uses, so the two cannot disagree -- and a shut card
+-- whose controls have never been shown still answers. Found by walking the
+-- body's frames, because a body row can hold more than one control.
+--
+-- A changed tick shows its own dot here instead (it carries the tooltip and
+-- hold-to-reset for the tick), so the mark stands down. The mark has no
+-- hold: one press resetting a whole card is too easy to do by accident.
+--
+-- Queued, at most one count per frame: every control's dot update asks for
+-- one, and a page refresh updates them all.
+-- ============================================================
+function GUI:AttachCardModifiedMark(section, clickArea)
+    local DOT = GUI.ModifiedDotTopLeft
+    local mark = section:CreateTexture(nil, "OVERLAY")
+    mark:SetSize(DOT.size, DOT.size)
+    mark:SetTexture(GUI.MEDIA .. "Icons\\dot.png")
+    mark:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    mark:SetPoint("CENTER", section.title, "TOPLEFT", DOT.x, DOT.y)
+    mark:Hide()
+    section.modifiedMark = mark
+
+    local changedCount, overrideCount, runtimeCount = 0, 0, 0
+    -- Motion only: a click on it still folds the card.
+    local markHit = CreateFrame("Frame", nil, section)
+    markHit:SetSize(DOT.hit, DOT.hit)
+    markHit:SetPoint("CENTER", mark, "CENTER", 0, 0)
+    markHit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+    markHit:EnableMouse(true)
+    markHit:SetMouseClickEnabled(false)
+    markHit:SetScript("OnEnter", function(self)
+        -- One line per kind, in the words each control's own dot uses.
+        local lines = {}
+        local defaultCount = changedCount - overrideCount - runtimeCount
+        if defaultCount > 0 then lines[#lines + 1] = format(L["%d changed from default"], defaultCount) end
+        if overrideCount > 0 then lines[#lines + 1] = format(L["%d set by this auto layout"], overrideCount) end
+        if runtimeCount > 0 then lines[#lines + 1] = format(L["%d set by the active auto layout"], runtimeCount) end
+        GUI:ShowTooltip(self, { title = L["Changed in this section"], lines = lines })
+    end)
+    markHit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    markHit:Hide()
+    section.modifiedMarkHit = markHit
+
+    local walking, queued = false, false
+    local scan
+    local function each(...)
+        for i = 1, select("#", ...) do scan((select(i, ...))) end
+    end
+    scan = function(frame)
+        if rawget(frame, "UpdateModifiedDot") then
+            local on, kind = frame:UpdateModifiedDot()
+            if on then
+                changedCount = changedCount + 1
+                if kind == "overridden" then
+                    overrideCount = overrideCount + 1
+                elseif kind == "runtime" then
+                    runtimeCount = runtimeCount + 1
+                end
+            end
+            return
+        end
+        each(frame:GetChildren())
+    end
+    section.RefreshModifiedMark = function(self)
+        walking = true
+        changedCount, overrideCount, runtimeCount = 0, 0, 0
+        for _, child in ipairs(self.sectionChildren) do scan(child) end
+        local tick = rawget(self, "headerToggle")
+        local tickChanged = tick and rawget(tick, "UpdateModifiedDot") and tick:UpdateModifiedDot() or false
+        walking = false
+        local show = changedCount > 0 and not tickChanged
+        if show then
+            local c = (overrideCount + runtimeCount > 0) and GUI:Call("accentFor", true) or C_NOTICE
+            mark:SetVertexColor(c.r, c.g, c.b)
+        end
+        mark:SetShown(show)
+        markHit:SetShown(show)
+    end
+    -- Ignored while counting: the count's own UpdateModifiedDot calls ask too.
+    section.QueueModifiedMark = function(self)
+        if walking or queued then return end
+        queued = true
+        C_Timer.After(0, function()
+            queued = false
+            self:RefreshModifiedMark()
+        end)
+    end
+    -- The body is built after this returns; the first count waits a frame.
+    section:QueueModifiedMark()
+    section:HookScript("OnShow", function(self) self:QueueModifiedMark() end)
+end
+
+function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
+    local CARD = opts and opts.card and GUI.SectionCard or nil
+    section.isCard = CARD and true or false
+    if CARD then section:SetHeight(CARD.header) end
+    -- The store slot: the caller's stable key when it gave one, else the title --
+    -- which is what every existing caller relies on, so none of them move.
+    section.collapseKey = opts and opts.collapseKey or nil
+    local stateKey = section.collapseKey or text
     -- Resolve initial expanded state: SavedVariables override the default.
     local savedStates = GUI:GetCollapsedGroups()
-    if text and savedStates[text] ~= nil then
-        section.expanded = not savedStates[text]
+    if stateKey and savedStates[stateKey] ~= nil then
+        section.expanded = not savedStates[stateKey]
     else
         section.expanded = defaultExpanded ~= false
     end
@@ -292,10 +517,59 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     -- Header bar with background. Same look as before, via the shared backdrop
     -- helper rather than a private copy of it, so it picks up the pixel border
     -- (and anything else that lands there) without its own wiring.
-    GUI:CreateElementBackdrop(section, {
-        bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
-        borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
-    })
+    local cardRect, cardSurface, cardHover, cardLine
+    if not CARD then
+        GUI:CreateElementBackdrop(section, {
+            bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
+            borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
+        })
+    else
+        -- The card's rect: header top -> body bottom, re-pointed by the fold (see
+        -- _ApplyCardFold). Draws nothing and takes no mouse; it only exists so
+        -- the surface below has one frame to stretch over.
+        cardRect = CreateFrame("Frame", nil, section)
+        cardRect:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)
+        cardRect:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", 0, 0)
+        -- The kit's rounded surface, not a new rounding system. Textures on the
+        -- HEADER, rect from cardRect -- the split Round.lua's anchorTo exists for.
+        -- The ring weight is the row plates' own.
+        local style = GUI:GetSurfaceStyle()
+        local bw = style and (style.rowBorderWidth or style.borderWidth) or 1
+        cardSurface = GUI:CreateRoundedSurface(section, {
+            radius      = CARD.radius,
+            borderWidth = bw,
+            fill        = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 1 },
+            border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
+            anchorTo    = cardRect,
+        })
+        -- The header strip: over the card's fill, UNDER its ring (the
+        -- title-strip sublevel), over the header's rect only. Always drawn, at
+        -- headerAlpha so the header reads apart from the body, and at hoverAlpha
+        -- under the mouse (SetCardHover). Top corners round while the body
+        -- shows, all four while the card is the header alone.
+        cardHover = GUI:CreateRoundedSurface(section, {
+            radius   = CARD.radius,
+            border   = false,
+            fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
+            sublevel = GUI.RoundStripSublevel,
+        })
+        -- The seam between header and body. BORDER sits above the whole of
+        -- BACKGROUND, so it is inset by the ring's weight rather than drawn
+        -- over it.
+        cardLine = section:CreateTexture(nil, "BORDER")
+        cardLine:SetPoint("BOTTOMLEFT", section, "BOTTOMLEFT", bw, 0)
+        cardLine:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", -bw, 0)
+        cardLine:SetHeight(1)
+        cardLine:Hide()
+    end
+
+    local cardHovered = false
+    local function SetCardHover(on)
+        if not cardHover then return end
+        cardHovered = on and true or false
+        cardHover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            cardHovered and CARD.hoverAlpha or CARD.headerAlpha)
+    end
 
     -- Click area
     local clickArea = CreateFrame("Button", nil, section)
@@ -304,18 +578,56 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     
     -- Expand/collapse arrow icon
     section.arrow = section:CreateTexture(nil, "OVERLAY")
-    section.arrow:SetPoint("LEFT", 8, 0)
-    section.arrow:SetSize(12, 12)
+    section.arrow:SetPoint("LEFT", CARD and CARD.edge or 8, 0)
+    section.arrow:SetSize(CARD and CARD.chevron or 12, CARD and CARD.chevron or 12)
     if section.expanded then
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     else
-        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        section.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
     end
     section.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
-    -- Section title
+    -- Optional ON/OFF TICK in the header (opts.toggle, built further down).
+    -- Read here because the title has to know whether it moves over for it.
+    -- ⚠ OPT-IN, and a spec without a key is no spec: every other caller passes
+    -- nothing and its title stays exactly where it was.
+    local toggleOpts = opts and type(opts.toggle) == "table" and type(opts.toggle.key) == "string"
+        and type(opts.toggle.db) == "table" and opts.toggle or nil
+    local TICK_SIZE = 18   -- the shared checkbox's box (StyleCheckButton's default)
+    -- Where the tick sits: the title's old start, one chevron-gap after the arrow.
+    local TICK_X = CARD and (CARD.edge + CARD.chevron + CARD.titleGap) or 26
+
+    -- ============================================================
+    -- Optional KIND ICON, between the chevron and the tick/title (opts.kind).
+    -- ------------------------------------------------------------
+    -- Order: chevron -> icon -> tick -> title. ⚠ THE SLOT IS RESERVED ON EVERY
+    -- CARD, kinded or not, so titles line up down a page and across pages; an
+    -- unkinded card just leaves it empty. Only a card moves -- a plain section
+    -- has no slot. The kind -> texture map is GUI.SectionCard.kinds; the tint is
+    -- painted with the chevron's (title.UpdateTheme, below).
+    if CARD then
+        local iconX = TICK_X
+        section._dfIconSlotX = iconX
+        TICK_X = iconX + CARD.icon + CARD.iconGap
+        local tex = opts.kind and CARD.kinds and CARD.kinds[opts.kind]
+        if tex then
+            section.kind = opts.kind
+            section.kindIcon = section:CreateTexture(nil, "OVERLAY")
+            section.kindIcon:SetSize(CARD.iconGlyph, CARD.iconGlyph)
+            section.kindIcon:SetPoint("LEFT", section, "LEFT", iconX + (CARD.icon - CARD.iconGlyph) / 2, 0)
+            section.kindIcon:SetTexture(tex)
+        end
+    end
+
+    -- Section title. TITLE_X is also what SetHeaderRightInset measures from.
+    -- ⚠ A CARD RESERVES THE TICK'S SLOT TOO, ticked or not, for the icon slot's
+    -- reason: titles line up down a page whether or not a card has a switch. The
+    -- modified dot sits in titleLead before the title either way. A plain section
+    -- reserves nothing for an unticked header.
+    local TITLE_X = TICK_X
+    if CARD or toggleOpts then TITLE_X = TICK_X + TICK_SIZE + (CARD and CARD.titleLead or 8) end
     section.title = section:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    section.title:SetPoint("LEFT", 26, 0)
+    section.title:SetPoint("LEFT", TITLE_X, 0)
     section.title:SetText(text)
     local c = GetThemeColor()
     section.title:SetTextColor(c.r, c.g, c.b)
@@ -336,6 +648,37 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     if not parent.ThemeListeners then parent.ThemeListeners = {} end
     table.insert(parent.ThemeListeners, section.title)
 
+    -- A CARD'S TITLE IS TEXT, NOT ACCENT -- the accent moves to the chevron. Same
+    -- listener slot, so a mode/accent switch repaints both, and the card's own
+    -- paint rides along (it is read off the shared palette, so a retheme reaches
+    -- it here too). Dimmed greys title and chevron alike, at the grey
+    -- SetPreviewDimmed has always used.
+    if CARD then
+        section.title.UpdateTheme = function()
+            local icon = section.kindIcon
+            if section.previewDimmed then
+                section.title:SetTextColor(0.5, 0.5, 0.5)
+                section.arrow:SetVertexColor(0.5, 0.5, 0.5)
+                if icon then icon:SetVertexColor(0.5, 0.5, 0.5) end
+            else
+                section.title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                local nc = GetThemeColor()
+                section.arrow:SetVertexColor(nc.r, nc.g, nc.b)
+                -- The one switch: GUI.SectionCard.iconAccent. Read on every
+                -- paint, so flipping it takes effect on the next repaint.
+                if icon then
+                    local ic = CARD.iconAccent and nc or C_TEXT_DIM
+                    icon:SetVertexColor(ic.r, ic.g, ic.b)
+                end
+            end
+            cardSurface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+            cardSurface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
+            SetCardHover(cardHovered)
+            cardLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
+        end
+        section.title.UpdateTheme()
+    end
+
     -- Optional inline tag — small yellow text placed after the title to
     -- stand out as a status summary (e.g. "[Normal Dispels]"). Call
     -- section:SetTag(text) at any time; pass nil or empty string to clear.
@@ -351,26 +694,472 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
             self.tag:SetText("")
             self.tag:Hide()
         end
+        if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
     end
+
+    -- ============================================================
+    -- Optional PIN, at the header's FAR RIGHT -- one small icon and nothing else.
+    -- ------------------------------------------------------------
+    -- ☠ WHAT THIS IS FOR, AND WHAT IT IS NOT. Popouts are no longer how settings
+    -- are REVEALED on a converted page -- the section folds open in place, which
+    -- is the whole point of the rework. The one job pinning survives for is
+    -- COMPARISON: keeping a section's settings open in a window of their own so
+    -- two pages can be read, or matched, side by side. So there is no gear, no
+    -- chevron and no count here -- every one of those was a second way IN, and
+    -- the header already is the way in.
+    --
+    -- ☠ IT OPENS ALREADY PINNED, which is why it is a pin and not an "open".
+    -- An unpinned panel lives in the host's shared pool, ONE per key: opening a
+    -- second section's panel would re-target the first's rather than stand
+    -- beside it, so the compare this exists for could never have two panels in
+    -- it. Popout:Pin takes the instance OUT of that pool, so the next section
+    -- gets a fresh one -- and a pinned panel also survives a page switch, which
+    -- is what makes Buff Bar beside Debuff Bar possible at all.
+    --
+    -- ⚠ THE SECTION DOES NOT MOVE. It keeps its header, its fold state, its
+    -- summary and its controls, and stays fully usable while its panel is up --
+    -- the pin only lights. Nothing is ever hidden behind the panel, so there is
+    -- no dead end if the panel is dragged off-screen or forgotten.
+    --
+    -- ⚠ TWO LIVE COPIES OF ONE SETTING, AND WE ONLY SYNC STATE. The panel holds
+    -- a SECOND instance of the same builder bound to the same keys, and a write
+    -- in one repaints the other's grey-gating (the mount's reflow ends in the
+    -- page's RefreshStates) but NOT its bound values -- a slider moved in the
+    -- panel leaves the page's copy drawing the old thumb until the page is
+    -- rebuilt. Known, and the reason the pin is offered for COMPARING pages
+    -- rather than for editing one setting from two places at once.
+    --
+    -- opts.pin, all opt-in -- a caller that passes nothing builds nothing:
+    --   build    the mount fn from tools.PopoutContent -- the SAME builder the
+    --            section's own band was built from, so the panel is the section
+    --            rather than a curated subset of it
+    --   title    the panel's header. PAGE-QUALIFIED by the caller ("Buff Bar /
+    --            Appearance"): two pinned panels both reading "Appearance" is
+    --            the exact complaint this answers
+    --   window   the settings window the panel docks outside of
+    --   clipTo   the scroll frame that clips this header (the connected chrome
+    --            hides while the section is scrolled out of it)
+    --   db       the table (or fn -> table) the row re-resolves on refresh
+    --   accent   per-panel accent override; absent = the host's
+    local pinOpts = opts and type(opts.pin) == "table" and opts.pin or nil
+    local pinRightInset
+    if pinOpts and type(pinOpts.build) == "function" then
+        local PIN_SIZE, PIN_EDGE = 14, 10
+        -- A card's pin is a 24px square (glyph 14 inside it) that wears a border
+        -- while lit -- see SetPinLit.
+        if CARD then PIN_SIZE, PIN_EDGE = CARD.pin, CARD.pinEdge end
+        -- Built on FIRST PRESS, not here. The mount behind it is eager (search
+        -- and any build-time db seeding depend on that -- see PopoutContent),
+        -- but the ROW is pure chrome: a plate this consumer never shows, whose
+        -- only job is to own the panel. Eight of them per page, built for a
+        -- press most users never make, is eight Buttons and their textures for
+        -- nothing.
+        local row
+        local function ensureRow()
+            if row then return row end
+            -- Guarded rather than called bare, the convention every reach into
+            -- the embedded pack follows: an older copy of it without the verb
+            -- must leave the header inert, not error under the user's cursor.
+            if type(GUI.CreatePopoutRow) ~= "function" then return nil end
+            row = GUI:CreatePopoutRow(section, {
+                label   = section.sectionTitleText,
+                title   = pinOpts.title or section.sectionTitleText,
+                db      = pinOpts.db,
+                window  = pinOpts.window,
+                clipTo  = pinOpts.clipTo,
+                accent  = pinOpts.accent,
+                build   = pinOpts.build,
+                -- ☠ THE HEADER IS THE TETHER, NOT THE PLATE. The row is never
+                -- laid out and never shown, so its own rect is the origin: the
+                -- panel would dock in the corner of the screen with its beam
+                -- pointing at nothing. See PopoutRow's opts.tetherTo.
+                tetherTo = section,
+                -- ☠ A CLOSED PIN IS KEPT, NOT LEAKED. Every press opens a panel
+                -- pinned, and WoW never frees a frame, so each pin-and-close
+                -- used to strand a whole panel for good. The kit keeps it as a
+                -- spare and the next press (any section's) revives it: the
+                -- pane cache is per ROW, so it shows that section's content
+                -- under that section's title, and it re-enters the store the
+                -- mode switch's CloseAllPopoutRows sweeps.
+                recyclePinned = true,
+                -- ...and the header goes back to plain the moment the panel
+                -- does -- its own cross, the family sweep, a mode switch's
+                -- CloseAllPopoutRows. Fired after the unbind, so `row.popout`
+                -- is already nil here.
+                onClose = function() section:SetPinLit(false) end,
+            })
+            -- ...and it stays off the page. Not Add'd to any group, so no
+            -- layout pass can reach it; hidden so nothing draws at the origin.
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)
+            row:Hide()
+            row:SetOnPanelPinned(function() section:SetPinLit(true) end)
+            return row
+        end
+
+        -- ⚠ A REAL BUTTON WITH A REAL TOOLTIP, through the kit's glyph helper --
+        -- which wires host:ShowTooltip / HideTooltip for us. Never raw
+        -- GameTooltip, and never a bare texture with a click handler bolted on.
+        --
+        -- ☠ ABOVE THE CLICK AREA. clickArea is SetAllPoints over the whole
+        -- header and is what folds the section; a sibling at the same frame
+        -- level would hand it every press that landed on the icon, so the pin
+        -- would fold the section instead of pinning it.
+        local pinBtn = GUI:CreateGlyphButton(section, {
+            -- The pin lives in the KIT's media, not DandersFrames' own: the old
+            -- Media\Icons\pin path does not exist and drew nothing.
+            texture = LibStub("DandersUI-1.0").MEDIA .. "Icons\\pin.png",
+            size    = PIN_SIZE,
+            iconSize = CARD and CARD.pinIcon or nil,
+            tooltip = { title = L["Pin settings in popout"] },
+            onClick = function()
+                local r = ensureRow()
+                if not r then return end
+                r:TogglePopout()
+                -- TogglePopout opened one (rather than closing what was up), so
+                -- take it out of the shared pool before another section's press
+                -- can re-target it -- see the essay above. Pin(true) is the
+                -- silent path: the press on this icon IS the confirmation.
+                local po = r.popout
+                if po and not po.closed and not po.pinned then po:Pin(true) end
+                -- A REVIVED panel may re-show a pane it built on an earlier
+                -- pin, and a closed panel's pane takes no reflow -- so its greys
+                -- are whatever they were at close. Values repaint on OnShow;
+                -- this re-runs the pane's own state pass (PopoutContent's mount).
+                local rec = po and not po.closed and rawget(po, "_rowActive")
+                local pane = rec and rec.pane
+                if pane and type(rawget(pane, "dfReflowPane")) == "function" then
+                    pane.dfReflowPane()
+                end
+                section:SetPinLit(po and not po.closed and true or false)
+            end,
+        })
+        pinBtn:SetPoint("RIGHT", section, "RIGHT", -PIN_EDGE, 0)
+        pinBtn:SetFrameLevel(clickArea:GetFrameLevel() + 2)
+        section.pinBtn = pinBtn
+
+        -- LIT = this section's panel is up. The accent, because that is what
+        -- every other "this one is active" mark in the pack uses; the dim text
+        -- colour otherwise, so a section nobody has pinned reads as furniture.
+        section.SetPinLit = function(self, lit)
+            self.pinLit = lit and true or false
+            if self.pinLit then
+                self.pinBtn:SetGlyph(nil, GetThemeColor())
+            else
+                self.pinBtn:SetGlyph(nil, C_TEXT_DIM)
+            end
+            -- A card's lit pin is a bordered square; at rest, a bare dim glyph.
+            -- The kit's pixel border, in the accent the glyph is lit in.
+            if self.isCard then
+                if self.pinLit then
+                    local ac = GetThemeColor()
+                    GUI:ApplyPixelBorder(self.pinBtn, { ac.r, ac.g, ac.b, 1 })
+                else
+                    GUI:HidePixelBorder(self.pinBtn)
+                end
+            end
+        end
+        section:SetPinLit(false)
+        table.insert(parent.ThemeListeners, {
+            UpdateTheme = function() section:SetPinLit(section.pinLit) end,
+        })
+
+        -- What the title and the tag must stop short of -- the widget's own
+        -- contract for anything a caller hangs on the right. Applied at the
+        -- foot of this function, because SetHeaderRightInset is declared below.
+        pinRightInset = PIN_EDGE + PIN_SIZE + 6
+    end
+
+    -- Optional VALUE SUMMARY at the header's RIGHT END -- what this section is
+    -- currently set to, read off a SHUT header so a folded section still says
+    -- something. Painted the way a popout row paints its own
+    -- (DandersUI/PopoutRow.lua): small, dim, right-justified, never wrapped.
+    --
+    -- ⚠ SHUT ONLY. Expanded, the controls themselves are the answer, and a
+    -- second copy of it sitting over them reads as a control of its own.
+    --
+    -- ⚠ OPT-IN, BOTH OF THESE. A caller that passes neither gets no fontstring
+    -- and no refreshContent, so nothing an existing section draws moves.
+    --
+    -- opts.summary  fn(db) -> string, rendered in the corner while shut
+    -- opts.dimOn    fn(db) -> bool, greys the header (SetPreviewDimmed) when the
+    --               section's own feature is off -- the header half of
+    --               grey-when-disabled, for a section whose band carries the
+    --               control half.
+    local summaryFn = opts and opts.summary or nil
+    local dimFn     = opts and opts.dimOn or nil
+    -- A ticked header needs the corner too: unticked and shut, it reads "Off".
+    if summaryFn or dimFn or toggleOpts then
+        if summaryFn or toggleOpts then
+            -- ⚠ ANCHORED OFF THE TAG, NOT THE TITLE, so a section that uses both
+            -- keeps them in reading order instead of drawing one over the other.
+            -- An empty tag is zero-wide and sits flush against the title.
+            section.summary = section:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            -- ⚠ INBOARD OF THE PIN WHEN THERE IS ONE. The icon owns the far
+            -- right and the value stops short of it -- an icon drawn ON TOP of
+            -- the last word of a summary is the one order that cannot be read.
+            -- A section with no pin keeps the edge it always had.
+            --
+            -- ☠ WITH A PIN, NO LEFT ANCHOR. SetHeaderRightInset (below) stretches
+            -- the tag to the pin and then hangs the tag off THIS string's left
+            -- edge; anchoring this to the tag as well would leave the summary a
+            -- zero-width slot between the tag's end and the pin -- it drew
+            -- nothing. apply() gives it its width instead.
+            if section.pinBtn then
+                section.summary:SetPoint("RIGHT", section.pinBtn, "LEFT", -6, 0)
+            else
+                section.summary:SetPoint("LEFT", section.tag, "RIGHT", 8, 0)
+                section.summary:SetPoint("RIGHT", section, "RIGHT", -10, 0)
+            end
+            section.summary:SetJustifyH("RIGHT")
+            section.summary:SetWordWrap(false)
+            section.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            section.summary:SetText("")
+        end
+        -- Repainted by whichever state pass owns this section: Panel.lua's page
+        -- pass for a page child, DandersUI Sections' RefreshChildStates for a
+        -- group child. Both call refreshContent on a SHOWN widget, and a section
+        -- header is always shown -- only the children it registered fold away.
+        -- Toggle() ends in that same pass, so the corner fills the moment it shuts.
+        --
+        -- ⚠ DEDUPED ON THE RENDERED STRING. refreshContent runs on EVERY state
+        -- pass and SetText re-measures; the summary only moves when a setting does.
+        section.refreshContent = function(self, d)
+            if dimFn then self:SetPreviewDimmed(dimFn(d) and true or false) end
+            -- The tick repaints on the same pass: its value (a pinned panel's
+            -- copy, or any other writer, may have moved the key) and its own
+            -- gate. See the tick's own block for why it greys at all.
+            local tick = self.headerToggle
+            local tickOff = false
+            if tick then
+                tick:Refresh()
+                local tdb = d or toggleOpts.db
+                if toggleOpts.isOn then
+                    tickOff = not toggleOpts.isOn(tdb)
+                else
+                    tickOff = not tdb[toggleOpts.key]
+                end
+                local enabled = not (toggleOpts.disableOn and toggleOpts.disableOn(tdb))
+                if self._dfTickEnabled ~= enabled then
+                    self._dfTickEnabled = enabled
+                    tick:SetEnabled(enabled)
+                end
+            end
+            local fs = self.summary
+            if not fs then return end
+            local text = ""
+            -- ⚠ OFF MEANS GREYED, NOT FOLDED. An unticked section keeps whatever
+            -- fold the user left it in; shut, its corner says "Off" instead of
+            -- the value summary, because the values it would list are not drawn.
+            if not self.expanded and tickOff then
+                text = L["Off"]
+            elseif not self.expanded and summaryFn then
+                text = summaryFn(d) or ""
+            end
+            if self._dfSummaryText ~= text then
+                self._dfSummaryText = text
+                fs:SetText(text)
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
+            end
+            -- ⚠ NOT ON A CARD. 0.5 grey on the card's C_PANEL is ~4.2:1, under
+            -- the 4.5 floor for small text; the title and chevron already say
+            -- the section is off, so the summary keeps its readable dim.
+            if self.previewDimmed and not self.isCard then
+                fs:SetTextColor(0.5, 0.5, 0.5)
+            else
+                fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            end
+        end
+    end
+
+    -- ☠ THE TITLE AND THE TAG HAVE NO RIGHT EDGE OF THEIR OWN. They run left to
+    -- right from the arrow and stop wherever the string stops, while anything a
+    -- caller hangs on the header -- an eye, a delete, a warning badge, the preview
+    -- swatches -- runs right to left from the other end. On an 850px header the
+    -- two never met. On the ~410px band a 640px window gives the designers they
+    -- do: a spell name like "Health Bar Color - Guardian Spirit", or any group
+    -- name a user typed up to the 30-character limit, runs straight under the
+    -- buttons.
+    --
+    -- So a caller that puts furniture on the right says how much room it took,
+    -- and the pair is BOUNDED by it. Re-applied on the header's own size change
+    -- rather than computed once, because the band is whatever the window is: the
+    -- title's share is DERIVED from the live width, not a smaller magic number.
+    --
+    -- ⚠ Opt-in. A section with a bare header is unbounded exactly as before, so
+    -- no existing page moves. (TITLE_X is declared with the title, above.)
+    section.SetHeaderRightInset = function(self, inset)
+        self.headerRightInset = tonumber(inset) or 0
+        local function apply()
+            local w = self:GetWidth() or 0
+            local free = w - TITLE_X - self.headerRightInset
+            if free < 40 then return end
+            -- The title takes the room the tag and the summary leave, sized from
+            -- what they show NOW: an open card shows no summary, so its title
+            -- gets the whole header. When all three fit, the title's box runs
+            -- to the tag, so the tag and the summary stay packed against the
+            -- right end. When they do not, the title keeps its own width up to
+            -- 55% -- it is the identity, so they truncate first -- but never
+            -- claims more than its words need: a short title left the summary
+            -- truncating beside an empty gap.
+            local function shown(fs)
+                local t = fs and fs:GetText()
+                if not t or t == "" then return 0 end
+                return (fs:GetUnboundedStringWidth() or 0) + 8
+            end
+            local tagW = shown(self.tag)
+            local sumW = (self.summary and self.pinBtn) and shown(self.summary) or 0
+            local titleNat = math.ceil(self.title:GetUnboundedStringWidth() or 0)
+            local avail = free - tagW - sumW
+            local titleW = avail
+            if avail < titleNat then
+                titleW = math.max(math.min(titleNat, math.floor(free * 0.55)), avail)
+            end
+            titleW = math.max(40, math.min(free, titleW))
+            self.title:SetWordWrap(false)
+            -- ⚠ LEFT, SAID OUT LOUD. A FontString given a width centres its text
+            -- by default, so every bounded title drew centred in its box.
+            self.title:SetJustifyH("LEFT")
+            self.title:SetWidth(titleW)
+            self.tag:SetWordWrap(false)
+            self.tag:SetJustifyH("LEFT")
+            self.tag:ClearAllPoints()
+            self.tag:SetPoint("LEFT", self.title, "RIGHT", 8, 0)
+            if self.summary and self.pinBtn then
+                -- The value takes the right-hand share and the tag stops short of
+                -- it; see the no-left-anchor note where the summary is built.
+                self.summary:SetWidth(math.max(20, free - titleW - tagW - 8))
+                self.tag:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
+            else
+                self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
+            end
+        end
+        self:HookScript("OnSizeChanged", apply)
+        self._dfApplyHeaderWidths = apply
+        -- ⚠ RE-SPLIT ON ANY TEXT WRITE, a font change included: the split is
+        -- measured from the strings, and a Settings Font change re-sets every
+        -- string's text (DandersUI Fonts.lua's Nudge) without resizing the
+        -- header. Hooked once; the hook calls whichever apply is current.
+        if not self._dfWidthTextHooked then
+            self._dfWidthTextHooked = true
+            local function reapply()
+                if self._dfApplyHeaderWidths then self._dfApplyHeaderWidths() end
+            end
+            for _, fs in ipairs({ self.title, self.tag, self.summary }) do
+                hooksecurefunc(fs, "SetText", reapply)
+            end
+        end
+        apply()
+        -- Order-independent: the swatches read this inset, so if they were placed
+        -- first they are re-flowed now.
+        if self._previewIconData then self:SetPreviewIcons(self._previewIconData) end
+    end
+
+    -- The pin's own share of the right end, declared the moment the verb for it
+    -- exists. A section with no pin never calls this and is unbounded exactly as
+    -- it was.
+    if pinRightInset then section:SetHeaderRightInset(pinRightInset) end
 
     -- SEARCH: Track current section
     if DF.Search then
         DF.Search:SetCurrentSection(text)
     end
-    
+
+    -- ============================================================
+    -- Optional ON/OFF TICK, between the chevron and the title (opts.toggle).
+    -- ------------------------------------------------------------
+    -- For a section whose feature has a switch: the switch moves OUT of the
+    -- body and into the header, so it can be flipped without opening the
+    -- section. The caller stops building its in-body copy (the builders'
+    -- hoistToggle seam) -- two live copies of one checkbox is the defect.
+    --
+    -- ☠ THE REAL CHECKBOX, NOT A LOOK-ALIKE. GUI:CreateCheckbox, bound to the
+    -- same table and key and handed the same commit the in-body one had, so
+    -- the write, the undo record, the override bracket and DF:UpdateAll are
+    -- all the ones it always ran. Built HERE, after SetCurrentSection, so its
+    -- search entry lands under this section's title under its own label --
+    -- exactly the entry the in-body checkbox used to register.
+    --
+    -- ☠ ABOVE THE CLICK AREA, the pin's fix: clickArea covers the header and
+    -- folds it, and a press on the tick must toggle, never fold.
+    --
+    -- ⚠ THE CAPTION IS HIDDEN, the title beside it is the name. Its tooltip
+    -- hit (built over the caption) goes with it, and the tooltip rides the box
+    -- instead, through the shared helper.
+    --
+    -- toggle = { db, key, label, onChanged, tooltip?, disableOn?, isOn? }
+    --   disableOn  fn(db) -> bool: greys the tick itself (the gates its
+    --              in-body copy carried). Repainted by refreshContent.
+    --   isOn       fn(db) -> bool, when "off" is not simply a falsy key.
+    if toggleOpts then
+        local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,
+            toggleOpts.key, toggleOpts.onChanged)
+        local box = tick.checkButton
+        tick:SetSize(TICK_SIZE, TICK_SIZE)
+        tick:ClearAllPoints()
+        tick:SetPoint("LEFT", section, "LEFT", TICK_X, 0)
+        tick:SetFrameLevel(clickArea:GetFrameLevel() + 2)
+        if box then box:SetFrameLevel(tick:GetFrameLevel() + 1) end
+        if tick.label then tick.label:Hide() end
+        if tick.dfTooltipHit then tick.dfTooltipHit:Hide() end
+        tick.tooltip = toggleOpts.tooltip
+        if box then
+            local spec = type(toggleOpts.tooltip) == "table" and toggleOpts.tooltip
+                or { title = toggleOpts.label,
+                     lines = type(toggleOpts.tooltip) == "string" and { toggleOpts.tooltip } or nil }
+            if spec.title == nil then spec.title = toggleOpts.label end
+            box:HookScript("OnEnter", function(self) GUI:ShowTooltip(self, spec) end)
+            box:HookScript("OnLeave", function() GUI:HideTooltip() end)
+            -- The styler registered the box with the SECTION's listener list,
+            -- which no theme pass walks; the page's list is the one that is.
+            if not parent.ThemeListeners then parent.ThemeListeners = {} end
+            table.insert(parent.ThemeListeners, box)
+        end
+        section.headerToggle = tick
+        -- The caption is hidden; the dot sits against the card title instead
+        -- (see GUI:PinModifiedDotTopLeft).
+        tick.dfDotTopLeftOf = section.title
+        if CARD then tick.dfCardSection = section end
+        if rawget(tick, "UpdateModifiedDot") then tick:UpdateModifiedDot() end
+    end
+
+    if CARD then GUI:AttachCardModifiedMark(section, clickArea) end
+
+    -- THE FOLD ITSELF, WITHOUT THE REPAINT -- the arrow and the SavedVariables
+    -- slot, and nothing else.
+    --
+    -- ☠ SPLIT OUT OF Toggle FOR THE BULK VERBS. An Expand All that called Toggle
+    -- once per section would run the page's whole state pass once per section --
+    -- eleven passes over every widget on the page for one press. So the two
+    -- halves are separated: this moves ONE section, and whoever moved a batch of
+    -- them runs the page pass ONCE at the end. Toggle keeps both halves and is
+    -- byte-for-byte the same behaviour it always had.
+    --
+    -- Returns whether the section actually MOVED, so a caller can skip the page
+    -- pass entirely when nothing did.
+    section.SetExpanded = function(self, want)
+        want = want and true or false
+        if self.expanded == want then return false end
+        self.expanded = want
+        if self.expanded then
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
+        else
+            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
+        end
+        -- Persist collapsed state to SavedVariables (only store true, remove when
+        -- expanded). The caller's stable key wins over the title -- see the header.
+        local persistKey = self.collapseKey or self.sectionTitleText
+        if persistKey then
+            local saved = GUI:GetCollapsedGroups()
+            saved[persistKey] = (not self.expanded) or nil
+        end
+        if self._ApplyCardFold then self:_ApplyCardFold() end
+        return true
+    end
+
     -- Toggle function
     section.Toggle = function(self)
-        self.expanded = not self.expanded
-        if self.expanded then
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-        else
-            self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-        end
-        -- Persist collapsed state to SavedVariables (only store true, remove when expanded)
-        if self.sectionTitleText then
-            local saved = GUI:GetCollapsedGroups()
-            saved[self.sectionTitleText] = (not self.expanded) or nil
-        end
+        self:SetExpanded(not self.expanded)
 
         -- Trigger layout refresh (RefreshStates handles show/hide based on expanded state)
         if parent.RefreshStates then
@@ -385,6 +1174,48 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
         
         -- Use a marker to check section state during RefreshStates
         widget.collapsibleSection = self
+
+        -- A card's FIRST settings group is its body: the card runs down to it,
+        -- and it takes the card's inset and the gap to the next card. Fields
+        -- LayoutChildren reads every pass, set before the builder adds a
+        -- single control to it.
+        if self._ApplyCardFold and widget.isSettingsGroup and not self.cardBody then
+            self.cardBody = widget
+            widget.padding = CARD.pad
+            widget.margin = CARD.gap
+            self:_ApplyCardFold()
+        end
+    end
+
+    -- THE CARD FOLLOWS THE FOLD. Open with a body: the card runs down to the
+    -- body's bottom, the hairline shows, the hover wash rounds its top corners
+    -- only, and the header's slot is exactly its own height so the body starts
+    -- flush under the seam (the body's margin is then the gap). Shut, or no
+    -- body: the card is the header alone, fully rounded, and the header's slot
+    -- carries the gap itself.
+    --
+    -- ⚠ layoutHeight is re-stamped here rather than left to Add: the slot is
+    -- the ONE number that differs between the two states, and Panel.lua's
+    -- positioning pass reads it fresh every run. preferredHeight + the fixed
+    -- flag is what makes Add stamp the right value the first time.
+    if CARD then
+        section.fixedRowHeight = true
+        section._ApplyCardFold = function(self)
+            local body = self.cardBody
+            local open = (body and self.expanded) and true or false
+            cardRect:ClearAllPoints()
+            cardRect:SetPoint("TOPLEFT", self, "TOPLEFT", 0, 0)
+            cardRect:SetPoint("BOTTOMRIGHT", open and body or self, "BOTTOMRIGHT", 0, 0)
+            cardLine:SetShown(open)
+            cardHover:SetCorners(open and CARD.cornersTop or CARD.cornersAll)
+            local slot = open and CARD.header or (CARD.header + CARD.gap)
+            self.preferredHeight = slot
+            self.layoutHeight = slot
+            -- The arrow's texture was just swapped; re-tint rather than trust the
+            -- swap to keep its vertex colour.
+            self.title.UpdateTheme()
+        end
+        section:_ApplyCardFold()
     end
     
     -- Optional header preview thumbnails — a right-aligned row of small icon
@@ -402,9 +1233,109 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     section.previewIcons = {}
     section.SetPreviewIcons = function(self, icons)
         local pool = self.previewIcons
+        -- Remembered so SetHeaderRightInset can re-flow them: the two are the same
+        -- right end, and whichever is called second has to be able to correct the
+        -- first.
+        self._previewIconData = icons
+        -- ☠ ON A CARD THE PREVIEW IS THE HEADER'S ICON. The right end belongs to
+        -- the summary and the pin, so the swatch takes the icon slot instead,
+        -- which every card reserves -- titles still line up. ONE entry fits: the
+        -- first that is live, else the first; a hover on it shows them all.
+        -- Text entries have no room there; the card's summary already says when
+        -- an icon shows as text.
+        --
+        -- An entry may be LAYERED -- { layers = { {texture, color}, ... },
+        -- size = n } -- drawn bottom to top in one slot: the Important Debuffs
+        -- marker is a tinted disc with a tinted glyph over it. Greyed, each
+        -- tinted layer keeps its own brightness in grey, so the glyph still
+        -- reads on its disc.
+        if CARD then
+            local pick
+            for _, e in ipairs(icons or {}) do
+                local drawable = e.texture or e.layers
+                if drawable and not pick then pick = e end
+                if drawable and not e.desaturate then pick = e break end
+            end
+            local layers = pick and (pick.layers or { pick }) or {}
+            local pool = self.previewLayers or {}
+            self.previewLayers = pool
+            local dim = pick and pick.desaturate and true or false
+            for i, layer in ipairs(layers) do
+                local tex = pool[i]
+                if not tex then
+                    -- Ascending sublevel: layer 2 draws over layer 1.
+                    tex = self:CreateTexture(nil, "OVERLAY", nil, i)
+                    pool[i] = tex
+                end
+                local size = (pick.size or CARD.icon) - 2 * (pick.inset or 0)
+                tex:SetSize(size, size)
+                tex:ClearAllPoints()
+                tex:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                local co = layer.coords
+                DF:SetIconTextureOrAtlas(tex, layer.texture, co and co[1], co and co[2], co and co[3], co and co[4])
+                tex:SetDesaturated(dim)
+                -- After the texture call, which resets the vertex colour.
+                local c = layer.color
+                if c and dim then
+                    local grey = 0.3 * (c.r or 1) + 0.59 * (c.g or 1) + 0.11 * (c.b or 1)
+                    tex:SetVertexColor(grey, grey, grey, c.a or 1)
+                elseif c then
+                    tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                else
+                    tex:SetVertexColor(1, 1, 1, 1)
+                end
+                tex:Show()
+            end
+            for i = #layers + 1, #pool do pool[i]:Hide() end
+            self.previewSlot = pool[1]
+            if self.kindIcon then self.kindIcon:SetShown(not pick) end
+
+            -- More than the slot shows: a hover lists every one. Motion only, so
+            -- a click on the swatch still folds the card, and the header keeps
+            -- its hover wash while the pointer is on it.
+            -- Shown in the house tooltip EXACTLY as the header draws them: the same
+            -- slot (CARD.icon) and the same insets. Atlases carry different amounts
+            -- of padding and the client cannot measure it, so a magnified row exposed
+            -- every difference the header's size hides; at header size the row
+            -- matches the swatch the user already sees.
+            local TIP_ICON = CARD.icon
+            local all = {}
+            for _, e in ipairs(icons or {}) do
+                if e.texture then
+                    all[#all + 1] = { texture = e.texture, coords = e.coords, color = e.color,
+                                      desaturate = e.desaturate, inset = e.inset }
+                end
+            end
+            self._previewAll = all
+            local hit = self.previewHit
+            if #all > 1 and not hit then
+                hit = CreateFrame("Frame", nil, self)
+                hit:SetSize(CARD.icon + 4, CARD.icon + 4)
+                hit:SetPoint("CENTER", self, "LEFT", (self._dfIconSlotX or 0) + CARD.icon / 2, 0)
+                hit:SetFrameLevel(clickArea:GetFrameLevel() + 3)
+                hit:EnableMouse(true)
+                hit:SetMouseClickEnabled(false)
+                hit:SetScript("OnEnter", function(h)
+                    SetCardHover(true)
+                    GUI:ShowTooltip(h, { title = self.sectionTitleText, icons = self._previewAll, iconSize = TIP_ICON })
+                end)
+                hit:SetScript("OnLeave", function()
+                    GUI:HideTooltip()
+                    if not clickArea:IsMouseOver() then SetCardHover(false) end
+                end)
+                self.previewHit = hit
+            end
+            if hit then hit:SetShown(#all > 1) end
+            return
+        end
         local n = icons and #icons or 0
         local SIZE, GAP, RIGHT_INSET = 18, 4, -10
-        local x = RIGHT_INSET
+        -- ⚠ THE SWATCHES SHARE THE RIGHT END WITH THE CALLER'S OWN FURNITURE. A
+        -- section that hangs an eye and a delete on its header and ALSO previews an
+        -- icon had both starting 10px from the same edge, so the swatch was drawn
+        -- underneath the delete button. headerRightInset is what the caller already
+        -- says the buttons cost; the swatches start inside it.
+        local x = RIGHT_INSET - (self.headerRightInset or 0)
         for i = n, 1, -1 do  -- right-to-left so entry 1 ends up leftmost
             local data = icons[i]
             local slot = pool[i]
@@ -470,11 +1401,18 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
         for i = n + 1, #pool do pool[i]:Hide() end
     end
 
-    -- Hover effects
-    clickArea:SetScript("OnEnter", function()
+    -- Hover effects. A title cut short to fit ("Element-Specifi...") shows in
+    -- full in a tooltip; a title that fits shows none.
+    clickArea:SetScript("OnEnter", function(self)
+        if section.title:IsTruncated() then
+            GUI:ShowTooltip(self, { title = section.title:GetText() })
+        end
+        if cardHover then SetCardHover(true) return end
         section:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.8)
     end)
     clickArea:SetScript("OnLeave", function()
+        GUI:HideTooltip()
+        if cardHover then SetCardHover(false) return end
         section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
     end)
     clickArea:SetScript("OnClick", function()
@@ -495,13 +1433,174 @@ function GUI:GetCollapsedGroups()
     return DandersFramesDB_v2.collapsedGroups
 end
 
+-- ============================================================
+-- GUI:CreateCardChrome -- THE SECTION CARD'S LOOK ON A HAND-BUILT CARD
+-- (opt-in; the Aura and Text Designers' cards only)
+-- ------------------------------------------------------------
+-- The designers' cards cannot be CreateCollapsibleSection: their headers carry
+-- furniture a section has no slot for (a spell icon, a type badge, a warning
+-- badge, a category chip, an eye, a delete), their bodies are built by hand at
+-- a running y rather than registered with a page, and each keeps its fold in
+-- its own store (expandedCards / expandedGroups / a td_* collapsedGroups key).
+-- So this hands over the LOOK and nothing else: the same GUI.SectionCard
+-- numbers, the same rounded surface, hover wash and hairline, the accent
+-- chevron and the TEXT-coloured title. The click, the fold store, the body and
+-- the furniture stay the caller's.
+--
+-- ☠ THE SURFACE IS DRAWN ON THE CARD, NOT THE HEADER. Header and body are the
+-- card's children, so every texture here sits under every control in either.
+-- Its rect is an invisible frame from the card's top to the BODY's bottom while
+-- open (the header's while shut), so a body that re-sizes itself in place
+-- carries the card with it -- nothing reads a rect mid-layout.
+--
+--   card    the card's frame; header and body are its children
+--   header  a Button child of card, anchored across its top by the caller
+--   opts.expanded   the fold the chevron starts in
+--
+-- Returns a chrome table:
+--   chrome.chevron, chrome.title, chrome.summary   regions on the header
+--   chrome:LayoutText(after, gap, rightInset)  title starts `gap` right of
+--       `after` (default: the chevron); the summary ends `rightInset` from the
+--       header's right edge, clear of the caller's buttons, and the title stops
+--       short of it
+--   chrome:SetSummary(text)   dim, right-aligned; drawn only while folded
+--   chrome:SetExpanded(open, body)   chevron art, card rect, hairline, hover corners
+--   chrome:SetDimmed(on)      title and chevron grey (the feature is off)
+--   chrome:Paint()            re-read the palette
+-- ============================================================
+function GUI:CreateCardChrome(card, header, opts)
+    local CARD = GUI.SectionCard
+    opts = opts or {}
+    local chrome = { expanded = opts.expanded and true or false, summaryText = "" }
+    header:SetHeight(CARD.header)
+
+    local style = GUI:GetSurfaceStyle()
+    local bw = style and (style.rowBorderWidth or style.borderWidth) or 1
+
+    local rect = CreateFrame("Frame", nil, card)
+    chrome.rect = rect
+    chrome.surface = GUI:CreateRoundedSurface(card, {
+        radius      = CARD.radius,
+        borderWidth = bw,
+        fill        = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 1 },
+        border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha },
+        anchorTo    = rect,
+    })
+    -- Over the fill, UNDER the ring, over the header's rect only -- the section
+    -- card's own recipe (see CreateCollapsibleSection): the header strip at
+    -- rest, brighter under the mouse.
+    chrome.hover = GUI:CreateRoundedSurface(card, {
+        radius   = CARD.radius,
+        border   = false,
+        fill     = { C_HOVER.r, C_HOVER.g, C_HOVER.b, CARD.headerAlpha },
+        sublevel = GUI.RoundStripSublevel,
+        anchorTo = header,
+    })
+    chrome.line = card:CreateTexture(nil, "BORDER")
+    chrome.line:SetPoint("TOPLEFT", header, "BOTTOMLEFT", bw, 0)
+    chrome.line:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -bw, 0)
+    chrome.line:SetHeight(1)
+    chrome.line:Hide()
+
+    chrome.chevron = header:CreateTexture(nil, "OVERLAY")
+    chrome.chevron:SetPoint("LEFT", header, "LEFT", CARD.edge, 0)
+    chrome.chevron:SetSize(CARD.chevron, CARD.chevron)
+
+    chrome.title = header:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    chrome.title:SetJustifyH("LEFT")
+    chrome.title:SetWordWrap(false)
+    chrome.summary = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    chrome.summary:SetJustifyH("RIGHT")
+    chrome.summary:SetWordWrap(false)
+
+    function chrome:Paint()
+        if self.dimmed then
+            self.title:SetTextColor(0.5, 0.5, 0.5)
+            self.chevron:SetVertexColor(0.5, 0.5, 0.5)
+        else
+            local tc = self.titleColor or C_TEXT
+            self.title:SetTextColor(tc.r, tc.g, tc.b)
+            local nc = GetThemeColor()
+            self.chevron:SetVertexColor(nc.r, nc.g, nc.b)
+        end
+        -- ⚠ NEVER GREYED, the section card's rule: 0.5 grey on C_PANEL is under
+        -- the 4.5:1 floor, and the title and chevron already say it is off.
+        self.summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        self.surface:SetFillColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 1)
+        self.surface:SetBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.borderAlpha)
+        self.hover:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b,
+            self.hovered and CARD.hoverAlpha or CARD.headerAlpha)
+        self.line:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, CARD.lineAlpha)
+    end
+
+    function chrome:SetDimmed(on)
+        self.dimmed = on and true or false
+        self:Paint()
+    end
+
+    -- The summary takes what it needs up to 45% of the header, the title the
+    -- rest: the section card's split, re-applied whenever the header re-sizes.
+    function chrome:FitSummary()
+        local fs = self.summary
+        local text = (not self.expanded) and self.summaryText or ""
+        fs:SetText(text)
+        if text == "" then
+            fs:SetWidth(1)
+            return
+        end
+        local sw = (fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth()) or fs:GetStringWidth() or 0
+        local hw = header:GetWidth() or 0
+        local cap = (hw > 0) and math.floor(hw * 0.45) or 160
+        fs:SetWidth(math.max(1, math.min(math.ceil(sw) + 1, cap)))
+    end
+
+    function chrome:SetSummary(text)
+        self.summaryText = text or ""
+        self:FitSummary()
+    end
+
+    function chrome:LayoutText(after, gap, rightInset)
+        self.summary:ClearAllPoints()
+        self.summary:SetPoint("RIGHT", header, "RIGHT", -(rightInset or CARD.edge), 0)
+        self.title:ClearAllPoints()
+        self.title:SetPoint("LEFT", after or self.chevron, "RIGHT", gap or CARD.titleGap, 0)
+        self.title:SetPoint("RIGHT", self.summary, "LEFT", -8, 0)
+        self:FitSummary()
+    end
+
+    function chrome:SetExpanded(open, body)
+        self.expanded = open and true or false
+        self.chevron:SetTexture(self.expanded
+            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png"
+            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
+        local withBody = (self.expanded and body) and true or false
+        rect:ClearAllPoints()
+        rect:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+        rect:SetPoint("RIGHT", card, "RIGHT", 0, 0)
+        rect:SetPoint("BOTTOM", withBody and body or header, "BOTTOM", 0, 0)
+        self.line:SetShown(withBody)
+        self.hover:SetCorners(withBody and CARD.cornersTop or CARD.cornersAll)
+        self:FitSummary()
+        -- The chevron's art was just swapped; re-tint rather than trust the swap.
+        self:Paint()
+    end
+
+    header:HookScript("OnEnter", function() chrome.hovered = true; chrome:Paint() end)
+    header:HookScript("OnLeave", function() chrome.hovered = false; chrome:Paint() end)
+    header:HookScript("OnSizeChanged", function() chrome:FitSummary() end)
+
+    chrome:LayoutText()
+    chrome:SetExpanded(chrome.expanded)
+    return chrome
+end
+
 -- ---- from Widgets.lua ----
 function GUI:CreateButton(parent, text, width, height, func, iconName)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     local opts = { width = width or 120, height = height or 22, text = text }
     -- Optional leading icon by Media\Icons name (14px to suit the small buttons).
     if iconName then
-        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName, size = 14 }
+        opts.icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png", size = 14 }
     end
     GUI:StyleButton(btn, opts)
     btn:SetScript("OnClick", function(self)
@@ -511,12 +1610,6 @@ function GUI:CreateButton(parent, text, width, height, func, iconName)
     return btn
 end
 
--- Standard close/dismiss button: a small square danger-toned button showing a
--- "×" glyph. Replaces the many hand-rolled red close buttons on dialogs/panels.
--- opts = { size (20), onClick, tooltip, tone }.
---   tone = nil      → dim grey "×" at rest → white on hover (close/dismiss; default)
---   tone = "danger" → RED "×" at rest → brighter red on hover (inline destructive
---                     removes: list-item / tag removes). Both keep the red hover wash.
 -- A horizontal row of buttons, chained left-to-right with one gap, sized as a
 -- single layout slot. Pages were building this by hand every time -- a bare
 -- CreateFrame, then SetPoint("LEFT", prev, "RIGHT", 6, 0) per button, plus the
@@ -590,8 +1683,17 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     -- Dropdown button + menu (rebuilt on each open so it always reflects the lib)
+    --
+    -- ☠ THE DROPDOWN TAKES WHATEVER IS LEFT, rather than a fixed 150. This bar
+    -- used to be laid out left-to-right in one chain -- label, a 150px dropdown,
+    -- then the four action buttons -- which totals 467px in the labelled form and
+    -- 317px in the icon form. Both fitted the designers' old 850px island and
+    -- neither fits the ~410px band a 640px window gives them, so Delete ran off
+    -- the page. The actions now chain from the bar's RIGHT edge inwards (see
+    -- below) and this spans the gap, so the bar costs exactly its fixed parts at
+    -- any width instead of a constant 467.
     local ddBtn = CreateFrame("Button", nil, bar, "BackdropTemplate")
-    ddBtn:SetSize(150, 22)
+    ddBtn:SetHeight(22)
     ddBtn:SetPoint("LEFT", label, "RIGHT", 6, 0)
     CreateElementBackdrop(ddBtn)
     ddBtn.text = ddBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -602,14 +1704,17 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local arrow = ddBtn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -4, 0)
     arrow:SetSize(10, 10)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local menu = CreateFrame("Frame", nil, ddBtn, "BackdropTemplate")
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     GUI:RegisterMenu(menu)
     menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -1)
-    menu:SetWidth(150)
+    -- The menu is the button's own list, so it is the button's own width -- and
+    -- the button no longer HAS a constant one. Anchored rather than measured: a
+    -- width read here would be read before the first layout pass.
+    menu:SetPoint("TOPRIGHT", ddBtn, "BOTTOMRIGHT", 0, -1)
     CreatePanelBackdrop(menu)
     menu:Hide()
 
@@ -661,13 +1766,23 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         menu:SetHeight(-y + 4)
     end
     ddBtn:SetScript("OnClick", function()
-        if menu:IsShown() then menu:Hide() else BuildMenu(); menu:Show() end
+        if menu:IsShown() then
+            menu:Hide()
+        else
+            BuildMenu()
+            -- ⚠ RE-RAISED ON EVERY OPEN, like the other hand-rolled menus. The strata
+            -- above is set once at build, and a page that is parked out of the window
+            -- and adopted back is REPARENTED, which drags this menu down to the
+            -- window's own strata -- level with the rows it is meant to cover.
+            if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menu, ddBtn) end
+            menu:Show()
+        end
     end)
 
     -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
-    -- set or an auto layout, and editing it then changes every one of them —
-    -- which nothing on this bar used to say. The dropdown is a fixed 150px, so
-    -- the FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    -- set or an auto layout, and editing it then changes every one of them --
+    -- which nothing on this bar used to say. The dropdown has no room for the
+    -- names, so the FACT rides as a glyph and the NAMES go in the tooltip.
     --
     -- Deliberately NOT clickable. Splitting a shared template off for this mode
     -- is exactly what Duplicate does, two buttons to the right, and Duplicate
@@ -675,7 +1790,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
     shareIcon:SetSize(12, 12)
     shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
-    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync")
+    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync.png")
     shareIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     shareIcon:Hide()
 
@@ -736,7 +1851,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             GUI:StyleButton(b, {
                 width = 22, height = 22,
                 icon = {
-                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
                     size = 14, color = C_TEXT,
                 },
             })
@@ -762,7 +1877,6 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             end
         end)
     end)
-    newBtn:SetPoint("LEFT", ddBtn, "RIGHT", 6, 0)
 
     local dupBtn = CreateAction(L["Duplicate"], "content_copy", 72, function()
         local cur = CurrentName()
@@ -776,7 +1890,6 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             end
         end)
     end)
-    dupBtn:SetPoint("LEFT", newBtn, "RIGHT", 4, 0)
 
     local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
@@ -786,14 +1899,148 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             bar:Refresh(); onChange()
         end)
     end)
-    renameBtn:SetPoint("LEFT", dupBtn, "RIGHT", 4, 0)
 
     local delBtn = CreateAction(L["Delete"], "delete", 56, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
         ConfirmDeletePreset(kind, cur, function() bar:Refresh(); onChange() end)
     end)
-    delBtn:SetPoint("LEFT", renameBtn, "RIGHT", 4, 0)
+
+    -- ☠ THE FOUR ACTIONS CHAIN FROM THE BAR'S RIGHT EDGE INWARDS, and they are
+    -- placed BELOW rather than at each creation because the chain runs backwards:
+    -- Delete pins to the bar, Rename to Delete, Duplicate to Rename, New to
+    -- Duplicate, and the dropdown then spans from the label to New. That is what
+    -- makes the bar cost its FIXED parts at any width. Left-to-right off a
+    -- 150px dropdown the four ran to 467px in the labelled form, which the
+    -- designers' old 850px island had room for and a 640px window's ~410px band
+    -- does not -- Delete simply left the page.
+    -- ☠ ...OR ALL FOUR COLLAPSE INTO ONE BUTTON. opts.overflowActions puts New /
+    -- Duplicate / Rename / Delete behind a single menu glyph, which costs 22px
+    -- instead of 100 (icon form) or 250 (labelled). That is what buys the room for
+    -- the spec picker to share this row instead of standing on a strip of its own
+    -- -- the chrome diet's third move. The four buttons still exist and still carry
+    -- their own enabled state; only where they are drawn changes.
+    local overflowBtn, overflowMenu
+    if opts.overflowActions then
+        overflowBtn = GUI:CreateGlyphButton(bar, {
+            size = 22, iconSize = 14,
+            -- ☠ DOUBLE BACKSLASHES. Lua 5.1 passes an unrecognised escape through as the
+            -- bare character, so "Interface\AddOns\..." silently becomes
+            -- "InterfaceAddOns..." -- a path to nothing, which the client draws as an
+            -- empty square. It does not error, which is why it shipped.
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu.png",
+            tooltip = { title = L["Templates"],
+                        lines = { L["Create, duplicate, rename or delete a template."] } },
+        })
+        CreateElementBackdrop(overflowBtn)
+
+        overflowMenu = CreateFrame("Frame", nil, overflowBtn, "BackdropTemplate")
+        overflowMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+        GUI:RegisterMenu(overflowMenu)
+        -- Right-aligned under the glyph and given a width of its own: unlike the
+        -- template dropdown this button is 22px wide and the item labels are not.
+        overflowMenu:SetPoint("TOPRIGHT", overflowBtn, "BOTTOMRIGHT", 0, -1)
+        overflowMenu:SetWidth(130)
+        CreatePanelBackdrop(overflowMenu)
+        overflowMenu:Hide()
+
+        local overflowRows = {}
+        local ACTIONS = {
+            { label = L["New"],       btn = function() return newBtn    end },
+            { label = L["Duplicate"], btn = function() return dupBtn    end },
+            { label = L["Rename"],    btn = function() return renameBtn end },
+            { label = L["Delete"],    btn = function() return delBtn    end },
+        }
+        local function BuildOverflow()
+            local y = -4
+            for i, def in ipairs(ACTIONS) do
+                local item = overflowRows[i]
+                if not item then
+                    item = CreateFrame("Button", nil, overflowMenu)
+                    item:SetHeight(20)
+                    item.text = item:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                    item.text:SetPoint("LEFT", 6, 0)
+                    item:SetScript("OnEnter", function(s)
+                        if s.dfOff then return end
+                        s.text:SetTextColor(1, 1, 1)
+                    end)
+                    item:SetScript("OnLeave", function(s)
+                        s.text:SetTextColor(s.dfOff and 0.4 or C_TEXT.r,
+                                            s.dfOff and 0.4 or C_TEXT.g,
+                                            s.dfOff and 0.4 or C_TEXT.b)
+                    end)
+                    -- ☠ THE MENU ITEM PRESSES THE BUTTON, it does not repeat its body.
+                    -- Four prompts, two confirmations and the Default-template guard
+                    -- all live on those four buttons already; a second copy here is a
+                    -- second place for "Delete asks first" to stop being true.
+                    item:SetScript("OnClick", function(s)
+                        if s.dfOff then return end
+                        overflowMenu:Hide()
+                        local b = s.dfBtn and s.dfBtn()
+                        if b and b:GetScript("OnClick") then b:GetScript("OnClick")(b) end
+                    end)
+                    overflowRows[i] = item
+                end
+                item:ClearAllPoints()
+                item:SetPoint("TOPLEFT", 4, y)
+                item:SetPoint("TOPRIGHT", -4, y)
+                item.text:SetText(def.label)
+                item.dfBtn = def.btn
+                -- Greyed rather than absent: Rename and Delete are inert on the
+                -- Default template, and a menu that changes LENGTH depending on
+                -- which template is picked is a menu whose items move under the
+                -- cursor.
+                local b = def.btn()
+                item.dfOff = (b and b.IsEnabled and not b:IsEnabled()) or false
+                if item.dfOff then
+                    item.text:SetTextColor(0.4, 0.4, 0.4)
+                else
+                    item.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                end
+                item:Show()
+                y = y - 20
+            end
+            overflowMenu:SetHeight(-y + 4)
+        end
+        overflowBtn:SetScript("OnClick", function()
+            if overflowMenu:IsShown() then
+                overflowMenu:Hide()
+            else
+                BuildOverflow()
+                -- ⚠ Re-raised on every open; see the preset menu above.
+                if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(overflowMenu, overflowBtn) end
+                overflowMenu:Show()
+            end
+        end)
+
+        -- The four still exist -- they own the prompts and the guards -- but they
+        -- are never drawn. Parked off the bar rather than left unanchored: an
+        -- un-pointed frame in a BackdropTemplate still draws at 0,0.
+        for _, b in ipairs({ newBtn, dupBtn, renameBtn, delBtn }) do
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            b:Hide()
+        end
+    end
+
+    -- ☠ THE FOUR ACTIONS CHAIN FROM THE BAR'S RIGHT EDGE INWARDS, and they are
+    -- placed here rather than at each creation because the chain runs backwards:
+    -- Delete pins to the bar, Rename to Delete, Duplicate to Rename, New to
+    -- Duplicate, and the dropdown then spans from the label to New. That is what
+    -- makes the bar cost its FIXED parts at any width. Left-to-right off a
+    -- 150px dropdown the four ran to 467px in the labelled form, which the
+    -- designers' old 850px island had room for and a 640px window's ~410px band
+    -- does not -- Delete simply left the page.
+    if overflowBtn then
+        overflowBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+        ddBtn:SetPoint("RIGHT", overflowBtn, "LEFT", -6, 0)
+    else
+    delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+    renameBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+    dupBtn:SetPoint("RIGHT", renameBtn, "LEFT", -4, 0)
+    newBtn:SetPoint("RIGHT", dupBtn, "LEFT", -4, 0)
+    ddBtn:SetPoint("RIGHT", newBtn, "LEFT", -6, 0)
+    end
 
     local function SetActionEnabled(btn, on)
         if on then
@@ -881,7 +2128,7 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
         text = text,
         align = align,
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName,
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. iconName .. ".png",
             size = iconSize or 18,
             color = C_TEXT,
         },
@@ -892,6 +2139,52 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
     return btn
+end
+
+-- ============================================================
+-- INLINE ICON ESCAPE
+-- ------------------------------------------------------------
+-- One of our own icons, as a |T...|t escape, for a FontString that has to carry
+-- a symbol in the middle of a sentence.
+--
+-- ☠ THIS EXISTS BECAUSE WOW FONTS DO NOT HAVE ARROWS. The settings panel renders
+-- in the user's chosen Settings Font, and the shipped default ("DF Roboto
+-- SemiBold") -- like most font files an addon bundles -- carries Latin, digits
+-- and punctuation and nothing else. Anything outside that renders as an EMPTY
+-- BOX, which is what the Changed Settings ledger's "current → default" arrow and
+-- the undo toast's "(3 → 2)" were on screen: 2 ⃞ 1. It is the same failure mode
+-- as the CJK squares in bug #1054, one block along. Art we ship cannot miss.
+--
+-- ⚠ THE FOURTEEN-FIELD FORM, not the short `|Tpath:h:w|t` one, and the vertex
+-- colour is the reason. These glyphs live inside DIMMED text (the "→ default"
+-- half of a ledger row is deliberately quieter than the current value), and a
+-- full-white icon beside grey text reads as a highlight rather than as
+-- punctuation. Colour escapes (|cff...|r) do not tint a texture; only the escape
+-- itself can. Our icons are white and tint cleanly -- /dficons says so on the
+-- window it draws them in.
+--
+--   name   an icon in Media\Icons (no path, no extension)
+--   size   rendered height AND width in pixels (default 12, the body text size)
+--   color  {r,g,b} 0-1, default the panel's body text colour
+--
+-- Every icon in Media\Icons is a 64x64 png, which is what the texel arguments
+-- describe; a future icon at another size needs its own call, not a change here.
+local ICON_ESCAPE_PATH   = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+local ICON_ESCAPE_TEXELS = 64
+
+function GUI:InlineIcon(name, size, color)
+    size = size or 12
+    local c = color or C_TEXT
+    local function byte(v)
+        v = math.floor((v or 1) * 255 + 0.5)
+        if v < 0 then return 0 elseif v > 255 then return 255 end
+        return v
+    end
+    return format("|T%s%s.png:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
+        ICON_ESCAPE_PATH, name, size, size,
+        ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
+        ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
+        byte(c.r), byte(c.g), byte(c.b))
 end
 
 -- A hairline rule for use INSIDE a settings group: separates a sub-option from the
@@ -922,334 +2215,6 @@ function GUI:CreateSeparator(parent, opts)
     tex:SetHeight(1)
     f.Texture = tex   -- exposed so a caller can re-tint without rebuilding
     return f
-end
-
--- ============================================================
--- CHOICE CARDS
--- ============================================================
--- A create action drawn as a small picture of what it produces, its name, and
--- one line saying where its contents come from.
---
--- A card REPLACES the compact "+ Add" button it stands in for rather than sitting
--- above it -- it is itself the create action, so running both would be two paths
--- to the same thing. Cards are pinned, not shown only while a list is empty; see
--- GUI:CreateChoiceCardGroup for the collapse that keeps a permanent block
--- affordable in a column this narrow.
---
--- The thumbnail is SYNTHETIC on purpose rather than a render of the player's own
--- config: an illustration that reads identically for everyone is what makes it
--- teachable, and it has to work before anything is configured. So it needs none
--- of the frame preview's rendering machinery.
---
---   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
---   opts.title    card heading (localised)
---   opts.desc     one short line -- roughly 24 characters before it wraps
---   opts.accent   border / hover tint, defaults to the mode theme
---   opts.onClick  fired on click
---
--- ⚠ CARD HEIGHT IS FIXED, so it has to clear the TALLEST card, not the average
--- one: the desc wraps and nothing re-measures it. 58 = 2 top + 13 title + 3 gap
--- + 3 wrapped desc lines at 10px. It was 54, which cleared the 8px text with
--- room to spare and would have clipped a third line at the larger size -- and a
--- clipped line is invisible until someone writes a longer desc or plays in a
--- language whose translation runs long. Raising the text is what pulled this
--- number up; if the text ever grows again, do this arithmetic again.
-local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 58, 62, 38
-
--- A unit frame in miniature. The name line and health bar are what make the
--- icons above them read as "on a frame" rather than as loose squares.
-local function BuildChoiceThumb(parent, art)
-    local thumb = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    thumb:SetSize(CHOICE_THUMB_W, CHOICE_THUMB_H)
-    CreateElementBackdrop(thumb, {
-        bgColor     = { 0.14, 0.14, 0.14, 1 },
-        borderColor = { 0.23, 0.23, 0.23, 1 },
-    })
-
-    local name = thumb:CreateTexture(nil, "ARTWORK")
-    name:SetColorTexture(0.43, 0.43, 0.43, 1)
-    name:SetPoint("TOPLEFT", 4, -4)
-    name:SetSize(20, 3)
-
-    local hpBg = thumb:CreateTexture(nil, "ARTWORK")
-    hpBg:SetColorTexture(0.17, 0.17, 0.17, 1)
-    hpBg:SetPoint("BOTTOMLEFT", 4, 4)
-    hpBg:SetPoint("BOTTOMRIGHT", -4, 4)
-    hpBg:SetHeight(8)
-
-    local hp = thumb:CreateTexture(nil, "OVERLAY")
-    hp:SetColorTexture(0.25, 0.48, 0.29, 1)
-    hp:SetPoint("TOPLEFT", hpBg, "TOPLEFT")
-    hp:SetPoint("BOTTOMLEFT", hpBg, "BOTTOMLEFT")
-    hp:SetWidth(36)
-
-    local kind = art and art.kind
-    local c = (art and art.color) or { 0.45, 0.45, 0.95 }
-
-    if kind == "iconRow" then
-        local x = 4
-        for _, col in ipairs(art.colors or {}) do
-            local ico = thumb:CreateTexture(nil, "OVERLAY")
-            ico:SetColorTexture(col[1], col[2], col[3], 1)
-            ico:SetPoint("TOPLEFT", x, -11)
-            ico:SetSize(8, 8)
-            x = x + 10
-        end
-        -- One unfilled slot. A layout group's row grows and shrinks with what is
-        -- actually up, and an empty space says that faster than a sentence can.
-        if art.ghost then
-            local ghost = thumb:CreateTexture(nil, "OVERLAY")
-            ghost:SetColorTexture(1, 1, 1, 0.07)
-            ghost:SetPoint("TOPLEFT", x, -11)
-            ghost:SetSize(8, 8)
-        end
-
-    elseif kind == "icon" then
-        -- Sits ON the frame at a corner.
-        local box = thumb:CreateTexture(nil, "OVERLAY")
-        box:SetColorTexture(c[1], c[2], c[3], 1)
-        box:SetPoint("TOPLEFT", 5, -11)
-        box:SetSize(13, 13)
-
-    elseif kind == "border" then
-        -- Drawn as four edges rather than a backdrop swap: the thumb's own border
-        -- is the "no effect" state, and this has to read as sitting on top of it.
-        for _, e in ipairs({ {"TOPLEFT","TOPRIGHT",0,0,nil,2}, {"BOTTOMLEFT","BOTTOMRIGHT",0,0,nil,2},
-                             {"TOPLEFT","BOTTOMLEFT",0,0,2,nil}, {"TOPRIGHT","BOTTOMRIGHT",0,0,2,nil} }) do
-            local t = thumb:CreateTexture(nil, "OVERLAY")
-            t:SetColorTexture(c[1], c[2], c[3], 1)
-            t:SetPoint(e[1], e[3], e[4])
-            t:SetPoint(e[2], e[3], e[4])
-            if e[5] then t:SetWidth(e[5]) end
-            if e[6] then t:SetHeight(e[6]) end
-        end
-
-    end
-    -- ☠ (Removed) the "square", "bar", "healthbar", "background", "nametext" and
-    -- "healthtext" arms. Every art.kind in the codebase is a string LITERAL -- there
-    -- is no computed `kind =` anywhere -- and across the six call sites only three
-    -- values are ever passed: "iconRow" (3), "border" (2) and "icon" (1). The other
-    -- six could not be reached.
-    --
-    -- ⚠ `name` and `hp` above are still built for every thumb and are NOT dead: they
-    -- draw the little name line and health bar that make the thumbnail read as a unit
-    -- frame at all. Only the arms that RE-TINTED them are gone.
-
-    return thumb
-end
-
--- A titled, collapsible block of choice cards.
---
--- Collapse state persists through GUI:GetCollapsedGroups() -- the same
--- account-wide store the settings pages' collapsible sections use -- keyed by
--- opts.title. Give every block a DISTINCT title or two of them share one state.
--- (Keying by display text means the state resets if the player changes language.
--- That is pre-existing behaviour for every collapsible section in the panel.)
---
--- ⚠ Toggling does not relayout by itself. The host is expected to rebuild from
--- opts.onToggle -- which suits the Aura Designer, where every edit already
--- rebuilds the tab. Without onToggle the state is saved but nothing moves.
-local CHOICE_GROUP_HEADER_H, CHOICE_CARD_GAP = 22, 6
-
-function GUI:CreateChoiceCardGroup(parent, opts)
-    opts = opts or {}
-    local accent = opts.accent or GetThemeColor()
-    local key = opts.title
-    local saved = GUI:GetCollapsedGroups()
-    local expanded = not (key and saved[key])
-
-    local group = CreateFrame("Frame", nil, parent)
-
-    local header = CreateFrame("Button", nil, group)
-    header:SetHeight(CHOICE_GROUP_HEADER_H)
-    header:SetPoint("TOPLEFT")
-    header:SetPoint("TOPRIGHT")
-
-    local arrow = header:CreateTexture(nil, "OVERLAY")
-    arrow:SetPoint("LEFT", 0, 0)
-    arrow:SetSize(12, 12)
-    arrow:SetTexture(expanded
-        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
-        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    local label = header:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(label, 9, "")
-    label:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
-    label:SetText(opts.title or "")
-    label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    header:SetScript("OnEnter", function()
-        label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    end)
-    header:SetScript("OnLeave", function()
-        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    end)
-    header:SetScript("OnClick", function()
-        if key then
-            -- Store only the collapsed state, matching CreateCollapsibleSection:
-            -- an expanded block leaves no key behind at all.
-            GUI:GetCollapsedGroups()[key] = expanded or nil
-        end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if opts.onToggle then opts.onToggle() end
-    end)
-
-    local h = CHOICE_GROUP_HEADER_H
-    if expanded then
-        local y = -h
-        for _, def in ipairs(opts.cards or {}) do
-            -- ⚠ This is a WHITELIST, not a pass-through: a field not named here never
-            -- reaches the card, and does so silently. `action` had to be added when
-            -- the filter cards grew a corner button.
-            local card = GUI:CreateChoiceCard(group, {
-                title = def.title, desc = def.desc, art = def.art,
-                accent = accent, onClick = def.onClick, action = def.action,
-            })
-            card:SetPoint("TOPLEFT", 0, y)
-            card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
-            y = y - (card.layoutHeight + CHOICE_CARD_GAP)
-            h = h + card.layoutHeight + CHOICE_CARD_GAP
-        end
-    end
-
-    group:SetHeight(h)
-    group.layoutHeight = h
-    group.expanded = expanded
-    return group
-end
-
-function GUI:CreateChoiceCard(parent, opts)
-    opts = opts or {}
-    local accent = opts.accent or GetThemeColor()
-    local idleBorder = { accent.r * 0.45, accent.g * 0.45, accent.b * 0.45, 0.8 }
-
-    local card = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    card:SetHeight(CHOICE_CARD_H)
-    CreateElementBackdrop(card, {
-        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
-        borderColor = idleBorder,
-    })
-
-    local thumb = BuildChoiceThumb(card, opts.art)
-    thumb:SetPoint("LEFT", 8, 0)
-
-    -- 11px, up from DFFontHighlightSmall's 10. Outline left nil so the user's
-    -- Settings Font Outline choice still wins -- that is what the font object this
-    -- replaces did, and passing "" would force the outline off for this string
-    -- alone. (The desc below passes "" deliberately: dim supporting text.)
-    -- The text stops short when this card carries a corner action, so a wrapped
-    -- description cannot run under the button.
-    local textRightPad = opts.action and 32 or 10
-
-    local title = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(title, 11)
-    title:SetPoint("TOPLEFT", thumb, "TOPRIGHT", 9, -2)
-    title:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
-    title:SetJustifyH("LEFT")
-    title:SetText(opts.title or "")
-    title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    -- 10px, up from 8. 8 was the smallest text anywhere in the settings UI and it
-    -- read as unfinished next to the card it explains (Krathe, 2026-08-10).
-    local desc = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 10, "")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
-    desc:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetWordWrap(true)
-    desc:SetText(opts.desc or "")
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-    card:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-        self:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
-    end)
-    card:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        self:SetBackdropBorderColor(unpack(idleBorder))
-    end)
-    card:SetScript("OnClick", function(self)
-        if opts.onClick then opts.onClick(self) end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end)
-
-    -- opts.action = { icon, tooltip, onClick } -- an optional second action in the
-    -- card's bottom-right corner, for a card whose SUBJECT has somewhere else to be
-    -- managed. Only "From a Filter" / "Filter Group" pass one; the block header would
-    -- have been the cheaper place to put it, but a header spans every card in the
-    -- block and only one of them is about filters, so it would claim a scope it does
-    -- not have.
-    --
-    -- ☠ A BUTTON INSIDE A BUTTON. The card is itself the create action, over its
-    -- whole area, so this control has to be unmissable about which of the two you are
-    -- about to fire:
-    --
-    --   * The child takes the click. A moused-over child Button captures the input
-    --     and the card's OnClick does not run, so there is no double-fire -- the risk
-    --     is purely one of AIM, which is why this is a 20px target with real padding
-    --     and not a 12px glyph.
-    --   * The card's hover is SUPPRESSED while the cursor is on the child, and the
-    --     child lights instead. Without that the card stays lit saying "click here to
-    --     create", which is a promise it will not keep for this click. That swap is
-    --     the entire reason this is safe to nest.
-    --   * Miss it and you create an effect -- recoverable, but an object you did not
-    --     want, so the padding is not cosmetic.
-    if opts.action then
-        -- Sized to be FOUND, not to be tidy. At 20px with a 13px dim glyph this read
-        -- as decoration on the card rather than a control -- and a control nobody
-        -- sees is the same as one that is not there. It also has to hold its own
-        -- against a 62px thumbnail and two lines of text on the same card.
-        local ACT = 24
-        local actionBtn = CreateFrame("Button", nil, card)
-        actionBtn:SetSize(ACT, ACT)
-        actionBtn:SetPoint("BOTTOMRIGHT", -4, 4)
-        actionBtn:SetFrameLevel(card:GetFrameLevel() + 2)
-
-        local ai = actionBtn:CreateTexture(nil, "OVERLAY")
-        ai:SetSize(16, 16)
-        ai:SetPoint("CENTER")
-        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit"))
-        -- Full text colour at REST, accent on hover. Dim-at-rest is the idiom for a
-        -- glyph sitting beside a label that already names it; this one has no label.
-        ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        actionBtn:SetScript("OnEnter", function(self)
-            -- Card back to REST, child lit: one of the two is always the live target
-            -- and the highlight says which.
-            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            card:SetBackdropBorderColor(unpack(idleBorder))
-            ai:SetVertexColor(accent.r, accent.g, accent.b)
-            -- Same contract as CreateGlyphButton's: a full ShowTooltip spec, or a
-            -- bare string for a title-only tooltip. Prefer the spec -- this button
-            -- has no label, so a title alone would just name the glyph again.
-            local t = opts.action.tooltip
-            if type(t) == "table" then
-                GUI:ShowTooltip(self, t)
-            elseif type(t) == "string" and t ~= "" then
-                GUI:ShowTooltip(self, { title = t })
-            end
-        end)
-        actionBtn:SetScript("OnLeave", function()
-            ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            if opts.action.tooltip then GUI:HideTooltip() end
-            -- The cursor is still inside the CARD on the way out, and leaving a child
-            -- does not re-fire the parent's OnEnter -- so restore the hover by hand or
-            -- the card sits at rest under a cursor that is still on it.
-            if card:IsMouseOver() then
-                card:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-                card:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
-            end
-        end)
-        actionBtn:SetScript("OnClick", function(self)
-            if opts.action.onClick then opts.action.onClick(self) end
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        end)
-        card.ActionButton = actionBtn
-    end
-
-    card.layoutHeight = CHOICE_CARD_H
-    return card
 end
 
 -- Creates a \"See Also:\" section with clickable links to related pages
@@ -1409,11 +2374,11 @@ end
 -- (a pooled row is a different filter every refresh) and a captured dbKey would go
 -- stale the moment the pool rebinds.
 --
--- ⚠ Clicks deliberately do NOT propagate. The override marker above lets them fall
--- through because it is a passive marker; this is a control, and on a clickable row
--- the two gestures must stay separate — tick the box to switch the filter on, click
--- anywhere else to select it. Nothing here calls SetPropagateMouseClicks, which is
--- PROTECTED on 12.1 anyway (see the note in CreateOverrideMarker).
+-- ⚠ Clicks deliberately do NOT propagate. GUI:CreateOverrideMarker (DandersUI/
+-- Widgets.lua) lets them fall through because it is a passive marker; this is a
+-- control, and on a clickable row the two gestures must stay separate — tick the
+-- box to switch the filter on, click anywhere else to select it. Nothing here calls
+-- SetPropagateMouseClicks, which is PROTECTED on 12.1 anyway (see that marker).
 --
 -- ⚠ The BOX ITSELF is GUI:StyleCheckButton, the addon's one checkbox look — do not
 -- hand-roll it again. This was hand-rolled once and drifted four ways: it drew the
@@ -1597,7 +2562,7 @@ function GUI:CreateCheckRow(parent, opts)
     return cb
 end
 
-function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
+function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey, opts)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
     container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
@@ -1608,13 +2573,22 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     cb:SetPoint("LEFT", 0, 0)
     -- Box + themed check come from the shared styler (single source of truth).
     GUI:StyleCheckButton(cb, { themeRoot = parent })
+    -- Exposed for a host that mounts the box somewhere a caption cannot go (a
+    -- section header's tick -- see opts.toggle on CreateCollapsibleSection).
+    container.checkButton = cb
 
-    -- Label
+    -- Label, 12px from the box: the modified dot sits in that gap.
     local txt = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txt:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+    txt:SetPoint("LEFT", cb, "RIGHT", 12, 0)
     txt:SetText(label)
     txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     container.label = txt  -- exposed so callers can re-font / anchor a subtitle
+    -- The width this row needs to keep its caption on one line. The caption has
+    -- no right edge, so a track narrower than this runs it under whatever sits
+    -- beside it; a two-track card reads this to decide whether it can pair up.
+    container.NaturalWidth = function()
+        return cb:GetWidth() + 12 + txt:GetStringWidth()
+    end
 
     -- Determine the key to use for override indicators
     local effectiveOverrideKey = overrideKey or dbKey
@@ -1639,7 +2613,8 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
+        AddOverrideIndicators(GUI, container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(container, txt)
     end
     
     local function UpdateState()
@@ -1655,33 +2630,57 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     container:SetScript("OnShow", UpdateState)
     -- Re-read the source and repaint the box, for a caller that changed the value
     -- behind the widget's back (a "set all" button). Same contract as
-    -- CreateSegmentToggle:Refresh(); before this, call sites reached for a
-    -- Hide()/Show() bounce to fire the OnShow above.
+    -- CreateSegmentToggle:Refresh().
     container.Refresh = UpdateState
-    cb:SetScript("OnClick", function(self)
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group reset, or the undo of one.
+    container.refreshValue = UpdateState
+    -- Named (not an inline OnClick) so the modified-default dot's hold-to-reset
+    -- runs this exact click; see the Dot* hooks below.
+    local function OnCheckClick(self)
         local val = self:GetChecked()
-        -- Was gated on DF.debugEnabled and printed straight to CHAT, bypassing the
-        -- console entirely. GUI is the right category and it is already declared.
         DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
             tostring(dbKey), tostring(overrideKey), tostring(val))
 
-        -- Runtime override protection: redirect to baseline, skip refresh
-        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-           and DF.AutoProfilesUI:HandleRuntimeWrite(effectiveOverrideKey, val) then
-            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
+        -- ☠ THE HOST BRACKET, NOT A SECOND COPY OF IT. What stood here was the
+        -- runtime-redirect gate and the override record written out by hand --
+        -- the same two rules GUI.lua's `interceptWrite` / `onSettingWritten`
+        -- hooks apply, spelled again because this factory predates the hooks
+        -- existing. Two spellings of one rule drift; worse, the inlined one is
+        -- invisible to everything ELSE that hangs off the bracket, and the undo
+        -- engine records from exactly those two hooks -- so every checkbox in the
+        -- panel was an edit the user could not undo.
+        --
+        -- ⚠ The BRACKET key is effectiveOverrideKey (the auto-profile key, which
+        -- is not always dbKey and may be nil -- the hook answers false for a nil
+        -- key, as the inlined gate effectively did). The WRITE below is unchanged:
+        -- customSet if the caller supplied one, else dbTable[dbKey]. When those
+        -- two keys differ, or a customSet puts the value somewhere else, the undo
+        -- engine's "did it land plainly in db[key]" test fails and it records
+        -- nothing -- which is right, because db[key] is then not the store.
+        --
+        -- opts.storedValue maps the tick to what customSet stores under that key,
+        -- for a box whose key does not hold a boolean (Shadow). The bracket records
+        -- that value, or a layout override would store the bare tick.
+        local stored = val
+        if opts and opts.storedValue then stored = opts.storedValue(val) end
+        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, stored) then
+            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(stored) end
             return
         end
 
         if customSet then customSet(val) elseif dbTable and dbKey then dbTable[dbKey] = val end
 
-        -- If editing a profile, also set the override (use effectiveOverrideKey)
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and effectiveOverrideKey then
-            DF.AutoProfilesUI:SetProfileSetting(effectiveOverrideKey, val)
-        end
-        
+        -- The other half: records the layout override while a profile is being
+        -- edited (what the removed SetProfileSetting call did) and commits the
+        -- undo entry -- carrying `callback`, this checkbox's own commit, so the
+        -- undo replays the apply and not only the write.
+        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, stored, label, callback)
+
         -- Update override indicators
         if container.UpdateOverrideIndicators then
-            container:UpdateOverrideIndicators(val)
+            container:UpdateOverrideIndicators(stored)
         end
         
         -- ☠ (Removed) three "calling X" entry traces, one immediately above each call.
@@ -1691,16 +2690,35 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         if callback then 
             callback() 
         end
-        if parent.RefreshStates then 
-            parent:RefreshStates() 
+        if parent.RefreshStates then
+            parent:RefreshStates()
         end
         DF:UpdateAll()
-    end)
-    
+    end
+    cb:SetScript("OnClick", OnCheckClick)
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the reset
+    -- ticks the box to the default and runs the click above. Booleans only --
+    -- a box cannot show anything else -- and only while the box shows what is
+    -- stored, which an inverting customGet does not.
+    container.DotWrite = function(v)
+        cb:SetChecked(v and true or false)
+        OnCheckClick(cb)
+    end
+    container.DotAccepts = function(v) return type(v) == "boolean" end
+    container.DotReadValue = function()
+        if customGet then return customGet() end
+        return dbTable and dbKey and dbTable[dbKey]
+    end
+    container.FormatDotValue = function(v)
+        if type(v) == "boolean" then return v and L["On"] or L["Off"] end
+    end
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget (box + check fill + label) so a disabled CHECKED
         -- box greys too: native SetEnabled has no DisabledCheckedTexture, so the
         -- accent check would otherwise stay full-bright.
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         cb:SetEnabled(enabled)
         if enabled then
@@ -1719,7 +2737,11 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     UpdateState()
     
     -- SEARCH: Register this setting
-    if DF.Search then
+    -- ⚠ opts.noSearch skips the registration, which makes the setting invisible
+    -- to settings search. It exists only for a checkbox that lives outside any
+    -- page, because a search result must be able to navigate to the widget it
+    -- names. No call site passes it today, and a page-resident checkbox never may.
+    if DF.Search and not (opts and opts.noSearch) then
         local hasCustomGetSet = (customGet ~= nil or customSet ~= nil)
         if dbKey and type(dbKey) == "string" then
             container.searchEntry = DF.Search:RegisterCheckbox(label, dbKey, nil, false, callback)
@@ -1797,6 +2819,9 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
         end
     end
     container.refreshContent = function(self) self:Refresh() end
+    -- ...and the group-wide value sweep's name (DandersUI Sections'
+    -- RefreshChildValues): a segment toggle's "value" is which segment is lit.
+    container.refreshValue = function(self) self:Refresh() end
 
     container.SetEnabled = function(self, enabled)
         self:SetAlpha(enabled and 1 or 0.4)
@@ -1809,6 +2834,130 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
 
     container:Refresh()
     return container
+end
+
+-- A settings write through the host bracket, the same two hooks CreateCheckbox
+-- uses: a running auto layout can redirect it, and the undo/override records hang
+-- off onSettingWritten. `plain` writes straight in, for a table that is not a
+-- settings db (an Aura Designer group's selection).
+local function BracketWrite(dbTable, key, value, label, callback, plain)
+    if plain then
+        dbTable[key] = value
+        return
+    end
+    if GUI:Call("interceptWrite", dbTable, key, value) then return end
+    dbTable[key] = value
+    GUI:Call("onSettingWritten", dbTable, key, value, label, callback)
+end
+
+-- THE SHOW AND HIDE COLUMNS: a caption, then a Show box and a
+-- Hide box at fixed distances from the right edge, so every row lines up under
+-- CreateShowHideHeader. Each box is its own boolean, and ticking one clears the
+-- other: a category is shown, hidden or left alone, never both. showKey nil leaves
+-- the Show box out (a hide-only row).
+-- opts.showOffWhen(db) hides the Show box (All Debuffs already shows everything);
+-- opts.hideOffWhen(db) hides the Hide box (another Hide already removes the rest);
+-- opts.offWhen(db) greys the whole row (another setting makes it do nothing);
+-- opts.plain writes straight into the table (an Aura Designer group's selection).
+local SHOWHIDE_HIDE_X, SHOWHIDE_SHOW_X = 14, 60   -- box centres, px in from the right
+
+function GUI:CreateShowHideRow(parent, label, dbTable, showKey, hideKey, callback, opts)
+    opts = opts or {}
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(260, 22)
+    row.preferredHeight = 26
+    row.fixedRowHeight = true
+    row.rowKind = "showhide"
+
+    local txt = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    txt:SetPoint("LEFT", 0, 0)
+    txt:SetText(label)
+    txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    row.label = txt
+
+    local function Box(key, otherKey, x)
+        local cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
+        GUI:StyleCheckButton(cb, { themeRoot = parent })
+        cb:SetPoint("CENTER", row, "RIGHT", -x, 0)
+        cb:SetScript("OnClick", function(self)
+            local on = self:GetChecked() and true or false
+            BracketWrite(dbTable, key, on, label, callback, opts.plain)
+            if on and otherKey and dbTable[otherKey] then
+                BracketWrite(dbTable, otherKey, false, label, callback, opts.plain)
+            end
+            row:Refresh()
+            if callback then callback() end
+        end)
+        return cb
+    end
+    local hideBox = Box(hideKey, showKey, SHOWHIDE_HIDE_X)
+    local showBox = showKey and Box(showKey, hideKey, SHOWHIDE_SHOW_X) or nil
+    row.showBox, row.hideBox = showBox, hideBox
+
+    local function PaintShow()
+        if showBox and opts.showOffWhen then showBox:SetShown(not opts.showOffWhen(dbTable)) end
+        if opts.hideOffWhen then hideBox:SetShown(not opts.hideOffWhen(dbTable)) end
+    end
+    row.Refresh = function()
+        if showBox then showBox:SetChecked(dbTable[showKey] and true or false) end
+        hideBox:SetChecked(dbTable[hideKey] and true or false)
+        PaintShow()
+    end
+    row.refreshValue = row.Refresh
+    -- Evaluated on every state pass, which is when All Debuffs can have moved.
+    row.disableOn = function()
+        PaintShow()
+        return opts.offWhen and opts.offWhen(dbTable) and true or false
+    end
+    row.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        hideBox:EnableMouse(enabled)
+        if showBox then showBox:EnableMouse(enabled) end
+        if enabled then PaintShow() end
+    end
+    row.NaturalWidth = function() return txt:GetStringWidth() + 12 + SHOWHIDE_SHOW_X + 8 end
+    row:SetScript("OnShow", row.Refresh)
+    GUI:AttachTooltip(row, label, txt)
+    row:Refresh()
+    if opts.offWhen and opts.offWhen(dbTable) then row:SetEnabled(false) end
+    return row
+end
+
+-- A section caption on the left and the Show / Hide column titles on the right,
+-- over the boxes of the CreateShowHideRow rows below it. opts.showOffWhen(db) hides
+-- the Show title along with the rows' Show boxes.
+function GUI:CreateShowHideHeader(parent, caption, dbTable, opts)
+    opts = opts or {}
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(260, 18)
+    row.preferredHeight = 22
+    row.fixedRowHeight = true
+    row.rowKind = "showhideheader"
+    local function Cap(text, point, x)
+        local title = point == "LEFT"
+        local fs = row:CreateFontString(nil, "OVERLAY", title and "DFFontNormal" or "DFFontHighlightSmall")
+        if title then
+            fs:SetPoint("LEFT", row, "LEFT", 0, 0)
+        else
+            fs:SetPoint("CENTER", row, "RIGHT", -x, 0)
+        end
+        fs:SetText(text)
+        local c = title and C_TEXT or C_TEXT_DIM
+        fs:SetTextColor(c.r, c.g, c.b)
+        return fs
+    end
+    if caption then row.label = Cap(caption, "LEFT") end
+    local showCap = Cap(L["Show"], nil, SHOWHIDE_SHOW_X)
+    Cap(L["Hide"], nil, SHOWHIDE_HIDE_X)
+    local function PaintShow()
+        if dbTable and opts.showOffWhen then showCap:SetShown(not opts.showOffWhen(dbTable)) end
+    end
+    -- refreshContent, not the rows' disableOn: the state pass only asks disableOn of
+    -- a widget that has SetEnabled, and a header has nothing to enable.
+    row.refreshContent = function() PaintShow() end
+    row:SetScript("OnShow", PaintShow)
+    PaintShow()
+    return row
 end
 
 -- opts.noisy marks a firehose category: one user action can produce dozens of
@@ -1854,15 +3003,14 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noi
         noisyIcon:SetFrameLevel(row:GetFrameLevel() + 2)
         local tex = noisyIcon:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints()
-        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
+        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning.png")
         -- The caution tone's ICON colour, read straight from the shared tone table
         -- so this stays in step with every banner and note that uses it.
         -- ☠ Read at CALL time, not through a file-scope alias. INFO_BANNER_TONES
-        -- is defined in GUI/Sections.lua, which lives in the load-on-demand
-        -- companion, while this file is resident -- an alias captured at load
-        -- would be nil forever and never see the companion's later publish.
-        -- This function is only ever called from a settings page, so the
-        -- companion is loaded by the time it runs.
+        -- is published on the kit's _priv by DandersUI/Widgets.lua, which the
+        -- RESIDENT addon loads, and GUI._priv falls through to it; this file
+        -- rides the load-on-demand companion, so the table is already there when
+        -- this runs. The call-time read is kept so load order can never matter.
         local ic = GUI._priv.INFO_BANNER_TONES.caution.iconColor
         tex:SetVertexColor(ic[1], ic[2], ic[3])
         noisyIcon:SetScript("OnEnter", function(self)
@@ -1976,11 +3124,8 @@ function GUI:CreateInput(parent, label, width)
     end
 
     frame.EditBox = editbox
-    -- Tooltip: shared attach on the LABEL only. This factory carried no tooltip
-    -- support at all, so a caller that set .tooltip on it got silence —
-    -- Options.lua's custom range-spell input did exactly that, and its
-    -- explanation never appeared. Keeping it off the edit box also means it can't
-    -- cover what you are typing.
+    -- Tooltip: shared attach on the LABEL only. Keeping it off the edit box also
+    -- means it can't cover what you are typing.
     GUI:AttachTooltip(frame, label, lbl)
     return frame
 end
@@ -2017,7 +3162,8 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(frame, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, frame, lbl, dbKey, onReset, 6, nil, dbTable)
+        GUI:PinModifiedDotTopLeft(frame, lbl)
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)
@@ -2040,17 +3186,24 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     local function SaveValue()
         if dbTable and dbKey then
             local val = editbox:GetText()
-            -- Runtime override protection
-            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, val) then
+            -- The host bracket, for the reason spelled out on CreateCheckbox above:
+            -- spelling the redirect gate and the override record out by hand here would
+            -- keep this widget's writes out of sight of everything hooked to the
+            -- bracket -- the undo engine included.
+            --
+            -- ⚠ OnEditFocusLost calls this whether or not anything was typed, so
+            -- clicking through a box "saves" the value already in it. Nothing
+            -- filters those out here and nothing needs to: the redirect and
+            -- override halves have always been fed them, and the undo engine drops
+            -- a commit whose old and new values are equal.
+            if GUI:Call("interceptWrite", dbTable, dbKey, val) then
                 if frame.UpdateOverrideIndicators then frame:UpdateOverrideIndicators(val) end
                 return
             end
             dbTable[dbKey] = val
-            -- Track override when editing a profile
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                DF.AutoProfilesUI:SetProfileSetting(dbKey, val)
-            end
+            -- ...carrying this box's own commit callback, for the same reason
+            -- the checkbox above does: an undo has to replay the apply too.
+            GUI:Call("onSettingWritten", dbTable, dbKey, val, label, callback)
             if frame.UpdateOverrideIndicators then
                 frame:UpdateOverrideIndicators(val)
             end
@@ -2064,7 +3217,20 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
         self:ClearFocus()
     end)
     editbox:SetScript("OnEditFocusLost", SaveValue)
-    
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot): the reset
+    -- puts the default in the box and saves it the way Enter does. Strings
+    -- only -- the box saves its TEXT, so a number default would come back as a
+    -- string and never compare equal to the default again.
+    frame.DotWrite = function(v)
+        editbox:SetText(v)
+        SaveValue()
+    end
+    frame.DotAccepts = function(v) return type(v) == "string" end
+    frame.FormatDotValue = function(v)
+        if v == "" then return L["None"] end
+    end
+
     -- Optional placeholder: greyed example text shown while the box is empty
     -- and unfocused. Purely cosmetic — never written to the db.
     if placeholder and placeholder ~= "" then
@@ -2088,7 +3254,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     end
 
     -- Refresh override indicators on show
-    frame:SetScript("OnShow", function()
+    local function RefreshDisplay()
         if dbTable and dbKey then
             editbox:SetText(dbTable[dbKey] or "")
         end
@@ -2096,12 +3262,24 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
             frame:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
         if editbox.UpdatePlaceholder then editbox.UpdatePlaceholder() end
-    end)
+    end
+    frame:SetScript("OnShow", RefreshDisplay)
 
-    -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled,
-    -- but this frame had none, so a disabled group left the input full-bright AND
-    -- editable. Dim the whole widget + block editing, matching the other helpers.
+    -- ☠ AND UNDER THE GROUP-WIDE VALUE SWEEP'S NAME. OnShow alone was enough while
+    -- an edit box only ever sat on a page: a write it could not have seen (a popout
+    -- row's Reset Group, its Hold: Defaults, the undo of either) reaches every other
+    -- control through DandersUI Sections' RefreshChildValues, which calls
+    -- widget.refreshValue -- and this widget had none, so the box went on showing the
+    -- string the user had typed while the profile already held the default. The
+    -- Icons page is the first to mount edit boxes inside a pane (thirteen status
+    -- texts and three role icon paths), which is what surfaced it. Same repair as
+    -- the font button's (GUI/Controls.lua), and a no-op on a page.
+    frame.refreshValue = RefreshDisplay
+
+    -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled.
+    -- Dim the whole widget + block editing, matching the other helpers.
     frame.SetEnabled = function(self, enabled)
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         editbox:SetEnabled(enabled)
         if enabled then
@@ -2134,14 +3312,31 @@ function GUI:AddEditBoxIcon(editbox, texture, size)
     return icon
 end
 
+-- The shared Frame Level explanation, as a TOOLTIP SPEC -- { title, lines }, the shape
+-- ShowTooltip and a control row's `tooltip` opt both take.
+--
+-- ⚠ IT EXISTS BECAUSE A CONTROL ROW HAS NO CONTAINER TO STAMP. SetFrameLevelTooltip below
+-- writes tooltipText / tooltipSubText onto the slider container, and a control row's
+-- embedded slider hangs its tooltip on the caption the row HIDES -- so a row has to be
+-- handed the spec and show it off its own plate.
+-- Two copies of the sentence would be exactly the drift this helper was written to stop, so
+-- there is one copy and both shapes read it.
+function GUI:FrameLevelTooltip()
+    return {
+        title = L["Frame Level"],
+        lines = { L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."] },
+    }
+end
+
 -- Stamp the shared Frame Level explanation onto a slider. One helper rather than the same
 -- two strings at 21 call sites, and it keeps the wording in ONE place -- the old per-page
 -- label went stale the moment the scale changed (it still read "0=Auto" afterwards).
 -- Takes the CONTAINER that CreateSlider returns, which is what every call site has.
 function GUI:SetFrameLevelTooltip(container)
     if not container then return end
-    container.tooltipText    = L["Frame Level"]
-    container.tooltipSubText = L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."]
+    local spec = GUI:FrameLevelTooltip()
+    container.tooltipText    = spec.title
+    container.tooltipSubText = spec.lines[1]
     return container   -- chainable, so it wraps a CreateSlider call in place
 end
 
@@ -2294,6 +3489,53 @@ function GUI:CreateRangeSlider(parent, opts)
     return track
 end
 
+-- ============================================================
+-- THE OLD PICKER'S UNDO GESTURE
+-- ------------------------------------------------------------
+-- CreateColorPicker below drives Blizzard's ColorPickerFrame, which MUTATES the
+-- stored colour table field by field on every drag tick. There is no single
+-- write to bracket, and -- unlike the checkbox and the edit box above -- no
+-- runtime-redirect gate here to route through either; adding one would change
+-- what this widget does, which is not what this is for. So the undo engine is
+-- wired DIRECTLY around the picking session instead of through the host hooks:
+--
+--   open the picker -> BeginGesture, every tick -> capture + commit,
+--   picker hides    -> EndGesture.
+--
+-- The engine merges same-key commits inside an open gesture (the FIRST old value
+-- is kept, the newest replaces the last), so a session of forty drag ticks is
+-- ONE undo entry describing the colour before the picker opened and the colour
+-- the user settled on. A cancel restores the original numbers through the same
+-- pair, which makes the merged entry zero-delta -- and a zero-delta entry is
+-- dropped, so a cancelled pick leaves nothing to undo.
+--
+-- ColorPickerFrame is a singleton, so this state is module-scope: only one
+-- picking session can be open at a time, whichever of the 87 pickers opened it.
+local pickerGestureOpen = false
+local pickerCloseHooked = false
+
+-- Closes the session's gesture, once, from wherever the session actually ended.
+-- Idempotent because two paths race for it: a cancel closes it itself (see
+-- cancelFunc) so its restore is guaranteed to land INSIDE the gesture whatever
+-- order the client fires cancelFunc and OnHide in, and the OnHide hook below
+-- catches every other way out -- OK, Escape, or the frame being hidden from
+-- under us.
+local function ClosePickerGesture()
+    if not pickerGestureOpen then return end
+    pickerGestureOpen = false
+    local SU = DF.SettingsUndo
+    if SU then SU:EndGesture() end
+end
+
+-- Installed on first use rather than at file load: this file is the load-on-
+-- demand companion, but ColorPickerFrame is still a frame we do not own, and one
+-- hook for the session is enough.
+local function EnsurePickerCloseHook()
+    if pickerCloseHooked then return end
+    pickerCloseHooked = true
+    ColorPickerFrame:HookScript("OnHide", ClosePickerGesture)
+end
+
 function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback, lightweightCallback, useLightweight)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
@@ -2341,7 +3583,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 DF:UpdateAll()
             end
         end
-        AddOverrideIndicators(container, txt, dbKey, onReset, nil, nil, dbTable)
+        AddOverrideIndicators(GUI, container, txt, dbKey, onReset, nil, nil, dbTable)
     end
     
     local function UpdateSwatch()
@@ -2355,7 +3597,50 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         end
     end
     container.UpdateSwatch = UpdateSwatch  -- Expose for reset
-    
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues): a colour picker's "value" is the swatch.
+    container.refreshValue = UpdateSwatch
+
+    -- The modified-default dot's hooks (DandersUI AddModifiedDot). A picker has
+    -- no single "commit one colour" path -- its session writes per wheel tick --
+    -- so the reset is the host bracket every other control's commit runs
+    -- (interceptWrite / onSettingWritten), around the picker's own in-place
+    -- write, followed by what a closed non-lightweight session runs.
+    --
+    -- ⚠ IN PLACE, KEY FOR KEY. The stored table keeps its identity (the picker,
+    -- the undo capture and anything holding it expect that), and gets exactly
+    -- the default's keys -- a default with no `a` must not keep a stored `a`, or
+    -- the defaults engine compares the two unequal and the dot stays lit.
+    -- ⚠ Each hook is handed its OWN copy: the auto-layout recorder keeps what it
+    -- is given, and handing it the live table would alias profile and layout.
+    local function CopyColor(c)
+        local t = {}
+        for k, v in pairs(c) do t[k] = v end
+        return t
+    end
+    container.DotWrite = function(v)
+        if GUI:Call("interceptWrite", dbTable, dbKey, CopyColor(v)) then
+            UpdateSwatch()
+            return
+        end
+        local c = dbTable[dbKey]
+        if type(c) ~= "table" then
+            c = {}
+            dbTable[dbKey] = c
+        end
+        for k in pairs(c) do c[k] = nil end
+        for k, val in pairs(v) do c[k] = val end
+        GUI:Call("onSettingWritten", dbTable, dbKey, CopyColor(c), label, callback)
+        UpdateSwatch()
+        DF:UpdateAll()
+        if callback then callback() end
+        RefreshOwnerStates(parent)
+    end
+    container.DotAccepts = function(v) return type(v) == "table" and v.r ~= nil end
+    container.FormatDotValue = function(v)
+        if type(v) == "table" then return GUI.FormatColorValue(v) end
+    end
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
@@ -2363,9 +3648,8 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
 
-    -- Tooltip: shared attach on the LABEL only. This factory carried none, across
-    -- 87 colour pickers. The btn keeps its own hover scripts untouched — the hit
-    -- frame is over the text, not the swatch.
+    -- Tooltip: shared attach on the LABEL only. The btn keeps its own hover
+    -- scripts untouched — the hit frame is over the text, not the swatch.
     GUI:AttachTooltip(container, label, txt)
 
     btn:SetScript("OnClick", function()
@@ -2378,6 +3662,13 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         
         -- Store original values for cancel
         local originalColor = {r = c.r, g = c.g, b = c.b, a = c.a or 1}
+
+        -- The undo engine, for the picking session about to start (see THE OLD
+        -- PICKER'S UNDO GESTURE above the factory). Resolved and hooked HERE
+        -- because the three callbacks below close over it; the gesture itself is
+        -- opened after setup, at the bottom of this handler.
+        EnsurePickerCloseHook()
+        local SU = DF.SettingsUndo
 
         -- Blizzard's SetupColorPickerAndShow fires swatchFunc once DURING
         -- setup (its SetColorRGB triggers OnColorSelect — the source comments
@@ -2395,16 +3686,29 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 if hasAlpha and ColorPickerFrame.GetColorAlpha then
                     a = ColorPickerFrame:GetColorAlpha() or 1
                 end
+                -- Capture BEFORE the mutation, exactly as interceptWrite does --
+                -- this is the last moment the stored table still holds the value
+                -- the tick is about to overwrite.
+                if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                 dbTable[dbKey].r = r
                 dbTable[dbKey].g = g
                 dbTable[dbKey].b = b
                 dbTable[dbKey].a = a
-                
+
                 -- If editing a profile, also set the override
                 if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
                     DF.AutoProfilesUI:SetProfileSetting(dbKey, {r = r, g = g, b = b, a = a})
                 end
-                
+                -- ...and the commit, AFTER the auto-profile half -- the same
+                -- order GUI.lua's onSettingWritten runs the two in. Merged into
+                -- the open gesture, so this is a tick, not an entry.
+                --
+                -- `callback` is this picker's COMMIT -- what the non-lightweight
+                -- branch below runs, and what the OK watcher runs at the end of a
+                -- lightweight session -- so the entry can replay the apply and not
+                -- just put the colour back.
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
+
                 UpdateSwatch()
                 -- Use lightweight callback during dragging if available
                 if useLightweight and lightweightCallback then
@@ -2420,7 +3724,11 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 if ColorPickerFrame.GetColorAlpha then
                     local a = ColorPickerFrame:GetColorAlpha()
                     if a then
+                        -- Same capture/commit pair as swatchFunc: the opacity bar
+                        -- is a drag over the same stored table.
+                        if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                         dbTable[dbKey].a = a
+                        if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
                         UpdateSwatch()
                         -- Use lightweight callback during dragging if available
                         if useLightweight and lightweightCallback then
@@ -2434,10 +3742,24 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
             end or nil,
             cancelFunc = function(restore)
                 -- Restore original color on cancel
+                -- ...through the SAME capture/commit pair as a drag tick, because
+                -- to the engine that is all this is: one more tick, landing on the
+                -- colour the session started from. The merged gesture entry then
+                -- has old == new, and the engine drops those -- so a cancelled
+                -- pick is not something the user can undo.
+                if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                 dbTable[dbKey].r = originalColor.r
                 dbTable[dbKey].g = originalColor.g
                 dbTable[dbKey].b = originalColor.b
                 dbTable[dbKey].a = originalColor.a
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
+                -- ⚠ Closed HERE, not left to the OnHide hook. The client is free
+                -- to run cancelFunc from inside its own OnHide, which is BEFORE
+                -- our hook -- but it is equally free to run it from the button and
+                -- hide afterwards. Closing here makes the restore land inside the
+                -- gesture either way; ClosePickerGesture is idempotent, so the
+                -- OnHide hook that follows finds nothing left to do.
+                ClosePickerGesture()
                 UpdateSwatch()
                 DF:UpdateAll()
                 if callback then callback() end
@@ -2449,25 +3771,33 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         }
         
         -- Hook the OK button to run full update when confirmed
-        if useLightweight and lightweightCallback then
-            -- We need to run full update when picker is closed via OK
-            -- Use a frame to detect when color picker closes
-            if not container.colorPickerWatcher then
-                container.colorPickerWatcher = CreateFrame("Frame")
-            end
-            container.colorPickerWatcher:SetScript("OnUpdate", function(self)
-                if not ColorPickerFrame:IsShown() then
-                    self:SetScript("OnUpdate", nil)
-                    -- Only run if color changed (not cancelled)
-                    local cur = dbTable[dbKey]
-                    if cur.r ~= originalColor.r or cur.g ~= originalColor.g or 
-                       cur.b ~= originalColor.b or cur.a ~= originalColor.a then
+        --
+        -- ☠ ARMED FOR EVERY PICK NOW, not only a lightweight one, because the
+        -- close is the only moment either kind of pick has a COMMIT. The full
+        -- update and the callback stay behind the lightweight gate they were
+        -- always behind -- a non-lightweight pick already ran both on every
+        -- swatch tick -- but the page/pane state refresh belongs to neither
+        -- tick: it is what re-reads the popout row summary showing this colour,
+        -- and running it per tick would sweep the whole page once per
+        -- mouse-move frame of a wheel drag. Once, on close, is the whole job.
+        if not container.colorPickerWatcher then
+            container.colorPickerWatcher = CreateFrame("Frame")
+        end
+        container.colorPickerWatcher:SetScript("OnUpdate", function(self)
+            if not ColorPickerFrame:IsShown() then
+                self:SetScript("OnUpdate", nil)
+                -- Only run if color changed (not cancelled)
+                local cur = dbTable[dbKey]
+                if cur.r ~= originalColor.r or cur.g ~= originalColor.g or 
+                   cur.b ~= originalColor.b or cur.a ~= originalColor.a then
+                    if useLightweight and lightweightCallback then
                         DF:UpdateAll()
                         if callback then callback() end
                     end
+                    RefreshOwnerStates(parent)
                 end
-            end)
-        end
+            end
+        end)
         
         -- Attach default colour so the picker can offer a Default button
         -- dbTable.__dfDefaults is set by callers (e.g. Aura Designer proxies) that
@@ -2494,11 +3824,29 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         GUI:MarkColorPickerCall()
         ColorPickerFrame:SetupColorPickerAndShow(info)
         settingUp = false
+
+        -- ☠ THE GESTURE OPENS AFTER SETUP, NOT BEFORE IT. Setting up an ALREADY
+        -- SHOWN picker takes the frame down and puts it back, which fires the
+        -- OnHide hook -- so a gesture opened a line above this would be closed by
+        -- the client mid-setup, and every drag tick that followed would push an
+        -- entry of its own. Opening here also puts the spurious swatchFunc that
+        -- setup fires (see the note by `settingUp`) outside the session, where it
+        -- belongs: it is not an edit.
+        --
+        -- The close first is the other half of the same problem: a picker that
+        -- was re-set without ever hiding leaves its previous session open, and
+        -- that session ends here rather than swallowing this one.
+        if SU then
+            ClosePickerGesture()
+            SU:BeginGesture()
+            pickerGestureOpen = true
+        end
     end)
     
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so the colour swatch greys even when it's a dark
         -- colour (SetDesaturated alone is invisible on near-black swatches).
+        self.dotLocked = not enabled
         self:SetAlpha(enabled and 1 or 0.4)
         btn:SetEnabled(enabled)
         if enabled then
@@ -2522,16 +3870,27 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
-    local options = {
+-- A fresh table each call: the dropdown takes ownership of the one it is handed.
+local function OutlineNames()
+    return {
         NONE = L["None"],
         OUTLINE = L["Outline"],
         THICKOUTLINE = L["Thick Outline"],
         MONOCHROME = L["Monochrome"],
         ["MONOCHROME, OUTLINE"] = L["Monochrome Outline"],
         ["MONOCHROME, THICKOUTLINE"] = L["Monochrome Thick Outline"],
-        _order = OUTLINE_FLAG_ORDER,
     }
+end
+
+-- The words the outline dropdown prints for a stored value, so a card summary
+-- names an outline exactly as the control does.
+function GUI:OutlineName(stored)
+    return OutlineNames()[DF:OutlineFlag(stored)]
+end
+
+function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
+    local options = OutlineNames()
+    options._order = OUTLINE_FLAG_ORDER
     local get = function() return DF:OutlineFlag(dbTable[dbKey] or (inheritKey and dbTable[inheritKey])) end
     local set = function(flag) dbTable[dbKey] = DF:ComposeOutline(flag, DF:OutlineHasShadow(dbTable[dbKey] or (inheritKey and dbTable[inheritKey]))) end
     return GUI:CreateDropdown(parent, label or L["Outline"], options, dbTable, dbKey, callback, get, set)
@@ -2548,8 +3907,36 @@ end
 function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inheritKey)
     local function effective() return dbTable[dbKey] or (inheritKey and dbTable[inheritKey]) end
     local get = function() return DF:OutlineHasShadow(effective()) end
-    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
-    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
+    local function compose(val) return DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
+    local set = function(val) dbTable[dbKey] = compose(val) end
+    return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set, nil,
+        { storedValue = compose })
+end
+
+-- The border animations' display names, keyed by the saved type value -- the
+-- list CreateAnimationControls' type dropdown offers. Published so a card's
+-- folded summary can name the chosen effect without keeping a copy of it.
+-- ⚠ A FRESH TABLE ON EVERY CALL, built from L at call time: the dropdown adds
+-- its own _order and may delete excluded types from what it is handed, and a
+-- table built once at file scope would freeze on the load-time language.
+-- CORNERS_ONLY is not in it (no longer pickable), so a caller must cope with
+-- a nil name for a legacy saved value.
+function GUI:AnimationTypeNames()
+    return {
+        NONE = L["None"],
+        DF_PULSATE = L["DF Pulsate"],
+        DF_ORBIT = L["DF Chase"],
+        DF_DASH = L["DF Dash"],
+        DF_FLASH = L["DF Flash"],
+        DF_PIXEL = L["DF Pixel"],
+        DF_PROC = L["DF Proc"],
+        BLINK = L["Blink"],
+        -- ★ Blizzard's own marching-ants widget, offered alongside ours. CAPABILITY-GATED:
+        -- MarchingAnts_CreateAsChildOf ships in Blizzard_SharedXML from 12.1.5, and offering
+        -- a type the engine cannot build would be an entry that silently renders nothing.
+        -- In this shared list (not beside the dropdown) so a folded card summary can name it.
+        MARCHING_ANTS = MarchingAnts_CreateAsChildOf and L["Marching Ants"] or nil,
+    }
 end
 
 function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
@@ -2575,16 +3962,21 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- sync with StartAnimation's branches in Frames/Border.lua.
     -- DF_DASH: Frequency = march SPEED (0 = static dashed), Thickness = dash
     -- thickness, Inset = dash inset.
-    local hasFrequency = { DF_PULSATE=1,
+    -- MARCHING_ANTS: Frequency = crawl SPEED (0 = a static outline, the mixin pauses
+    -- itself), Thickness = line width, Inset/Offset position the ring. No Particles,
+    -- Length or Scale — it is one continuous scrolling texture per edge, not a pool of
+    -- discrete pieces, so none of those three has anything to act on.
+    local hasFrequency = { DF_PULSATE=1, MARCHING_ANTS=1,
                            DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
     local hasParticles = { DF_ORBIT=1, DF_PIXEL=1 }
     -- CORNERS_ONLY is hidden from the type dropdown below, but keep its param
     -- entries so an indicator that still carries a saved CORNERS_ONLY value shows
     -- the right controls.
-    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1 }
+    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1, MARCHING_ANTS=1 }
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
-    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
+    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1,
+                             MARCHING_ANTS=1 }
     -- Scale slider = how big the effect draws. Sparkle size on DF Chase; on DF Proc and
     -- DF Flash it multiplies how far the glow reaches past the border. That reach cannot
     -- be a constant: both are a square glow texture stretched over the host, its bright
@@ -2595,6 +3987,10 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     local hasScale     = { DF_ORBIT=1, DF_PROC=1, DF_FLASH=1 }
     -- Length slider = bar length (DF Pixel's chasing bars).
     local hasLength    = { DF_PIXEL=1 }
+    -- Blend mode = how the effect's own textures mix with what is behind them. Every effect
+    -- that draws textures of its own; DF_PULSATE is absent because it has none -- it modulates
+    -- the BORDER's edges, whose blend mode is the border's own control.
+    local hasBlendMode = { DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
     local cornersOnly  = { CORNERS_ONLY=1 }
     local function hideUnless(set)
         return function()
@@ -2606,25 +4002,23 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     local w = {}
 
     -- All DF-owned border effects (no external glow library). The "DF " labels
-    -- are kept from when they sat alongside the retired LCG glows.
-    local animTypeOptions = {
-        NONE = L["None"],
-        DF_PULSATE = L["DF Pulsate"],
-        DF_ORBIT = L["DF Chase"],
-        DF_DASH = L["DF Dash"],
-        DF_FLASH = L["DF Flash"],
-        DF_PIXEL = L["DF Pixel"],
-        DF_PROC = L["DF Proc"],
-        BLINK = L["Blink"],
-        -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
-        -- is intentionally absent — it's kept in the engine (an existing saved
-        -- value still renders) but no longer offered as a pickable animation.
-        _order = { "NONE", "BLINK", "DF_ORBIT",
-                   "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" },
-    }
+    -- are kept from when they sat alongside the retired LCG glows. The names
+    -- come from GUI:AnimationTypeNames() (above), the one list a card summary
+    -- also reads.
+    local animTypeOptions = GUI:AnimationTypeNames()
+    -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
+    -- is intentionally absent — it's kept in the engine (an existing saved
+    -- value still renders) but no longer offered as a pickable animation.
+    animTypeOptions._order = { "NONE", "BLINK", "DF_ORBIT",
+                               "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" }
+    -- Marching Ants (12.1.5, capability-gated) is added by GUI:AnimationTypeNames itself;
+    -- it goes on the end of the order only when the client offers it.
+    if animTypeOptions.MARCHING_ANTS then
+        animTypeOptions._order[#animTypeOptions._order + 1] = "MARCHING_ANTS"
+    end
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
-    -- overlay-recoverable animations — no LCG glows).
+    -- overlay-recoverable animations).
     if excludeTypes then
         for k in pairs(excludeTypes) do animTypeOptions[k] = nil end
         local filteredOrder = {}
@@ -2652,7 +4046,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -- overflows (text spills past the box) on narrow windows until a manual
         -- drag forces a relayout.
         local reflowingHost = parent and parent.dfAD_ReflowWidgets ~= nil
-        local perfBanner = GUI:CreateInfoBanner(parent, {
+        local perfBanner = GUI:CreateInfoBanner(parent, { dismissKey = "border_animation_perf",
             tone = "caution",
             text = L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."],
             staticHeight = reflowingHost or nil,
@@ -2672,8 +4066,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     end
 
     -- Min 0: DF_DASH reads Frequency as march speed, so 0 = static dashed.
-    -- The LCG glows treat 0 as their default rate (clamped in StartAnimation),
-    -- and the OnUpdate effects fall back to a sensible default period at 0.
+    -- The OnUpdate effects fall back to a sensible default period at 0.
     w.animationFrequency = group:AddWidget(GUI:CreateSlider(parent, L["Animation Frequency"],
         0, 4, 0.05, dbTable, aKey("Frequency"),
         fullUpdate, lightUpdate, true), 55)
@@ -2727,6 +4120,30 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         fullUpdate, lightUpdate, true), 55)
     w.animationOffsetY.hideOn = hideUnless(hasPositioning)
 
+    -- ★★ ANIMATION BLEND MODE. Border Blend Mode is a different control: it governs
+    -- the border's own EDGES, not the effect drawn over them. Each effect also has a
+    -- built-in mode of its own -- DF Chase and DF Proc additive, the rest not.
+    -- ⚠ NO DEFAULT VALUE IN THE DB. An unset key means "this effect's own default", so every
+    -- existing profile keeps exactly the look it has -- see ANIM_BLEND_DEFAULT in Border.lua.
+    -- That is why this dropdown is not seeded and why its first entry is not Blend.
+    -- ⚠ EVERY EFFECT BUT DF PULSATE, which owns no textures: it modulates the border's own
+    -- edges, so Border Blend Mode already IS its blend mode. Two controls over one texture
+    -- would leave the user watching whichever ran last.
+    w.animationBlendMode = group:AddWidget(GUI:CreateDropdown(parent, L["Animation Blend Mode"],
+        -- _order, because pairs() order is not an order -- Default leads (it is the state
+        -- everyone is in), then the two anyone will actually pick, then the two nobody will.
+        { DEFAULT = L["Default"], BLEND = L["Blend"], ADD = L["Add"],
+          MOD = L["Modulate"], DISABLE = L["Disable"],
+          _order = { "DEFAULT", "BLEND", "ADD", "MOD", "DISABLE" } },
+        dbTable, aKey("BlendMode"), fullUpdate,
+        -- ⚠ nil <-> "DEFAULT" IN THE VIEW ONLY. The stored shape stays "absent means the
+        -- effect decides", so nothing has to migrate and a profile exported before today
+        -- imports unchanged; the dropdown just needs a row to show for that state.
+        function() return dbTable[aKey("BlendMode")] or "DEFAULT" end,
+        function(v) dbTable[aKey("BlendMode")] = (v ~= "DEFAULT") and v or nil end), 55)
+    w.animationBlendMode.hideOn = hideUnless(hasBlendMode)
+    w.animationBlendMode.tooltip = L["How the effect's colour mixes with what is behind it. Add brightens whatever it crosses, so a red effect reads orange over a yellow border — it is what makes a glow glow. Blend draws the colour exactly as picked. Default keeps this effect's original look."]
+
     -- DF Flash / DF Proc: skip the one-shot intro burst (glow-only).
     -- ☠ introInert SHOWS THE FORCED VALUE, NOT THE STORED ONE. The runtime pins
     -- procStart = true (intro suppressed) on every row-mode button, so binding the
@@ -2766,6 +4183,115 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationCornerLength.tooltip = L["How far the effect runs along each edge from the corner before stopping. Small values leave four short brackets instead of a full outline."]
 
     return w
+end
+
+-- ============================================================
+-- BORDER SHADOW -- the five controls under the "Border Shadow" toggle.
+--
+-- Lifted out of CreateBorderControls for popout gate two: Border and Border
+-- Shadow mount as two SEPARATE popout rows, so each needs a builder that can be
+-- handed its own group. CreateBorderControls still calls this for
+-- include.shadow, so every existing consumer builds exactly what it did.
+--
+-- The widgets come back with hideOn set and the four sub-controls carrying
+-- shadowOff as their disableOn — and NOTHING composed on top. The caller owns
+-- that: CreateBorderControls' end-of-function loop does it for the merged case,
+-- GUI:CreateBorderShadowControls below does it for the standalone one. Applying
+-- it here as well would double-compose the merged path.
+-- ============================================================
+local function BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+    local parent        = opts.parent
+    local fullUpdate    = opts.fullUpdate or function() end
+    local lightUpdate   = opts.lightUpdate
+    local refreshStates = opts.refreshStates
+
+    local function key(suffix) return prefix .. suffix end
+    local shadowOnKey = key("BorderShadowEnabled")
+    local w = {}
+
+    -- opts.noEnableToggle: suppress the built-in "Border Shadow" checkbox, the
+    -- same idiom as CreateBorderControls' noShowToggle, for consumers that gate
+    -- the shadow on an external toggle. The sub-controls keep their shadowOff
+    -- grey either way — the key still gates them, it is just not written here.
+    if not opts.noEnableToggle then
+        w.shadowEnabled = group:AddWidget(GUI:CreateCheckbox(parent, L["Border Shadow"], dbTable, shadowOnKey, function()
+            if refreshStates then refreshStates() end
+            fullUpdate()
+        end), 30)
+        w.shadowEnabled.hideOn = hideOff
+    end
+    -- Border Shadow OFF greys (not hides) its sub-controls — a nested boolean
+    -- toggle, same grey-everything rule. The caller's composition ORs its own
+    -- gate on top, so these also grey when Show Border is off.
+    local function shadowOff() return dbTable[shadowOnKey] == false end
+
+    w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"],
+        dbTable, key("BorderShadowColor"), true, fullUpdate), 35)
+    w.shadowColor.hideOn = hideOff
+    w.shadowColor.disableOn = shadowOff
+    w.shadowSize = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Size"], 0, 10, 1,
+        dbTable, key("BorderShadowSize"), fullUpdate, lightUpdate, true), 55)
+    w.shadowSize.hideOn = hideOff
+    w.shadowSize.disableOn = shadowOff
+    w.shadowOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset X"], -10, 10, 1,
+        dbTable, key("BorderShadowOffsetX"), fullUpdate, lightUpdate, true), 55)
+    w.shadowOffsetX.hideOn = hideOff
+    w.shadowOffsetX.disableOn = shadowOff
+    w.shadowOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset Y"], -10, 10, 1,
+        dbTable, key("BorderShadowOffsetY"), fullUpdate, lightUpdate, true), 55)
+    w.shadowOffsetY.hideOn = hideOff
+    w.shadowOffsetY.disableOn = shadowOff
+
+    return w
+end
+
+-- The Border Style dropdown's option map, and its order.
+--
+-- Gradient is a STYLE, not a separate toggle. When the consumer opts into
+-- gradient we expose GRADIENT as a third option, between SOLID and TEXTURE so
+-- the order reads "simple colour -> two colours -> custom texture"; otherwise the
+-- dropdown is the original SOLID / TEXTURE pair.
+--
+-- ☠ LIFTED OUT OF CreateBorderControls SO IT HAS ONE HOME. A popout row may
+-- HOIST this dropdown onto its own plate -- a second widget on the same table
+-- and key -- and that widget needs the same map. Two copies of an option map is
+-- exactly the drift the Frame page's own ☠☠ note about the two growth-direction
+-- maps is written against: the second copy is right on the day it is typed and
+-- silently wrong the day the first one gains an option.
+function GUI:BorderStyleOptions(includeGradient)
+    local L = DF.L
+    if includeGradient then
+        return { SOLID = L["Solid"], GRADIENT = L["Gradient"], TEXTURE = L["Texture"],
+                 _order = { "SOLID", "GRADIENT", "TEXTURE" } }
+    end
+    return { SOLID = L["Solid"], TEXTURE = L["Texture"], _order = { "SOLID", "TEXTURE" } }
+end
+
+-- Picking Texture without a texture configured leaves the border drawing
+-- nothing, so switching TO that style seeds the first LSM border. Lifted out of
+-- the Style dropdown's own callback for the reason the option map above was: a
+-- popout row may hoist that dropdown, and the hoisted twin has to do the SAME
+-- work on the same write or the two disagree about what "Texture" means.
+function GUI:SeedBorderTexture(dbTable, prefix)
+    if type(dbTable) ~= "table" or type(prefix) ~= "string" then return end
+    if dbTable[prefix .. "BorderStyle"] ~= "TEXTURE" then return end
+    local list = DF.GetBorderList and DF:GetBorderList() or nil
+    -- ☠ ANY VALUE THE LIST CANNOT ANSWER FOR, not just the three empty ones.
+    -- The list is keyed by LibSharedMedia NAME, and a stored PATH is none of
+    -- nil / "" / "SOLID" -- so it survived the seed, the dropdown had no label
+    -- for it and printed the raw path, and the border itself drew nothing
+    -- because Fetch could not resolve it either. The pandemic border shipped
+    -- exactly such a default; the Aura Designer per-aura proxies still carry
+    -- one, and this is what repairs both without a profile migration.
+    --
+    -- ⚠ `first` rather than `list`, because an EMPTY list is truthy. With LSM
+    -- absent GetBorderList returns {}, and the old guard wrote next({}) -- nil --
+    -- over whatever was stored. Nothing to seed FROM is nothing to seed.
+    local first = list and next(list)
+    local t = dbTable[prefix .. "BorderTexture"]
+    if first and (not t or t == "" or t == "SOLID" or not list[t]) then
+        dbTable[prefix .. "BorderTexture"] = first
+    end
 end
 
 function GUI:CreateBorderControls(group, dbTable, prefix, opts)
@@ -2826,28 +4352,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         dbTable, key("BorderSize"), fullUpdate, lightUpdate, true), 55)
     w.size.hideOn = hideOff
 
-    -- Gradient is a STYLE, not a separate toggle. When the consumer opts into
-    -- gradient via include.gradient, we expose GRADIENT as a third dropdown
-    -- option. Otherwise the dropdown is the original SOLID / TEXTURE pair.
-    local styleOptions = { SOLID = L["Solid"], TEXTURE = L["Texture"],
-        _order = { "SOLID", "TEXTURE" } }
-    if include.gradient then
-        styleOptions.GRADIENT = L["Gradient"]
-        -- Insert GRADIENT between SOLID and TEXTURE so the order reads
-        -- "simple colour → two colours → custom texture" in the dropdown.
-        styleOptions._order = { "SOLID", "GRADIENT", "TEXTURE" }
-    end
+    local styleOptions = GUI:BorderStyleOptions(include.gradient)
     w.style = group:AddWidget(GUI:CreateDropdown(parent, L["Border Style"],
         styleOptions, dbTable, key("BorderStyle"), function()
-            -- Match the frame border: pick the first LSM border when switching
-            -- to Texture without one configured.
-            if dbTable[key("BorderStyle")] == "TEXTURE" then
-                local list = DF.GetBorderList and DF:GetBorderList() or nil
-                local t = dbTable[key("BorderTexture")]
-                if list and (not t or t == "" or t == "SOLID") then
-                    dbTable[key("BorderTexture")] = next(list)
-                end
-            end
+            GUI:SeedBorderTexture(dbTable, prefix)
             if refreshStates then refreshStates() end
             fullUpdate()
         end), 55)
@@ -2869,12 +4377,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- Gradient pickers — only visible under Style = GRADIENT.  Grouped here
     -- (between Texture and the Colour Source dropdown) so all style-dependent
     -- widgets sit directly under the Style dropdown that controls them.
-    -- The standalone "Border Gradient" checkbox was removed when Style
-    -- absorbed it; Style is now the single source of truth so it's not
-    -- possible to pick "Solid + Class Color" then have a Gradient checkbox
-    -- stomp the class colour (the previous UX bug).  Legacy
-    -- `<prefix>BorderGradientEnabled = true` profiles are migrated to
-    -- `<prefix>BorderStyle = "GRADIENT"` on db load.
+    -- There is no standalone "Border Gradient" checkbox: Style is the single
+    -- source of truth, so a gradient toggle can never stomp the class colour of a
+    -- "Solid + Class Color" pick.  Legacy `<prefix>BorderGradientEnabled = true`
+    -- profiles are migrated to `<prefix>BorderStyle = "GRADIENT"` on db load.
     if include.gradient then
         local function gradHide() return hideOff() or not isGradient() end
 
@@ -2995,9 +4501,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         -- other Offset slider in the addon (~60 of them): an offset is a well
         -- understood control and a tooltip restating it is noise. Inset is the
         -- one that needs explaining, so the Thickness / Inset / Offset
-        -- distinction is spelled out THERE, once. Krathe's call, 2026-07-27 —
-        -- these two briefly had tooltips and Border Shadow's offsets did not,
-        -- which is the inconsistency that prompted it.
+        -- distinction is spelled out THERE, once.
     end
 
     if include.blendMode then
@@ -3008,34 +4512,13 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.blendMode.tooltip = L["How the border colour mixes with whatever is behind it. Blend is normal. Add brightens and is what makes a colour glow. Modulate darkens. Disable ignores opacity entirely and draws the colour flat."]
     end
 
+    -- The shadow block lives in its own builder (above) so gate two can mount it
+    -- as a popout row of its own. Merged onto `w` here, BEFORE the composition
+    -- loop at the end of this function — which is what puts borderOff on top of
+    -- the shadowOff those sub-controls came back carrying.
     if include.shadow then
-        local shadowOnKey = key("BorderShadowEnabled")
-        w.shadowEnabled = group:AddWidget(GUI:CreateCheckbox(parent, L["Border Shadow"], dbTable, shadowOnKey, function()
-            if refreshStates then refreshStates() end
-            fullUpdate()
-        end), 30)
-        w.shadowEnabled.hideOn = hideOff
-        -- Border Shadow OFF greys (not hides) its sub-controls — a nested boolean
-        -- toggle, same grey-everything rule. The end-of-function loop OR-composes
-        -- borderOff, so these also grey when Show Border is off.
-        local function shadowOff() return dbTable[shadowOnKey] == false end
-
-        w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"],
-            dbTable, key("BorderShadowColor"), true, fullUpdate), 35)
-        w.shadowColor.hideOn = hideOff
-        w.shadowColor.disableOn = shadowOff
-        w.shadowSize = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Size"], 0, 10, 1,
-            dbTable, key("BorderShadowSize"), fullUpdate, lightUpdate, true), 55)
-        w.shadowSize.hideOn = hideOff
-        w.shadowSize.disableOn = shadowOff
-        w.shadowOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset X"], -10, 10, 1,
-            dbTable, key("BorderShadowOffsetX"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetX.hideOn = hideOff
-        w.shadowOffsetX.disableOn = shadowOff
-        w.shadowOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset Y"], -10, 10, 1,
-            dbTable, key("BorderShadowOffsetY"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetY.hideOn = hideOff
-        w.shadowOffsetY.disableOn = shadowOff
+        local sw = BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+        for k, v in pairs(sw) do w[k] = v end
     end
 
     -- ===== Animation (Stage 3) =====
@@ -3116,6 +4599,43 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             widget.disableOn = function(d)
                 if disableWhen and disableWhen(dbTable) then return true end
                 if not isShow and borderOff() then return true end
+                return (prev and prev(d)) or false
+            end
+        end
+    end
+
+    return w
+end
+
+-- Border Shadow on its own, for a consumer that mounts it apart from the rest
+-- of the border — popout gate two, where Border and Border Shadow are two
+-- separate rows with a group each. Identical widgets to the include.shadow
+-- branch above; the difference is only who supplies the gates:
+--   hideWhen    — the consumer's visibility gate, applied to every row. nil (no
+--                 gate) means never hidden, which is what the panel pages pass.
+--   disableWhen — the consumer's grey, applied to EVERY row INCLUDING the
+--                 Border Shadow checkbox. The single-call path's equivalent is
+--                 borderOff, which the loop in CreateBorderControls composes;
+--                 split apart, the mount site passes the same predicate here.
+--   noEnableToggle — suppress the built-in checkbox (see the builder above).
+function GUI:CreateBorderShadowControls(group, dbTable, prefix, opts)
+    opts = opts or {}
+    local hideWhen    = opts.hideWhen
+    local disableWhen = opts.disableWhen
+
+    -- Same shape as CreateBorderControls' hideShow: the predicate reads from the
+    -- captured dbTable, not from the table LayoutChildren passes in.
+    local function hideOff() return hideWhen and hideWhen(dbTable) or false end
+
+    local w = BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+
+    -- The consumer's grey, composed on top of whatever the widget already
+    -- carries — nil for the toggle, shadowOff for the four under it.
+    for _, widget in pairs(w) do
+        if type(widget) == "table" and widget.SetEnabled then
+            local prev = widget.disableOn
+            widget.disableOn = function(d)
+                if disableWhen and disableWhen(dbTable) then return true end
                 return (prev and prev(d)) or false
             end
         end

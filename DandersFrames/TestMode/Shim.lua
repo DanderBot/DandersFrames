@@ -138,11 +138,18 @@ function DF:ReconcileTestMode(scope, silent)
     scope = testScope(scope)
     local wanted, active = DF:IsTestModeWanted(scope), DF:IsTestModeActive(scope)
     if wanted == active then return end
+    -- PERF timing (debug-gated, /df debug on, category "PERF"): the Show*/Hide*
+    -- call below is the bulk of the mover unlock/lock cost -- attribute it.
+    local t0 = DF.DebugActive and DF:DebugActive("PERF") and debugprofilestop() or nil
+    local what
     if scope == "raid" then
-        if wanted then DF:ShowRaidTestFrames(silent) else DF:HideRaidTestFrames(silent) end
+        if wanted then what = "ShowRaidTestFrames"; DF:ShowRaidTestFrames(silent)
+        else what = "HideRaidTestFrames"; DF:HideRaidTestFrames(silent) end
     else
-        if wanted then DF:ShowTestFrames(silent) else DF:HideTestFrames(silent) end
+        if wanted then what = "ShowTestFrames"; DF:ShowTestFrames(silent)
+        else what = "HideTestFrames"; DF:HideTestFrames(silent) end
     end
+    if t0 then DF:Debug("PERF", "ReconcileTestMode: %s %.1fms", what, debugprofilestop() - t0) end
     -- Show* refuses in combat, so `active` may still disagree afterwards; the
     -- next reconcile picks that up rather than us pretending it succeeded.
     if DF.GUI and DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end

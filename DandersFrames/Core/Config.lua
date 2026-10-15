@@ -241,60 +241,42 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Stripes_Sparse.tga",
     "DF_Stripes_Very_Dense.tga",
     "DF_Tank.tga",
-    "Icons\\add.tga",
-    "Icons\\check.tga",
-    "Icons\\chevron_right.tga",
-    "Icons\\close.tga",
-    "Icons\\content_copy.tga",
-    "Icons\\delete.tga",
-    "Icons\\dot.tga",
-    "Icons\\download.tga",
-    "Icons\\edit.tga",
-    "Icons\\edit_square.tga",
-    "Icons\\expand_more.tga",
-    "Icons\\filter_alt.tga",
-    -- ⚠ BOTH filter_list files ship, and the .png is the live one -- it is the
-    -- heavier weight, which is what reads at 11-13px. They differ only in that, so
-    -- the trap is real: a call site written as ...\filter_list, with no extension,
-    -- silently resolves to the LIGHT .tga and looks like the icon simply did not
-    -- take. Every live reference spells out ".png".
+    "Icons\\add.png",
+    "Icons\\check.png",
+    "Icons\\chevron_right.png",
+    "Icons\\close.png",
+    "Icons\\content_copy.png",
+    "Icons\\delete.png",
+    "Icons\\dot.png",
+    "Icons\\download.png",
+    "Icons\\edit.png",
+    "Icons\\edit_square.png",
+    "Icons\\expand_more.png",
+    "Icons\\filter_alt.png",
     "Icons\\filter_list.png",
-    "Icons\\filter_list.tga",
-    "Icons\\info.tga",
-    "Icons\\keyboard.tga",
-    "Icons\\lock.tga",
-    "Icons\\lock_open.tga",
-    "Icons\\menu.tga",
-    "Icons\\mouse.tga",
-    "Icons\\notes.tga",
-    "Icons\\preview.tga",
-    "Icons\\preview_off.tga",
-    -- The first .png ICON we ship (the absorb bar textures were the first PNGs of any
-    -- kind). Deliberately left unconverted, to learn whether PNG icons behave.
-    --
-    -- ⚠ Listed here only because this manifest is GENERATED FROM THE FOLDER and has
-    -- to match it. Icons/ entries are INERT: the healing repair walks
-    -- TEXTURE_REPAIR_KEYS -- an explicit list of user-selectable PROFILE keys -- and
-    -- never enumerates this table, while GUI icons are hardcoded at their call sites
-    -- and go through a raw SetTexture rather than DF:SafeSetTexture. Nothing can heal
-    -- a GUI icon and nothing should try; a user cannot pick one, so a wrong one is a
-    -- bug in our source rather than a stale profile. That is true of every Icons\\
-    -- line above this one too.
-    "Icons\\question.png",
-    "Icons\\refresh.tga",
-    "Icons\\remove.tga",
-    "Icons\\reorder.tga",
-    "Icons\\save.tga",
-    "Icons\\search.tga",
-    "Icons\\settings.tga",
-    "Icons\\star.tga",
-    "Icons\\sync.tga",
-    "Icons\\sync_disabled.tga",
-    "Icons\\upload.tga",
-    "Icons\\visibility.tga",
-    "Icons\\visibility_off.tga",
-    "Icons\\warning.tga",
-    "Icons\\widget_small.tga",
+    "Icons\\info.png",
+    "Icons\\keyboard.png",
+    "Icons\\lock.png",
+    "Icons\\lock_open.png",
+    "Icons\\menu.png",
+    "Icons\\mouse.png",
+    "Icons\\notes.png",
+    "Icons\\preview.png",
+    "Icons\\preview_off.png",
+    "Icons\\refresh.png",
+    "Icons\\remove.png",
+    "Icons\\reorder.png",
+    "Icons\\save.png",
+    "Icons\\search.png",
+    "Icons\\settings.png",
+    "Icons\\star.png",
+    "Icons\\sync.png",
+    "Icons\\sync_disabled.png",
+    "Icons\\upload.png",
+    "Icons\\visibility.png",
+    "Icons\\visibility_off.png",
+    "Icons\\warning.png",
+    "Icons\\widget_small.png",
 }
 
 -- Lookup keyed BOTH ways: with the extension (how .png must be referenced) and
@@ -537,9 +519,8 @@ local fontValidationString = fontValidationFrame:CreateFontString(nil, "OVERLAY"
 -- Memoised per path. This runs on EVERY DF:SafeSetFont call, and SafeSetFont is one of
 -- the hottest functions in the addon (5.7% of a boss trace's allocation just here), but
 -- a path only ever needs loading once -- the file does not unload and the mapping from
--- path to file never changes. Keyed on ATTEMPTED rather than succeeded, which matches
--- the old behaviour exactly: the pcall result was discarded, so a failed load was never
--- retried anyway.
+-- path to file never changes. Keyed on ATTEMPTED rather than succeeded, so a failed
+-- load is never retried.
 --
 -- pcall(fn, args...) not pcall(function() ... end): the closure form allocated one
 -- closure per call on that same hot path.
@@ -709,7 +690,7 @@ local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     return nil
 end
 
--- ★ Exposed for the settings-UI font objects (GUI/DFFonts.lua). The DFFont* objects
+-- ★ Exposed for the settings-UI font objects (DandersUI/Fonts.lua). The DFFont* objects
 -- are Font OBJECTS, not FontStrings, so SafeSetFont (which also scales/re-renders a
 -- FontString) does not fit them — but they need the same multi-alphabet family, or
 -- every widget inheriting a DFFont renders tofu on a CJK client whenever the chosen
@@ -930,9 +911,11 @@ local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
 -- flag). These let the GUI bind a flag dropdown and a shadow checkbox to a single
 -- stored value without a destructive migration of existing profiles.
 
+-- A boolean is a Shadow tick that reached a store raw (a layout override or an
+-- old profile): true reads as shadow with no outline, false as none.
 -- Returns the flag portion (always "NONE" rather than "" for dropdown matching).
 function DF:OutlineFlag(stored)
-    stored = stored or "NONE"
+    if type(stored) ~= "string" then return "NONE" end
     local rest = stored:match("^SHADOW;(.*)$")
     if rest then stored = rest end
     if stored == "" or stored == "SHADOW" then return "NONE" end
@@ -941,7 +924,7 @@ end
 
 -- Returns true if the stored value includes a drop shadow.
 function DF:OutlineHasShadow(stored)
-    if not stored then return false end
+    if type(stored) ~= "string" then return stored == true end
     return stored == "SHADOW" or stored:match("^SHADOW;") ~= nil
 end
 
@@ -967,11 +950,15 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     -- every caller, and a corrupted import can store a boolean/number/table in
     -- a font key. Coerce instead of crashing (a bad outline once broke frame
     -- layout addon-wide on login): bad font name -> fallback font, bad size ->
-    -- default, bad outline -> no flags.
+    -- default, bad outline -> no flags (true -> shadow, as DF:OutlineHasShadow reads it).
     if type(fontNameOrPath) ~= "string" then fontNameOrPath = nil end
     fontSize = tonumber(fontSize) or 10
     if fontSize <= 0 then fontSize = 10 end
-    if type(outline) ~= "string" then outline = "" end
+    if outline == true then
+        outline = "SHADOW"
+    elseif type(outline) ~= "string" then
+        outline = ""
+    end
 
     -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
@@ -995,8 +982,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         end
         -- Normalize "NONE" to empty string (NONE is not a valid WoW font flag)
         if flags == "NONE" then flags = "" end
-        -- The SLUG variant is derived from `flags` alone, so it caches with it --
-        -- the concat below used to run per call for every slug-eligible element.
+        -- The SLUG variant is derived from `flags` alone, so it caches with it.
         parsed = {
             shadow = shadow,
             flags  = flags,
@@ -1078,7 +1064,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- (hundreds/minute in PvP instances on live); on 12.1 this runs in
             -- the SecureGroupHeader's child-refresh path, so the taint poisoned
             -- the secure header + aura containers and froze auras in combat
-            -- (taint.log: 168× Config.lua:773). Skip the re-render for secret
+            -- (taint.log: 168× in SafeSetFont). Skip the re-render for secret
             -- text: issecretvalue runs BEFORE any boolean use of the value, and
             -- secret-text fontstrings rewrite on every update anyway, so the
             -- font change lands on the next natural SetText. The old `~= ""`
@@ -1146,14 +1132,17 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- How the settings pages' explainer banners start: "show", "fold" (as their
+    -- icon chip) or "off". Account-wide: it is about learning the window, not a
+    -- profile's look. Shown by default so a new user meets them.
+    pageTips = "show",
     -- The one-line greeting printed at login. Account-wide like its Notifications
     -- sibling above: it is chat chrome, not a per-profile visual. Default ON so a
     -- new user still learns `/df` exists; anyone who already knows can silence it.
     showLoginMessage = true,
     -- Colour picker. Account-wide, not per-mode: "use DF's picker" is a UI-chrome
     -- preference with no party/raid meaning, and the hooks that consume it are
-    -- installed once for the whole session. Previously these lived in PartyDefaults,
-    -- which generated an independent (and permanently ignored) raid copy.
+    -- installed once for the whole session.
     --   colorPickerOverride       -- DF's own colour swatches use DF's picker
     --   colorPickerGlobalOverride -- every OTHER addon's picker becomes DF's too
     colorPickerOverride = true,
@@ -1321,6 +1310,16 @@ DF.PartyDefaults = {
     -- read and stay.
     anchorX = 0,
     anchorY = -325,
+    -- The DandersMover position RECORD. { point, x, y, anchor } — the shape the lib
+    -- reads and mutates in place, and what DF:GetPositionRecord / UpdateContainerPosition
+    -- read. anchorX/anchorY above are kept as a WRITE-THROUGH MIRROR for this minor:
+    -- 30+ resident readers still take the scalars, and the auto-layout override system
+    -- can only override top-level SCALAR keys (a table-valued override is invisible to
+    -- the raid overlay proxy's __newindex, so it would read stale and lose writes).
+    -- DF:SetPositionRecord is the single funnel that keeps the two in step.
+    -- ⚠ The raid value differs; it is supplied by RAID_DEFAULT_OVERRIDES at the bottom
+    -- of this file, NOT by a second copy here (DF.RaidDefaults is generated).
+    position = { point = "CENTER", x = 0, y = -325 },
 
     -- Background
     backgroundClassAlpha = 1,
@@ -1398,8 +1397,8 @@ DF.PartyDefaults = {
     buffShowBorder = true,
     buffBorderInset = 0,
     buffBorderSize = 1,
-    -- Canonical border toolkit (Stage 5.5 Phase 2): plugs into BuildSpec +
-    -- CreateBorderControls.  Colour alpha 0.8 preserves the legacy opacity.
+    -- Canonical border toolkit: plugs into BuildSpec + CreateBorderControls.
+    -- Colour alpha 0.8 preserves the legacy opacity.
     buffBorderColor = {r = 0, g = 0, b = 0, a = 0.8},
     buffBorderStyle = "SOLID",
     buffBorderTexture = "SOLID",
@@ -1477,7 +1476,13 @@ DF.PartyDefaults = {
     buffPandemicBorderOffsetY = 0,
     buffPandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
     buffPandemicBorderBlendMode = "BLEND",
-    buffPandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    -- ☠ "SOLID", like all eleven sibling <prefix>BorderTexture defaults, and NOT
+    -- a texture path. GetBorderList() is keyed by LibSharedMedia NAME, so a path
+    -- is not a key in it: the dropdown could not label it and fell back to
+    -- printing the raw path, and GetBorderTexturePath could not fetch it either,
+    -- so the border drew nothing. This one shipped a STATUSBAR path besides --
+    -- DF_Minimalist is registered as a bar texture, never as a border.
+    buffPandemicBorderTexture = "SOLID",
     buffPandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
     buffPandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
     buffPandemicBorderGradientDirection = "HORIZONTAL",
@@ -1486,7 +1491,6 @@ DF.PartyDefaults = {
     buffPandemicBorderShadowSize = 1,
     buffPandemicBorderShadowOffsetX = 1,
     buffPandemicBorderShadowOffsetY = -1,
-    -- Expiring Animation (AD-style full toolkit) — replaces the legacy
 
     -- Aura Source Mode
 
@@ -1573,10 +1577,41 @@ DF.PartyDefaults = {
         [447960] = true,  -- Ride Along Inactive
         [206151] = true,  -- Challenger's Burden
     },
-    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (native DISPELLABLE token). "ANY" is a retired legacy value: same token as ALL, dropdown row removed 2026-08-22; Core.lua rewrites stored ones and the engine still accepts strays from imports.
+    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (native DISPELLABLE token). "ANY" is a retired legacy value: same token as ALL, dropdown row removed; Core.lua rewrites stored ones and the engine still accepts strays from imports.
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
+    debuffMaxDurationUnit = "MINUTES",        -- ... "SECONDS" reads debuffMaxDurationSeconds instead
+    debuffMaxDurationSeconds = 5,
+    debuffHidePermanent = false,              -- Hide debuffs with no duration
+    -- Hide column: never show these, whatever the categories (or All Debuffs) pick.
+    debuffHideBoss = false,
+    debuffHideRole = false,
+    debuffHidePriority = false,
+    debuffHideCrowdControl = false,
+    debuffHideRaid = false,
+    debuffHideDispellable = false,            -- follows directDebuffDispellableMode
+    debuffHideNonPlayer = false,              -- keeps only debuffs a player or pet cast
+    debuffHidePlayer = false,                 -- hides debuffs any player or pet cast
+    debuffFilterPlayer = false,               -- From Any Player (isFromPlayerOrPlayerPet = true)
+    debuffFilterMine = false,                 -- Cast By You (PLAYER token)
+    debuffHideMine = false,
+    -- Later Show categories (IMPORTANT, RAID_IN_COMBAT, RAID_PLAYER_DISPELLABLE tokens,
+    -- then per-type dispel picks) and their Hide twins. All off: no change.
+    debuffFilterImportant = false,
+    debuffFilterRaidInCombat = false,
+    debuffFilterMagic = false,
+    debuffFilterCurse = false,
+    debuffFilterPoison = false,
+    debuffFilterDisease = false,
+    debuffFilterBleed = false,
+    debuffHideImportant = false,
+    debuffHideRaidInCombat = false,
+    debuffHideMagic = false,
+    debuffHideCurse = false,
+    debuffHidePoison = false,
+    debuffHideDisease = false,
+    debuffHideBleed = false,
     directDebuffSortOrder = "TIME",           -- "DEFAULT" / "TIME" / "NAME"
     directDebuffSortMineFirst = false,        -- Own auras before others' (TIME/NAME sorts; DEFAULT is already mine-first)
     directDebuffSortReverse = false,          -- Reverse the sort direction
@@ -1601,6 +1636,20 @@ DF.PartyDefaults = {
     buffStackScale = 1,
     buffStackX = 3,
     buffStackY = -2,
+    -- CASTER NAME (12.1.5's SetCasterName). Default OFF: it is the only aura text that
+    -- can be as wide as the icon, so turning it on for everyone would be a layout change
+    -- nobody asked for. Class colours default ON because that is what makes the name
+    -- readable at a glance; realm names default OFF for the same width reason.
+    buffCasterName = false,
+    buffCasterRealm = false,
+    buffCasterClassColor = true,
+    buffCasterAnchor = "BOTTOM",
+    buffCasterColor = {r = 1, g = 1, b = 1},
+    buffCasterFont = "DF Roboto SemiBold",
+    buffCasterOutline = "SHADOW;OUTLINE",
+    buffCasterScale = 1,
+    buffCasterX = 0,
+    buffCasterY = -12,
     buffWrap = 2,
     showBuffs = true,
 
@@ -1628,6 +1677,11 @@ DF.PartyDefaults = {
     healthFadeAlpha = 0.5,
     healthFadeThreshold = 100,
     hfCancelOnDispel = true,
+
+    -- Unhealable fading (Spirit of Redemption): a cover over the frame while the aura is up
+    fadeUnhealableEnabled = false,
+    fadeUnhealableAlpha = 0.4,
+    fadeUnhealableColor = {r = 0.05, g = 0.05, b = 0.05},
 
     -- Debuff settings
     debuffAlpha = 1,
@@ -1722,6 +1776,18 @@ DF.PartyDefaults = {
     debuffStackScale = 1,
     debuffStackX = 0,
     debuffStackY = 0,
+    -- CASTER NAME — see the buff twin above for why each default is what it is. This is
+    -- the row where it earns its keep: "who put this on me" is a debuff question.
+    debuffCasterName = false,
+    debuffCasterRealm = false,
+    debuffCasterClassColor = true,
+    debuffCasterAnchor = "BOTTOM",
+    debuffCasterColor = {r = 1, g = 1, b = 1},
+    debuffCasterFont = "DF Roboto SemiBold",
+    debuffCasterOutline = "SHADOW;OUTLINE",
+    debuffCasterScale = 1,
+    debuffCasterX = 0,
+    debuffCasterY = -12,
     debuffWrap = 3,
     showDebuffs = true,
 
@@ -1849,14 +1915,21 @@ DF.PartyDefaults = {
     dispelIconOffsetY = 0,
     dispelIconPosition = "TOPRIGHT",
     dispelIconSize = 20,
+    dispelIconMax = 1,        -- dispel icon row: symbols per frame (1-5)
     dispelShowBorder = true,
     dispelShowGradient = true,
     dispelShowIcon = true,
 
     -- Unified dispel overlay (12.1 container-slot driven, Features/Dispel.lua)
     dispelOverlayEnabled = true,
-    -- "Show Overlay For": 1 = Dispellable By Me, 2 = All Dispellable (Blizzard convention)
+    -- "Dispellable": 1 = By Me, 2 = All (Blizzard convention)
     dispelOverlayDispelType = 2,
+    -- Per-type Hide: never light the overlay for these, whatever the mode (all off).
+    dispelOverlayHideMagic = false,
+    dispelOverlayHideCurse = false,
+    dispelOverlayHidePoison = false,
+    dispelOverlayHideDisease = false,
+    dispelOverlayHideBleed = false,
 
     -- External Defensive
 
@@ -1866,7 +1939,6 @@ DF.PartyDefaults = {
     frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
-    gridSize = 25,
     growDirection = "HORIZONTAL",
     growthAnchor = "CENTER",
     locked = true,
@@ -1887,10 +1959,6 @@ DF.PartyDefaults = {
     permanentMoverShowOnHover = false,
     permanentMoverWidth = 15,
     pixelPerfect = true,
-    snapToGrid = true,
-    pinnedSnapToGrid = false,
-    pinnedHideMover = false,
-    hideDragOverlay = false,
 
     -- Group Labels
     groupLabelColor = {r = 1, g = 1, b = 1, a = 1},
@@ -2011,6 +2079,7 @@ DF.PartyDefaults = {
     hideBlizzardPartyFrames = true,
     hideBlizzardRaidFrames = true,
     hideDefaultPlayerFrame = false,
+    hideDefaultPlayerFrameRaidOnly = false,
     hidePlayerFrame = false,
     showBlizzardSideMenu = true,
 
@@ -2223,6 +2292,12 @@ DF.PartyDefaults = {
     personalTargetedSpellSpacing = 6,
     personalTargetedSpellX = 0,
     personalTargetedSpellY = -150,
+    -- DandersMover position RECORD for the personal block ({ point, x, y, anchor });
+    -- the X/Y scalars above stay as a write-through mirror for this minor, written by
+    -- DF:SetPositionRecord only. Raid inherits this key (RaidDefaults is generated) and
+    -- the raid copy is what drives the block in a raid (GetPersonalDB). It is on
+    -- AutoProfiles' NON_OVERRIDABLE_KEYS: the scalars are what a raid layout overrides.
+    personalTargetedPosition = { point = "CENTER", x = 0, y = -150 },
 
     -- Pet Frames
     petAnchor = "BOTTOM",
@@ -2372,6 +2447,11 @@ DF.PartyDefaults = {
     -- with the range / health fades. Global by default; the split swaps in an
     -- out-of-combat and an in-combat value (hover can borrow the in-combat one so a
     -- receded frame is still readable while you interact with it).
+    -- ⚠ TRUE, so nobody's frames change on upgrade: the migration fills this in for
+    -- every existing profile, and a profile that had fade set up has to keep it.
+    -- The resolver reads it as `== false` for the same reason -- a table that has not
+    -- been migrated yet holds nil, and nil has to mean on (Features/ElementAppearance.lua).
+    frameFadeEnabled = true,
     frameFadeAlpha = 1,
     frameFadeSplitCombat = false,
     frameFadeAlphaOutOfCombat = 1,
@@ -2552,10 +2632,9 @@ DF.PartyDefaults = {
     statusTextColor = {r = 1, g = 1, b = 1, a = 1},
     statusTextEnabled = true,
     statusTextFont = "DF Roboto SemiBold",
-    -- 12 (Krathe, 2026-08-08; was 14). This is the "Dead / Offline / Ghost" size for
-    -- BOTH surfaces: the legacy status text, and the Text Designer's `status_text`
-    -- element — TextDesigner/Migration.lua seeds that element's fontSize from this key,
-    -- so one value is the default for both by construction.
+    -- The "Dead / Offline / Ghost" size for BOTH surfaces: the legacy status text, and
+    -- the Text Designer's `status_text` element — TextDesigner/Migration.lua seeds that
+    -- element's fontSize from this key, so one value is the default for both.
     statusTextFontSize = 12,
     statusTextOutline = "SHADOW",
     statusTextX = 0,
@@ -2677,6 +2756,9 @@ DF.PartyDefaults = {
     targetedListWidth = 240,
     targetedListX = 0,
     targetedListY = -10,
+    -- DandersMover position RECORD (see personalTargetedPosition). Party-only for free:
+    -- PARTY_ONLY_PREFIX strips every targetedList* key from the generated RaidDefaults.
+    targetedListPosition = { point = "CENTER", x = 0, y = -10 },
     targetedListZoomIcon = true,
     -- Per-text-element anchor + offset. Anchor is a point name
     -- (LEFT / CENTER / RIGHT) applied within the bar's progress
@@ -2883,6 +2965,13 @@ DF.PartyDefaults = {
         -- defaults. Default true: pinned is a party/raid feature and the PvP event
         -- storm could exhaust the per-frame budget ("script ran too long").
         disableInPvP = true,
+        -- Pinned position records are in DandersMover semantics (point = growth corner,
+        -- x/y = offsets from UIParent CENTER, frames glue in `anchor`). A profile whose
+        -- pinnedFrames table lacks this marker is normalised ONCE by
+        -- PinnedFrames.MigrateProfileRecords. It lives INSIDE the table, not as a
+        -- profile flag, so it travels with the table through export/import and a
+        -- pinnedFrames-category import of an old string is converted exactly once too.
+        positionsV2 = true,
         sets = {
             [1] = {
                 enabled = false,
@@ -2999,6 +3088,10 @@ local RAID_DEFAULT_OVERRIDES = {
     -- missingBuffIconScale). missingBuffIconSize has no raid override, so 24 is its value
     -- in both modes — change that and this stops matching silently.
     defensiveIconSize = 24,   -- party: 26; matches missingBuffIconSize (24)
+    -- Raid's container sits in a different place than party's. Mirrors the legacy
+    -- raidAnchorX/raidAnchorY defaults above (-6.666610717773438 / -25) exactly, so a
+    -- fresh profile's record and its scalar mirror agree from the first frame.
+    position = { point = "CENTER", x = -6.666610717773438, y = -25 },
 }
 
 local PARTY_ONLY_PREFIX = "targetedList"
@@ -3028,7 +3121,13 @@ DF.RaidDefaults = (function()
         end
     end
     for _, k in ipairs(remove) do t[k] = nil end
-    for k, v in pairs(RAID_DEFAULT_OVERRIDES) do t[k] = v end
+    -- Deep-copy here too, not just for the inherited keys above: `position` is the first
+    -- TABLE-valued override, and a raw assignment would make DF.RaidDefaults.position and
+    -- RAID_DEFAULT_OVERRIDES.position the same table -- one stray mutation of the "default"
+    -- would then rewrite the shipped default for the rest of the session.
+    for k, v in pairs(RAID_DEFAULT_OVERRIDES) do
+        t[k] = (type(v) == "table") and CopyDefaultsDeep(v) or v
+    end
     return t
 end)()
 
@@ -3072,3 +3171,4 @@ function DF:GetGlobalDB()
     end
     return DandersFramesDB_v2.global
 end
+

@@ -7,9 +7,8 @@ local addonName, DF = ...
 -- aura lists and display names (all sourced from the static
 -- DF.AuraDesigner tables in Config.lua).
 --
--- The legacy aura-scanning provider that used to live here died
--- with the 12.1 rework: live indicators are rendered by the game
--- engine via AuraDesigner\Factory.lua and no aura data is read.
+-- No aura data is read here: live indicators are rendered by the
+-- game engine via AuraDesigner\Factory.lua.
 -- ============================================================
 
 local pairs, ipairs = pairs, ipairs
@@ -324,7 +323,7 @@ end
 -- Returns the spec key for the current player, or nil if not supported
 function AuraAdapter:GetPlayerSpec()
     local _, englishClass = UnitClass("player")
-    local specIndex = GetSpecialization and GetSpecialization() or nil
+    local specIndex = C_SpecializationInfo.GetSpecialization() or nil
     if not englishClass or not specIndex then return nil end
 
     local key = englishClass .. "_" .. specIndex

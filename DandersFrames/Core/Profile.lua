@@ -42,15 +42,10 @@ end
 -- SETTINGS-WINDOW STATE (ACCOUNT-WIDE, NOT PROFILE CONTENT)
 -- ============================================================
 -- Scale, size and position of the settings window are machine state, not
--- settings -- ExportCategories has declared them local-only for as long as
--- exports have existed. They used to be STORED in db.party anyway, which meant
--- a profile carried them: a freshly created profile is born from PartyDefaults,
--- so its guiScale was 1 while the already-open window kept the old scale. The
--- Test Mode and Unlock windows re-read the db on every OnShow, so they snapped
--- to 100% and only the UI Scale slider (the single writer) could put them back
--- in step. Holding the state account-wide is what actually enforces the
--- declared intent -- switching or creating a profile can no longer move,
--- resize or rescale the window out from under the user.
+-- settings -- ExportCategories declares them local-only. Holding that state
+-- account-wide rather than in db.party is what enforces the declared intent:
+-- switching or creating a profile can no longer move, resize or rescale the
+-- window out from under the user.
 --
 -- Fields: scale, width, height, point, relPoint, x, y. All optional; every
 -- reader supplies its own fallback.
@@ -65,6 +60,23 @@ function DF:GetWindowState()
 end
 
 -- ============================================================
+-- SETTINGS PANEL FONT
+-- ============================================================
+-- The panel's font and outline live at the profile root, and every path that
+-- swaps or rewrites the profile (switch, import, reset) ends in
+-- FullProfileRefresh, which calls this. It re-skins only when the pair actually
+-- moved: auto layouts run that refresh on every group change, and a re-skin
+-- walks the whole settings window.
+function DF:SyncSettingsFont()
+    local db = DF.db
+    if not (db and DF.GUI and DF.GUI.RefreshSettingsFont) then return end
+    local key = tostring(db.settingsFont) .. "\0" .. tostring(db.settingsFontOutline)
+    if key == DF._settingsFontKey then return end
+    DF._settingsFontKey = key
+    DF.GUI:RefreshSettingsFont()
+end
+
+-- ============================================================
 -- PROFILE MANAGEMENT
 -- ============================================================
 
@@ -73,44 +85,39 @@ function DF:ResetProfile(mode)
     local L = DF.L
     if not DF.db or not DF.db[mode] then return end
     local defaults = (mode == "party" and DF.PartyDefaults or DF.RaidDefaults)
+    -- ☠ THE UNDO STACK IS FENCED HERE. DF.db[mode] is about to be REPLACED, so
+    -- every entry holding a reference to the outgoing table would undo into a
+    -- table nothing reads any more -- silently, since the write itself succeeds.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
     DF.db[mode] = DF:DeepCopy(defaults)
     DF:FullProfileRefresh()
     local modeLabel = mode == "party" and "Party" or "Raid"
     DF:Say(format(L["%s settings reset to defaults."], modeLabel))
 end
 
--- Full profile reset: both modes PLUS the profile-level designer preset
--- libraries. DF:ResetProfile only replaces DF.db[mode]; the Aura/Text Designer
--- store their configs in the shared, profile-level auraDesignerPresets/
--- textDesignerPresets libraries, which those per-mode resets never touch — so
--- without this, edited AD/TD presets survive a "Reset Profile to Defaults".
--- Used by the GUI "Reset Profile to Defaults" button and /df reset.
+-- Full profile reset: the current profile becomes exactly what a NEW profile
+-- is, under the same name. Used by the GUI "Reset Profile to Defaults" button
+-- and /df reset.
+--
+-- ☠ REPLACED, NOT RESET KEY BY KEY. Resetting the two modes misses the
+-- profile-ROOT state they never reach -- designer preset libraries, filter
+-- overrides, sync links, the settings font, class and power colours, auto
+-- layouts, the Party/Raid switches -- and every new root key would be one more
+-- to chase. A fresh table from the constructor a new profile uses cannot miss
+-- anything it seeds, and ActivateProfile then runs the same migrations,
+-- refresh and reload check a profile switch does.
+--
+-- ⚠ NOT SAVED FIRST. SetProfile saves the outgoing profile before switching;
+-- here that would write the old settings straight back over the new table.
 function DF:ResetFullProfile()
-    -- ★ UNLINK FIRST. Party/Raid sync state lives at the PROFILE ROOT, so neither
-    -- per-mode ResetProfile reached it and a "Reset Profile to Defaults" left every
-    -- synced page still synced — a state a freshly created profile can never be in
-    -- (Profile.lua seeds linkedSections = {}), which is the yardstick for this function.
-    -- ⚠ BEFORE the mode resets, not after: each ResetProfile ends in FullProfileRefresh,
-    -- which runs DF:SyncLinkedSections. Clearing afterwards would let three refreshes
-    -- fire against link state we are about to discard.
-    -- `{}` rather than nil to match the fresh-profile shape exactly; readers are
-    -- nil-guarded either way.
-    DF.db.linkedSections = {}
-    self:ResetProfile("party")
-    self:ResetProfile("raid")
-    if self.ResetDesignerPresets then self:ResetDesignerPresets() end
-    -- Filter Designer per-spell preset overrides live at profile root
-    -- (DF.db.filterPresetOverrides), like the AD/TD preset libraries above —
-    -- neither per-mode ResetProfile nor ResetDesignerPresets touches them.
-    -- filterMutedSpellIDs is its sibling (per-spell-ID narrowing within a record)
-    -- and travels with it everywhere: reset, export, payload keys, new-profile
-    -- copy, import.
-    DF.db.filterPresetOverrides = nil
-    DF.db.filterMutedSpellIDs = nil
-    -- FullProfileRefresh re-applies the Aura Designer engine to live frames
-    -- (Core.lua), so the reset AD presets take effect immediately. It does NOT
-    -- touch the Text Designer, so nudge that separately below.
-    self:FullProfileRefresh()
+    local L = DF.L
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local name = DF:GetCurrentProfile()
+    DandersFramesDB_v2.profiles[name] = DF:NewProfileTable()
+    DF:ActivateProfile(name, format(L["Profile reset to defaults: %s"], name))
+    -- FullProfileRefresh (inside ActivateProfile) re-applies the Aura Designer
+    -- engine to live frames but not the Text Designer, so nudge that here.
     if DF.TextDesigner and DF.TextDesigner.Preview and DF.TextDesigner.Preview.RefreshAll then
         DF.TextDesigner.Preview:RefreshAll()
     end
@@ -324,6 +331,34 @@ function DF:SaveCurrentProfile()
     DandersFramesDB_v2.profiles[currentName] = DF:DeepCopy(DF.db)
 end
 
+-- A brand-new profile table: current defaults for both modes and the profile
+-- root, with every one-time migration already marked done. The one
+-- constructor, shared by creating a profile and resetting one.
+function DF:NewProfileTable()
+    local profile = {
+        party = DF:DeepCopy(DF.PartyDefaults),
+        raid = DF:DeepCopy(DF.RaidDefaults),
+        raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
+        classColors = {},
+        powerColors = {},
+        linkedSections = {},
+        partyEnabled = true,
+        raidEnabled = true,
+        -- Must match the CURRENT default (and ActivateProfile's nil-backfill).
+        -- Seeding the pre-Roboto face here meant a freshly created profile kept
+        -- Friz -- the backfill skips a non-nil value -- until the
+        -- _settingsFontRobotoDefaultV1 migration flipped it on the next reload,
+        -- so the settings font appeared to change by itself.
+        settingsFont = "DF Roboto SemiBold",
+        settingsFontOutline = "NONE",
+    }
+    -- Born from current defaults => every one-time migration is already done.
+    -- Without this, the unconditional frame-level / container-position shifts
+    -- fired on the new profile and moved values that were already correct.
+    DF:StampFreshProfileMigrations(profile)
+    return profile
+end
+
 -- Set/create a profile
 function DF:SetProfile(name)
     local L = DF.L
@@ -336,6 +371,20 @@ function DF:SetProfile(name)
     -- Save current profile before switching (strips runtime overrides)
     DF:SaveCurrentProfile()
 
+    -- Create new profile if doesn't exist
+    if not DandersFramesDB_v2.profiles[name] then
+        DandersFramesDB_v2.profiles[name] = DF:NewProfileTable()
+        DF:Say(format(L["Created new profile: %s"], name))
+    end
+
+    DF:ActivateProfile(name, format(L["Switched to profile: %s"], name))
+end
+
+-- Make the stored profile `name` the live one: clear the runtime state that
+-- belongs to the outgoing profile, point DF.db at it, run the per-profile
+-- migrations and the full refresh, announce `message`, and check whether the
+-- frame-mode switches now need a reload. SetProfile and ResetFullProfile.
+function DF:ActivateProfile(name, message)
     -- Clear auto-profile runtime state and overlay BEFORE switching profiles
     -- so FullProfileRefresh reads the clean new profile with no stale overlay
     if DF.AutoProfilesUI then
@@ -344,37 +393,16 @@ function DF:SetProfile(name)
         DF.AutoProfilesUI.pendingAutoProfileEval = false
     end
     DF.raidOverrides = nil
+    -- ...and the undo stack with them. Every entry names a table inside the
+    -- profile being left behind, so an undo pressed after the switch would write
+    -- a value into settings the user is no longer looking at.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
     -- Clear the Global Fonts temp selection so the page re-initialises from
     -- the new profile's font settings rather than showing the old profile's
     -- last-used font until the next /reload.
     DF.GlobalFontTemp = nil
-    DF:Debug("PROFILE", "SetProfile: cleared runtime state before switching to " .. name)
-
-    -- Create new profile if doesn't exist
-    if not DandersFramesDB_v2.profiles[name] then
-        DandersFramesDB_v2.profiles[name] = {
-            party = DF:DeepCopy(DF.PartyDefaults),
-            raid = DF:DeepCopy(DF.RaidDefaults),
-            raidAutoProfiles = DF:DeepCopy(DF.RaidAutoProfilesDefaults),
-            classColors = {},
-            powerColors = {},
-            linkedSections = {},
-            partyEnabled = true,
-            raidEnabled = true,
-            -- Must match the CURRENT default (and the nil-backfill just below).
-            -- Seeding the pre-Roboto face here meant a freshly created profile kept
-            -- Friz -- the backfill skips a non-nil value -- until the
-            -- _settingsFontRobotoDefaultV1 migration flipped it on the next reload,
-            -- so the settings font appeared to change by itself.
-            settingsFont = "DF Roboto SemiBold",
-            settingsFontOutline = "NONE",
-        }
-        -- Born from current defaults => every one-time migration is already done.
-        -- Without this, the unconditional frame-level / container-position shifts
-        -- fired on the new profile and moved values that were already correct.
-        DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles[name])
-        DF:Say(format(L["Created new profile: %s"], name))
-    end
+    DF:Debug("PROFILE", "ActivateProfile: cleared runtime state before switching to " .. name)
 
     -- Backfill defaults on older profiles
     local p = DandersFramesDB_v2.profiles[name]
@@ -456,14 +484,21 @@ function DF:SetProfile(name)
     -- the new profile directly with no stale overlay
     DF:FullProfileRefresh()
 
+    -- The Power Infusion Helper's gate, role exclusions and sound registrations follow the
+    -- profile's own settings; without this the OLD profile's sound kept playing after a
+    -- switch, for a helper the new profile may not even have.
+    if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.PIH_ApplySaved then
+        DF.AuraDesigner.Engine:PIH_ApplySaved()
+    end
+
     -- ★ THE COMPLETION MARKER. PROFILE logged the START of a switch and nothing else, with
     -- eleven one-time migrations and a full refresh running in between -- so a log showing
     -- "cleared runtime state before switching" and then nothing was indistinguishable from
     -- a switch that half-applied and threw. That is precisely the failure worth catching
     -- here, and it was the one state the category could not describe.
-    DF:Debug("PROFILE", "SetProfile: switch to %s complete", tostring(name))
+    DF:Debug("PROFILE", "ActivateProfile: switch to %s complete", tostring(name))
 
-    DF:Say(format(L["Switched to profile: %s"], name))
+    DF:Say(message)
 
     -- If the new profile has a different enable-flag state, prompt to reload
     -- so headers can be (re)created. Frames cannot be added/removed at runtime.
@@ -847,6 +882,10 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     local exportData = {
         version = DF.VERSION,
         profileName = exportProfileName,
+        -- "retail" / "forever": which game version the payload's spell ids belong to.
+        -- Importers on the other version reset its Aura Designer data (FlavorCorrection).
+        -- Absent on older strings, which are all retail's.
+        sourceFlavor = DF.CLIENT_FLAVOR,
     }
     
     if not DF.db then
@@ -1181,17 +1220,13 @@ function DF:ValidateImportString(str)
 end
 
 -- ★ ONE LINE FOR TWELVE SILENT REJECTIONS. ValidateImportString bails with a distinct
--- reason in twelve places -- Invalid encoding, Decompression failed, Deserialization
--- failed, Missing required libraries, Legacy format, Corrupt data and the rest -- and
--- logged none of them. "My import string doesn't work" therefore produced a completely
--- empty log, while the function had the exact reason in hand and handed it only to the UI.
+-- reason in twelve places and hands it only to the UI, so it is WRAPPED rather than
+-- edited at each return: the wrapper cannot be bypassed, needs no maintenance, and a
+-- future thirteenth return is covered too.
 --
--- Wrapped rather than edited at each return: twelve separate edits to add the same line is
--- twelve chances to drift, and a future thirteenth return would miss it. The wrapper cannot
--- be bypassed and needs no maintenance.
---
--- Length is included because the common causes are a truncated paste and a string mangled
--- by a chat client, and both show up as a plausible-looking prefix with the wrong size.
+-- Length is included because the common causes are a truncated paste and a string
+-- mangled by a chat client, and both show up as a plausible-looking prefix with the
+-- wrong size.
 local ValidateImportStringInner = DF.ValidateImportString
 function DF:ValidateImportString(str)
     local data, err = ValidateImportStringInner(self, str)
@@ -1270,11 +1305,9 @@ local function ResetTDForLegacyImport(payloads)
     for mode, payload in pairs(payloads) do
         -- A payload is LEGACY only if it carries neither the inline TD table
         -- (pre-library exports) NOR a preset-name ref (post-library exports).
-        -- The old check looked only at the inline table — but the preset
-        -- migration deletes the inline table from mode DBs, so EVERY modern
-        -- export has textDesigner == nil while legacy keys (nameFont etc.)
-        -- are still present for pets. That misfired this reset on every
-        -- modern import and wiped the just-imported Text Designer elements.
+        -- Checking only the inline table is not enough: the preset migration
+        -- deletes it from mode DBs, so EVERY modern export has textDesigner ==
+        -- nil while legacy keys (nameFont etc.) are still present for pets.
         if type(payload) == "table" and payload.textDesigner == nil
             and payload.textDesignerPreset == nil
             and (payload.nameFont ~= nil or payload.nameFontSize ~= nil
@@ -1417,6 +1450,11 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                 end
             end
         end
+        -- ...except the two game-version keys (Core\FlavorCorrection.lua), which describe
+        -- the SOURCE profile, not this one: its parked Aura Designer data would be another
+        -- profile's (and a shared table reference), and FC.AfterImport stamps _flavor below.
+        newProfile._parkedAD = nil
+        newProfile._flavor = nil
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
@@ -1481,6 +1519,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         adPresetsImported = false
     end
     if (aurasImported or adPresetsImported) and importData.customAuraFilters and DF.FilterRegistry then
+        DF.FilterRegistry._lastImportPruned = 0   -- counted by the WoW Forever prune, reported below
         local remap = DF.FilterRegistry:ImportCustomFilters(importData.customAuraFilters)
         local function remapCustoms(sel)
             if type(sel) == "table" and type(sel.customs) == "table" then
@@ -1675,7 +1714,6 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
 
     -- If it's a full export (legacy or "all categories"), use direct replacement
     if importInfo.isFullExport and not selectedCategories then
-        -- Legacy behavior: replace entire profile sections
         if importData.party and selectedFrameTypes.party then 
             DF.db.party = importData.party 
         end
@@ -1922,6 +1960,44 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             end
         end
     end
+    -- ☠ ALSO BEFORE THE BACKFILL, for the same reason as _raidCenterModeV1 above.
+    -- `position` has a shipped default, so once the backfill stamps it a pre-record
+    -- payload's anchorX/anchorY (the only position it carries) can never be folded into
+    -- the record again -- the frames would land on the default, not where the export
+    -- put them. The flag rode across from the source profile (or is simply this
+    -- profile's own), so clear it when either mode arrived without a record and let the
+    -- login migration's presence gate do the seeding.
+    if DF.MigrateContainerPositionRecords and type(DF.db) == "table" then
+        local p, r = DF.db.party, DF.db.raid
+        if (type(p) == "table" and p.position == nil) or (type(r) == "table" and r.position == nil) then
+            DF.db._moverPositionRecordsV1 = nil
+        end
+        -- Phase B records, same reason: a pre-record payload carries only the scalars.
+        if (type(p) == "table" and (p.personalTargetedPosition == nil or p.targetedListPosition == nil))
+            or (type(r) == "table" and r.personalTargetedPosition == nil) then
+            DF.db._moverPositionRecordsV2 = nil
+        end
+        -- Phase C: an old export can carry the five deleted grid prefs (or a
+        -- RESET_POSITION quick action). Re-open the sweep so the call below cleans
+        -- the imported payload; a payload without them costs one idle pass.
+        local function carriesLegacyMoverPrefs(m)
+            if type(m) ~= "table" then return false end
+            return m.gridSize ~= nil or m.snapToGrid ~= nil or m.pinnedSnapToGrid ~= nil
+                or m.pinnedHideMover ~= nil or m.hideDragOverlay ~= nil
+                or m.permanentMoverActionLeft == "RESET_POSITION"
+                or m.permanentMoverActionRight == "RESET_POSITION"
+                or m.permanentMoverActionShiftLeft == "RESET_POSITION"
+                or m.permanentMoverActionShiftRight == "RESET_POSITION"
+        end
+        if carriesLegacyMoverPrefs(p) or carriesLegacyMoverPrefs(r) then
+            DF.db._moverLegacyPrefsRemovedV1 = nil
+        end
+        -- Always run: the two blocks above are flag-gated per profile and the pinned
+        -- walk is self-gated (an imported pinnedFrames table lacks its positionsV2
+        -- marker), so an import that changed nothing costs one idle pass.
+        DF:MigrateContainerPositionRecords()
+    end
+
     backfillDefaults(DF.db and DF.db.party, DF.PartyDefaults)
     backfillDefaults(DF.db and DF.db.raid, DF.RaidDefaults)
 
@@ -1963,8 +2039,30 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- the legacy fallback until some later login happens to convert it.
     if DF.MigrateHealthColorStops then DF:MigrateHealthColorStops() end
 
+    -- The import has landed, so anything the undo stack still holds describes
+    -- values the payload has just overwritten -- or tables it replaced outright.
+    -- Fenced after the apply rather than before it: the import can bail out at a
+    -- dozen points above, and a stack cleared by an import that never happened is
+    -- work the user loses for nothing.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
+
+    -- Retail <-> WoW Forever: Aura Designer data from the other version is keyed by its
+    -- spell ids and can't work here. The import is a copy, so it's reset rather than
+    -- parked (Core\FlavorCorrection.lua). Before the refresh, so nothing draws it first.
+    local adReset = DF.FlavorCorrection
+        and DF.FlavorCorrection.AfterImport(DF.db, importData, adPresetsImported)
+    local pruned = DF.FilterRegistry and DF.FilterRegistry._lastImportPruned or 0
+    if DF.FilterRegistry then DF.FilterRegistry._lastImportPruned = nil end
+
     DF:FullProfileRefresh()
     DF:Say(L["Profile imported successfully!"])
+    if adReset then
+        DF:Say(L["Aura Designer settings in this import came from a different version of the game and were reset, because spell IDs differ between versions."])
+    end
+    if pruned > 0 then
+        DF:Say(format(L["%d spell IDs that don't exist on WoW Forever were left out of the import."], pruned))
+    end
 
     -- If the imported state changed which frame modes are enabled, prompt
     -- the user to reload so headers can be (re)created.
@@ -1975,11 +2073,6 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     return true
 end
 
--- DF:ImportProfile(str) used to live here — a dead wholesale-replacement
--- import with zero callers that bypassed the custom-filter/remap machinery.
--- The real import path is DF:ApplyImportedProfile (above), which the GUI
--- and API.lua both use.
-
 -- ============================================================
 -- SPEC AUTO-SWITCH (per-character settings)
 -- ============================================================
@@ -1989,7 +2082,7 @@ function DF:CheckProfileAutoSwitch()
     if not DandersFramesCharDB then return end
     if not DandersFramesCharDB.enableSpecSwitch then return end
     
-    local specIndex = GetSpecialization and GetSpecialization()
+    local specIndex = C_SpecializationInfo.GetSpecialization()
     if not specIndex then return end
     
     local profileName = DandersFramesCharDB.specProfiles and DandersFramesCharDB.specProfiles[specIndex]

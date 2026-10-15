@@ -301,6 +301,26 @@ bindingTooltip:SetScript("OnEvent", function(self)
 end)
 
 -- ============================================================
+-- RAIDER.IO FALLBACK
+-- ============================================================
+-- On secure header children GameTooltip:GetUnit() is secret. Raider.IO resolves the unit
+-- from the tooltip data's GUID instead, so it draws its own block whenever that GUID is
+-- readable; draw it ourselves only when it is not, or the block appears twice.
+function DF:ShowRaiderIOFallback(tooltip, unit)
+    local rio = _G.RaiderIO
+    if not (rio and rio.ShowProfile) or not unit then return end
+    if tooltip.GetPrimaryTooltipData then
+        local data = tooltip:GetPrimaryTooltipData()
+        local guid = data and data.guid
+        if guid and not issecretvalue(guid) then return end
+    else
+        local _, ttUnit = tooltip:GetUnit()
+        if ttUnit and not issecretvalue(ttUnit) then return end
+    end
+    rio.ShowProfile(tooltip, unit)
+end
+
+-- ============================================================
 -- TOOLTIP REFRESH TICKER
 -- Re-fires GameTooltip:SetUnit() every 0.25s while hovering a unit frame.
 -- Allows addons like RaiderIO that check IsModifierKeyDown() inside
@@ -507,12 +527,10 @@ end)
 
 local tooltipModWatcher = CreateFrame("Frame")
 tooltipModWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
--- ★ ENTERING COMBAT RE-DECIDES TOO. Disable In Combat used to mean "do not START a
--- tooltip once you are in combat" -- a tooltip already on screen when the pull began
--- simply stayed there, because nothing re-ran the checks until the cursor moved. That
--- reads as the setting not working, and it is the half of "disable fully" the enter
--- path alone cannot cover (Krathe, 2026-08-23). The enter path now HIDES on the combat
--- branch rather than merely returning, so re-running it here takes the tooltip down.
+-- ★ ENTERING COMBAT RE-DECIDES TOO. Without this, a tooltip already on screen when
+-- the pull begins stays there until the cursor moves, which reads as Disable In
+-- Combat not working. The enter path HIDES on the combat branch rather than merely
+-- returning, so re-running it here takes the tooltip down.
 tooltipModWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
 tooltipModWatcher:SetScript("OnEvent", function(_, event)
     local f = tooltipHoverFrame
@@ -570,10 +588,7 @@ local function StartTooltipRefresh(frame)
         if mod == tooltipRefreshModState then return end
         tooltipRefreshModState = mod
         GameTooltip:SetUnit(f.unit)
-        local _, ttUnit = GameTooltip:GetUnit()
-        if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-            _G.RaiderIO.ShowProfile(GameTooltip, f.unit)
-        end
+        DF:ShowRaiderIOFallback(GameTooltip, f.unit)
     end)
 end
 
@@ -611,10 +626,6 @@ function DF:TestDurationDebug()
         o:Field("CreateColorCurve", C_CurveUtil.CreateColorCurve ~= nil,
             C_CurveUtil.CreateColorCurve and "GOOD" or "BAD")
     end
-    -- (Removed) a "durationAPIMode: old/new" line. DF.durationAPIMode was declared
-    -- nil with a "set once on first use" comment and then never assigned by any
-    -- code path, so this always reported "not set yet" — a dump that looked like a
-    -- measurement but only ever printed its own placeholder.
 
     o:Section("Sample aura")
     local auraData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
@@ -638,13 +649,9 @@ function DF:TestDurationDebug()
     end
 end
 
--- One-shot dump of which duration APIs this build exposes. The old on/off
--- subcommands set DF.debugDurationAPI, which nothing ever read — the "continuous
--- debug" they advertised did not exist. Only the dump was ever real.
--- Dev-gated: it reports which C_UnitAuras / C_CurveUtil entry points exist on this
--- build, which means nothing to someone who does not maintain the code. The earlier
--- reasoning for opening it up — "let a PTR tester paste it back" — was wrong on its
--- own terms: testers run alpha builds, so the dev gate does not hide it from them.
+-- One-shot dump of which duration APIs this build exposes. Dev-gated: it reports
+-- which C_UnitAuras / C_CurveUtil entry points exist on this build, which means
+-- nothing to someone who does not maintain the code.
 DF:RegisterDebugSlash("DFDURATIONDEBUG", "Aura duration API availability dump", true, "/dfduration")
 SlashCmdList["DFDURATIONDEBUG"] = function(msg)
     DF:TestDurationDebug()
@@ -1199,9 +1206,8 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- re-level this to frame + absorbBarFrameLevel (11) the first time they run, so
     -- healthBar+4 is what it looks like for a fraction of a second and never after.
     -- Kept so the bar is ordered before the first update rather than defaulting to
-    -- parent+1, but do NOT reason from it: the dispel wash used to derive its own
-    -- level from "absorb is at healthBar+4" and ended up tied with the real one.
-    -- (Z-order review, 2026-08-07.)
+    -- parent+1, but do NOT reason from it -- anything deriving its own level from
+    -- "absorb is at healthBar+4" ends up tied with the real one.
     frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
 
@@ -1599,9 +1605,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- re-level this to frame + absorbBarFrameLevel (11) the first time they run, so
     -- healthBar+4 is what it looks like for a fraction of a second and never after.
     -- Kept so the bar is ordered before the first update rather than defaulting to
-    -- parent+1, but do NOT reason from it: the dispel wash used to derive its own
-    -- level from "absorb is at healthBar+4" and ended up tied with the real one.
-    -- (Z-order review, 2026-08-07.)
+    -- parent+1, but do NOT reason from it -- anything deriving its own level from
+    -- "absorb is at healthBar+4" ends up tied with the real one.
     frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
 
@@ -1922,10 +1927,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             PositionFrameTooltip(self)
             local unit = GetCleanUnitForTooltip(self) or self.unit
             GameTooltip:SetUnit(unit)
-            local _, ttUnit = GameTooltip:GetUnit()
-            if (not ttUnit or issecretvalue(ttUnit)) and _G.RaiderIO and _G.RaiderIO.ShowProfile then
-                _G.RaiderIO.ShowProfile(GameTooltip, unit)
-            end
+            DF:ShowRaiderIOFallback(GameTooltip, unit)
             StartTooltipRefresh(self)
         end
         DF:ShowBindingTooltip(self)
@@ -1934,9 +1936,6 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- Use HookScript (not SetScript) to preserve SecureHandlerEnterLeaveTemplate's _onenter/_onleave
     -- SetScript would override the template's handler and break click-casting keyboard bindings
     frame:HookScript("OnEnter", OnUnitFrameEnter)
-    -- (Removed) DF._OnUnitFrameEnter. The watcher used to reach for one published
-    -- handler, which only ever worked for frames built here; it now dispatches to
-    -- whatever DF:NoteTooltipHover recorded, so each hover path supplies its own.
 
     frame:HookScript("OnLeave", function(self)
         DF:ClearTooltipHover(self)

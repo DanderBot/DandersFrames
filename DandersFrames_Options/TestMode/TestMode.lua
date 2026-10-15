@@ -54,7 +54,7 @@ DF.TestData = {
         -- both to share: raising healPrediction did nothing at all, because the ceiling was
         -- the headroom, not the value. Reported as "hard to notice" (Krathe, 2026-08-14).
         -- ⇒ A preview value is only visible if the frame has ROOM for it. Same trap on
-        -- Tankerino below, which is at health 1.0 and therefore cannot show its
+        -- Tankerino above, which is at health 1.0 and therefore cannot show its
         -- healPrediction at all.
         {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.70, maxHealth = 85000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.22, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
         -- THE out-of-range unit, and the only one — so the fade has a subject with
@@ -78,15 +78,12 @@ DF.TestData = {
         -- ★ THE ONLY MISSING-BUFF FRAME now (it shows here by default — no field needed).
         -- ⚠ If this unit ever gains showMissingBuff = false, the strip is previewed
         -- NOWHERE. Check the other four before turning it off here.
-        -- ★ ALSO THE ONLY BG-CARRIER FRAME in party (Krathe, 2026-08-08). It was raid-only
-        -- before, on the reasoning that it would overlap the leader's ready-check icon —
-        -- but the ready check has since moved to Мишок, and the real constraint was broader:
-        -- bgCarrierIcon sat on the CENTRE BUS, and all five party frames already have their
-        -- centre claimed, so there was nowhere clear to put it.
-        -- ⇒ Fixed at the SOURCE, not in the preview: the icon's live default moved to
-        -- TOPRIGHT -2,-2 (Config.lua). It now has its own lane on every frame, here and in
-        -- game alike — no preview-only offset, which would have broken "previews differ in
-        -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
+        -- ★ ALSO THE ONLY BG-CARRIER FRAME in party. bgCarrierIcon sat on the CENTRE BUS,
+        -- and all five party frames already have their centre claimed, so it was fixed at
+        -- the SOURCE, not in the preview: the icon's live default is TOPRIGHT -2,-2
+        -- (Config.lua). It has its own lane on every frame, here and in game alike — no
+        -- preview-only offset, which would have broken "previews differ in DATA, never
+        -- RENDERING". This frame's centre still belongs to phasedIcon.
         -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
         {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45, showPing = true},  -- Missing buffs, phased, in vehicle, BG carrier, ping, has HoT
     },
@@ -168,10 +165,9 @@ DF.TestData = {
         -- ★ THE ONE LONG BUFF, and the pool needs exactly one: it is the only entry that
         -- exercises the minutes side of the countdown formats and a duration bar that
         -- barely moves. 10 minutes is Earth Shield's real duration — durations here are
-        -- honest, per the Beacon note above. ⚠ It no longer crosses the HOUR boundary,
-        -- which the old 3600s entries did; that format is now unpreviewed. Deliberate —
-        -- Krathe's call was "keep just 1 longer buff... maybe 5min or something", and an
-        -- hour-long buff on a party frame only ever means a raid buff.
+        -- honest, per the Beacon note above. ⚠ Nothing crosses the HOUR boundary, so that
+        -- format is unpreviewed — deliberate, since an hour-long buff on a party frame
+        -- only ever means a raid buff.
         {icon = "Interface\\Icons\\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
         {icon = "Interface\\Icons\\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
     },
@@ -187,14 +183,14 @@ DF.TestData = {
         -- catches a dispellable entry more often, so the rate climbs; accepted rather
         -- than decoupling the overlay from the icons again, which is the bug being fixed.
         -- ⚠ Same-class entries must still sit EXACTLY 5 apart (see the buff pool):
-        -- ROGUE at 4/9 and WARRIOR at 5/10.
+        -- WARRIOR at 1/6 (Rend, Mortal Wounds).
         -- ★ THE ONLY Bleed ENTRY, and it has to live in slot 1. DF ships five dispel
         -- colours (Border.lua: Magic, Curse, Disease, Poison, Bleed, with Enrage sharing
         -- Bleed's red) and the pool had no Bleed at all, so that colour could be set on
-        -- the Colors page and never previewed. Slot 1 is the one TYPED slot whose 5-apart
-        -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
-        -- the class spacing. Converting Rake or Rend instead would have been simpler and
-        -- was rejected: they are two of the four untyped slots that set the 60% density.
+        -- the Colors page and never previewed. Slot 1 is a TYPED slot, and Rend is WARRIOR
+        -- like its 5-apart partner (Mortal Wounds at 6), so the class spacing holds. Typing
+        -- one of the four untyped slots instead would have been simpler and was rejected:
+        -- they set the 60% density.
         {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
         {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
         {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
@@ -261,7 +257,7 @@ DF.TestData = {
 --   5. An out-of-range frame carries STATIC badges only.
 --
 -- ⚠ COVERAGE IS FRONT-LOADED, because raidTestFrameCount is user-driven (1-40).
--- Frames 1-10 cover every primary indicator; the four secondary status icons (summon,
+-- Frames 1-10 cover every primary indicator; the three secondary status icons (summon,
 -- phased, vehicle) start at 11. Everything appears by 20. Below 10 frames the
 -- preview is necessarily partial — that is a property of the slider, not a gap here.
 --
@@ -297,9 +293,8 @@ local RAID_ALLOC = {
     -- on frame 2: it carries the AFK countdown, and an oversized badged
     -- icon lands on the same region — the party tank hit exactly that.
     IMPORTANTDEBUFF = { [7] = true, [16] = true },
-    -- Healer bars. Deliberately sparse: the old `i % 2 == 0 or i % 3 == 1` put heal
-    -- prediction on 14 of the first 20 frames, which reads as "every frame is being
-    -- healed" rather than as an example of the bar.
+    -- Healer bars. Deliberately sparse: heal prediction on most frames reads as "every
+    -- frame is being healed" rather than as an example of the bar.
     ABSORB     = { [7] = true, [20] = true },
     HEALABSORB = { [10] = true, [20] = true },
     HEALPRED   = { [7] = true, [20] = true },
@@ -331,6 +326,110 @@ local function inRaidSet(key, i)
     return set[i] == true or (i > 20 and set[i - 20] == true)
 end
 
+-- ☠ FILE SCOPE, NOT PER CALL. These were built fresh inside GetTestUnitData on
+-- every call -- six 40-entry raid tables (plus the boss names) per frame per call,
+-- and the animation ticker calls it for every test frame 20 times a second, so an
+-- animating raid preview threw away hundreds of these tables a second. They are
+-- read-only; nothing below writes to them.
+local bossNames = {
+    "Fiery Treant", "Charred Bramble", "Smoldering Sapling", "Ember Root",
+    "Blazing Thorn", "Ashen Oak", "Cinder Vine", "Glowing Grove",
+}
+
+local testNames = {
+    "Tankadin", "Healbot", "Magefire", "Stabbymc", "Huntard",
+    "Shammywow", "Dkfrost", "Warlockz", "Monkbrew", "Priestess",
+    "Druidtree", "Palaheals", "Rogueshadow", "Warriorfury", "Huntermark",
+    "Magearcane", "Warlockaff", "Shamanrest", "Monkmist", "Priestshadow",
+    "Dkblood", "Demonhunter", "Evokerdev", "Tankwarrior", "Tankdruid",
+    "Holypriest", "Discpriest", "Restoshaman", "Mistweaver", "Holypaladin",
+    "Boomkin", "Feral", "Enhance", "Elemental", "Retribution",
+    "Windwalker", "Havoc", "Devastation", "Arms", "Assassination"
+}
+local testClasses = {
+    "PALADIN", "PRIEST", "MAGE", "ROGUE", "HUNTER",
+    "SHAMAN", "DEATHKNIGHT", "WARLOCK", "MONK", "PRIEST",
+    "DRUID", "PALADIN", "ROGUE", "WARRIOR", "HUNTER",
+    "MAGE", "WARLOCK", "SHAMAN", "MONK", "PRIEST",
+    "DEATHKNIGHT", "DEMONHUNTER", "EVOKER", "WARRIOR", "DRUID",
+    "PRIEST", "PRIEST", "SHAMAN", "MONK", "PALADIN",
+    "DRUID", "DRUID", "SHAMAN", "SHAMAN", "PALADIN",
+    "MONK", "DEMONHUNTER", "EVOKER", "WARRIOR", "ROGUE"
+}
+local testRoles = {
+    "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "HEALER", "DAMAGER", "DAMAGER", "TANK", "HEALER",
+    "HEALER", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "DAMAGER", "DAMAGER", "HEALER", "HEALER", "DAMAGER",
+    "TANK", "DAMAGER", "DAMAGER", "TANK", "TANK",
+    "HEALER", "HEALER", "HEALER", "HEALER", "HEALER",
+    "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER",
+    "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER"
+}
+-- Spec IDs matching each class/role for accurate melee/ranged separation
+local testSpecs = {
+    66,   -- 1  PALADIN/TANK      - Protection
+    257,  -- 2  PRIEST/HEALER     - Holy
+    63,   -- 3  MAGE/DAMAGER      - Fire (ranged)
+    260,  -- 4  ROGUE/DAMAGER     - Outlaw (melee)
+    254,  -- 5  HUNTER/DAMAGER    - Marksmanship (ranged)
+    264,  -- 6  SHAMAN/HEALER     - Restoration
+    251,  -- 7  DEATHKNIGHT/DPS   - Frost (melee)
+    265,  -- 8  WARLOCK/DAMAGER   - Affliction (ranged)
+    268,  -- 9  MONK/TANK         - Brewmaster
+    256,  -- 10 PRIEST/HEALER     - Discipline
+    105,  -- 11 DRUID/HEALER      - Restoration
+    65,   -- 12 PALADIN/HEALER    - Holy
+    259,  -- 13 ROGUE/DAMAGER     - Assassination (melee)
+    71,   -- 14 WARRIOR/DAMAGER   - Arms (melee)
+    255,  -- 15 HUNTER/DAMAGER    - Survival (melee)
+    64,   -- 16 MAGE/DAMAGER      - Frost (ranged)
+    266,  -- 17 WARLOCK/DAMAGER   - Demonology (ranged)
+    264,  -- 18 SHAMAN/HEALER     - Restoration
+    270,  -- 19 MONK/HEALER       - Mistweaver
+    258,  -- 20 PRIEST/DAMAGER    - Shadow (ranged)
+    250,  -- 21 DEATHKNIGHT/TANK  - Blood
+    577,  -- 22 DEMONHUNTER/DPS   - Havoc (melee)
+    1467, -- 23 EVOKER/DAMAGER    - Devastation (ranged)
+    73,   -- 24 WARRIOR/TANK      - Protection
+    104,  -- 25 DRUID/TANK        - Guardian
+    257,  -- 26 PRIEST/HEALER     - Holy
+    256,  -- 27 PRIEST/HEALER     - Discipline
+    264,  -- 28 SHAMAN/HEALER     - Restoration
+    270,  -- 29 MONK/HEALER       - Mistweaver
+    65,   -- 30 PALADIN/HEALER    - Holy
+    102,  -- 31 DRUID/DAMAGER     - Balance (ranged)
+    103,  -- 32 DRUID/DAMAGER     - Feral (melee)
+    263,  -- 33 SHAMAN/DAMAGER    - Enhancement (melee)
+    262,  -- 34 SHAMAN/DAMAGER    - Elemental (ranged)
+    70,   -- 35 PALADIN/DAMAGER   - Retribution (melee)
+    269,  -- 36 MONK/DAMAGER      - Windwalker (melee)
+    577,  -- 37 DEMONHUNTER/DPS   - Havoc (melee)
+    1473, -- 38 EVOKER/DAMAGER    - Augmentation (ranged)
+    72,   -- 39 WARRIOR/DAMAGER   - Fury (melee)
+    261,  -- 40 ROGUE/DAMAGER     - Subtlety (melee)
+}
+local testHealthPercents = {
+    0.95, 0.88, 0.72, 0.65, 0.80,
+    0.92, 0.58, 0.75, 0.85, 0.70,
+    0.90, 0.82, 0.68, 0.55, 0.78,
+    0.88, 0.62, 0.95, 0.72, 0.60,
+    0.98, 0.75, 0.82, 0.90, 0.85,
+    0.78, 0.92, 0.65, 0.88, 0.70,
+    0.82, 0.75, 0.68, 0.95, 0.58,
+    0.85, 0.72, 0.80, 0.65, 0.90
+}
+local testPowerPercents = {
+    0.85, 0.92, 0.78, 0.65, 0.70,
+    0.88, 0.55, 0.82, 0.95, 0.72,
+    0.80, 0.68, 0.90, 0.75, 0.85,
+    0.62, 0.95, 0.70, 0.88, 0.78,
+    0.92, 0.65, 0.85, 0.72, 0.80,
+    0.90, 0.75, 0.82, 0.68, 0.95,
+    0.78, 0.85, 0.70, 0.88, 0.62,
+    0.80, 0.92, 0.75, 0.68, 0.85
+}
+
 -- Get test unit data for a frame index
 -- For party: index 0 = player, 1-4 = party members
 -- For raid: index 1-40 = raid members
@@ -341,10 +440,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     -- Boss NPCs don't have classes or roles — we return a minimal fake unit
     -- so the frame renders a health bar with a readable name.
     if isBoss then
-        local bossNames = {
-            "Fiery Treant", "Charred Bramble", "Smoldering Sapling", "Ember Root",
-            "Blazing Thorn", "Ashen Oak", "Cinder Vine", "Glowing Grove",
-        }
         local i = index
         local basePercent = (0.9 - (i - 1) * 0.08)  -- slight descending stagger
         if basePercent < 0.25 then basePercent = 0.25 end
@@ -389,100 +484,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
 
     -- For raid frames, generate deterministic test data
     if isRaid then
-        local testNames = {
-            "Tankadin", "Healbot", "Magefire", "Stabbymc", "Huntard",
-            "Shammywow", "Dkfrost", "Warlockz", "Monkbrew", "Priestess",
-            "Druidtree", "Palaheals", "Rogueshadow", "Warriorfury", "Huntermark",
-            "Magearcane", "Warlockaff", "Shamanrest", "Monkmist", "Priestshadow",
-            "Dkblood", "Demonhunter", "Evokerdev", "Tankwarrior", "Tankdruid",
-            "Holypriest", "Discpriest", "Restoshaman", "Mistweaver", "Holypaladin",
-            "Boomkin", "Feral", "Enhance", "Elemental", "Retribution",
-            "Windwalker", "Havoc", "Devastation", "Arms", "Assassination"
-        }
-        local testClasses = {
-            "PALADIN", "PRIEST", "MAGE", "ROGUE", "HUNTER",
-            "SHAMAN", "DEATHKNIGHT", "WARLOCK", "MONK", "PRIEST",
-            "DRUID", "PALADIN", "ROGUE", "WARRIOR", "HUNTER",
-            "MAGE", "WARLOCK", "SHAMAN", "MONK", "PRIEST",
-            "DEATHKNIGHT", "DEMONHUNTER", "EVOKER", "WARRIOR", "DRUID",
-            "PRIEST", "PRIEST", "SHAMAN", "MONK", "PALADIN",
-            "DRUID", "DRUID", "SHAMAN", "SHAMAN", "PALADIN",
-            "MONK", "DEMONHUNTER", "EVOKER", "WARRIOR", "ROGUE"
-        }
-        local testRoles = {
-            "TANK", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "HEALER", "DAMAGER", "DAMAGER", "TANK", "HEALER",
-            "HEALER", "HEALER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "DAMAGER", "DAMAGER", "HEALER", "HEALER", "DAMAGER",
-            "TANK", "DAMAGER", "DAMAGER", "TANK", "TANK",
-            "HEALER", "HEALER", "HEALER", "HEALER", "HEALER",
-            "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER",
-            "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER", "DAMAGER"
-        }
-        -- Spec IDs matching each class/role for accurate melee/ranged separation
-        local testSpecs = {
-            66,   -- 1  PALADIN/TANK      - Protection
-            257,  -- 2  PRIEST/HEALER     - Holy
-            63,   -- 3  MAGE/DAMAGER      - Fire (ranged)
-            260,  -- 4  ROGUE/DAMAGER     - Outlaw (melee)
-            254,  -- 5  HUNTER/DAMAGER    - Marksmanship (ranged)
-            264,  -- 6  SHAMAN/HEALER     - Restoration
-            251,  -- 7  DEATHKNIGHT/DPS   - Frost (melee)
-            265,  -- 8  WARLOCK/DAMAGER   - Affliction (ranged)
-            268,  -- 9  MONK/TANK         - Brewmaster
-            256,  -- 10 PRIEST/HEALER     - Discipline
-            105,  -- 11 DRUID/HEALER      - Restoration
-            65,   -- 12 PALADIN/HEALER    - Holy
-            259,  -- 13 ROGUE/DAMAGER     - Assassination (melee)
-            71,   -- 14 WARRIOR/DAMAGER   - Arms (melee)
-            255,  -- 15 HUNTER/DAMAGER    - Survival (melee)
-            64,   -- 16 MAGE/DAMAGER      - Frost (ranged)
-            266,  -- 17 WARLOCK/DAMAGER   - Demonology (ranged)
-            264,  -- 18 SHAMAN/HEALER     - Restoration
-            270,  -- 19 MONK/HEALER       - Mistweaver
-            258,  -- 20 PRIEST/DAMAGER    - Shadow (ranged)
-            250,  -- 21 DEATHKNIGHT/TANK  - Blood
-            577,  -- 22 DEMONHUNTER/DPS   - Havoc (melee)
-            1467, -- 23 EVOKER/DAMAGER    - Devastation (ranged)
-            73,   -- 24 WARRIOR/TANK      - Protection
-            104,  -- 25 DRUID/TANK        - Guardian
-            257,  -- 26 PRIEST/HEALER     - Holy
-            256,  -- 27 PRIEST/HEALER     - Discipline
-            264,  -- 28 SHAMAN/HEALER     - Restoration
-            270,  -- 29 MONK/HEALER       - Mistweaver
-            65,   -- 30 PALADIN/HEALER    - Holy
-            102,  -- 31 DRUID/DAMAGER     - Balance (ranged)
-            103,  -- 32 DRUID/DAMAGER     - Feral (melee)
-            263,  -- 33 SHAMAN/DAMAGER    - Enhancement (melee)
-            262,  -- 34 SHAMAN/DAMAGER    - Elemental (ranged)
-            70,   -- 35 PALADIN/DAMAGER   - Retribution (melee)
-            269,  -- 36 MONK/DAMAGER      - Windwalker (melee)
-            577,  -- 37 DEMONHUNTER/DPS   - Havoc (melee)
-            1473, -- 38 EVOKER/DAMAGER    - Augmentation (ranged)
-            72,   -- 39 WARRIOR/DAMAGER   - Fury (melee)
-            261,  -- 40 ROGUE/DAMAGER     - Subtlety (melee)
-        }
-        local testHealthPercents = {
-            0.95, 0.88, 0.72, 0.65, 0.80,
-            0.92, 0.58, 0.75, 0.85, 0.70,
-            0.90, 0.82, 0.68, 0.55, 0.78,
-            0.88, 0.62, 0.95, 0.72, 0.60,
-            0.98, 0.75, 0.82, 0.90, 0.85,
-            0.78, 0.92, 0.65, 0.88, 0.70,
-            0.82, 0.75, 0.68, 0.95, 0.58,
-            0.85, 0.72, 0.80, 0.65, 0.90
-        }
-        local testPowerPercents = {
-            0.85, 0.92, 0.78, 0.65, 0.70,
-            0.88, 0.55, 0.82, 0.95, 0.72,
-            0.80, 0.68, 0.90, 0.75, 0.85,
-            0.62, 0.95, 0.70, 0.88, 0.78,
-            0.92, 0.65, 0.85, 0.72, 0.80,
-            0.90, 0.75, 0.82, 0.68, 0.95,
-            0.78, 0.85, 0.70, 0.88, 0.62,
-            0.80, 0.92, 0.75, 0.68, 0.85
-        }
-        
         local i = index
         local baseHealth = testHealthPercents[i] or 0.75
         local basePower = testPowerPercents[i] or 0.80
@@ -643,7 +644,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     -- Apply animation if enabled (only for alive units) - health only, not absorbs
     -- ☠ WAS `0.65 + (wave * 0.35)`, WHICH THREW AWAY THE UNIT'S CONFIGURED HEALTH.
     -- Every party scenario collapsed onto one curve centred at 65%, so switching
-    -- Animate Health on erased the five frames' distinct levels (100 / 95 / 60 / 30)
+    -- Animate Health on erased the five frames' distinct levels (100 / 70 / 60 / 30)
     -- and switching it off brought them back. The raid and boss branches always did
     -- this correctly -- `baseHealth + wave * 0.15` -- and this now matches them, so
     -- the three agree and the scenarios survive the toggle. (Audit, 2026-08-07.)
@@ -782,11 +783,9 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- clobbers the other regardless of order.
     if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(frame) end
 
-    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
-    -- restatements (value, texture, all four colour modes, the dead-colour override)
-    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
-    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
-    -- needed here. (Audit, 2026-08-07.)
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. DF.SetMissingHealthBarValue
+    -- reads the frame stamps, so there is one renderer; it also owns the BACKGROUND-mode
+    -- hide, so no branch is needed here.
     if frame.missingHealthBar then
         DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
@@ -795,12 +794,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- own, both of which disagreed with live. (Audit, 2026-08-07.)
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Update bars to follow animated health (use animated health value)
-    local animatedTestData = {}
-    for k, v in pairs(testData) do
-        animatedTestData[k] = v
-    end
-    animatedTestData.healthPercent = health
+    -- Update bars to follow animated health (use animated health value).
+    -- ⚠ NOT COPIED. testData is this call's own fresh table (GetTestUnitData builds a
+    -- new one per call and keeps no reference), so it carries the animated value
+    -- itself. The copy it used to make was a second ~40-field throwaway table per
+    -- frame per 20 Hz tick.
+    testData.healthPercent = health
+    local animatedTestData = testData
     
     -- ☠ REDUCED MAX HEALTH MUST RE-RUN ON EVERY HEALTH CHANGE. Live's UpdateHealthFast
     -- calls it explicitly for exactly that reason; this ticker never did, so with
@@ -900,8 +900,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local db = DF:GetFrameDB(frame)
 
     -- Set dfInRange for test mode - consumed by the range/alpha systems
-    -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
-    -- Otherwise set true (in range)
     local isTestOutOfRange = db.testShowOutOfRange and testData.outOfRange and not testData.status
     frame.dfInRange = not isTestOutOfRange
     
@@ -911,10 +909,8 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     DF.SetBarValueSmoothed(frame.healthBar, healthValue, db.smoothBars)
 
-    -- ★ LIVE'S INSET, not a restatement of it. This was ten lines that re-anchored both
-    -- bars by db.framePadding, under a comment saying it was "matching what UpdateUnitFrame
-    -- does unconditionally for live frames" — which is the divergence class named in every
-    -- audit of this file. UpdateReducedMaxHealth below may re-clip the right edge after.
+    -- ★ LIVE'S INSET, not a restatement of it. UpdateReducedMaxHealth below may re-clip
+    -- the right edge after.
     DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
@@ -924,21 +920,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
-    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
-    -- restatements (value, texture, all four colour modes, the dead-colour override)
-    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
-    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
-    -- needed here. (Audit, 2026-08-07.)
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. DF.SetMissingHealthBarValue
+    -- reads the frame stamps, so there is one renderer; it also owns the BACKGROUND-mode
+    -- hide, so no branch is needed here.
     if frame.missingHealthBar then
         DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
 
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Name through the LIVE renderer, supplying only the fabricated name. This block
-    -- used to restate DF:UpdateName's truncation verbatim -- the nameTextLength read,
-    -- the ELLIPSIS/CUT branch, the UTF8Sub calls -- so the two could drift on any
-    -- format change, and the preview also skipped live's legacy-text suppression.
+    -- Name through the LIVE renderer, supplying only the fabricated name.
     DF:UpdateName(frame, testData.name)
     
     -- ☠ (Removed) THE PER-ELEMENT ALPHA BLOCK, and the three tables it existed to fill:
@@ -1094,10 +1085,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         
         -- Apply out of range effect to auras: the container rows fade as one
         -- (alpha on the row's plain anchor frame is ours to set).
-        -- ★ Row fades through the live functions now. They compose the same three
-        -- inputs this used to (row opacity x dead fade x out-of-range) and, since
-        -- 2026-08-07, use the row's own opacity as the BASE -- which live had been
-        -- dropping. One implementation, so the slider cannot mean two things.
+        -- ★ Row fades through the live functions. They compose the same three inputs
+        -- (row opacity x dead fade x out-of-range) and use the row's own opacity as the
+        -- BASE. One implementation, so the slider cannot mean two things.
         if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
         if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
     end
@@ -1266,9 +1256,7 @@ function DF:UpdateTestIcons(frame, testData)
                 and "Interface\\GroupFrame\\UI-Group-LeaderIcon"
                 or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
-            -- Geometry, base alpha and frame level from the LIVE applier. (The two
-            -- arms differed only in the texture, but each carried its own verbatim
-            -- copy of the geometry block — leader kept working while assist drifted.)
+            -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.leaderIcon, db, "leaderIcon")
             end
@@ -1328,7 +1316,6 @@ function DF:UpdateTestIcons(frame, testData)
     -- dfTestIsDead stamp the preview already sets.
 end
 
--- Helper function to show icon as text or texture in test mode
 -- ★ ShowTestIconAsText and ApplyTestIconTimerFont are GONE. The first restated
 -- live's ShowIconAsText and then re-applied the font and text colour on top --
 -- work DF:ApplyStatusIconSettings already does, and doing it a second time AFTERWARDS
@@ -1639,7 +1626,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
     -- folds DF:GetStatusIconFadeAlpha into each icon's alpha, and every icon above
     -- now goes through it. Re-applying here would square the fade -- the same
     -- mistake the range and health fades made before ef3c56e0.
-    -- (Audit, 2026-08-07.)
 end
 
 -- ☠ A CORPSE CARRIES NO AURAS, so the preview must not draw any on one. Death
@@ -1720,11 +1706,10 @@ end
 
 -- The mock unit's primary resource, for DF:GetResourceBarColor's powerTokenOverride.
 --
--- ⚠ DERIVED FROM CLASS, NOT ROLE. The old inline version mapped HEALER->MANA,
--- TANK->RAGE and everything else ->ENERGY, so exactly three power colours were ever
--- previewable; the raid roster carries all thirteen classes, and FOCUS, RUNIC_POWER
--- and FURY are all editable on the Colors page with no way to see them. Role is still
--- consulted, but only where a class genuinely splits by spec role.
+-- ⚠ DERIVED FROM CLASS, NOT ROLE. The raid roster carries all thirteen classes, and
+-- FOCUS, RUNIC_POWER and FURY are all editable on the Colors page with no other way
+-- to see them. Role is still consulted, but only where a class genuinely splits by
+-- spec role.
 --
 -- ⚠ KNOWN LIMIT, deliberately not faked: the roster models class and role, not spec,
 -- so the spec-only resources -- LUNAR_POWER (Balance), MAELSTROM (Elemental/Enhance),
@@ -2298,11 +2283,6 @@ function DF:ToggleTestMode()
     -- refuse while frames are unlocked: turning the preview off mid-unlock drops
     -- your claim, unlock keeps the frames it still needs to have something to
     -- drag, and locking then hides them because nobody is left asking.
-    --
-    -- The old refusal ("Cannot disable test mode while frames are unlocked")
-    -- existed only to stop the snapshot going stale, and it never covered the
-    -- toolbar button — which closes the PANEL without coming through here at
-    -- all. That was the reported repro. See TestMode/Shim.lua.
     local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
     -- The "frames stay visible while unlocked" line is emitted by SetTestModeOwner,
     -- not here: the toolbar button releases the claim through the panel's OnHide and
@@ -2427,9 +2407,7 @@ function DF:ShowRaidTestFrames(silent)
         DF.PinnedFrames:EnterTestMode()
     end
 
-    -- Same confirmation party mode gives. Raid never announced itself at all, and
-    -- did not even take `silent` -- Panel.lua has been passing one to the Hide half
-    -- for a while, which quietly did nothing.
+    -- Same confirmation party mode gives.
     if not silent then
         DF:Say(L["Test mode enabled."])
     end
@@ -2848,9 +2826,8 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
         SecureSort:UpdateRaidLayoutParams()
         
         -- Calculate container size (for max 40 players)
-        -- ⚠ The static default table was retired with the secure-sort half; this is nil
-        -- only if UpdateRaidLayoutParams bailed on a missing raid db, in which case there
-        -- is nothing to lay out.
+        -- ⚠ lp is nil only if UpdateRaidLayoutParams bailed on a missing raid db, in
+        -- which case there is nothing to lay out.
         local lp = SecureSort.raidLayoutParams
         if not lp then return end
         local playersPerRow = lp.playersPerRow or 5
@@ -2961,7 +2938,7 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
 
     -- ☠ A SECOND, UNREACHABLE PARTY LAYOUT USED TO LIVE HERE -- ~76 lines behind
     -- 'Fallback: if SecureSort not available'. Features/SecureSort.lua is
-    -- unconditional in the .toc (line 124) and assigns DF.SecureSort at load, so the
+    -- unconditional in the .toc and assigns DF.SecureSort at load, so the
     -- branch above always returns and this never ran. It also used a DIFFERENT
     -- growthAnchor formula to CalculateSlotPosition -- a third statement of the same
     -- geometry that no longer had to agree with anything. (Audit, 2026-08-07.)
@@ -3260,7 +3237,10 @@ function DF:ApplyTestPreset(preset)
         if db.testAnimateHealth then
             DF:StartTestAnimation()
         end
-        DF:UpdateAllFrames()
+        -- ⚠ _Now, not the arm-stub: RefreshAllTestSurfaces below repaints the
+        -- surfaces this pass rebuilds, so the layout pass has to be finished
+        -- first. A one-frame deferral would invert the two.
+        DF:UpdateAllFrames_Now()
         if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
         RefreshAllTestSurfaces()
     end
@@ -3362,6 +3342,16 @@ end
 function DF:UpdateTestMissingBuff(frame)
     if not frame then return end
 
+    -- Missing raid-buff icons are off on WoW Forever (see DF:UseFactoryForMissingBuff),
+    -- so test mode must not preview a feature that never draws there.
+    if DF.IS_FOREVER then
+        if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+            frame.dfMissingStripShown = false
+            frame.missingBuffStrip:Hide()
+        end
+        return
+    end
+
     local db = DF:GetFrameDB(frame)
 
     -- 12.1: the live missing-buff display is the factory badge STRIP (one badge
@@ -3389,14 +3379,10 @@ function DF:UpdateTestMissingBuff(frame)
 end
 
 -- The buff/debuff sibling of UpdateAllTestMissingBuff / UpdateAllTestDefensiveBar /
--- UpdateAllTestAuraDesigner. Its ABSENCE is why aura settings did not live-update in
--- test mode: every OTHER container surface had one of these and was wired to it, but
--- the buff and debuff rows had no "refresh every test frame" entry point at all. So a
--- slider drag saved the value, re-drove the LIVE frames, and left the preview stale —
--- and Aura Designer appeared to be the only thing that worked.
---
--- The per-frame drive (UpdateTestAuras) already existed and already reads every
--- setting; nothing was missing but the loop over the frames.
+-- UpdateAllTestAuraDesigner: the "refresh every test frame" entry point for the buff
+-- and debuff rows. Without it a slider drag re-drives the LIVE frames and leaves the
+-- preview stale. The per-frame drive (UpdateTestAuras) already reads every setting;
+-- this is only the loop over the frames.
 function DF:UpdateAllTestAuras()
     if DF.testMode and DF.testPartyFrames then
         for i = 0, 4 do
@@ -3456,11 +3442,6 @@ function DF:UpdateAllTestMissingBuff()
     end
 end
 
--- Test defensive spell textures (variety for multi-icon display)
--- (Removed) TEST_DEFENSIVE_SPELLS — a four-ID list (Pain Suppression, Ironbark,
--- Blessing of Sacrifice, Life Cocoon) with no readers. The defensive preview drives
--- the real 12.1 container and takes its spell from testData instead.
-
 -- Test defensive preview: drive the real 12.1 defensive container.
 function DF:UpdateTestDefensiveBar(frame, testData)
     if not frame then return end
@@ -3469,8 +3450,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
 
     -- 12.1: the live defensive row is a container (DriveDefensiveFactory) —
     -- preview through the SAME container (P5 hybrid) so styling, layout and
-    -- fonts are live-true; the legacy pool below is a dead pipeline here.
-    -- Role-scaled count mirrors the legacy preview shape (tank 3 / healer 1).
+    -- fonts are live-true.
     if DF.FactoryOwnsDefensiveRow and DF:FactoryOwnsDefensiveRow(db) then
         local role = testData and testData.role
         -- The COUNT is the on/off: 0 hides the row outright — same rule as the buff and
@@ -3560,10 +3540,6 @@ function DF:UpdateAllTestDefensiveBar()
 end
 
 
--- (Removed) TEST MODE: TARGETED SPELLS — the on-frame test painter
--- (DF:UpdateTestTargetedSpell). Orphaned once UpdateAllTestTargetedSpell stopped
--- driving it; the group-frame display it previewed is gone.
-
 -- Targeted List demo bars in test mode. This is a single global
 -- container (not per-frame), so the update function just toggles the
 -- show/hide helpers on the feature module. Safe to call with the
@@ -3595,9 +3571,7 @@ end
 
 -- ⚠ Despite the name this is NOT group-only, which is why it survives the removal
 -- of the group-frame Targeted Spells display. It also drives the PERSONAL preview
--- and the Targeted List demo bars, and is called from four places.
--- (Removed) the group half: the UpdateFrame closure that painted on-frame icons,
--- and the party/raid frame loops that existed only to drive it.
+-- and the Targeted List demo bars.
 function DF:UpdateAllTestTargetedSpell()
     if DF.testMode then
         -- Update personal targeted spells display in test mode
@@ -3616,13 +3590,10 @@ function DF:UpdateAllTestTargetedSpell()
 
     if DF.raidTestMode then
         local raidDb = DF:GetRaidDB()
-        -- (Removed) the raid frame loop — it only called the group-frame painter, and
-        -- group Targeted Spells were party-only anyway (raid was forced off).
 
         -- Show personal targeted spells in raid test mode. Personal Targeted is a
         -- player-screen overlay with PER-MODE settings, so the raid preview must gate on
-        -- the RAID profile — this read DF:GetDB() (party), so the raid panel's toggle was
-        -- ignored and the party value decided it instead.
+        -- the RAID profile.
         local db = raidDb
         if db.personalTargetedSpellEnabled and db.testShowPersonalTargeted ~= false and DF.ShowTestPersonalTargetedSpells then
             DF:ShowTestPersonalTargetedSpells()
@@ -3749,12 +3720,9 @@ function DF:CreateTestPanel()
     end
 
     panel:SetScript("OnHide", function()
-        -- Closing the panel drops the USER's claim on both scopes -- and only
-        -- that. It used to hide the frames itself, but ONLY when locked, which is
-        -- exactly how the preview got stranded: close the panel while unlocked and
-        -- the frames stayed up with nothing tracking that you had dismissed them.
-        -- Now unlock's own claim decides whether they stay, and the later lock
-        -- takes them down.
+        -- Closing the panel drops the USER's claim on both scopes -- and only that;
+        -- it must not hide the frames itself. Unlock's own claim decides whether they
+        -- stay up, and the later lock takes them down.
         DF:SetTestModeOwner("party", "user", false)
         DF:SetTestModeOwner("raid", "user", false)
         if DF.GUI and DF.GUI.UpdateTestButtonState then
@@ -3815,10 +3783,8 @@ function DF:CreateTestPanel()
     toggleBtn:SetScript("OnClick", function()
         DF:ToggleTestMode()
         -- This button and the toolbar's test button are the SAME action: turn the
-        -- preview off and close the panel. Leaving the panel open with test mode off
-        -- was the odd state -- one control closed everything, the other printed a
-        -- line and sat there. So an open panel now always means "the user is asking
-        -- for a preview", which is also what makes the toggle's label unambiguous.
+        -- preview off and close the panel. An open panel always means "the user is
+        -- asking for a preview", which is what makes the toggle's label unambiguous.
         --
         -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
         -- idempotent with the release ToggleTestMode just did.
@@ -3946,7 +3912,7 @@ function DF:CreateTestPanel()
             -- deliberately left alone: dropping both at once is how it became invisible
             -- the first time round.
             local arrow = labelBtn:CreateTexture(nil, "OVERLAY")
-            arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             arrow:SetSize(8, 8)
             arrow:SetPoint("LEFT", labelText, "RIGHT", 2, 0)
             arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
@@ -4036,7 +4002,10 @@ function DF:CreateTestPanel()
                     end
                 end)
             elseif not isRaidMode and DF.testMode then
-                DF:UpdateAllFrames()
+                -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below
+                -- and the After(0) "second pass over settled rects" both depend
+                -- on this rebuild having already happened this tick.
+                DF:UpdateAllFrames_Now()
                 if DF.RefreshTestFrames then DF:RefreshTestFrames() end
                 -- Same second pass as the raid branch above — see that comment.
                 C_Timer.After(0, function()
@@ -4211,7 +4180,7 @@ function DF:CreateTestPanel()
         local chevron = header:CreateTexture(nil, "OVERLAY")
         chevron:SetSize(12, 12)
         chevron:SetPoint("LEFT", 8, 0)
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
         chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         section.chevron = chevron
 
@@ -4310,10 +4279,10 @@ function DF:CreateTestPanel()
         section.SetExpanded = function(self, expanded)
             self.expanded = expanded
             if self.expanded then
-                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more.png")
                 self.content:Show()
             else
-                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                self.chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
                 self.content:Hide()
             end
         end
@@ -4462,7 +4431,7 @@ function DF:CreateTestPanel()
     panel.showHealPredictCheck = secBars:AddCheckbox(L["Heal Prediction"], "testShowHealPrediction", nil, "bars_healpred")
     panel.showOutOfRangeCheck = secBars:AddCheckbox(L["Out of Range"], "testShowOutOfRange", nil, "display_fading")
     panel.showReducedMaxCheck = secBars:AddCheckbox(L["Reduced Max Health"], "testShowReducedMaxHealth", nil, "bars_health")
-    -- Text Designer is alpha-gated; only offer the toggle when the module loaded.
+    -- Only offer the toggle when the Text Designer module is loaded.
     if DF.UpdateTextDesigner then
         -- Default ON: seed any profile that predates the Config default so the
         -- checkbox shows checked (migration timing can otherwise leave it nil).
@@ -4664,11 +4633,11 @@ function DF:CreateTestPanel()
     -- 1-5 previews that many. A checkbox plus a slider whose 0 means the same thing is two
     -- controls for one decision, and they can disagree — checkbox off with the slider at 3
     -- reads as broken.
-    -- ⚠ CONSEQUENCE, deliberate: the defensive preview is no longer a PRESET toggle. It
-    -- behaves like the Buffs/Debuffs counts, which presets have always left alone as a
-    -- working preference — so Static/Combat/Healer/Full no longer force it on or off, and
-    -- `GetActiveTestPreset` no longer compares it. That is the consistent answer once it
-    -- became a count rather than a boolean.
+    -- ⚠ It remains a PRESET toggle, as a count: `testDefensiveCount` is declared in
+    -- TEST_TOGGLE_KEYS and listed `= true` in the presets that want the row on, and
+    -- TEST_COUNT_KEYS translates that to 1 / 0 on apply. GetActiveTestPreset compares
+    -- it through the same translation, so Default/Auras/Healer/Full turn the row on
+    -- and Combat turns it off.
     -- ⚠ Also lost: the checkbox's click-through to the Defensive Icon settings page. The
     -- slider row is a plain frame with no pageId hook.
 
@@ -4728,23 +4697,12 @@ function DF:CreateTestPanel()
     end)
     panel.defSlider = defSlider
     panel.defSliderLabel = defLabel
-    -- "Targeted Spell" was the old group-frame icon display that
-    -- Blizzard's 2026-04-07 hotfix killed. The checkbox slot is now
-    -- repurposed for the Targeted List (alpha/beta-only feature).
     panel.showTargetedListCheck = secIndicators:AddCheckbox(L["Targeted List"], "testShowTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end, "indicators_targetedlist")
     panel.animTargetedListCheck = secIndicators:AddCheckbox(L["Animate Targeted List"], "testAnimateTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end)
-    -- (Removed) the "Targeted Spells" checkbox on testShowTargetedSpell. Its painter
-    -- DF:UpdateTestTargetedSpell went with the group-frame display, and
-    -- DF:UpdateAllTestTargetedSpell — which survives — never reads that key: it
-    -- gates on personalTargetedSpellEnabled + testShowPersonalTargeted and delegates
-    -- the list to testShowTargetedList. So the box persisted a value nothing
-    -- consumed. The comment here used to justify keeping it "because it drives the
-    -- Personal Targeted preview too"; that was wrong — Personal has its own box
-    -- immediately below, which is the one that actually drives the preview.
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")
@@ -4989,10 +4947,9 @@ function DF:CreateTestPanel()
         self.debuffSlider:SetValue(debuffCount)
         self.debuffValueText:SetText(debuffCount)
         if self.debuffSlider.UpdateTheme then self.debuffSlider:UpdateTheme() end
-        -- ⚠ Fallback is 0 here, matching Config's default (and the OFF checkbox this
-        -- replaced). The two above fall back to 3 while Config seeds 2 — a pre-existing
-        -- mismatch that only shows on a db with no key at all; left alone rather than
-        -- folded into this change.
+        -- ⚠ Fallback is 0 here, but Config seeds testDefensiveCount = 1 -- the fallback
+        -- only shows on a db with no key at all. The two above fall back to 3 while
+        -- Config seeds 2, the same kind of mismatch; left alone rather than folded in.
         if self.defSlider then
             local defCount = db.testDefensiveCount or 0
             self.defSlider:SetValue(defCount)

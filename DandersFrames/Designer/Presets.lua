@@ -108,30 +108,6 @@ local function DefaultPresetNameForMode(mode)
 end
 DF.DefaultPresetNameForMode = DefaultPresetNameForMode
 
--- Full-reset helper: rebuild both designer preset libraries with pristine
--- Default/Party/Raid presets. The libraries live at profile level, so the
--- per-mode DF:ResetProfile does NOT touch them — without this, edited Aura/
--- Text Designer presets survive a "Reset Profile to Defaults". User-created
--- presets are intentionally dropped by a full reset. We reseed distinct Party
--- and Raid presets (not just Default) so the two modes stay independent; the
--- mode preset refs are left as DF:ResetProfile set them (nil), and a nil ref
--- resolves to the mode's default-named preset ("Party"/"Raid") which we seed
--- here, so both modes render pristine immediately and refs backfill on the
--- next migration.
-function DF:ResetDesignerPresets()
-    if not DF.db then return end
-    local function reseed(libKey, factory)
-        local lib = {}
-        lib[DF.DEFAULT_PRESET] = factory()
-        for _, mode in ipairs({ "party", "raid" }) do
-            lib[DefaultPresetNameForMode(mode)] = factory()
-        end
-        DF.db[libKey] = lib
-    end
-    reseed("auraDesignerPresets", function() return DF:NewAuraDesignerConfig() end)
-    reseed("textDesignerPresets", function() return DF:NewTextDesignerConfig() end)
-end
-
 -- The table the EDITOR / baseline reads should resolve against. For raid this is
 -- the REAL raid table (DF._realRaidDB), NOT the merged DF:GetDB("raid") proxy:
 -- at runtime the proxy carries the active auto-layout's overlay, which would make

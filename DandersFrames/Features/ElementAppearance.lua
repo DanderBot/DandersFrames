@@ -126,6 +126,13 @@ end
 
 function DF:GetFrameBaseAlpha(db, frame)
     if not db then return 1 end
+    -- ☠ THE ENABLE GATE IS FIRST, and it is `== false` rather than `not`. Frame Fade
+    -- switched off means full opacity whatever the sliders and the split say, so it
+    -- has to answer before any of the branches below reads one -- and a profile that
+    -- has not been migrated yet holds NIL here, which must behave exactly as the
+    -- shipped default (true) does. `not db.frameFadeEnabled` would fade nobody's
+    -- frames on the first login after an upgrade.
+    if db.frameFadeEnabled == false then return 1 end
     if db.frameFadeSplitCombat then
         -- "In Instances" holds the in-combat value for the whole dungeon / raid /
         -- arena / BG visit -- the M+ complaint: combat drops between every pack, so
@@ -542,12 +549,10 @@ function DF:UpdateMissingHealthBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.missingHealthBar then return end
 
-    -- ★ TEST FRAMES PASS THROUGH. The fade is pure db + GetInRange and the preview had
-    -- NO counterpart for oorMissingHealthAlpha, so the bar never dimmed out of range
-    -- there. SetMissingHealthBarValue is stamp-aware now (it takes the fraction, the
-    -- dead state and the class from the frame when they are stamped), so the VALUE write
-    -- is shared too -- it no longer resolves a test frame's REAL token to whoever is
-    -- standing next to you. (Audit, 2026-08-07.)
+    -- ★ TEST FRAMES PASS THROUGH. The fade is pure db + GetInRange, and
+    -- SetMissingHealthBarValue is stamp-aware (it takes the fraction, the dead state and
+    -- the class from the frame when they are stamped), so the VALUE write is shared too --
+    -- it does not resolve a test frame's REAL token to whoever is standing next to you.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local unit = frame.unit
@@ -625,7 +630,7 @@ function DF:UpdateBackgroundAppearance(frame)
     -- frames carry REAL tokens ("raid1"), so solo the token does not exist, this branch
     -- was skipped and the background fell through to db.backgroundColor; inside a real
     -- raid the token resolves and it worked, which is why it read as intermittent.
-    -- Same shape as Frames/Core.lua:230, which had it right.
+    -- Same shape as SetMissingHealthBarValue in Frames/Core.lua, which had it right.
     elseif bgMode == "CLASS"
         and ((frame and frame.dfClassToken) or (unit and UnitExists(unit))) then
         local classColor = GetClassColor(frame)
@@ -1134,20 +1139,22 @@ function DF:UpdateDispelOverlayAppearance(frame)
     -- them (SetAlpha included) from addon code errors in restricted content —
     -- the old per-button loop error-spammed every range tick in raid combat
     -- (live-caught). Same channel the buff/defensive row fades already use.
-    local h = frame.dispelFactory
-    if h and h.GetFrame then
-        local w = h:GetFrame()
-        if w then
-            local fDeadAlpha = 1.0
-            if IsDeadOrOffline(frame) and db.fadeDeadFrames then
-                fDeadAlpha = db.fadeDeadBackground or 1
-            end
-            if db.oorEnabled then
-                local fInRange = GetInRange(frame)
-                local fOorAlpha = db.oorDispelOverlayAlpha or 0.2
-                ApplyOORAlpha(w, fInRange, fDeadAlpha, fDeadAlpha * fOorAlpha)
-            else
-                w:SetAlpha(fDeadAlpha)
+    -- The dispel icon row (DriveDispelIconRow) is a second container; it fades with the overlay.
+    for _, h in ipairs({ frame.dispelFactory, frame.dispelIconRow }) do
+        if h and h.GetFrame then
+            local w = h:GetFrame()
+            if w then
+                local fDeadAlpha = 1.0
+                if IsDeadOrOffline(frame) and db.fadeDeadFrames then
+                    fDeadAlpha = db.fadeDeadBackground or 1
+                end
+                if db.oorEnabled then
+                    local fInRange = GetInRange(frame)
+                    local fOorAlpha = db.oorDispelOverlayAlpha or 0.2
+                    ApplyOORAlpha(w, fInRange, fDeadAlpha, fDeadAlpha * fOorAlpha)
+                else
+                    w:SetAlpha(fDeadAlpha)
+                end
             end
         end
     end
@@ -1403,11 +1410,6 @@ function DF:UpdateDefensiveIconAppearance(frame)
     end
 end
 
--- (Removed) TARGETED SPELL CONTAINER APPEARANCE — DF:UpdateTargetedSpellAppearance
--- and its DF.UpdateTargetedSpellAlpha alias. It faded frame.targetedSpellContainer,
--- which no longer exists; this was the GROUP container only, and Personal Targeted
--- never came through here.
-
 -- ============================================================
 -- AURA DESIGNER INDICATORS APPEARANCE
 -- Handles OOR alpha for placed AD indicators (icons, squares, bars)
@@ -1639,11 +1641,10 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
         end
     end, rangeEdge or forceRetryDenied)
 
-    -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above — and now BY CHOICE,
-    -- not by refusal. This header used to claim every walk write on a per-slot host is
-    -- refused; that is only true in combat, and the out-of-combat writes that DID land
-    -- are how fades ended up on both layers at once (multiplied) and stranded across
-    -- combat. The walk now writes slot hosts base-only; range fade lives here alone.
+    -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above. A walk write on a
+    -- per-slot host is only refused IN COMBAT; out of combat it lands, which is how
+    -- fades ended up on both layers at once (multiplied) and stranded across combat.
+    -- The walk writes slot hosts base-only; range fade lives here alone.
     -- The slot owner's DF-created anchor frame sits ABOVE the container, is ours, and
     -- multiplies its alpha down over every slot — one legal write covers all of them.
     -- Frame-wide is the correct grain for range anyway.
@@ -1878,7 +1879,8 @@ function DF:DebugADAlphaHosts(unit)
                         tostring(entryKey), kind,
                         okW and "OK" or "REFUSED", okR and "OK" or "refused",
                         tostring(rawequal(f, h.frame)), latched),
-                        okW and nil or "BAD")
+                        -- `okW and nil or "BAD"` toned every line BAD, successes included.
+                        (not okW) and "BAD" or nil)
                 end
             end
         end
