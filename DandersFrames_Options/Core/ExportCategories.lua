@@ -1539,6 +1539,7 @@ DF.ExportLocalOnly = {
 -- (GUI-write-only keys where nil is meaningful -- plus top-level/legacy carriers).
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
+    defensiveIconStackColor = true,                     -- nil = "leave the colour alone"
     auraDesignerPreset = true, textDesignerPreset = true,
     auraDesignerEnabled = true,                         -- lazy by design, no Config default
     textDesigner = true,                                -- legacy inline table
