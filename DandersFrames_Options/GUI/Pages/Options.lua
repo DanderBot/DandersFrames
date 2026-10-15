@@ -1104,8 +1104,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
         --              oorEnabled)
         --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
-        --              Threshold Fading (tick: healthFadeEnabled), Unhealable
-        --              Fading
+        --              Threshold Fading (tick: healthFadeEnabled), Spirit of
+        --              Redemption Fading
         --
         -- Every feature that has an enable carries it as its header tick (one
         -- checkbox per setting, the builder's own skipped through hoistToggle).
@@ -1605,17 +1605,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function apply() DF:RefreshUnhealableFade() end
 
             if not tools2.hoistToggle then
-                local ufEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Fade Unhealable Units"], db, "fadeUnhealableEnabled", function()
+                local ufEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Fade Spirit of Redemption"], db, "fadeUnhealableEnabled", function()
                     tools2.refreshStates()
                     apply()
                 end), 30)
                 ufEnable.keepEnabled = true
-                ufEnable.tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."]
+                ufEnable.tooltip = L["Dims a priest's frame while they are in Spirit of Redemption, since heals cannot land on them."]
             end
             group.disableChildrenOn = function(d) return not d.fadeUnhealableEnabled end
 
-            local ufAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Unhealable)"], 0.1, 1.0, 0.05, db, "fadeUnhealableAlpha", apply, apply, true), 55)
-            ufAlpha.tooltip = L["How visible the frame stays while its unit cannot be healed."]
+            local ufAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Spirit of Redemption)"], 0.1, 1.0, 0.05, db, "fadeUnhealableAlpha", apply, apply, true), 55)
+            ufAlpha.tooltip = L["How visible the frame stays while the priest is in Spirit of Redemption."]
             group:AddWidget(GUI:CreateColorPicker(parent, L["Fade Color"], db, "fadeUnhealableColor", false, apply, apply, true), 35)
         end
 
@@ -1625,10 +1625,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return a and format("%s %.2f", L["Alpha"], a) or ""
         end
 
-        local band = OpenSection(L["Unhealable Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
+        local band = OpenSection(L["Spirit of Redemption Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
             BuildUnhealableFadeGroup, {
-                db = db, key = "fadeUnhealableEnabled", label = L["Fade Unhealable Units"],
-                tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."],
+                db = db, key = "fadeUnhealableEnabled", label = L["Fade Spirit of Redemption"],
+                tooltip = L["Dims a priest's frame while they are in Spirit of Redemption, since heals cannot land on them."],
                 onChanged = function()
                     self:RefreshStates()
                     DF:RefreshUnhealableFade()
