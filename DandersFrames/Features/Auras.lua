@@ -3471,10 +3471,10 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- back to the map, and Atlas keeps Blizzard's palette. Shows only on
     -- dispellable debuffs; the static DF.Border below renders always, so
     -- non-dispellable keeps the base border.
-    -- Wave 5b: the spec also hosts the NATIVE dispel-type SYMBOL (colourblind letter,
-    -- SetAuraSymbol) — DECOUPLED from the colour ring so either ships alone. Both are
-    -- engine-written (zero aura reads); the symbol additionally renders in-game only
-    -- while the colorblindMode CVar is on (test mode previews it regardless).
+    -- The spec also hosts the NATIVE dispel-type SYMBOL (colourblind letter,
+    -- SetDispelTypeText) — DECOUPLED from the colour ring so either ships alone. Both
+    -- are engine-written (zero aura reads); the symbol carries our own letter map, so
+    -- it does not depend on the colorblindMode CVar.
     local dispel
     if prefix == "debuff" then
         -- ☠ THE COLOUR RING IS A BORDER, SO IT OBEYS THE BORDER TOGGLE. This read the
@@ -4006,8 +4006,7 @@ end
 -- ============================================================
 -- DEBUFF FACTORY BRIDGE (P3) — mirror of the buff bridge with debuff keys.
 -- Filter list = the native direct-debuff filters; dispel colouring binds through
--- AddDispelTypeTexture (68914's replacement for the deprecated SetAuraBorder alias)
--- in the Color style, carrying customDispelColorMap — so custom per-type colours ARE
+-- AddDispelTypeTexture in the Color style, carrying customDispelColorMap — so custom per-type colours ARE
 -- expressible and the account-wide Colors-page palette drives this row. Debuff rows
 -- get NO spell-ID candidate filters: harmful spell-ID maps do nothing on friendly
 -- frames (Meorawr gate).

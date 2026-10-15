@@ -6023,7 +6023,7 @@ function Factory:SyncFrame(frame)
 
     -- ---- BORDER (whole-frame static ring via DF.Border, overlay) ---------------------
     -- AD borders are a static user-chosen colour per aura (NOT dispel-type driven — every
-    -- AD entry is a helpful buff, so Blizzard's native SetAuraBorder dispel-Color path
+    -- AD entry is a helpful buff, so Blizzard's native AddDispelTypeTexture dispel-Color path
     -- doesn't apply). Rendered as static border art (DF.Border secretRect), shown on
     -- presence via the slot. Expiring border art (thickness/anim/colour-swap near expiry)
     -- reads remaining time → unportable, base ring only (P4.7 overlays the Expiring group).

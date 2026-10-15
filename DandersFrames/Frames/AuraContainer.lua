@@ -1459,7 +1459,7 @@ local function normalizeFilters(filter)
             elseif type(f) == "table" and type(f.filter) == "string" then
                 -- onInit: a consumer secure-init hook (overlay dispel carriers) run
                 -- INSIDE initializeFrame so its regions are created in secure context
-                -- (SetAuraBorder rejects textures created in the tainted style pass —
+                -- (AddDispelTypeTexture rejects textures created in the tainted style pass —
                 -- children of the secret aura button are access-constrained).
                 -- style: per-record button overrides (scale / badge). See applyRecordStyle
                 -- — a group whose membership IS the predicate can be styled unconditionally.
@@ -2568,7 +2568,7 @@ local function styleButton_regions(slot, config)
         DF.TextStyle:Apply(slot.dfCaster, casterSpec, slot.dfCasterHolder)
     end
 
-    -- NATIVE dispel border / symbol REGIONS (the SetAuraBorder/SetAuraSymbol bind is in bindNative).
+    -- NATIVE dispel border / symbol REGIONS (the AddDispelTypeTexture/SetDispelTypeText bind is in bindNative).
     local dispelSpec = style.dispel
     if dispelSpec then
         if dispelSpec.nativeBorder and not slot.dfAuraBorder then
@@ -3304,7 +3304,7 @@ local function bindNative(slot, config)
 
     local dispelSpec = style.dispel
     if dispelSpec then
-        if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
+        if slot.dfAuraBorder and slot.AddDispelTypeTexture
             and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
             -- Both stamps land AFTER the pcall below. Setting them up front meant a
             -- failed bind marked the slot as bound AND as carrying the current
@@ -3346,16 +3346,11 @@ local function bindNative(slot, config)
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                     showIcon = false,
                 }
-                -- 68914: SetAuraBorder is the deprecated clearing alias ("removed after
-                -- 12.1"); AddDispelTypeTexture is the real API and APPENDS. This bind
-                -- re-runs on a palette-generation bump, so clear first to REPLACE rather
-                -- than stack a second ring on the same icon.
-                if slot.AddDispelTypeTexture then
-                    if slot.ClearDispelTypeTextures then slot:ClearDispelTypeTextures() end
-                    slot:AddDispelTypeTexture(slot.dfAuraBorder, opts)
-                else
-                    slot:SetAuraBorder(slot.dfAuraBorder, opts)
-                end
+                -- AddDispelTypeTexture APPENDS, and this bind re-runs on a
+                -- palette-generation bump, so clear first to REPLACE rather than stack a
+                -- second ring on the same icon.
+                slot:ClearDispelTypeTextures()
+                slot:AddDispelTypeTexture(slot.dfAuraBorder, opts)
             end)
             if ok then
                 slot._boundAuraBorder = true
@@ -3369,11 +3364,11 @@ local function bindNative(slot, config)
                 if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(0) end
                 if not warnedDispelBorder then
                     warnedDispelBorder = true
-                    DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
+                    DF:DebugWarn(DBG, "AddDispelTypeTexture failed (build still ok): %s", tostring(err))
                 end
             end
         end
-        if slot.dfSymbol and (slot.SetDispelTypeText or slot.SetAuraSymbol) and not slot._boundSymbol then
+        if slot.dfSymbol and slot.SetDispelTypeText and not slot._boundSymbol then
             slot._boundSymbol = true
             local ok, err = pcall(function()
                 local opts = {
@@ -3387,18 +3382,7 @@ local function bindNative(slot, config)
                     -- See DF:GetGameDispelTextMap in Frames/Border.lua.
                     customDispelTextMap = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap() or nil,
                 }
-                -- 68914: SetAuraSymbol sits in the same "removed after 12.1" deprecation
-                -- block as SetAuraBorder, but unlike that one it is a PLAIN ALIAS —
-                -- `SetAuraSymbol = SetDispelTypeText`, same (fontString, options)
-                -- signature, no clear-then-add semantics to mirror. So this is a straight
-                -- rename: prefer the real name, keep the alias only for older builds.
-                -- Without the fallback the gate above would simply stop matching when the
-                -- aliases go, and the dispel symbol would vanish SILENTLY.
-                if slot.SetDispelTypeText then
-                    slot:SetDispelTypeText(slot.dfSymbol, opts)
-                else
-                    slot:SetAuraSymbol(slot.dfSymbol, opts)
-                end
+                slot:SetDispelTypeText(slot.dfSymbol, opts)
             end)
             if not ok and not warnedDispelText then
                 warnedDispelText = true
@@ -4391,7 +4375,7 @@ function NativeBackend:build()
             local key = rec.key or ("df" .. i)
             if isOverlay then
                 -- Per-slot init when the consumer supplied an onInit hook (overlay
-                -- dispel carriers) so it can create+bind SetAuraBorder in secure
+                -- dispel carriers) so it can create+bind AddDispelTypeTexture in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
@@ -5455,7 +5439,7 @@ function Handle:_paintTestSlot(slot, index)
     if slot.dfCaster then
         slot.dfCaster:SetText(UnitName and UnitName("player") or "")
     end
-    -- Dispel ring: no native SetAuraBorder bind in test mode -> tint + show it
+    -- Dispel ring: no native AddDispelTypeTexture bind in test mode -> tint + show it
     -- ourselves. Custom palette first (the preview mirrors live, where the shared
     -- account dispel colours drive Color-style rings), game palette fallback.
     if slot.dfAuraBorder then
@@ -5480,7 +5464,7 @@ function Handle:_paintTestSlot(slot, index)
         -- exactly the white ring the dark birth exists to prevent.
         if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(shown and 1 or 0) end
     end
-    -- Dispel symbol: no native SetAuraSymbol bind in test mode -> fake the colourblind
+    -- Dispel symbol: no native SetDispelTypeText bind in test mode -> fake the colourblind
     -- letter ourselves (house rule: every native-driven region renders in test, or the
     -- preview lies) — there is no native bind to drive it on a fake aura.
     -- ★ Reads the SAME map the live bind hands to customDispelTextMap
@@ -6245,7 +6229,7 @@ function Handle:GetFrame() return self.frame end
 function Handle:GetAlphaHost() return self.frame end
 -- OVERLAY mode only: the live native slot buttons, keyed by the filter record's key
 -- (positional "df<i>" when unkeyed). Consumers decorate these directly (build DF art
--- on them, register native SetAuraBorder regions). EMPTY until a native build lands
+-- on them, register native AddDispelTypeTexture regions). EMPTY until a native build lands
 -- (combat-deferred builds, fake/test backend) and INVALIDATED by every rebuild — never
 -- cache the buttons across drives; re-fetch and key per-button state on the button itself.
 function Handle:GetOverlaySlots()

@@ -7364,7 +7364,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
                 -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the
                 -- Magic/Curse/Disease/Poison shape; this probe shows what it found,
-                -- the SetAuraBorder style enums (Color vs Atlas resolution), and
+                -- the AddDispelTypeTexture style enums (Color vs Atlas resolution), and
                 -- whether the shared curve builds.
                 local o = DF:Out("Dispel IDs", "colour probe")
                 DF._dispelTypeEnum = nil   -- force a fresh scan
@@ -7399,7 +7399,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local hasDTC = C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil
                 o:Field("GetAuraDispelTypeColor", hasDTC and "present" or "absent",
                     hasDTC and "good" or "warn")
-                -- Overlay ground truth: each SetAuraBorder bind site's last attempt
+                -- Overlay ground truth: each AddDispelTypeTexture bind site's last attempt
                 -- ("ok" / the pcall error / never attempted). Keyed by slot key
                 -- (main / gameborder / edgeTOP / …).
                 local be = DF._dispelBindErr

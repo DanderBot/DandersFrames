@@ -1695,14 +1695,13 @@ DF.PartyDefaults = {
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
     debuffDispelBorderInset = 0,    -- native dispel ring: + inward / - outward halo
-    -- Dispel symbol (Wave 5b, colourblind aid): the engine writes the dispel-type
-    -- letter into a DF-owned FontString (native SetAuraSymbol; zero aura reads).
-    -- Renders in-game ONLY while WoW's colorblindMode CVar is on (GUI tooltip caveat).
+    -- Dispel symbol (colourblind aid): the engine writes the dispel-type letter into a
+    -- DF-owned FontString (native SetDispelTypeText; zero aura reads). We pass our own
+    -- customDispelTextMap, so it renders without WoW's colorblindMode CVar.
     -- ☠ NAME DIVERGENCE, DELIBERATE -- do not "tidy" these to match the label.
     -- These drive the feature the UI calls DISPEL TEXT: the two-letter dispel code
-    -- (Ma/Po/Cu) on a debuff icon. The keys still say Symbol because that was the
-    -- pre-68914 API name; Blizzard itself renamed it (SetDispelTypeText is current,
-    -- SetAuraSymbol is the deprecated alias) and the UI followed. Renaming the keys
+    -- (Ma/Po/Cu) on a debuff icon. The keys say Symbol after Blizzard's original API
+    -- name (now SetDispelTypeText), and the UI followed the rename. Renaming the keys
     -- would need a migration over everyone's saved data plus import handling for the
     -- export strings already in the wild -- all for an internal name nobody sees.
     --

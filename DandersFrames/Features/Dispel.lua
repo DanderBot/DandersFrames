@@ -639,7 +639,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- aura button (12.1 slot path — itself SetAllPoints(frame)), so the rect is
         -- byte-identical to the padded frame either way. The difference that matters
         -- is the anchor CHAIN: on the slot path it now terminates at the aura button.
-        -- 68824's SetAuraBorder runs GetValidatedForbiddenObjectTable, which rejects
+        -- AddDispelTypeTexture runs GetValidatedForbiddenObjectTable, which rejects
         -- any bound carrier whose anchor chain doesn't reach the button ("must inherit
         -- all forbidden layout aspects from owner"); the game-mode gradient/tint
         -- carriers pin onto this proxy, so it has to lead back to the button — not the
@@ -1863,9 +1863,8 @@ local function BindDispelCarriers(btn, carriers, db, key)
     local tintOpts = {
         style = DispelBorderStyle(),
         customDispelColorMap = DispelBorderMapFor(),
-        -- ☠☠ THE CURVE IS THE ONLY SECRET-SAFE TINT — the map is NOT, despite what this
-        -- file's header claimed for a month. Read from the LIVE client source
-        -- (Blizzard_CustomAuraButton.lua @ Gethe 9f2b839d, build 69382):
+        -- ☠☠ THE CURVE IS THE ONLY SECRET-SAFE TINT — the map is NOT
+        -- (Blizzard_CustomAuraButton.lua):
         --   * the map is a RAW LUA TABLE INDEX: colorMap[auraData.dispelName or "None"].
         --     A SECRET dispelName is truthy (the `or "None"` never fires) and matches no
         --     stored key, so the lookup returns nil — and the colour apply is
@@ -1877,10 +1876,9 @@ local function BindDispelCarriers(btn, carriers, db, key)
         --     applied AFTER the style step and overrides it, for every style.
         -- The debuff-row icon ring (Frames/AuraContainer.lua, the slot dispel bind) passes
         -- the same curve alongside its map for the "Color" style; its Atlas style passes
-        -- no map at all and keeps the engine palette, which is why the reporters' row
-        -- borders were coloured next to a white overlay.
+        -- no map at all and keeps the engine palette.
         -- nil when C_CurveUtil / the dispel-type enum is absent: the engine then falls
-        -- back to the map, i.e. exactly the previous behaviour. Cache is invalidated
+        -- back to the map. Cache is invalidated
         -- with the map (DF:InvalidateDispelColorCurve), and the palette-edit re-bind
         -- (dispelCurveGen) re-reads it here.
         customDispelColorCurve = DF.GetDispelColorCurve and DF:GetDispelColorCurve() or nil,
@@ -1888,21 +1886,16 @@ local function BindDispelCarriers(btn, carriers, db, key)
         showWhenHelpful = false,
         showIcon = false,
     }
-    -- nBound is what was ACTUALLY bound, and it is what the stamp reports. The
-    -- pre-68914 alias binds ONE carrier, and stamping "ok x" .. #carriers there lied
-    -- about the rest -- the reveal then lifted dims whose textures nothing owned.
+    -- nBound is what was ACTUALLY bound, and it is what the stamp reports: an add that
+    -- throws part-way leaves the later carriers unowned, and the reveal must not lift
+    -- their dims.
     local nBound = 0
     local ok, err = pcall(function()
-        if btn.AddDispelTypeTexture then
-            if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
-            for i = 1, #carriers do
-                local c = carriers[i]
-                btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
-                nBound = i
-            end
-        else
-            btn:SetAuraBorder(carriers[1].tex, carriers[1].opts or tintOpts)
-            nBound = 1
+        btn:ClearDispelTypeTextures()
+        for i = 1, #carriers do
+            local c = carriers[i]
+            btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
+            nBound = i
         end
     end)
     -- The whole set or nothing: a partial bind (one strip of four) is not a revealable
@@ -1940,7 +1933,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
 end
 
 
--- Create the SetAuraBorder carrier(s) for one overlay slot and bind them, per the
+-- Create the AddDispelTypeTexture carrier(s) for one overlay slot and bind them, per the
 -- slot's role (from its key / edgeSide). Each carrier is anchored to the button here
 -- (SetAllPoints(btn)) so it inherits the button's forbidden aspects at bind time; the
 -- tainted style pass re-positions it afterwards (validation already passed). Icon
@@ -1954,9 +1947,7 @@ end
 -- touch live buttons in combat (BUILD-ONCE-LEAVE-IT). Moving create+bind there would
 -- delay the overlay's debut to regen. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
-    -- Either bind API is enough (AddDispelTypeTexture is current; SetAuraBorder is the
-    -- deprecated alias kept for pre-68914 clients) — see BindDispelCarriers.
-    if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
+    if not (btn and btn.CreateTexture and btn.AddDispelTypeTexture) then return end
     local key = slotInfo.key
     local roles = slotInfo.roles
     if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
@@ -2168,7 +2159,7 @@ local function StyleGameMainSlot(btn, frame, db)
 
     -- Dress the carrier that DispelSlotSecureInit created + bound. This tainted pass
     -- ONLY does geometry/alpha/blend (legal post-bind); it must NEVER CreateTexture,
-    -- SetAuraBorder, or SetStatusBarTexture (that recreates the bound fill) here —
+    -- AddDispelTypeTexture, or SetStatusBarTexture (that recreates the bound fill) here —
     -- Blizzard owns the carrier's colour + Shown after the bind.
     if style == "EDGE" then
         -- EDGE renders through the four edge slots; keep the main widget's gradient
@@ -2255,7 +2246,7 @@ end
 -- Born dark: the dim host stays at alpha 0 until BindDispelCarriers confirms the bind.
 -- ============================================================
 local function DispelIconRowSecureInit(btn, db)
-    if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
+    if not (btn and btn.CreateTexture and btn.AddDispelTypeTexture) then return end
     local holder = CreateFrame("Frame", nil, btn)
     holder:SetAllPoints(btn)
     local badgeDim = CreateFrame("Frame", nil, holder)
@@ -2294,7 +2285,7 @@ local function StyleGameBorderSlot(btn, frame, db)
     if not ring then return end
     -- Anchor to `btn`, not `frame`: the button is SetAllPoints(frame) so the rect is
     -- identical, but the chain must terminate at the aura button for 68824's
-    -- SetAuraBorder validation. The frame rect is OURS (readable); style re-runs on
+    -- AddDispelTypeTexture validation. The frame rect is OURS (readable); style re-runs on
     -- layout-version bumps, so a resize catches up on the next dispel pass.
     ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
     -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
@@ -2341,7 +2332,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- holders) — no SetHeight/SetWidth on regions inside the button subtree.
     -- Anchor to `btn`, NOT `frame`: the button is SetAllPoints(frame) so the rect is
     -- identical, but the anchor chain must terminate at the aura button for 68824's
-    -- SetAuraBorder validation ("must inherit all forbidden layout aspects from
+    -- AddDispelTypeTexture validation ("must inherit all forbidden layout aspects from
     -- owner") — anchoring to the unit frame leaves this bound carrier orphaned (white).
     tex:ClearAllPoints()
     if edge == "TOP" then
@@ -2628,7 +2619,7 @@ local function dispelFilterRecords(slots, db, frame)
         local si = slots[i]   -- fresh per-iteration capture for the onInit closure
         recs[i] = { filter = si.filter, key = si.key,
                     candidateFilters = si.candidateFilters,
-                    -- SECURE carrier create + SetAuraBorder bind, run inside the
+                    -- SECURE carrier create + AddDispelTypeTexture bind, run inside the
                     -- container's initializeFrame (the only context where a texture child
                     -- of the secret button isn't access-constrained). Geometry/alpha stay
                     -- in StyleGame*Slot.

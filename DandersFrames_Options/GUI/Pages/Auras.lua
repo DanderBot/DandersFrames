@@ -609,7 +609,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { key = "Bleed",   name = L["Bleed / Enrage"] },
         }
         -- Commit: bump the curve generation, rebuild the container rows (fresh
-        -- SetAuraBorder binds pick up the new curve) and restyle the overlay
+        -- AddDispelTypeTexture binds pick up the new curve) and restyle the overlay
         -- (its binds re-run via the generation gate).
         local function DispelColorChanged()
             if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
