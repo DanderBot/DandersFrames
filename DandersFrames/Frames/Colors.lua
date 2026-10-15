@@ -213,6 +213,7 @@ function DF:GetCurveForUnit(unit, db, prefix, cache)
 
     local class = "DEFAULT"
     if useClass then
+        local _
         _, class = UnitClass(unit)
         -- ☠ Secret class (boss units): it may not key the curve cache (read OR
         -- write below), and BuildColorStops compares it. DEFAULT is exactly the
