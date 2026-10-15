@@ -212,8 +212,9 @@ do
     eq(direct, 1, "collect: ...and only ADStructuralRedraw calls the page rebuild")
     local routed = 0
     for _ in IND:gmatch("ADStructuralRedraw%(parent%)") do routed = routed + 1 end
-    -- Fifteen controls, plus the section cards' own fold (a16 #4).
-    eq(routed, 16, "collect: ...every reveal-a-sibling control goes through it")
+    -- Fifteen controls, plus the section cards' own fold (a16 #4), plus the bar's
+    -- Expiration note opening a shut Appearance card before its Color Mode jump.
+    eq(routed, 17, "collect: ...every reveal-a-sibling control goes through it")
 
     -- Text-only mode drops the Border section at build time.
     check(IND:find("if not proxy.hideIcon then", 1, true) ~= nil,

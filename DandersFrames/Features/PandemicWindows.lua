@@ -36,11 +36,9 @@ local addonName, DF = ...
 -- later makes wrong greys a feature that would work, and the user cannot tell that from
 -- intended behaviour. That is the argument for eventually letting a LOCALLY measured YES
 -- override a shipped NO — never the reverse, or a spell nobody happened to cast this week
--- starts greying itself. Local learning is deliberately NOT built yet: DF no longer scans
--- auras (the render path is engine-owned), so it would mean a new UNIT_AURA reader existing
--- only to feed this gate, in an environment where `info.isFullUpdate` is a secret boolean
--- that throws when tested and AuraUtil.ForEachAura throws while auras are sealed. Ship the
--- table alone; add learning only if a stale NO actually bites.
+-- starts greying itself. Local learning now exists (Pandemic.lua's sampler, riding the
+-- container's out-of-combat sweep, stored per game build in DandersFramesDB_v2.pandemicWindows);
+-- this table is its seed.
 --
 -- ⚠ MEASUREMENTS, NOT OPINIONS. Several NOs are counter-intuitive and were re-checked:
 -- Prayer of Mending, Earth Shield, Echo of Light, Atonement and Dawnlight all read no.

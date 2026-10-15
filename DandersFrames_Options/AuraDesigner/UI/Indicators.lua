@@ -264,7 +264,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
         -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
-        return group
+        return group, section
     end
 
 
@@ -1081,7 +1081,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- The local stays `texColorsGroup` only because the |H link route below is keyed
         -- "dfADScroll:texcolors" and renaming that would break saved links in old tooltips.
         local colorModeDrop
-        local texColorsGroup = AddGroup(L["Appearance"], function(g)
+        local texColorsGroup, texColorsSection = AddGroup(L["Appearance"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
             -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
@@ -1198,6 +1198,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local maxS = S.tabScrollFrame:GetVerticalScrollRange() or 0
                 S.tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
             end
+            local function jumpToColorMode()
+                GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
+                    flash = { border = true } })   -- a single control: fill + outline
+            end
+            -- The rebuilt card's own jump, for a click that had to open Appearance first.
+            S.adJumpToColorMode = jumpToColorMode
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
             -- known before AddWidget — else it falls back to a fixed slot the text overflows.
@@ -1205,11 +1211,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Appearance."], link), {
                 width = innerW,
                 onLinkClick = function()
+                    -- ⚠ A SHUT APPEARANCE CARD NEVER RAN ITS BUILDER, so there is nothing
+                    -- here to scroll to. Open it (a fold is a redraw), then jump with the
+                    -- targets the rebuilt card published.
+                    if texColorsSection and not texColorsSection.expanded then
+                        texColorsSection:SetExpanded(true)
+                        ADStructuralRedraw(parent)
+                        C_Timer.After(0, function()
+                            if S.adJumpToColorMode then S.adJumpToColorMode() end
+                        end)
+                        return
+                    end
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
                     -- (LinkToSetting flashes target.widget — pass the group instead to flash the
                     -- whole section).
-                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
-                        flash = { border = true } })   -- a single control: fill + outline
+                    jumpToColorMode()
                 end,
             })
             g:AddWidget(note, note.layoutHeight or 34)

@@ -35,6 +35,12 @@ local EDIT_BOX_ROW_H = 56
 local TD_SPLIT_GAP, TD_LEFT_FLOOR = 6, 300
 local tdPreviewNeed = TD_LEFT_FLOOR
 local function TDSplitLeftWidth(total)
+    -- ⚠ Still the floor means the build-time measure ran before fonts loaded (it
+    -- returns its uncached 300 then), so measure again on this size change. Once
+    -- the shared width is real it is cached and this stops asking.
+    if tdPreviewNeed <= TD_LEFT_FLOOR and DF.GUI.DesignerPreviewWidth then
+        tdPreviewNeed = math.max(TD_LEFT_FLOOR, DF.GUI.DesignerPreviewWidth())
+    end
     if total - TD_SPLIT_GAP - tdPreviewNeed < tdPreviewNeed then
         return math.floor((total - TD_SPLIT_GAP) / 2)
     end

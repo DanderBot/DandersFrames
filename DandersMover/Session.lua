@@ -133,7 +133,14 @@ function Sess:Lock(onDone)
         if onDone then onDone(true) end
         return
     end
-    self.lockDone = onDone
+    -- A second Lock while the prompt is up must not drop the first caller: both hear the
+    -- one answer.
+    local prev = self.lockDone
+    if prev and onDone then
+        self.lockDone = function(ended) prev(ended); onDone(ended) end
+    else
+        self.lockDone = onDone or prev
+    end
     if not self.dirty then self:Finish("save") return end
     -- The popup frame is shared with the host addon, so remember that this prompt is
     -- ours: Finish and Escape close only it, never a dialog someone else opened.

@@ -363,7 +363,11 @@ local function openOptionsPage(mode, pageId)
         local btn = (mode == "raid") and GUI.RaidButton or GUI.PartyButton
         if btn and btn.Click then
             local t = perfStart()
-            btn:Click()
+            -- Flagged so the mode buttons' end-the-session-first guard lets this through.
+            GUI._moverOwnedClick = true
+            local okClick, err = pcall(btn.Click, btn)
+            GUI._moverOwnedClick = nil
+            if not okClick then geterrorhandler()(err) end
             perfLog(t, "openOptionsPage: mode button Click (page rebuild)")
         end
     end

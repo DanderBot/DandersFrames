@@ -3249,9 +3249,21 @@ local function SplitBuffRowForOwnCasts(filter, candidateFilters, mineOnly)
             return filter, withoutMine(candidateFilters)
         end
     end
+    -- noVisLatch: for a unit outside your world the engine cannot tell who cast an aura, so
+    -- these two records fail open -- each aura shows once without the own-cast split, or a
+    -- tracked buff shows on the bar as well as in the Aura Designer. Both beat the latch's
+    -- answer, which blanks the whole row (every other player's buffs too).
+    local mineCF = withoutMine(candidateFilters)
+    -- Every included spell is a My Buffs id: the own-casts half has nothing left to show,
+    -- and an empty include list is ambiguous to the engine (it may read as "no selection").
+    if mineCF.includeSpellIDs and next(mineCF.includeSpellIDs) == nil then
+        return {
+            { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters, noVisLatch = true },
+        }, candidateFilters
+    end
     return {
-        { filter = f .. "|PLAYER",  key = "mine",   candidateFilters = withoutMine(candidateFilters) },
-        { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters },
+        { filter = f .. "|PLAYER",  key = "mine",   candidateFilters = mineCF, noVisLatch = true },
+        { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters, noVisLatch = true },
     }, candidateFilters
 end
 

@@ -342,7 +342,7 @@ do
           "gate: ...and GUI:CreateHeader is what stamps that mark")
     -- The three builders that carry a group-wide gate still carry it, because a
     -- band is a group like any other.
-    for _, b in ipairs({ "BuildBuffOrderGroup", "BuildBuffDurationGroup", "BuildBuffStackGroup" }) do
+    for _, b in ipairs({ "BuildBuffFilterGroup", "BuildBuffOrderGroup", "BuildBuffDurationGroup", "BuildBuffStackGroup" }) do
         check(builderBody(b):find("group.disableChildrenOn = function(d) return not d.showBuffs end", 1, true) ~= nil,
               "gate: " .. b .. " still carries the group gate")
     end

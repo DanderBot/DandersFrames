@@ -243,10 +243,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- an empty card.
         local function HideDurationBar(d) return not DF:FactoryOwnsBuffRow(d) end
 
-        -- ☠ THE PAGE GATE, ON THE CARDS. Show Buffs greys the gated groups --
-        -- and ONLY those: Buff Filters (and Hide Duplicate Buffs at its foot)
-        -- never dims with it (you can pick what the bar would show before you
-        -- switch it on).
+        -- ☠ THE PAGE GATE, ON THE CARDS. Show Buffs greys every card on the
+        -- page, Buff Filters (and Hide Duplicate Buffs at its foot) included.
         --
         -- ⚠ THE VISIBILITY CARD IS THE ONE EXCEPTION among the gated groups: it
         -- carries the gate's own tick, so greying it would leave no way to turn
@@ -264,9 +262,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function Join(parts) return table.concat(parts, " \194\183 ") end
 
         -- ===== VISIBILITY (a Content card) =====
-        -- Show Buffs is the master switch for this whole page — most other groups grey
-        -- out under it (BuffsOffRow names the ones that do not) — so it leads, above
-        -- even the filters.
+        -- Show Buffs is the master switch for this whole page — every other group greys
+        -- out under it (see BuffsOffRow) — so it leads, above even the filters.
         --
         -- Named for what the group DOES, not "Settings": everything on the page is
         -- a setting. "Visibility" covers both controls honestly — whether the bar
@@ -429,6 +426,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local function BuildBuffFilterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+
+            -- The body greys with the page gate, as the header does (dimOn is
+            -- the header half only). Hide Duplicate Buffs is added to this same
+            -- band after the builder, so it greys with it.
+            group.disableChildrenOn = function(d) return not d.showBuffs end
 
             local showAllCb = group:AddWidget(GUI:CreateCheckbox(parent, L["All Buffs"], db, "directBuffShowAll", function()
                 tools2.refreshStates()
@@ -1027,6 +1029,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- and changes the bind, which the lightweight text paths deliberately do not do.
         local function ApplyBuffCasterText() DF:UpdateAllFrames() end
 
+        -- ⚠ HIDDEN WHERE THE FACTORY DOES NOT OWN THE ROW, as Duration Bar is: the
+        -- legacy renderer has no caster text. The engine also skips a button without
+        -- SetCasterName (pre-12.1.5), but that method lives on a secure-environment
+        -- mixin with no global to probe from here, so that half is not gated.
+        local function NoCasterRow(d) return not DF:FactoryOwnsBuffRow(d) end
+
         local function BuildBuffCasterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             local function Changed()
@@ -1054,7 +1062,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 disableOn      = function(d) return not d.buffCasterName end,
                 colorDisableOn = function(d) return d.buffCasterClassColor and true or false end,
                 onChange       = ApplyBuffCasterText,
-                onDrag         = ApplyBuffCasterText,
+                -- A drag only restyles the bound region: the layout re-drive is
+                -- enough, and the slider's release runs the full update.
+                onDrag         = function() DF:InvalidateAuraLayout() end,
             })
             group.disableChildrenOn = function(d) return not d.showBuffs end
         end
@@ -1072,7 +1082,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ☠ SHOW CASTER NAME IS THE HEADER'S TICK; the builder skips its own
         -- (hoistToggle), as Dispel Text does.
         tools.DeferCard("buffs_caster", function()
-            local band = OpenSection(L["Caster Name"], "buffs_caster", 1, BuffCasterSummary, BuffsOffRow, nil,
+            local band = OpenSection(L["Caster Name"], "buffs_caster", 1, BuffCasterSummary, BuffsOffRow, NoCasterRow,
                 BuildBuffCasterGroup, {
                     db = db, key = "buffCasterName", label = L["Show Caster Name"],
                     disableOn = BuffsOffRow,
@@ -1496,10 +1506,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- collapses the slot instead of drawing an empty card.
         local function NoFactoryRow(d) return not DF:FactoryOwnsDebuffRow(d) end
 
-        -- ☠ THE PAGE GATE, ON THE CARDS. Show Debuffs greys the gated groups --
-        -- and ONLY those: Debuff Filters, Debuff Blacklist and Hide Duplicate
-        -- Debuffs never dim with it (you can pick what the bar would show before
-        -- you switch it on).
+        -- ☠ THE PAGE GATE, ON THE CARDS. Show Debuffs greys every card on the
+        -- page, Debuff Filters, Debuff Blacklist and Hide Duplicate Debuffs
+        -- included.
         --
         -- ⚠ THE VISIBILITY CARD IS THE ONE EXCEPTION among the gated groups: it
         -- carries the gate's own tick, so greying it would leave no way to turn
@@ -1519,7 +1528,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== VISIBILITY (a Content card) =====
         -- Leads the page for the same reason it does on Buff Bar: Show Debuffs is the
-        -- master switch most groups grey out under (see DebuffsOffRow). Same name
+        -- master switch every other group greys out under (see DebuffsOffRow). Same name
         -- as its twin — the two pages are read as a pair, and a group holding the
         -- same two controls must not have two names.
         local function BuildDebuffVisibilityGroup(tools2)
@@ -1618,6 +1627,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- opposite of what a header tick means.
         local function BuildDebuffFilterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            -- Body greys with the page gate (dimOn greys the header only); Hide
+            -- Duplicate Debuffs joins this band after the builder and greys too.
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
             local function Changed()
                 tools2.refreshStates()
                 DebuffFilterChanged()
@@ -1824,6 +1836,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- rebuilds a page, so it can be a card and pin.
         local function BuildDebuffBlacklistGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
 
             group:AddWidget(GUI:CreateLabel(parent,
                 "|cff888888" .. L["Select a debuff to hide it from this bar. These are the only debuffs the game lets us hide."] .. "|r", 250), 45)
@@ -2665,7 +2678,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 disableOn      = function(d) return not d.debuffCasterName end,
                 colorDisableOn = function(d) return d.debuffCasterClassColor and true or false end,
                 onChange       = ApplyDebuffCasterText,
-                onDrag         = ApplyDebuffCasterText,
+                onDrag         = function() DF:InvalidateAuraLayout() end,   -- as the Buff Bar's
             })
             group.disableChildrenOn = function(d) return not d.showDebuffs end
         end
@@ -2683,7 +2696,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ☠ SHOW CASTER NAME IS THE HEADER'S TICK; the builder skips its own
         -- (hoistToggle), as Dispel Text does.
         tools.DeferCard("debuffs_caster", function()
-            local band = OpenSection(L["Caster Name"], "debuffs_caster", 1, DebuffCasterSummary, DebuffsOffRow, nil,
+            -- NoFactoryRow: hidden where the legacy renderer owns the row (see the
+            -- Buff Bar's NoCasterRow note for the SetCasterName half).
+            local band = OpenSection(L["Caster Name"], "debuffs_caster", 1, DebuffCasterSummary, DebuffsOffRow, NoFactoryRow,
                 BuildDebuffCasterGroup, {
                     db = db, key = "debuffCasterName", label = L["Show Caster Name"],
                     disableOn = DebuffsOffRow,
@@ -3320,9 +3335,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ☠ THE PAGE GATE, ON THE CARDS. Enable Defensive Icon greys the header of
         -- every card -- which on this page is ALL of them, the filter list
-        -- included. (That is where this page parts company with the two bar
-        -- pages, whose filter card never dims with the bar.) The bodies grey
-        -- through each builder's own group.disableChildrenOn.
+        -- included, as on the two bar pages. The bodies grey through each
+        -- builder's own group.disableChildrenOn.
         --
         -- ⚠ THE SETTINGS CARD IS THE ONE EXCEPTION: it holds the switch, so greying
         -- it would leave no way to turn the icon back on.

@@ -80,3 +80,25 @@ do
     check(fac:find("for id in pairs(union) do mineOnly[id] = nil end", 1, true) ~= nil,
           "factory: ...and an id shown for any caster is not also mine-only")
 end
+
+-- ---- the split row opts out of the visibility latch --------------------------------
+-- Out of your world both halves fail open (an aura shows once, or a tracked one twice);
+-- the latch would blank the whole row, other players' buffs included.
+do
+    local f2 = split({ "HELPFUL" }, nil, { [REJUV] = true })
+    check(f2[1].noVisLatch == true and f2[2].noVisLatch == true, "latch: both halves opt out")
+    local ac = df_file_source("Frames/AuraContainer.lua"):gsub("\r\n", "\n")
+    check(ac:find("noVisLatch = f.noVisLatch", 1, true) ~= nil,
+          "latch: normalizeFilters carries the opt-out through")
+    local _, n = ac:gsub("if not rec%.noVisLatch and filterSourceRelative%(", "")
+    eq(n, 2, "latch: both source-relative stamps honour it")
+end
+
+-- ---- every included id is mine-only: no empty include list on your half -----------
+do
+    local cf = { includeSpellIDs = { [REJUV] = true } }
+    local f2 = split({ "HELPFUL" }, cf, { [REJUV] = true })
+    eq(#f2, 1, "empty include: your half is dropped rather than sent an empty list")
+    eq(f2[1].key, "others", "empty include: ...others' half stays")
+    check(f2[1].candidateFilters.includeSpellIDs[REJUV], "empty include: ...and still shows their copies")
+end

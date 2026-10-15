@@ -591,11 +591,18 @@ GUI.PageRefreshStates = PageRefreshStates
 -- Click / Drag / Right-click hint rows on one line each; the Text Designer uses the same
 -- width so the two pages read as one design. Measured once off the hint strings
 -- (same font, same badge arithmetic as CreateFramePreview), floored at 300.
-local designerPreviewW
+-- ⚠ One probe for the session, made on first use: an unloaded-font call returns
+-- uncached and the next call measures again, and a FontString per call would pile up
+-- on UIParent.
+local designerPreviewW, designerPreviewProbe
 function GUI.DesignerPreviewWidth()
     if designerPreviewW then return designerPreviewW end
-    local probe = UIParent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    probe:Hide()
+    local probe = designerPreviewProbe
+    if not probe then
+        probe = UIParent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        probe:Hide()
+        designerPreviewProbe = probe
+    end
     local need = 300
     for _, row in ipairs({
         { L["Click"],       L["an indicator on the frame to expand its settings"] },
@@ -2439,7 +2446,12 @@ function DF:CreateGUI()
     -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
     -- session's claim against the wrong mode: test frames stuck on screen, or both groups
     -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
-    local function DeferForMoverSession(btn)
+    -- Not for the mover's own Configure (MoverBridge.openOptionsPage clicks these buttons
+    -- mid-session on purpose, flagged by _moverOwnedClick), and not for a click on the
+    -- mode already showing, which switches nothing.
+    local function DeferForMoverSession(btn, mode)
+        if GUI._moverOwnedClick then return false end
+        if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end
         local B = DF.MoverBridge
         if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
         B:EndSessionThen(function() btn:Click() end)
@@ -2453,7 +2465,7 @@ function DF:CreateGUI()
     end
 
     btnParty:SetScript("OnClick", function()
-        if DeferForMoverSession(btnParty) then return end
+        if DeferForMoverSession(btnParty, "party") then return end
         if LeaveGlobalTo("party") then return end
         -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
         -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
@@ -2531,7 +2543,7 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
-        if DeferForMoverSession(btnRaid) then return end
+        if DeferForMoverSession(btnRaid, "raid") then return end
         if LeaveGlobalTo("raid") then return end
         -- Leaving GLOBAL, if it was up -- see the Party handler.
         GUI.GlobalView = false

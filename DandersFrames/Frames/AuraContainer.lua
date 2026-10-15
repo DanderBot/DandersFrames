@@ -1475,8 +1475,10 @@ local function normalizeFilters(filter)
                 -- children of the secret aura button are access-constrained).
                 -- style: per-record button overrides (scale / badge). See applyRecordStyle
                 -- — a group whose membership IS the predicate can be styled unconditionally.
+                -- noVisLatch: a record whose fail-open is harmless (see SplitBuffRowForOwnCasts)
+                -- opts out of the visibility latch.
                 out[#out + 1] = { f = canonicalFilter(f.filter), key = f.key, candidateFilters = f.candidateFilters,
-                                  onInit = f.onInit, style = f.style }
+                                  onInit = f.onInit, style = f.style, noVisLatch = f.noVisLatch }
             end
         end
     end
@@ -2848,6 +2850,12 @@ local function styleButton_regions(slot, config)
             if slot.dfPandemicBorder then
                 local ok, err = pcall(function()
                     local bs = pdSpec.border
+                    -- Same type filter as the frame-border ring: a stale profile naming a
+                    -- retired effect renders static rather than erroring.
+                    local bAnimType = bs.animation and bs.animation.type
+                    if bs.animation and not (bAnimType and SAFE_OVERLAY_ANIM[bAnimType]) then
+                        bs.animation = nil
+                    end
                     bs.knownWidth, bs.knownHeight = sx, sy   -- DF_DASH sizes from these, never a rect read
                     if bs.renderScale == nil then
                         bs.renderScale = tonumber(config.layout and config.layout.scale) or 1
@@ -4393,7 +4401,7 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
-        if filterSourceRelative(f, cf) then
+        if not rec.noVisLatch and filterSourceRelative(f, cf) then
             handle._idGateSourceRelative = true
         end
         if AuraUtil and AuraUtil.IsValidFilterString and not AuraUtil.IsValidFilterString(f) then
@@ -4761,7 +4769,7 @@ function NativeBackend:applyGroupTuning()
         fsByKey[key] = rec.f
         -- Re-derived here because a filter string can change without a rebuild, and the
         -- visibility latch reads this flag.
-        if filterSourceRelative(rec.f, cf) then
+        if not rec.noVisLatch and filterSourceRelative(rec.f, cf) then
             self.handle._idGateSourceRelative = true
         end
     end
@@ -8375,13 +8383,19 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- apart, and the first version of this probe reported exactly that bare count.
 -- ⚠ Independent of the field repro, which stands on its own: parked slots rendering live
 -- debuffs (Drasvin, then Krathe's own frames after a profile swap).
--- ☠ SLOT_PARK_CF ({ maxDuration = 0 }) IS RETIRED — the enable bit in _pushFilter is the
--- park now. It is not deleted history: it was measured working in game and it is what the
+-- ☠ SLOT_PARK_CF ({ maxDuration = 0 }) IS RETIRED WHERE THE ENABLE BIT EXISTS — the bit in
+-- _pushFilter is the park on 12.1.5 (the CF park is only the fallback below). It is not deleted history: it was measured working in game and it is what the
 -- 12.1.0 line still ships. Kept out of the code rather than out of the record, because the
 -- reason it went is not that it failed — it is that a second dark-state representation
 -- earns its keep only while there is no way to ask the engine directly, and now there is.
 -- ⚠ The park-string SENTINEL above stays. It is a parser canary, load-bearing for nothing,
 -- and precisely because it is no longer load-bearing it is worth keeping as a drift alarm.
+-- ★ FALLBACK, NOT REVIVAL: a client WITHOUT the enable bit (WoW Forever, or any 12.1.0
+-- build the TOC still lists) has no other way to park a slot, so there the CF park is
+-- still the park. Where the bit exists it is never pushed, so the bit stays the single
+-- dark-state representation on 12.1.5.
+local SLOT_PARK_CF = { maxDuration = 0 }
+AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
@@ -8401,7 +8415,8 @@ function SlotHandle:_pushFilter()
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
     local dark = (self.parked or unitHidden) and true or false
     -- ☠☠ THE PARK STRING IS NO LONGER PUSHED (2026-08-30). A dark slot keeps its OWN
-    -- live filter and is held dark by the CF lock below, alone.
+    -- live filter and is held dark by the enable bit below (the CF park on a client
+    -- without it), alone.
     --
     -- WHY: the contradiction is PROVEN to match auras on this build. The parser probe
     -- fired in the field on both polarities in one session —
@@ -8448,7 +8463,8 @@ function SlotHandle:_pushFilter()
     -- Through _cf(), never the raw stash: the wake push after a park/latch clears must
     -- not un-gate a helper-owned slot whose Power Infusion gate is still dark. _cf()
     -- returns the stash (already caster-locked at write) or the helper dead map.
-    local cfWant = self:_cf()
+    local hasEnableBit = c.SetAuraSlotEnabled and c.IsAuraSlotEnabled
+    local cfWant = (dark and not hasEnableBit) and SLOT_PARK_CF or self:_cf()
     if self._cfWant ~= cfWant then
         local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
         -- ⚠ RECORD THE ASK ONLY IF THE CALL ITSELF SURVIVED. A QUIET combat refusal

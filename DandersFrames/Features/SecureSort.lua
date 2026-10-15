@@ -280,6 +280,15 @@ function SecureSort:ProcessInspectQueue()
         return
     end
 
+    -- Out of inspect range: a request cannot be answered, so drop the unit now rather than
+    -- spending its tries on timeouts. The next roster scan queues it again.
+    if CanInspect and not CanInspect(unit) then
+        self.inspectQueue[guid] = nil
+        self.inspectAttempts[guid] = nil
+        C_Timer.After(0.1, function() self:ProcessInspectQueue() end)
+        return
+    end
+
     local attempts = (self.inspectAttempts[guid] or 0) + 1
     if attempts > INSPECT_MAX_ATTEMPTS then
         self.inspectQueue[guid] = nil

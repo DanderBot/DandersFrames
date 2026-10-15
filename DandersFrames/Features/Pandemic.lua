@@ -120,11 +120,22 @@ end
 -- empty; the sampler below fills it as you play. Not per-profile: a spell either has the
 -- mechanic or it does not, and that answer has nothing to do with which frames profile is
 -- loaded.
+-- ⚠ Keyed to the game build: a patch can give or take a spell's refresh mechanic, so a new
+-- interface version starts the store over rather than trusting what an old one measured.
 local function learnedStore(create)
     local db = _G.DandersFramesDB_v2
     if not db then return nil end
-    if not db.pandemicWindows and create then db.pandemicWindows = {} end
-    return db.pandemicWindows
+    local iface = select(4, GetBuildInfo())
+    local store = db.pandemicWindows
+    if store and store._iface ~= iface then
+        store = nil
+        db.pandemicWindows = nil
+    end
+    if not store and create then
+        store = { _iface = iface }
+        db.pandemicWindows = store
+    end
+    return store
 end
 
 -- true / false / nil. ☠ nil is UNKNOWN and is NOT false — the shipped table is a
@@ -200,8 +211,15 @@ local function sampleUnit(unit)
                 local extSecret = issecretvalue and issecretvalue(ext) or false
                 if okE and not extSecret then
                     if ext == nil then
-                        store[sid] = false          -- definitive: no refresh mechanic
-                        learnedCount = learnedCount + 1
+                        -- ⚠ A NO only from your own cast: whether the call answers for an
+                        -- aura someone else cast is unverified, and a wrong NO greys a
+                        -- working feature. A YES (below) is safe from any caster.
+                        local src = data.sourceUnit
+                        local srcSecret = issecretvalue and issecretvalue(src) or false
+                        if not srcSecret and src == "player" then
+                            store[sid] = false      -- definitive: no refresh mechanic
+                            learnedCount = learnedCount + 1
+                        end
                     elseif C.GetRefreshCarryOverDuration then
                         -- ★ 12.1.5 PTR 3 (69952): the game's own carry-over, which is what
                         -- AuraContainerUtil.GetPandemicWindow now uses. The old derivation
