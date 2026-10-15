@@ -350,7 +350,7 @@ function SecureSort:OnInspectReady(guid)
     local gotSpec = false
     local liveGuid = UnitGUID(unit)
     if UnitExists(unit) and canaccessvalue(liveGuid) and liveGuid == guid then
-        local specID = GetInspectSpecialization(unit)
+        local specID = (C_SpecializationInfo.GetInspectSpecialization or GetInspectSpecialization)(unit)
         if specID and specID > 0 then
             gotSpec = true
             self:CacheUnitSpec(unit, specID)

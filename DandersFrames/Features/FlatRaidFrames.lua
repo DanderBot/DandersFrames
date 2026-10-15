@@ -185,7 +185,7 @@ function FlatRaidFrames:BuildSortedNameList()
                 end
             end
             if not specID then
-                specID = GetInspectSpecialization(unit)
+                specID = (C_SpecializationInfo.GetInspectSpecialization or GetInspectSpecialization)(unit)
             end
         end
         
