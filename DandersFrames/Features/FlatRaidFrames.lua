@@ -144,7 +144,11 @@ function FlatRaidFrames:BuildSortedNameList()
     local numMembers = GetNumGroupMembers()
     if numMembers == 0 then
         -- Solo - just return player name
-        return UnitName("player") or ""
+        local name, realm = UnitName("player")
+        if name and realm and realm ~= "" then
+            return name .. "-" .. realm
+        end
+        return name or ""
     end
     
     -- Settings
