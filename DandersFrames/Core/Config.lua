@@ -1008,8 +1008,9 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         -- precomputed variants, so toggling it needs no invalidation.
         actualOutline = parsed.slug
     end
-    if fontString.SetScaleAnimationMode and FontStringScaleAnimationMode then
-        fontString:SetScaleAnimationMode(useSlug and FontStringScaleAnimationMode.Vertex or FontStringScaleAnimationMode.FontSize)
+    local scaleModes = Enum and Enum.FontStringScaleAnimationMode
+    if fontString.SetScaleAnimationMode and scaleModes then
+        fontString:SetScaleAnimationMode(useSlug and scaleModes.Vertex or scaleModes.FontSize)
     end
 
     local LSM = GetLSM()
