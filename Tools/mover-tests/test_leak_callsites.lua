@@ -226,8 +226,6 @@ check(api:find("DF.GUI.RefreshCurrentPageAfterFullRefresh()", 1, true) ~= nil,
       "after-full-refresh: the public import API too")
 
 -- Gates: a state pass, not a rebuild.
-check(options:find("                refreshStates = function() GUI.RelayoutCurrentPage() end,\n                shadowDisableWhen = BorderOff,", 1, true) ~= nil,
-      "state pass: the Frame page's classic border controls re-lay, not rebuild")
 local pinned = frames:match("local borderCheck = CreateRefreshableCheckbox(.-)layoutGroup:AddWidget%(borderCheck")
 check(pinned ~= nil, "state pass: the pinned Override Border toggle is found")
 if pinned then
@@ -242,6 +240,6 @@ check(frames:find("            refreshStates = function() GUI.RelayoutCurrentPag
 -- Palette resets: the value sweep, not a rebuild.
 local repaint = auras:match("local function RepaintSwatches%(tools2%)(.-)\n        end")
 check(repaint and repaint:find("tools2.group:RefreshChildValues()", 1, true) ~= nil,
-      "value sweep: classic's palette reset repaints its box instead of rebuilding the page")
-check(auras:find("                elseif group.RefreshChildValues then\n                    group:RefreshChildValues()\n                    if tools then tools.ReflowMounted(true) end\n                elseif pageResource and pageResource.Refresh then", 1, true) ~= nil,
-      "value sweep: ...and the power colours' reset too (a modern card also repaints any pinned copy)")
+      "value sweep: the palette reset repaints its card instead of rebuilding the page")
+check(auras:find("                if not tools2.popout then group:RefreshChildValues() end\n                tools.ReflowMounted(true)", 1, true) ~= nil,
+      "value sweep: ...and the power colours' reset too, and any pinned copy")

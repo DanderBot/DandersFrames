@@ -3,9 +3,8 @@ local NS = ...
 -- ============================================================
 -- HEALTH BAR PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Bars > Health Bar: three full-width collapsible sections over seven boxes in
--- classic; in modern, the Debuff Bar's collapsible CARDS -- one per box, the two
--- gradient editors included -- in two page columns:
+-- Bars > Health Bar: the Debuff Bar's collapsible CARDS -- the two gradient
+-- editors included -- in two page columns:
 --
 --   column 1   Color, Gradient (hidden unless Health Gradient), Missing Health,
 --              Gradient (missing health's, same kind of rule)
@@ -13,9 +12,8 @@ local NS = ...
 --
 -- ☠ THREE RULES MAKE THIS PAGE DIFFERENT FROM ITS SIBLINGS:
 --
---   1. THE FULL-WIDTH SECTIONS AND THEIR SPACERS ARE CLASSIC'S ONLY. Each is a
---      "both" widget -- a sync point -- so in modern it would end both card
---      columns. Built through expressions so classic's arms are untouched.
+--   1. NO FULL-WIDTH SECTIONS OR SPACERS. Each would be a "both" widget -- a
+--      sync point -- that ends both card columns.
 --   2. THE GRADIENT EDITORS ARE CARDS WITHOUT A PIN: every structural edit
 --      rebuilds the page, which would close a pinned copy. Section 7.
 --   3. REDUCED MAX HEALTH'S ENABLE MOVES INTO ITS CARD'S HEADER (hoistToggle),
@@ -27,14 +25,11 @@ local NS = ...
 -- and asserts against it.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each extracted builder -- kind, L key, db key and
---     slot height, in order -- taken from the PRE-CHANGE source, so a builder
---     that quietly dropped a control or renamed a key fails here. This is also
---     the evidence that CLASSIC RENDERS AS IT DID: the classic branch mounts the
---     same builder into the same 280 box, under the same header, in the same
---     column, in the same order.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
+--     in order -- so a builder that quietly dropped a control or renamed a key
+--     fails here.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, hide gate, tick and pin;
 --     the two opt-ins; Expand/Collapse All; no popout furniture or counts left.
 --   ✓ that the four mode dropdowns route through tools2.refreshStates.
@@ -136,23 +131,8 @@ local function sectionBlock(labelKey)
     return block, call
 end
 
--- What every converted box on this page has in common. `boxHeader` is passed
--- separately from the card's label because two of the five boxes are headed
--- "Settings" in classic; their cards take the section's name instead.
+-- What every card on this page has in common.
 local function checkShared(g)
-    -- ONE builder, BOTH layouts: the declaration, the classic box's mount and
-    -- the card's (a pin's panel copy is built by the shared helper).
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.boxHeader .. '"]), 40)', 1, true) ~= nil,
-          g.label .. ": ...under the header it always had (" .. g.boxHeader .. ")")
-    check(PAGE:find("AddToSection(" .. g.box .. ", nil, " .. g.column .. ")", 1, true) ~= nil,
-          g.label .. ": ...and still goes to column " .. g.column .. ", inside its section")
-
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary .. ', nil, nil,', 1, true) ~= nil,
           g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing its summary")
@@ -161,8 +141,8 @@ local function checkShared(g)
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
     return block, call
 end
 
@@ -171,8 +151,6 @@ end
 -- ============================================================
 print("-- Health Bar page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     check(PAGE:find("_popoutHolders", 1, true) == nil,
@@ -253,10 +231,9 @@ end
 -- ============================================================
 -- 3. THE MODE DROPDOWNS -- the page's own RefreshStates, routed
 -- Picking a colour mode re-gates controls inside the group AND the gradient
--- editor that stays out on the page. Classic paid for that with
--- self:RefreshStates() -- NOT GUI:RefreshCurrentPage, so there is no rebuild to
--- unpick -- and tools2.refreshStates IS that call in classic, while in a pane it
--- is ReflowPane plus the page's own pass. One call, both jobs.
+-- card beside it. tools2.refreshStates covers both: on a card it is the page's
+-- own self:RefreshStates(), in a pane ReflowPane plus the page's own pass.
+-- Never GUI:RefreshCurrentPage.
 -- ============================================================
 print("-- Health Bar page: the mode dropdowns route through the tools")
 do
@@ -273,7 +250,7 @@ do
 
     -- Four gates in all: the health colour mode, the background colour mode,
     -- the background fill and the missing-health colour mode. Plus the enable
-    -- tick's own, which only the classic arm ever builds.
+    -- tick's own, which only an unhoisted build (a pinned panel) builds.
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
     eq(routed, 5, "gate: five callbacks route their state pass through the tools")
@@ -312,17 +289,17 @@ local MISSING_HEALTH = {
 }
 
 local PLAIN = {
-    { builder = "BuildHealthColorGroup", label = "Color", boxHeader = "Color",
-      box = "colorGroup", column = "1", golden = HEALTH_COLOR,
+    { builder = "BuildHealthColorGroup", label = "Color", 
+      column = "1", golden = HEALTH_COLOR,
       key = "health_color", col = 1, summary = "HealthColorSummary" },
-    { builder = "BuildHealthTextureGroup", label = "Texture", boxHeader = "Texture",
-      box = "textureGroup", column = "2", golden = HEALTH_TEXTURE,
+    { builder = "BuildHealthTextureGroup", label = "Texture", 
+      column = "2", golden = HEALTH_TEXTURE,
       key = "health_texture", col = 2, summary = "HealthTextureSummary" },
-    { builder = "BuildHealthBackgroundGroup", label = "Background", boxHeader = "Background",
-      box = "bgGroup", column = "2", golden = HEALTH_BACKGROUND,
+    { builder = "BuildHealthBackgroundGroup", label = "Background", 
+      column = "2", golden = HEALTH_BACKGROUND,
       key = "health_background", col = 2, summary = "HealthBackgroundSummary" },
-    { builder = "BuildMissingHealthGroup", label = "Missing Health", boxHeader = "Settings",
-      box = "missingGroup", column = "1", golden = MISSING_HEALTH,
+    { builder = "BuildMissingHealthGroup", label = "Missing Health", 
+      column = "1", golden = MISSING_HEALTH,
       key = "health_missing", col = 1, summary = "MissingHealthSummary" },
 }
 
@@ -341,7 +318,7 @@ end
 
 -- ============================================================
 -- 5. REDUCED MAX HEALTH -- the page's one header tick
--- keepEnabled + disableChildrenOn in classic, which is the shape of "am I doing
+-- keepEnabled + disableChildrenOn, which is the shape of "am I doing
 -- anything at all". The card's header carries the tick; the builder skips the
 -- checkbox (hoistToggle), so there is one checkbox per setting.
 -- ============================================================
@@ -356,7 +333,6 @@ local REDUCED_MAX = {
 print("-- Health Bar page: Reduced Max Health")
 do
     local g = { builder = "BuildReducedMaxHealthGroup", label = "Settings",
-                boxHeader = "Settings", box = "reducedGroup", column = "1",
                 key = "health_reduced", col = 1, summary = "ReducedMaxHealthSummary" }
     local body = builderBody(g.builder)
     checkCensus(census(body), REDUCED_MAX, "reduced max health")
@@ -367,7 +343,7 @@ do
     check(guard ~= nil and cb ~= nil and cb > guard,
           "reduced max health: the builder builds the enable only when not hoisted")
     check(body:find(".keepEnabled = true", 1, true) ~= nil,
-          "reduced max health: ...and in classic it stays live under the group's own grey")
+          "reduced max health: ...and it stays live under the group's own grey")
     check(body:find("group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end", 1, true) ~= nil,
           "reduced max health: the group's grey-while-off gate is inside the builder")
 
@@ -381,52 +357,28 @@ do
 end
 
 -- ============================================================
--- 6. THE SECTIONS ARE CLASSIC'S, AND THE CARDS FOLLOW CLASSIC'S ORDER
+-- 6. NO FULL-WIDTH SECTIONS, AND THE CARDS' ORDER
 -- ============================================================
-print("-- Health Bar page: the collapsible sections and the Add order")
+print("-- Health Bar page: no full-width sections, and the Add order")
 do
-    -- ---- all three are classic's only, through an expression ------------
-    for _, s in ipairs({
-        { "healthBarSection", "Health Bar" },
-        { "missingSection",   "Missing Health" },
-        { "reducedSection",   "Reduced Max Health" },
-    }) do
-        check(PAGE:find("local " .. s[1] .. ' = classicLayout\n            and Add(GUI:CreateCollapsibleSection(self.child, L["' .. s[2] .. '"], true), 36, "both")\n            or nil', 1, true) ~= nil,
-              "sections: " .. s[2] .. " is still classic's collapsible section, and never built in modern")
-    end
-    local spacers = 0
-    for _ in PAGE:gmatch('if classicLayout then AddSpace%(GUI%.Space%.section, "both"%) end') do spacers = spacers + 1 end
-    eq(spacers, 2, "page: the two between-section spacers survive, in classic only")
-    local bare = 0
-    for _ in PAGE:gmatch('AddSpace%(GUI%.Space%.section, "both"%)') do bare = bare + 1 end
-    eq(bare, 2, "page: ...and there is no other copy of them")
+    check(PAGE:find("AddToSection", 1, true) == nil and PAGE:find("currentSection", 1, true) == nil,
+          "sections: no page-level section mount is left")
 
-    -- ---- the classic Add order is unchanged -----------------------------
-    local classicArm = PAGE:match("if classicLayout then(.-)\n        else")
-    check(classicArm ~= nil, "order: the Health Bar section's classic arm is locatable")
-    if classicArm then
-        local a = classicArm:find("AddToSection(colorGroup, nil, 1)", 1, true)
-        local b = classicArm:find("AddToSection(textureGroup, nil, 2)", 1, true)
-        local c = classicArm:find('BuildGradientStopBox("healthColor"', 1, true)
-        local d = classicArm:find("AddToSection(bgGroup, nil, 2)", 1, true)
-        check(a and b and c and d and a < b and b < c and c < d,
-              "order: classic still adds Color, Texture, the gradient editor, then Background")
-    end
-
-    -- ---- the cards open in the same order -- the one-column fold's --------
+    -- ---- the cards open in the one-column fold's order ------------------
     local order = {}
     for at, name in PAGE:gmatch('()OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Color | Texture | Background | Missing Health | Settings",
        "order: the five boxes' cards, in source order (the gradient builder's title is chosen per ramp -- section 7)")
     local function at(needle) return PAGE:find(needle, 1, true) end
-    local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)\n\n            local band = OpenSection(L["Background"]',
-                  'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)\n        end',
+    local seq = { 'OpenSection(L["Color"]', 'OpenSection(L["Texture"]', 'BuildGradientStopBox("healthColor", HealthGradientHiddenOn)',
+                  'OpenSection(L["Background"]',
+                  'OpenSection(L["Missing Health"]', 'BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)',
                   'Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")',
                   'OpenSection(L["Settings"]' }
     local prev = 0
     for _, n in ipairs(seq) do
         local p = PAGE:find(n, prev + 1, true)
-        check(p ~= nil and p > prev, "order: modern adds " .. n:match("^[^\n]+") .. " next")
+        check(p ~= nil and p > prev, "order: the page adds " .. n .. " next")
         prev = p or prev
     end
 
@@ -435,9 +387,6 @@ do
           "page: the See Also block survives")
     check(PAGE:find('{pageId = "general_frame", label = L["Frame"]}', 1, true) ~= nil,
           "page: ...with the links it always had")
-    local spacers = 0
-    for _ in PAGE:gmatch('AddSpace%(GUI%.Space%.section, "both"%)') do spacers = spacers + 1 end
-    eq(spacers, 2, "page: the two between-section spacers survive")
 end
 
 -- ============================================================
@@ -454,12 +403,8 @@ do
     check(PAGE:find("if pageHealthBar and pageHealthBar.Refresh then pageHealthBar:Refresh() end", 1, true) ~= nil,
           "gradient: ...and it still rebuilds the PAGE on a structural edit, which is why it has no pin")
 
-    -- The box: classic's bare 280, modern's card in column 1 under a stable key
+    -- The card in column 1 under a stable key
     -- per ramp, hidden with its colour mode -- and no pin (no builder argument).
-    check(PAGE:find("local gradGroup = classicLayout\n            and GUI:CreateSettingsGroup(self.child, 280)\n            or OpenSection((prefix == \"healthColor\") and L[\"Health Gradient\"] or L[\"Missing Health Gradient\"],\n                (prefix == \"healthColor\") and \"health_gradient\" or \"health_missinggradient\",\n                1, nil, nil, hideOn)", 1, true) ~= nil,
-          "gradient: classic's 280 box, or a card titled and keyed per ramp in column 1, hidden with its mode, with no pin")
-    check(PAGE:find('if classicLayout then gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40) end', 1, true) ~= nil,
-          "gradient: ...only classic's box takes a header -- the card's title already names the gradient")
     -- ☠ TWO CARDS, TWO TITLES. Both ramps were once "Gradient", and a column
     -- holding two identical titles cannot be told apart. The collapse keys are
     -- the shipped ones (checked just above), so folds survive the rename.
@@ -469,15 +414,13 @@ do
     for _, k in ipairs({ "Health Gradient", "Missing Health Gradient" }) do
         check(ENUS:find('L["' .. k .. '"] = true', 1, true) ~= nil, "gradient: enUS ships L[\"" .. k .. "\"]")
     end
-    check(PAGE:find("if classicLayout then AddToSection(gradGroup, nil, 1) else CloseSection(gradGroup) end", 1, true) ~= nil,
-          "gradient: ...column 1 in classic, the card's own band close in modern")
     check(PAGE:find("local function BuildGradientStopBox(prefix, hideOn)\n        local listKey", 1, true) ~= nil,
           "gradient: ...and the builder still opens on its one local")
     check(PAGE:find("bandStyle", 1, true) == nil,
           "gradient: no band skin is restated as a literal")
 
-    -- Its hideOn is named once per ramp and handed to both layout arms, so the
-    -- two cannot drift.
+    -- Its hideOn is named once per ramp, so the card and its rule cannot
+    -- drift.
     check(PAGE:find("local function HealthGradientHiddenOn(d) return d.healthColorMode ~= \"PERCENT\" end", 1, true) ~= nil,
           "gradient: the health ramp's visibility rule is named once")
     check(PAGE:find("local function MissingGradientHiddenOn(d)", 1, true) ~= nil,
@@ -485,17 +428,11 @@ do
     local health, missing = 0, 0
     for _ in PAGE:gmatch('BuildGradientStopBox%("healthColor", HealthGradientHiddenOn%)') do health = health + 1 end
     for _ in PAGE:gmatch('BuildGradientStopBox%("missingHealthColor", MissingGradientHiddenOn%)') do missing = missing + 1 end
-    eq(health, 2, "gradient: the health ramp is built once per layout arm")
-    eq(missing, 2, "gradient: ...and so is the missing-health ramp")
+    eq(health, 1, "gradient: the health ramp's card is built once")
+    eq(missing, 1, "gradient: ...and so is the missing-health ramp's")
 
-    -- ---- six bare 280 boxes left, and they are the classic branch's own ----
-    -- Five section boxes plus the gradient editor's own classic width.
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 6, "boxes: six bare 280 boxes left -- the classic arms' own")
-    -- ☠ THE ALIGNMENT RULE, ON THIS PAGE: no box is mounted at a column's 280 with
-    -- the tools in hand. A 280 box only ever appears with NO opts, which is the
-    -- classic arm's signature.
+    -- ☠ THE ALIGNMENT RULE, ON THIS PAGE: no box is mounted at a column's 280
+    -- with the tools in hand.
     local narrow = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
     eq(narrow, 0, "boxes: ...and none of them is a new-UI mount at 280")

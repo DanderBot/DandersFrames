@@ -31,7 +31,7 @@ local pixelBordered = P.pixelBordered
 
 -- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE, and every widget factory owes it
 -- one call. `RefreshStates` is stamped on whatever a control was parented to --
--- classic's scroll child (Panel.lua) or a popout pane's holder (the stamp in
+-- the page's scroll child (Panel.lua) or a popout pane's holder (the stamp in
 -- Controls.lua's CreatePopoutPageTools) -- and running it is what re-reads every
 -- `disableOn` on the page AND every popout row's summary line. A factory that
 -- skips it leaves both stale until something unrelated refreshes: the reported
@@ -259,62 +259,6 @@ function GUI:CreateHeader(parent, text, opts)
     end
 
     return container
-end
-
---- Attach a small live preview swatch to a header built by GUI:CreateHeader —
---- the plain-header counterpart of a collapsible section's SetPreviewIcons, for
---- sections whose setting produces ONE small piece of art (the important-debuff
---- corner marker). It sits immediately right of the title rather than at the
---- group's right edge: a lone swatch only reads as "this is the thing this
---- section makes" when it sits with the words.
----
---- `layers` draws 1..N textures in order with their own colours, because the real
---- art is often layered (the marker is a tinted disc plus a tinted glyph) — a
---- one-texture swatch would preview a white blob and lie about the colours, which
---- is the exact fault the section-preview swatches were corrected for.
----
---- Greying: pass dimmed=true and every layer desaturates and drops alpha, matching
---- the icon sections' `desaturate` convention. Drive it from the owning header's
---- `refreshContent` so RefreshChildStates keeps it live (see CreateSettingsGroup).
-function GUI:AttachHeaderSwatch(header, size, layerCount)
-    if not header or not header.text then return nil end
-    if header.swatch then return header.swatch end
-    local SZ = size or 16
-    local sw = CreateFrame("Frame", nil, header)
-    sw:SetSize(SZ, SZ)
-    sw:SetPoint("LEFT", header.text, "RIGHT", 6, 0)
-    sw.layers = {}
-    for i = 1, (layerCount or 2) do
-        -- Ascending sublevel so layer 2 draws over layer 1 (disc, then glyph).
-        local t = sw:CreateTexture(nil, "OVERLAY", nil, i)
-        t:SetAllPoints()
-        t:Hide()
-        sw.layers[i] = t
-    end
-    --- layers: { { texture = path, color = {r,g,b,a}? }, ... }
-    sw.SetSwatch = function(self, layers, dimmed)
-        for i, t in ipairs(self.layers) do
-            local d = layers and layers[i]
-            if d and d.texture then
-                t:SetTexture(d.texture)
-                t:SetDesaturated(dimmed and true or false)
-                -- ⚠ AFTER the texture call — SetTexture/SetAtlas reset vertex colour.
-                -- Same trap documented on the section preview swatches.
-                if dimmed then
-                    t:SetVertexColor(0.5, 0.5, 0.5, 0.55)
-                elseif d.color then
-                    t:SetVertexColor(d.color.r or 1, d.color.g or 1, d.color.b or 1, d.color.a or 1)
-                else
-                    t:SetVertexColor(1, 1, 1, 1)
-                end
-                t:Show()
-            else
-                t:Hide()
-            end
-        end
-    end
-    header.swatch = sw
-    return sw
 end
 
 -- Collapsible section for grouping related settings.
@@ -3987,6 +3931,11 @@ function GUI:AnimationTypeNames()
         DF_PIXEL = L["DF Pixel"],
         DF_PROC = L["DF Proc"],
         BLINK = L["Blink"],
+        -- ★ Blizzard's own marching-ants widget, offered alongside ours. CAPABILITY-GATED:
+        -- MarchingAnts_CreateAsChildOf ships in Blizzard_SharedXML from 12.1.5, and offering
+        -- a type the engine cannot build would be an entry that silently renders nothing.
+        -- In this shared list (not beside the dropdown) so a folded card summary can name it.
+        MARCHING_ANTS = MarchingAnts_CreateAsChildOf and L["Marching Ants"] or nil,
     }
 end
 
@@ -4013,16 +3962,21 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- sync with StartAnimation's branches in Frames/Border.lua.
     -- DF_DASH: Frequency = march SPEED (0 = static dashed), Thickness = dash
     -- thickness, Inset = dash inset.
-    local hasFrequency = { DF_PULSATE=1,
+    -- MARCHING_ANTS: Frequency = crawl SPEED (0 = a static outline, the mixin pauses
+    -- itself), Thickness = line width, Inset/Offset position the ring. No Particles,
+    -- Length or Scale — it is one continuous scrolling texture per edge, not a pool of
+    -- discrete pieces, so none of those three has anything to act on.
+    local hasFrequency = { DF_PULSATE=1, MARCHING_ANTS=1,
                            DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
     local hasParticles = { DF_ORBIT=1, DF_PIXEL=1 }
     -- CORNERS_ONLY is hidden from the type dropdown below, but keep its param
     -- entries so an indicator that still carries a saved CORNERS_ONLY value shows
     -- the right controls.
-    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1 }
+    local hasThickness = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_PIXEL=1, MARCHING_ANTS=1 }
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
-    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
+    local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1,
+                             MARCHING_ANTS=1 }
     -- Scale slider = how big the effect draws. Sparkle size on DF Chase; on DF Proc and
     -- DF Flash it multiplies how far the glow reaches past the border. That reach cannot
     -- be a constant: both are a square glow texture stretched over the host, its bright
@@ -4057,6 +4011,11 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- value still renders) but no longer offered as a pickable animation.
     animTypeOptions._order = { "NONE", "BLINK", "DF_ORBIT",
                                "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" }
+    -- Marching Ants (12.1.5, capability-gated) is added by GUI:AnimationTypeNames itself;
+    -- it goes on the end of the order only when the client offers it.
+    if animTypeOptions.MARCHING_ANTS then
+        animTypeOptions._order[#animTypeOptions._order + 1] = "MARCHING_ANTS"
+    end
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
     -- overlay-recoverable animations).

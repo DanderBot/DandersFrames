@@ -5,7 +5,7 @@ local NS = ...
 -- DandersFrames_Options/GUI/Controls.lua
 -- ------------------------------------------------------------
 -- The one copy of the page-scope machinery every card-section page takes: the
--- non-classic prologue, the eager pin-panel content, the reflow, the band width
+-- prologue, the eager pin-panel content, the reflow, the band width
 -- and the section verbs. Pinned here: the helper exists, it exposes every verb
 -- the pages call, and no page keeps a second copy of any of it.
 --
@@ -35,27 +35,17 @@ end)()
 
 local BODY = (DECL_AT and END_AT) and SRC:sub(DECL_AT, END_AT) or ""
 
-print("-- Popout page tools: one page argument, and a classic-safe early return")
+print("-- Popout page tools: the close on every build")
 do
-    local classicAt = BODY:find("if DF:IsClassicSettingsLayout() then return nil end", 1, true)
-    check(classicAt ~= nil, "tools: the classic layout returns nil, doing nothing else")
-
-    -- ☠ THE CLOSE COMES BEFORE THE CLASSIC BAIL. The FLIP to classic is itself a
-    -- rebuild, and it is the one rebuild that can happen with a panel standing
-    -- open. Left below the bail, the helper would hand a classic page back with
-    -- an orphan panel floating beside it.
     local closeAt = BODY:find('GUI:CloseAllPopoutRows("rebuild")', 1, true)
     check(closeAt ~= nil, "tools: every open row panel is closed on every build")
-    check(closeAt and classicAt and closeAt < classicAt,
-          "tools: ...BEFORE the classic bail, so a flip to classic takes the panels down too")
     -- Still guarded, so an older embedded copy of the pack without the verb cannot
-    -- break a page -- and so the close is a plain no-op on a classic build that
-    -- never had a panel open.
+    -- break a page.
     check(BODY:find("if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows(\"rebuild\") end", 1, true) ~= nil,
           "tools: ...and guarded on the verb, not called bare")
 end
 
-print("-- Popout page tools: the non-classic prologue, in order")
+print("-- Popout page tools: the prologue, in order")
 do
     -- An open popout from the previous build is wired to the db table THAT build
     -- captured, so after a mode switch a slider dragged in a stale panel writes

@@ -679,10 +679,27 @@ function DF:GetADTrackedSpellIDs(frame, db)
 
     local specAuras = adDB.auras and adDB.auras[spec]
 
-    local union
+    -- ☠ TWO MAPS, BECAUSE THE POOLS DO NOT SEE THE SAME CASTERS. My Buffs (the spec pool,
+    -- and the spec tab's filter groups) renders "HELPFUL|PLAYER" -- only YOUR casts -- while
+    -- Other Buffs renders any caster. A single caster-agnostic exclude hid another player's
+    -- copy of a My-Buffs spell from the buff bar as well, so it showed nowhere. `union`
+    -- holds what is shown whoever cast it; `mineOnly` what is shown only for your casts,
+    -- which the buff row excludes from its PLAYER half alone.
+    -- ⚠ Self-only auras on your own frame drop the caster filter (resolvePoolMode), so
+    -- they count as any-caster there. Inlined: resolvePoolMode is declared below this
+    -- function, and calling it from here would compile as a nil global.
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    local onOwnFrame = frame.unit and UnitIsUnit and UnitIsUnit(frame.unit, "player")
+    local union, mineOnly
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
-            union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            local selfOnly = onOwnFrame and Adapter and Adapter.IsSelfOnlyAura
+                and Adapter:IsSelfOnlyAura(spec, auraName)
+            if selfOnly then
+                union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+            else
+                mineOnly = unionTrackedIdentity(spec, auraName, auraCfg, mineOnly)
+            end
         end
     end
 
@@ -737,9 +754,15 @@ function DF:GetADTrackedSpellIDs(frame, db)
                         and not group.othersOnly then
                         local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
                         if res.kind == "include" and res.map then
+                            -- Spec-tab groups render your casts only (g == 1).
                             for id in pairs(res.map) do
-                                union = union or {}   -- only allocate when the map has entries
-                                union[id] = true
+                                if g == 1 then
+                                    mineOnly = mineOnly or {}
+                                    mineOnly[id] = true
+                                else
+                                    union = union or {}   -- only allocate when the map has entries
+                                    union[id] = true
+                                end
                             end
                         end
                     end
@@ -747,7 +770,12 @@ function DF:GetADTrackedSpellIDs(frame, db)
             end
         end
     end
-    return union   -- nil when nothing is tracked -> caller unions nothing
+    -- An id shown for any caster already covers your own casts.
+    if mineOnly and union then
+        for id in pairs(union) do mineOnly[id] = nil end
+    end
+    if mineOnly and not next(mineOnly) then mineOnly = nil end
+    return union, mineOnly   -- nil when nothing is tracked -> caller unions nothing
 end
 
 -- ============================================================
@@ -880,10 +908,9 @@ end
 -- design doc §11.1 — "it's literally in the name"; a tester with two same-class
 -- players saw indicators fire for the other player's buffs). The OTHER pool is
 -- unchanged: anyone-cast, or "HELPFUL|!PLAYER" when the effect is othersOnly.
--- ACCEPTED consequence: the buff-bar dedup exclude map is caster-agnostic, so with
--- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
--- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
--- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+-- The buff-bar dedup follows that split: GetADTrackedSpellIDs returns My Buffs ids
+-- separately, and the buff row hides them only from its PLAYER half, so another
+-- player's cast of a My-Buffs-tracked spell stays on the bar.
 -- SELF_ONLY: a third `mine` value, not a boolean. See resolvePoolMode below for what
 -- it means and why it exists; checked FIRST because a truthy string would otherwise
 -- fall into the My Buffs branch, and it deliberately ignores othersOnly (an Other-pool
@@ -1826,7 +1853,7 @@ local function buildDurationTextSpec(indicator, defaultShow, defScale, defColorB
     local colorByTime = DF:DurationColorUsesBuckets(colorMode)
     local hideAboveT = durationHideAboveT(indicator)
     -- Resolve the indicator's Duration Format (default NUMBER — bare "45" / "2m" / "1h",
-    -- the same default the buff/debuff/defensive rows use). Classic formats come back as
+    -- the same default the buff/debuff/defensive rows use). Plain formats come back as
     -- a plain formatter; the percent family (PERCENT / SECONDS_PERCENT, PTR-7 #5) comes
     -- back as a SetTextFormat spec instead. The formatter also carries colour-by-time
     -- buckets + hide-above blanking when set — hide-above never composes with the
@@ -3403,6 +3430,57 @@ function Factory:MemberSize(ind, defs)
     return math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24)
 end
 
+-- ☠ A PACKED MEMBER HAS NO SCALE OF ITS OWN. A loose placement renders inside a container
+-- SetScale'd by its scale; a member shares the group's one container, so the only places
+-- its scale can live are its cell size and its text. This view folds scale into exactly
+-- what SetScale would have grown (size, text scale, text offsets) and reports scale 1, so
+-- every builder that reads the member renders it at its scaled size. Border thickness stays
+-- in pixels. Read with the same caller baselines buildPlacedStyle uses (duration 1.2,
+-- stack offset 2/-2). Views are reused per indicator and refreshed in place: this runs on
+-- the per-aura-event sync path.
+local memberView
+do
+    local memberViews = setmetatable({}, { __mode = "k" })
+    function memberView(ind, defs)
+        local sc = tonumber(defOf(ind, "scale", defs, 1)) or 1
+        if sc == 1 then return ind end
+        local v = memberViews[ind]
+        if not v then
+            v = setmetatable({}, { __index = ind })
+            memberViews[ind] = v
+        end
+        v.scale         = 1
+        v.size          = math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24) * sc
+        v.durationScale = (tonumber(defOf(ind, "durationScale", defs, 1.2)) or 1.2) * sc
+        v.durationX     = (tonumber(defOf(ind, "durationX", defs, 0)) or 0) * sc
+        v.durationY     = (tonumber(defOf(ind, "durationY", defs, 0)) or 0) * sc
+        v.stackScale    = (tonumber(defOf(ind, "stackScale", defs, 1)) or 1) * sc
+        v.stackX        = (tonumber(defOf(ind, "stackX", defs, 2)) or 2) * sc
+        v.stackY        = (tonumber(defOf(ind, "stackY", defs, -2)) or -2) * sc
+        return v
+    end
+end
+
+-- The member as the group flow renders it (see memberView) — the canvas styles its packed
+-- slots from this so they match the live buttons.
+function Factory:MemberView(ind, defs)
+    return memberView(ind, defs)
+end
+
+-- ☠ THE ROW CAP IS A WIDTH, NOT A COUNT. The engine wraps when the running row width
+-- passes `wrap` cells of layout.size, so that size has to be the members' own cell or
+-- "Icons Per Row" counts wrong: members smaller than the group's fallback 24 fit an extra
+-- icon per row. The largest member is the cell, so uniform members wrap exactly at the
+-- setting and a mixed group never wraps before it.
+function Factory.MemberFlowCell(recs)
+    local cell
+    for _, r in ipairs(recs) do
+        local s = r.size or (r.style and r.style.layout and r.style.layout.size)
+        if s and (not cell or s > cell) then cell = s end
+    end
+    return cell
+end
+
 -- A member's PER-RECORD STYLE, in the shape recordGroupLayout reads (Frames/AuraContainer):
 -- layout.size gives the record its own cell, layoutIndex fixes its order in the flow. This
 -- is the same style buildMemberGroupConfig declares per record; the button half is omitted
@@ -3413,7 +3491,7 @@ end
 -- for a declared cell first (GetElementSize) and only measures the button when there is
 -- none. Stamp this on the slot as dfImpRecStyle and the shared flow does the rest.
 function Factory:MemberRecordStyle(ind, defs, memberIdx)
-    return { layout = { size = self:MemberSize(ind, defs) }, layoutIndex = memberIdx }
+    return { layout = { size = self:MemberSize(memberView(ind, defs), defs) }, layoutIndex = memberIdx }
 end
 
 -- The CONFIG a group's flow is laid out with: its layout AND its style.
@@ -3421,9 +3499,14 @@ end
 -- duration strip's height, and that reservation is folded into elementHeight — so a config
 -- carrying layout alone silently drops the padding live applies, and every row of a group
 -- with a duration bar sat tighter on the canvas than on the frame.
-function Factory:BuildGroupFlowConfig(frame, group, wrapDefault)
+-- records: a member group's packed record styles, so the row cap uses the members' own
+-- cell exactly as buildMemberGroupConfig does (memberFlowCell).
+function Factory:BuildGroupFlowConfig(frame, group, wrapDefault, records)
+    local layout = buildFilterGroupLayout(group, wrapDefault)
+    local cell = records and Factory.MemberFlowCell(records)
+    if cell then layout.size = cell end
     return {
-        layout = buildFilterGroupLayout(group, wrapDefault),
+        layout = layout,
         style  = buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
     }
 end
@@ -3577,6 +3660,8 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             },
         }
     end
+    local layout = buildFilterGroupLayout(group)
+    layout.size = Factory.MemberFlowCell(recs) or layout.size
     return {
         unit = frame.unit,
         mode = "row",
@@ -3594,7 +3679,7 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
         tooltips = adTooltipsOn(frame, "tooltipADIndicatorsEnabled"),
         adBorderAnim = true,
         frameLevelOffset = (defs and defs.level) or 40,
-        layout = buildFilterGroupLayout(group),
+        layout = layout,
         style = buildFilterGroupStyle(group, borderSpec),
     }
 end
@@ -3836,7 +3921,7 @@ end
 
 -- ============================================================
 -- MEMBER LAYOUT GROUPS — position arranger (12.1 port)
--- A member ("classic") layout group arranges its members' PLACED indicators in
+-- A member layout group arranges its members' PLACED indicators in
 -- a grid computed from the group's settings (anchor / offset / grow direction /
 -- icons per row / spacing). On 12.1 aura presence is SECRET, so slots are STATIC: each
 -- member owns the grid cell of its member index (no compaction as auras come and go),
@@ -4952,6 +5037,7 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
             local map = ids and ids.includeSpellIDs
             if map then
+                ind = memberView(ind, defs)
                 local isSquare = ind.type == "square"
                 local borderOn = placedBorderOn(ind, ind.hideIcon)
                 recs = recs or {}
@@ -6469,10 +6555,23 @@ function Factory:DebugDumpADGate()
                                 -- convention later. The CF park constant is now the only
                                 -- thing that darkens a slot, so it is the only honest
                                 -- source for this column.
+                                -- ★ NOW AN ENGINE READ, NOT AN INFERENCE. The CF park is
+                                -- retired too (see AuraContainer's SLOT_PARK_CF tombstone):
+                                -- a dark slot carries its own filter AND its own
+                                -- candidates, so both would report every parked slot as
+                                -- shown. IsAuraSlotEnabled answers the question directly
+                                -- instead of asking what we last pushed, which is the whole
+                                -- reason this column has been wrong twice.
                                 local pf = h and h._pushedFilter
-                                local parkCF = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_CF
-                                local darkCF = parkCF ~= nil and h and h._cfPushed == parkCF
-                                hShown = (pf == nil) and "-" or (darkCF and "false" or "true")
+                                local cc = h and h.owner and h.owner.container
+                                local darkEn
+                                if cc and cc.IsAuraSlotEnabled then
+                                    local okR, en = pcall(cc.IsAuraSlotEnabled, cc, h.key)
+                                    local secretEn = issecretvalue and issecretvalue(en) or false
+                                    if okR and not secretEn then darkEn = not en end
+                                end
+                                hShown = (pf == nil) and "-"
+                                    or (darkEn == nil and "?" or (darkEn and "false" or "true"))
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter

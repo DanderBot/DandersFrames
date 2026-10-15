@@ -3,11 +3,10 @@ local NS = ...
 -- ============================================================
 -- DISPEL OVERLAY PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Modules.lua
 -- ------------------------------------------------------------
--- Auras > Dispel Overlay: FIVE classic boxes. In Modern they are the Debuff
--- Bar's collapsible CARDS -- two per row inside a card wide enough, dim captions,
--- the value summary in a shut card's corner, Expand All / Collapse All at the
--- top -- FOUR of them, because the Display box's one checkbox (Pulse Overlay)
--- moved into Settings:
+-- Auras > Dispel Overlay: the Debuff Bar's collapsible CARDS -- two per row
+-- inside a card wide enough, dim captions, the value summary in a shut card's
+-- corner, Expand All / Collapse All at the top -- FOUR of them, with Pulse
+-- Overlay at the foot of Settings:
 --
 --   column 1   Settings (holds the PAGE gate, Enable Dispel Overlay, in its
 --              body -- as Show Buffs does -- plus Pulse Overlay) and Gradient
@@ -15,19 +14,12 @@ local NS = ...
 --   column 2   Dispel Symbol and Border (Show Dispel Symbol / Show Border are
 --              their header ticks).
 --
--- ⚠ GRADIENT IS IN COLUMN 1, where classic always had it, which is what balances
--- the page: as cards it was one behaviour card against three looks cards.
+-- ⚠ GRADIENT IS IN COLUMN 1, which is what balances the page.
 --
--- ☠ THE PAGE GATE IS SAID TWICE, AND THE TWO LAYOUTS SAY IT DIFFERENTLY. Classic
--- HIDES every dependent control and four of the five boxes, and keeps doing
--- exactly that -- every hideOn below is asserted where it always was. A card
--- cannot: hiding its controls leaves a header over an empty body. So Modern
--- GREYS: the three looks cards dim their headers and grey their ticks, and every
--- card body greys whole (GreyWithPage) with the switch itself kept live.
---
--- The seam that carries the hide is GateHide(tools2, w[, also]): classic gets
--- the widget's hideOn, a card or a pinned panel gets nothing -- except where the
--- widget also carries its OWN variant gate, which survives in both layouts.
+-- ☠ THE PAGE GATE GREYS, IT DOES NOT HIDE: hiding a card's controls leaves a
+-- header over an empty body. The three looks cards dim their headers and grey
+-- their ticks, and every card body greys whole (GreyWithPage) with the switch
+-- itself kept live. The one hideOn left is a widget's OWN variant gate.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -36,11 +28,9 @@ local NS = ...
 --
 -- What that buys, and what it does not:
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
---     in order -- taken from the PRE-CHANGE source. This is also the evidence
---     that CLASSIC RENDERS AS IT DID: the classic branch mounts the same builder
---     into the same 280 box, in the same column, in the same order.
---   ✓ that ONE builder serves both layouts, and the card hands it what classic
---     hands it plus `card` (and hoistToggle where the tick moved to the header).
+--     in order.
+--   ✓ how each card mounts its builder (hoistToggle where the tick lives in
+--     the header).
 --   ✓ each card's column, stable collapse key, summary, grey, tick and pin; that
 --     there is one checkbox per setting.
 --   ✓ the two opt-ins (two per row, dim captions) and that no count survives.
@@ -151,8 +141,6 @@ end
 -- ============================================================
 print("-- Dispel Overlay page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -200,15 +188,16 @@ do
         check(at ~= nil and lastVocab ~= nil and lastVocab < at,
               "vocab: " .. b .. " is declared after it, so it closes over the real tables")
     end
-    for _, g in ipairs({ "HideIfDisabled", "ApplyDispelSettings", "InvalidateCurves",
-                         "OnDispelTypeChanged", "DispelOffRow", "GateHide", "GreyWithPage",
+    for _, g in ipairs({ "ApplyDispelSettings", "InvalidateCurves",
+                         "OnDispelTypeChanged", "DispelOffRow", "GreyWithPage",
                          "OnDispelCardTick" }) do
         local n = 0
         for _ in PAGE:gmatch("local function " .. g .. "%(") do n = n + 1 end
         eq(n, 1, "vocab: " .. g .. " is declared exactly once")
     end
-    check(PAGE:find("local HideDispelOptions = HideIfDisabled", 1, true) ~= nil,
-          "vocab: ...and the alias the widget wiring reads is still the same function")
+    for _, gone in ipairs({ "HideIfDisabled", "HideDispelOptions", "GateHide" }) do
+        check(PAGE:find(gone, 1, true) == nil, "vocab: " .. gone .. " is gone -- the page gate never hides")
+    end
     for _, g in ipairs({ "DisableIfNoGradient", "DisableIfNoBorder", "DisableIfNoIcon" }) do
         local n = 0
         for _ in PAGE:gmatch("local " .. g .. " = function") do n = n + 1 end
@@ -222,17 +211,17 @@ do
 end
 
 -- ============================================================
--- 2. THE PAGE GATE -- a HIDE in classic, a GREY in a card
+-- 2. THE PAGE GATE -- a GREY
 -- ============================================================
-print("-- Dispel Overlay page: the page gate, said twice")
+print("-- Dispel Overlay page: the page gate")
 do
     check(PAGE:find("local function DispelOffRow(d) return not (d or db).dispelOverlayEnabled end", 1, true) ~= nil,
           "gate: the page names the grey half of its gate once")
 
     -- ---- the grey: every builder greys whole in a card or a pinned panel ----
     local grey = (PAGE:match("local function GreyWithPage%(tools2%)(.-)\n        end") or ""):gsub("%s+", " ")
-    check(grey:find("if tools2.popout or tools2.card then tools2.group.disableChildrenOn = DispelOffRow end", 1, true) ~= nil,
-          "gate: GreyWithPage greys the whole group, in a card or a pinned panel and nowhere else")
+    check(grey:find("tools2.group.disableChildrenOn = DispelOffRow", 1, true) ~= nil,
+          "gate: GreyWithPage greys the whole group")
     for _, b in ipairs({ "BuildDispelSettingsGroup", "BuildDispelIconGroup",
                          "BuildDispelBorderGroup", "BuildDispelGradientGroup" }) do
         check(builderBody(b):find("GreyWithPage(tools2)", 1, true) ~= nil,
@@ -246,31 +235,20 @@ do
     for _ in PAGE:gmatch("%.disableChildrenOn%s*=") do gates = gates + 1 end
     eq(gates, 1, "gate: GreyWithPage is the page's only group-level child gate")
 
-    -- ---- the classic half, unchanged ---------------------------------
-    for _, box in ipairs({ "displayGroup", "iconGroup", "borderGroup", "gradientGroup" }) do
-        check(PAGE:find(box .. ".hideOn = HideDispelOptions", 1, true) ~= nil,
-              "gate: classic still hides " .. box .. " with the overlay")
-    end
-    check(PAGE:find("animate.hideOn = HideDispelOptions", 1, true) ~= nil,
-          "gate: ...and the Pulse Overlay checkbox inside the Display box")
-
-    -- ---- the seam ----------------------------------------------------
-    -- ☠ EVERY DEPENDENT CONTROL GOES THROUGH GateHide. A raw `w.hideOn =` inside
-    -- a builder would hide that control in a CARD as well, which is the empty
-    -- body this whole arrangement exists to avoid.
+    -- ---- no hide on the page gate --------------------------------------
+    -- ☠ A hideOn on the page gate would hide controls in a CARD, the empty body
+    -- the grey exists to avoid. The ONE hideOn is a variant gate.
     for _, b in ipairs({ "BuildDispelSettingsGroup", "BuildDispelIconGroup",
-                         "BuildDispelBorderGroup", "BuildDispelGradientGroup" }) do
-        local body = builderBody(b)
-        check(body:find("GateHide(tools2,", 1, true) ~= nil,
-              "gate: " .. b .. " states its hides through the seam")
-        check(body:find(".hideOn", 1, true) == nil,
-              "gate: ..." .. b .. " never writes a hideOn straight onto a widget")
+                         "BuildDispelBorderGroup" }) do
+        check(builderBody(b):find(".hideOn", 1, true) == nil,
+              "gate: " .. b .. " hides nothing")
     end
-    check(PAGE:find("if tools2.popout or tools2.card then\n                if also then w.hideOn = also end", 1, true) ~= nil,
-          "gate: ...and the seam drops the page hide in a card and a pinned panel alike")
-    check(builderBody("BuildDispelGradientGroup")
-            :find('GateHide(tools2, onHealthCheck, function(d) return d.dispelGradientStyle ~= "FULL" end)', 1, true) ~= nil,
-          "gate: Show On Current Health Only keeps its own variant gate through the seam")
+    local grad = builderBody("BuildDispelGradientGroup")
+    local hides = 0
+    for _ in grad:gmatch("%.hideOn%s*=") do hides = hides + 1 end
+    eq(hides, 1, "gate: BuildDispelGradientGroup hides one control")
+    check(grad:find('onHealthCheck.hideOn = function(d) return d.dispelGradientStyle ~= "FULL" end', 1, true) ~= nil,
+          "gate: ...Show On Current Health Only, on its own variant gate")
 
     -- ---- no page rebuild ---------------------------------------------
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
@@ -292,8 +270,6 @@ end
 
 -- ============================================================
 -- 3. THE FOUR BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source: same factories,
--- same L keys, same db keys, same slot heights, in the same order.
 -- ============================================================
 local DISPEL_SETTINGS = {
     { "checkbox", "Enable Dispel Overlay", "dispelOverlayEnabled",    30 },
@@ -332,19 +308,19 @@ local DISPEL_GRADIENT = {
     { "slider",   "Darken Amount",                "dispelGradientDarkenAlpha",    55 },
 }
 
--- label, stable collapse key, card column, classic box column, the summary;
+-- label, stable collapse key, card column, the summary;
 -- `dim` = greys with the page gate, `pin` = passes its builder (decides how the
 -- overlay LOOKS), `tick` = its on/off moved into the header.
 local CARDS = {
-    { label = "Settings", key = "dispel_settings", col = 1, classicCol = 1,
+    { label = "Settings", key = "dispel_settings", col = 1,
       builder = "BuildDispelSettingsGroup", golden = DISPEL_SETTINGS, summary = "DispelSettingsSummary" },
-    { label = "Dispel Symbol", key = "dispel_symbol", col = 2, classicCol = 2,
+    { label = "Dispel Symbol", key = "dispel_symbol", col = 2,
       builder = "BuildDispelIconGroup", golden = DISPEL_ICON, summary = "DispelIconSummary",
       dim = true, pin = true, tick = { key = "dispelShowIcon", name = "Show Dispel Symbol" } },
-    { label = "Border", key = "dispel_border", col = 2, classicCol = 2,
+    { label = "Border", key = "dispel_border", col = 2,
       builder = "BuildDispelBorderGroup", golden = DISPEL_BORDER, summary = "DispelBorderSummary",
       dim = true, pin = true, tick = { key = "dispelShowBorder", name = "Show Border" } },
-    { label = "Gradient", key = "dispel_gradient", col = 2, classicCol = 1,
+    { label = "Gradient", key = "dispel_gradient", col = 2,
       builder = "BuildDispelGradientGroup", golden = DISPEL_GRADIENT, summary = "DispelGradientSummary",
       dim = true, pin = true, tick = { key = "dispelShowGradient", name = "Show Gradient" } },
 }
@@ -353,22 +329,6 @@ for _, g in ipairs(CARDS) do
     print("-- Dispel Overlay page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, g.label .. ": the classic box keeps its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...which still goes to column " .. g.classicCol)
-    end
 
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -391,16 +351,16 @@ for _, g in ipairs(CARDS) do
               g.label .. ": ...committing through the page's tick commit")
         check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
               g.label .. ": the builder skips its in-body copy when the header carries it")
-        local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, card = true, hoistToggle = true, })"
+        local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })"
         check(block:find(mount, 1, true) ~= nil,
-              g.label .. ": mounts the builder as classic does, plus card and hoistToggle")
+              g.label .. ": mounts its builder with hoistToggle")
     else
         check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick")
         check(body:find("hoistToggle", 1, true) == nil,
               g.label .. ": ...and its builder has no hoist branch -- the page gate stays in the body")
-        local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, card = true, })"
+        local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
         check(block:find(mount, 1, true) ~= nil,
-              g.label .. ": mounts the builder as classic does, plus card")
+              g.label .. ": mounts its builder into the card's band")
     end
 end
 
@@ -412,7 +372,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Settings | Dispel Symbol | Border | Gradient",
-       "order: the four cards open in the order the page always read")
+       "order: the four cards open in reading order")
 
     -- The groups: Content over the dispel choice in column 1, Appearance over
     -- the three looks in column 2, each header before its first card.
@@ -432,14 +392,12 @@ do
     -- ---- Pulse Overlay moved into Settings -----------------------------
     local settings = sectionBlock("Settings")
     check(settings:find('local pulse = band:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", ApplyDispelSettings), 30)', 1, true) ~= nil,
-          "pulse: Pulse Overlay is a checkbox at the foot of the Settings card, with the classic callback's apply")
+          "pulse: Pulse Overlay is a checkbox at the foot of the Settings card, applying the settings")
     check(settings:find("pulse.fullRow = true", 1, true) ~= nil,
           "pulse: ...on a row of its own")
     local n = 0
     for _ in PAGE:gmatch('"dispelAnimate"') do n = n + 1 end
-    eq(n, 2, "pulse: two checkboxes on the key in the source -- classic's Display box and the card's")
-    check(PAGE:find('GUI:CreateHeader(self.child, L["Display"])', 1, true) ~= nil,
-          "pulse: the Display box survives in classic")
+    eq(n, 1, "pulse: ...and dispelAnimate is bound once on the page")
 
     -- ---- Expand All / Collapse All --------------------------------------
     check(PAGE:find('Add(tools.SectionControls(self.child), 24, "both")', 1, true) ~= nil,
@@ -449,17 +407,8 @@ do
     check(stripAt and firstAt and stripAt < firstAt,
           "bulk: ...above the first card, because it acts on the whole page")
 
-    -- ---- five classic boxes, in the order they always had ---------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 5, "classic: five bare 280 boxes, and they are the classic branch's own")
-    local prev = 0
-    for _, a in ipairs({ "settingsGroup, nil, 1", "displayGroup, nil, 1", "iconGroup, nil, 2",
-                         "borderGroup, nil, 2", "gradientGroup, nil, 1" }) do
-        local at = PAGE:find("Add(" .. a .. ")", 1, true)
-        check(at ~= nil and at > prev, "classic: still calls Add(" .. a .. ") in sequence")
-        prev = at or prev
-    end
+    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280)", 1, true) == nil,
+          "page: no fixed-width box is left on the page")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"dispel"}, L["Dispel Overlay"], "auras_dispel")', 1, true) ~= nil,

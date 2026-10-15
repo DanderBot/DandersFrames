@@ -21,6 +21,11 @@
 - (Debuffs) Hide Long Debuffs can be set in seconds as well as minutes, and Hide Permanent Auras drops debuffs with no duration. (by Krathe)
 - (Aura Designer) Debuff groups get the same Show and Hide filters, can show debuffs by who cast them, and have a Match setting: Any, or All so a group shows only debuffs that fit every ticked row (for example short non-boss mechanics as big click targets). (by Krathe)
 - (Dispel) The dispel overlay can hide individual dispel types, such as bleeds. (by Krathe)
+- (Auras) Buff and Debuff Bar icons can show the name of who cast them, in their class colour. Off by default. (by Krathe)
+- (Auras) Pandemic now offers the full set of border animations, plays only during the refresh window, and also animates the frame border. DandersFrames learns each aura's refresh window as you play, so more auras get a Pandemic warning over time. (by Krathe)
+- (Borders) New **Marching Ants** border animation. (by Krathe)
+- (Fading) New **Unhealable Fading** card: a player who can't be healed, such as a priest in Spirit of Redemption, is dimmed like an out-of-range player. Off by default. (by Krathe)
+- (Blizzard Frames) Hide Blizzard Player Frame can be set to apply only in a raid group. (by Krathe)
 
 ### Bug Fixes
 
@@ -73,6 +78,18 @@
 - (Aura Designer) Hide Duplicate Debuffs no longer hides debuffs that a debuff group doesn't actually show. (by Krathe)
 - (Debuffs) With All Debuffs off, the Highlight now marks boss, role and priority debuffs that come in through other categories. (by Krathe)
 - (Defensive Icon) The border animation settings are back, so an animation carried over from an older version can be changed or turned off. (by Krathe)
+- (Buffs) Hide Duplicate Buffs now hides only your own casts of a My Buffs spell, so another player's copy of the same buff stays on the bar. (by Krathe)
+- (Auras) Auras on a player who dies or is brought back now hide and return reliably. (by Krathe)
+- (Inspect) Fix Blizzard's inspect window sometimes opening empty in a group. (by Krathe)
+- (Aura Designer) A layout group's Icons Per Row now counts its members, and a member's scale applies inside the group. (by Krathe)
+- (Aura Designer) A group's border settings grey out while Show Border is off. (by Krathe)
+- (Auto Layouts) Global settings can no longer be overridden by a raid auto layout. (by Krathe)
+- (Test Mode) Test frames no longer show the dispel overlay while it is turned off. (by Krathe)
+- (Buffs) The Buff and Debuff Bar's Filters and Blacklist cards grey out with Show Buffs and Show Debuffs, like every other card. (by Krathe)
+- (Text Designer) The filter chip you click now shows as selected. (by Krathe)
+- (Settings) A page that fits the window no longer scrolls, and the Aura and Text Designers no longer scroll as a whole. (by Krathe)
+- (Settings) Designer Preview Scale is now relative to your live frames, so the settings window's own scale no longer shrinks or grows the preview. (by Krathe)
+- (Settings) Switching between Party and Raid while DandersMover is open now finishes the mover session first. (by Krathe)
 
 ### Changes
 
@@ -86,6 +103,10 @@
 - (Settings) Buff Bar, Debuff Bar and Defensive Icon cards start closed. (by Krathe)
 - (Tooltips) Aura tooltips no longer offer Game Default positioning, which the game's aura tooltip can't do. (by Krathe)
 - (Settings) Switching tabs and pages is faster. (by Krathe)
+- (Settings) The classic settings layout has been removed; the card layout is now the only one. (by Krathe)
+- (Aura Designer) An indicator's settings, the Global tab, group settings and the Power Infusion Helper are now cards, two settings to a row when there's room. (by Krathe)
+- (Text Designer) An element's Content, Appearance and Position are now cards, two settings to a row when there's room. (by Krathe)
+- (Aura Designer) The Aura and Text Designer previews take only the width they need, giving the settings the rest. (by Krathe)
 
 ## [5.3.3]
 

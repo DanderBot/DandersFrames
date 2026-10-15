@@ -53,7 +53,6 @@ end
 -- Search system strings
 L["(missing)"] = true
 L["12.1 AuraContainer factory (build, filters, capability gate)"] = true
-L["Applies to the whole account."] = true
 L["Aura Designer (incl. sounds)"] = true
 L["Aura row drivers: rebuild vs tuning vs style, retargets"] = true
 L["Auto-create profiles disabled. Profiles will not be created for new loadouts."] = true
@@ -86,7 +85,6 @@ L["Frame size, spacing, growth direction, container resize"] = true
 L["FrameSort addon integration"] = true
 L["Filter registry: custom filter import, scrub and reference rewrites"] = true
 L["Group composition changes, throttling, sorting decisions"] = true
-L["Settings Layout"] = true
 L["Settings search: breadcrumb resolution and navigation failures"] = true
 L["Header show/hide and state-driver changes"] = true
 L["Health bar value writes, including Reduced Max Health"] = true
@@ -127,7 +125,6 @@ L["Role icon show/hide decisions and combat transitions"] = true
 L["Secure header creation, attributes and re-anchoring"] = true
 L["Secure position handler trigger and snippet runs"] = true
 L["Settings window internals — slider drag paths, relayout"] = true
-L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."] = true
 L["Switched to profile: %s (%s)"] = true
 L["Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup"] = true
 L["Text Designer render and mirror state"] = true
@@ -521,7 +518,6 @@ L["AFK Icon"] = true
 L["AGGRO"] = true
 L["Aggro Flag"] = true
 L["Aggro Highlight"] = true
-L["Aggro Settings"] = true
 L["Alignment"] = true
 L["All %s movers are turned off under DandersFrames in /mover config."] = true
 L["All Buffs"] = true
@@ -834,7 +830,6 @@ L["Next Part"] = true
 L["Debug console module not loaded."] = true
 L["Debug logging %s"] = true
 L["Decimal Places"] = true
-L["Deduplication"] = true
 L["Default"] = true
 L["Default (Slot Order)"] = true
 L["Defensive Filters"] = true
@@ -1214,6 +1209,15 @@ L["Hide when 0"] = true
 L["Hides and unregisters all events on the default Blizzard party frames so they consume no performance."] = true
 L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."] = true
 L["Hides the default Blizzard player portrait and health bar."] = true
+L["Unhealable Fading"] = true
+L["Fade Unhealable Units"] = true
+L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."] = true
+L["Frame Alpha (Unhealable)"] = true
+L["How visible the frame stays while its unit cannot be healed."] = true
+L["Fade Color"] = true
+L["Only in a Raid Group"] = true
+L["Hides the Blizzard player frame only while you are in a raid group. In a party or solo it shows as normal."] = true
+L["Player (in raid)"] = true
 L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."] = true
 L["High Threat (Yellow)"] = true
 L["Highest Threat (Orange)"] = true
@@ -1222,14 +1226,12 @@ L["Highlight Animation"] = true
 L["Highlight Color"] = true
 L["Highlight Important Spells"] = true
 L["Highlight the bar when the enemy is casting at you."] = true
-L["Highlight Settings"] = true
 L["Highlight Shadow"] = true
 L["Highlights"] = true
 L["Horizontal"] = true
 L["Horizontal Spacing"] = true
 L["Hover Applies To"] = true
 L["Hover Highlight"] = true
-L["Hover Settings"] = true
 L["Hovered Frame Only"] = true
 L["How many groups sit in a column before a new column starts. At 8, every group shares one column."] = true
 L["How many groups sit on a row before a new row starts. At 8, every group shares one row."] = true
@@ -1269,7 +1271,6 @@ L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-comba
 L["Inset"] = true
 L["Instanced / PvP"] = true
 L["Integrations"] = true
-L["Interrupt Settings"] = true
 L["Interrupted Flash Duration"] = true
 L["Interruptible Color"] = true
 L["Join a raid group (2-5 players works best)"] = true
@@ -1340,6 +1341,7 @@ L["Max Debuffs"] = true
 -- ⚠ TWO FORMAT PLACEHOLDERS, IN ORDER: the number of category groups, then the resulting
 -- ceiling (groups x the slider). A translation must keep both %d and their order.
 L["The game applies this limit to each category separately. Your filters use %d categories, so up to %d debuffs can show at once."] = true
+L["When My Buffs in the Aura Designer tracks a buff, your casts and other players' casts are limited separately, so up to %d buffs can show at once."] = true
 L["Max Health"] = true
 L["Max HP"] = true
 L["Max HP Reduction %"] = true
@@ -1362,7 +1364,6 @@ L["Missing Health Color"] = true
 L["Missing Health Gradient"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
-L["Modern"] = true
 L["Melee DPS"] = true
 L["Match ALL groups"] = true
 L["Match ANY group"] = true
@@ -1480,7 +1481,6 @@ L["Permanent Mover"] = true
 L["Persist (seconds)"] = true
 L["Personal Targeted"] = true
 L["Pet Buffs"] = true
-L["Pet Frame Settings"] = true
 L["Pet Frames"] = true
 L["Pet frames are grouped together in a separate container."] = true
 L["Pet frames are positioned relative to their owner's frame."] = true
@@ -1611,7 +1611,6 @@ L["Reset to Global"] = true
 L["Reset to Global Order"] = true
 L["Reset to inherited value"] = true
 L["Resource Bar"] = true
-L["Resource Bar Settings"] = true
 L["Resource Colors"] = true
 L["Rested Indicator"] = true
 L["Resurrection"] = true
@@ -1659,7 +1658,6 @@ L["Select any tab"] = true
 L["Select which spell to use for range checking. Auto will use your spec's default healing/friendly spell."] = true
 L["Select..."] = true
 L["Selection Highlight"] = true
-L["Selection Settings"] = true
 L["Self"] = true
 L["Self Position"] = true
 L["Self-Target Color"] = true
@@ -1924,7 +1922,6 @@ L["Too many to show here."] = true
 L["Use /df debug overrides for the full list — active layout, or Edit one to inspect it."] = true
 L["Use In-Combat Fade In Instances"] = true
 L["Use Class Color"] = true
-L["Use classic settings layout"] = true
 L["Use Custom Colors"] = true
 L["Use DF Color Picker"] = true
 L["Use DF Color Picker for All Addons"] = true
@@ -2108,6 +2105,21 @@ L["DF Chase"] = true
 L["DF Proc"] = true
 L["DF Flash"] = true
 L["DF Pixel"] = true
+-- No "DF " prefix on purpose: that prefix marks a DF-owned reimplementation, and this
+-- one really is the game's own widget (Blizzard_SharedXML/MarchingAnts, 12.1.5) — the
+-- same border their raid-frame dispel option draws.
+L["Marching Ants"] = true
+-- Caster name (12.1.5 SetCasterName). "Include Realm Name" rather than "Show Realm":
+-- the name is already showing, the question is whether the realm is appended to it.
+L["Caster Name"] = true
+-- Shown (and used as the Enable tooltip) when every spell behind an aura is a MEASURED
+-- no-refresh-window. Names the way out on purpose: the failure this prevents is a healer
+-- wanting "warn me before this drops", finding it under Pandemic rather than Expiration,
+-- and configuring a cue that can never fire.
+L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."] = true
+L["Show Caster Name"] = true
+L["Include Realm Name"] = true
+L["Color by Class"] = true
 L["Hide Intro Flash"] = true
 L["Animation Color"] = true
 L["Animation Frequency"] = true
@@ -2935,7 +2947,7 @@ L["This list can't be built during combat."] = true
 -- tooltip and hold-to-reset hint. Alphabetical within the block. "On", "Off"
 -- and "None" are reused from above.
 L["Changed from default"] = true
--- Settings page group headers (the Modern layout card groups).
+-- Settings page group headers (the card groups).
 L["Frames"] = true
 L["Interface"] = true
 L["Unit Colors"] = true

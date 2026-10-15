@@ -100,40 +100,29 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Initial update
         UpdateCombatBanner()
         
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: five 280 boxes in two columns.
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
-        -- two settings per row, dim captions, Expand All / Collapse All at the
-        -- top, and the two page columns classic has always drawn -- sorting itself
-        -- down the left, the drag orders down the right:
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- Sorting itself down the left, the drag orders down the right:
         --
         --   column 1   Unit Frame Sorting (+ Self Position), FrameSort Integration
         --              (only with the FrameSort addon; header tick)
         --   column 2   "Priority"  Role Priority, Class Priority
         --
-        -- ⚠ SELF POSITION MOVES INTO UNIT FRAME SORTING. It was the page's one lone
-        -- control -- a one-dropdown box in classic, a control row after the popout
-        -- sweep -- and it is the first level of the very order that card
-        -- describes ("Self Position > Role > Class > Name"). Classic keeps its box.
+        -- ⚠ SELF POSITION LIVES IN UNIT FRAME SORTING: it is the first level of
+        -- the very order that card describes ("Self Position > Role > Class >
+        -- Name").
         --
         -- ☠ ENABLE CUSTOM SORTING STAYS IN THE BODY of the first card, as Show
         -- Debuffs does on the Debuff Bar: it is the PAGE gate. Shut, that card's
         -- corner says Off while sorting is off; the two priority cards grey their
-        -- headers with it. Use FrameSort Addon is its own card's on/off, so it moves
-        -- into that card's header.
+        -- headers with it. Use FrameSort Addon is its own card's on/off, so it
+        -- lives in that card's header.
         --
         -- ⚠ NO PINS ON THIS PAGE. Every card decides what ORDER frames sort in,
         -- which is behaviour, not looks.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
-        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
-        -- The classic branch mounts the SAME builder into the box it always built,
-        -- which is what makes "classic is unchanged" structural rather than a
-        -- promise -- test_sorting_page_builders.lua pins the inventory of each one
-        -- against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`
+        -- -- test_sorting_page_builders.lua pins each inventory.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -148,9 +137,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== SELF POSITION'S VOCABULARY AND COMMIT, AT PAGE SCOPE ========
-        -- Declared above the Unit Frame Sorting card, which carries the dropdown
-        -- in modern; classic's own Self Position box, further down, reads the
-        -- same two.
+        -- Declared above the Unit Frame Sorting card, which carries the dropdown.
         local selfPosValues = {
             ["FIRST"] = L["Always First"],
             ["LAST"] = L["Always Last"],
@@ -159,22 +146,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             _order = {"FIRST", "LAST", "SORTED"},
         }
 
-        -- The dropdown's callback, under a name at page scope: both layouts drive
-        -- it, and two copies of a body that repaints the combat banner is the
+        -- The dropdown's callback, under a name at page scope: the card and a
+        -- pinned copy drive it, and two copies of a body that repaints the combat banner is the
         -- kind of duplication that drifts one of them.
         local function ApplySelfPosition()
             TriggerSortForCurrentMode()
             UpdateCombatBanner()
         end
 
-        -- ===== UNIT FRAME SORTING (a 280 box in classic, the first card in
-        -- column 1 in modern) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db keys, same slot heights, same hideOns.
-        --
-        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while custom sorting is off; the card has to do the same,
-        -- and one builder serving both is what stops the two drifting.
+        -- ===== UNIT FRAME SORTING (the first card in column 1) =====
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, so a pinned copy greys its
+        -- children while custom sorting is off, exactly as the card does.
         local function BuildSortOptionsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Sort party members by role, class, and name.\n\nSort order: Self Position > Role > Class > Name"], 250), 60)
@@ -182,7 +164,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local raidSortNote = group:AddWidget(GUI:CreateLabel(parent, L["Raid: Group layout sorts within each group.\nFlat grid layout sorts all players together."], 250), 35)
             raidSortNote.hideOn = function() return GUI.SelectedMode ~= "raid" end
 
-            -- Built in both layouts: it is the PAGE gate, so no card hoists it
+            -- Built in the body: it is the PAGE gate, so no card hoists it
             -- (see the page note). The seam stays for any future caller.
             if not tools2.hoistToggle then
                 local sortEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Custom Sorting"], db, "sortEnabled", function()
@@ -229,68 +211,53 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             sortAlpha.hideOn = HideSortOptions
         end
 
-        if classicLayout then
-            local sortOptionsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            sortOptionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame Sorting"]), 40)
-            BuildSortOptionsGroup({
-                group = sortOptionsGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(sortOptionsGroup, nil, 1)
-        else
-            -- The summary, per the page convention: at most four items, a fixed
-            -- order, "\194\183" between them, WORDS localised and numbers raw,
-            -- every read guarded because a profile mid-migration may be missing
-            -- any of these keys.
-            --
-            -- It reads as the group's own blurb does -- "Self Position > Role >
-            -- Class > Name" -- with the levels that are actually switched on.
-            -- L["Role"] is unconditional because role order is what this sorts by
-            -- whatever else is off, so a default profile still says something.
-            -- Shut while sorting is off, the corner says Off instead.
-            --
-            -- ⚠ THE MELEE/RANGED SPLIT IS DELIBERATELY NOT HERE. It refines the
-            -- Role entry rather than adding a level to the list, and there is no
-            -- short word for it in the locale -- the checkbox's own label is a
-            -- sentence. A summary is not worth inventing a string for.
-            local function SortOptionsSummary(d)
-                if not d then return "" end
-                if not d.sortEnabled then return L["Off"] end
-                local parts = { L["Role"] }
-                if d.sortByClass then parts[#parts + 1] = L["Class"] end
-                local alpha = d.sortAlphabetical
-                if alpha == "AZ" then parts[#parts + 1] = L["A to Z"]
-                elseif alpha == "ZA" then parts[#parts + 1] = L["Z to A"] end
-                return table.concat(parts, " \194\183 ")
-            end
-
-            -- ☠ THE PAGE'S TWO BULK VERBS, at col "both", under the combat banner
-            -- and above every card -- the Debuff Bar's placement.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- ☠ NO TICK: Enable Custom Sorting is the page gate and stays in the
-            -- body, built by the builder exactly as classic builds it. No pin.
-            Add(GUI:CreateHeader(self.child, L["Sorting"]), 40, 1)
-            local band = OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)
-            BuildSortOptionsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            -- ☠ SELF POSITION, THE PAGE'S LONE CONTROL, MOVED IN HERE (see the page
-            -- note), at the foot of the order it heads. Classic's dropdown call,
-            -- captioned with the box's own name -- "Position" alone, on a page
-            -- about sorting, does not say WHOSE -- with the box's two gates: hidden
-            -- under a FrameSort takeover, and greyed with the rest of this card by
-            -- the builder's group gate while custom sorting is off.
-            local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
-            selfPos.hideOn = HideSortOptions
-            CloseSection(band)
+        -- The summary, per the page convention: at most four items, a fixed
+        -- order, "\194\183" between them, WORDS localised and numbers raw,
+        -- every read guarded because a profile mid-migration may be missing
+        -- any of these keys.
+        --
+        -- It reads as the group's own blurb does -- "Self Position > Role >
+        -- Class > Name" -- with the levels that are actually switched on.
+        -- L["Role"] is unconditional because role order is what this sorts by
+        -- whatever else is off, so a default profile still says something.
+        -- Shut while sorting is off, the corner says Off instead.
+        --
+        -- ⚠ THE MELEE/RANGED SPLIT IS DELIBERATELY NOT HERE. It refines the
+        -- Role entry rather than adding a level to the list, and there is no
+        -- short word for it in the locale -- the checkbox's own label is a
+        -- sentence. A summary is not worth inventing a string for.
+        local function SortOptionsSummary(d)
+            if not d then return "" end
+            if not d.sortEnabled then return L["Off"] end
+            local parts = { L["Role"] }
+            if d.sortByClass then parts[#parts + 1] = L["Class"] end
+            local alpha = d.sortAlphabetical
+            if alpha == "AZ" then parts[#parts + 1] = L["A to Z"]
+            elseif alpha == "ZA" then parts[#parts + 1] = L["Z to A"] end
+            return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== FRAMESORT INTEGRATION GROUP (a 280 box in column 1 in classic, a
-        -- card in column 1 in modern) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db key, same callback, same slot heights.
+        -- ☠ THE PAGE'S TWO BULK VERBS, at col "both", under the combat banner
+        -- and above every card -- the Debuff Bar's placement.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- ☠ NO TICK: Enable Custom Sorting is the page gate and stays in the
+        -- body. No pin.
+        Add(GUI:CreateHeader(self.child, L["Sorting"]), 40, 1)
+        local band = OpenSection(L["Unit Frame Sorting"], "sorting_unitframes", 1, SortOptionsSummary)
+        BuildSortOptionsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        -- ☠ SELF POSITION, at the foot of the order it heads (see the page
+        -- note). Captioned "Self Position" -- "Position" alone, on a page about
+        -- sorting, does not say WHOSE -- with two gates: hidden under a
+        -- FrameSort takeover, and greyed with the rest of this card by the
+        -- builder's group gate while custom sorting is off.
+        local selfPos = band:AddWidget(GUI:CreateDropdown(self.child, L["Self Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
+        selfPos.hideOn = HideSortOptions
+        CloseSection(band)
+
+        -- ===== FRAMESORT INTEGRATION GROUP (a card in column 1) =====
         --
         -- The tick's commit, named so the in-body checkbox and the card's header
         -- tick run the same body.
@@ -324,40 +291,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- its pinned slot: it is the one sentence on this page that must not be
         -- behind a hover, and a card flows it on a row of its own.
         if FrameSortApi then
-            if classicLayout then
-                local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
-                frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
-                BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
-                Add(frameSortGroup, nil, 1)
-            else
-                -- ☠ USE FRAMESORT ADDON IS THE HEADER'S TICK; the builder skips
-                -- its own (hoistToggle). Same key, label and commit. No pin.
-                -- ⚠ NO SUMMARY, by decision: the tick is the whole card, and shut
-                -- and off the corner already reads "Off".
-                local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
-                    db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
-                    onChanged = UseFrameSortChanged,
-                })
-                BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })
-                CloseSection(band)
-            end
+            -- ☠ USE FRAMESORT ADDON IS THE HEADER'S TICK; the builder skips
+            -- its own (hoistToggle). Same key, label and commit. No pin.
+            -- ⚠ NO SUMMARY, by decision: the tick is the whole card, and shut
+            -- and off the corner already reads "Off".
+            local band = OpenSection(L["FrameSort Integration"], "sorting_framesort", 1, nil, nil, nil, nil, {
+                db = db, key = "useFrameSort", label = L["Use FrameSort Addon"],
+                onChanged = UseFrameSortChanged,
+            })
+            BuildFrameSortGroup({ group = band, parent = self.child, hoistToggle = true })
+            CloseSection(band)
         end
 
-        -- ===== SELF POSITION (a 280 box in column 1 in classic; in modern the
-        -- last control of the Unit Frame Sorting card, above) =====
-        if classicLayout then
-            local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)
-            selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)
-            selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
-            selfPosGroup.hideOn = HideSortOptions
-            selfPosGroup.disableChildrenOn = DisableSortOptions
-            Add(selfPosGroup, nil, 1)
-        else
-            -- Modern: Self Position is the last control of Unit Frame Sorting.
-        end
-
-        -- ===== ROLE PRIORITY (a 280 box in classic, a card under "Priority" in
-        -- column 2 in modern) =====
+        -- ===== ROLE PRIORITY (a card under "Priority" in column 2) =====
         -- ☠ THE WIDGET REFERENCE IS REBOUND ON EVERY BUILD, NOT CAPTURED ONCE.
         -- `roleOrderWidget` is read by the Separate Melee & Ranged callback,
         -- which has to repaint whichever role list the user can actually see.
@@ -374,8 +320,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = DisableSortOptions
         end
 
-        -- ===== CLASS PRIORITY (a 280 box in classic, a card under "Priority" in
-        -- column 2 in modern) =====
+        -- ===== CLASS PRIORITY (a card under "Priority" in column 2) =====
         local function BuildClassPriorityGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder. Top = first."], 250), 25)
@@ -387,93 +332,69 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = DisableSortOptions
         end
 
-        if classicLayout then
-            local rolePriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
-            rolePriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Role Priority"]), 40)
-            BuildRolePriorityGroup({
-                group = rolePriorityGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            rolePriorityGroup.hideOn = HideSortOptions
-            Add(rolePriorityGroup, nil, 2)
-
-            local classPriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
-            classPriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Class Priority"]), 40)
-            BuildClassPriorityGroup({
-                group = classPriorityGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            -- Hide under FrameSort takeover or when not sorting by class (variant
-            -- gates); grey out when custom sorting is disabled (enable gate).
-            classPriorityGroup.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
-            Add(classPriorityGroup, nil, 2)
-        else
-            -- The summaries: the top of each list, which is the one thing a drag
-            -- order says in a line. Guarded reads, and NO invented words -- the
-            -- role names are the locale's own and the class names are the
-            -- client's, exactly as the two lists draw them. An order the page
-            -- cannot read yields "", and a shut card is then just its title.
-            --
-            -- ⚠ THE ROLE WORD FOLLOWS THE SPLIT. With Separate Melee & Ranged
-            -- off, the list folds MELEE and RANGED back into one DPS entry, so a
-            -- summary reading the raw stored token would name a role the user
-            -- cannot see in the list below it.
-            local function RoleWord(role, separate)
-                if role == "TANK" then return L["Tank"] end
-                if role == "HEALER" then return L["Healer"] end
-                if not separate then return L["DPS"] end
-                if role == "MELEE" then return L["Melee DPS"] end
-                if role == "RANGED" then return L["Ranged DPS"] end
-                return L["DPS"]
-            end
-
-            local function RolePrioritySummary(d)
-                if not d then return "" end
-                local order = d.sortRoleOrder
-                local top = type(order) == "table" and order[1] or nil
-                if type(top) ~= "string" then return "" end
-                return RoleWord(top, d.sortSeparateMeleeRanged) or ""
-            end
-
-            local function ClassPrioritySummary(d)
-                if not d then return "" end
-                local order = d.sortClassOrder
-                local top = type(order) == "table" and order[1] or nil
-                if type(top) ~= "string" then return "" end
-                local names = LOCALIZED_CLASS_NAMES_MALE
-                return (names and names[top]) or ""
-            end
-
-            -- The category header the two priority cards sit under, in column 2.
-            -- It hides with them under a FrameSort takeover, so it is never a
-            -- title left standing over nothing.
-            local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])
-            priorityHeader.hideOn = HideSortOptions
-            Add(priorityHeader, 40, 2)
-
-            -- The box's own two gates, on the card: HIDDEN under a FrameSort
-            -- takeover (header and band), the header GREYED while custom sorting
-            -- is off -- the list itself greys through the builder's group gate.
-            -- No pin: a drag order is behaviour.
-            local band = OpenSection(L["Role Priority"], "sorting_rolepriority", 2, RolePrioritySummary,
-                DisableSortOptions, HideSortOptions)
-            BuildRolePriorityGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-
-            -- Also hidden while Sort by Class is off -- classic's variant gate.
-            local band = OpenSection(L["Class Priority"], "sorting_classpriority", 2, ClassPrioritySummary,
-                DisableSortOptions, function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end)
-            BuildClassPriorityGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- The summaries: the top of each list, which is the one thing a drag
+        -- order says in a line. Guarded reads, and NO invented words -- the
+        -- role names are the locale's own and the class names are the
+        -- client's, exactly as the two lists draw them. An order the page
+        -- cannot read yields "", and a shut card is then just its title.
+        --
+        -- ⚠ THE ROLE WORD FOLLOWS THE SPLIT. With Separate Melee & Ranged
+        -- off, the list folds MELEE and RANGED back into one DPS entry, so a
+        -- summary reading the raw stored token would name a role the user
+        -- cannot see in the list below it.
+        local function RoleWord(role, separate)
+            if role == "TANK" then return L["Tank"] end
+            if role == "HEALER" then return L["Healer"] end
+            if not separate then return L["DPS"] end
+            if role == "MELEE" then return L["Melee DPS"] end
+            if role == "RANGED" then return L["Ranged DPS"] end
+            return L["DPS"]
         end
+
+        local function RolePrioritySummary(d)
+            if not d then return "" end
+            local order = d.sortRoleOrder
+            local top = type(order) == "table" and order[1] or nil
+            if type(top) ~= "string" then return "" end
+            return RoleWord(top, d.sortSeparateMeleeRanged) or ""
+        end
+
+        local function ClassPrioritySummary(d)
+            if not d then return "" end
+            local order = d.sortClassOrder
+            local top = type(order) == "table" and order[1] or nil
+            if type(top) ~= "string" then return "" end
+            local names = LOCALIZED_CLASS_NAMES_MALE
+            return (names and names[top]) or ""
+        end
+
+        -- The category header the two priority cards sit under, in column 2.
+        -- It hides with them under a FrameSort takeover, so it is never a
+        -- title left standing over nothing.
+        local priorityHeader = GUI:CreateHeader(self.child, L["Priority"])
+        priorityHeader.hideOn = HideSortOptions
+        Add(priorityHeader, 40, 2)
+
+        -- The box's own two gates, on the card: HIDDEN under a FrameSort
+        -- takeover (header and band), the header GREYED while custom sorting
+        -- is off -- the list itself greys through the builder's group gate.
+        -- No pin: a drag order is behaviour.
+        local band = OpenSection(L["Role Priority"], "sorting_rolepriority", 2, RolePrioritySummary,
+            DisableSortOptions, HideSortOptions)
+        BuildRolePriorityGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
+
+        -- Also hidden while Sort by Class is off -- its variant gate.
+        local band = OpenSection(L["Class Priority"], "sorting_classpriority", 2, ClassPrioritySummary,
+            DisableSortOptions, function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end)
+        BuildClassPriorityGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
@@ -503,22 +424,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- colour-picker toggles, and those are account-wide now (see below), so
         -- there is nothing per-mode left to copy.
         --
-        -- ===== COLOR PICKER (a 280 box in classic, a card in modern) ======
+        -- ===== COLOR PICKER =====
         -- Bound to the ACCOUNT-WIDE db, not the page's per-mode `db`. These render
         -- on both the Party and Raid tabs, and when they were per-mode the Raid copy
         -- was write-only -- the hooks only ever read party, so ticking it on Raid
         -- looked enabled and did nothing. One setting, one value, both tabs.
         local pickerDB = DF:GetGlobalDB()
 
-        -- MODERN is the Debuff Bar's collapsible-card design: the one box is one
-        -- card in column 1 -- each tick over the line that explains it, since a
-        -- blurb takes a row of its own -- and Expand All / Collapse All at the top
-        -- like every card page.
+        -- One card in column 1 -- each tick over the line that explains it,
+        -- since a blurb takes a row of its own -- and Expand All / Collapse All
+        -- at the top like every card page.
         -- No pin -- which picker opens is behaviour, not looks -- and no header
         -- tick: the two ticks are independent (see the builder's note).
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, taken unconditionally: nil in classic,
-        -- which is what the `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins.
@@ -531,9 +448,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.CloseSection(Add, band)
         end
 
-        -- The group's four widgets, verbatim, taking the group and parent they
-        -- should build into -- the same factories, L keys, db keys and slot
-        -- heights in both layouts.
+        -- The group's four widgets, taking the group and parent they should
+        -- build into.
         --
         -- ⚠ NO TOGGLE IS HOISTED. Neither tick means "am I doing anything": they
         -- are two INDEPENDENT overrides (this addon's pickers, and every other
@@ -570,43 +486,32 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateLabel(parent, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
         end
 
-        if classicLayout then
-            local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
-            colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)
-            BuildColorPickerGroup({
-                group = colorPickerGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(colorPickerGroup, nil, 1)
-        else
-            -- Whose pickers are DF's: every addon's, this addon's only, or none
-            -- (Blizzard's everywhere). The global tick wins -- it installs the
-            -- hook whatever the other says.
-            --
-            -- ⚠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S `db`. The card's corner is
-            -- handed the per-mode table by the page pass; these two keys live in
-            -- the global db, so the summary reads that instead.
-            local function ColorPickerSummary()
-                local g = DF:GetGlobalDB()
-                if not g then return "" end
-                if g.colorPickerGlobalOverride then return L["All Addons"] end
-                if g.colorPickerOverride then return format(L["%s only"], "DandersFrames") end
-                return L["Blizzard"]
-            end
-
-            -- ☠ THE PAGE'S TWO BULK VERBS, at col "both" -- the Debuff Bar's
-            -- placement, kept on a one-card page so every card page reads alike.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- ⚠ NO RESET STRIP, AS BEFORE. The defaults engine answers for the
-            -- per-mode tables only, and these two keys are account-wide.
-            local band = OpenSection(L["Color Picker"], "integrations_colorpicker", 1, ColorPickerSummary)
-            BuildColorPickerGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        -- Whose pickers are DF's: every addon's, this addon's only, or none
+        -- (Blizzard's everywhere). The global tick wins -- it installs the
+        -- hook whatever the other says.
+        --
+        -- ⚠ THE ACCOUNT-WIDE TABLE, NOT THE PAGE'S `db`. The card's corner is
+        -- handed the per-mode table by the page pass; these two keys live in
+        -- the global db, so the summary reads that instead.
+        local function ColorPickerSummary()
+            local g = DF:GetGlobalDB()
+            if not g then return "" end
+            if g.colorPickerGlobalOverride then return L["All Addons"] end
+            if g.colorPickerOverride then return format(L["%s only"], "DandersFrames") end
+            return L["Blizzard"]
         end
+
+        -- ☠ THE PAGE'S TWO BULK VERBS, at col "both" -- the Debuff Bar's
+        -- placement, kept on a one-card page so every card page reads alike.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- ⚠ NO RESET STRIP, AS BEFORE. The defaults engine answers for the
+        -- per-mode tables only, and these two keys are account-wide.
+        local band = OpenSection(L["Color Picker"], "integrations_colorpicker", 1, ColorPickerSummary)
+        BuildColorPickerGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
         -- (Masque Integration group removed on 12.1: Masque cannot skin the
         -- native container aura buttons — its script hooks and backdrops are
@@ -749,16 +654,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return PaletteSummary(dispelColorsDB, DISPEL_LIST, "key", function(k) return dispelGamePalette[k] end)
         end
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: four 280 boxes -- Class Colors
-        -- then Dispel Type Colors down column 1, Role Colors then the Color by
-        -- Time section down column 2.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per box --
-        -- the three palettes and the Color by Time editor -- two swatches per row
-        -- inside a wide enough card, dim captions, Expand All / Collapse All at
-        -- the top, and the two page columns classic has always used:
-        --
+        -- ===== THE PAGE'S CARDS ===========================================
         --   column 1   Class Colors, Dispel Type Colors
         --   column 2   Role Colors, Color by Time
         --
@@ -774,21 +670,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- is NOT, because every structural edit in it rebuilds the page, which
         -- would close a pinned copy (see its own note).
         --
-        -- ⚠ THE TWO CROSS-LINK ANCHORS SURVIVE ON THEIR OWN. "Dispel Type Colors"
-        -- and "Color by Time" are reached from other pages through
-        -- Search:ScrollToSection, which finds a page child by :GetText() -- and a
-        -- card is a collapsible section, whose GetText is its title, and which the
-        -- jump EXPANDS when the user had it shut.
+        -- ⚠ THE TWO CROSS-LINK ANCHORS. "Dispel Type Colors" and "Color by Time"
+        -- are reached from other pages through Search:ScrollToSection, which
+        -- finds a page child by :GetText() -- and a card is a collapsible
+        -- section, whose GetText is its title, and which the jump EXPANDS when
+        -- the user had it shut.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
-        -- parent, refreshStates, popout }. The classic branch mounts the SAME
-        -- builder into the box it always built, which is what makes "classic is
-        -- unchanged" structural rather than a promise --
-        -- test_colors_page_builders.lua pins the inventory of each one against the
-        -- census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- parent, refreshStates, popout } -- test_colors_page_builders.lua pins
+        -- each inventory.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -802,53 +692,30 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.CloseSection(Add, band)
         end
 
-        -- Color by Time's column: column 2 in both layouts. (The popout layout
-        -- moved it to column 1 once the palettes had left the columns for a
-        -- full-width band; the cards are back in the columns, so it is back too.)
+        -- Color by Time's column.
         local cbtColumn = 2
 
-        -- ☠ WHAT A "RESET ALL TO DEFAULT" COSTS, AND WHY IT IS NOT THE SAME IN
-        -- BOTH LAYOUTS. The button writes every swatch in its group behind the
-        -- widgets' backs, so the swatches have to be repainted. Classic has always
-        -- paid for that with a whole page rebuild (pageColors:Refresh), and it
-        -- kept doing exactly that until the sweep below replaced it.
-        --
-        -- A pinned panel must not. A rebuild retires every widget on the page, and
-        -- the shared helper's own prologue closes every open panel on the way in --
-        -- so the panel the button was clicked in would slam shut under the user's
-        -- hand. What the rebuild was actually buying is the swatch repaint, and
-        -- that is precisely the value sweep: RefreshChildValues calls each
-        -- control's `refreshValue`, which for a colour picker IS its UpdateSwatch
-        -- (SettingsWidgets.lua). ReflowMounted(true) runs it on every mounted pane,
-        -- including a pinned second one. (The Tooltips page's AnchorGateRefresh is
-        -- the same shape for the same reason.)
-        --
-        -- ★ CLASSIC AND A CARD TAKE THE SAME SWEEP, over the one group the button
-        -- sits in (every swatch it writes is a colour picker in that group); a card
-        -- then sweeps any pinned copy of itself too. The page rebuild classic used
-        -- to pay leaked the whole page per click; it is kept only as the fallback
-        -- for a group without the sweep.
+        -- ☠ WHAT A "RESET ALL TO DEFAULT" COSTS. The button writes every swatch
+        -- in its group behind the widgets' backs, so the swatches have to be
+        -- repainted -- and NOT by a page rebuild: that retires every widget on
+        -- the page, the shared helper's prologue closes every open panel on the
+        -- way in (so a pinned panel the button was clicked in would slam shut),
+        -- and it leaks the whole page per click. The repaint is the value
+        -- sweep: RefreshChildValues calls each control's `refreshValue`, which
+        -- for a colour picker IS its UpdateSwatch (SettingsWidgets.lua), over
+        -- the one group the button sits in; ReflowMounted(true) then runs it on
+        -- every mounted pane, including a pinned copy. (The Tooltips page's
+        -- AnchorGateRefresh is the same shape for the same reason.)
         local function RepaintSwatches(tools2)
-            if tools2.popout then
-                tools.ReflowMounted(true)
-            elseif tools2.group and tools2.group.RefreshChildValues then
-                tools2.group:RefreshChildValues()
-                if tools then tools.ReflowMounted(true) end
-            elseif pageColors and pageColors.Refresh then
-                pageColors:Refresh()
-            end
+            if not tools2.popout then tools2.group:RefreshChildValues() end
+            tools.ReflowMounted(true)
         end
 
-        -- ===== CLASS COLORS (a 280 box in column 1 in classic, the first card in
-        -- column 1 in modern) =====
-        -- Verbatim, taking the group and parent it should build into: same
-        -- factories, same L keys, same db keys, same callbacks, same slot heights.
+        -- ===== CLASS COLORS (the first card in column 1) =====
         --
-        -- ☠ THE THIRTEEN SEEDS STAY EXACTLY WHERE THEY WERE, inside the loop and
-        -- ahead of the picker that reads each one. They are build-time writes to a
-        -- non-profile table, and a card is built with the page, so they still land
-        -- at the moment they always did. Moving them out would move WHEN a profile
-        -- changes shape.
+        -- ☠ THE THIRTEEN SEEDS STAY inside the loop, ahead of the picker that
+        -- reads each one. They are build-time writes to a non-profile table;
+        -- moving them out would move WHEN a profile changes shape.
         --
         -- ☠ A CARD WITH NO TICK. There is no boolean here meaning "am I doing
         -- anything": a palette is always in force, and the group's only non-picker
@@ -892,32 +759,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
 
-        if classicLayout then
-            -- ===== Column 1 =====
-            local col1 = GUI:CreateSettingsGroup(self.child, 280)
-            col1:AddWidget(GUI:CreateHeader(self.child, L["Class Colors"]), 40)
-            BuildClassColorsGroup({
-                group = col1,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(col1, nil, 1)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Debuff Bar's placement: they act on cards in both columns.
-            Add(tools.SectionControls(self.child), 24, "both")
-            Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)
-            -- Column 1, pinnable.
-            local band = OpenSection(L["Class Colors"], "colors_class", 1, ClassColorsSummary, nil, nil, BuildClassColorsGroup)
-            BuildClassColorsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Debuff Bar's placement: they act on cards in both columns.
+        Add(tools.SectionControls(self.child), 24, "both")
+        Add(GUI:CreateHeader(self.child, L["Unit Colors"]), 40, 1)
+        -- Column 1, pinnable.
+        local band = OpenSection(L["Class Colors"], "colors_class", 1, ClassColorsSummary, nil, nil, BuildClassColorsGroup)
+        BuildClassColorsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== ROLE COLORS (a 280 box in column 2 in classic, the first card in
-        -- column 2 in modern) =====
+        -- ===== ROLE COLORS (the first card in column 2) =====
         -- Same shape as Class Colors, three swatches instead of thirteen, and the
         -- same three seeds staying inside the loop.
         local function BuildRoleColorsGroup(tools2)
@@ -950,31 +804,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
 
-        if classicLayout then
-            -- ===== Column 2: Role Colors =====
-            local col2 = GUI:CreateSettingsGroup(self.child, 280)
-            col2:AddWidget(GUI:CreateHeader(self.child, L["Role Colors"]), 40)
-            BuildRoleColorsGroup({
-                group = col2,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(col2, nil, 2)
-        else
-            -- Column 1 under Class Colors, pinnable.
-            local band = OpenSection(L["Role Colors"], "colors_role", 1, RoleColorsSummary, nil, nil, BuildRoleColorsGroup)
-            BuildRoleColorsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Column 1 under Class Colors, pinnable.
+        local band = OpenSection(L["Role Colors"], "colors_role", 1, RoleColorsSummary, nil, nil, BuildRoleColorsGroup)
+        BuildRoleColorsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== DISPEL TYPE COLORS (a 280 box in column 1 in classic, the second
-        -- card in column 1 in modern) =====
-        -- The one palette whose commit is not a plain repaint: both callbacks stay
-        -- exactly as they were, page-scope above, so the card and the box drive the
-        -- same work.
+        -- ===== DISPEL TYPE COLORS (the second card in column 1) =====
+        -- The one palette whose commit is not a plain repaint: both callbacks
+        -- live at page scope above, so the card and a pinned copy drive the same
+        -- work.
         local function BuildDispelColorsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Colours for each dispel type, used by the dispel overlay and the debuff-icon border (when Color by Dispel Type is on). Reset restores the game's colours."], 260), 55)
@@ -999,33 +840,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
 
-        if classicLayout then
-            local dispelCol = GUI:CreateSettingsGroup(self.child, 280)
-            dispelCol:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
-            BuildDispelColorsGroup({
-                group = dispelCol,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(dispelCol, nil, 1)
-        else
-            -- Column 2, opening Aura Colors, pinnable. Its title is the
-            -- cross-link anchor the debuff Border and Dispel Overlay pages jump to
-            -- (see the page note) -- keep it in step with theirs.
-            Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)
-            local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, DispelColorsSummary, nil, nil, BuildDispelColorsGroup)
-            BuildDispelColorsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Column 2, opening Aura Colors, pinnable. Its title is the
+        -- cross-link anchor the debuff Border and Dispel Overlay pages jump to
+        -- (see the page note) -- keep it in step with theirs.
+        Add(GUI:CreateHeader(self.child, L["Aura Colors"]), 40, 2)
+        local band = OpenSection(L["Dispel Type Colors"], "colors_dispel", 2, DispelColorsSummary, nil, nil, BuildDispelColorsGroup)
+        BuildDispelColorsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== Color by Time Remaining -- a collapsible section over a 280 box in
-        -- classic, a card in column 2 in modern =====
-        -- ☠ THE ONE CARD ON THIS PAGE WITHOUT A PIN, and it was the one group the
-        -- popout layout never turned into a row. The reasons are structural rather
-        -- than taste:
+        -- ===== COLOR BY TIME REMAINING (a card in column 2) =====
+        -- ☠ THE ONE CARD ON THIS PAGE WITHOUT A PIN. The reasons are structural
+        -- rather than taste:
         --
         --   1. IT REBUILDS THE PAGE ON EVERY STRUCTURAL EDIT. Adding a stop,
         --      removing one, committing a threshold and flipping the s/% tab all
@@ -1036,11 +864,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --      and the shared helper's prologue closes every open panel on the way
         --      in, so the editor would slam its own panel shut on each + click. The
         --      palettes above dodge this because their reset only moves VALUES,
-        --      which the pane's value sweep repaints in place; there is no such
-        --      sweep for "this group now has a different list of children", and
-        --      hand-rolling one here would mean reimplementing the page builder's
-        --      own widget-retire loop inside a settings page. (Pet Frames keeps
-        --      Layout Mode inline for exactly this reason.)
+        --      which the value sweep repaints in place; there is no such sweep for
+        --      "this group now has a different list of children", and hand-rolling
+        --      one here would mean reimplementing the page builder's own
+        --      widget-retire loop inside a settings page.
         --
         --   2. ITS TITLE IS A CROSS-LINK ANCHOR, and a live one: every aura page
         --      and the Aura Designer reach it through UI:CreateColorsPageLink ->
@@ -1049,13 +876,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --      OWN children, and a CollapsibleSection is the one target it handles
         --      specially -- it EXPANDS the section if the user had it closed, then
         --      flashes the content rather than the 28px bar. A card IS such a
-        --      section, so the anchor keeps all of that in modern too.
+        --      section.
         --
-        --   3. IT IS AN EDITOR, NOT A GROUP OF SETTINGS. A row's contract is a
-        --      label, a count of controls and a one-line summary; this box holds
-        --      unit tabs, a preview strip, a variable list of stops and a "how this
-        --      renders" legend. There is no honest count and no four-item summary
-        --      to write.
+        --   3. IT IS AN EDITOR, NOT A GROUP OF SETTINGS: unit tabs, a preview
+        --      strip, a variable list of stops and a "how this renders" legend.
+        --      There is no honest summary to write.
         --
         -- Account-wide duration-colour breakpoints, shared by the buff / debuff / defensive
         -- rows AND the Aura Designer wherever "Color by Time Remaining" is enabled. Each stop
@@ -1121,13 +946,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
         end
 
-        -- Page-level collapsible section wrapping BOTH boxes, matching Health Bar and
-        -- friends. Its title is also the cross-link anchor every aura page flashes
-        -- (GUI:CreateColorsPageLink -> LinkToSetting{ section = L["Color by Time"] }) —
-        -- keep the two in step if it is ever renamed. Assigned just before the build
-        -- loop so it lands on the page ABOVE the boxes it owns.
-        local cbtSection
-
         -- ONE box (design "A"): Seconds/Percent TABS pick which unit's stops are being
         -- EDITED (self._cbtEditUnit — page-local UI state, deliberately not saved), the
         -- editor strip under them always shows HARD BANDS (the stops are data; how a
@@ -1162,17 +980,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return out
         end
 
-        -- ⚠ CLASSIC'S 280 BOX, OR MODERN'S CARD -- an expression, not an arm, so
-        -- nothing below has to know which layout it is building into. The card's
-        -- band re-sizes its rows on every layout pass; the 260px rows inside were
-        -- laid out for the box and sit left-aligned in a wider card.
+        -- The card's band re-sizes its rows on every layout pass; the 260px rows
+        -- inside sit left-aligned in a wider card.
         --
         -- ⚠ NO SUMMARY, by decision: the card is a breakpoint editor over two
         -- ramps, and neither a count nor a list of thresholds says anything a
         -- glance can use.
-        local cbtGroup = classicLayout
-            and GUI:CreateSettingsGroup(self.child, 280)
-            or OpenSection(L["Color by Time"], "colors_bytime", cbtColumn)
+        local cbtGroup = OpenSection(L["Color by Time"], "colors_bytime", cbtColumn)
 
         -- Tabs: which unit's stops are on the editor below. UI state only — flipping a
         -- tab changes nothing about what renders in the world. Underline-tab style
@@ -1510,22 +1324,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { width = 260 }))
 
         RefreshPreview()   -- tint the legend strips built after the first pass
-        if classicLayout then
-            Add(cbtGroup, nil, cbtColumn)
-            if cbtSection then cbtSection:RegisterChild(cbtGroup) end
-        else
-            CloseSection(cbtGroup)
-        end
+        CloseSection(cbtGroup)
         end   -- BuildSection
 
-        -- One column, not "both": the header belongs over the box it owns rather than
-        -- spanning the page (in classic, column 1 holds the dispel palette, which it
-        -- does not own). Width matches the box so the rule under the title lines up
-        -- with it. ☠ CLASSIC'S ONLY: in modern the card opened in BuildSection is the
-        -- section.
-        cbtSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, cbtColumn)
-            or nil
         BuildSection()
     end)
 
@@ -1539,41 +1340,22 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageHealthBar, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"healthColor", "healthOrientation", "healthTexture", "classColor", "smoothBars", "background", "missingHealth", "reducedMaxHealth"}, L["Health Bar"], "bars_health"), 25, 2)
-        
-        local currentSection = nil
-        local function AddToSection(widget, height, col)
-            Add(widget, height, col)
-            if currentSection then currentSection:RegisterChild(widget) end
-            return widget
-        end
-        
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: three collapsible sections over
-        -- seven 280 boxes -- Color (col 1), Texture (col 2), the health gradient
-        -- editor (col 1) and Background (col 2) under "Health Bar"; the settings
-        -- box (col 1) and its own gradient editor (col 1) under "Missing Health";
-        -- and one settings box (col 1) under "Reduced Max Health".
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
-        -- the two gradient editors included, two settings per row, dim captions,
-        -- Expand All / Collapse All at the top and TWO page columns when the
-        -- window is wide -- what the bar is drawn IN on the left, what it is drawn
-        -- ON and the overlay on the right:
+
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- Two page columns when the window is wide -- what the bar is drawn IN
+        -- on the left, what it is drawn ON and the overlay on the right:
         --
         --   column 1   Color, Gradient (health colour mode Health Gradient only),
         --              Missing Health, Gradient (missing health's, same rule)
         --   column 2   Texture, Background, Reduced Max Health (header tick)
         --
-        -- The cards are ADDED in classic's reading order (Color, Texture, Gradient,
+        -- The cards are ADDED in reading order (Color, Texture, Gradient,
         -- Background, ...), which is also the order the one-column fold reads.
         --
-        -- ☠ THE THREE FULL-WIDTH SECTIONS ARE CLASSIC'S ONLY, and so are the
-        -- spacers between them. In modern each card IS a section -- it folds and
-        -- persists its fold under its own stable key -- and a full-width section
-        -- or spacer is a "both" widget, a SYNC POINT that would end both columns
-        -- and stack the page back into one. Built through expressions rather than
-        -- arms, the gradient box's idiom below, so classic's arms stay what they
-        -- were.
+        -- ☠ NO FULL-WIDTH SECTIONS OR SPACERS. Each card IS a section -- it
+        -- folds and persists its fold under its own stable key -- and a
+        -- full-width section or spacer is a "both" widget, a SYNC POINT that
+        -- would end both columns and stack the page back into one.
         --
         -- ⚠ THE TWO GRADIENT EDITORS ARE CARDS WITHOUT A PIN. Adding, removing or
         -- moving a stop REBUILDS THE PAGE (see GradRebuild), and a pinned copy
@@ -1584,15 +1366,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- one checkbox per setting; the group gate inside the builder still greys
         -- the four controls under it.
         --
-        -- Every box's widgets live in a `Build<X>Group(tools2)` taking { group,
-        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
-        -- The classic branch mounts the SAME builder into the box it always
-        -- built, which is what makes "classic is unchanged" structural rather
-        -- than a promise -- test_healthbar_page_builders.lua pins the inventory
-        -- of each one against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`
+        -- -- test_healthbar_page_builders.lua pins each inventory.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -1635,27 +1411,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ☠ THE FOUR MODE DROPDOWNS RE-GATE THINGS ON BOTH SIDES OF THE PANE.
         -- Picking a colour mode hides or shows controls in its OWN group and the
-        -- gradient editor that stays out on the page. Classic paid for that with
-        -- self:RefreshStates() -- the page's own hideOn/disableOn pass, NOT
-        -- GUI:RefreshCurrentPage -- so there is no rebuild to unpick here, which
-        -- is why this page needs no AnchorGateRefresh-style branch.
-        --
-        -- tools2.refreshStates IS that same call in classic and on a card (both
-        -- hand it `function() self:RefreshStates() end`, and the page pass is what
-        -- the gradient cards' hideOn rides on) and, in a pinned panel, ReflowPane
-        -- followed by the page's own RefreshStates. One call, every job.
+        -- gradient card beside it. tools2.refreshStates covers both: on a card
+        -- it is the page's own hideOn/disableOn pass (which the gradient cards'
+        -- hideOn rides on), and in a pinned panel ReflowPane followed by the
+        -- page's RefreshStates. No rebuild, so no AnchorGateRefresh-style branch.
 
-        -- ===== HEALTH BAR SECTION =====
-        -- ☠ CLASSIC'S ONLY -- in modern each card is its own section (see the
-        -- page note). An expression rather than an arm, so classic's arms stay
-        -- exactly what they were.
-        local healthBarSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Health Bar"], true), 36, "both")
-            or nil
-        currentSection = healthBarSection
-
-        -- ===== COLOR (a 280 box in column 1 in classic, the first card in
-        -- column 1 in modern) =====
+        -- ===== COLOR (the first card in column 1) =====
         local function BuildHealthColorGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1689,8 +1450,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== TEXTURE (a 280 box in column 2 in classic, the first card in
-        -- column 2 in modern) =====
+        -- ===== TEXTURE (the first card in column 2) =====
         local function BuildHealthTextureGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1714,73 +1474,49 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== GRADIENT GROUP (Column 1, conditional) =====
-        -- ☠ WAS A FULL-WIDTH HEADER, A 550px BAR AND THREE 280px GROUPS -- roughly 500px
-        -- of page across both columns for what is one ramp. It is one box under Color
-        -- now, in column 1, and the ramp is a STOP LIST rather than three fixed stages
-        -- with weights: any number of stops, each with its own threshold.
+        -- ===== GRADIENT (column 1, conditional) =====
+        -- The ramp is a STOP LIST: any number of stops, each with its own
+        -- threshold.
         --
         -- Modelled on the Color by Time editor further up this file, deliberately -- same
         -- preview-strip-over-rows shape, same 52px colour chip, same +/- stepper, same
         -- add/reset footer. Two editors for "a colour ramp with stops" that look
         -- different would be two things to learn.
         --
-        -- ⚠ The 550px bar was ALSO the widget that misbehaved on window drag, because a
-        -- full-width widget is resized on every relayout. This one is fixed at the box's
-        -- inner width, and CreateGradientBar repaints on OnSizeChanged regardless.
-        --
         -- ★ ONE BUILDER, BOTH BARS. The health bar and the missing-health fill each keep
         -- a stop list under this same editor; only the key prefix and the visibility
-        -- rule differ. The first version was built for the health bar alone, and the
-        -- missing-health section kept its old Low/Medium/High stage groups -- which by
-        -- then were editing legacy keys the renderer no longer reads on any migrated
-        -- profile (BuildColorStops resolves <prefix>Stops first). The body keeps the
-        -- surrounding indent so the factoring reads as what it is in the diff.
+        -- rule differ. (BuildColorStops resolves <prefix>Stops first, so the legacy
+        -- Low/Medium/High keys are dead on any migrated profile.)
         --
-        -- ★ AND IT STAYS INLINE IN BOTH LAYOUTS -- the Color by Time precedent,
-        -- for the same structural reason rather than for taste. GradRebuild ends
-        -- in pageHealthBar:Refresh(), a full PAGE REBUILD, and it has to: adding
+        -- ★ AND IT REBUILDS THE PAGE -- the Color by Time precedent, for the same
+        -- structural reason. GradRebuild ends in pageHealthBar:Refresh(): adding
         -- a stop, removing one and committing a threshold each change which
         -- WIDGETS the editor has, and every remaining stepper's bounds are
-        -- recomputed from its neighbours. Inside a pane that is fatal -- a
-        -- rebuild retires the pane, and CreatePopoutPageTools' own prologue
-        -- closes every open panel on the way in, so the editor would slam its own
-        -- panel shut on each + click. There is no rebuild-one-pane verb, and
-        -- hand-rolling one here means reimplementing the page builder's widget
-        -- retire loop inside a settings page.
+        -- recomputed from its neighbours. There is no rebuild-one-pane verb.
         --
-        -- ☠ IN MODERN IT IS A CARD OF ITS OWN, in column 1 under the card it
-        -- belongs to, and its band IS the group every row below goes into -- so
-        -- it takes no header (the card's title names the ramp) and no pin (a
-        -- pinned copy would be closed by the very rebuild its + button causes).
-        -- Every row, the bar and the footer are prose-shaped (no bound value), so
-        -- the card's two-per-row flow gives each a row of its own; and the band
-        -- re-sizes its children on every layout pass, so a stop row follows the
-        -- card's width when the window folds or a resize drags it.
+        -- ☠ A CARD OF ITS OWN, in column 1 under the card it belongs to, and its
+        -- band IS the group every row below goes into -- so it takes no header
+        -- (the card's title names the ramp) and no pin (a pinned copy would be
+        -- closed by the very rebuild its + button causes). Every row, the bar and
+        -- the footer are prose-shaped (no bound value), so the card's
+        -- two-per-row flow gives each a row of its own; and the band re-sizes its
+        -- children on every layout pass, so a stop row follows the card's width
+        -- when the window folds or a resize drags it.
         --
         -- ⚠ A REBUILD FROM HERE CLOSES ANY PINNED PANEL, and that is accepted
-        -- rather than fixed, as it was for the popout rows before the cards: the
-        -- panels hold the colour/texture cards, not the ramp.
+        -- rather than fixed: the panels hold the colour/texture cards, not the
+        -- ramp.
         local function BuildGradientStopBox(prefix, hideOn)
         local listKey = prefix .. "Stops"
-        -- ⚠ THE TWO CONSTRUCTIONS AS AN EXPRESSION, NOT AN `if classicLayout then`
-        -- ARM. This builder is declared ABOVE the section's own layout arms and
-        -- inside the page builder's indent, so a second `if classicLayout then ...
-        -- else` at that indent here is one the section's own arm-locators would
-        -- find first. Classic builds its 280 box; modern opens a card in column 1
-        -- under a stable key of its own, hidden with its colour mode. Each card
-        -- names its ramp ("Health Gradient" / "Missing Health Gradient"): two
-        -- cards both titled "Gradient" in one column could not be told apart.
-        -- The keys are the ones they shipped with, so folds survive the rename.
+        -- Each card names its ramp ("Health Gradient" / "Missing Health
+        -- Gradient"): two cards both titled "Gradient" in one column could not be
+        -- told apart. The keys are the ones they shipped with, so folds survive
+        -- the rename. Hidden with its colour mode.
         -- ⚠ NO SUMMARY, by decision: a gradient stop list has no value to name,
         -- and the card only shows while its colour mode is Gradient anyway.
-        local gradGroup = classicLayout
-            and GUI:CreateSettingsGroup(self.child, 280)
-            or OpenSection((prefix == "healthColor") and L["Health Gradient"] or L["Missing Health Gradient"],
+        local gradGroup = OpenSection((prefix == "healthColor") and L["Health Gradient"] or L["Missing Health Gradient"],
                 (prefix == "healthColor") and "health_gradient" or "health_missinggradient",
                 1, nil, nil, hideOn)
-        -- The card's title already names the gradient; only classic's box needs one.
-        if classicLayout then gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40) end
         local gradInner = GUI:GroupInnerWidth(gradGroup)
         -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
         -- so it is not in scope here. Reaching for it would resolve to a nil global.
@@ -2055,13 +1791,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         gradGroup.hideOn = hideOn
-        -- Column 1 in classic, exactly where it always was; in modern the card
-        -- puts its band in after its last row, in its own column.
-        if classicLayout then AddToSection(gradGroup, nil, 1) else CloseSection(gradGroup) end
+        CloseSection(gradGroup)
         end
 
-        -- ===== BACKGROUND (a 280 box in column 2 in classic, the second card
-        -- in column 2 in modern) =====
+        -- ===== BACKGROUND (the second card in column 2) =====
         local function BuildHealthBackgroundGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2094,107 +1827,53 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== THE HEALTH BAR SECTION'S MOUNT ==============================
-        -- ☠ ONE if/else FOR THE WHOLE SECTION, rather than the per-group arm
-        -- most pages use, because both layouts add in the same interleaved
-        -- order -- Color (1), Texture (2), the gradient editor (1), Background
-        -- (2) -- and classic's arm has always read as one block. The cards follow
-        -- the same order, which is the order the one-column fold reads.
+        -- ===== THE HEALTH BAR CARDS' MOUNT ================================
+        -- Color (1), Texture (2), the gradient editor (1), Background (2) --
+        -- the order the one-column fold reads.
         --
-        -- ★ COLUMN 2, under Texture. Column 1 carries Color and then the Gradient editor,
-        -- which is ~280 lines of widgets and expands further as stops are added — so with
-        -- the gradient open, column 1 ran long while column 2 held Texture and nothing
-        -- else, leaving that box stranded beside a wall of controls (Krathe, 2026-08-13).
-        -- Background pairs naturally with Texture anyway: both are what the bar is drawn
-        -- ON, against Color/Gradient which are what it is drawn IN.
-        -- ⚠ When the gradient is hidden (healthColorMode ~= "PERCENT") this tips the other
-        -- way — column 2 then holds two groups against column 1's one. That is the lesser
-        -- imbalance, and the pending "gradient editor as a single-column box" rework
-        -- changes the same balance, so the two want checking together.
-        -- ⚠ MODERN KEEPS THE SAME SPLIT for the same reason, and balances it
-        -- against the rest of the page: Missing Health (and its gradient) join
+        -- ★ BACKGROUND IN COLUMN 2, under Texture: both are what the bar is
+        -- drawn ON, against Color/Gradient which are what it is drawn IN -- and
+        -- the Gradient editor runs long and grows as stops are added, so column
+        -- 1 already carries the weight. Missing Health (and its gradient) join
         -- column 1, Reduced Max Health joins column 2.
         local function HealthGradientHiddenOn(d) return d.healthColorMode ~= "PERCENT" end
 
-        if classicLayout then
-            local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
-            colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Color"]), 40)
-            BuildHealthColorGroup({
-                group = colorGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            AddToSection(colorGroup, nil, 1)
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Debuff Bar's placement: they act on cards in both columns.
+        Add(tools.SectionControls(self.child), 24, "both")
 
-            local textureGroup = GUI:CreateSettingsGroup(self.child, 280)
-            textureGroup:AddWidget(GUI:CreateHeader(self.child, L["Texture"]), 40)
-            BuildHealthTextureGroup({
-                group = textureGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            AddToSection(textureGroup, nil, 2)
+        -- The four looks, across both columns.
+        Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, "both")
 
-            BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
+        -- Pins on all three: they are what the bar is drawn IN and ON.
+        local band = OpenSection(L["Color"], "health_color", 1, HealthColorSummary, nil, nil,
+            BuildHealthColorGroup)
+        BuildHealthColorGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-            local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
-            bgGroup:AddWidget(GUI:CreateHeader(self.child, L["Background"]), 40)
-            BuildHealthBackgroundGroup({
-                group = bgGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            AddToSection(bgGroup, nil, 2)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Debuff Bar's placement: they act on cards in both columns.
-            Add(tools.SectionControls(self.child), 24, "both")
+        local band = OpenSection(L["Texture"], "health_texture", 2, HealthTextureSummary, nil, nil,
+            BuildHealthTextureGroup)
+        BuildHealthTextureGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-            -- The four looks, across both columns.
-            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, "both")
+        -- The Gradient card, column 1 under Color (see BuildGradientStopBox).
+        BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
 
-            -- Pins on all three: they are what the bar is drawn IN and ON.
-            local band = OpenSection(L["Color"], "health_color", 1, HealthColorSummary, nil, nil,
-                BuildHealthColorGroup)
-            BuildHealthColorGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
+        local band = OpenSection(L["Background"], "health_background", 2, HealthBackgroundSummary, nil, nil,
+            BuildHealthBackgroundGroup)
+        BuildHealthBackgroundGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-            local band = OpenSection(L["Texture"], "health_texture", 2, HealthTextureSummary, nil, nil,
-                BuildHealthTextureGroup)
-            BuildHealthTextureGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-
-            -- The Gradient card, column 1 under Color (see BuildGradientStopBox).
-            BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
-
-            local band = OpenSection(L["Background"], "health_background", 2, HealthBackgroundSummary, nil, nil,
-                BuildHealthBackgroundGroup)
-            BuildHealthBackgroundGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
-
-        currentSection = nil
-        -- ☠ CLASSIC'S ONLY: a "both" spacer would end both card columns.
-        if classicLayout then AddSpace(GUI.Space.section, "both") end
-
-        -- ===== MISSING HEALTH SECTION =====
-        -- ☠ CLASSIC'S ONLY, as the Health Bar section above.
-        local missingSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Missing Health"], true), 36, "both")
-            or nil
-        currentSection = missingSection
-        
-        -- ===== MISSING HEALTH (a 280 box in column 1 in classic, a card in
-        -- column 1 in modern) =====
+        -- ===== MISSING HEALTH (a card in column 1) =====
         local function BuildMissingHealthGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2256,54 +1935,29 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- One if/else for the section, for the reason the Health Bar section has
         -- one: the settings and the gradient editor go in as a pair, in order.
-        if classicLayout then
-            local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
-            missingGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-            BuildMissingHealthGroup({
-                group = missingGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            AddToSection(missingGroup, nil, 1)
+        -- Column 1, pinnable. No tick: backgroundMode is a three-way pick,
+        -- not a boolean, so nothing means "am I doing anything at all".
+        local band = OpenSection(L["Missing Health"], "health_missing", 1, MissingHealthSummary, nil, nil,
+            BuildMissingHealthGroup)
+        BuildMissingHealthGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-            BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
-        else
-            -- Column 1, pinnable. No tick: backgroundMode is a three-way pick,
-            -- not a boolean, so nothing means "am I doing anything at all".
-            local band = OpenSection(L["Missing Health"], "health_missing", 1, MissingHealthSummary, nil, nil,
-                BuildMissingHealthGroup)
-            BuildMissingHealthGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-
-            -- Its Gradient card, column 1 directly under it.
-            BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
-        end
-
-        currentSection = nil
-
-        -- ☠ CLASSIC'S ONLY, as the spacer and the sections above.
-        if classicLayout then AddSpace(GUI.Space.section, "both") end
+        -- Its Gradient card, column 1 directly under it.
+        BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
 
         -- ===== REDUCED MAX HEALTH SECTION =====
-        local reducedSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
-            or nil
-        currentSection = reducedSection
 
-        -- ===== REDUCED MAX HEALTH (a 280 box in column 1 in classic, a card in
-        -- column 2 in modern) =====
+        -- ===== REDUCED MAX HEALTH (a card in column 2) =====
         --
-        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
-        -- own children while the overlay is off; the card has to do the same, and
-        -- one builder serving both is what stops the two drifting.
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, so a pinned copy greys its
+        -- children while the overlay is off, exactly as the card does.
         local function BuildReducedMaxHealthGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the CARD's header carries this tick. Still built in
-            -- classic, where it is the group's only on/off control.
+            -- Suppressed when the CARD's header carries this tick.
             if not tools2.hoistToggle then
                 local reducedEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], db, "reducedMaxHealthEnabled", function() tools2.refreshStates() DF:UpdateAllFrames() end), 30)
                 reducedEnable.keepEnabled = true
@@ -2331,32 +1985,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        if classicLayout then
-            local reducedGroup = GUI:CreateSettingsGroup(self.child, 280)
-            reducedGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-            BuildReducedMaxHealthGroup({
-                group = reducedGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            AddToSection(reducedGroup, nil, 1)
-        else
-            -- Its own group under the looks, as classic gives it its own section:
-            -- an extra the bar can show, not how the bar looks. ☠ ITS ENABLE STAYS
-            -- IN THE BODY, first in its Settings card: a switch for a whole group
-            -- never rides a "Settings" header. A pin: the overlay's texture,
-            -- colour and blend are how it LOOKS.
-            Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
-            local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
-                BuildReducedMaxHealthGroup)
-            BuildReducedMaxHealthGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
-
-        currentSection = nil
+        -- Its own group under the looks: an extra the bar can show, not how the
+        -- bar looks. ☠ ITS ENABLE IS THE HEADER TICK (see the page note). A
+        -- pin: the overlay's texture, colour and blend are how it LOOKS.
+        Add(GUI:CreateHeader(self.child, L["Reduced Max Health"]), 40, "both")
+        local band = OpenSection(L["Settings"], "health_reduced", 1, ReducedMaxHealthSummary, nil, nil,
+            BuildReducedMaxHealthGroup)
+        BuildReducedMaxHealthGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
@@ -2371,45 +2010,30 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageResource, function(self, db, Add, AddSpace, AddSyncPoint)
         Add(CreateCopyButton(self.child, {"resourceBar"}, L["Resource Bar"], "bars_resource"), 25, 2)
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: nine 280 boxes -- Settings, Class
-        -- Filter, Size and Position down column 1; Appearance, Background and
-        -- Border down column 2; Frame Level back in column 1; Resource Colors last
-        -- in column 2.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
-        -- two settings per row, dim captions, Expand All / Collapse All at the top,
-        -- and two page columns -- what the bar DOES on the left, how it LOOKS on
-        -- the right -- under the three category headers the popout bands had:
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- Two page columns -- what the bar DOES on the left, how it LOOKS on the
+        -- right -- under three category headers:
         --
         --   column 1   "General"  Resource Bar Settings, Class Filter
         --              "Layout"   Size, Position (+ Frame Level)
         --   column 2   "Style"    Appearance, Background (header tick), Border
         --                         (header tick), Resource Colors
         --
-        -- ⚠ FRAME LEVEL MOVES INTO POSITION. It was the page's one lone control --
-        -- a one-slider box in classic, a control row after the popout sweep -- and
-        -- where the bar sits in the frame's stack is part of where the bar sits.
-        -- Classic keeps its own box.
+        -- ⚠ FRAME LEVEL LIVES IN POSITION: where the bar sits in the frame's
+        -- stack is part of where the bar sits.
         --
         -- ☠ ENABLE RESOURCE BAR STAYS IN THE BODY of the first card, as Show
         -- Debuffs does on the Debuff Bar: it is the PAGE gate, and a header tick
         -- that greyed every other card would surprise people. Shut, that card's
         -- corner says Off while the bar is off. Show Background and Show Border are
-        -- their own cards' on/off, so they move into those cards' headers.
+        -- their own cards' on/off, so they live in those cards' headers.
         --
         -- ⚠ THE PAGE GATE GREYS EVERY OTHER CARD: its header through dimOn, its
-        -- controls through the group gate each builder has always carried.
+        -- controls through the group gate each builder carries.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
-        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`.
-        -- The classic branch mounts the SAME builder into the box it always built,
-        -- which is what makes "classic is unchanged" structural rather than a
-        -- promise -- test_resourcebar_page_builders.lua pins the inventory of each
-        -- one against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- parent, refreshStates } and, where a toggle is hoisted, `hoistToggle`
+        -- -- test_resourcebar_page_builders.lua pins each inventory.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -2443,9 +2067,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- ⚠ THE CLASS LIST MOVES BUT THE SEED DOES NOT. The list is only data; the
         -- `db.resourceBarClassFilter` seeding block that reads it stays inside the
-        -- builder, where it runs at page-build time in both layouts -- a card is
-        -- built with the page, so the write still lands at the moment it always did.
-        -- Moving it would move WHEN a profile changes shape, which is what the
+        -- builder, where it runs at page-build time -- a card is built with the
+        -- page. Moving it would move WHEN a profile changes shape, which is what the
         -- export byte-identity gate measures.
         local RB_CLASS_LIST = {
             { token = "WARRIOR",      name = L["Warrior"] },
@@ -2489,17 +2112,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return nil
         end
 
-        -- ===== SETTINGS (a 280 box in column 1 in classic, the first card under
-        -- "General" in modern) =====
+        -- ===== SETTINGS (the first card under "General") =====
         --
         -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does for every group on
-        -- this page: in classic the box greys its own children while the bar is
-        -- off, and a card or a pinned panel has to do the same. One builder serving both is what
-        -- stops the two drifting.
+        -- this page, so a card and a pinned panel grey alike while the bar is off.
         local function BuildResourceSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Built in both layouts: it is the PAGE gate, so no card hoists it
+            -- Built in the body: it is the PAGE gate, so no card hoists it
             -- (see the page note). keepEnabled is what keeps it live under the
             -- group's own grey. The seam stays for any future caller.
             if not tools2.hoistToggle then
@@ -2537,8 +2157,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return ResourceSettingsSummary(d)
         end
 
-        -- ===== CLASS FILTER (a 280 box in column 1 in classic, the second card
-        -- under "General" in modern) =====
+        -- ===== CLASS FILTER (the second card under "General") =====
         local function BuildResourceClassFilterGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2572,8 +2191,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return format("%d/%d", on, #RB_CLASS_LIST)
         end
 
-        -- ===== SIZE (a 280 box in column 1 in classic, the first card under
-        -- "Layout" in modern) =====
+        -- ===== SIZE (the first card under "Layout") =====
         -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION (Aphoex 5/5.1, redesigned as
         -- UX by Krathe 2026-08-22: "it auto matches the health bar depending on the
         -- orientation set but you still control how thick the bar looks").
@@ -2597,9 +2215,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ AND THE HOOK STILL FIRES IN A PINNED PANEL. refreshContent is run by
         -- DandersUI Sections' RefreshChildStates, which is exactly what ReflowPane
         -- calls on the group it re-flows -- so tools2.refreshStates renames these
-        -- two controls in a panel for the same reason self:RefreshStates renamed
-        -- them on the page. What does NOT reach a panel is a refresh driven from
-        -- the page, which is why the Orientation dropdown has its own note.
+        -- two controls in a panel as self:RefreshStates does on the page. What
+        -- does NOT reach a panel is a refresh driven from the page, which is why
+        -- the Orientation dropdown has its own note.
         local function BuildResourceSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2667,8 +2285,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== POSITION (a 280 box in column 1 in classic, the second card under
-        -- "Layout" in modern, where Frame Level joins it) =====
+        -- ===== POSITION (the second card under "Layout", where Frame Level
+        -- joins it) =====
         local function BuildResourcePositionGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2678,15 +2296,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "resourceBarY", nil, function() DF:LightweightUpdatePowerBarPosition() end, true), 55)
         end
 
-        -- ☠ MODERN'S POSITION CARD: the builder above, then Frame Level (see the
-        -- page note). ONE function for the card AND its pin -- the slider used to
-        -- be added to the card's band after the builder, so a pinned Position
-        -- panel (built from the builder alone) came up without it. Classic never
-        -- calls this: it mounts BuildResourcePositionGroup and keeps Frame Level
-        -- in its own box. The slider is classic's own call -- same key, range,
-        -- two callback slots (nothing on commit, the frame-level reapply on the
-        -- drag tick) and shared tooltip; the builder's group gate greys it with
-        -- the rest of Position.
+        -- ☠ THE POSITION CARD: the builder above, then Frame Level (see the page
+        -- note). ONE function for the card AND its pin, so a pinned Position
+        -- panel ends in the slider too. Two callback slots (nothing on commit,
+        -- the frame-level reapply on the drag tick) and the shared tooltip; the
+        -- builder's group gate greys it with the rest of Position.
         local function BuildResourcePositionCardGroup(tools2)
             BuildResourcePositionGroup(tools2)
             tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
@@ -2707,9 +2321,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== APPEARANCE (a 280 box in column 2 in classic, the first card under
-        -- "Style" in modern) — mirrors the Health Bar's Texture group:
-        -- Texture, Orientation / Reverse Fill, and Smooth Bar Animation in one place. =====
+        -- ===== APPEARANCE (the first card under "Style") — mirrors the Health
+        -- Bar's Texture group: Texture, Orientation / Reverse Fill, and Smooth
+        -- Bar Animation in one place. =====
         --
         -- ☠ THE ORIENTATION PICK RE-GATES A DIFFERENT GROUP, which is what makes it
         -- the one callback on this page that cannot just be tools2.refreshStates.
@@ -2723,12 +2337,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ WITHOUT THE VALUE SWEEP. This is a STATE change, not a write behind the
         -- widgets' backs, and ReflowMounted(true) mid-drag snaps a slider thumb back
         -- to the last committed step (the helper's own note).
-        --
-        -- In classic tools2.refreshStates IS self:RefreshStates(), which is exactly
-        -- what this callback always did, and there is no tools and nothing to reflow.
         local function OrientationChanged(tools2)
             tools2.refreshStates()
-            if tools then tools.ReflowMounted() end
+            tools.ReflowMounted()
         end
 
         local function BuildResourceAppearanceGroup(tools2)
@@ -2763,13 +2374,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== BACKGROUND (a 280 box in column 2 in classic, the second card
-        -- under "Style" in modern) =====
+        -- ===== BACKGROUND (the second card under "Style") =====
         --
-        -- ⚠ SHOW BACKGROUND IS THE CARD'S HEADER TICK in modern (hoistToggle), so
-        -- the card's body is the one colour swatch it gates -- no panel, beam or
-        -- footer is wrapped round it any more, which is what kept it in the pane
-        -- before. Classic still builds the checkbox in its box.
+        -- ⚠ SHOW BACKGROUND IS THE CARD'S HEADER TICK (hoistToggle), so the
+        -- card's body is the one colour swatch it gates.
         local function BuildResourceBackgroundGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2788,8 +2396,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ NO SUMMARY, AND NOTHING IS INVENTED TO MAKE ONE. A swatch has no word;
         -- the header tick says Off in the corner when the background is off.
 
-        -- ===== BORDER (a 280 box in column 2 in classic, the third card under
-        -- "Style" in modern) =====
+        -- ===== BORDER (the third card under "Style") =====
         -- Include set tailored for a resource indicator:
         -- alpha / inset / blendMode / gradient / shadow keep the visual
         -- toolkit; classColor / roleColor match the bar's optional class
@@ -2798,10 +2405,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- has its own X/Y positioning controls above), colorByTime /
         -- colorByType (no aura-state context).
         --
-        -- ⚠ noShowToggle IS THE HOIST -- the Pet Frames border row's move, verbatim.
-        -- With it the built-in Show Border checkbox is not built and the card's
-        -- header carries that tick instead; showKey is still read, so borderOff
-        -- still greys the other sixteen exactly as before.
+        -- ⚠ noShowToggle IS THE HOIST. With it the built-in Show Border checkbox
+        -- is not built and the card's header carries that tick instead; showKey
+        -- is still read, so borderOff still greys the other sixteen.
         local function BuildResourceBorderGroup(tools2)
             GUI:CreateBorderControls(tools2.group, db, "resourceBar", {
                 parent       = tools2.parent,
@@ -2820,10 +2426,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- CreateBorderControls owns the group and writes disableOn onto each
                 -- of the seventeen itself -- so the gate goes in as the CONSUMER
                 -- gate it is, which the factory composes on top of borderOff and
-                -- every widget's own predicate. Modern -- the card and its pinned
-                -- panel -- passes it; nil in classic, where the box's
-                -- disableChildrenOn does the same job it always has.
-                disableWhen  = tools and ResourceOffRow or nil,
+                -- every widget's own predicate.
+                disableWhen  = ResourceOffRow,
             })
         end
 
@@ -2859,8 +2463,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        -- ===== RESOURCE COLORS (a 280 box in column 2 in classic, the last card
-        -- under "Style" in modern) =====
+        -- ===== RESOURCE COLORS (the last card under "Style") =====
         --
         -- ⚠ THE TEN POWER SWATCHES WRITE DF.db.powerColors, which lives at the ROOT
         -- of the profile and is shared by party and raid -- not a per-mode key.
@@ -2930,30 +2533,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     end
                 end
                 DF:RefreshAllVisibleFrames()
-                -- ☠ WHAT THE REBUILD WAS BUYING, AND WHY A PANE MUST NOT PAY FOR IT
-                -- THAT WAY -- the Colors page's RepaintSwatches, same reason. The
-                -- button writes ten swatches behind the widgets' backs, so they have
-                -- to be repainted; classic has always done that with a whole page
-                -- Refresh and keeps doing exactly that. Inside a pane a rebuild
-                -- retires every widget on the page, and CreatePopoutPageTools' own
-                -- prologue closes every open panel on the way in -- so the panel the
-                -- button was clicked in would slam shut under the user's hand. The
-                -- pane's value sweep IS the repaint: RefreshChildValues calls each
-                -- control's `refreshValue`, which for a colour picker is its swatch
-                -- update, and ReflowMounted(true) runs it on every mounted pane
-                -- including a pinned second one.
-                -- Classic takes the same sweep over this box (every swatch the
-                -- button wrote is a colour picker in it); the page rebuild it used
-                -- to pay leaked the page, and is only the fallback now. A modern
-                -- CARD sweeps its own band and then any pinned copy of it.
-                if tools2.popout then
-                    tools.ReflowMounted(true)
-                elseif group.RefreshChildValues then
-                    group:RefreshChildValues()
-                    if tools then tools.ReflowMounted(true) end
-                elseif pageResource and pageResource.Refresh then
-                    pageResource:Refresh()
-                end
+                -- ☠ A VALUE SWEEP, NOT A PAGE REBUILD -- the Colors page's
+                -- RepaintSwatches, same reason. The button writes ten swatches
+                -- behind the widgets' backs, so they have to be repainted; a
+                -- rebuild would retire every widget on the page and the prologue
+                -- would close every open panel on the way in. RefreshChildValues
+                -- calls each control's `refreshValue`, which for a colour picker is
+                -- its swatch update, and ReflowMounted(true) runs it on every
+                -- mounted pane including a pinned copy.
+                if not tools2.popout then group:RefreshChildValues() end
+                tools.ReflowMounted(true)
             end)
             group:AddWidget(resetPowerBtn, 30)
         end
@@ -2968,223 +2557,120 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE MOUNTS ==================================================
-        -- One arm per group, in the order classic has always added them, so the
-        -- classic page is unmoved: Settings (1), Class Filter (1), Size (1),
-        -- Position (1), Appearance (2), Background (2), Border (2), Frame Level (1)
-        -- and Resource Colors (2). The cards follow the same order -- the one the
-        -- one-column fold reads -- with Frame Level inside Position.
-        if classicLayout then
-            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Resource Bar Settings"]), 40)
-            BuildResourceSettingsGroup({
-                group = settingsGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(settingsGroup, nil, 1)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Debuff Bar's placement: they act on cards in both columns.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- The category header the two General cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
-            -- ☠ NO TICK: Enable Resource Bar is the page gate and stays in the body
-            -- (see the page note), built by the builder exactly as classic builds
-            -- it. No pin: which roles get a bar is behaviour, not looks.
-            local band = OpenSection(L["Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
-            BuildResourceSettingsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Settings, Class Filter, Size, Position (+ Frame Level) in column 1;
+        -- Appearance, Background, Border and Resource Colors in column 2 -- the
+        -- order the one-column fold reads.
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Debuff Bar's placement: they act on cards in both columns.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- The category header the two General cards sit under.
+        Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+        -- ☠ NO TICK: Enable Resource Bar is the page gate and stays in the body
+        -- (see the page note). No pin: which roles get a bar is behaviour, not
+        -- looks.
+        local band = OpenSection(L["Settings"], "resource_settings", 1, ResourceSettingsCardSummary)
+        BuildResourceSettingsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local classFilterGroup = GUI:CreateSettingsGroup(self.child, 280)
-            classFilterGroup:AddWidget(GUI:CreateHeader(self.child, L["Class Filter"]), 40)
-            BuildResourceClassFilterGroup({
-                group = classFilterGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(classFilterGroup, nil, 1)
-        else
-            -- Thirteen class ticks, two per row on a wide card. No pin: which
-            -- classes get a bar is behaviour. Greys its header with the page gate.
-            local band = OpenSection(L["Class Filter"], "resource_classfilter", 1, ResourceClassFilterSummary, ResourceOffRow)
-            BuildResourceClassFilterGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Thirteen class ticks, two per row on a wide card. No pin: which
+        -- classes get a bar is behaviour. Greys its header with the page gate.
+        local band = OpenSection(L["Class Filter"], "resource_classfilter", 1, ResourceClassFilterSummary, ResourceOffRow)
+        BuildResourceClassFilterGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-            BuildResourceSizeGroup({
-                group = sizeGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(sizeGroup, nil, 1)
-        else
-            Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
-            -- A pin: the bar's length and thickness are how it LOOKS.
-            local band = OpenSection(L["Size"], "resource_size", 1, ResourceSizeSummary, ResourceOffRow, nil,
-                BuildResourceSizeGroup)
-            BuildResourceSizeGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)
+        -- A pin: the bar's length and thickness are how it LOOKS.
+        local band = OpenSection(L["Size"], "resource_size", 1, ResourceSizeSummary, ResourceOffRow, nil,
+            BuildResourceSizeGroup)
+        BuildResourceSizeGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-            positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-            BuildResourcePositionGroup({
-                group = positionGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(positionGroup, nil, 1)
-        else
-            -- A pin: where the bar sits is how it LOOKS. Card and pin both mount
-            -- the card builder, so both end in Frame Level.
-            local band = OpenSection(L["Position"], "resource_position", 1, ResourcePositionSummary, ResourceOffRow, nil,
-                BuildResourcePositionCardGroup)
-            BuildResourcePositionCardGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- A pin: where the bar sits is how it LOOKS. Card and pin both mount
+        -- the card builder, so both end in Frame Level.
+        local band = OpenSection(L["Position"], "resource_position", 1, ResourcePositionSummary, ResourceOffRow, nil,
+            BuildResourcePositionCardGroup)
+        BuildResourcePositionCardGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-            BuildResourceAppearanceGroup({
-                group = appearanceGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(appearanceGroup, nil, 2)
-        else
-            -- The category header the four Style cards sit under.
-            Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
-            local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
-                BuildResourceAppearanceGroup)
-            BuildResourceAppearanceGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- The category header the four Style cards sit under.
+        Add(GUI:CreateHeader(self.child, L["Appearance"]), 40, 2)
+        local band = OpenSection(L["Bar Style"], "resource_appearance", 2, ResourceAppearanceSummary, ResourceOffRow, nil,
+            BuildResourceAppearanceGroup)
+        BuildResourceAppearanceGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
-            bgGroup:AddWidget(GUI:CreateHeader(self.child, L["Background"]), 40)
-            BuildResourceBackgroundGroup({
-                group = bgGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(bgGroup, nil, 2)
-        else
-            -- ☠ SHOW BACKGROUND IS THE HEADER'S TICK; the builder skips its own
-            -- (hoistToggle). The commit is what the in-body checkbox ran, plus a
-            -- reflow for a pinned copy -- never a page rebuild. It greys with the
-            -- page gate. Shown and shut, the corner gives the colour's alpha --
-            -- the one number in a card whose other control is a swatch.
-            local function ResourceBackgroundSummary(d)
-                local c = d and d.resourceBarBackgroundColor
-                if type(c) ~= "table" then return "" end
-                return format("%s %.2f", L["Alpha"], tonumber(c.a) or 1)
-            end
-            local band = OpenSection(L["Background"], "resource_background", 2, ResourceBackgroundSummary, ResourceOffRow, nil,
-                BuildResourceBackgroundGroup, {
-                    db = db, key = "resourceBarBackgroundEnabled", label = L["Show Background"],
-                    disableOn = ResourceOffRow,
-                    onChanged = function()
-                        self:RefreshStates()
-                        DF:UpdateAllFrames()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildResourceBackgroundGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
+        -- ☠ SHOW BACKGROUND IS THE HEADER'S TICK; the builder skips its own
+        -- (hoistToggle). The commit is what the in-body checkbox ran, plus a
+        -- reflow for a pinned copy -- never a page rebuild. It greys with the
+        -- page gate. Shown and shut, the corner gives the colour's alpha --
+        -- the one number in a card whose other control is a swatch.
+        local function ResourceBackgroundSummary(d)
+            local c = d and d.resourceBarBackgroundColor
+            if type(c) ~= "table" then return "" end
+            return format("%s %.2f", L["Alpha"], tonumber(c.a) or 1)
         end
+        local band = OpenSection(L["Background"], "resource_background", 2, ResourceBackgroundSummary, ResourceOffRow, nil,
+            BuildResourceBackgroundGroup, {
+                db = db, key = "resourceBarBackgroundEnabled", label = L["Show Background"],
+                disableOn = ResourceOffRow,
+                onChanged = function()
+                    self:RefreshStates()
+                    DF:UpdateAllFrames()
+                    tools.ReflowMounted()
+                end,
+            })
+        BuildResourceBackgroundGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        if classicLayout then
-            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-            borderGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-            BuildResourceBorderGroup({
-                group = borderGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
+        -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
+        -- build its own (hoistToggle -> noShowToggle). The key is still read
+        -- inside, so the other sixteen grey exactly as before. The commit is
+        -- what the suppressed checkbox ran, plus a reflow for a pinned copy --
+        -- never a page rebuild. It greys with the page gate.
+        local band = OpenSection(L["Border"], "resource_border", 2, ResourceBorderSummary, ResourceOffRow, nil,
+            BuildResourceBorderGroup, {
+                db = db, key = "resourceBarShowBorder", label = L["Show Border"],
+                disableOn = ResourceOffRow,
+                onChanged = function()
+                    ApplyResourceBorder()
+                    self:RefreshStates()
+                    tools.ReflowMounted()
+                end,
             })
-            Add(borderGroup, nil, 2)
-        else
-            -- ☠ SHOW BORDER IS THE HEADER'S TICK, so the toolkit is told not to
-            -- build its own (hoistToggle -> noShowToggle). The key is still read
-            -- inside, so the other sixteen grey exactly as before. The commit is
-            -- what the suppressed checkbox ran, plus a reflow for a pinned copy --
-            -- never a page rebuild. It greys with the page gate.
-            local band = OpenSection(L["Border"], "resource_border", 2, ResourceBorderSummary, ResourceOffRow, nil,
-                BuildResourceBorderGroup, {
-                    db = db, key = "resourceBarShowBorder", label = L["Show Border"],
-                    disableOn = ResourceOffRow,
-                    onChanged = function()
-                        ApplyResourceBorder()
-                        self:RefreshStates()
-                        tools.ReflowMounted()
-                    end,
-                })
-            BuildResourceBorderGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-                hoistToggle = true,
-            })
-            CloseSection(band)
-        end
+        BuildResourceBorderGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+            hoistToggle = true,
+        })
+        CloseSection(band)
 
-        -- ===== FRAME LEVEL (a 280 box in column 1 in classic; in modern it is
-        -- the last control of the Position card, above) =====
-        if classicLayout then
-            local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)
-            frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)
-            frameLevelGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-            frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
-            Add(frameLevelGroup, nil, 1)
-        else
-            -- Modern: Frame Level is the last control of the Position card.
-        end
-
-        if classicLayout then
-            local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
-            colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Resource Colors"]), 40)
-            BuildResourceColorsGroup({
-                group = colorGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(colorGroup, nil, 2)
-        else
-            -- A pin: which colour each bar is drawn in is how it LOOKS.
-            local band = OpenSection(L["Resource Colors"], "resource_colors", 2, ResourceColorsSummary, ResourceOffRow, nil,
-                BuildResourceColorsGroup)
-            BuildResourceColorsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- A pin: which colour each bar is drawn in is how it LOOKS.
+        local band = OpenSection(L["Resource Colors"], "resource_colors", 2, ResourceColorsSummary, ResourceOffRow, nil,
+            BuildResourceColorsGroup)
+        BuildResourceColorsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
     end)
     
     -- Bars > Absorbs (combined Absorb Shield + Heal Absorb with collapsible sections)
@@ -3192,54 +2678,21 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageAbsorb, function(self, db, Add, AddSpace)
         Add(CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, L["Absorbs"], "bars_absorb"), 25, 2)
 
-        local currentSection = nil
-
-        -- Helper to add widgets to current section
-        local function AddToSection(widget, height, col)
-            Add(widget, height, col)
-            if currentSection then
-                currentSection:RegisterChild(widget)
-            end
-            return widget
-        end
-
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: two collapsible sections over
-        -- LOOSE WIDGETS -- no settings boxes at all. Twenty-one controls go
-        -- straight onto the page under "Absorb Shield" and fifteen under "Heal
-        -- Absorb", each with its own slot height and its own column.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: each section's pile
-        -- is ONE card, and the two cards sit SIDE BY SIDE, one per page column,
-        -- when the window is wide enough (testers compared the two bars and did
-        -- not want to scroll between them). Everything is on the card -- nothing
-        -- is behind a popout any more -- two settings per row, dim captions, and
-        -- Expand All / Collapse All at the top:
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- ONE card per bar, and the two cards sit SIDE BY SIDE, one per page
+        -- column, when the window is wide enough (testers compared the two bars
+        -- and did not want to scroll between them):
         --
         --   column 1   Absorb Shield
         --   column 2   Heal Absorb
         --
-        -- ☠ THE BUILDERS TAKE AN `add` OR A `group`. This was the sweep's first
-        -- loose-widget page: classic has no box, it calls `AddToSection(w, h, col)`
-        -- and the COLUMN is part of what it always did, so classic hands its own
-        -- `add` in and every other line of the builder is the page's own source,
-        -- unmoved. A card (and its pinned panel) hands a `group` instead, exactly
-        -- like every other page's builder, and the builder adds into it with the
-        -- column dropped -- a card is one flow. test_absorbs_page_builders.lua
-        -- pins the classic Add order, heights and columns against the census
-        -- taken before the move.
-        --
-        -- ☠ THE FULL-WIDTH SECTIONS ARE CLASSIC'S ONLY. Classic keeps its two
-        -- collapsible sections over loose widgets, and the spacer between them;
-        -- in modern the card IS the section, and a full-width section or spacer
-        -- between the two cards would push Heal Absorb under Absorb Shield.
+        -- ☠ NO FULL-WIDTH SECTION OR SPACER between the two cards: it would push
+        -- Heal Absorb under Absorb Shield. test_absorbs_page_builders.lua pins
+        -- each builder's inventory.
         --
         -- ⚠ NEITHER CARD CARRIES A TICK. There is no enable key for either bar --
         -- the Display Mode dropdown IS the master, and neither list of modes has an
         -- off. Both are pinnable: every control in them decides how a bar looks.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -3290,37 +2743,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return nil
         end
 
-        -- ===== ABSORB SHIELD SECTION =====
-        -- ☠ CLASSIC'S ONLY -- in modern the card is the section (see the page note).
-        -- An expression rather than an arm, the Health Bar gradient box's idiom:
-        -- classic's two arms below stay exactly what they were.
-        local absorbSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Absorb Shield"], true), 36, "both")
-            or nil
-        currentSection = absorbSection
-
-        -- ===== ABSORB SHIELD (twenty-one loose widgets in classic, the first
-        -- card, column 1, in modern) =====
+        -- ===== ABSORB SHIELD (the first card, column 1) =====
         --
         -- ⚠ THE STRIPE MERGE STAYS INSIDE THE BUILDER. It augments the option table
         -- the dropdown is about to be handed, which is the builder's own business;
         -- moving it out would put a page-scope table in front of two dropdowns that
         -- have always had one each.
         --
-        -- ⚠ AND SO DOES THE "Floating Bar Position" HEADER -- the sweep's first
-        -- header INSIDE a pane, and now inside a card, on a row of its own. Classic needs it built (it is a widget on the page
-        -- like any other), and one builder serving both is what stops the layouts
-        -- drifting; in a pane it earns its place a second time, because FLOATING
-        -- mode shows fourteen controls in one stack and the header is what says
-        -- where the general four stop and the nine floating ones begin. It hides
-        -- with them in every other mode.
+        -- ⚠ AND SO DOES THE "Floating Bar Position" HEADER, on a row of its own:
+        -- FLOATING mode shows fourteen controls in one stack and the header is
+        -- what says where the general four stop and the nine floating ones
+        -- begin. It hides with them in every other mode.
         local function BuildAbsorbShieldGroup(tools2)
-            local add, parent = tools2.add, tools2.parent
-            -- A card or a pinned panel hands a group: add into it, column dropped.
-            if not add then
-                local group = tools2.group
-                add = function(w, h) return group:AddWidget(w, h) end
-            end
+            local group, parent = tools2.group, tools2.parent
+            local function add(w, h) return group:AddWidget(w, h) end
 
             add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
                 tools2.refreshStates()
@@ -3435,54 +2871,26 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        if classicLayout then
-            -- Straight onto the page, in the columns and at the heights it always
-            -- used: `add` IS AddToSection here, so this arm is the old code path
-            -- with the call renamed.
-            BuildAbsorbShieldGroup({
-                add = AddToSection,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Debuff Bar's placement: they act on cards in both columns.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- Column 1, pinnable. No tick: the Display Mode pick is the master.
-            local band = OpenSection(L["Absorb Shield"], "absorbs_shield", 1, AbsorbShieldSummary, nil, nil,
-                BuildAbsorbShieldGroup)
-            BuildAbsorbShieldGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Debuff Bar's placement: they act on cards in both columns.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- Column 1, pinnable. No tick: the Display Mode pick is the master.
+        local band = OpenSection(L["Absorb Shield"], "absorbs_shield", 1, AbsorbShieldSummary, nil, nil,
+            BuildAbsorbShieldGroup)
+        BuildAbsorbShieldGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        currentSection = nil
-        -- ☠ CLASSIC'S ONLY: a "both" spacer between the two cards would end
-        -- column 1 and push Heal Absorb under Absorb Shield.
-        if classicLayout then AddSpace(GUI.Space.section, "both") end
-
-        -- ===== HEAL ABSORB SECTION =====
-        -- ☠ CLASSIC'S ONLY, as the Absorb Shield section above.
-        local healAbsorbSection = classicLayout
-            and Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
-            or nil
-        currentSection = healAbsorbSection
-
-        -- ===== HEAL ABSORB (fifteen loose widgets in classic, the second card,
-        -- column 2, in modern) =====
+        -- ===== HEAL ABSORB (the second card, column 2) =====
         --
         -- ⚠ THE BLURB TRAVELS WITH THE CONTROLS. It says what a heal absorb IS,
         -- which is the one thing a user opening this card may not know, so it is
-        -- the group's first widget in every layout, on a row of its own in a card.
+        -- the group's first widget, on a row of its own.
         local function BuildHealAbsorbGroup(tools2)
-            local add, parent = tools2.add, tools2.parent
-            -- A card or a pinned panel hands a group: add into it, column dropped.
-            if not add then
-                local group = tools2.group
-                add = function(w, h) return group:AddWidget(w, h) end
-            end
+            local group, parent = tools2.group, tools2.parent
+            local function add(w, h) return group:AddWidget(w, h) end
 
             add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
 
@@ -3557,24 +2965,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        if classicLayout then
-            BuildHealAbsorbGroup({
-                add = AddToSection,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-        else
-            -- Column 2, beside Absorb Shield when the window is wide. Pinnable.
-            local band = OpenSection(L["Heal Absorb"], "absorbs_healabsorb", 2, HealAbsorbSummary, nil, nil,
-                BuildHealAbsorbGroup)
-            BuildHealAbsorbGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Column 2, beside Absorb Shield when the window is wide. Pinnable.
+        local band = OpenSection(L["Heal Absorb"], "absorbs_healabsorb", 2, HealAbsorbSummary, nil, nil,
+            BuildHealAbsorbGroup)
+        BuildHealAbsorbGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        currentSection = nil
     end)
     
     -- Bars > Heal Prediction
@@ -3583,15 +2982,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"healPrediction"}, L["Heal Prediction"], "bars_healpred"), 25, 2)
 
-        -- ===== THE PAGE'S TWO LAYOUTS =====================================
-        -- CLASSIC is exactly what it always was: three 280 boxes -- Settings and
-        -- Floating Bar Position down column 1, Floating Bar Anchor in column 2,
-        -- the last two hiding wholesale unless the bar is floating.
-        --
-        -- MODERN is the Debuff Bar's collapsible-card design: one card per box,
-        -- two settings per row inside a wide enough card, dim captions, Expand
-        -- All / Collapse All at the top, and two page columns -- what the bar is
-        -- and does on the left, where a floating bar sits on the right:
+        -- ===== THE PAGE'S CARDS ===========================================
+        -- Two page columns -- what the bar is and does on the left, where a
+        -- floating bar sits on the right:
         --
         --   column 1   Heal Prediction        (the page's master switch, in its body)
         --   column 2   Floating Bar Position  (hidden unless the bar is floating)
@@ -3603,22 +2996,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- no hoistToggle; shut, its corner says "Off" while the bar is off.
         --
         -- ☠ THE FLOATING hideOn GOES ON THE CARD, header and band together
-        -- (OpenSection's hideFn), off the one predicate classic's boxes use -- so
-        -- box and card cannot drift. The Display Mode pick makes the two floating
+        -- (OpenSection's hideFn). The Display Mode pick makes the two floating
         -- cards appear and disappear through the page's own state pass.
         --
         -- ⚠ THE PAGE GATE GREYS THE TWO FLOATING HEADERS (dimOn). Their controls
         -- grey on their own: every widget here carries `disableOn = not
-        -- healPredictionEnabled`, inside the builders, in both layouts.
+        -- healPredictionEnabled`, inside the builders.
         --
         -- Every group's widgets live in a `Build<X>Group(tools2)` taking { group,
-        -- parent, refreshStates }. The classic branch mounts the SAME builder into
-        -- the box it always built, which is what makes "classic is unchanged"
-        -- structural rather than a promise -- test_healpred_page_builders.lua pins
-        -- the inventory of each one against the census taken before the move.
-        local classicLayout = DF:IsClassicSettingsLayout()
-        -- The shared page-scope machinery, which carries the card helper. nil in
-        -- classic, which is what every `if classicLayout then` arm below leans on.
+        -- parent, refreshStates } -- test_healpred_page_builders.lua pins each
+        -- inventory.
         local tools = GUI:CreatePopoutPageTools(self)
 
         -- ONE CARD: the Debuff Bar's helper and its two opt-ins, which every card
@@ -3632,10 +3019,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.CloseSection(Add, band)
         end
 
-        -- The two predicates the page turns on. The floating one is named once and
-        -- handed to BOTH layouts -- a box's hideOn in classic, a card's in modern
-        -- -- so the two cannot drift. The gate only greys the cards' HEADERS: the
-        -- controls already grey, one by one, inside the builders.
+        -- The two predicates the page turns on. The gate only greys the cards'
+        -- HEADERS: the controls already grey, one by one, inside the builders.
         local function HealPredOffRow(d) return not (d or db).healPredictionEnabled end
         local function HealPredFloatingHiddenOn(d) return d.healPredictionMode ~= "FLOATING" end
 
@@ -3656,40 +3041,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
 
-        -- ===== SETTINGS (a 280 box in column 1 in classic, the first card in
-        -- column 1 in modern) =====
+        -- ===== SETTINGS (the first card in column 1) =====
         --
-        -- ☠ THE COLOUR PICKERS ARE THE ONE PLACE THIS BUILDER BRANCHES ON LAYOUT,
-        -- and it is the sweep's first such branch. In classic the picker set is
-        -- decided AT BUILD TIME from the db: Split builds two, bound to the mine
-        -- and others colours; every other mode builds ONE, bound to whichever
-        -- colour that mode uses. Changing the mode therefore has to REBUILD THE
-        -- PAGE for the picker to rebind -- which is what the Show Heals From
-        -- callback does, and which is fatal inside a pane: a rebuild retires the
-        -- pane, and CreatePopoutPageTools' own prologue closes every open panel on
-        -- the way in, so the dropdown would slam shut the panel it was clicked in.
-        --
-        -- Modern -- the card and its pinned panel alike -- builds ALL THREE
-        -- instead and gates them with hideOn, so the write targets are identical,
-        -- the widget set never changes, and the callback needs nothing more than
-        -- the state pass every other dropdown on the page runs. Classic keeps its
-        -- conditional build, byte for byte. (A card is not a pane, but a rebuild
-        -- would still close the card's own pinned copy, and all three findable by
-        -- search is worth having on the page as well.)
-        --
-        -- ⚠ WHAT THAT COSTS, said plainly: under Mine the pane's picker reads "My
-        -- Heals Color" where the box read "Heal Prediction Color", and likewise
-        -- for Others. Both labels already ship and both are labels classic itself
-        -- uses for that key under Split, so the popout is a strict subset of the
-        -- page's own vocabulary -- it is simply always precise instead of
-        -- sometimes generic. Search gains by it: all three colours are findable in
-        -- the popout layout whatever the mode, where classic can only register the
-        -- one it happens to have built.
+        -- ☠ ALL THREE COLOUR PICKERS ARE BUILT, gated by hideOn on the source
+        -- mode: Split shows the mine and others pickers, every other mode the
+        -- one colour it uses. The widget set never changes, so the Show Heals
+        -- From callback needs nothing more than the state pass -- a page rebuild
+        -- to rebind a picker would close a pinned panel the dropdown was clicked
+        -- in -- and all three colours stay findable by search whatever the mode.
         local function BuildHealPredictionSettingsGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            -- Suppressed when the ROW carries this tick. Still built in classic,
-            -- where it is the page's only on/off control.
+            -- Suppressed when the card's header carries this tick.
             if not tools2.hoistToggle then
                 local hpEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Heal Prediction"], db, "healPredictionEnabled", function()
                     tools2.refreshStates()
@@ -3714,15 +3077,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             modeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
 
             local showModeDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Heals From"], showModeOptions, db, "healPredictionShowMode", function()
-                if not classicLayout then
-                    -- Modern holds all three pickers already, so there is nothing
-                    -- to rebind -- and a rebuild would close a pinned panel this
-                    -- dropdown may have been clicked in.
-                    tools2.refreshStates()
-                else
-                    -- Rebuild so the colour picker(s) rebind to the selected mode.
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                end
+                -- All three pickers already exist, so there is nothing to
+                -- rebind -- and a rebuild would close a pinned panel this
+                -- dropdown may have been clicked in.
+                tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 55)
             showModeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
@@ -3732,41 +3090,23 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
             texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
 
-            if not classicLayout then
-                -- All three, gated by the mode rather than built by it. Split shows
-                -- the first two; Mine and Others show one each; All shows the third.
-                local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                myColor.disableOn = function(d) return not d.healPredictionEnabled end
-                myColor.hideOn = function(d)
-                    return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "MINE"
-                end
-
-                local othersColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                othersColor.disableOn = function(d) return not d.healPredictionEnabled end
-                othersColor.hideOn = function(d)
-                    return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "OTHERS"
-                end
-
-                local allColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Heal Prediction Color"], db, "healPredictionAllColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                allColor.disableOn = function(d) return not d.healPredictionEnabled end
-                allColor.hideOn = function(d) return d.healPredictionShowMode ~= "ALL" end
-            else
-                -- Colour picker(s): Split shows both segment colours; other modes show
-                -- the single colour for the selected mode. The mode dropdown rebuilds
-                -- the page so these rebind when the mode changes.
-                if db.healPredictionShowMode == "SPLIT" then
-                    local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                    myColor.disableOn = function(d) return not d.healPredictionEnabled end
-                    local othersColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                    othersColor.disableOn = function(d) return not d.healPredictionEnabled end
-                else
-                    local showModeColorKey = (db.healPredictionShowMode == "ALL" and "healPredictionAllColor")
-                        or (db.healPredictionShowMode == "OTHERS" and "healPredictionOthersColor")
-                        or "healPredictionMyColor"
-                    local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Heal Prediction Color"], db, showModeColorKey, true, nil, function() DF:UpdateAllFrames() end, true), 35)
-                    myColor.disableOn = function(d) return not d.healPredictionEnabled end
-                end
+            -- All three, gated by the mode rather than built by it. Split shows
+            -- the first two; Mine and Others show one each; All shows the third.
+            local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+            myColor.disableOn = function(d) return not d.healPredictionEnabled end
+            myColor.hideOn = function(d)
+                return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "MINE"
             end
+
+            local othersColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+            othersColor.disableOn = function(d) return not d.healPredictionEnabled end
+            othersColor.hideOn = function(d)
+                return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "OTHERS"
+            end
+
+            local allColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Heal Prediction Color"], db, "healPredictionAllColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+            allColor.disableOn = function(d) return not d.healPredictionEnabled end
+            allColor.hideOn = function(d) return d.healPredictionShowMode ~= "ALL" end
 
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
             local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
@@ -3793,37 +3133,24 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return HealPredictionSettingsSummary(d)
         end
 
-        if classicLayout then
-            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Heal Prediction"]), 40)
-            BuildHealPredictionSettingsGroup({
-                group = settingsGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            Add(settingsGroup, nil, 1)
-        else
-            -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
-            -- Debuff Bar's placement: they act on cards in both columns.
-            Add(tools.SectionControls(self.child), 24, "both")
-            -- ☠ NO TICK: Enable Heal Prediction is the page gate and stays in the
-            -- body (see the page note), built by the builder exactly as classic
-            -- builds it. Shut, the corner says Off while the bar is off, else the
-            -- mode and the source.
-            --
-            -- A pin: the texture, the colours and the blend are how the bar LOOKS.
-            Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
-            local band = OpenSection(L["Settings"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
-                BuildHealPredictionSettingsGroup)
-            BuildHealPredictionSettingsGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- ☠ THE PAGE'S TWO BULK VERBS, ABOVE EVERYTHING, at col "both" -- the
+        -- Debuff Bar's placement: they act on cards in both columns.
+        Add(tools.SectionControls(self.child), 24, "both")
+        -- ☠ NO TICK: Enable Heal Prediction is the page gate and stays in the
+        -- body (see the page note). Shut, the corner says Off while the bar is
+        -- off, else the mode and the source.
+        --
+        -- A pin: the texture, the colours and the blend are how the bar LOOKS.
+        Add(GUI:CreateHeader(self.child, L["Content"]), 40, 1)
+        local band = OpenSection(L["Settings"], "healpred_settings", 1, HealPredictionCardSummary, nil, nil,
+            BuildHealPredictionSettingsGroup)
+        BuildHealPredictionSettingsGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== FLOATING BAR POSITION (a 280 box in column 1 in classic, the
-        -- first card in column 2 in modern) =====
+        -- ===== FLOATING BAR POSITION (the first card in column 2) =====
         local function BuildHealPredictionFloatingGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -3856,35 +3183,22 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        if classicLayout then
-            local floatingGroup = GUI:CreateSettingsGroup(self.child, 280)
-            floatingGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Position"]), 40)
-            BuildHealPredictionFloatingGroup({
-                group = floatingGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            floatingGroup.hideOn = HealPredFloatingHiddenOn
-            Add(floatingGroup, nil, 1)
-        else
-            -- ☠ COLUMN 2, HIDDEN UNLESS THE BAR FLOATS -- header and band together.
-            -- Greys its header with the page gate; its controls grey themselves.
-            -- A pin: size and fill direction are how the bar LOOKS.
-            -- Layout heads column 2 and hides with its two cards unless the bar floats.
-            local layoutHeader = GUI:CreateHeader(self.child, L["Layout"])
-            layoutHeader.hideOn = HealPredFloatingHiddenOn
-            Add(layoutHeader, 40, 2)
-            local band = OpenSection(L["Floating Bar Position"], "healpred_floating", 2, HealPredictionFloatingSummary,
-                HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionFloatingGroup)
-            BuildHealPredictionFloatingGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- ☠ COLUMN 2, HIDDEN UNLESS THE BAR FLOATS -- header and band together.
+        -- Greys its header with the page gate; its controls grey themselves.
+        -- A pin: size and fill direction are how the bar LOOKS.
+        -- Layout heads column 2 and hides with its two cards unless the bar floats.
+        local layoutHeader = GUI:CreateHeader(self.child, L["Layout"])
+        layoutHeader.hideOn = HealPredFloatingHiddenOn
+        Add(layoutHeader, 40, 2)
+        local band = OpenSection(L["Floating Bar Position"], "healpred_floating", 2, HealPredictionFloatingSummary,
+            HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionFloatingGroup)
+        BuildHealPredictionFloatingGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
 
-        -- ===== FLOATING BAR ANCHOR (a 280 box in column 2 in classic, the
-        -- second card in column 2 in modern) =====
+        -- ===== FLOATING BAR ANCHOR (the second card in column 2) =====
         local function BuildHealPredictionAnchorGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -3923,27 +3237,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return table.concat(parts, " \194\183 ")
         end
 
-        if classicLayout then
-            local anchorGroup = GUI:CreateSettingsGroup(self.child, 280)
-            anchorGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Anchor"]), 40)
-            BuildHealPredictionAnchorGroup({
-                group = anchorGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            anchorGroup.hideOn = HealPredFloatingHiddenOn
-            Add(anchorGroup, nil, 2)
-        else
-            -- Under Floating Bar Position, on the same two gates: same bar, same
-            -- mode. A pin: where the bar sits and its colour are how it LOOKS.
-            local band = OpenSection(L["Floating Bar Anchor"], "healpred_anchor", 2, HealPredictionAnchorSummary,
-                HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionAnchorGroup)
-            BuildHealPredictionAnchorGroup({
-                group = band, parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
-            CloseSection(band)
-        end
+        -- Under Floating Bar Position, on the same two gates: same bar, same
+        -- mode. A pin: where the bar sits and its colour are how it LOOKS.
+        local band = OpenSection(L["Floating Bar Anchor"], "healpred_anchor", 2, HealPredictionAnchorSummary,
+            HealPredOffRow, HealPredFloatingHiddenOn, BuildHealPredictionAnchorGroup)
+        BuildHealPredictionAnchorGroup({
+            group = band, parent = self.child,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        CloseSection(band)
     end)
     
     -- ========================================
@@ -3955,15 +3257,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
     -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
     -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
-    -- The designer keeps its own state beside the build (page.dfTD, a classic
-    -- island outside page.children, a swapped-in RefreshStates), none of which a
-    -- second retained build could share.
+    -- The designer keeps its own state beside the build (page.dfTD, its own
+    -- island outside page.children, a swapped-in RefreshStates), none of which
+    -- a second retained build could share.
     if pageTextDesigner then pageTextDesigner.singleModeBuild = true end
-    -- ⚠ Add AND AddSpace GO THROUGH. The designer page has two arms: the classic
-    -- split panel, which anchors everything inside frames of its own and needs
-    -- neither, and the popout page, which emits BANDS -- and a band can only reach
-    -- the page's column through the harness's own Add. Having one is also how the
-    -- builder tells which arm it is on.
+    -- The designer builds its own island, anchored inside frames of its own;
+    -- the harness's Add and AddSpace are handed over but not used.
     BuildPage(pageTextDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildTextDesignerPage then
             DF.BuildTextDesignerPage(GUI, self, db, Add, AddSpace)
@@ -4096,11 +3395,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Same as the Text Designer: its own island, its own RefreshStates and its
     -- remembered geometry live beside the build, not in it.
     if pageAuraDesigner then pageAuraDesigner.singleModeBuild = true end
-    -- ⚠ Add AND AddSpace GO THROUGH. The designer page has two arms: the classic
-    -- split panel, which anchors everything inside one frame of its own and needs
-    -- neither, and the popout page, which emits BANDS -- and a band can only reach
-    -- the page's column through the harness's own Add. Having one is also how the
-    -- builder tells which arm it is on.
+    -- The designer builds its own island, anchored inside one frame of its
+    -- own; the harness's Add and AddSpace are handed over but not used.
     BuildPage(pageAuraDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildAuraDesignerPage then
             DF.BuildAuraDesignerPage(GUI, self, db, Add, AddSpace)

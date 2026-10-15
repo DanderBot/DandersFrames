@@ -65,6 +65,40 @@ local function ADStructuralRedraw(host)
 end
 P.ADStructuralRedraw = ADStructuralRedraw
 
+-- ONE CARD SECTION, for every surface in the designer that stacks its own sections (an
+-- indicator's settings, the Global tab, a group card): the same card every settings page
+-- draws, over a chromeless body the caller fills. Returns the header and the body; the
+-- caller places both, and builds the body only while the card is open.
+-- ☠ A FOLD REBUILDS THE DESIGNER, NOT A RE-FLOW. These surfaces size themselves once, at
+-- build, and the designer has always answered a fold with a full redraw (GUI.lua's
+-- onSectionToggled hook) -- so a shut card builds no body at all.
+local function ADCardSection(parent, header, width, kind, collapseKey)
+    local section = GUI:CreateCollapsibleSection(parent, header, true, width, {
+        card = true, collapseKey = collapseKey, kind = kind,
+    })
+    section.Toggle = function(self)
+        self:SetExpanded(not self.expanded)
+        ADStructuralRedraw(parent)
+    end
+    local body = GUI:CreateSettingsGroup(parent, width, { chromeless = true })
+    section:RegisterChild(body)   -- the card's body: its inset, its gap, its fold
+    if not section.expanded then body:Hide() end
+    return section, body
+end
+
+-- After the caller filled the body: two settings per row once the card is wide enough,
+-- quiet captions -- the page cards' own helpers (Controls.lua) -- then lay it out.
+local function ADCardFinish(body)
+    if GUI.StampFullRows then
+        GUI.StampFullRows(body)
+        GUI.QuietLabels(body)
+        GUI.WireTwoTrack(body)
+    end
+    return body:LayoutChildren()
+end
+P.ADCardSection = ADCardSection
+P.ADCardFinish = ADCardFinish
+
 -- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
 -- The colour wash is handed to the engine's refresh-window driver (Factory
 -- wantsPandemicColor -> AuraContainer bindNative), so it shows only while a refresh
@@ -190,7 +224,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         for _, entry in ipairs(widgets) do
             local w = entry.widget
             local h
-            if w.calculatedHeight then
+            if w.isCard then
+                -- A card header's slot is the one number its fold changes.
+                h = w.layoutHeight or entry.height
+            elseif w.calculatedHeight then
                 -- SettingsGroup tracks its current height after LayoutChildren.
                 h = w.calculatedHeight
             else
@@ -203,20 +240,31 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         parent:SetHeight(y)
     end
 
-    -- ONE section: a collapsible settings group stacked into the card.
+    -- ONE section: a card stacked into the indicator card (ADCardSection) -- cards
+    -- inside a card, as the GUI rework asked of the designers (a16 #4).
+    -- Kind is keyed off the HEADER STRING here only because these headers are the
+    -- section's identity in this file already (swmGroup below); the page cards key it
+    -- off a stable section key, which these sections have never had.
+    local SECTION_KIND = {
+        [L["Position"]] = "position", [L["Appearance"]] = "appearance",
+        [L["Border"]] = "border", [L["Duration Text"]] = "text", [L["Stack Count"]] = "text",
+        [L["Expiration"]] = "timer", [L["Pandemic"]] = "effects", [L["Duration Bar"]] = "timer",
+        [L["Show When Missing"]] = "visibility", [L["Tracked IDs"]] = "filters",
+        [L["Size & Orientation"]] = "size", [L["Sound Alert"]] = "notifications",
+        [L["Buff Dropped"]] = "notifications", [L["Stack Gained"]] = "notifications",
+        [L["Power Infusion Helper"]] = "important",
+    }
     local function AddGroup(header, buildFn, showSummary)
-        local group = GUI:CreateSettingsGroup(parent, contentWidth - 10, {
-            collapsible = true,
-            showSummary = showSummary or false,
-        })
-        group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
-        buildFn(group)
-        local h = group:LayoutChildren()
-        AddWidget(group, h)
+        local section, group = ADCardSection(parent, header, contentWidth - 10,
+            SECTION_KIND[header], "adSection:" .. header)
+        AddWidget(section, section.layoutHeight)
+        if section.expanded then
+            buildFn(group)
+            AddWidget(group, ADCardFinish(group))
+        end
         -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
-        return group
+        return group, section
     end
 
 
@@ -842,7 +890,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "square" then
@@ -981,7 +1029,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddExpiryAlertControls(g, parent, proxy)
         end)
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "bar" then
@@ -1033,7 +1081,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- The local stays `texColorsGroup` only because the |H link route below is keyed
         -- "dfADScroll:texcolors" and renaming that would break saved links in old tooltips.
         local colorModeDrop
-        local texColorsGroup = AddGroup(L["Appearance"], function(g)
+        local texColorsGroup, texColorsSection = AddGroup(L["Appearance"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
             -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
@@ -1150,6 +1198,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local maxS = S.tabScrollFrame:GetVerticalScrollRange() or 0
                 S.tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
             end
+            local function jumpToColorMode()
+                GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
+                    flash = { border = true } })   -- a single control: fill + outline
+            end
+            -- The rebuilt card's own jump, for a click that had to open Appearance first.
+            S.adJumpToColorMode = jumpToColorMode
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
             -- known before AddWidget — else it falls back to a fixed slot the text overflows.
@@ -1157,11 +1211,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Appearance."], link), {
                 width = innerW,
                 onLinkClick = function()
+                    -- ⚠ A SHUT APPEARANCE CARD NEVER RAN ITS BUILDER, so there is nothing
+                    -- here to scroll to. Open it (a fold is a redraw), then jump with the
+                    -- targets the rebuilt card published.
+                    if texColorsSection and not texColorsSection.expanded then
+                        texColorsSection:SetExpanded(true)
+                        ADStructuralRedraw(parent)
+                        C_Timer.After(0, function()
+                            if S.adJumpToColorMode then S.adJumpToColorMode() end
+                        end)
+                        return
+                    end
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
                     -- (LinkToSetting flashes target.widget — pass the group instead to flash the
                     -- whole section).
-                    GUI:LinkToSetting({ widget = colorModeDrop or texColorsGroup, scrollTo = scrollToTexColors,
-                        flash = { border = true } })   -- a single control: fill + outline
+                    jumpToColorMode()
                 end,
             })
             g:AddWidget(note, note.layoutHeight or 34)
@@ -1172,7 +1236,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- fontstring, which distort off-square and collapse on a thin bar. A pandemic region
         -- is a real texture anchored to the bar's own edges, so a ring or wash fits it exactly.
         AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
+            AddPandemicControls(g, parent, proxy, auraName)
         end)
 
     elseif typeKey == "border" then

@@ -76,10 +76,10 @@ local function band(col)
 end
 
 local b1, b2 = band(1), band(2)
--- A classic box: built at a fixed width, never resized.
-local classic = band(1)
-classic.layoutColFill = nil
-local page = frame({ children = { b1, b2, classic }, child = frame() })
+-- A fixed-width box (the Profiles / Debug pages' kind): never resized.
+local fixed = band(1)
+fixed.layoutColFill = nil
+local page = frame({ children = { b1, b2, fixed }, child = frame() })
 
 local function pass(w)
     contentW = w
@@ -102,4 +102,4 @@ eq(b1:GetWidth(), b1.laidOutAt, "fold: the band's final width is the width it la
 pass(500)
 eq(b1.laidOutAt, 468, "fold: back to one column -- the band lays out full width on the same pass")
 
-eq(classic.laidOutAt, 280, "fold: a classic box keeps its own width through every fold")
+eq(fixed.laidOutAt, 280, "fold: a fixed-width box keeps its own width through every fold")

@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- FRAME PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- General > Frame: ten groups. In Modern they are the Debuff Bar's collapsible
+-- General > Frame: ten groups, as the Debuff Bar's collapsible
 -- CARDS -- two per row inside a card wide enough, dim captions, the value
 -- summary in a shut card's corner, Expand All / Collapse All at the top -- and
 -- every one of them now behaves the same way (the old page had three kinds of
@@ -17,13 +17,12 @@ local NS = ...
 --                            (tick: frameBorderShadowEnabled), Frame Fade
 --                            (tick: frameFadeEnabled)
 --
--- Each conversion is allowed to change WHERE a group is mounted and nothing
--- else: same widgets, same order, same L keys, same db keys, same slot heights,
--- because the classic box and the card are handed the SAME builder.
+-- Each card is mounted from its own builder: same widgets, same order, same L
+-- keys, same db keys, same slot heights as the census below.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the widget CENSUS of each builder, taken from the pre-change source.
---   ✓ that ONE builder serves both layouts, and each card's column, stable
+--   ✓ the widget CENSUS of each builder.
+--   ✓ each card's column, stable
 --     collapse key, summary, grey and hide gates, header tick and pin.
 --   ✓ the Frame Fade engine's own reading of its tick (section 1b, driven).
 --   ✗ nothing about runtime behaviour -- read in game.
@@ -118,11 +117,6 @@ local function sectionBlock(labelKey, mount)
     return block, m and block:sub(1, m - 1) or block
 end
 
--- The classic box each group is still built into, with its own header.
-local function classicBox(label)
-    return PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. label:gsub("%p", "%%%0") .. "\"%]%)")
-end
-
 -- ============================================================
 -- 1. FRAME FADE -- its enable is the card's header tick
 -- The group had no boolean meaning "am I doing anything" for a whole release;
@@ -146,7 +140,7 @@ do
     checkCensus(census(body), FRAME_FADE, "frame fade")
     check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
       and body:find(".keepEnabled = true", 1, true) ~= nil,
-          "frame fade: the enable is skipped when the header carries it, and stays live in classic")
+          "frame fade: the enable is skipped when the header carries it, and stays live in a pinned panel")
 
     -- ☠ ...AND THE BODY'S FIRST CONTROL IS EXPECTED TO GREY. With the header
     -- carrying the tick, the Global Frame Fade slider is child ONE of a band with
@@ -175,13 +169,6 @@ do
     check(options_file_source("Core/ExportCategories.lua"):find('"' .. FRAME_FADE[1][3] .. '"', 1, true) ~= nil,
           "frame fade: ...and the key travels in a profile export")
 
-    local calls = 0
-    for _ in PAGE:gmatch("BuildFrameFadeGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "frame fade: declared once, mounted twice -- classic box and card")
-    local box = classicBox("Frame Fade")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, 2)", 1, true) ~= nil,
-          "frame fade: the classic box keeps its header and column 2")
-
     local block, call = sectionBlock("Frame Fade", "BuildFrameFadeGroup({")
     check(call:find('OpenSection(L["Frame Fade"], "frame_fade", 2, FrameFadeSummary, nil, nil, BuildFrameFadeGroup, {', 1, true) ~= nil,
           "frame fade: a card keyed frame_fade in column 2, pinnable from its own builder")
@@ -191,9 +178,9 @@ do
       and call:find("RefreshCurrentPage", 1, true) == nil,
           "frame fade: ...committing the engine refresh, a state pass and a pinned-panel repaint -- never a rebuild")
     check(block:find("BuildFrameFadeGroup({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
-          "frame fade: mounts the builder as classic does, plus hoistToggle for its header tick")
+          "frame fade: mounts its builder with hoistToggle for its header tick")
 
-    local sum = PAGE:match("local function FrameFadeSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function FrameFadeSummary%(d%)(.-)\n        end")
     check(sum ~= nil and sum:find('L%["Alpha"%]') ~= nil and sum:find('L%["Combat"%]') ~= nil,
           "frame fade: the summary labels its opacities in words the locale ships")
 end
@@ -321,14 +308,7 @@ do
           "permanent mover: the enable is skipped when the header carries it")
     local greys = 0
     for _ in body:gmatch("disableOn%s*=%s*function%(d%) return not d%.permanentMover end") do greys = greys + 1 end
-    eq(greys, #PERM_MOVER - 1, "permanent mover: every control but the enable greys on it, in both layouts")
-
-    local calls = 0
-    for _ in PAGE:gmatch("BuildPermanentMoverGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "permanent mover: declared once, mounted twice -- classic box and card")
-    check(PAGE:find("BuildPermanentMoverGroup({ group = permMoverGroup, parent = self.child })", 1, true) ~= nil
-      and PAGE:find("Add(permMoverGroup, nil, 2)", 1, true) ~= nil,
-          "permanent mover: classic mounts it exactly as it always did, in column 2")
+    eq(greys, #PERM_MOVER - 1, "permanent mover: every control but the enable greys on it")
 
     local block, call = sectionBlock("Permanent Mover", "BuildPermanentMoverGroup({")
     check(call:find('OpenSection(L["Permanent Mover"], "frame_permanentmover", 1, PermMoverSummary, nil, nil, nil, {', 1, true) ~= nil,
@@ -362,16 +342,6 @@ do
       and shadow:find("disableWhen  = tools2.shadowDisableWhen,", 1, true) ~= nil,
           "border shadow: its enable is skipped the same way, and it takes Show Border's grey from outside")
 
-    -- Classic: the one box, the one header, both builders back to back.
-    check(PAGE:find("if classicLayout then\n            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)\n        end", 1, true) ~= nil,
-          "classic: the Appearance box is built in classic only")
-    check(PAGE:find('if classicLayout then\n            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)\n        end', 1, true) ~= nil,
-          "classic: ...with its header, in classic only")
-    check(PAGE:find("BuildBorderGroup(borderTools)\n            BuildBorderShadowGroup(borderTools)", 1, true) ~= nil
-      and PAGE:find("shadowDisableWhen = BorderOff,", 1, true) ~= nil
-      and PAGE:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true) ~= nil,
-          "classic: ...mounting both builders into it, with the shadow gate, in column 2")
-
     local bblock, bcall = sectionBlock("Border", "BuildBorderGroup({")
     check(bcall:find('OpenSection(L["Border"], "frame_border", 2, BorderSummary, nil, nil, BuildBorderGroup, {', 1, true) ~= nil,
           "border: a card keyed frame_border in column 2, pinnable")
@@ -392,12 +362,12 @@ do
           "border shadow: mounts the builder with the shadow gate and hoistToggles")
     -- ☠ A pinned panel mounts the section's builder with the standard fields
     -- only -- so the pin goes through a wrapper that hands it the same gate.
-    local pinned = PAGE:match("local function BuildBorderShadowPinned%(tools2%)(.-)\n            end")
+    local pinned = PAGE:match("local function BuildBorderShadowPinned%(tools2%)(.-)\n        end")
     check(pinned ~= nil and pinned:find("tools2.shadowDisableWhen = BorderOff", 1, true) ~= nil
       and pinned:find("BuildBorderShadowGroup(tools2)", 1, true) ~= nil,
           "border shadow: the pin mounts the same builder with the same gate")
 
-    local toggle = PAGE:match("local function OnBorderToggle%(%)(.-)\n            end")
+    local toggle = PAGE:match("local function OnBorderToggle%(%)(.-)\n        end")
     check(toggle ~= nil and toggle:find("ApplyBorder()", 1, true) ~= nil
       and toggle:find("self:RefreshStates()", 1, true) ~= nil and toggle:find("RefreshCurrentPage", 1, true) == nil,
           "border: the ticks' commit applies, re-runs the state pass, never rebuilds")
@@ -457,22 +427,22 @@ local RAID      = 'function() return GUI.SelectedMode ~= "raid" end'
 local GROUPED   = 'function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end'
 local FLAT      = 'function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end'
 
--- label, key, classic column, builder, golden, summary, hide gate (nil = none),
+-- label, key, builder, golden, summary, hide gate (nil = none),
 -- pin (passes its builder).
 local LAYOUT = {
-    { label = "Frame Size", key = "frame_size", classicCol = 1, builder = "BuildFrameSizeGroup",
+    { label = "Frame Size", key = "frame_size", builder = "BuildFrameSizeGroup",
       golden = FRAME_SIZE, summary = "FrameSizeSummary", pin = true },
-    { label = "Layout Direction", key = "frame_layoutdirection", classicCol = 1, builder = "BuildLayoutDirectionGroup",
+    { label = "Layout Direction", key = "frame_layoutdirection", builder = "BuildLayoutDirectionGroup",
       golden = LAYOUT_DIR, summary = "LayoutDirectionSummary" },
-    { label = "Raid Layout Mode", key = "frame_raidmode", classicCol = 1, builder = "BuildRaidModeGroup",
+    { label = "Raid Layout Mode", key = "frame_raidmode", builder = "BuildRaidModeGroup",
       golden = RAID_MODE, summary = "RaidModeSummary", hide = RAID },
-    { label = "Group Layout Settings", key = "frame_grouplayout", classicCol = 1, builder = "BuildGroupLayoutGroup",
+    { label = "Group Layout Settings", key = "frame_grouplayout", builder = "BuildGroupLayoutGroup",
       golden = GROUP_LAYOUT, summary = "GroupLayoutSummary", hide = GROUPED, pin = true },
-    { label = "Group Visibility", key = "frame_groupvisibility", classicCol = 1, builder = "BuildGroupVisGroup",
+    { label = "Group Visibility", key = "frame_groupvisibility", builder = "BuildGroupVisGroup",
       golden = GROUP_VIS, summary = "GroupVisSummary", hide = RAID },
-    { label = "Group Display Order", key = "frame_grouporder", classicCol = 2, builder = "BuildGroupOrderGroup",
+    { label = "Group Display Order", key = "frame_grouporder", builder = "BuildGroupOrderGroup",
       golden = GROUP_ORDER, summary = "GroupOrderSummary", hide = GROUPED },
-    { label = "Flat Grid Settings", key = "frame_flatgrid", classicCol = 1, builder = "BuildFlatGridGroup",
+    { label = "Flat Grid Settings", key = "frame_flatgrid", builder = "BuildFlatGridGroup",
       golden = FLAT_GRID, summary = "FlatGridSummary", hide = FLAT, pin = true },
 }
 
@@ -480,13 +450,6 @@ for _, g in ipairs(LAYOUT) do
     print("-- Frame page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    local box = classicBox(g.label)
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-          g.label .. ": the classic box keeps its header and column " .. g.classicCol)
 
     local block, call = sectionBlock(g.label, g.builder .. "({")
     local want = 'OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", 1, ' .. g.summary
@@ -499,13 +462,13 @@ for _, g in ipairs(LAYOUT) do
        g.label .. (g.pin and ": pinnable from its own builder" or ": no pin"))
     check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
     check(block:find(g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          g.label .. ": mounts the builder exactly as classic does")
+          g.label .. ": mounts its builder into the card's band")
 end
 
 print("-- Frame page: what the layout builders still own")
 do
     -- Frame Size's summary: WxH in ASCII, the rest only when changed.
-    local sum = PAGE:match("local function FrameSizeSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function FrameSizeSummary%(d%)(.-)\n        end")
     check(sum ~= nil and sum:find('"%%dx%%d"') ~= nil and sum:find("\\195\\151", 1, true) == nil
       and sum:find("D:IsModified(d, key)", 1, true) ~= nil,
           "frame size: the summary prints WxH in ASCII and asks the defaults engine what changed")
@@ -522,17 +485,17 @@ do
     local anchorLiterals = 0
     for _ in PAGE:gmatch('_order = { "START", "CENTER", "END" }, START= MAIN_START') do anchorLiterals = anchorLiterals + 1 end
     eq(anchorLiterals, 1, "layout direction: the anchor map is written out once")
-    local dsum = PAGE:match("local function LayoutDirectionSummary%(d%)(.-)\n            end")
+    local dsum = PAGE:match("local function LayoutDirectionSummary%(d%)(.-)\n        end")
     check(dsum ~= nil and dsum:find("MAIN_START", 1, true) == nil and dsum:find("d.raidUseGroups", 1, true) ~= nil,
           "layout direction: the summary derives its words from d, in the dropdown's dialect")
 
     -- Raid Layout Mode: the tick is a MODE, so it stays in the body.
     local raid = builderBody("BuildRaidModeGroup")
     check(raid:find("if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end", 1, true) ~= nil,
-          "raid layout mode: the checkbox rebuilds the page, a page widget in both layouts")
+          "raid layout mode: the checkbox rebuilds the page, a page widget")
     check((select(2, sectionBlock("Raid Layout Mode", "BuildRaidModeGroup({"))):find("hoistToggle", 1, true) == nil,
           "raid layout mode: the tick is not hoisted -- flat is a layout too, a shut card must not read Off")
-    local rsum = PAGE:match("local function RaidModeSummary%(d%)(.-)\n            end")
+    local rsum = PAGE:match("local function RaidModeSummary%(d%)(.-)\n        end")
     check(rsum ~= nil and rsum:find('L["Groups"]', 1, true) ~= nil and rsum:find('L["Flat"]', 1, true) ~= nil,
           "raid layout mode: the summary names the mode either way")
     local apply = PAGE:match("local function ApplyRaidUseGroups%(%)(.-)\n        end")
@@ -546,7 +509,7 @@ do
     check(gl:find("local function UpdateFramesAndGates()", 1, true) ~= nil
       and gl:find("if group.RefreshChildStates then group:RefreshChildStates() end", 1, true) ~= nil
       and gl:find("groupLayoutGroup", 1, true) == nil,
-          "group layout: the gate refresh is the builder's own, never the classic box")
+          "group layout: the gate refresh is the builder's own group's")
     check(gl:find("if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end", 1, true) ~= nil,
           "group layout: ...and the pin commit refreshes this instance's own picker")
 
@@ -628,20 +591,6 @@ do
     local stripAt = PAGE:find("tools.SectionControls", 1, true)
     local layoutAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Layout"]), 40, 1)', 1, true)
     check(stripAt and layoutAt and stripAt < layoutAt, "bulk: ...above the first category header")
-
-    -- Classic's own columns, untouched.
-    local CLASSIC_COL = {
-        sizeGroup = "1", layoutGroup = "1", raidModeGroup = "1",
-        groupLayoutGroup = "1", groupVisGroup = "1", groupOrderGroup = "2",
-        flatGridGroup = "1", frameFadeGroup = "2", permMoverGroup = "2",
-    }
-    for name, col in pairs(CLASSIC_COL) do
-        check(PAGE:find("Add(" .. name .. ", nil, " .. col .. ")", 1, true) ~= nil,
-              "classic: " .. name .. " still goes to column " .. col)
-    end
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 10, "classic: ten bare 280 boxes, all the classic branch's own")
 end
 
 -- ============================================================

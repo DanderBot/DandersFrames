@@ -174,6 +174,25 @@ local NON_OVERRIDABLE_KEYS = {
     personalTargetedPosition = true,
 }
 
+-- ☠ GLOBAL SETTINGS ARE NOT A LAYOUT'S TO CHANGE. These are written to both modes at once
+-- and mostly read from party alone, so a raid layout override was either dead (the player
+-- frame hide reads party, never raid) or split one setting into two (pixel perfect). A
+-- layout also has nothing to fall back to for them when it ends. So they are never stored
+-- as overrides, and an edit made while editing a layout is kept as the global change it
+-- is (ExitEditing), instead of being thrown away with the layout's preview.
+local GLOBAL_KEYS = {
+    hideBlizzardPartyFrames = true,
+    hideBlizzardRaidFrames = true,
+    hideDefaultPlayerFrame = true,
+    hideDefaultPlayerFrameRaidOnly = true,
+    showBlizzardSideMenu = true,
+    showMinimapButton = true,
+    pixelPerfect = true,
+    fontShadowOffsetX = true,
+    fontShadowOffsetY = true,
+    fontShadowColor = true,
+}
+
 -- True unless `key` is non-overridable: a pinned key (pinned.N.setting) whose
 -- setting isn't overridable, or a transient UI-state key. The single gate that
 -- keeps such keys out of the layout override store — used by SetProfileSetting /
@@ -183,8 +202,21 @@ local function IsKeyOverridable(key)
     if setting then
         return PINNED_OVERRIDABLE[setting] == true
     end
-    if NON_OVERRIDABLE_KEYS[key] then return false end
+    if NON_OVERRIDABLE_KEYS[key] or GLOBAL_KEYS[key] then return false end
     return true
+end
+
+-- Drop any global-key override a layout already carries (captured before GLOBAL_KEYS
+-- existed). ApplyRuntimeProfile already skips them; this is so the layout list stops
+-- counting and showing them.
+function DF:StripGlobalLayoutOverrides(profile)
+    if not (DF.ForEachRaidLayoutOverride and type(profile) == "table") then return end
+    DF.ForEachRaidLayoutOverride(profile, function(holder)
+        local o = holder and holder.overrides
+        if type(o) == "table" then
+            for key in pairs(GLOBAL_KEYS) do o[key] = nil end
+        end
+    end)
 end
 
 -- ============================================================
@@ -214,6 +246,7 @@ local function RefreshOverrideTabMap()
     {"oor",                 "display_fading",       L["Fading"]},
     {"dead",                "display_fading",       L["Fading"]},
     {"offline",             "display_fading",       L["Fading"]},
+    {"fadeUnhealable",      "display_fading",       L["Fading"]},
     {"pet",                 "display_pets",         L["Pet Frames"]},
     -- General (specific before generic)
     {"fontShadow",          "general_fonts",        L["Fonts"]},
@@ -1234,6 +1267,11 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                     DF:DebugWarn("AUTOPROFILE", "ExitEditing: removed stale pinnedFrames direct override key")
                 end
             elseif not IsKeyOverridable(key) then
+                -- A global edited mid-session already went to party; keep raid's copy
+                -- too by moving it into the snapshot the restore below writes back.
+                if GLOBAL_KEYS[key] then
+                    self.globalSnapshot[key] = DeepCopyValue(GetRaidValue(key))
+                end
                 -- Transient/never-override key (e.g. raidLocked) — never store it,
                 -- and self-heal any override an earlier build captured.
                 if overrides[key] ~= nil then
@@ -1288,7 +1326,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
         -- Remove orphan keys created during editing that aren't tracked overrides
         local orphansRemoved = 0
         for key in pairs(DF._realRaidDB) do
-            if self.globalSnapshot[key] == nil and not overrides[key] then
+            if self.globalSnapshot[key] == nil and not overrides[key] and not GLOBAL_KEYS[key] then
                 DF._realRaidDB[key] = nil
                 orphansRemoved = orphansRemoved + 1
             end

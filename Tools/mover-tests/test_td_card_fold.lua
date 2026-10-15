@@ -93,11 +93,15 @@ local function FindContentType(key) return { category = "x", label = key } end
 local function BuildContentSection(GUI_, parent, elem, tdDB, state, page, card, yStart) return yStart - 100 end
 local function BuildAppearanceSection(GUI_, parent, elem, card, yStart) return yStart - 100 end
 local function BuildPositionSection(GUI_, parent, elem, tdDB, card, yStart) return yStart - 100 end
+-- The sections are cards now (BuildElementSectionCards; its own fold relays the body).
+-- The element card only sees the body height it hands back, so the stub returns the
+-- same 320 the three sections used to sum to.
+local function BuildElementSectionCards(GUI_, body) body:SetHeight(320) return 320 end
 
 local api
 if pieces.elemCard and pieces.renderList and pieces.groupCard and pieces.renderGrp then
     local src = "local CreateFrame, GUI, DF, L, CATEGORY_COLORS, C_TEXT_DIM, FindContentType,"
-        .. " BuildContentSection, BuildAppearanceSection, BuildPositionSection = ...\n"
+        .. " BuildContentSection, BuildAppearanceSection, BuildPositionSection, BuildElementSectionCards = ...\n"
         .. (pieces.restack or "") .. "\n"
         .. pieces.elemCard .. "\n" .. pieces.renderList .. "\n"
         .. pieces.groupCard .. "\n" .. pieces.renderGrp .. "\n"
@@ -106,7 +110,7 @@ if pieces.elemCard and pieces.renderList and pieces.groupCard and pieces.renderG
     check(chunk ~= nil, "fold: the cut parses (" .. tostring(err) .. ")")
     if chunk then
         api = chunk(CreateFrame, GUI, DF, L, CATEGORY_COLORS, C_TEXT_DIM, FindContentType,
-                    BuildContentSection, BuildAppearanceSection, BuildPositionSection)
+                    BuildContentSection, BuildAppearanceSection, BuildPositionSection, BuildElementSectionCards)
         -- The re-render exports count AND run the real renderers, so a fold that
         -- still re-renders is caught twice: by the count and by the frames it makes.
         DF.TextDesigner.RenderCardList = function(...)

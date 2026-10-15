@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- SETTINGS PAGE GROUPS -- DandersFrames_Options/GUI/Pages/*.lua
 -- ------------------------------------------------------------
--- Every Modern card page with three or more cards puts its cards under group
+-- Every card page with three or more cards puts its cards under group
 -- headers, and every header name comes from the agreed set:
 --
 --   a page about ONE feature   Content, Layout, Appearance, Text, Effects
@@ -17,8 +17,8 @@ local NS = ...
 -- Read from the SOURCE, as the page-builder tests are. A header counts when
 -- the page adds it itself (Add(GUI:CreateHeader(...)) or a header local it
 -- Adds) or names it in a group table (tools.MountCardGroups, ICON_GROUPS).
--- Classic boxes put their headers in a box (box:AddWidget(...)), which is
--- not a page header and is not counted.
+-- A fixed-width box puts its header inside the box (box:AddWidget(...)),
+-- which is not a page header and is not counted.
 -- ============================================================
 
 local SHARED = { Content = true, Layout = true, Appearance = true, Text = true, Effects = true, Movement = true }

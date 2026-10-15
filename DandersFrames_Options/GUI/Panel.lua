@@ -33,35 +33,6 @@ local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 
 -- ============================================================
--- THE LAYOUT FLIP -- ONE FUNCTION, TWO DOORS
--- ------------------------------------------------------------
--- The title-bar glyph and the Options page's classic checkbox both flip the
--- same SV root field, and both must run the SAME sequence in the SAME order:
--- the open panels first (they belong to the layout being left), then every
--- page's build cache, then the page on screen, then the glyph's tint. The two
--- sites each carried their own copy of that list, which is exactly how they
--- would drift; this is the only copy now.
---
--- `value` omitted = toggle (the glyph). The checkbox passes the value its
--- factory has already written -- SetClassicSettingsLayout is an idempotent
--- field write, so restating it costs nothing and the one function serves both.
---
--- Safe from ANY page, the designer shells included: the rebuild goes through
--- RefreshCurrentPage -> page:Refresh() -> the page's own builder, and each
--- designer's build dispatcher owns the arm swap (DF.BuildAuraDesignerPage /
--- DF.BuildTextDesignerPage restore the harness's RefreshStates their classic
--- island replaced -- see those files).
--- ============================================================
-function GUI:FlipSettingsLayout(value)
-    if value == nil then value = not DF:IsClassicSettingsLayout() end
-    DF:SetClassicSettingsLayout(value)
-    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
-    if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
-    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-    if GUI.PaintLayoutButton then GUI.PaintLayoutButton() end
-end
-
--- ============================================================
 -- THE CONTENT CORRIDOR
 -- ------------------------------------------------------------
 -- Every number between the right edge of a widget on a page and the right edge
@@ -155,7 +126,7 @@ end
 -- between column 1's right edge (a band filling its column: colMargin + ColumnWidth)
 -- and column 2's left edge (Column2X). nil while the page has one column. Read by the
 -- resize grip's guide line, so the line sits where the split lands after release.
--- ⚠ A classic page's fixed-width boxes are SettingsBox.group wide rather than
+-- ⚠ A boxed page's fixed-width boxes (Profiles, Debug) are SettingsBox.group wide rather than
 -- ColumnWidth, so their gap is wider on the left; column 2's start is the same either way.
 function GUI.ColumnSplitX()
     if not GUI.UsesTwoColumns() then return nil end
@@ -247,6 +218,24 @@ local function ApplyGUIScale(frame, value, keepPlace)
     for _, f in ipairs(GUI._scaledSurfaces) do
         f:SetScale(value)
     end
+    for _, fn in pairs(GUI._windowScaleListeners) do pcall(fn) end
+end
+
+-- ☠ A DESIGNER PREVIEW IS A RULER, SO THE WINDOW'S SCALE MUST NOT REACH IT. The mock
+-- frame lives inside the settings window and inherits its scale, so at a 60% window a
+-- Preview Scale of 1.0 drew the frame at 60% of the live one and the preview stopped
+-- being a true-size reference (Aphoex, a16 #6). Previews multiply their scale by this
+-- to divide the window's back out, and register a refresh so a slider drag re-fits them.
+GUI._windowScaleListeners = GUI._windowScaleListeners or setmetatable({}, { __mode = "k" })
+
+function GUI.PreviewUnscale()
+    local ws = DF.GetWindowState and DF:GetWindowState()
+    local s = tonumber(ws and ws.scale) or 1
+    return (s > 0) and (1 / s) or 1
+end
+
+function GUI.OnWindowScaleChanged(owner, fn)
+    if owner and fn then GUI._windowScaleListeners[owner] = fn end
 end
 
 -- ★ THE WIDTH THE LAYOUT PASS GIVES A WIDGET, or nil when it keeps its own.
@@ -257,10 +246,9 @@ end
 -- for the old width until the next refresh: two tracks spilling out of a card
 -- that had just narrowed, or a widened card's controls still at the narrow
 -- width, wrapping.
--- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A classic page's
--- boxes are built at a FIXED width and sit in a column wider than themselves;
--- sizing those to the column would restyle a layout this is not allowed to
--- touch. Only a band that declares it wants to FILL its column is resized --
+-- ⚠ layoutColFill IS OPT-IN, AND THAT IS THE WHOLE POINT. A boxed page's
+-- boxes (Profiles, Debug) are built at a FIXED width and sit in a column wider
+-- than themselves; sizing those to the column would restyle them. Only a band that declares it wants to FILL its column is resized --
 -- to the column with two, and to the WHOLE usable width with one, which is
 -- what makes the two-column layout a presentation of the same page rather
 -- than a second one.
@@ -569,18 +557,25 @@ local function PageRefreshStates(self)
     for _, w in ipairs(self.children) do
         if w.isPageFooter and w:IsShown() then footer = w break end
     end
+    -- ☠ THE STRETCH MUST FOLLOW THE VIEWPORT'S HEIGHT, not be taken once here. This
+    -- pass re-runs on content and WIDTH changes only, so a page stretched to one
+    -- height kept it through a vertical resize of the window or a return from the
+    -- page dock at another height -- and the difference became scroll range on a page
+    -- that fits (only pages with a See Also footer ever stretch, which is the tell).
+    -- The flow geometry is kept so the OnSizeChanged hook can redo just this part.
     if footer then
-        local viewH = self:GetHeight() or 0
-        if viewH > contentH then
-            contentH = viewH
-            footer:ClearAllPoints()
-            footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
-                SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
-            footer:SetWidth(SnapLen(footer, usableWidth))
+        local _, _, _, fx, fy = footer:GetPoint(1)
+        self._footerFit = { footer = footer, flowH = contentH, x = fx, y = fy,
+            x1 = x1, width = usableWidth }
+        if not self._footerFitHooked then
+            self._footerFitHooked = true
+            self:HookScript("OnSizeChanged", function(page) GUI.FitPageFooter(page) end)
         end
+    else
+        self._footerFit = nil
     end
-
     self.child:SetHeight(contentH)
+    if footer then GUI.FitPageFooter(self) end
 
     -- Update scroll child width to match the page viewport. GUI.PageChildWidth,
     -- not a second copy of the arithmetic: CreateSubTab sizes the child the same
@@ -591,6 +586,71 @@ local function PageRefreshStates(self)
     end
 end
 GUI.PageRefreshStates = PageRefreshStates
+
+-- ONE PREVIEW WIDTH FOR BOTH DESIGNERS. The Aura Designer's preview must fit its
+-- Click / Drag / Right-click hint rows on one line each; the Text Designer uses the same
+-- width so the two pages read as one design. Measured once off the hint strings
+-- (same font, same badge arithmetic as CreateFramePreview), floored at 300.
+-- ⚠ One probe for the session, made on first use: an unloaded-font call returns
+-- uncached and the next call measures again, and a FontString per call would pile up
+-- on UIParent.
+local designerPreviewW, designerPreviewProbe
+function GUI.DesignerPreviewWidth()
+    if designerPreviewW then return designerPreviewW end
+    local probe = designerPreviewProbe
+    if not probe then
+        probe = UIParent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        probe:Hide()
+        designerPreviewProbe = probe
+    end
+    local need = 300
+    for _, row in ipairs({
+        { L["Click"],       L["an indicator on the frame to expand its settings"] },
+        { L["Drag"],        L["a placed indicator to reposition it on the frame"] },
+        { L["Right-click"], L["a placed indicator to remove it from the frame"] },
+    }) do
+        probe:SetText(row[1])
+        local badgeW = math.max((probe:GetStringWidth() or 0) + 10, 20)
+        probe:SetText(row[2])
+        local w = 8 + badgeW + 5 + math.ceil(probe:GetUnboundedStringWidth() or 0) + 8
+        if w > need then need = w end
+    end
+    -- Only cache a real measurement: before fonts load a string measures 0.
+    if need > 300 then designerPreviewW = need end
+    return need
+end
+
+-- An ISLAND page (the designers) is exactly one viewport tall and scrolls only inside
+-- its own panels. Its RefreshStates sets that, but RefreshStates does not run on every
+-- height change, so the child is held to the viewport on resize too -- a stale taller
+-- child is page-level scroll on a page that must never scroll.
+function GUI.PinChildToViewport(page)
+    if not page or page._childPinned then return end
+    page._childPinned = true
+    page:HookScript("OnSizeChanged", function(p)
+        if p.child then p.child:SetHeight(p:GetHeight()) end
+    end)
+end
+
+-- Seat a page's See Also footer for the viewport's CURRENT height: at the bottom with
+-- the child stretched to fill when the content is shorter than the viewport, back at
+-- its place in the flow when it is not.
+function GUI.FitPageFooter(page)
+    local fit = page and page._footerFit
+    if not (fit and page.child) then return end
+    local footer = fit.footer
+    local viewH = page:GetHeight() or 0
+    footer:ClearAllPoints()
+    if viewH > fit.flowH then
+        page.child:SetHeight(viewH)
+        footer:SetPoint("BOTTOMLEFT", page.child, "BOTTOMLEFT",
+            SnapLen(page.child, fit.x1), SnapLen(page.child, GUI.Space.footer))
+        footer:SetWidth(SnapLen(footer, fit.width))
+    else
+        page.child:SetHeight(fit.flowH)
+        footer:SetPoint("TOPLEFT", fit.x or 0, fit.y or 0)
+    end
+end
 
 function DF:CreateGUI()
     if DF.GUIFrame then return end
@@ -945,83 +1005,6 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
-    -- ☠ HIDDEN WITH CLASSIC (2026-09-26). The whole picker is built only while
-    -- DF.CLASSIC_SETTINGS_AVAILABLE (Core/Config.lua) is true -- the one switch.
-    -- Off, there is no layoutChip, no GUI.LayoutButton and no PaintLayoutButton
-    -- (GUI:FlipSettingsLayout guards that call), and the profile chip anchors to
-    -- the scale glyph instead. Flip the switch and this comes back unchanged.
-    local layoutChip
-    if DF:ClassicSettingsAvailable() then
-    -- ⇄ SETTINGS LAYOUT. Which layout the panel draws in is account identity,
-    -- like the profile chip beside it — it shapes every page, so it is reachable
-    -- from every page rather than buried on the Options page (whose checkbox
-    -- stays; both read the same SV root field, so they cannot drift).
-    --
-    -- ⚠ A DROPDOWN, NOT A CHECKBOX. A lone ticked box among a row of glyphs read
-    -- as clutter and made the bar feel crowded, and a checkbox can only say "the
-    -- other one" about whatever it is not. The two layouts are two NAMED things,
-    -- so the control that names them is a menu. Deliberately the same shape,
-    -- height, opener and menu alignment as the profile chip beside it: both
-    -- answer "which <thing> is this window in", and a bar that asks that question
-    -- twice should not ask it in two different languages.
-    --
-    -- ⚠ RAW KEYS IN THE MENU, LOCALISED TEXT ON IT. The stored field is a BOOLEAN
-    -- (DandersFramesDB_v2.classicSettings), so the option VALUES are the stable
-    -- keys "classic"/"compact" and the boolean is derived at the seam below --
-    -- never the display text, which changes with the client's language.
-    local LAYOUT_OPTIONS = {
-        _order  = { "compact", "classic" },
-        -- ⚠ SHOWN AS "MODERN", STILL KEYED "compact". The value is the menu's stable
-        -- identifier and nothing persists it (the saved field is the classicSettings
-        -- boolean), so only the word the user reads changed. "Compact" undersold it:
-        -- this is the ROOMIER layout -- two columns, settings inline -- and read like
-        -- the smaller option. Its own label, because L["Compact"] also names an
-        -- unrelated Indicators option that keeps its word.
-        compact = { value = "compact", text = L["Modern"] },
-        classic = { value = "classic", text = L["Classic"] },
-    }
-    layoutChip = GUI:CreateDropdown(
-        titleBar, "", LAYOUT_OPTIONS,
-        nil, nil, nil,
-        function()                                              -- customGet
-            return DF:IsClassicSettingsLayout() and "classic" or "compact"
-        end,
-        function(value)                                         -- customSet
-            local classic = (value == "classic")
-            -- Same guard as the profile chip: re-picking what is already active
-            -- must not pay for a full rebuild of every page.
-            if classic == DF:IsClassicSettingsLayout() then return end
-            -- The one shared flip -- see GUI:FlipSettingsLayout above. It writes
-            -- the field, closes the panels belonging to the layout being left,
-            -- invalidates every page's build cache, rebuilds the page on screen
-            -- and repaints this chip, IN THAT ORDER. The order is the point.
-            GUI:FlipSettingsLayout(classic)
-        end,
-        { inline = true, menuAlign = "RIGHT" }
-    )
-    -- Narrower than the profile chip (126): a profile is a user-typed name of
-    -- any length, a layout is one of two words we ship and translate ourselves.
-    layoutChip:SetSize(104, 20)
-    layoutChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
-    layoutChip.openerTooltip = {
-        title = L["Settings Layout"],
-        lines = { L["Applies to the whole account."] },
-    }
-    GUI.LayoutButton = layoutChip
-    local function PaintLayoutButton()
-        -- UpdateText, NOT RebuildOptions: the two options never change, so the
-        -- caption is the only thing that can have moved. Same reasoning as
-        -- UpdateProfileChip below.
-        if layoutChip.UpdateText then layoutChip:UpdateText() end
-    end
-    -- Exposed so the Options-page checkbox (which flips the same field) can
-    -- repaint this one. hooksecurefunc on RefreshCurrentPage was the first
-    -- cut -- it is assigned AFTER this runs and reassigned by AutoProfiles, so
-    -- the hook would either error or be silently bypassed.
-    GUI.PaintLayoutButton = PaintLayoutButton
-    PaintLayoutButton()
-    end -- DF:ClassicSettingsAvailable()
-
     -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
     -- and it used to be answerable only by walking to the Profiles page. The
     -- chip is the shared inline dropdown -- same opener, same menu, same
@@ -1055,13 +1038,7 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    -- Beside the layout picker when it exists; otherwise it takes the picker's
-    -- own place, the same 8 px left of the scale glyph.
-    if layoutChip then
-        profileChip:SetPoint("TOPRIGHT", layoutChip, "TOPLEFT", -6, 0)
-    else
-        profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
-    end
+    profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 
@@ -2464,6 +2441,22 @@ function DF:CreateGUI()
     -- the handlers below -- the sync, the locks, the test hand-over, a new search
     -- index, a second refresh of the page and of every override dot -- has
     -- nothing to do. This is GLOBAL's own path, the other way.
+    -- ☠ A MODE SWITCH MUST NOT OVERLAP A MOVER SESSION. The handlers below lock the
+    -- departing mode and carry test mode across, but with unsaved moves the lock is only a
+    -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
+    -- session's claim against the wrong mode: test frames stuck on screen, or both groups
+    -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
+    -- Not for the mover's own Configure (MoverBridge.openOptionsPage clicks these buttons
+    -- mid-session on purpose, flagged by _moverOwnedClick), and not for a click on the
+    -- mode already showing, which switches nothing.
+    local function DeferForMoverSession(btn, mode)
+        if GUI._moverOwnedClick then return false end
+        if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end
+        local B = DF.MoverBridge
+        if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
+        B:EndSessionThen(function() btn:Click() end)
+        return true
+    end
     local function LeaveGlobalTo(mode)
         if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
         GUI:EnterView(false)
@@ -2472,6 +2465,7 @@ function DF:CreateGUI()
     end
 
     btnParty:SetScript("OnClick", function()
+        if DeferForMoverSession(btnParty, "party") then return end
         if LeaveGlobalTo("party") then return end
         -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
         -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
@@ -2549,6 +2543,7 @@ function DF:CreateGUI()
         end
     end)
     btnRaid:SetScript("OnClick", function()
+        if DeferForMoverSession(btnRaid, "raid") then return end
         if LeaveGlobalTo("raid") then return end
         -- Leaving GLOBAL, if it was up -- see the Party handler.
         GUI.GlobalView = false
@@ -2615,6 +2610,7 @@ function DF:CreateGUI()
     
     -- Click Casting tab click handler
     btnClicks:SetScript("OnClick", function()
+        if DeferForMoverSession(btnClicks) then return end
         GUI.GlobalView = false
         -- Clean up any test/unlock state from previous mode
         if GUI.SelectedMode == "party" then

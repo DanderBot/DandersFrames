@@ -2988,6 +2988,10 @@ end
 function DF:UpdateDispelOverlay(frame)
     if not frame then return end
 
+    -- Rides this call for its call sites (every per-frame refresh and unit change,
+    -- pinned frames too); it is its own feature and ignores the dispel settings.
+    if DF.DriveUnhealableFade then DF:DriveUnhealableFade(frame) end
+
     -- MEMORY TEST: Skip if disabled
     if DF:MemTestDisabled("enableDispel") then
         HideDispelAndInvalidate(frame)
@@ -2997,7 +3001,6 @@ function DF:UpdateDispelOverlay(frame)
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
 
-    -- Check if in test mode first (allows preview even when dispel overlay is disabled)
     local isRaidFrame = frame.isRaidFrame
     local inRelevantTestMode = (isRaidFrame and DF.raidTestMode) or (not isRaidFrame and DF.testMode)
 
@@ -3010,11 +3013,12 @@ function DF:UpdateDispelOverlay(frame)
     end
 
     -- Decide whether the legacy overlay path should run (only reachable when the
-    -- factory doesn't own — test mode / unsupported client). In test mode we honour
-    -- testShowDispelGlow; otherwise the enable toggle.
+    -- factory doesn't own — test mode / unsupported client). Test mode needs BOTH the
+    -- test panel's toggle and the feature's own enable, like every other aura preview:
+    -- a disabled overlay must not appear on test frames.
     local shouldRun
     if inRelevantTestMode then
-        shouldRun = db and db.testShowDispelGlow
+        shouldRun = db and db.testShowDispelGlow and db.dispelOverlayEnabled ~= false
     else
         shouldRun = db and db.dispelOverlayEnabled ~= false
     end

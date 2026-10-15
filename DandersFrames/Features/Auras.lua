@@ -2872,7 +2872,7 @@ end
 -- seconds banded into a seconds-sampled formatter — a percent component can't
 -- blank on a seconds cut, and blanking only the seconds half would leave a
 -- floating "(45%)". The GUI greys Hide Above when a percent format is picked.
--- colorByTime (the pre-68914 |c bucket fallback) only ever reaches the classic
+-- colorByTime (the pre-68914 |c bucket fallback) only ever reaches the plain
 -- formats: a client old enough to bucket lacks SetTextFormat, so the percent
 -- family falls back to plain NUMBER there rather than render wrong bands.
 function DF:GetDurationFormatFields(format, hideAboveT, colorByTime)
@@ -3208,6 +3208,65 @@ local function buildTooltipSpec(db, key)
     }
 end
 
+-- ☠ MY BUFFS DEDUP HIDES ONLY YOUR OWN CASTS. The Aura Designer shows those ids for
+-- your casts alone, so another player's cast must stay on the buff bar or it shows
+-- nowhere. "Mine" is only expressible as the PLAYER filter token, and a token is per
+-- group, so with Only Mine off the row splits into a PLAYER group (ids hidden) and a
+-- !PLAYER group (ids kept). The two are disjoint, so nothing doubles.
+-- ⚠ Each group takes the full Max (the engine has no row-wide cap), so the split row
+-- can show up to twice Max Buffs, and your casts sort ahead of others'. The debuff row
+-- lives with the same limit (DF:GetDebuffRowGroupCount) and the Max Buffs note says
+-- so; hiding buffs to keep the number exact is the worse failure.
+-- Returns the (possibly replaced) filter list and config-level candidate filters.
+local function SplitBuffRowForOwnCasts(filter, candidateFilters, mineOnly)
+    if not (mineOnly and next(mineOnly)) then return filter, candidateFilters end
+    if not (type(filter) == "table" and #filter == 1 and type(filter[1]) == "string") then
+        return filter, candidateFilters
+    end
+    local function withoutMine(cf)
+        local out = {}
+        if cf then for k, v in pairs(cf) do out[k] = v end end
+        if out.includeSpellIDs then
+            local inc = {}
+            for id in pairs(out.includeSpellIDs) do
+                if not mineOnly[id] then inc[id] = true end
+            end
+            out.includeSpellIDs = inc
+        else
+            local excl = {}
+            if out.excludeSpellIDs then
+                for id in pairs(out.excludeSpellIDs) do excl[id] = true end
+            end
+            for id in pairs(mineOnly) do excl[id] = true end
+            out.excludeSpellIDs = excl
+        end
+        return out
+    end
+    local f = filter[1]
+    for component in f:gmatch("[^|]+") do
+        if component == "PLAYER" then
+            -- Only Mine already: the whole row is your casts.
+            return filter, withoutMine(candidateFilters)
+        end
+    end
+    -- noVisLatch: for a unit outside your world the engine cannot tell who cast an aura, so
+    -- these two records fail open -- each aura shows once without the own-cast split, or a
+    -- tracked buff shows on the bar as well as in the Aura Designer. Both beat the latch's
+    -- answer, which blanks the whole row (every other player's buffs too).
+    local mineCF = withoutMine(candidateFilters)
+    -- Every included spell is a My Buffs id: the own-casts half has nothing left to show,
+    -- and an empty include list is ambiguous to the engine (it may read as "no selection").
+    if mineCF.includeSpellIDs and next(mineCF.includeSpellIDs) == nil then
+        return {
+            { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters, noVisLatch = true },
+        }, candidateFilters
+    end
+    return {
+        { filter = f .. "|PLAYER",  key = "mine",   candidateFilters = mineCF, noVisLatch = true },
+        { filter = f .. "|!PLAYER", key = "others", candidateFilters = candidateFilters, noVisLatch = true },
+    }, candidateFilters
+end
+
 -- Map a prefixed aura-row setting block (buff*/debuff*) -> DF.AuraContainer config.
 -- prefix = "buff" (debuff reuses this later). opts.filterList is the PRE-BUILT native
 -- filter list (buffs: BuildDirectBuffFilters); opts.unit is the initial unit token.
@@ -3319,8 +3378,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- map above, and folded into the row tuning signature via excludeSig, so a
         -- change in the tracked set re-applies the buff row's candidate filters in
         -- place (see rowTuningSig / ApplyTuning).
+        -- My Buffs ids (shown only for YOUR casts) come back separately and are applied
+        -- at the end of this block, to the PLAYER half only.
+        local adMineOnly
         if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
-            local adIDs = DF:GetADTrackedSpellIDs(opts.frame, db)
+            local adIDs, mineOnly = DF:GetADTrackedSpellIDs(opts.frame, db)
+            adMineOnly = mineOnly
             if adIDs then
                 candidateFilters = candidateFilters or {}
                 local map = candidateFilters.excludeSpellIDs or {}
@@ -3375,6 +3438,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             local excl = candidateFilters.excludeSpellIDs or {}
             for id in pairs(res.map) do excl[id] = true end
             candidateFilters.excludeSpellIDs = excl
+        end
+
+        -- My Buffs ids hide only your own casts -- see SplitBuffRowForOwnCasts.
+        if adMineOnly then
+            filter, candidateFilters = SplitBuffRowForOwnCasts(filter, candidateFilters, adMineOnly)
         end
     end
 
@@ -3531,6 +3599,24 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 })
                 st.show = true
                 return st
+            end)(),
+            -- CASTER NAME (12.1.5 SetCasterName). Same shared TextStyle shape as the
+            -- stack count; the two extra fields are the ENGINE's own options, which it
+            -- resolves from the aura's secret casterGUID — realm suffix and class
+            -- colouring both happen Blizzard-side, so nothing here reads a caster.
+            -- ⚠ Unlike stacks this is opt-in, so `show` is a real key rather than a
+            -- hardcoded true. Anchored below the icon by default because it is the only
+            -- aura text wide enough to collide with everything else on the button.
+            casterName = (function()
+                local ct = DF.TextStyle:BuildSpec(db, prefix .. "Caster", {
+                    baseSize = 9, defaultAnchor = "BOTTOM",
+                    defaultOffsetX = 0, defaultOffsetY = -12,
+                    boxW = iconSize, boxH = iconSize,
+                })
+                ct.show       = db[prefix .. "CasterName"] and true or false
+                ct.showRealm  = db[prefix .. "CasterRealm"] and true or false
+                ct.classColor = db[prefix .. "CasterClassColor"] ~= false
+                return ct
             end)(),
         },
     }
@@ -3732,6 +3818,22 @@ local function rowStructSig(cfg)
         -- unsupported client (no spec) sigs identically to the feature being off.
         tostring(s.pandemic and s.pandemic.mode),
         tostring(s.pandemic and s.pandemic.flash),
+        -- ☠ CASTER NAME PRESENCE IS STRUCTURAL, and leaving it out is what made the
+        -- setting look STUCK ON. The region is create-once and the fontstring is bound to
+        -- the engine, which then owns its Text and Shown aspects and keeps writing to it.
+        -- The SetShown sweep in styleButton_regions that would otherwise hide it is gated
+        -- on `not slot.AddPandemicRegion` — i.e. PREVIEW SLOTS ONLY, because on a live
+        -- button Blizzard owns visibility and removing a region is supposed to arrive as a
+        -- Rebuild. With this absent from the signature no Rebuild ever fired, the old
+        -- button kept its binding, and turning the setting off did nothing until /reload.
+        -- ★ The general rule, already stated for pandemic above: any create-once region
+        -- depends on "off = never created", and that is only true if its presence moves
+        -- THIS signature.
+        -- ⚠ Only PRESENCE. showRealm and classColor are engine OPTIONS carried by the
+        -- bind, and SetCasterName replaces its display element rather than appending, so
+        -- bindNative re-binds them in place on a restyle — they are cosmetics and must NOT
+        -- be hashed here, or every toggle of them would hand over fresh buttons.
+        tostring(s.casterName and s.casterName.show or false),
     }, "|") .. rowBorderAnimTok(cfg)
 end
 

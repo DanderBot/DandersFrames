@@ -333,7 +333,7 @@ end
 print("-- Text Designer: the shared canvas")
 do
     check(TD:find("local previewNote = previewPanel:CreateFontString", 1, true) ~= nil,
-          "canvas: ...while the split panel still draws its own, which is classic's")
+          "canvas: ...while the split panel still draws its own")
 
     for _, opt in ipairs({ "compact   = true,", "scaleDB   = tdDB,",
                            "placement = false,", "unitText  = false," }) do
@@ -551,23 +551,21 @@ do
 end
 
 -- ============================================================
--- THE TABS SAY HOW MUCH THEY HOLD, IN BOTH LAYOUTS
+-- THE TABS SAY HOW MUCH THEY HOLD
 -- ------------------------------------------------------------
 -- ☠ REPORTED AS "Tabs (Texts, Text Groups) don't show the numbers of existing
--- elements, compared to the classic layout that do shows them". Which tab holds
--- the default current/max health is not obvious from its name; the split panel
--- answered that with a count on the tab and the row layout shipped without one,
--- because the conversion nilled the verb that painted it.
+-- elements". Which tab holds the default current/max health is not obvious
+-- from its name, so the tab carries a count.
 --
--- ONE piece of arithmetic, read by both strips: two copies is two tabs that can
--- disagree about the same profile.
+-- ONE piece of arithmetic: two copies is two tabs that can disagree about the
+-- same profile.
 -- ============================================================
 print("-- Text Designer: the tabs say how much they hold")
 do
     check(TD:find("local function TabElementCounts(countDB)", 1, true) ~= nil,
           "tabcount: the bucketing is declared once")
     check(TD:find("local counts = TabElementCounts(countDB or tdDB)", 1, true) ~= nil,
-          "tabcount: the classic strip reads that one copy rather than its own loop")
+          "tabcount: the strip reads that one copy rather than its own loop")
     local _, n = TD:gsub("local counts = { texts = 0, groups = 0 }", "")
-    eq(n, 1, "tabcount: and the loop it used to inline is gone from the classic arm")
+    eq(n, 1, "tabcount: and no inline copy of the loop is left")
 end

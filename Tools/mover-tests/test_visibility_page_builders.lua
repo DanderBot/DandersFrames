@@ -3,8 +3,8 @@ local NS = ...
 -- ============================================================
 -- VISIBILITY PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Visibility: ONE classic box ("Frame Display") holding two unrelated
--- things. In Modern they are the Debuff Bar's collapsible CARDS -- two per row
+-- Display > Visibility: two unrelated things as two of the Debuff Bar's
+-- collapsible CARDS -- two per row
 -- inside a card wide enough, dim captions, the value summary in a shut card's
 -- corner, Expand All / Collapse All at the top:
 --
@@ -13,20 +13,17 @@ local NS = ...
 --   column 2   Frame Display   Hide Self from Party Frames -- independent of
 --                              Solo Mode, so never behind its tick.
 --
--- ☠ THE SPLIT IS THE WHOLE RISK THIS FILE COVERS. Classic still builds ONE box
--- with all six controls in their original order; it does it by mounting the two
--- builders into the same group, one after the other. If either builder drifts,
--- or if the classic arm stops mounting both, classic silently loses controls --
--- so the census below is taken from the PRE-CHANGE source and both builders are
--- checked against it.
+-- ☠ THE SPLIT IS THE WHOLE RISK THIS FILE COVERS: all six controls must stay
+-- built, in their order, across the two builders -- so both are checked
+-- against the census below.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel, so this file
 -- reads the page's SOURCE and asserts against it.
 --
 -- What that buys, and what it does not:
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height.
---   ✓ that ONE builder serves both layouts, and each card hands it exactly what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, tick and (absent) pin.
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
@@ -117,8 +114,6 @@ end
 -- ============================================================
 print("-- Visibility page: the shared machinery, and the row furniture gone")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -142,7 +137,7 @@ do
     check(PAGE:find("local function CloseSection(band)\n            tools.CloseSection(Add, band)\n        end", 1, true) ~= nil,
           "sections: ...and closes through the shared helper too")
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "rebuild: the page never rebuilds itself, in either layout")
+          "rebuild: the page never rebuilds itself")
 end
 
 -- ============================================================
@@ -167,10 +162,6 @@ do
     local body = builderBody("BuildSoloModeGroup")
     checkCensus(census(body), SOLO_MODE, "solo mode")
 
-    local calls = 0
-    for _ in PAGE:gmatch("BuildSoloModeGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "solo mode: declared once, mounted twice -- classic box and card")
-
     check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
           "solo mode: the in-body checkbox is skipped when the header carries it")
     check(body:find("restedIndicator.disableOn = function(d) return not d.soloMode end", 1, true) ~= nil,
@@ -194,9 +185,9 @@ do
     check(call:find("DF:UpdateAllFrames() DF:UpdateDefaultPlayerFrame() self:RefreshStates()", 1, true) ~= nil,
           "solo mode: ...committing what the checkbox ran, then a state pass")
     check(block:find("BuildSoloModeGroup({ group = soloBand, parent = self.child, refreshStates = function() self:RefreshStates() end, hoistToggle = true, })", 1, true) ~= nil,
-          "solo mode: mounts the builder as classic does, plus hoistToggle for its header tick")
+          "solo mode: mounts its builder with hoistToggle for its header tick")
 
-    local sum = PAGE:match("local function SoloModeSummary%(d%)(.-)\n            end")
+    local sum = PAGE:match("local function SoloModeSummary%(d%)(.-)\n        end")
     check(sum ~= nil, "solo mode: the summary is a named function on the page")
     if sum then
         check(sum:find('L%["Rested Indicator"%]') ~= nil and sum:find('L%["Icon"%]') ~= nil
@@ -209,10 +200,6 @@ print("-- Visibility page: Hide Self from Party Frames")
 do
     local body = builderBody("BuildHideSelfGroup")
     checkCensus(census(body), HIDE_SELF, "hide self")
-
-    local calls = 0
-    for _ in PAGE:gmatch("BuildHideSelfGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "hide self: declared once, mounted twice -- classic box and card")
 
     local apply = PAGE:match("local function ApplyHideSelf%(%)(.-)\n        end")
     check(apply ~= nil, "hide self: the apply is a named function at page scope")
@@ -229,13 +216,13 @@ do
     check(call:find('OpenSection(L["Frame Display"], "visibility_framedisplay", 2, FrameDisplaySummary)', 1, true) ~= nil,
           "hide self: the box's own name as a card, keyed visibility_framedisplay, in column 2, saying shown / hidden -- no tick, no pin")
     check(block:find("BuildHideSelfGroup({ group = displayBand, parent = self.child, refreshStates = function() self:RefreshStates() end, })", 1, true) ~= nil,
-          "hide self: mounts the builder exactly as classic does")
+          "hide self: mounts its builder into the card's band")
 end
 
 -- ============================================================
--- 3. THE CARDS TOGETHER, AND THE CLASSIC BOX
+-- 3. THE CARDS TOGETHER
 -- ============================================================
-print("-- Visibility page: the cards together, and the classic box")
+print("-- Visibility page: the cards together")
 do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
@@ -251,13 +238,6 @@ do
     local firstAt = PAGE:find('OpenSection(L["Solo Mode"]', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first card")
 
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 1, "classic: exactly one bare 280 box, the classic branch's own")
-    check(PAGE:find('local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)\n            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)', 1, true) ~= nil,
-          "classic: the box is built with the header it always had")
-    check(PAGE:find("Add(frameDisplayGroup, nil, 1)", 1, true) ~= nil,
-          "classic: ...and still goes to column 1")
     check(PAGE:find('Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)', 1, true) ~= nil,
           "page: the copy button keeps its key list and its slot")
 end

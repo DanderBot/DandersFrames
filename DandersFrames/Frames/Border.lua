@@ -2544,6 +2544,117 @@ local function buildFlashAnims(border, anim)
     return true
 end
 
+-- ===== MARCHING_ANTS (Blizzard's own widget, 12.1.5) =====
+-- The one effect in this file DF does not draw. 12.1.5 added
+-- Blizzard_SharedXML/MarchingAnts.lua — MarchingAntsTemplate plus the
+-- MarchingAnts_* constructors — as a general-purpose reusable border. SharedXML
+-- carries no UseSecureEnvironment, so it is ordinary addon-reachable UI code.
+--
+-- ★ WHY IT EARNS A SLOT NEXT TO DF_DASH, which is also marching ants:
+--   · It is the DEFAULT UI's look. Blizzard drive their new raid-frame dispel
+--     ants with it, so "match the game" is now a thing a user can reasonably
+--     want and could not previously have.
+--   · Its motion is four TextureCoordTranslations on wrap-addressed atlases —
+--     the texture scrolls under a fixed quad. DF_DASH instead clips and
+--     translates a POOL of dash textures. Different mechanism, different look
+--     (a continuous crawl versus discrete dashes), and cheaper.
+--   · It is declarative on EVERY host. Unlike our own effects there is no
+--     driver twin to fall back to, so it renders identically on a container
+--     button and on the AD canvas — no _secretRect branch, nothing to diverge.
+--
+-- ☠ NEVER CALL SetInsetCorners / SetInsetLeft / SetInsetRight / SetInsetBottom.
+-- They are BROKEN in the shipped 12.1.5 file: SetInsetsInternal takes
+-- (container, element, elementKey, ...) and then assigns to a bare `self`, which
+-- is a nil global there, and it calls AnchorElement with three arguments when
+-- that function takes two. All four setters throw. There is no SetInsetTop at
+-- all and the file is dotted with FIXME/TODO, so treat the whole family as
+-- unfinished. The offsets are plain fields the mixin reads back off the frame
+-- (elementSetupData -> container[keyOffsetP1X]), so we set them directly and let
+-- SetupAssets do the anchoring — which is also what Blizzard's own dispel
+-- template does, via KeyValues, presumably having hit exactly this.
+--
+-- ⚠ SetupAssets and Play are called EXPLICITLY rather than left to the
+-- template's OnLoad/OnShow. A frame parented under a native aura button inherits
+-- forbidden aspects and is recorded as never getting scripts, so relying on
+-- those handlers would leave the ants unbuilt and still exactly where a
+-- capability check would report success. Both calls are idempotent, so doing
+-- them ourselves costs nothing on hosts where the scripts do run.
+local MARCH_SPEED = 1.25   -- Blizzard's own dispel-ant rate at Frequency 1.
+
+local function hideMarchingAnts(border)
+    if border.antsFrame then border.antsFrame:Hide() end
+end
+
+local warnedAntsBuild = false
+
+local function buildMarchingAnts(border, anim)
+    if not MarchingAnts_CreateAsChildOf then return false end
+    local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
+
+    local f = border.antsFrame
+    if not f then
+        -- ⚠ Parent to the animRect and create ONCE. The frame is DF-owned but it
+        -- lives under whatever hosts this border, so on a container button it is
+        -- create-in-secure-context-or-never, like every other region here.
+        local ok, made = pcall(MarchingAnts_CreateAsChildOf, host, "MarchingAntsTemplate", "dfAnts")
+        if not ok or not made then
+            -- ☠ THIS USED TO RETURN SILENTLY, which is the silent-capability-skip
+            -- antipattern: the effect simply does not appear and nothing says why. The
+            -- first field report against this feature ("shows on the AD preview but not on
+            -- live frames") had a different cause — the SAFE_OVERLAY_ANIM allow-list — and
+            -- took a code read to find precisely because BOTH failure paths were quiet.
+            -- One-shot: a refused create will repeat on every button in the batch.
+            if not warnedAntsBuild then
+                warnedAntsBuild = true
+                if DF.DebugWarn then
+                    DF:DebugWarn("AURACONTAINER",
+                        "MarchingAnts create failed on a %s host, effect will not render: %s",
+                        border._secretRect and "container-button" or "DF-owned",
+                        tostring(made))
+                end
+            end
+            return false
+        end
+        border.antsFrame = made
+        f = made
+    end
+    f:SetParent(host)
+    f:ClearAllPoints()
+    f:SetAllPoints(host)
+
+    local th = math.max(1, anim.thickness or 2)
+    pcall(f.SetLineThickness, f, th, th)
+
+    -- Rebuild the atlases every start: thickness and the asset choice both feed
+    -- SetupAssets, and the mixin's own MarkDirty path runs off OnEvent, which we
+    -- cannot rely on here.
+    pcall(f.SetupAssets, f)
+
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
+    if CreateColor then pcall(f.SetColor, f, CreateColor(r, g, b, a)) end
+
+    -- Frequency is the crawl SPEED, matching DF_DASH's convention so the slider
+    -- reads the same way across both ant effects. 0 pauses (the mixin's own
+    -- documented behaviour), which gives a static outline for free.
+    local freq = anim.frequency
+    if freq == nil then freq = 1 end
+    pcall(f.SetSpeed, f, freq * MARCH_SPEED)
+
+    f:Show()
+    -- Explicit, for the reason in the section header. SetSpeed(>0) also calls
+    -- CheckResumePlaying, but that early-outs on IsVisible() which is secret on a
+    -- container button — so it cannot be trusted to have started anything.
+    if f.MarchingAnim then pcall(f.MarchingAnim.Play, f.MarchingAnim) end
+
+    -- Join the declarative registry so StopAnimation stops us, and so
+    -- StartAnimation's dedupe counts this border as genuinely live rather than
+    -- treating it as a dead driver and rebuilding on every re-apply.
+    local groups = border._declAnims or {}
+    if f.MarchingAnim then groups[#groups + 1] = f.MarchingAnim end
+    border._declAnims = groups
+    return true
+end
+
 -- ===== CUSTOM ONUPDATE TICKS =====
 -- Each tick function receives (border, anim, elapsed) and modulates the 4
 -- edge SetAlpha values. Period defaults to anim.frequency-derived; a
@@ -2735,6 +2846,7 @@ function Border:StopAnimation(border)
     hidePixelParticles(border)
     hideProcGlow(border)
     hideFlashGlow(border)
+    hideMarchingAnts(border)
     if border.cornerExtras then
         for _, e in ipairs(border.cornerExtras) do e:Hide() end
         border.cornerExtras = nil
@@ -2902,6 +3014,21 @@ function Border:StartAnimation(border, spec)
             tick(b, anim, el)
         end)
         border.activeAnimation = anim.type
+        return
+    end
+
+    -- Marching Ants: Blizzard's own SharedXML widget (12.1.5). Declarative on every
+    -- host, so unlike our effects there is no driver twin to fall through to — if the
+    -- template is missing (12.1.0) or the build fails, the border simply carries no
+    -- animation rather than silently becoming a different effect.
+    -- ☠ The GUI only offers this type when MarchingAnts_CreateAsChildOf exists, so a
+    -- profile can only carry it after having run on a client that had it. Reaching here
+    -- on an older client means a profile came across from a newer one; leaving the
+    -- border un-animated is the correct read of "the effect you picked is not available".
+    if anim.type == "MARCHING_ANTS" then
+        if buildMarchingAnts(border, anim) then
+            border.activeAnimation = anim.type
+        end
         return
     end
 

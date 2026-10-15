@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- DEFENSIVE ICON PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Auras > Defensive Icon: NINE groups. In Modern they are the Debuff Bar's
+-- Auras > Defensive Icon: NINE groups, as the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top --
 -- mounted by group (tools.MountCardGroups):
@@ -22,10 +22,9 @@ local NS = ...
 -- and asserts against it, as the other census files do.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each builder, taken from the PRE-CHANGE source -- the
---     evidence that CLASSIC RENDERS AS IT DID.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ the widget CENSUS of each builder.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate,
 --     header tick and pin; that there is one checkbox per setting; the Add
 --     order that the one-column fold reads in.
@@ -126,8 +125,6 @@ end
 -- ============================================================
 print("-- Defensive Icon page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -192,7 +189,7 @@ do
               "vocab: " .. b .. " is declared after it, so it closes over the real tables")
     end
 
-    -- The registry hook block runs ONCE PER PAGE BUILD, in both layouts.
+    -- The registry hook block runs ONCE PER PAGE BUILD.
     check(PAGE:find("self.dfDefFilterSignature = RegistrySignature()", 1, true) ~= nil,
           "vocab: the filter-registry signature is taken at page scope")
     local hooks = 0
@@ -207,7 +204,7 @@ do
                          "BuildDefensivePositionGroup", "BuildDefensiveDurationGroup",
                          "BuildDefensiveStackGroup" }) do
         check(builderBody(b):find("group.disableChildrenOn = HideDefensiveIconOptions", 1, true) ~= nil,
-              "gate: " .. b .. " carries the group gate the classic box had")
+              "gate: " .. b .. " carries the page's group gate")
     end
     check(builderBody("BuildDefensiveBorderGroup"):find("tools2.group.disableChildrenOn = HideDefensiveIconOptions", 1, true) ~= nil,
           "gate: the border builder carries it too, after the toolkit has mounted")
@@ -216,12 +213,12 @@ do
           "gate: the Duration Bar keeps its compound gate -- the feature AND the bar")
 
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "rebuild: the page never rebuilds itself, in either layout")
+          "rebuild: the page never rebuilds itself")
 end
 
 -- ============================================================
 -- 2. THE NINE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local DEFENSIVE_SETTINGS = {
     { "label",    "Shows an icon when party members have a defensive cooldown active (Pain Suppression, Ironbark, etc.).", "(none)", 45 },
@@ -277,37 +274,37 @@ local DEFENSIVE_DURBAR = {
     { "checkbox",        "Reverse Fill",        "defensiveDurationBarReverseFill", 30 },
 }
 
--- label, stable collapse key, card column, classic box header and column;
+-- label, stable collapse key, card column;
 -- `dim` = greys with the page gate, `hide` = the factory gate on both halves,
 -- `pin` = passes its builder (decides how the icon LOOKS), `tick` = its on/off
 -- moved into the header.
 local CARDS = {
-    { label = "Settings", key = "defensiveicon_settings", col = 1, box = "Settings", classicCol = 1,
+    { label = "Settings", key = "defensiveicon_settings", col = 1, 
       builder = "BuildDefensiveSettingsGroup", golden = DEFENSIVE_SETTINGS, summary = "DefensiveSettingsSummary" },
-    { label = "Defensive Filters", key = "defensiveicon_filters", col = 1, box = "Defensive Filters", classicCol = 2,
+    { label = "Defensive Filters", key = "defensiveicon_filters", col = 1, 
       builder = "BuildDefensiveFilterGroup", golden = DEFENSIVE_FILTERS, summary = "DefensiveFilterSummary",
       dim = true },
-    { label = "Layout", key = "defensiveicon_layout", col = 2, box = "Layout", classicCol = 1,
+    { label = "Layout", key = "defensiveicon_layout", col = 2, 
       builder = "BuildDefensiveLayoutGroup", golden = DEFENSIVE_LAYOUT, summary = "DefensiveLayoutSummary",
       dim = true, pin = true },
-    { label = "Icon Style", key = "defensiveicon_appearance", col = 2, box = "Appearance", classicCol = 2,
+    { label = "Icon Style", key = "defensiveicon_appearance", col = 2, 
       builder = "BuildDefensiveAppearanceGroup", golden = DEFENSIVE_APPEARANCE, summary = "DefensiveAppearanceSummary",
       dim = true, pin = true },
-    { label = "Position", key = "defensiveicon_position", col = 2, box = "Position", classicCol = 1,
+    { label = "Position", key = "defensiveicon_position", col = 2, 
       builder = "BuildDefensivePositionGroup", golden = DEFENSIVE_POSITION, summary = "DefensivePositionSummary",
       dim = true, pin = true },
-    { label = "Border", key = "defensiveicon_border", col = 2, box = "Border", classicCol = 2,
+    { label = "Border", key = "defensiveicon_border", col = 2, 
       builder = "BuildDefensiveBorderGroup", golden = DEFENSIVE_BORDER, summary = "DefensiveBorderSummary",
       dim = true, pin = true, composite = true,
       tick = { key = "defensiveIconShowBorder", name = "Show Border", commit = "ApplyDefensive()" } },
-    { label = "Duration Text", key = "defensiveicon_duration", col = 1, box = "Duration Text", classicCol = 1,
+    { label = "Duration Text", key = "defensiveicon_duration", col = 1, 
       builder = "BuildDefensiveDurationGroup", golden = DEFENSIVE_DURATION, summary = "DefensiveDurationSummary",
       dim = true, pin = true,
       tick = { key = "defensiveIconShowDuration", name = "Show Duration", commit = "ApplyDefensive()" } },
-    { label = "Stack Count", key = "defensiveicon_stack", col = 1, box = "Stack Count", classicCol = 1,
+    { label = "Stack Count", key = "defensiveicon_stack", col = 1, 
       builder = "BuildDefensiveStackGroup", golden = DEFENSIVE_STACK, summary = "DefensiveStackSummary",
       dim = true, hide = true, pin = true },
-    { label = "Duration Bar", key = "defensiveicon_durationbar", col = 2, box = "Duration Bar", classicCol = 1,
+    { label = "Duration Bar", key = "defensiveicon_durationbar", col = 2, 
       builder = "BuildDefensiveDurationBarGroup", golden = DEFENSIVE_DURBAR, summary = "DefensiveDurationBarSummary",
       dim = true, hide = true, pin = true,
       tick = { key = "defensiveDurationBarEnabled", name = "Enable Duration Bar", commit = "DefBarChanged()" } },
@@ -317,22 +314,6 @@ for _, g in ipairs(CARDS) do
     print("-- Defensive Icon page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.box .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, g.label .. ": the classic box keeps its own header (" .. g.box .. ")")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...which still goes to column " .. g.classicCol)
-    end
 
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -372,8 +353,8 @@ for _, g in ipairs(CARDS) do
     local mount = g.builder .. "({ group = " .. bandName .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
@@ -381,15 +362,12 @@ end
 -- ============================================================
 print("-- Defensive Icon page: the cards together")
 do
-    -- The source order is classic's; the cards MOUNT in the group table's.
+    -- The source order; the cards MOUNT in the group table's.
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Settings | Defensive Filters | Layout | Icon Style | Position | Border | Duration Text | Stack Count | Duration Bar",
-       "order: the nine cards are declared in classic's order")
-    -- The classic Filters arm keeps its else, holding only a pointer to the card.
-    check(PAGE:find("Add(filterGroup, nil, 2)\n        else\n            -- Modern opened this card above", 1, true) ~= nil,
-          "order: the classic Defensive Filters arm is untouched, its Modern half a pointer")
+       "order: the nine cards are declared in reading order")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -399,7 +377,7 @@ do
     for _, g in ipairs(CARDS) do
         if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
     end
-    eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's")
 
     check((sectionBlock("Settings")):find("defensiveIconEnabled", 1, true) == nil,
           "ticks: Enable Defensive Icon is not hoisted into Settings' header")
@@ -413,23 +391,6 @@ do
     local mountAt = PAGE:find("tools.MountCardGroups(Add,", 1, true)
     check(stripAt and mountAt and stripAt < mountAt,
           "bulk: ...above the first group header, because it acts on the whole page")
-
-    -- ---- nine classic boxes, in the order they always had ---------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 9, "classic: nine bare 280 boxes, and they are the classic branch's own")
-    local ADDS = { "settingsGroup, nil, 1", "layoutGroup, nil, 1", "appearanceGroup, nil, 2",
-                   "positionGroup, nil, 1", "borderGroup, nil, 2", "filterGroup, nil, 2",
-                   "durationGroup, nil, 1", "defStackGroup, nil, 1", "durBarGroup, nil, 1" }
-    local prev = 0
-    for _, a in ipairs(ADDS) do
-        local at = PAGE:find("Add(" .. a .. ")", 1, true)
-        check(at ~= nil and at > prev, "classic: still calls Add(" .. a .. ") in sequence")
-        prev = at or prev
-    end
-    check(PAGE:find("defStackGroup.hideOn = NoFactoryRow", 1, true) ~= nil
-      and PAGE:find("durBarGroup.hideOn = NoFactoryRow", 1, true) ~= nil,
-          "classic: ...and still puts the factory gate on its two boxes")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar"}', 1, true) ~= nil,

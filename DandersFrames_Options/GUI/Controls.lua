@@ -355,6 +355,31 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     local function isBorder() return mode() == "BORDER" end
     local function enabled() return dbTable[K("Enabled")] and true or false end
     local supported = P:IsSupported()
+    -- ★ SPELL-LEVEL GATE. opts.trackedIds is a callback returning the identity map behind
+    -- THIS aura; a consumer with no per-spell identity (the buff and debuff rows, which are
+    -- a whole row of arbitrary auras) simply passes nothing and the gate never fires.
+    -- ☠ Evaluated per CALL, not cached: the ids change as the user edits the placement's
+    -- tracked spells, and a cached answer would grey a panel the user had just made valid.
+    -- ⚠ Greys rather than HIDES, unlike the shape gating on the bar card. That one is always
+    -- true; this one rests on a sample that is admittedly incomplete, so the control has to
+    -- stay visible and say why — a hidden control cannot be argued with.
+    -- ★ SAMPLE ON OPEN, so the answer is as fresh as it can be at the moment someone is
+    -- actually looking. The sweep learns every 30s, which is fine in the background but
+    -- means a spell you just started tracking can sit unknown for half a minute while you
+    -- stare at the panel. Opening the card is the closest reachable point to "the user just
+    -- added this spell" without hunting the add path through the editor, and it costs one
+    -- pass over auras that are already up.
+    -- ⚠ It can only answer for auras LIVE RIGHT NOW — a spell that is not on you or anyone
+    -- nearby stays unknown, which is the correct answer rather than a failure. In practice a
+    -- healer setting up a HoT cue usually has it rolling.
+    if P.SampleUnits then pcall(P.SampleUnits, P, "player", "target") end
+
+    local function noWindow()
+        if not opts.trackedIds then return false end
+        local ok, ids = pcall(opts.trackedIds)
+        if not ok then return false end
+        return not P:MayHaveWindow(ids)
+    end
     local masterGate = opts.masterGate
     local function gated(db) return masterGate and masterGate(db) or false end
     local function onStructural() refreshStates(); fullUpdate() end
@@ -379,7 +404,14 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         -- On a client without the registrar the toggle itself must go dead, or a user can switch
         -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
         -- master switch greys it too — nothing above it being on means nothing below it applies.
-        w.enable.disableOn = function(db) return not supported or gated(db) end
+        w.enable.disableOn = function(db) return not supported or gated(db) or noWindow() end
+        -- ⚠ The tooltip carries the SPELL reason only. The client reason has its own note
+        -- below and applies to the whole section; this one is about the aura in front of
+        -- you, and a tooltip is where a per-item reason belongs.
+        -- ⚠ Deliberately the SAME string as the note below, not a variant of it. Two
+        -- near-identical sentences are two entries a translator has to notice are meant to
+        -- match, for no reader-facing gain.
+        w.enable.tooltip = L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."]
     end
 
     -- Says why there is no threshold, and why a given spell may never light. Sits directly
@@ -395,6 +427,18 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         L["This game build does not support refresh-window highlights."],
         { tone = "caution", prefix = "Note", width = noteW }))
     w.unsupported.hideOn = function() return supported end
+
+    -- Shown only when every spell behind this aura is a MEASURED no. Its own note rather
+    -- than a variant of the one above, because the two say different things and can be true
+    -- at once — an old client AND an unrefreshable spell.
+    -- ⚠ Names the way out. The whole failure this gate exists to stop is a healer wanting
+    -- "warn me before this drops", finding it under Pandemic because Expiration withholds
+    -- Border and Tint on a bar, and configuring a cue that can never fire. Greying without
+    -- pointing at Expiration would leave them stuck rather than redirected.
+    w.noWindow = group:AddWidget(GUI:CreateNote(parent,
+        L["This aura has no refresh window, so a pandemic highlight would never appear. Use Expiration to warn when it is about to run out."],
+        { tone = "caution", prefix = "Note", width = noteW }))
+    w.noWindow.hideOn = function() return not noWindow() end
 
     w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Type"],
         { BORDER = L["Border"], TINT = L["Tint"], _order = { "BORDER", "TINT" } },
@@ -457,9 +501,24 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     w.border = GUI:CreateBorderControls(group, dbTable, P:BorderPrefix(prefix), {
         parent       = parent,
         noShowToggle = true,
+        -- ★ animation joins the house icon-border set. It was absent because the pandemic
+        -- engine stripped spec.border.animation, so these controls would have driven
+        -- nothing; that strip is gone (Features/Pandemic.lua) now that container-hosted
+        -- borders take the declarative path, and on 12.1.5 the engine plays the effect
+        -- only inside the refresh window.
+        -- ⚠ include is opt-in PER KEY — adding one does not disturb the others, but
+        -- omitting one silently drops its control.
+        -- ☠ THE KEY IS `animate`, NOT `animation`. CreateBorderControls tests
+        -- `if include.animate then`; `animation = true` is silently ignored, so the whole
+        -- Border Animation control set is never built and the setting looks absent rather
+        -- than broken. Reported as "where are the pandemic animations?" — the engine side
+        -- was working the whole time and had nothing to drive it.
+        -- ⚠ include is opt-in PER KEY and a wrong key cannot fail loudly, because an
+        -- unknown key is indistinguishable from one deliberately left out.
         include      = {
             inset = true, offset = true, blendMode = true,
             gradient = true, shadow = true, alpha = true,
+            animate = true,
         },
         hideWhen     = function() return not isBorder() end,
         fullUpdate   = fullUpdate,
@@ -504,11 +563,14 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
         end
     end
 
-    -- Master gate: an unsupported client, the page's own feature switch, or Enable off greys
-    -- everything below the toggle. Composed here so a caller never has to wrap this and risk
-    -- dropping one of the three.
+    -- Master gate: an unsupported client, a spell with no refresh window, the page's own
+    -- feature switch, or Enable off greys everything below the toggle. Composed here so a
+    -- caller never has to wrap this and risk dropping one of the four.
+    -- ☠ noWindow() belongs here as well as on the toggle. Without it a profile that already
+    -- has Enabled set on an unrefreshable spell would grey the switch and leave every
+    -- control under it live — a section you cannot turn off but can still configure.
     group.disableChildrenOn = function(db)
-        return not supported or gated(db) or not enabled()
+        return not supported or noWindow() or gated(db) or not enabled()
     end
 
     return w
@@ -4350,6 +4412,7 @@ GUI.SectionKindByKey = {
     buffs_border            = "border",
     buffs_duration          = "text",
     buffs_stack             = "text",
+    buffs_caster            = "text",
     buffs_durationbar       = "timer",
     buffs_pandemic          = "effects",
     -- Debuff Bar (Indicators.lua)
@@ -4364,6 +4427,7 @@ GUI.SectionKindByKey = {
     debuffs_duration        = "text",
     debuffs_stack           = "text",
     debuffs_dispeltext      = "text",
+    debuffs_caster          = "text",
     debuffs_durationbar     = "timer",
     -- Missing Buffs (Indicators.lua)
     missingbuffs_appearance = "appearance",
@@ -4476,6 +4540,190 @@ GUI.SectionKindByKey = {
 }
 
 -- ============================================================
+-- THE CARD BODY'S TWO TRACKS AND QUIET CAPTIONS (used by the page tools below)
+-- ============================================================
+-- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
+-- not chosen. Every factory in the kit was laid out against a 260 column; at
+-- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
+-- longest word on these pages ("Default (Slot Order)") still fits its opener,
+-- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
+-- Permanent Auras") still sits on one line. Below it they start to truncate.
+-- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
+local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+-- Published for the resize readout (Panel.lua), which predicts the card's
+-- track count mid-drag, before any layout pass has run.
+GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
+
+-- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
+-- sweep's one name, and every db-bound factory carries it (slider, dropdown
+-- and its texture/font/outline variants, checkbox, colour picker); prose,
+-- notes, banners, cross-links, buttons and the growth control do not. Those
+-- take a row of their own, or a wrapping blurb lands beside the control
+-- above it and a 155px growth block squeezes into half a card.
+local function StampFullRows(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
+            w.fullRow = true
+        end
+    end
+end
+
+-- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
+-- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
+-- 55px slider floated on the slider's label line with a hole under it --
+-- and the next row down then read as starting in two different places.
+-- Centring the shorter slot puts its box level with the slider's bar and
+-- value box, which is the line the eye actually compares. Done after the
+-- kit's pass and only on a two-track band, so no other group moves.
+local function CentreShortSlots(group)
+    local rows = {}
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        if w and w:IsShown() and not rawget(w, "fullRow") then
+            local _, _, _, _, y = w:GetPoint(1)
+            if y then
+                local r = rows[y]
+                if not r then r = { h = 0 }; rows[y] = r end
+                r[#r + 1] = entry
+                if (entry.height or 0) > r.h then r.h = entry.height or 0 end
+            end
+        end
+    end
+    for y, r in pairs(rows) do
+        if #r > 1 then
+            for _, entry in ipairs(r) do
+                local dy = math.floor((r.h - (entry.height or 0)) / 2)
+                if dy > 0 then
+                    local w = entry.widget
+                    local p, rel, rp, x = w:GetPoint(1)
+                    w:ClearAllPoints()
+                    w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
+                end
+            end
+        end
+    end
+end
+
+-- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
+-- folds to one column and back, and a resize-grip drag widens or narrows the
+-- card, without the page being rebuilt -- a rebuild would retire the whole
+-- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
+-- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
+-- only the NUMBER is chosen here, off the band's live width, right before
+-- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
+-- or more, one below it.
+--
+-- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
+-- measured against the Debuff Bar's captions; the Global Settings page has
+-- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
+-- caption ran under the checkbox beside it. A control that knows its one-line
+-- width says so (NaturalWidth), and a card holding one too wide for half of
+-- it stays one track. Hidden rows count too, so toggling one never flips the
+-- card's shape.
+local function WidestPairedRow(group)
+    local widest = 0
+    for _, entry in ipairs(group.groupChildren or {}) do
+        local w = entry.widget
+        local natural = w and rawget(w, "NaturalWidth")
+        if natural and not rawget(w, "fullRow") then
+            local n = natural(w) or 0
+            if n > widest then widest = n end
+        end
+    end
+    return widest
+end
+
+local function WireTwoTrack(band)
+    band.dfTwoTrack = true
+    local layout = band.LayoutChildren
+    local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
+    band.LayoutChildren = function(self)
+        local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
+        local fits = inner >= SECTION_TWO_TRACK_MIN
+            and (inner - gap) / 2 >= WidestPairedRow(self)
+        self.innerColumns = fits and 2 or nil
+        local h = layout(self)
+        if self.innerColumns then CentreShortSlots(self) end
+        return h
+    end
+end
+
+-- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
+-- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
+-- DFFontHighlightSmall in the SAME colour, and one step of size was all that
+-- told the two apart. So on an opted-in band the caption takes the caption
+-- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
+-- value it labels (the slider's number, the dropdown's choice, the swatch)
+-- keeps its full brightness.
+-- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
+-- in it too the card read as greyed out while every control in it was on.
+--
+-- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
+-- repaints its caption in SetEnabled -- text when on, textDim when off -- on
+-- every state pass, so a one-off paint would be undone the first time the
+-- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
+-- and the "off" colour passes through as it is. Any other colour (an override
+-- marker's) passes straight through. No factory changes, and a caption on any
+-- other page is never touched.
+-- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
+-- whole widget to 0.4, so a second fade on the caption stacked differently per
+-- control and greyed some settings far more than their neighbours.
+--
+-- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
+-- repaint that passed the nil along would keep whatever alpha the caption had.
+--
+-- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
+-- one.
+local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
+local function QuietLabel(fs)
+    if not fs or rawget(fs, "_dfQuiet") then return end
+    fs._dfQuiet = true
+    local set = fs.SetTextColor
+    fs.SetTextColor = function(self, r, g, b, a)
+        if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
+            return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
+        end
+        return set(self, r, g, b, a or 1)
+    end
+    fs:SetTextColor(fs:GetTextColor())
+end
+
+-- A control's caption: the field the kit's slider and dropdown publish, else
+-- the first string the factory created (the texture and font dropdowns build
+-- theirs first and publish nothing), and on a colour picker the first string
+-- on its button, which is where that factory draws it.
+local function firstString(frame)
+    if not frame or not frame.GetRegions then return nil end
+    for _, r in ipairs({ frame:GetRegions() }) do
+        if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
+    end
+    return nil
+end
+local function CaptionOf(w)
+    local fs = rawget(w, "label")
+    if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
+    if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
+        return firstString((w:GetChildren()))
+    end
+    return firstString(w)
+end
+local function QuietLabels(band)
+    for _, entry in ipairs(band.groupChildren or {}) do
+        local w = entry.widget
+        if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
+            QuietLabel(CaptionOf(w))
+        end
+    end
+end
+
+-- Published: any surface that stacks its own card bodies (the Aura Designer's
+-- indicator cards) flows them the same way a page's cards do.
+GUI.WireTwoTrack  = WireTwoTrack
+GUI.StampFullRows = StampFullRows
+GUI.QuietLabels   = QuietLabels
+
+-- ============================================================
 -- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
 -- ------------------------------------------------------------
 -- Everything a settings page needs to build its card sections. This is the
@@ -4483,14 +4731,9 @@ GUI.SectionKindByKey = {
 -- one of the load-bearing notes rather than the code under it. The essays below
 -- are the only place each piece is explained.
 --
--- USAGE, at the top of a BuildPage builder and unconditionally:
+-- USAGE, at the top of a BuildPage builder:
 --
---     local classicLayout = DF:IsClassicSettingsLayout()
 --     local tools = GUI:CreatePopoutPageTools(self)
---
--- `tools` is nil in the classic layout, which is what makes the classic branch
--- of every converted group a plain `if classicLayout then` arm building the box
--- it always built.
 --
 -- WHAT COMES BACK (all closing over this page's own state -- its mounted panes
 -- and its holders -- so two pages built in one session cannot reflow each
@@ -4515,23 +4758,14 @@ function GUI:CreatePopoutPageTools(page)
 
     -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
     -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
-    -- the classic-layout flip, and the settings search registry, which is built
+    -- and the settings search registry, which is built
     -- by re-running every page's builder -- and an open popout from the PREVIOUS
     -- build is showing widgets wired to the db table THAT build captured. After
     -- a mode switch that table is the other mode's, so a slider dragged in a
     -- stale panel writes live settings into the wrong mode. Guarded rather than
     -- called bare, so an older embedded copy of the pack without the verb cannot
     -- break the page.
-    --
-    -- ☠ AND IT IS ABOVE THE CLASSIC BAIL. The flip TO classic is itself a
-    -- rebuild, and it is the one rebuild that can happen with a panel standing
-    -- open. Left below the early return, the helper would hand the classic page
-    -- back with an orphan panel still floating beside it. Classic has nothing
-    -- open otherwise, so on every other classic build this is a no-op over an
-    -- empty registry.
     if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
-
-    if DF:IsClassicSettingsLayout() then return nil end
 
     -- Retire the previous build's holders. They are deliberately NOT in
     -- page.children -- anything in that list is laid out into one of the page's
@@ -4634,7 +4868,7 @@ function GUI:CreatePopoutPageTools(page)
 
             -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE, because the widget
             -- factories reach for it by name. Every one of them ends a write with
-            -- `if parent.RefreshStates then parent:RefreshStates() end`; classic's
+            -- `if parent.RefreshStates then parent:RefreshStates() end`; the page's
             -- scroll child carries that forwarder (Panel.lua), a bare holder does
             -- not, so the guard would read nil and silently do NOTHING -- every
             -- `disableOn` inside a pane stale until the panel was re-opened.
@@ -4898,181 +5132,6 @@ function GUI:CreatePopoutPageTools(page)
     --   collapsed    the card starts SHUT on a first run (a page of many cards
     --                that reads best as a list of headers -- Icons)
 
-    -- ☠ THE NARROWEST A SECOND TRACK MAY BE, and it is measured off the controls,
-    -- not chosen. Every factory in the kit was laid out against a 260 column; at
-    -- 200 a slider still has a ~140px bar beside its 50px value box, a dropdown's
-    -- longest word on these pages ("Default (Slot Order)") still fits its opener,
-    -- and the longest checkbox caption on the Debuff Bar ("Hide Duration on
-    -- Permanent Auras") still sits on one line. Below it they start to truncate.
-    -- Two tracks and the kit's own inner gutter: 2 x 160 + 10.
-    local SECTION_TWO_TRACK_MIN = 2 * 160 + (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
-    -- Published for the resize readout (Panel.lua), which predicts the card's
-    -- track count mid-drag, before any layout pass has run.
-    GUI.SectionTwoTrackMin = SECTION_TWO_TRACK_MIN
-
-    -- ⚠ ONLY BOUND CONTROLS SHARE A ROW. `refreshValue` is the group-wide value
-    -- sweep's one name, and every db-bound factory carries it (slider, dropdown
-    -- and its texture/font/outline variants, checkbox, colour picker); prose,
-    -- notes, banners, cross-links, buttons and the growth control do not. Those
-    -- take a row of their own, or a wrapping blurb lands beside the control
-    -- above it and a 155px growth block squeezes into half a card.
-    local function StampFullRows(band)
-        for _, entry in ipairs(band.groupChildren or {}) do
-            local w = entry.widget
-            if w and rawget(w, "refreshValue") == nil and rawget(w, "fullRow") == nil then
-                w.fullRow = true
-            end
-        end
-    end
-
-    -- ☠ UNEVEN ROWS, CENTRED. The kit's grid makes a row as tall as its tallest
-    -- slot and pins every slot to the row's TOP, so a 30px checkbox beside a
-    -- 55px slider floated on the slider's label line with a hole under it --
-    -- and the next row down then read as starting in two different places.
-    -- Centring the shorter slot puts its box level with the slider's bar and
-    -- value box, which is the line the eye actually compares. Done after the
-    -- kit's pass and only on a two-track band, so no other group moves.
-    local function CentreShortSlots(group)
-        local rows = {}
-        for _, entry in ipairs(group.groupChildren or {}) do
-            local w = entry.widget
-            if w and w:IsShown() and not rawget(w, "fullRow") then
-                local _, _, _, _, y = w:GetPoint(1)
-                if y then
-                    local r = rows[y]
-                    if not r then r = { h = 0 }; rows[y] = r end
-                    r[#r + 1] = entry
-                    if (entry.height or 0) > r.h then r.h = entry.height or 0 end
-                end
-            end
-        end
-        for y, r in pairs(rows) do
-            if #r > 1 then
-                for _, entry in ipairs(r) do
-                    local dy = math.floor((r.h - (entry.height or 0)) / 2)
-                    if dy > 0 then
-                        local w = entry.widget
-                        local p, rel, rp, x = w:GetPoint(1)
-                        w:ClearAllPoints()
-                        w:SetPoint(p, rel, rp, x, SnapLen(w, y - dy) or (y - dy))
-                    end
-                end
-            end
-        end
-    end
-
-    -- ☠ THE TRACK COUNT IS DECIDED ON EVERY LAYOUT PASS, NOT AT BUILD. The page
-    -- folds to one column and back, and a resize-grip drag widens or narrows the
-    -- card, without the page being rebuilt -- a rebuild would retire the whole
-    -- page (Panel.lua's ONE RETAINED BUILD PER MODE). So the band keeps the
-    -- kit's own multi-track grid (opts.innerColumns, DandersUI Sections) and
-    -- only the NUMBER is chosen here, off the band's live width, right before
-    -- the kit lays it out: two tracks at SECTION_TWO_TRACK_MIN of content width
-    -- or more, one below it.
-    --
-    -- ☠ ...AND ONLY WHEN EVERY CAPTION FITS ITS TRACK. SECTION_TWO_TRACK_MIN was
-    -- measured against the Debuff Bar's captions; the Global Settings page has
-    -- longer ones ("Disable Blizzard Party Frames"), and at the minimum that
-    -- caption ran under the checkbox beside it. A control that knows its one-line
-    -- width says so (NaturalWidth), and a card holding one too wide for half of
-    -- it stays one track. Hidden rows count too, so toggling one never flips the
-    -- card's shape.
-    local function WidestPairedRow(group)
-        local widest = 0
-        for _, entry in ipairs(group.groupChildren or {}) do
-            local w = entry.widget
-            local natural = w and rawget(w, "NaturalWidth")
-            if natural and not rawget(w, "fullRow") then
-                local n = natural(w) or 0
-                if n > widest then widest = n end
-            end
-        end
-        return widest
-    end
-
-    local function WireTwoTrack(band)
-        band.dfTwoTrack = true
-        local layout = band.LayoutChildren
-        local gap = GUI.SettingsBox and GUI.SettingsBox.innerGap or 10
-        band.LayoutChildren = function(self)
-            local inner = (self:GetWidth() or 0) - 2 * (self.padding or 0)
-            local fits = inner >= SECTION_TWO_TRACK_MIN
-                and (inner - gap) / 2 >= WidestPairedRow(self)
-            self.innerColumns = fits and 2 or nil
-            local h = layout(self)
-            if self.innerColumns then CentreShortSlots(self) end
-            return h
-        end
-    end
-
-    -- ☠ A SETTING'S CAPTION MUST NOT READ AS A HEADING. Inside a card the title
-    -- is DFFontNormal in the text colour; a slider's or dropdown's own caption is
-    -- DFFontHighlightSmall in the SAME colour, and one step of size was all that
-    -- told the two apart. So on an opted-in band the caption takes the caption
-    -- tone instead -- GUI.Colors.textCaption, a step under the text colour. The
-    -- value it labels (the slider's number, the dropdown's choice, the swatch)
-    -- keeps its full brightness.
-    -- ⚠ NOT textDim. That is what a DISABLED caption wears, and with live captions
-    -- in it too the card read as greyed out while every control in it was on.
-    --
-    -- ⚠ THE CAPTION'S OWN SetTextColor IS WRAPPED, not painted once. Every factory
-    -- repaints its caption in SetEnabled -- text when on, textDim when off -- on
-    -- every state pass, so a one-off paint would be undone the first time the
-    -- page refreshed. Mapped instead: the "on" colour becomes the caption tone,
-    -- and the "off" colour passes through as it is. Any other colour (an override
-    -- marker's) passes straight through. No factory changes, and a caption on any
-    -- other page is never touched.
-    -- ⚠ "Off" gets NO extra fade here. Every factory's SetEnabled already fades the
-    -- whole widget to 0.4, so a second fade on the caption stacked differently per
-    -- control and greyed some settings far more than their neighbours.
-    --
-    -- ☠ AND THE ALPHA IS SAID OUT LOUD. The factories repaint with no alpha; a
-    -- repaint that passed the nil along would keep whatever alpha the caption had.
-    --
-    -- ⚠ CHECKBOXES ARE LEFT ALONE: their caption IS the control, not a label over
-    -- one.
-    local function near(a, b) return a and b and math.abs(a - b) < 0.01 end
-    local function QuietLabel(fs)
-        if not fs or rawget(fs, "_dfQuiet") then return end
-        fs._dfQuiet = true
-        local set = fs.SetTextColor
-        fs.SetTextColor = function(self, r, g, b, a)
-            if near(r, C_TEXT.r) and near(g, C_TEXT.g) and near(b, C_TEXT.b) then
-                return set(self, C_TEXT_CAPTION.r, C_TEXT_CAPTION.g, C_TEXT_CAPTION.b, a or 1)
-            end
-            return set(self, r, g, b, a or 1)
-        end
-        fs:SetTextColor(fs:GetTextColor())
-    end
-
-    -- A control's caption: the field the kit's slider and dropdown publish, else
-    -- the first string the factory created (the texture and font dropdowns build
-    -- theirs first and publish nothing), and on a colour picker the first string
-    -- on its button, which is where that factory draws it.
-    local function firstString(frame)
-        if not frame or not frame.GetRegions then return nil end
-        for _, r in ipairs({ frame:GetRegions() }) do
-            if r.GetObjectType and r:GetObjectType() == "FontString" then return r end
-        end
-        return nil
-    end
-    local function CaptionOf(w)
-        local fs = rawget(w, "label")
-        if fs and fs.GetObjectType and fs:GetObjectType() == "FontString" then return fs end
-        if rawget(w, "rowKind") == "colorpicker" and w.GetChildren then
-            return firstString((w:GetChildren()))
-        end
-        return firstString(w)
-    end
-    local function QuietLabels(band)
-        for _, entry in ipairs(band.groupChildren or {}) do
-            local w = entry.widget
-            if w and rawget(w, "refreshValue") ~= nil and rawget(w, "rowKind") ~= "checkbox" then
-                QuietLabel(CaptionOf(w))
-            end
-        end
-    end
-
     local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
         local pin
         if builder then
@@ -5147,7 +5206,7 @@ function GUI:CreatePopoutPageTools(page)
     end
 
     -- CARD GROUPS. A page whose cards are declared in an order that interleaves
-    -- its groups registers each Modern card's mount with DeferCard, then
+    -- its groups registers each card's mount with DeferCard, then
     -- MountCardGroups adds them group by group, each under its header. The
     -- page's Add order is what a one-column window stacks, so this is what
     -- keeps a group's cards together there. A registered card in no group

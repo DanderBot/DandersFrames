@@ -3,10 +3,9 @@ local NS = ...
 -- ============================================================
 -- PERSONAL TARGETED PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Indicators > Personal Targeted: NINE classic boxes. In Modern they are the
--- Debuff Bar's collapsible CARDS -- two per row inside a card wide enough, dim
--- captions, the value summary in a shut card's corner, Expand All / Collapse
--- All at the top -- in the columns and the order the old bands had:
+-- Indicators > Personal Targeted: the Debuff Bar's collapsible CARDS -- two
+-- per row inside a card wide enough, dim captions, the value summary in a shut
+-- card's corner, Expand All / Collapse All at the top:
 --
 --   column 1   "Content"     Settings (holds the PAGE gate in its body),
 --                            Content Types.
@@ -16,19 +15,15 @@ local NS = ...
 --   column 1   "Effects"     Highlight, Highlight Shadow, Highlight
 --                            Animation, Interrupted Visual, X Mark.
 --
--- ☠ TWO THINGS MOVED. Growth Direction was a lone control row; it now sits at
--- the foot of Size. Highlight Settings was one panel of twenty-eight controls;
--- Modern splits it into three cards (ring, shadow, animation) built by three
--- builders from the same shared helpers, while classic still mounts the one
--- original builder into its one box.
+-- ☠ Growth Direction sits at the foot of Size. The highlight is three cards
+-- (ring, shadow, animation) built by three builders from the shared helpers.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each original builder (the PRE-CHANGE one) -- the
---     evidence CLASSIC RENDERS AS IT DID -- and classic's Add order.
---   ✓ that the three split builders together ask the helpers for exactly what
---     the original asked for, on the same keys, with the same gate.
+--   ✓ the widget CENSUS of each builder.
+--   ✓ that the three highlight builders ask the helpers for the ring, the
+--     shadow and the animation on the same keys, with the same gate.
 --   ✓ each card's column, stable collapse key, summary, grey gate, header tick
 --     and pin; one checkbox per setting; the moved Growth Direction.
 --   ✗ nothing about how any of it LOOKS or behaves in the client.
@@ -129,8 +124,6 @@ end
 -- ============================================================
 print("-- Personal Targeted page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -174,12 +167,11 @@ do
         eq(n, 1, "vocab: " .. g .. " is declared exactly once")
     end
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "rebuild: the page never rebuilds itself, in either layout")
+          "rebuild: the page never rebuilds itself")
 end
 
 -- ============================================================
 -- 2. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
 -- ============================================================
 local PT_SETTINGS = {
     { "label",    "Shows incoming targeted spells on YOU in the center of your screen.", "(none)", 30 },
@@ -218,12 +210,7 @@ local PT_DURATION = {
     { "slider",          "Offset Y",            "personalTargetedSpellDurationY",       55 },
     { "colorpicker",     "Color",               "personalTargetedSpellDurationColor",   35 },
 }
--- Classic's ONE Highlight Settings box, untouched.
-local PT_HIGHLIGHT = {
-    { "checkbox",       "Highlight Important Spells", "personalTargetedSpellHighlightImportant", 30 },
-    { "bordercontrols", "(none)",                     "personalTargetedSpellImportant",          nil },
-}
--- ...and Modern's three cards.
+-- The highlight's three cards.
 local PT_HL_RING = {
     { "checkbox",       "Highlight Important Spells", "personalTargetedSpellHighlightImportant", 30 },
     { "bordercontrols", "(none)",                     "personalTargetedSpellImportant",          nil },
@@ -246,24 +233,23 @@ local PT_XMARK = {
     { "slider",      "X Size",      "personalTargetedSpellInterruptedXSize",  55 },
 }
 
--- label, stable collapse key, card column; `box`/`classicCol` = the classic box
--- the SAME builder fills (nil for the two split-off cards); `dim` = the gate its
+-- label, stable collapse key, card column; `dim` = the gate its
 -- header greys on; `pin` = passes its builder; `tick` = its on/off moved into
 -- the header, with the gate the tick itself greys on.
 local CARDS = {
-    { label = "Settings", key = "personaltargeted_settings", col = 1, box = "Settings", classicCol = 1,
+    { label = "Settings", key = "personaltargeted_settings", col = 1,
       builder = "BuildPersonalSettingsGroup", golden = PT_SETTINGS, summary = "PersonalSettingsSummary" },
-    { label = "Content Types", key = "personaltargeted_content", col = 1, box = "Content Types", classicCol = 2,
+    { label = "Content Types", key = "personaltargeted_content", col = 1,
       builder = "BuildPersonalContentGroup", golden = PT_CONTENT, summary = "PersonalContentSummary",
       dim = "PersonalOffRow" },
-    { label = "Size", key = "personaltargeted_size", col = 2, box = "Size", classicCol = 1,
+    { label = "Size", key = "personaltargeted_size", col = 2,
       builder = "BuildPersonalSizeGroup", golden = PT_SIZE, summary = "PersonalSizeSummary",
       dim = "PersonalOffRow", pin = true, cardBuilder = "BuildPersonalSizeCardGroup" },
-    { label = "Border", key = "personaltargeted_border", col = 2, box = "Border", classicCol = 2,
+    { label = "Border", key = "personaltargeted_border", col = 2,
       builder = "BuildPersonalBorderGroup", golden = PT_BORDER, summary = "PersonalBorderSummary",
       dim = "PersonalOffRow", pin = true, composite = "noShowToggle",
       tick = { key = "personalTargetedSpellShowBorder", name = "Show Border", gate = "PersonalOffRow" } },
-    { label = "Duration Text", key = "personaltargeted_duration", col = 2, box = "Duration Text", classicCol = 2,
+    { label = "Duration Text", key = "personaltargeted_duration", col = 2,
       builder = "BuildPersonalDurationGroup", golden = PT_DURATION, summary = "PersonalDurationSummary",
       dim = "PersonalOffRow", pin = true },
     { label = "Highlight", key = "personaltargeted_highlight", col = 1,
@@ -277,46 +263,27 @@ local CARDS = {
     { label = "Highlight Animation", key = "personaltargeted_highlightanim", col = 1, band = "aband",
       builder = "BuildPersonalHighlightAnimationGroup", golden = PT_HL_ANIM, summary = "PersonalHighlightAnimationSummary",
       dim = "HighlightOffRow", pin = true, split = true },
-    { label = "Interrupted Visual", key = "personaltargeted_interrupt", col = 1, box = "Interrupt Settings", classicCol = 2,
+    { label = "Interrupted Visual", key = "personaltargeted_interrupt", col = 1,
       builder = "BuildPersonalInterruptGroup", golden = PT_INTERRUPT, summary = "PersonalInterruptSummary",
       dim = "PersonalOffRow", pin = true,
       tick = { key = "personalTargetedSpellShowInterrupted", name = "Show Interrupted Visual", gate = "PersonalOffRow" } },
-    { label = "X Mark", key = "personaltargeted_xmark", col = 1, box = "X Mark", classicCol = 2,
+    { label = "X Mark", key = "personaltargeted_xmark", col = 1,
       builder = "BuildPersonalXMarkGroup", golden = PT_XMARK, summary = "PersonalXMarkSummary",
       dim = "InterruptOffRow", pin = true,
       tick = { key = "personalTargetedSpellInterruptedShowX", name = "Show X Mark", gate = "InterruptOffRow" } },
 }
-
-local function classicBox(header)
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. header .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then return name end
-    end
-end
 
 for _, g in ipairs(CARDS) do
     print("-- Personal Targeted page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
     if g.split then
-        -- Declared once and mounted once, by its card -- classic never sees it.
-        -- (The pin is handed the builder by name, not called.)
+        -- Declared once and mounted once, by its card. (The pin is handed the
+        -- builder by name, not called.)
+        local calls = 0
+        for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
         eq(calls, 2, g.label .. ": declared once, mounted by its card only")
-    else
-        eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-    end
-
-    if g.box then
-        local box = classicBox(g.box)
-        check(box ~= nil, g.label .. ": the classic box keeps its own header")
-        if box then
-            check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-                  g.label .. ": ...which still goes to column " .. g.classicCol)
-        end
     end
 
     local block, call = sectionBlock(g.label)
@@ -327,7 +294,7 @@ for _, g in ipairs(CARDS) do
     else
         check(call:find("OffRow", 1, true) == nil, g.label .. ": never greys -- it holds the page's switch")
     end
-    -- `cardBuilder`: the card mounts a wrapper round the classic builder (Size +
+    -- `cardBuilder`: the card mounts a wrapper round the builder (Size +
     -- Growth Direction), and the pin is handed that SAME wrapper.
     local cardBuilder = g.cardBuilder or g.builder
     eq(call:find(cardBuilder, 1, true) ~= nil, g.pin == true,
@@ -359,38 +326,26 @@ for _, g in ipairs(CARDS) do
     local mount = cardBuilder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
--- 3. HIGHLIGHT SETTINGS: CLASSIC'S ONE BOX, MODERN'S THREE CARDS
+-- 3. HIGHLIGHT SETTINGS: THREE CARDS
 -- ============================================================
-print("-- Personal Targeted page: Highlight Settings, split")
+print("-- Personal Targeted page: Highlight Settings, as three cards")
 do
-    -- Classic still mounts the ORIGINAL builder, census unchanged, into its box.
-    local orig = builderBody("BuildPersonalHighlightGroup")
-    checkCensus(census(orig), PT_HIGHLIGHT, "highlight (classic)")
-    local calls = 0
-    for _ in PAGE:gmatch("BuildPersonalHighlightGroup%(") do calls = calls + 1 end
-    eq(calls, 2, "split: the original builder is declared once and mounted by classic only")
-    local box = classicBox("Highlight Settings")
-    check(box ~= nil and PAGE:find("Add(" .. box .. ", nil, 1)", 1, true) ~= nil,
-          "split: ...into the Highlight Settings box, still in column 1")
+    check(PAGE:find("BuildPersonalHighlightGroup", 1, true) == nil,
+          "split: no single-box highlight builder is left")
 
-    -- ☠ THE THREE ASK THE HELPERS FOR EXACTLY WHAT THE ONE DID.
-    local flatOrig = orig:gsub("%s+", " ")
-    check(flatOrig:find("include = { alpha = true, inset = true, blendMode = true, gradient = true, shadow = true, animate = true }", 1, true) ~= nil,
-          "split: the original asks for the ring, the shadow and the animation")
     local ring = builderBody("BuildPersonalHighlightRingGroup"):gsub("%s+", " ")
     check(ring:find('GUI:CreateBorderControls(group, db, "personalTargetedSpellImportant", {', 1, true) ~= nil
       and ring:find("include = { alpha = true, inset = true, blendMode = true, gradient = true },", 1, true) ~= nil,
-          "split: the ring card asks for the same prefix and everything but shadow and animation")
+          "split: the ring card asks for the prefix and everything but shadow and animation")
     for _, same in ipairs({ "noShowToggle = true,", "sizeMin = 0, sizeMax = 8, sizeStep = 1,",
                             "disableWhen = HidePersonalHighlightOptions,", "fullUpdate = PersonalTargetedUpdate,",
                             "lightUpdate = PersonalTargetedUpdate,", "lightColors = PersonalTargetedUpdate," }) do
-        check(flatOrig:find(same, 1, true) ~= nil and ring:find(same, 1, true) ~= nil,
-              "split: ...with the same " .. same)
+        check(ring:find(same, 1, true) ~= nil, "split: ...with " .. same)
     end
     local shadow = builderBody("BuildPersonalHighlightShadowGroup"):gsub("%s+", " ")
     check(shadow:find('GUI:CreateBorderShadowControls(tools2.group, db, "personalTargetedSpellImportant", {', 1, true) ~= nil
@@ -454,7 +409,7 @@ do
     check(sizeCard:find('tools2.group:AddWidget(GUI:CreateDropdown(tools2.parent, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)', 1, true) ~= nil,
           "growth: Growth Direction sits at the foot of the Size card builder -- it arranges the icons")
     check(sizeCard:find("ptsGrowth.disableOn = HidePersonalOptions", 1, true) ~= nil,
-          "growth: ...with the gate classic's box gives it")
+          "growth: ...greyed with the page gate")
     local g1 = sizeCard:find("BuildPersonalSizeGroup(tools2)", 1, true)
     local g2 = sizeCard:find('L["Growth Direction"]', 1, true)
     check(g1 and g2 and g1 < g2, "growth: ...after the Size builder's own controls")
@@ -465,10 +420,7 @@ do
     check(size:find("band:AddWidget", 1, true) == nil,
           "growth: nothing is added to the Size band outside the builder")
     check(builderBody("BuildPersonalSizeGroup"):find("Growth Direction", 1, true) == nil,
-          "growth: classic's Size builder is untouched -- its box never gains the dropdown")
-    check(PAGE:find('GUI:CreateHeader(self.child, L["Growth"])', 1, true) ~= nil
-      and PAGE:find("Add(growthGroup, nil, 1)", 1, true) ~= nil,
-          "growth: classic still builds its own Growth box in column 1")
+          "growth: the plain Size builder does not build the dropdown -- the card builder adds it")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -478,7 +430,7 @@ do
     for _, g in ipairs(CARDS) do
         if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
     end
-    eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's")
     check((sectionBlock("Settings")):find("personalTargetedSpellEnabled", 1, true) == nil,
           "ticks: Enable Personal Targeted Spells is not in Settings' header")
     check(builderBody("BuildPersonalSettingsGroup"):find('L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled"', 1, true) ~= nil,
@@ -493,18 +445,8 @@ do
     check(stripAt and contentAt and stripAt < contentAt,
           "bulk: ...above the first category header")
 
-    -- ---- nine classic boxes, in the order they always had ---------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 9, "classic: nine bare 280 boxes, and they are the classic branch's own")
-    local prev = 0
-    for _, a in ipairs({ "settingsGroup, nil, 1", "contentGroup, nil, 2", "sizeGroup, nil, 1",
-                         "growthGroup, nil, 1", "borderGroup, nil, 2", "durationGroup, nil, 2",
-                         "highlightGroup, nil, 1", "interruptGroup, nil, 2", "xMarkGroup, nil, 2" }) do
-        local at = PAGE:find("Add(" .. a .. ")", 1, true)
-        check(at ~= nil and at > prev, "classic: still calls Add(" .. a .. ") in sequence")
-        prev = at or prev
-    end
+    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280)", 1, true) == nil,
+          "page: no fixed-width box is left on the page")
 
     check(PAGE:find('CreateCopyButton(self.child, {"personalTargeted"}, L["Personal Targeted"], "indicators_personal_targeted")', 1, true) ~= nil,
           "page: the copy button keeps the prefix it owns")

@@ -9,8 +9,10 @@ local addonName, DF = ...
 -- own window maths, so this is attach-and-inherit exactly like SetIcon: we build the art,
 -- the game decides when it is visible, and nothing here reads an aura.
 --
--- WHAT THE WINDOW IS. Blizzard computes it (Blizzard_CustomAuraButton.lua:612):
---     carriedOverToNewCast = GetRefreshExtendedDuration(u,id) - GetAuraBaseDuration(u,id)
+-- WHAT THE WINDOW IS. Blizzard computes it (AuraContainerUtil.GetPandemicWindow):
+--     carriedOverToNewCast = GetRefreshCarryOverDuration(u,id)      -- 12.1.5 PTR 3 (69952)
+--       (before 69952: GetRefreshExtendedDuration(u,id) - GetAuraBaseDuration(u,id), which
+--        mis-timed auras pushed past the refresh cap, e.g. Lifebloom under Tranquility)
 --     window exists when carriedOverToNewCast > 0
 --     start = expirationTime - carriedOverToNewCast ;  end = expirationTime
 -- i.e. it lights exactly while a refresh would clip NOTHING. In practice that is the last
@@ -101,6 +103,202 @@ function Pandemic:IsSupported()
     return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
 end
 
+-- ============================================================
+-- SPELL-LEVEL CAPABILITY — does THIS aura have a refresh window at all?
+-- ============================================================
+-- ⚠ A DIFFERENT QUESTION FROM IsSupported ABOVE, and the two must not be merged. That one
+-- asks whether the CLIENT can drive a pandemic region; this asks whether a particular
+-- SPELL ever has a window to drive it with. A user on a supported client configuring
+-- Prayer of Mending passes the first and fails the second, and gets a panel full of live
+-- controls attached to a cue that can never light — which is exactly the report this
+-- exists to stop, and an hour of my own debugging before that.
+--
+-- Measurements live in Features/PandemicWindows.lua; read that file for why the data
+-- cannot be an API call and what the sample honestly covers.
+
+-- The LEARNED store — what this install has measured for itself, account-wide. Seeded
+-- empty; the sampler below fills it as you play. Not per-profile: a spell either has the
+-- mechanic or it does not, and that answer has nothing to do with which frames profile is
+-- loaded.
+-- ⚠ Keyed to the game build: a patch can give or take a spell's refresh mechanic, so a new
+-- interface version starts the store over rather than trusting what an old one measured.
+local function learnedStore(create)
+    local db = _G.DandersFramesDB_v2
+    if not db then return nil end
+    local iface = select(4, GetBuildInfo())
+    local store = db.pandemicWindows
+    if store and store._iface ~= iface then
+        store = nil
+        db.pandemicWindows = nil
+    end
+    if not store and create then
+        store = { _iface = iface }
+        db.pandemicWindows = store
+    end
+    return store
+end
+
+-- true / false / nil. ☠ nil is UNKNOWN and is NOT false — the shipped table is a
+-- proof-of-concept sample, not a survey, so "we have never seen this spell" must behave
+-- like "no opinion".
+--
+-- ★ RESOLUTION ORDER, AND IT IS NOT "LOCAL WINS". Any YES beats any NO, from either
+-- source; only then does a NO count. Greying a feature that actually works is the one
+-- failure direction that hurts a user — they cannot tell it from intended behaviour — so
+-- every tie resolves toward the panel staying live:
+--   learned yes -> yes      (a stale shipped NO self-heals the moment we see it work)
+--   shipped yes -> yes      (a local NO can never grey something the shipped data vouches for)
+--   learned no  -> no
+--   shipped no  -> no
+--   otherwise   -> unknown
+-- ⚠ Note what is deliberately absent: local SILENCE never adds a no. A spell nobody has
+-- cast this week must not start greying itself.
+function Pandemic:SpellWindowState(id)
+    id = tonumber(id)
+    if not id then return nil end
+    local seeded = DF.PandemicWindows and DF.PandemicWindows[id]
+    local store = learnedStore(false)
+    local learned = store and store[id]
+    if learned == true or seeded == true then return true end
+    if learned == false or seeded == false then return false end
+    return nil
+end
+
+-- ============================================================
+-- THE SAMPLER — the table stops being something anyone maintains
+-- ============================================================
+-- ☠ WHY THIS CAN ONLY EVER BE OPPORTUNISTIC. GetRefreshExtendedDuration is
+-- `RequiresValidUnitAuraInstance`: it needs a unit and a live auraInstanceID. There is no
+-- spell-level query anywhere in C_Spell, C_SpellBook or C_UnitAuras (enumerated on 12.1.5,
+-- not guessed), so we cannot ask about a spell that is not on anybody right now. We can
+-- only answer for what we happen to see, and remember it.
+--
+-- ★ IT RIDES MACHINERY THAT ALREADY EXISTS. The caller is AuraContainer's 30s sweep, which
+-- is already out-of-combat gated and already enumerates the player plus a rotating group
+-- member for the park sentinel. That timing is what makes this safe rather than merely
+-- convenient: GetRefreshExtendedDuration is `SecretWhenUnitAuraRestricted`, so OUT of
+-- combat it returns a plain number we can test, and the whole class of secret-value traps
+-- never arises. No new event path, no UNIT_AURA reader, no ForEachAura.
+--
+-- ☠ nil FROM THE EXTENDED CALL IS THE DEFINITIVE "NO MECHANIC". A refreshable aura always
+-- carries over something (capped at 30% of base, so > 0 even on a fresh cast); the call
+-- returns nil when the spell has no refresh behaviour at all. That is the same signal the
+-- shipped table's NO_EXT rows were collected from, so both sources mean the same thing.
+-- ⚠ Anything ambiguous is NOT recorded. A missing base duration or a non-positive
+-- carry-over writes nothing rather than guessing — silence is always safe here, a wrong NO
+-- is not.
+local function sampleUnit(unit)
+    local C = C_UnitAuras
+    local okIDs, ids = pcall(C.GetUnitAuraInstanceIDs, unit, "HELPFUL")
+    if not okIDs or type(ids) ~= "table" then return 0 end
+
+    local store = learnedStore(true)
+    if not store then return 0 end
+    local learnedCount = 0
+
+    for i = 1, #ids do
+        local instID = ids[i]
+        local okD, data = pcall(C.GetAuraDataByAuraInstanceID, unit, instID)
+        -- ⚠ issecretvalue FIRST and as its own statement, on every value read out of a
+        -- Blizzard table, before anything truth-tests it. A secret here is not an error, it
+        -- just means this unit is restricted right now — skip and catch it another sweep.
+        local dataSecret = issecretvalue and issecretvalue(data) or false
+        if okD and not dataSecret and type(data) == "table" then
+            local sid = data.spellId
+            local sidSecret = issecretvalue and issecretvalue(sid) or false
+            if not sidSecret and type(sid) == "number" and store[sid] == nil then
+                local okE, ext = pcall(C.GetRefreshExtendedDuration, unit, instID)
+                local extSecret = issecretvalue and issecretvalue(ext) or false
+                if okE and not extSecret then
+                    if ext == nil then
+                        -- ⚠ A NO only from your own cast: whether the call answers for an
+                        -- aura someone else cast is unverified, and a wrong NO greys a
+                        -- working feature. A YES (below) is safe from any caster.
+                        local src = data.sourceUnit
+                        local srcSecret = issecretvalue and issecretvalue(src) or false
+                        if not srcSecret and src == "player" then
+                            store[sid] = false      -- definitive: no refresh mechanic
+                            learnedCount = learnedCount + 1
+                        end
+                    elseif C.GetRefreshCarryOverDuration then
+                        -- ★ 12.1.5 PTR 3 (69952): the game's own carry-over, which is what
+                        -- AuraContainerUtil.GetPandemicWindow now uses. The old derivation
+                        -- below (extended minus base) was wrong for auras that can be pushed
+                        -- past the normal refresh cap -- Blizzard's own example is Lifebloom
+                        -- under Tranquility -- where it came out <= 0.
+                        -- ⚠ ONLY THE YES COMES FROM HERE. A nil or 0 is NOT recorded as a no:
+                        -- the call can fail to derive a duration (its optional spellID
+                        -- argument exists for that), and the definitive no is the nil
+                        -- extended duration above, which is unchanged. Nothing the old
+                        -- formula stored needs re-measuring: its failure mode was
+                        -- "ambiguous, record nothing", never a wrong answer.
+                        local okC, carry = pcall(C.GetRefreshCarryOverDuration, unit, instID)
+                        local carrySecret = issecretvalue and issecretvalue(carry) or false
+                        if okC and not carrySecret and type(carry) == "number" and carry > 0 then
+                            store[sid] = true       -- definitive: carries time over
+                            learnedCount = learnedCount + 1
+                        end
+                        -- else: ambiguous, record nothing
+                    else
+                        -- Pre-69952 clients: the derivation the engine itself used then.
+                        local okB, base = pcall(C.GetAuraBaseDuration, unit, instID)
+                        local baseSecret = issecretvalue and issecretvalue(base) or false
+                        if okB and not baseSecret and type(base) == "number"
+                            and type(ext) == "number" and (ext - base) > 0 then
+                            store[sid] = true       -- definitive: carries time over
+                            learnedCount = learnedCount + 1
+                        end
+                        -- else: ambiguous, record nothing
+                    end
+                end
+            end
+        end
+    end
+    return learnedCount
+end
+
+-- ⚠ ONLY EVER FILLS GAPS. `store[sid] == nil` above means a spell is measured once and then
+-- left alone, so this cannot thrash a value or re-decide something on a bad read. To
+-- re-measure, clear the entry.
+-- ⚠ Callers are expected to be out of combat. This does not assert it, because the secrecy
+-- guards make a restricted call a skip rather than a fault — but the sweep's own gate is
+-- what makes the sampler productive rather than merely harmless.
+function Pandemic:SampleUnits(...)
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs
+        and C_UnitAuras.GetRefreshExtendedDuration and C_UnitAuras.GetAuraBaseDuration
+        and C_UnitAuras.GetAuraDataByAuraInstanceID) then return 0 end
+    local total = 0
+    for i = 1, select("#", ...) do
+        local unit = select(i, ...)
+        if type(unit) == "string" and UnitExists(unit) then
+            total = total + sampleUnit(unit)
+        end
+    end
+    return total
+end
+
+-- ★ THE GATE. True unless EVERY id behind the aura is a measured NO.
+-- Asymmetric on purpose: one YES or one unknown keeps the panel live, so an incomplete
+-- table can never take a working feature away from someone. The only thing that greys a
+-- panel is positive evidence about every id it could match.
+-- ⚠ Accepts both shapes an identity map comes in: a SET ({[774] = true}, which is what
+-- includeSpellIDs and BuildADIdentityFilters produce) and a plain array ({774, 8936}).
+-- ⚠ No ids at all — an unresolved placement, an empty filter — is UNKNOWN, so it allows.
+-- Refusing there would grey the panel for every aura the resolver could not name, which is
+-- a resolution problem wearing a capability problem's clothes.
+function Pandemic:MayHaveWindow(ids)
+    if type(ids) ~= "table" then return true end
+    local sawAny = false
+    for k, v in pairs(ids) do
+        local id = (type(v) == "number") and v or (type(k) == "number" and k or nil)
+        if id then
+            sawAny = true
+            if self:SpellWindowState(id) ~= false then return true end
+        end
+    end
+    return not sawAny
+end
+
 -- Active reveal type, or nil when off. Capability, then the master toggle, then the type.
 -- An UNSET type takes DEFAULT_MODE; a SET but unknown one (a stale or hand-edited profile
 -- value) is off rather than silently substituted.
@@ -115,13 +313,29 @@ end
 
 -- ANIMATION.
 --
--- ☠ WHY NOT DF.Border's ANIMATION SET (Wipe / Ripple / Segment Reveal / Sides / Corners /
--- DF Dash / Proc). Every one of them rides Border.lua's single shared OnUpdate driver,
--- which calls back per frame into tainted Lua and writes SetVertexColor / SetPoint / Hide
--- on the border's pieces. On a container button child that errors on every frame while
--- auras are secret — which is exactly the content this feature exists for. That is why
--- animation is stripped unconditionally from every container border, and it is not
--- something the working flash changes.
+-- ☠☠ THIS SECTION USED TO SAY DF.Border's ANIMATION SET COULD NEVER COME HERE. THAT IS
+-- NO LONGER TRUE, ON BOTH OF ITS PREMISES. It said every effect rides Border.lua's shared
+-- OnUpdate driver (per-frame tainted Lua writing SetVertexColor / SetPoint / Hide on the
+-- border's pieces, refused on a button child once auras are secret), and that animation
+-- is therefore stripped unconditionally from every container border.
+--
+-- ★ WHAT CHANGED, IN ORDER:
+--   1. DF grew DECLARATIVE paths. `border._secretRect` — true exactly when the border is
+--      hosted on a container button — now selects a C-side AnimationGroup build per
+--      effect instead of the tick (Border.lua: "CONTAINER-HOSTED BORDERS TAKE THE
+--      DECLARATIVE PATH"). Animation on container borders is not stripped any more; it is
+--      the shipping `config.adBorderAnim` opt-in on placed indicators, bars, mgroup
+--      members and filter/debuff groups.
+--   2. 12.1.5 added Enter/Active/Leave animation triggers to CustomAuraButton, so a
+--      declarative group can be handed to the ENGINE and played only inside the refresh
+--      window instead of looping from creation.
+--
+-- ⇒ The pandemic border now takes the ordinary DF.Border animation set. (1) is what makes
+-- it legal at all and needs no 12.1.5; (2) is what makes it good, and is applied where the
+-- border is bound — see the pandemic-border registration in Frames/AuraContainer.lua.
+-- ⚠ A declarative builder that finds no usable geometry falls through to the tick, which
+-- on a button child is refused, dropped with ONE warn, and re-armed on the next restyle.
+-- Bounded, and pre-existing behaviour for every other animated container border.
 --
 -- ★ WHAT DOES WORK: a native AnimationGroup, built and :Play()ed ONCE inside
 -- initializeFrame (secure context) and then run entirely C-side — zero Lua per frame, and
@@ -131,10 +345,13 @@ end
 -- holder (in game, 2026-08-05: FLASH pulsed, a Scale-based PULSE and a combined BREATHE
 -- did nothing at all). The holder carries SecretAspect.Shown plus the forbidden aspects
 -- AddPandemicRegion stamps on it, and a scale transform evidently does not survive that
--- where an alpha one does. Not worth pushing further: Blizzard have said pandemic
--- animation is being looked at for 12.1.5, so anything clever built here now is likely to
--- be replaced by something supported. ⚠ Re-test Scale on a later build before assuming it
--- is permanently dead — this is an empirical result, not a documented rule.
+-- where an alpha one does. ⚠ That limit applies to the FLASH's own group on the registered
+-- holder; the border set above animates the border's own regions and is not bound by it.
+-- ⚠ Re-test Scale on a later build before assuming it is permanently dead — this is an
+-- empirical result, not a documented rule. (The "Blizzard are looking at pandemic
+-- animation for 12.1.5, so don't build anything clever" note that used to close this
+-- paragraph has been overtaken: they shipped it, and the flash is now handed over rather
+-- than self-played.)
 --
 -- CREATION-FROZEN, hence part of StructSig: the group's animation and its duration are
 -- baked when it is built, and reaching back in later would be a tainted write to a
@@ -153,16 +370,57 @@ end
 -- things about a pandemic cue are frozen after creation: which WIDGET it is (a DF.Border
 -- inside the holder, or a plain tint texture), the AddPandemicRegion bind, and the flash
 -- animation. Everything else is a plain region write that re-runs each style pass.
+-- The border-animation keys, in BuildSpec's own order (Frames/Border.lua, "Animation:
+-- spec.animation is set only when the consumer picked a non-NONE type"). Kept as a list
+-- rather than hashing the built spec: StructSig runs per indicator per UNIT_AURA and must
+-- not call BuildSpec to answer a signature question.
+-- ☠ Keep in step with BuildSpec. A key it reads and this omits is an edit that silently
+-- does nothing until something else happens to rebuild the slot.
+local ANIM_KEYS = {
+    "BorderAnimationType", "BorderAnimationColor", "BorderAnimationFrequency",
+    "BorderAnimationParticles", "BorderAnimationLength", "BorderAnimationThickness",
+    "BorderAnimationScale", "BorderAnimationInset", "BorderAnimationOffsetX",
+    "BorderAnimationOffsetY", "BorderAnimationMask", "BorderAnimationSidesAxis",
+    "BorderAnimationCornerLength", "BorderAnimationProcStart",
+}
+local animParts = {}
+
+-- ⚠ EMPTY WHEN UNCONFIGURED, not a run of "nil,nil,nil…". An always-populated token would
+-- change this signature for every profile that has never touched a pandemic animation,
+-- forcing a one-off rebuild of every pandemic slot on upgrade for no visible gain. Same
+-- stability contract as the factory's rawBorderAnimStructTok.
+local function animStructTok(cfg, bp)
+    local t = cfg and cfg[bp .. "BorderAnimationType"]
+    if not t or t == "NONE" then return "" end
+    local parts = animParts
+    wipe(parts)
+    for i = 1, #ANIM_KEYS do
+        local v = cfg[bp .. ANIM_KEYS[i]]
+        parts[i] = (type(v) == "table") and colorSig(v) or tostring(v)
+    end
+    return "|A" .. tconcat(parts, ",")
+end
+
 function Pandemic:StructSig(cfg, prefix)
     local mode = self:Mode(cfg, prefix)
     if not mode then return "" end
-    return mode .. ":F" .. tostring(self:Flash(cfg, prefix))
+    -- ☠ THE ANIMATION BELONGS HERE, NOT IN CoSig. A container border's animation groups
+    -- are built once and frozen — reaching back into them later is a tainted write to a
+    -- button child — so an animation edit must hand over a FRESH button. Putting these
+    -- keys in the cosmetic signature instead would hot-apply an edit that provably cannot
+    -- take effect, which is the "the slider does nothing" bug in its purest form.
+    -- TINT mode has no border, so it contributes nothing and its signature is unchanged.
+    local anim = (mode == "BORDER") and animStructTok(cfg, self:BorderPrefix(prefix)) or ""
+    return mode .. ":F" .. tostring(self:Flash(cfg, prefix)) .. anim
 end
 
--- The DF.Border keys whose values must move the COSMETIC signature. Deliberately excludes
--- the Border*Animation* family: animations are stripped unconditionally on container
--- borders (they cannot run on a button child while auras are secret), so hashing them
--- would churn the sig for settings that provably cannot render.
+-- The DF.Border keys whose values must move the COSMETIC signature. Still deliberately
+-- excludes the Border*Animation* family, but ☠ THE REASON HAS CHANGED and the old one was
+-- load-bearing: it used to be "animations are stripped on container borders, so hashing
+-- them would churn the sig for settings that provably cannot render". They render now.
+-- They are excluded here because they are STRUCTURAL — creation-frozen groups that need a
+-- fresh button — so they live in StructSig instead. Excluded from the cosmetic sig either
+-- way; hashed in exactly one place rather than none.
 local BORDER_KEYS = {
     "BorderStyle", "BorderTexture", "BorderSize", "BorderInset",
     "BorderOffsetX", "BorderOffsetY", "BorderBlendMode",
@@ -252,14 +510,21 @@ function Pandemic:BuildSpec(cfg, prefix, ctx)
     else
         if not (DF.Border and DF.Border.BuildSpec) then return nil end
         spec.border = DF.Border:BuildSpec(cfg, self:BorderPrefix(prefix), ctx)
-        if spec.border then
-            -- Animation is stripped here as well as at the container's own chokepoint.
-            -- Belt and braces on purpose: this spec is built by consumers that may not go
-            -- through that path (the AD canvas preview), and an animated border on a
-            -- button child spams a per-frame forbidden error in exactly the content this
-            -- feature is for.
-            spec.border.animation = nil
-        end
+        -- ☠ THE ANIMATION STRIP THAT USED TO LIVE HERE IS GONE. It read
+        -- `spec.border.animation = nil`, justified as belt-and-braces against a per-frame
+        -- forbidden error on a button child. Both halves of that reasoning have expired:
+        -- container-hosted borders take the DECLARATIVE path (no per-frame Lua at all),
+        -- and the container's own chokepoint no longer strips either — animated container
+        -- borders are a shipping feature. Leaving the strip in would mean the pandemic
+        -- section is the ONE border in DF that silently ignores its animation controls.
+        -- ⚠ The AD canvas preview, named in the old comment as the reason for belt AND
+        -- braces, is a plain frame: _secretRect is false there, so it takes the OnUpdate
+        -- tick exactly as every other previewed border does, and retunes live while a
+        -- slider is dragged. That was an argument FOR passing the animation through, not
+        -- against it.
+        -- ⚠ Animation is CREATION-FROZEN on a container border, so the keys are
+        -- STRUCTURAL — see StructSig, which hashes them so an edit rebuilds the slot
+        -- rather than trying to retune a frozen group.
     end
 
     return spec

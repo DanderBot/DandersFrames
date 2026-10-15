@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- TOOLTIPS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
--- Display > Tooltips: SEVEN groups. In Modern they are the Debuff Bar's
+-- Display > Tooltips: SEVEN groups, as the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top:
 --
@@ -17,10 +17,9 @@ local NS = ...
 -- When and where a tooltip appears is behaviour, so no card is pinnable.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY, so this file reads the page's SOURCE.
---   ✓ the widget CENSUS of each builder -- taken from the PRE-CHANGE source, so
---     it is also the evidence that CLASSIC RENDERS AS IT DID.
---   ✓ that ONE builder serves both layouts, and the card hands it exactly what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ the widget CENSUS of each builder.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, tick and (absent) pin.
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
@@ -110,8 +109,6 @@ end
 -- ============================================================
 print("-- Tooltips page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -198,7 +195,7 @@ end
 
 -- ============================================================
 -- 4. THE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local FRAME_TOOLTIP = {
     { "checkbox", "Enable Frame Tooltips", "tooltipFrameEnabled",       30 },
@@ -249,27 +246,27 @@ local AD_TOOLTIP = {
 }
 
 local CARDS = {
-    { label = "Frame Tooltips", key = "tooltips_frame", col = 1, classicCol = 1,
+    { label = "Frame Tooltips", key = "tooltips_frame", col = 1, 
       builder = "BuildFrameTooltipGroup", golden = FRAME_TOOLTIP,
       summary = 'HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat")',
       tick = { key = "tooltipFrameEnabled", name = "Enable Frame Tooltips" } },
-    { label = "Binding Tooltips", key = "tooltips_binding", col = 1, classicCol = 2,
+    { label = "Binding Tooltips", key = "tooltips_binding", col = 1, 
       builder = "BuildBindTooltipGroup", golden = BIND_TOOLTIP,
       summary = 'HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat")',
       tick = { key = "tooltipBindingEnabled", name = "Enable Binding Tooltips" } },
-    { label = "Buff Tooltips", key = "tooltips_buff", col = 2, classicCol = 1,
+    { label = "Buff Tooltips", key = "tooltips_buff", col = 2, 
       builder = "BuildBuffTooltipGroup", golden = BUFF_TOOLTIP,
       summary = 'AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat")',
       tick = { key = "tooltipBuffEnabled", name = "Enable Buff Tooltips", aura = true } },
-    { label = "Debuff Tooltips", key = "tooltips_debuff", col = 2, classicCol = 2,
+    { label = "Debuff Tooltips", key = "tooltips_debuff", col = 2, 
       builder = "BuildDebuffTooltipGroup", golden = DEBUFF_TOOLTIP,
       summary = 'AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat")',
       tick = { key = "tooltipDebuffEnabled", name = "Enable Debuff Tooltips", aura = true } },
-    { label = "Defensive Icon Tooltips", key = "tooltips_defensive", col = 2, classicCol = 1,
+    { label = "Defensive Icon Tooltips", key = "tooltips_defensive", col = 2, 
       builder = "BuildDefTooltipGroup", golden = DEF_TOOLTIP,
       summary = 'AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat")',
       tick = { key = "tooltipDefensiveEnabled", name = "Enable Defensive Icon Tooltips", aura = true } },
-    { label = "Aura Designer Tooltips", key = "tooltips_auradesigner", col = 2, classicCol = 2,
+    { label = "Aura Designer Tooltips", key = "tooltips_auradesigner", col = 2, 
       builder = "BuildADTooltipGroup", golden = AD_TOOLTIP, summary = "ADTooltipSummary" },
 }
 
@@ -279,18 +276,6 @@ for _, g in ipairs(CARDS) do
     checkCensus(census(body), g.golden, g.label:lower())
     check(body:find("GUI:RefreshCurrentPage", 1, true) == nil,
           g.label .. ": the builder never rebuilds the page from inside itself")
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    local esc = g.label:gsub("%p", "%%%0")
-    local box = PAGE:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. esc .. "\"%]%)")
-    check(box ~= nil, g.label .. ": the classic 280 box is built with its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...and still goes to column " .. g.classicCol)
-    end
 
     local block, call = sectionBlock(g.label, g.builder)
     local flatSummary = g.summary:gsub("%s+", " ")
@@ -302,7 +287,7 @@ for _, g in ipairs(CARDS) do
     if g.tick then
         check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil
           and body:find(".keepEnabled = true", 1, true) ~= nil,
-              g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in classic")
+              g.label .. ": the in-body enable is skipped under hoistToggle, and stays live in a pinned panel")
         check(body:find("group.disableChildrenOn = function(d) return not d." .. g.tick.key .. " end", 1, true) ~= nil,
               g.label .. ": the body greys while the tick is off, from inside the builder")
         check(call:find('db = db, key = "' .. g.tick.key .. '", label = L["' .. g.tick.name .. '"]', 1, true) ~= nil,
@@ -319,8 +304,8 @@ for _, g in ipairs(CARDS) do
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
@@ -329,20 +314,17 @@ end
 print("-- Tooltips page: Resurrection Icon Tooltips, and the cards together")
 do
     local CHECK = 'GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)'
-    check(PAGE:find('resTooltipGroup:AddWidget(' .. CHECK, 1, true) ~= nil
-      and PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
-          "resurrection: classic keeps its box, its checkbox and column 2")
     local block, call = sectionBlock("Resurrection Icon Tooltips")
     check(call:find('OpenSection(L["Resurrection Icon Tooltips"], "tooltips_resurrection", 1, ResurrectionTooltipSummary)', 1, true) ~= nil,
           "resurrection: a card keyed tooltips_resurrection in column 1, saying On / Off -- no tick, no pin")
     check(block:find('band:AddWidget(' .. CHECK, 1, true) ~= nil,
-          "resurrection: its one checkbox is the same call classic makes, in the card's body")
+          "resurrection: its one checkbox is in the card's body")
 
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Frame Tooltips | Binding Tooltips | Buff Tooltips | Debuff Tooltips | Defensive Icon Tooltips | Aura Designer Tooltips | Resurrection Icon Tooltips",
-       "order: the seven cards open in classic's source order")
+       "order: the seven cards open in source order")
 
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end
@@ -354,9 +336,6 @@ do
     local firstAt = PAGE:find('Add(GUI:CreateHeader(self.child, L["Unit Frame"]), 40, 1)', 1, true)
     check(stripAt and firstAt and stripAt < firstAt, "bulk: ...above the first category header")
 
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 7, "classic: seven bare 280 boxes, all the classic branch's own")
     check(PAGE:find('Add(CreateCopyButton(self.child, {"tooltip"}, L["Tooltips"], "display_tooltips"), 25, 2)', 1, true) ~= nil,
           "page: the copy button keeps its prefix and its slot")
 end

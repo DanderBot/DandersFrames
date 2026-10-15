@@ -3,10 +3,10 @@ local NS = ...
 -- ============================================================
 -- HIGHLIGHTS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Modules.lua
 -- ------------------------------------------------------------
--- Indicators > Highlights: FOUR groups inside three classic sections. In Modern
--- they are the Debuff Bar's collapsible CARDS -- two per row inside a card wide
--- enough, dim captions, the value summary in a shut card's corner, Expand All /
--- Collapse All at the top -- one card per group, named for the highlight:
+-- Indicators > Highlights: FOUR of the Debuff Bar's collapsible CARDS -- two per
+-- row inside a card wide enough, dim captions, the value summary in a shut
+-- card's corner, Expand All / Collapse All at the top -- one card per group,
+-- named for the highlight:
 --
 --   column 1   Aggro Highlight, Threat Colors (hides, header and band together,
 --              while the aggro mode is Hidden)
@@ -27,11 +27,8 @@ local NS = ...
 --
 -- What that buys, and what it does not:
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
---     in order -- taken from the PRE-CHANGE source. This is also the evidence
---     that CLASSIC RENDERS AS IT DID: the classic branch mounts the same builder
---     into the same 280 box, in the same section, in the same column.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it.
+--     in order.
+--   ✓ how each card mounts its builder.
 --   ✓ each card's column, stable collapse key, summary, hide gate and pin; that
 --     no card carries a tick or a grey.
 --   ✓ the two opt-ins (two per row, dim captions) and that no count survives.
@@ -139,8 +136,6 @@ end
 -- ============================================================
 print("-- Highlights page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -205,7 +200,7 @@ do
     check(PAGE:find("disableChildrenOn", 1, true) == nil,
           "gate: no group-level child gate on this page")
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "rebuild: the page never rebuilds itself, in either layout")
+          "rebuild: the page never rebuilds itself")
     for _, b in ipairs({ "BuildSelectionHighlightGroup", "BuildHoverHighlightGroup",
                          "BuildAggroHighlightGroup", "BuildThreatColorsGroup" }) do
         check(builderBody(b):find("self:RefreshStates()", 1, true) == nil,
@@ -221,7 +216,7 @@ end
 
 -- ============================================================
 -- 2. THE FOUR BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source: same factories,
+-- Every golden below is the census of the builder: same factories,
 -- same L keys, same db keys, same slot heights, in the same order.
 -- ============================================================
 local SELECTION = {
@@ -259,21 +254,17 @@ local THREAT = {
     { "label",       "Yellow=high, Orange=highest, Red=tanking.", "(none)",                 25 },
 }
 
--- label, stable collapse key, card column, classic box header and column, the
+-- label, stable collapse key, card column, the
 -- summary; `hide` = the hide gate on both halves. Every card pins (all four
 -- decide how a highlight LOOKS) and none carries a tick or a grey.
 local CARDS = {
     { label = "Selection Highlight", key = "highlights_selection", col = 2,
-      box = "Selection Settings", classicCol = 1,
       builder = "BuildSelectionHighlightGroup", golden = SELECTION, summary = "SelectionSettingsSummary" },
     { label = "Hover Highlight", key = "highlights_hover", col = 2,
-      box = "Hover Settings", classicCol = 1,
       builder = "BuildHoverHighlightGroup", golden = HOVER, summary = "HoverSettingsSummary" },
     { label = "Aggro Highlight", key = "highlights_aggro", col = 1,
-      box = "Aggro Settings", classicCol = 1,
       builder = "BuildAggroHighlightGroup", golden = AGGRO, summary = "AggroSettingsSummary" },
     { label = "Threat Colors", key = "highlights_threat", col = 1,
-      box = "Threat Colors", classicCol = 2,
       builder = "BuildThreatColorsGroup", golden = THREAT, summary = "ThreatColorsSummary",
       hide = "HideAggroModeNone" },
 }
@@ -282,28 +273,6 @@ for _, g in ipairs(CARDS) do
     print("-- Highlights page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    -- ONE builder, BOTH layouts: the declaration, the classic box, the card, and
-    -- the pin (a builder argument).
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    -- ⚠ THE CLASSIC MOUNT IS AddToSection, NOT Add: every box on this page
-    -- belongs to one of the three collapsible sections, and it is that call which
-    -- registers it as the section's child.
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.box .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, g.label .. ": the classic box keeps its own header (" .. g.box .. ")")
-    if box then
-        check(PAGE:find("AddToSection(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...which still goes to column " .. g.classicCol .. ", inside its section")
-    end
-
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
           g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing the group's own summary")
@@ -322,7 +291,7 @@ for _, g in ipairs(CARDS) do
     check(call:find("key = \"", 1, true) == nil, g.label .. ": no header tick")
 
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
-    check(block:find(mount, 1, true) ~= nil, g.label .. ": mounts the builder exactly as classic does")
+    check(block:find(mount, 1, true) ~= nil, g.label .. ": mounts its builder into the card's band")
 end
 
 -- ============================================================
@@ -346,21 +315,9 @@ do
     check(stripAt and firstAt and stripAt < firstAt,
           "bulk: ...above the first card, because it acts on the whole page")
 
-    -- ---- the classic arms, untouched ---------------------------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 4, "classic: four bare 280 boxes, and they are the classic branch's own")
-    for _, s in ipairs({ "Selection Highlight", "Hover Highlight", "Aggro Highlight" }) do
-        check(PAGE:find('GUI:CreateCollapsibleSection(self.child, L["' .. s .. '"], true), 36, "both")', 1, true) ~= nil,
-              "classic: still folds " .. s .. " into its own section")
-    end
-    local sections = 0
-    for _ in PAGE:gmatch("GUI:CreateCollapsibleSection%(") do sections = sections + 1 end
-    eq(sections, 3, "classic: three sections built directly, and only the classic arms build them")
-    check(PAGE:find("local function AddToSection(widget, height, col)", 1, true) ~= nil,
-          "classic: the section-registering mount survives for the classic arms")
-    check(PAGE:find("threatGroup.hideOn = HideAggroModeNone", 1, true) ~= nil,
-          "classic: the Threat Colors box keeps the gate its card now also carries")
+    -- ---- no page-level sections -------------------------------------
+    check(PAGE:find("AddToSection", 1, true) == nil,
+          "sections: no page-level section mount is left")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights")', 1, true) ~= nil,

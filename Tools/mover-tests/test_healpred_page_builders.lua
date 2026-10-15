@@ -3,8 +3,7 @@ local NS = ...
 -- ============================================================
 -- HEAL PREDICTION PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Bars > Heal Prediction: three 280 boxes in classic, three of the Debuff Bar's
--- collapsible CARDS in modern, in two page columns:
+-- Bars > Heal Prediction: three collapsible CARDS in two page columns:
 --
 --   column 1   Heal Prediction        (the page's master switch, in its body)
 --   column 2   Floating Bar Position  (hidden unless the bar is floating)
@@ -12,13 +11,11 @@ local NS = ...
 --
 -- ☠ THREE THINGS THIS SUITE IS HERE TO PIN:
 --
---   1. THE COLOUR PICKERS BRANCH ON LAYOUT. Classic decides the picker SET at
---      build time from the db -- Split builds two, every other mode builds one
---      bound to that mode's key -- so changing the source has to REBUILD THE
---      PAGE. Modern builds all three and gates them with hideOn instead, so a
---      pinned panel is never slammed shut by a rebuild. Section 3.
---   2. THE FLOATING hideOn IS ONE NAMED PREDICATE handed to the classic boxes
---      and to the cards alike. Section 6.
+--   1. ALL THREE COLOUR PICKERS ARE BUILT and gated with hideOn on the source
+--      mode, so changing the source never rebuilds the page and a pinned panel
+--      is never slammed shut by a rebuild. Section 3.
+--   2. THE FLOATING hideOn IS ONE NAMED PREDICATE handed to both floating
+--      cards. Section 6.
 --   3. ENABLE HEAL PREDICTION IS THE PAGE GATE and stays in the first card's
 --      body, as Show Debuffs does on the Debuff Bar -- no header tick, no
 --      hoistToggle. Section 5.
@@ -28,10 +25,8 @@ local NS = ...
 -- reads the page's SOURCE and asserts against it.
 --
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
---     in order -- taken from the pre-card source, BOTH arms of the picker branch
---     included, so classic renders what it always did.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it.
+--     in order.
+--   ✓ how each card mounts its builder.
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate and
 --     pin; the two opt-ins (two per row, quiet captions); Expand/Collapse All.
 --   ✗ nothing about runtime behaviour -- the folding, the two-per-row flow and
@@ -128,8 +123,6 @@ end
 -- ============================================================
 print("-- Heal Prediction page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     check(PAGE:find("_popoutHolders", 1, true) == nil,
@@ -200,27 +193,20 @@ do
 end
 
 -- ============================================================
--- 3. THE LAYOUT-CONDITIONAL COLOUR PICKERS
+-- 3. THE COLOUR PICKERS, ALL THREE, GATED BY THE SOURCE
 -- ============================================================
-print("-- Heal Prediction page: the colour pickers, one set per layout")
+print("-- Heal Prediction page: the colour pickers")
 do
     local body = builderBody("BuildHealPredictionSettingsGroup")
-
-    -- ☠ MODERN, NOT "A PANE": the card on the page and its pinned panel both
-    -- take the three-picker arm, so neither needs a rebuild.
-    check(body:find("if tools2.popout then", 1, true) == nil,
-          "pickers: the branch is no longer keyed on being a pane")
-    local arms = 0
-    for _ in body:gmatch("if not classicLayout then") do arms = arms + 1 end
-    eq(arms, 2, "pickers: the picker set and the source callback both branch on the layout")
 
     for _, p in ipairs({
         { "My Heals Color",       "healPredictionMyColor" },
         { "Others' Heals Color",  "healPredictionOthersColor" },
         { "Heal Prediction Color","healPredictionAllColor" },
     }) do
-        check(body:find('GUI:CreateColorPicker(parent, L["' .. p[1] .. '"], db, "' .. p[2] .. '"', 1, true) ~= nil,
-              "pickers: modern builds " .. p[1] .. " bound to " .. p[2])
+        local n = 0
+        for _ in body:gmatch('GUI:CreateColorPicker%(parent, L%["' .. p[1]:gsub("'", "%%'") .. '"%], db, "' .. p[2] .. '"') do n = n + 1 end
+        eq(n, 1, "pickers: builds " .. p[1] .. " once, bound to " .. p[2])
     end
     check(body:find('allColor.hideOn = function(d) return d.healPredictionShowMode ~= "ALL" end', 1, true) ~= nil,
           "pickers: ...and the All swatch shows only for All Incoming")
@@ -228,27 +214,18 @@ do
           "pickers: ...My Heals for Split and Mine")
     check(body:find('return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "OTHERS"', 1, true) ~= nil,
           "pickers: ...and Others' Heals for Split and Others")
+    check(body:find("showModeColorKey", 1, true) == nil,
+          "pickers: no picker is bound by the mode at build time")
 
-    check(body:find('if db.healPredictionShowMode == "SPLIT" then', 1, true) ~= nil,
-          "pickers: classic still decides its picker set at build time, from the db")
-    check(body:find('local showModeColorKey = (db.healPredictionShowMode == "ALL" and "healPredictionAllColor")', 1, true) ~= nil,
-          "pickers: ...and still binds its single picker to the mode's own key")
-
-    local rebuilds = 0
-    for _ in PAGE:gmatch("GUI:RefreshCurrentPage%(%)") do rebuilds = rebuilds + 1 end
-    eq(rebuilds, 1, "pickers: exactly one page rebuild left on this page")
-    local sourceArm = body:match("if not classicLayout then(.-)\n                else")
-    check(sourceArm ~= nil, "pickers: the source dropdown's modern arm is locatable")
-    if sourceArm then
-        check(sourceArm:find("RefreshCurrentPage", 1, true) == nil,
-              "pickers: ...and the one rebuild left on this page is NOT in it")
-        check(sourceArm:find("tools2.refreshStates()", 1, true) ~= nil,
-              "pickers: ...which runs the state pass instead")
-    end
+    check(PAGE:find("RefreshCurrentPage", 1, true) == nil,
+          "pickers: nothing on this page rebuilds it")
+    local source = body:match('L%["Show Heals From"%].-end%), 55%)')
+    check(source ~= nil and source:find("tools2.refreshStates()", 1, true) ~= nil,
+          "pickers: the source pick runs the state pass")
 end
 
 -- ============================================================
--- 4. THE THREE CARDS -- census, classic box, card
+-- 4. THE THREE CARDS -- census and mount
 -- ============================================================
 local HP_SETTINGS = {
     { "checkbox",        "Enable Heal Prediction", "healPredictionEnabled",       30 },
@@ -256,14 +233,9 @@ local HP_SETTINGS = {
     { "dropdown",        "Display Mode",           "healPredictionMode",          55 },
     { "dropdown",        "Show Heals From",        "healPredictionShowMode",      55 },
     { "texturedropdown", "Texture",                "healPredictionTexture",       55 },
-    -- the MODERN arm's three
     { "colorpicker",     "My Heals Color",         "healPredictionMyColor",       35 },
     { "colorpicker",     "Others' Heals Color",    "healPredictionOthersColor",   35 },
     { "colorpicker",     "Heal Prediction Color",  "healPredictionAllColor",      35 },
-    -- ...and the CLASSIC arm's, which are the same widgets built by the db
-    { "colorpicker",     "My Heals Color",         "healPredictionMyColor",       35 },
-    { "colorpicker",     "Others' Heals Color",    "healPredictionOthersColor",   35 },
-    { "colorpicker",     "Heal Prediction Color",  "(none)",                      35 },
     { "dropdown",        "Blend Mode",             "healPredictionBlendMode",     55 },
 }
 
@@ -282,17 +254,17 @@ local HP_ANCHOR = {
     { "slider",      "Frame Level",      "healPredictionFrameLevel",      55 },
 }
 
--- label, stable collapse key, card column, classic box and column, summary;
+-- label, stable collapse key, card column, summary;
 -- `dim` = header greys with the page gate, `hide` = the floating gate on both
 -- halves, `pin` = passes its builder (decides how the bar LOOKS).
 local CARDS = {
-    { label = "Settings", classicLabel = "Heal Prediction", key = "healpred_settings", col = 1, box = "settingsGroup", classicCol = "1",
+    { label = "Settings", key = "healpred_settings", col = 1,
       builder = "BuildHealPredictionSettingsGroup", golden = HP_SETTINGS,
       summary = "HealPredictionCardSummary", pin = true },
-    { label = "Floating Bar Position", key = "healpred_floating", col = 2, box = "floatingGroup", classicCol = "1",
+    { label = "Floating Bar Position", key = "healpred_floating", col = 2,
       builder = "BuildHealPredictionFloatingGroup", golden = HP_FLOATING,
       summary = "HealPredictionFloatingSummary", dim = true, hide = true, pin = true },
-    { label = "Floating Bar Anchor",   key = "healpred_anchor",   col = 2, box = "anchorGroup",   classicCol = "2",
+    { label = "Floating Bar Anchor",   key = "healpred_anchor",   col = 2,
       builder = "BuildHealPredictionAnchorGroup", golden = HP_ANCHOR,
       summary = "HealPredictionAnchorSummary", dim = true, hide = true, pin = true },
 }
@@ -301,19 +273,6 @@ for _, g in ipairs(CARDS) do
     print("-- Heal Prediction page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    -- ONE builder, BOTH layouts: the declaration, the classic box's mount and
-    -- the card's (the pin's panel copy is built by the shared helper).
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"]), 40)', 1, true) ~= nil,
-          g.label .. ": ...under the header it always had")
-    check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-          g.label .. ": ...and still goes to column " .. g.classicCol)
 
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -327,7 +286,7 @@ for _, g in ipairs(CARDS) do
     check(call:find('key = "', 1, true) == nil, g.label .. ": no header tick")
 
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end, })"
-    check(block:find(mount, 1, true) ~= nil, g.label .. ": mounts the builder exactly as classic does")
+    check(block:find(mount, 1, true) ~= nil, g.label .. ": mounts its builder into the card's band")
 end
 
 -- ============================================================
@@ -356,10 +315,6 @@ print("-- Heal Prediction page: what hides and what greys")
 do
     check(PAGE:find('local function HealPredFloatingHiddenOn(d) return d.healPredictionMode ~= "FLOATING" end', 1, true) ~= nil,
           "hide: the floating rule is named once, at page scope")
-    for _, w in ipairs({ "floatingGroup", "anchorGroup" }) do
-        check(PAGE:find(w .. ".hideOn = HealPredFloatingHiddenOn", 1, true) ~= nil,
-              "hide: classic's " .. w .. " takes the shared rule")
-    end
     check(PAGE:find('hideOn = function(d) return d.healPredictionMode ~= "FLOATING" end', 1, true) == nil,
           "hide: ...no hand-written duplicate is left behind")
     check(PAGE:find("local function HealPredOffRow(d) return not (d or db).healPredictionEnabled end", 1, true) ~= nil,
@@ -369,9 +324,9 @@ do
     for _ in PAGE:gmatch("disableOn = function%(d%) return not d%.healPredictionEnabled end") do
         gates = gates + 1
     end
-    -- Twenty: eleven in the Settings builder (six of them pickers, three per
-    -- layout arm), four in Floating Bar Position and five in Floating Bar Anchor.
-    eq(gates, 20, "gate: every control on the page still carries the gate it always had")
+    -- Seventeen: eight in the Settings builder (the enable itself excepted),
+    -- four in Floating Bar Position and five in Floating Bar Anchor.
+    eq(gates, 17, "gate: every control on the page carries the page gate")
 
     local body = builderBody("BuildHealPredictionSettingsGroup")
     check(body:find("self:RefreshStates", 1, true) == nil,
@@ -384,7 +339,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Settings | Floating Bar Position | Floating Bar Anchor",
-       "order: the three cards open in the order the classic boxes read")
+       "order: the three cards open in reading order")
 
     -- The groups: Content over Settings in column 1; Layout over the two
     -- floating cards in column 2, hiding with them unless the bar floats.

@@ -29,6 +29,25 @@ local C_RIGHT_PANEL_BORDER = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a 
 -- Row-height constant for GUI:CreateEditBox (label-above style).
 local EDIT_BOX_ROW_H = 56
 
+-- THE SPLIT, the Aura Designer's rule (AuraDesigner/UI/Editor.lua): the preview takes
+-- the width its own furniture needs (tdPreviewNeed, measured when the preview is built)
+-- and the settings panel the rest; below twice that, 50/50.
+local TD_SPLIT_GAP, TD_LEFT_FLOOR = 6, 300
+local tdPreviewNeed = TD_LEFT_FLOOR
+local function TDSplitLeftWidth(total)
+    -- ⚠ Still the floor means the build-time measure ran before fonts loaded (it
+    -- returns its uncached 300 then), so measure again on this size change. Once
+    -- the shared width is real it is cached and this stops asking.
+    if tdPreviewNeed <= TD_LEFT_FLOOR and DF.GUI.DesignerPreviewWidth then
+        tdPreviewNeed = math.max(TD_LEFT_FLOOR, DF.GUI.DesignerPreviewWidth())
+    end
+    if total - TD_SPLIT_GAP - tdPreviewNeed < tdPreviewNeed then
+        return math.floor((total - TD_SPLIT_GAP) / 2)
+    end
+    return tdPreviewNeed
+end
+local function TDSplitRightWidth(total) return total - TD_SPLIT_GAP - TDSplitLeftWidth(total) end
+
 -- Semantic palette for content-type categories. Tints card title text and
 -- could be reused for category badges later.
 local CATEGORY_COLORS = {
@@ -317,7 +336,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             card.title:SetText(displayName)
             -- Re-apply the category tint so SetText doesn't reset it back to
             -- the default font colour.
-            -- A classic card's colour is its chrome's (TEXT, or grey while hidden).
+            -- A card's colour is its chrome's (TEXT, or grey while hidden).
             local cc = card.titleCatColor
             if card.chrome then
                 card.chrome:Paint()
@@ -1425,6 +1444,99 @@ end
 -- Body sections: Content / Appearance / Position.
 -- ============================================================
 
+-- ============================================================
+-- THE ELEMENT CARD'S SECTIONS AS CARDS (cards inside a card, as the Aura Designer)
+-- ------------------------------------------------------------
+-- Content / Appearance / Position, each the settings pages' card over a chromeless
+-- body that the section builders fill in their GROUP mode (they add to a group rather
+-- than hand-anchoring down the card), flowing two settings per row once the card is
+-- wide enough -- the page cards' own helpers (Controls.lua).
+-- ☠ A FOLD RE-STACKS IN PLACE, it never rebuilds: every rebuild here creates frames WoW
+-- never frees, which is why the element cards themselves fold the same way. onResize
+-- hands the element card its new body height so it can re-size and re-stack its list.
+-- Folds persist per section, shared by every element ("tdSection:<key>").
+local TD_SECTIONS = {
+    { key = "content",    label = function() return L["Content"] end,    kind = "text" },
+    { key = "appearance", label = function() return L["Appearance"] end, kind = "appearance" },
+    { key = "position",   label = function() return L["Position"] end,   kind = "position" },
+}
+local TD_SECTION_INSET = 8
+
+local function BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card, width, onResize)
+    -- The list's width can still read 0 on a first build; size against a sane column.
+    if not width or width < 100 then width = 300 end
+    local w = width - 2 * TD_SECTION_INSET
+    local entries = {}
+
+    -- ☠ THE SECTIONS SPAN THE CARD, by anchors, not at a width read at build: the list
+    -- can measure 0 on a first build, and a fixed width left every section stuck at
+    -- the fallback, narrow and one track, whatever the window was.
+    local function Relayout()
+        local y = -TD_SECTION_INSET
+        for _, e in ipairs(entries) do
+            e.section:ClearAllPoints()
+            e.section:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
+            e.section:SetPoint("RIGHT", body, "RIGHT", -TD_SECTION_INSET, 0)
+            y = y - e.section.layoutHeight
+            if e.section.expanded then
+                e.body:Show()
+                e.body:ClearAllPoints()
+                e.body:SetPoint("TOPLEFT", body, "TOPLEFT", TD_SECTION_INSET, y)
+                e.body:SetPoint("RIGHT", body, "RIGHT", -TD_SECTION_INSET, 0)
+                y = y - (e.body.calculatedHeight or 0)
+            else
+                e.body:Hide()
+            end
+        end
+        local h = math.max(1, -y + TD_SECTION_INSET - GUI.SectionCard.gap)
+        body:SetHeight(h)
+        return h
+    end
+
+    for _, def in ipairs(TD_SECTIONS) do
+        local section = GUI:CreateCollapsibleSection(body, def.label(), true, w, {
+            card = true, collapseKey = "tdSection:" .. def.key, kind = def.kind,
+        })
+        local group = GUI:CreateSettingsGroup(body, w, { chromeless = true })
+        section:RegisterChild(group)   -- the card's body: its inset, its gap, its fold
+        if def.key == "content" then
+            BuildContentSection(GUI, body, elem, tdDB, state, page, card, 0, false, group)
+        elseif def.key == "appearance" then
+            BuildAppearanceSection(GUI, body, elem, card, 0, group)
+        else
+            BuildPositionSection(GUI, body, elem, tdDB, card, 0, group)
+        end
+        if GUI.StampFullRows then
+            GUI.StampFullRows(group)
+            GUI.QuietLabels(group)
+            GUI.WireTwoTrack(group)
+        end
+        group:LayoutChildren()
+        section.Toggle = function(self)
+            self:SetExpanded(not self.expanded)
+            local h = Relayout()
+            if onResize then onResize(h) end
+        end
+        entries[#entries + 1] = { section = section, body = group }
+    end
+
+    -- A width change re-lays every open body (the track count is decided off the live
+    -- width, WireTwoTrack) and hands the element card its new height. Width only:
+    -- Relayout's own SetHeight fires this too.
+    local lastW
+    body:HookScript("OnSizeChanged", function(self, bw)
+        if not bw or bw < 50 or (lastW and math.abs(bw - lastW) < 0.5) then return end
+        lastW = bw
+        for _, e in ipairs(entries) do
+            e.body:SetWidth(bw - 2 * TD_SECTION_INSET)
+            if e.section.expanded then e.body:LayoutChildren() end
+        end
+        local h = Relayout()
+        if onResize then onResize(h) end
+    end)
+    return Relayout()
+end
+
 -- AD-style card builder. Returns (card, totalCardH). Caller advances its
 -- y-cursor with totalCardH. The card is layout-only; the header and body each
 -- own their own backdrop so there's no underlying surface bleeding through.
@@ -1567,16 +1679,19 @@ local function CreateTextElementCard(GUI, parent, yPos, elem, tdDB, state, page)
     body:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
     card.body = body
 
-    -- Build content sections inside body.
-    local yEnd = BuildContentSection(GUI, body, elem, tdDB, state, page, card, -10)
-    yEnd = BuildAppearanceSection(GUI, body, elem, card, yEnd)
-    yEnd = BuildPositionSection(GUI, body, elem, tdDB, card, yEnd)
-    local bodyHeight = math.max(1, -yEnd + 10)
-    body:SetHeight(bodyHeight)
+    -- Build the content sections inside body, as cards (BuildElementSectionCards).
+    local bodyHeight
+    local ApplyCollapseState
+    bodyHeight = BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card,
+        parent:GetWidth(), function(h)
+            bodyHeight = h
+            ApplyCollapseState()
+            RestackCards(state.cardOrder, parent, GUI.SectionCard.gap)
+        end)
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
     -- (cardKey / card.collapsed were read before the header, for the chrome.)
-    local function ApplyCollapseState()
+    function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
             card.cardHeight = HEADER_HEIGHT
@@ -1826,7 +1941,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        btn:SetWidth(math.max(60, math.floor(((provW / 2) - (#tabDefs - 1) * TAB_GAP) / #tabDefs)))
+        btn:SetWidth(math.max(60, math.floor((TDSplitRightWidth(provW) - (#tabDefs - 1) * TAB_GAP) / #tabDefs)))
 
         -- Shared underline-tab styling; SelectTab drives SetActive. text = btn.Text.
         GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
@@ -1914,6 +2029,7 @@ end
 -- RE-SYNC verb.
 local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
     local chips = {}
+    local SyncActive
     for _, chip in ipairs(TextFilterChips()) do
         local c = CreateFrame("Button", nil, host, "BackdropTemplate")
         local fs = c:CreateFontString(nil, "OVERLAY")
@@ -1928,6 +2044,7 @@ local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
         c.fs = fs
         c:SetScript("OnClick", function(self)
             state.activeFilter = self.key
+            SyncActive()
             -- NOT FullRebuildCards: a filter chip changes what is listed, not
             -- what any frame renders, so it must not drag every live frame
             -- through a refresh.
@@ -1963,7 +2080,7 @@ local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
     -- is actually filtered. That is exactly what shipped on the Aura Designer's
     -- own filter panel (rework spec section 23). The opener calls this on every
     -- open.
-    local function SyncActive()
+    function SyncActive()
         local active = (state and state.activeFilter) or "_all"
         for k = 1, #chips do
             local c = chips[k]
@@ -2282,18 +2399,21 @@ local function CreateGroupCard(GUI, parent, yPos, elem, tdDB, state, page)
     -- section so the group anchor/offset can be configured like any text
     -- element — groups behave exactly like text elements, except their content
     -- is concatenated from multiple sources.
-    local yEnd = BuildContentSection(GUI, body, elem, tdDB, state, page, card, -10)
-    yEnd = BuildAppearanceSection(GUI, body, elem, card, yEnd)
-    yEnd = BuildPositionSection(GUI, body, elem, tdDB, card, yEnd)
-    local bodyHeight = math.max(1, -yEnd + 10)
-    body:SetHeight(bodyHeight)
+    local bodyHeight
+    local ApplyCollapseState
+    bodyHeight = BuildElementSectionCards(GUI, body, elem, tdDB, state, page, card,
+        parent:GetWidth(), function(h)
+            bodyHeight = h
+            ApplyCollapseState()
+            RestackCards(state.groupCardOrder, parent, GUI.SectionCard.gap)
+        end)
 
     -- Update meta line: show item count.
     chrome:SetSummary(("(%d %s)"):format(#elem.groupItems, (#elem.groupItems == 1) and L["item"] or L["items"]))
 
     -- ── COLLAPSE STATE ───────────────────────────────────────
     -- (cardKey / card.collapsed were read before the header, for the chrome.)
-    local function ApplyCollapseState()
+    function ApplyCollapseState()
         if card.collapsed then
             body:Hide()
             card.cardHeight = HEADER_HEIGHT
@@ -2648,8 +2768,7 @@ end
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside frames the page harness never sees. It is why this page
--- had to force the settings window 210px wider than its own default. It is the
--- designer's only page, in both settings layouts (decided 2026-09-22).
+-- had to force the settings window 210px wider than its own default.
 -- ============================================================
 local function BuildTextDesignerIsland(GUI, page, db)
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
@@ -2669,6 +2788,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- the full page viewport instead. (Mirrors AD's S.page.RefreshStates override.)
     -- Installed every call (even when short-circuited) because RefreshStates
     -- may be invoked freshly on tab re-open.
+    if GUI.PinChildToViewport then GUI.PinChildToViewport(page) end
     page.RefreshStates = function(self)
         if self.child then
             self.child:SetHeight(self:GetHeight())
@@ -2879,7 +2999,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
     -- Bottom anchor matches rightAnchorFrame:BOTTOMRIGHT page.child 0,0 so
     -- the two panels end at exactly the same Y.
     previewPanel:SetPoint("BOTTOM", page.child, "BOTTOM", 0, 0)
-    previewPanel:SetPoint("RIGHT", page.child, "CENTER", -2, 0)
+    -- Width from the split (TDSplitLeftWidth), applied once the panel's furniture exists.
     state.previewPanel = previewPanel
 
     -- "Frame Preview" label
@@ -2901,7 +3021,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         mockFrame = CreateFrame("Frame", nil, previewPanel, "BackdropTemplate")
         mockFrame:SetSize(FRAME_W, FRAME_H)
         mockFrame:SetPoint("CENTER", previewPanel, "CENTER", 0, -4)
-        mockFrame:SetScale(tdDB.previewScale or 1.0)
+        mockFrame:SetScale((tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1))
         ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
         previewPanel.mockFrame = mockFrame
         state.mockFrame = mockFrame
@@ -2999,7 +3119,9 @@ local function BuildTextDesignerIsland(GUI, page, db)
         if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
         if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
 
-        local want = tdDB.previewScale or 1.0
+        -- Preview Scale is relative to the LIVE frame, so the window's own scale is
+        -- divided back out (GUI.PreviewUnscale).
+        local want = (tdDB.previewScale or 1.0) * (GUI.PreviewUnscale and GUI.PreviewUnscale() or 1)
         -- Before the first layout pass the panel has no size yet; honour the user's
         -- scale rather than clamping against a zero and collapsing the mock.
         local cw, ch = previewPanel:GetWidth() or 0, previewPanel:GetHeight() or 0
@@ -3013,6 +3135,7 @@ local function BuildTextDesignerIsland(GUI, page, db)
         m:SetScale(math.max(0.2, math.min(want, fit)))
     end
     previewPanel.RefreshGeometry()
+    if GUI.OnWindowScaleChanged then GUI.OnWindowScaleChanged(previewPanel, previewPanel.RefreshGeometry) end
 
     -- Preview Scale slider (top-left of preview panel, below the FRAME PREVIEW
     -- label). Mirrors AD's Preview Scale slider (AuraDesigner/UI/Cards.lua) —
@@ -3036,6 +3159,25 @@ local function BuildTextDesignerIsland(GUI, page, db)
     previewNote:SetPoint("BOTTOM", previewPanel, "BOTTOM", 0, 10)
     previewNote:SetText(L["Preview placeholder (visual mockup)"])
     previewNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+
+    -- The Aura Designer's preview width, so the two designers share one layout.
+    tdPreviewNeed = math.max(TD_LEFT_FLOOR,
+        GUI.DesignerPreviewWidth and GUI.DesignerPreviewWidth() or 0)
+    local function ApplySplit(total)
+        if total and total >= 100 then previewPanel:SetWidth(TDSplitLeftWidth(total)) end
+    end
+    local splitW = page.child:GetWidth()
+    if not splitW or splitW < 100 then
+        splitW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
+    end
+    ApplySplit(splitW)
+    if not page.child._dfTDSplitHooked then
+        page.child._dfTDSplitHooked = true
+        page.child:HookScript("OnSizeChanged", function(_, w)
+            local pp = GetState(page).previewPanel
+            if pp and w and w >= 100 then pp:SetWidth(TDSplitLeftWidth(w)) end
+        end)
+    end
 
     -- ── RIGHT-SIDE CONTAINER ───────────────────────────────────
     -- Dark panel chrome wrapping the tab strip + per-tab content frames.
@@ -3100,9 +3242,9 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- The designer always builds its split-panel island, in both settings layouts
--- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
--- contract is unchanged; the island does not use them.
+-- The designer always builds its split-panel island. `Add` and `AddSpace` are
+-- still accepted so BuildPage's contract is unchanged; the island does not use
+-- them.
 -- ============================================================
 function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
     return BuildTextDesignerIsland(GUI, page, db)

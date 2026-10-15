@@ -266,10 +266,28 @@ P.AddExpiryAlertControls = AddExpiryAlertControls
 -- expiry alert — whose Border/Tint are a |T escape inside a fontstring and so collapse on a
 -- thin bar — a pandemic region is a real texture anchored to the button's own edges, so a
 -- ring or wash fits a bar exactly as well as an icon. Hence no `include` parameter.
-local function AddPandemicControls(g, parent, proxy)
+local function AddPandemicControls(g, parent, proxy, auraName)
     GUI:CreatePandemicControls(g, proxy, {
         parent          = parent,
         anchorOptions   = OPTS.ANCHOR_OPTIONS,
+        -- ★ SPELL-LEVEL GATE — which ids does THIS placement actually render? Resolved the
+        -- same way the render path resolves them, so the panel and the renderer can never
+        -- disagree about what the indicator is tracking.
+        -- ☠ A CLOSURE, NOT A VALUE. The tracked-ID ticks and the spec dropdown both live on
+        -- surfaces this card does not rebuild, so resolving once at build time would freeze
+        -- the verdict — greying a panel the user had just made valid, or leaving one live
+        -- after they narrowed it down to an unrefreshable spell.
+        -- ⚠ `proxy` goes in as the indicator so per-placement mutes narrow the set. That is
+        -- right HERE (we want the ids this indicator draws) and is deliberately the opposite
+        -- of the duplicate check in Cards.lua, which must NOT narrow or a real duplicate
+        -- slips through. Same helper, two different questions.
+        -- ⚠ Other-pool entries are spec-independent, hence the nil spec — mirrors every
+        -- other BuildADIdentityFilters call site.
+        trackedIds      = function()
+            local spec = (not IsOtherTab()) and ResolveSpec() or nil
+            local f = DF:BuildADIdentityFilters(spec, auraName, proxy)
+            return f and f.includeSpellIDs
+        end,
         -- Both systems key off the SAME per-indicator record here, so the collision notes
         -- can compare them directly. The buff/debuff rows have no expiry alert at all and
         -- pass nothing.
@@ -1139,7 +1157,7 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
 -- is how they drifted; there is no longer a field list to copy.
 --
--- kind: nil/"members" = classic member arranger (legacy records carry no kind); "filter" = a
+-- kind: nil/"members" = member arranger (legacy records carry no kind); "filter" = a
 -- container-backed group linked to registry filters (stable preset keys / custom ids in
 -- filterSelection) with uniform per-group styling (iconSize / maxIcons on top of the shared
 -- layout). The caller owns `id` and `name` -- both come from the store it is inserting into.
@@ -1960,6 +1978,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     -- the table but the preview ignores them: the canvas is standalone, not layered over a
     -- unit frame, so there is nothing for a z-order band to mean there.)
     local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(GetAuraDesignerDB())
+    -- A packed member renders as the group flow draws it: scale folded into its size and
+    -- text, because the flow runs the slot at scale 1 (see Factory memberView).
+    if flowParent and Factory.MemberView then
+        effectiveConfig = Factory:MemberView(effectiveConfig, defs)
+    end
     local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defs)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
@@ -2507,9 +2530,12 @@ local function ApplyMemberGroupFlows(mockFrame, flows)
             -- The group's LAYOUT AND STYLE, from the factory. The style is what carries the
             -- duration-strip reservation into the row stride (stripReservation reads
             -- config.style.bar); passing layout alone padded the canvas's rows differently
-            -- from live's for any group with a duration bar.
+            -- from live's for any group with a duration bar. Every packed member's cell
+            -- goes in too, shown or not, because live sizes its row cap from all of them.
+            local recStyles = {}
+            for i, m in ipairs(f.keys) do recStyles[i] = { style = m.style } end
             local cfg = Factory.BuildGroupFlowConfig
-                and Factory:BuildGroupFlowConfig(mockFrame, f.group)
+                and Factory:BuildGroupFlowConfig(mockFrame, f.group, nil, recStyles)
                 or { layout = Factory:BuildGroupLayout(f.group) }
             AC.FlowSlots(f.box, mockFrame, slots, n, cfg, pp)
         else
@@ -2663,7 +2689,7 @@ local function RefreshPlacedIndicators()
     -- FILTER GROUP PLACEHOLDERS (My Buffs / Other Buffs): labeled outline
     -- blocks via the shared helper above. Pooled per group id — SEPARATE pool
     -- table per tab (the two id counters can collide, mirror the dgroup pool);
-    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the classic
+    -- eye-hidden groups draw nothing. Wrap/max defaults 8 match the
     -- member-group layout.
     do
         local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"

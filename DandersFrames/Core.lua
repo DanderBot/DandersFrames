@@ -4176,6 +4176,12 @@ function DF:MigrateContainerPositionRecords()
         if type(profile) == "table" and DF.PinnedFrames and DF.PinnedFrames.MigrateProfileRecords then
             DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
         end
+
+        -- Global settings captured as raid auto-layout overrides: runs every time for the
+        -- same reason, since an import can bring one back. See GLOBAL_KEYS (AutoProfiles).
+        if type(profile) == "table" and DF.StripGlobalLayoutOverrides then
+            DF:StripGlobalLayoutOverrides(profile)
+        end
     end
 
     -- Phase D tail: move what lives OUTSIDE the profiles across to the uid key format.
@@ -6392,7 +6398,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- either; these are reached THROUGH it and have to match it.
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
-        sub("idgate",       "engine gate mirror + group canaries ('probe' toggles them)", true)
+        sub("idgate",       "aura latches, slot audit and the latch trail", true)
         sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -7208,10 +7214,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 o:Field(L["Debug logging"],
                     DF.OUT.CMD .. "/df debug on|r / " .. DF.OUT.CMD .. "/df debug off|r")
                 o:Field(L["console page"], DF.OUT.CMD .. "/df console|r")
-                -- Which way the settings panel is drawing its gated groups. Raw,
-                -- not L[...]: dev diagnostics stay out of the translation portal.
-                o:Field("settings layout",
-                    DF:IsClassicSettingsLayout() and "classic" or "popout", "NEUTRAL")
 
                 -- Flatten both registries into one row shape: {name, desc}.
                 -- ONE form per row now. The old listing carried a second grey
@@ -7344,15 +7346,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- text is always a width fault; this says WHICH frame caused it.
                 if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
             elseif msg == "idgate" or msg:match("^idgate%s") then
-                -- Post-demolition (69465): "idgate" prints everything — handles/slots
-                -- classification, the per-group-member engine mirror, canary readings
-                -- and the always-on gate trail; works in combat (reads only).
-                -- "idgate probe" TOGGLES group-wide canaries (no unit arg);
-                -- "idgate probe show" toggles the eyeball placement.
-                local probeArgs = msg:match("^idgate%s+probe%s*(.-)%s*$")
-                if probeArgs and DF.AuraContainer and DF.AuraContainer.DebugGateProbe then
-                    DF.AuraContainer.DebugGateProbe(probeArgs)
-                elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
+                -- Every container's latches and filters, the slot-enable audit and the
+                -- always-on latch trail; reads only, so it works in combat.
+                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
             elseif msg == "dispelcap" then
@@ -8293,6 +8289,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
         end
 
+        if DF.pendingPlayerFrameUpdate then
+            DF.pendingPlayerFrameUpdate = nil
+            DF:UpdateDefaultPlayerFrame()
+        end
+
         -- Pet work the lockdown blocked, on any track. Two flags rather than one
         -- because they cost differently: a visibility replay only needs the show/hide
         -- pass re-run, while a position replay re-parents and re-anchors every pet
@@ -9068,13 +9069,27 @@ end
 -- ========================================
 -- Hide/Show Default Player Frame
 -- ========================================
-function DF:UpdateDefaultPlayerFrame()
+-- Read from the party table on purpose: the setting is global (written to both modes) and
+-- a raid auto layout can never override it, so there is one answer however the group is
+-- shaped. "Only in a raid group" is that global choice, not a per-layout one.
+function DF:ShouldHideDefaultPlayerFrame()
     local db = DF:GetDB()
-    if not db then return end
-    
-    -- Hide default player frame when the option is checked (independent of solo mode)
-    local shouldHide = db.hideDefaultPlayerFrame
-    
+    if not (db and db.hideDefaultPlayerFrame) then return false end
+    if db.hideDefaultPlayerFrameRaidOnly then return IsInRaid() and true or false end
+    return true
+end
+
+function DF:UpdateDefaultPlayerFrame()
+    if not DF:GetDB() then return end
+    -- PlayerFrame is protected: a change that lands in combat (joining a raid mid-fight)
+    -- waits for PLAYER_REGEN_ENABLED instead of being dropped.
+    if InCombatLockdown() then
+        DF.pendingPlayerFrameUpdate = true
+        return
+    end
+
+    local shouldHide = DF:ShouldHideDefaultPlayerFrame()
+
     if shouldHide then
         -- Hide the default player frame using the standard method
         if PlayerFrame and not InCombatLockdown() then
@@ -9083,8 +9098,7 @@ function DF:UpdateDefaultPlayerFrame()
             -- Use a hook to keep it hidden
             if not DF.playerFrameHooked then
                 hooksecurefunc(PlayerFrame, "Show", function(self)
-                    local db = DF:GetDB()
-                    if db and db.hideDefaultPlayerFrame then
+                    if DF:ShouldHideDefaultPlayerFrame() then
                         if not InCombatLockdown() then
                             self:Hide()
                         end

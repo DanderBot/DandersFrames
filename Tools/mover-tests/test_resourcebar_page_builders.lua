@@ -3,9 +3,8 @@ local NS = ...
 -- ============================================================
 -- RESOURCE BAR PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Auras.lua
 -- ------------------------------------------------------------
--- Bars > Resource Bar: nine 280 boxes in classic; in modern, the Debuff Bar's
--- collapsible CARDS, one per box, in two page columns under the three category
--- headers the popout bands had:
+-- Bars > Resource Bar: the Debuff Bar's collapsible CARDS in two page columns
+-- under three category headers:
 --
 --   column 1   "Content"     Settings, Class Filter
 --              "Layout"      Size, Position (+ Frame Level)
@@ -28,9 +27,9 @@ local NS = ...
 -- file reads the page's SOURCE and asserts against it.
 --
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
---     in order -- taken from the pre-card source, so classic renders as it did.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--     in order.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, tick and pin.
 --   ✗ nothing about runtime behaviour -- read in game.
 -- ============================================================
@@ -124,8 +123,6 @@ end
 -- ============================================================
 print("-- Resource Bar page: the shared card helper")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
 
@@ -222,30 +219,30 @@ local RESOURCE_COLORS = {
     { "colorpicker", "(none)",       "(none)",                 30 },
 }
 
--- label, stable collapse key, card column, classic box and column, summary;
+-- label, stable collapse key, card column, summary;
 -- `dim` = header greys with the page gate, `pin` = passes its builder (decides
 -- how the bar LOOKS), `tick` = its on/off moved into the header.
 local CARDS = {
-    { label = "Settings", classicLabel = "Resource Bar Settings", key = "resource_settings", col = 1, box = "settingsGroup", classicCol = 1,
+    { label = "Settings", key = "resource_settings", col = 1, 
       builder = "BuildResourceSettingsGroup", golden = RESOURCE_SETTINGS, summary = "ResourceSettingsCardSummary" },
-    { label = "Class Filter", key = "resource_classfilter", col = 1, box = "classFilterGroup", classicCol = 1,
+    { label = "Class Filter", key = "resource_classfilter", col = 1, 
       builder = "BuildResourceClassFilterGroup", golden = RESOURCE_CLASS_FILTER,
       summary = "ResourceClassFilterSummary", dim = true },
-    { label = "Size", key = "resource_size", col = 1, box = "sizeGroup", classicCol = 1,
+    { label = "Size", key = "resource_size", col = 1, 
       builder = "BuildResourceSizeGroup", golden = RESOURCE_SIZE, summary = "ResourceSizeSummary", dim = true, pin = true },
-    { label = "Position", key = "resource_position", col = 1, box = "positionGroup", classicCol = 1,
+    { label = "Position", key = "resource_position", col = 1, 
       builder = "BuildResourcePositionGroup", golden = RESOURCE_POSITION, summary = "ResourcePositionSummary",
       dim = true, pin = true, cardBuilder = "BuildResourcePositionCardGroup" },
-    { label = "Bar Style", classicLabel = "Appearance", key = "resource_appearance", col = 2, box = "appearanceGroup", classicCol = 2,
+    { label = "Bar Style", key = "resource_appearance", col = 2, 
       builder = "BuildResourceAppearanceGroup", golden = RESOURCE_APPEARANCE, summary = "ResourceAppearanceSummary",
       dim = true, pin = true },
-    { label = "Background", key = "resource_background", col = 2, box = "bgGroup", classicCol = 2,
+    { label = "Background", key = "resource_background", col = 2, 
       builder = "BuildResourceBackgroundGroup", golden = RESOURCE_BACKGROUND, summary = "ResourceBackgroundSummary",
       dim = true, pin = true, tick = { key = "resourceBarBackgroundEnabled", name = "Show Background" } },
-    { label = "Border", key = "resource_border", col = 2, box = "borderGroup", classicCol = 2,
+    { label = "Border", key = "resource_border", col = 2, 
       builder = "BuildResourceBorderGroup", golden = RESOURCE_BORDER, summary = "ResourceBorderSummary",
       dim = true, pin = true, tick = { key = "resourceBarShowBorder", name = "Show Border" }, composite = true },
-    { label = "Resource Colors", key = "resource_colors", col = 2, box = "colorGroup", classicCol = 2,
+    { label = "Resource Colors", key = "resource_colors", col = 2, 
       builder = "BuildResourceColorsGroup", golden = RESOURCE_COLORS, summary = "ResourceColorsSummary",
       dim = true, pin = true },
 }
@@ -255,23 +252,12 @@ for _, g in ipairs(CARDS) do
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
 
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    check(PAGE:find("local " .. g.box .. " = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          g.label .. ": the classic 280 box is built")
-    check(PAGE:find(g.box .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. (g.classicLabel or g.label) .. '"]), 40)', 1, true) ~= nil,
-          g.label .. ": ...under the header it always had")
-    check(PAGE:find("Add(" .. g.box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-          g.label .. ": ...and still goes to column " .. g.classicCol)
-
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
           g.label .. ": a card keyed " .. g.key .. " in column " .. g.col .. ", printing " .. g.summary)
     eq(call:find("ResourceOffRow", 1, true) ~= nil and call:find(g.summary .. ", ResourceOffRow", 1, true) ~= nil, g.dim == true,
        g.label .. (g.dim and ": its header greys with the page gate" or ": holds the page gate, so never greys with it"))
-    -- `cardBuilder`: the card mounts a wrapper round the classic builder (Position
+    -- `cardBuilder`: the card mounts a wrapper round the builder (Position
     -- + Frame Level), and the pin is handed that SAME wrapper.
     local cardBuilder = g.cardBuilder or g.builder
     eq(call:find(cardBuilder, 1, true) ~= nil, g.pin == true,
@@ -303,8 +289,8 @@ for _, g in ipairs(CARDS) do
     local mount = cardBuilder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
@@ -331,20 +317,19 @@ do
         check(builderBody(b):find("group.disableChildrenOn = function(d) return not d.resourceBarEnabled end", 1, true) ~= nil,
               "gate: " .. b .. " keeps its group gate")
     end
-    -- The border factory owns its group, so the gate goes in as its consumer gate
-    -- -- in modern (card and pinned panel alike), never in classic.
-    check(builderBody("BuildResourceBorderGroup"):find("disableWhen  = tools and ResourceOffRow or nil,", 1, true) ~= nil,
-          "gate: the border's controls take the page gate through the factory in modern")
+    -- The border factory owns its group, so the gate goes in as its consumer gate.
+    check(builderBody("BuildResourceBorderGroup"):find("disableWhen  = ResourceOffRow,", 1, true) ~= nil,
+          "gate: the border's controls take the page gate through the factory")
 
     -- ☠ THE ORIENTATION PICK REACHES A PINNED SIZE PANEL.
     local gate = PAGE:match("local function OrientationChanged%(tools2%)(.-)\n        end")
     check(gate ~= nil and gate:find("tools2.refreshStates()", 1, true) ~= nil
-      and gate:find("if tools then tools.ReflowMounted() end", 1, true) ~= nil,
-          "orientation: a state pass, then -- in modern -- a reflow of every mounted panel")
+      and gate:find("tools.ReflowMounted()", 1, true) ~= nil,
+          "orientation: a state pass, then a reflow of every mounted panel")
 
     -- The colour reset repaints the card's own band, then any pinned copy.
     local colors = builderBody("BuildResourceColorsGroup")
-    check(colors:find("group:RefreshChildValues()\n                    if tools then tools.ReflowMounted(true) end", 1, true) ~= nil,
+    check(colors:find("if not tools2.popout then group:RefreshChildValues() end\n                tools.ReflowMounted(true)", 1, true) ~= nil,
           "reset: the card sweeps its own swatches and then any pinned copy's")
 
     local rebuilds = 0
@@ -364,7 +349,7 @@ do
     local b = card:find("BuildResourcePositionGroup(tools2)", 1, true)
     local s = card:find('tools2.group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(tools2.parent, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)', 1, true)
     check(b ~= nil and s ~= nil and b < s,
-          "frame level: the card builder is Position's builder, then classic's own slider call -- same key, range, callbacks and tooltip")
+          "frame level: the card builder is Position's builder, then the slider call -- same key, range, callbacks and tooltip")
     local block, call = sectionBlock("Position")
     check(call:find("BuildResourcePositionCardGroup", 1, true) ~= nil
       and block:find("BuildResourcePositionCardGroup({ group = band,", 1, true) ~= nil,
@@ -372,40 +357,19 @@ do
     check(block:find("band:AddWidget", 1, true) == nil,
           "frame level: nothing is added to the Position band outside the builder")
     check(builderBody("BuildResourcePositionGroup"):find("Frame Level", 1, true) == nil,
-          "frame level: classic's Position builder is untouched -- its box never gains the slider")
-    local frames = 0
-    for _ in PAGE:gmatch('L%["Frame Level"%], 0, 100, 1, db, "resourceBarFrameLevel"') do frames = frames + 1 end
-    eq(frames, 2, "frame level: two sliders on the page -- classic's box and the Position card builder")
-    check(PAGE:find("local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil
-      and PAGE:find('frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)', 1, true) ~= nil
-      and PAGE:find("Add(frameLevelGroup, nil, 1)", 1, true) ~= nil,
-          "frame level: classic keeps its own box, header and column")
+          "frame level: the plain Position builder does not build the slider -- the card builder adds it")
 end
 
 -- ============================================================
--- 6. THE ORDER -- classic unmoved, and the cards in the same sequence
+-- 6. THE ORDER
 -- ============================================================
-print("-- Resource Bar page: the Add order in both layouts")
+print("-- Resource Bar page: the card order")
 do
-    local ORDER = {
-        "Add(settingsGroup, nil, 1)", "Add(classFilterGroup, nil, 1)", "Add(sizeGroup, nil, 1)",
-        "Add(positionGroup, nil, 1)", "Add(appearanceGroup, nil, 2)", "Add(bgGroup, nil, 2)",
-        "Add(borderGroup, nil, 2)", "Add(frameLevelGroup, nil, 1)", "Add(colorGroup, nil, 2)",
-    }
-    local prev = 0
-    for _, a in ipairs(ORDER) do
-        local at = PAGE:find(a, 1, true)
-        check(at ~= nil and at > prev, "classic: still calls " .. a .. " in sequence")
-        prev = at or prev
-    end
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Settings | Class Filter | Size | Position | Bar Style | Background | Border | Resource Colors",
-       "order: the cards open in classic's order, which is the one-column fold's")
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 9, "classic: nine bare 280 boxes, the classic arms' own")
+       "order: the cards open in reading order, which is the one-column fold's")
     check(SRC:find('CreateCopyButton(self.child, {"resourceBar"}, L["Resource Bar"], "bars_resource")', 1, true) ~= nil,
           "page: the copy button is untouched")
 end

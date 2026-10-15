@@ -604,7 +604,7 @@ local function GroupApply(kind)
 end
 
 -- ── PLACEMENT (every group kind) ──
--- The controls bind the group record itself, in both layouts.
+-- The controls bind the group record itself.
 local function BuildGroupPlacement(env, group, kind)
     local place, host = env.place, env.host
     local apply = GroupApply(kind)
@@ -803,8 +803,8 @@ local function PaintIconRowOnThumb(pv, colors, ghost)
         x = x + GROUP_ICON_SIZE + GROUP_ICON_GAP
     end
 end
--- Published for the classic Effects tab's Add from a Spell / Add from a Filter
--- tiles (Cards.lua's S.BuildClassicAddTiles), which draw in this same vocabulary.
+-- Published for the Effects tab's Add from a Spell / Add from a Filter
+-- tiles (Cards.lua's S.BuildAddTiles), which draw in this same vocabulary.
 P.PaintGroupIconRow = PaintIconRowOnThumb
 
 -- "Create Filter" -- jump to the Filter Designer and pulse its New Filter button.
@@ -886,11 +886,11 @@ end
 --   opts.Close()       shut the panel once something has been added
 -- ============================================================
 local GROUP_TILE_PIC_H, GROUP_TILE_GAP = 40, 6
--- The same numbers for the classic Effects tab's source tiles (Cards.lua's
--- S.BuildClassicAddTiles), so all three tabs' add tiles are one size.
+-- The same numbers for the Effects tab's source tiles (Cards.lua's
+-- S.BuildAddTiles), so all three tabs' add tiles are one size.
 P.GroupTileMetrics = { picH = GROUP_TILE_PIC_H, gap = GROUP_TILE_GAP }
 
--- ── opts.onPage: THE CLASSIC DESIGNER MOUNTS THESE PANES ON ITS TAB ──
+-- ── opts.onPage: THE DESIGNER MOUNTS THESE PANES ON ITS TAB ──
 -- The split panel's Layout Groups / Debuffs tabs draw these tiles straight onto
 -- the page, above the list, and a click ADDS (2026-09-22). So there is no numbered
 -- question over them -- the tab heading already says what the tiles are -- and the
@@ -968,11 +968,11 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local hasGroups = #VisibleLayoutGroups() > 0
 
     -- ── SPELL GROUP / FILTER GROUP ──
-    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH (2026-09-22). The Modern
+    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH (2026-09-22). The
     -- pane (S.BuildAddLayoutGroupPane, opts.onPage) mounted straight onto this tab:
     -- a tile click creates the group, and the Create / Manage Filters pair sits
-    -- under the tiles -- see Cards.lua's THE CLASSIC DESIGNER'S INLINE ADD FLOWS.
-    yPos = S.BuildClassicAddTiles(parent, yPos, "layout")
+    -- under the tiles -- see Cards.lua's THE DESIGNER'S INLINE ADD FLOWS.
+    yPos = S.BuildAddTiles(parent, yPos, "layout")
 
     -- Teaching prose, first visit only. The CARDS below are pinned permanently --
     -- they are the create action, so they have to be -- but this sentence is read
@@ -1626,7 +1626,7 @@ end
 -- says what this kind of group IS. A bare row would be one click cheaper and
 -- would drop that sentence on the floor.
 -- ============================================================
--- opts.onPage / opts.blocked / opts.gate: the classic tab's mount, exactly as the
+-- opts.onPage / opts.blocked / opts.gate: the tab's mount, exactly as the
 -- Layout Groups pane takes them (see opts.onPage above S.BuildAddLayoutGroupPane).
 S.BuildAddDebuffGroupPane = function(host, opts)
     opts = opts or {}
@@ -1690,7 +1690,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     -- The Debuffs pool's half of the same change: its one tile, on the page
     -- (S.BuildAddDebuffGroupPane, opts.onPage), one click adds. The debuffGroups
     -- array is still born lazily on the first add.
-    yPos = S.BuildClassicAddTiles(parent, yPos, "debuff")
+    yPos = S.BuildAddTiles(parent, yPos, "debuff")
 
     -- Teaching prose, first visit only -- see the Layout Groups tab.
     if not hasGroups then
@@ -1736,7 +1736,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
         -- which is the whole reason it was lifted out.
         local adDBForDedup = GetAuraDesignerDB()
         if adDBForDedup then
-            -- Same structural chain both layouts already spell for the eye and the
+            -- Same structural chain the designer already spells for the eye and the
             -- delete; defined here because neither host's copy is in scope.
             local function StructuralDedupRefresh()
                 S.SwitchTab("layout")
@@ -1975,8 +1975,7 @@ end
 -- ------------------------------------------------------------
 -- The 50/50 layout: preview left, three-tab settings column right, everything
 -- hand-anchored inside one S.mainFrame that the page harness never sees. It is
--- why this page had to force the window 210px wider than its own default. It is
--- the designer's only page, in both settings layouts (decided 2026-09-22).
+-- why this page had to force the window 210px wider than its own default.
 -- ============================================================
 local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local prevDB = S.db  -- capture before overwrite to detect mode switch
@@ -2124,6 +2123,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- dimensions actually changed.  GUI window resize cases (the real
     -- reason this hook exists) still rebuild; banner-cascade-as-noop
     -- cases stop the loop.
+    if GUI.PinChildToViewport then GUI.PinChildToViewport(S.page) end
     S.page.RefreshStates = function(self)
         local pageH = self:GetHeight()
         self.child:SetHeight(pageH)
@@ -2257,8 +2257,19 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     yPos = yPos - (BUFFTAB_H + SECTION_GAP)
 
     -- ========================================
-    -- 50/50 SPLIT: LEFT PANEL + RIGHT PANEL
+    -- SPLIT: LEFT PANEL (preview) + RIGHT PANEL (settings)
     -- ========================================
+    -- The preview takes what its hint rows need on one line (GUI.DesignerPreviewWidth,
+    -- shared with the Text Designer so both pages split alike) and the settings panel
+    -- takes the rest, so the settings cards reach two settings per row at a narrower
+    -- window. Below twice that, 50/50 as before.
+    local SPLIT_GAP, LEFT_FLOOR = 6, 300
+    local function SplitLeftWidth(total)
+        local need = max(LEFT_FLOOR, GUI.DesignerPreviewWidth and GUI.DesignerPreviewWidth() or 0)
+        if total - SPLIT_GAP - need < need then return floor((total - SPLIT_GAP) / 2) end
+        return need
+    end
+    local function SplitRightWidth(total) return total - SPLIT_GAP - SplitLeftWidth(total) end
     local splitContainer = CreateFrame("Frame", nil, S.mainFrame)
     splitContainer:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
     splitContainer:SetPoint("BOTTOMRIGHT", S.mainFrame, "BOTTOMRIGHT", 0, 0)
@@ -2268,7 +2279,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.leftPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     S.leftPanel:SetPoint("TOPLEFT", 0, 0)
     S.leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
-    S.leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -3, 0)
+    -- Width set by ApplySplit below, once the preview has measured its hint rows.
     -- NO border here — the inner preview container (CreateFramePreview) draws the
     -- visible dim border. A border on both stacked to a brighter doubled line.
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
@@ -2280,7 +2291,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
     S.rightPanel:SetPoint("TOPRIGHT", 0, 0)
     S.rightPanel:SetPoint("BOTTOMRIGHT", 0, 0)
-    S.rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 3, 0)  -- 6px split gap (matches Text Designer)
+    S.rightPanel:SetPoint("LEFT", S.leftPanel, "RIGHT", SPLIT_GAP, 0)
+
+    local function ApplySplit(total)
+        if not total or total < 100 then return end
+        S.leftPanel:SetWidth(SplitLeftWidth(total))
+    end
+    local splitStartW = parent:GetWidth()
+    if splitStartW < 100 then
+        splitStartW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
+    end
+    ApplySplit(splitStartW)
+    splitContainer:SetScript("OnSizeChanged", function(_, w) ApplySplit(w) end)
     GUI:CreatePanelBackdrop(S.rightPanel, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
 
     -- ── TAB BAR ── (shared underline-tab style, mirroring the Pinned Frames
@@ -2328,7 +2350,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
         local provW = parent:GetWidth()
         if provW < 100 and GUI and GUI.contentFrame then provW = GUI.contentFrame:GetWidth() end
         if provW < 100 then provW = 600 end
-        btn:SetWidth(max(60, floor(((provW / 2) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
+        btn:SetWidth(max(60, floor((SplitRightWidth(provW) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
 
         -- Shared underline-tab styling; S.SwitchTab drives SetActive. label = btn.Text.
         GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
@@ -2378,7 +2400,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     if earlyW < 100 then
         earlyW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
     end
-    S.tabContentFrame:SetWidth(max(1, (earlyW / 2) - 2 - 22))
+    S.tabContentFrame:SetWidth(max(1, SplitRightWidth(earlyW) - 22))
     S.tabContentFrame:SetHeight(800)
     S.tabScrollFrame:SetScrollChild(S.tabContentFrame)
     DF.GUI.StyleScrollBar(S.tabScrollFrame)
@@ -2417,7 +2439,7 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local parentW = parent:GetWidth()
     if parentW < 100 and GUI and GUI.contentFrame then parentW = GUI.contentFrame:GetWidth() end
     if parentW < 100 then parentW = UIParent:GetWidth() / 2 end
-    local initW = (parentW / 2) - 2 - 22  -- half split minus gap minus scrollbar
+    local initW = SplitRightWidth(parentW) - 22  -- the settings panel less its scrollbar
     if initW > 50 then
         S.tabContentFrame:SetWidth(initW)
     end
@@ -2443,9 +2465,8 @@ end
 -- ============================================================
 -- WHICH PAGE THIS IS
 -- ------------------------------------------------------------
--- The designer always builds its classic island, in both settings layouts
--- (decided 2026-09-22). `Add` and `AddSpace` are still accepted so BuildPage's
--- contract is unchanged; the island does not use them.
+-- The designer always builds its island. `Add` and `AddSpace` are still
+-- accepted so BuildPage's contract is unchanged; the island does not use them.
 -- ============================================================
 function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)

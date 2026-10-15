@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- TARGETED LIST PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Indicators > Targeted List: THIRTEEN groups. In Modern they are the Debuff
+-- Indicators > Targeted List: THIRTEEN groups, as the Debuff
 -- Bar's collapsible CARDS -- two per row inside a card wide enough, dim
 -- captions, the value summary in a shut card's corner, Expand All / Collapse All
 -- at the top -- in the columns and the order the old bands had:
@@ -29,13 +29,12 @@ local NS = ...
 -- and asserts against it, as the other census files do.
 --
 -- What that buys, and what it does not:
---   ✓ the widget CENSUS of each builder, taken from the PRE-CHANGE source -- the
---     evidence that CLASSIC RENDERS AS IT DID -- and classic's Add order.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--   ✓ the widget CENSUS of each builder.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, header tick
 --     and pin; that there is one checkbox per setting; the Add order the
---     one-column fold reads in; the preset's no-rebuild path in Modern.
+--     one-column fold reads in; the preset's no-rebuild path.
 --   ✗ nothing about how any of it LOOKS or behaves in the client.
 -- ============================================================
 
@@ -137,8 +136,6 @@ end
 -- ============================================================
 print("-- Targeted List page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     local at = PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true)
     local bail = PAGE:find('if GUI.SelectedMode == "raid" then', 1, true)
     check(at ~= nil and bail ~= nil and at < bail,
@@ -207,19 +204,16 @@ do
 end
 
 -- ============================================================
--- 2. THE PRESET: CLASSIC REBUILDS, MODERN REPAINTS IN PLACE
+-- 2. THE PRESET REPAINTS IN PLACE
 -- ============================================================
-print("-- Targeted List page: the preset's layout-aware refresh")
+print("-- Targeted List page: the preset's in-place refresh")
 do
-    local n = 0
-    for _ in PAGE:gmatch("RefreshCurrentPage") do n = n + 1 end
-    eq(n, 2, "rebuild: exactly one guarded RefreshCurrentPage call is left on the page")
+    check(PAGE:find("RefreshCurrentPage", 1, true) == nil,
+          "rebuild: nothing on the page rebuilds it")
     local a = PAGE:find("local function TargetedListPresetChanged(tools2)", 1, true)
     check(a ~= nil, "rebuild: the preset's commit is named once")
     local b = PAGE:find("\n            end\n", a or 1, true)
     local body = PAGE:sub(a or 1, b or (a or 1))
-    check(body:find("if tools2.popout or tools then", 1, true) ~= nil,
-          "rebuild: a pinned panel AND a Modern card take the in-place path")
     check(body:find("for _, w in ipairs(self.children or {}) do", 1, true) ~= nil
       and body:find("if w.RefreshChildValues then w:RefreshChildValues() end", 1, true) ~= nil,
           "rebuild: ...a card sweeps the VALUES of every band on the page, because a state pass never repaints a value")
@@ -227,13 +221,11 @@ do
       and body:find("self:RefreshStates()", 1, true) ~= nil
       and body:find("GUI.RefreshAllOverrideIndicators", 1, true) ~= nil,
           "rebuild: ...plus the pinned panels, the summaries and the override indicators")
-    check(body:find("GUI:RefreshCurrentPage()", 1, true) ~= nil,
-          "rebuild: ...while classic (no tools) still rebuilds the page, exactly as it always did")
 end
 
 -- ============================================================
 -- 3. THE THIRTEEN BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local TL_SETTINGS = {
     { "label",    "Shows a bar when an enemy is casting a spell targeting a party/raid member.", "(none)", 35 },
@@ -325,48 +317,48 @@ local TL_TIMING = {
     { "slider", "Interrupted Flash Duration", "targetedListInterruptedFlashDuration", 55 },
 }
 
--- label, stable collapse key, card column, classic box column; `dim` = greys
+-- label, stable collapse key, card column; `dim` = greys
 -- its header with the page gate, `pin` = passes its builder (how a bar LOOKS),
 -- `tick` = its on/off moved into the header.
 local CARDS = {
-    { label = "Settings", key = "targetedlist_settings", col = 1, classicCol = 1,
+    { label = "Settings", key = "targetedlist_settings", col = 1, 
       builder = "BuildTargetedListSettingsGroup", golden = TL_SETTINGS, summary = "TargetedListSettingsSummary" },
-    { label = "Size & Spacing", key = "targetedlist_layout", col = 1, classicCol = 1,
+    { label = "Size & Spacing", key = "targetedlist_layout", col = 1, 
       builder = "BuildTargetedListLayoutGroup", golden = TL_LAYOUT, summary = "TargetedListLayoutSummary",
       dim = true, pin = true },
-    { label = "Bar Style", key = "targetedlist_barstyle", col = 1, classicCol = 2,
+    { label = "Bar Style", key = "targetedlist_barstyle", col = 1, 
       builder = "BuildTargetedListPresetGroup", golden = TL_PRESET, summary = "TargetedListPresetSummary",
       dim = true, pin = true },
-    { label = "Bar Color", key = "targetedlist_barcolor", col = 1, classicCol = 2,
+    { label = "Bar Color", key = "targetedlist_barcolor", col = 1, 
       builder = "BuildTargetedListColorGroup", golden = TL_COLOR, summary = "TargetedListColorSummary",
       dim = true, pin = true },
-    { label = "Border", key = "targetedlist_border", col = 1, classicCol = 2,
+    { label = "Border", key = "targetedlist_border", col = 1, 
       builder = "BuildTargetedListBorderGroup", golden = TL_BORDER, summary = "TargetedListBorderSummary",
       dim = true, pin = true, composite = true,
       tick = { key = "targetedListShowBorder", name = "Show Border" } },
-    { label = "Icon", key = "targetedlist_icon", col = 1, classicCol = 2,
+    { label = "Icon", key = "targetedlist_icon", col = 1, 
       builder = "BuildTargetedListIconGroup", golden = TL_ICON, summary = "TargetedListIconSummary",
       dim = true, pin = true,
       tick = { key = "targetedListShowIcon", name = "Show Icon" } },
-    { label = "Timing", key = "targetedlist_timing", col = 1, classicCol = 1, band = "tband",
+    { label = "Timing", key = "targetedlist_timing", col = 1, band = "tband",
       builder = "BuildTargetedListTimingGroup", golden = TL_TIMING, summary = "TargetedListTimingSummary",
       dim = true },
-    { label = "Show Text", key = "targetedlist_showtext", col = 2, classicCol = 1,
+    { label = "Show Text", key = "targetedlist_showtext", col = 2, 
       builder = "BuildTargetedListShowTextGroup", golden = TL_SHOWTEXT, summary = "TargetedListShowTextSummary",
       dim = true },
-    { label = "Text Font", key = "targetedlist_font", col = 2, classicCol = 2,
+    { label = "Text Font", key = "targetedlist_font", col = 2, 
       builder = "BuildTargetedListFontGroup", golden = TL_FONT, summary = "TargetedListFontSummary",
       dim = true, pin = true },
-    { label = "Spell Name Position", key = "targetedlist_spellnamepos", col = 2, classicCol = 1,
+    { label = "Spell Name Position", key = "targetedlist_spellnamepos", col = 2, 
       builder = "BuildTargetedListSpellNamePosGroup", golden = TL_SPELLNAME, summary = "TargetedListSpellNameSummary",
       dim = true, pin = true },
-    { label = "Target Name Position", key = "targetedlist_targetnamepos", col = 2, classicCol = 2,
+    { label = "Target Name Position", key = "targetedlist_targetnamepos", col = 2, 
       builder = "BuildTargetedListTargetNamePosGroup", golden = TL_TARGETNAME, summary = "TargetedListTargetNameSummary",
       dim = true, pin = true },
-    { label = "Duration Position", key = "targetedlist_durationpos", col = 2, classicCol = 1,
+    { label = "Duration Position", key = "targetedlist_durationpos", col = 2, 
       builder = "BuildTargetedListDurationPosGroup", golden = TL_DURATIONPOS, summary = "TargetedListDurationPosSummary",
       dim = true, pin = true },
-    { label = "Interrupt Text Position", key = "targetedlist_interruptpos", col = 2, classicCol = 2,
+    { label = "Interrupt Text Position", key = "targetedlist_interruptpos", col = 2, 
       builder = "BuildTargetedListInterruptPosGroup", golden = TL_INTERRUPTPOS, summary = "TargetedListInterruptPosSummary",
       dim = true, pin = true },
 }
@@ -375,22 +367,6 @@ for _, g in ipairs(CARDS) do
     print("-- Targeted List page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.label .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, g.label .. ": the classic box keeps its own header")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...which still goes to column " .. g.classicCol)
-    end
 
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -426,8 +402,8 @@ for _, g in ipairs(CARDS) do
     local mount = g.builder .. "({ group = " .. (g.band or "band") .. ", parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
@@ -455,9 +431,6 @@ do
     local timingCard = PAGE:find('OpenSection(L["Timing"]', 1, true)
     check(timingDecl and timingCard and timingDecl < timingCard,
           "order: Timing's builder is declared before the card that calls it")
-    -- ...while classic's Timing box is still Add'd last, its Modern half a pointer.
-    check(PAGE:find("Add(timingGroup, nil, 1)\n            else\n                -- Modern opened this card above", 1, true) ~= nil,
-          "order: the classic Timing arm is untouched, its Modern half a pointer")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -467,13 +440,13 @@ do
     for _, g in ipairs(CARDS) do
         if g.tick then inCards = inCards + select(2, (sectionBlock(g.label)):gsub("hoistToggle = true,", "")) end
     end
-    eq(inCards, hoists, "ticks: ...and every one is a ticked card's -- classic never passes it")
+    eq(inCards, hoists, "ticks: ...and every one is a ticked card's")
 
     -- ☠ THE MASTER SWITCH FOLLOWS EVERY OTHER PAGE NOW: in Settings' body.
     check((sectionBlock("Settings")):find("targetedListEnabled", 1, true) == nil,
           "ticks: Enable is not in Settings' header")
     check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable Targeted List"], db, "targetedListEnabled"', 1, true) ~= nil,
-          "ticks: ...its builder builds it in the body, in both layouts")
+          "ticks: ...its builder builds it in the body")
     -- The master switch names its feature, as every other page's does
     -- ("Enable Resource Bar", "Enable Buffs") -- never a bare "Enable".
     check(builderBody("BuildTargetedListSettingsGroup"):find('L["Enable"]', 1, true) == nil,
@@ -489,20 +462,6 @@ do
     local bail = PAGE:find('if GUI.SelectedMode == "raid" then', 1, true)
     check(stripAt and contentAt and bail and bail < stripAt and stripAt < contentAt,
           "bulk: ...after the raid bail and above the first category header")
-
-    -- ---- thirteen classic boxes, in the order they always had -----------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 13, "classic: thirteen bare 280 boxes, and they are the classic branch's own")
-    local prev = 0
-    for _, name in ipairs({ "settingsGroup", "layoutGroup", "presetGroup", "colorGroup",
-                            "borderGroup", "iconGroup", "textToggleGroup", "fontGroup",
-                            "spellNamePosGroup", "targetNamePosGroup", "durationPosGroup",
-                            "interruptPosGroup", "timingGroup" }) do
-        local at = PAGE:find("Add(" .. name .. ", nil,", 1, true)
-        check(at ~= nil and at > prev, "classic: adds " .. name .. " in its original place")
-        prev = at or prev
-    end
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"targetedList"}, L["Targeted List"], "indicators_targetedlist")', 1, true) ~= nil,

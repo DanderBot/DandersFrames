@@ -3,7 +3,7 @@ local NS = ...
 -- ============================================================
 -- MISSING BUFFS PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Indicators.lua
 -- ------------------------------------------------------------
--- Auras > Missing Buffs: FIVE groups. In Modern they are the Debuff Bar's
+-- Auras > Missing Buffs: FIVE groups, as the Debuff Bar's
 -- collapsible CARDS -- two per row inside a card wide enough, dim captions, the
 -- value summary in a shut card's corner, Expand All / Collapse All at the top.
 --
@@ -23,11 +23,9 @@ local NS = ...
 --
 -- What that buys, and what it does not:
 --   ✓ the widget CENSUS of each builder -- kind, L key, db key and slot height,
---     in order -- taken from the PRE-CHANGE source. This is also the evidence
---     that CLASSIC RENDERS AS IT DID: the classic branch mounts the same builder
---     into the same 280 box in the same column.
---   ✓ that ONE builder serves both layouts, and the card hands it EXACTLY what
---     classic hands it (plus hoistToggle where the tick moved to the header).
+--     in order.
+--   ✓ how each card mounts its builder (plus hoistToggle where the tick lives
+--     in the header).
 --   ✓ each card's column, stable collapse key, summary, grey gate, hide gate,
 --     header tick and pin; that there is one checkbox per setting.
 --   ✓ the two opt-ins (two per row, dim captions) and that no count survives.
@@ -135,8 +133,6 @@ end
 -- ============================================================
 print("-- Missing Buffs page: the shared machinery and the page-scope vocabulary")
 do
-    check(PAGE:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true) ~= nil,
-          "tools: the page asks which layout it is building")
     check(PAGE:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
           "tools: ...and takes the shared machinery unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "ClaimKeys",
@@ -205,22 +201,22 @@ do
     end
 
     -- Every builder still declares the group gate it always did, so the bodies
-    -- grey under the page gate in both layouts.
+    -- grey under the page gate.
     for _, b in ipairs({ "BuildMissingSettingsGroup", "BuildMissingBuffsToCheckGroup",
                          "BuildMissingAppearanceGroup", "BuildMissingPositionGroup" }) do
         check(builderBody(b):find("group.disableChildrenOn = HideMissingBuffOptions", 1, true) ~= nil,
-              "gate: " .. b .. " carries the group gate the classic box had")
+              "gate: " .. b .. " carries the page's group gate")
     end
     check(builderBody("BuildMissingBorderGroup"):find("tools2.group.disableChildrenOn = HideMissingBuffOptions", 1, true) ~= nil,
           "gate: the border builder carries it too, after the toolkit has mounted")
 
     check(PAGE:find("GUI:RefreshCurrentPage", 1, true) == nil,
-          "rebuild: the page never rebuilds itself, in either layout")
+          "rebuild: the page never rebuilds itself")
 end
 
 -- ============================================================
 -- 2. THE FIVE BUILDERS, CONTROL BY CONTROL, AND THEIR CARDS
--- Every golden below is the census of the PRE-CHANGE source.
+-- Every golden below is the builder's census.
 -- ============================================================
 local MISSING_SETTINGS = {
     { "label",    "Shows icon when party members are missing raid buffs.", "(none)", 30 },
@@ -253,24 +249,24 @@ local MISSING_BORDER = {
     { "bordercontrols", "(none)", "missingBuffIcon", nil },
 }
 
--- label, stable collapse key, card column, classic box header and column, the
+-- label, stable collapse key, card column, the
 -- summary; `dim` = greys with the page gate, `hide` = the hide gate on both
 -- halves, `pin` = passes its builder (decides how the icon LOOKS), `tick` = its
 -- on/off moved into the header.
 local CARDS = {
-    { label = "Settings", key = "missingbuffs_settings", col = 1, box = "Settings", classicCol = 1,
+    { label = "Settings", key = "missingbuffs_settings", col = 1, 
       builder = "BuildMissingSettingsGroup", golden = MISSING_SETTINGS, summary = "MissingSettingsSummary" },
     { label = "Buffs to Check (Manual Mode)", key = "missingbuffs_buffs", col = 1,
-      box = "Buffs to Check (Manual Mode)", classicCol = 1,
+      
       builder = "BuildMissingBuffsToCheckGroup", golden = MISSING_BUFFS, summary = "MissingBuffsToCheckSummary",
       dim = true, hide = "HideManualBuffVariant" },
-    { label = "Icon Style", key = "missingbuffs_appearance", col = 2, box = "Appearance", classicCol = 2,
+    { label = "Icon Style", key = "missingbuffs_appearance", col = 2, 
       builder = "BuildMissingAppearanceGroup", golden = MISSING_APPEARANCE, summary = "MissingAppearanceSummary",
       dim = true, pin = true },
-    { label = "Position", key = "missingbuffs_position", col = 1, box = "Position", classicCol = 1,
+    { label = "Position", key = "missingbuffs_position", col = 1, 
       builder = "BuildMissingPositionGroup", golden = MISSING_POSITION, summary = "MissingPositionSummary",
       dim = true, pin = true },
-    { label = "Border", key = "missingbuffs_border", col = 2, box = "Border", classicCol = 2,
+    { label = "Border", key = "missingbuffs_border", col = 2, 
       builder = "BuildMissingBorderGroup", golden = MISSING_BORDER, summary = "MissingBorderSummary",
       dim = true, pin = true, composite = true,
       tick = { key = "missingBuffIconShowBorder", name = "Show Border" } },
@@ -280,22 +276,6 @@ for _, g in ipairs(CARDS) do
     print("-- Missing Buffs page: " .. g.label)
     local body = builderBody(g.builder)
     checkCensus(census(body), g.golden, g.label:lower())
-
-    local calls = 0
-    for _ in PAGE:gmatch(g.builder .. "%(") do calls = calls + 1 end
-    eq(calls, 3, g.label .. ": declared once, mounted twice -- classic box and card")
-
-    local box
-    for at, name in PAGE:gmatch("()local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)") do
-        local want = name .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. g.box .. '"])'
-        local hit = PAGE:find(want, at, true)
-        if hit and hit - at < 900 then box = name break end
-    end
-    check(box ~= nil, g.label .. ": the classic box keeps its own header (" .. g.box .. ")")
-    if box then
-        check(PAGE:find("Add(" .. box .. ", nil, " .. g.classicCol .. ")", 1, true) ~= nil,
-              g.label .. ": ...which still goes to column " .. g.classicCol)
-    end
 
     local block, call = sectionBlock(g.label)
     check(block:find('OpenSection(L["' .. g.label .. '"], "' .. g.key .. '", ' .. g.col .. ', ' .. g.summary, 1, true) ~= nil,
@@ -335,8 +315,8 @@ for _, g in ipairs(CARDS) do
     local mount = g.builder .. "({ group = band, parent = self.child, refreshStates = function() self:RefreshStates() end,"
         .. (g.tick and " hoistToggle = true," or "") .. " })"
     check(block:find(mount, 1, true) ~= nil,
-          g.label .. (g.tick and ": mounts the builder as classic does, plus hoistToggle for its header tick"
-                              or ": mounts the builder exactly as classic does"))
+          g.label .. (g.tick and ": mounts its builder with hoistToggle for its header tick"
+                              or ": mounts its builder into the card's band"))
 end
 
 -- ============================================================
@@ -348,7 +328,7 @@ do
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
        "Settings | Buffs to Check (Manual Mode) | Icon Style | Position | Border",
-       "order: the five cards are declared in classic's order; they mount in the group table's")
+       "order: the five cards are declared in reading order; they mount in the group table's")
 
     -- ---- one checkbox per setting --------------------------------------
     local hoists = 0
@@ -378,21 +358,6 @@ do
         if body:find('db, "' .. k .. '"', 1, true) then listed = listed + 1 end
     end
     eq(listed, 12, "summary: every key in MISSING_BUFF_KEYS is one the builder actually binds")
-
-    -- ---- five classic boxes, in the order they always had ---------------
-    local bare = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 5, "classic: five bare 280 boxes, and they are the classic branch's own")
-    local ADDS = { "settingsGroup, nil, 1", "buffsGroup, nil, 1", "appearanceGroup, nil, 2",
-                   "positionGroup, nil, 1", "borderGroup, nil, 2" }
-    local prev = 0
-    for _, a in ipairs(ADDS) do
-        local at = PAGE:find("Add(" .. a .. ")", 1, true)
-        check(at ~= nil and at > prev, "classic: still calls Add(" .. a .. ") in sequence")
-        prev = at or prev
-    end
-    check(PAGE:find("buffsGroup.hideOn = HideManualBuffVariant", 1, true) ~= nil,
-          "classic: ...and still puts the variant gate on its box")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs")', 1, true) ~= nil,

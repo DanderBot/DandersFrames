@@ -3959,7 +3959,7 @@ end
 -- keeps its pane live because the control that would satisfy the dependency is
 -- usually IN it. The two designers are the case where it is not -- their Enable
 -- banner is a band of its own -- so they opt in with `gateWhenDisabled`, and the
--- classic layout's full-cover scrim is what the pane then behaves like.
+-- settings page's full-cover scrim is what the pane then behaves like.
 do
     local win, bag = window(), {}
     local db = { master = true, on = true }
