@@ -4579,6 +4579,27 @@ function DF:MigrateAbsoluteFrameLevels()
     end
 end
 
+-- An import never reaches the pass above: the receiving profile already carries its
+-- flags, so a payload exported before v5 would keep the 0 sentinel and draw these icons
+-- at the bottom of the frame. Convert the PAYLOAD instead, before it is applied, so a
+-- selective import cannot touch the receiver's own values. The Aura Designer default is
+-- left alone: 4.x read it as a raw level, not as an offset added to 40. A payload with no
+-- parseable version predates the version field and is treated as pre-v5.
+function DF:ConvertPreV5FrameLevels(payload)
+    if type(payload) ~= "table" then return end
+    local major = tonumber(tostring(payload.version or ""):match("^v?(%d+)%."))
+    if major and major >= 5 then return end
+    for _, mode in ipairs({ "party", "raid" }) do
+        local modeDb = payload[mode]
+        if type(modeDb) == "table" then
+            for key, builtin in pairs(ABS_LEVEL_SENTINEL_DEFAULT) do
+                if modeDb[key] == 0 then modeDb[key] = builtin end
+            end
+            if modeDb.missingBuffIconFrameLevel == 35 then modeDb.missingBuffIconFrameLevel = 60 end
+        end
+    end
+end
+
 -- A profile created from Config defaults is ALREADY in the current shape, so every
 -- one-time migration has to treat it as done. Most migrations here derive from a
 -- legacy value and are naturally no-ops on a fresh profile (the rule stated in the

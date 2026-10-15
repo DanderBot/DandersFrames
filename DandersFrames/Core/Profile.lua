@@ -1353,6 +1353,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- One deep copy per import is nothing -- this is a deliberate user action, not a
     -- hot path.
     importData = DF:DeepCopy(importData)
+    if DF.ConvertPreV5FrameLevels then DF:ConvertPreV5FrameLevels(importData) end
 
     -- A SELECTIVE payload (importData.categories set) merges through the
     -- category tables in the companion. Import is a deliberate user action --
