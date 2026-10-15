@@ -6547,21 +6547,9 @@ function Factory:DebugDumpADGate()
                             if isSlot then
                                 hGate = (h and (h._deathLatched or h._visLatched)) and true or false
                                 -- ☠ "shown" NOW DERIVES FROM THE CF LOCK, NOT THE STRING.
-                                -- A dark slot keeps its own live filter since 2026-08-30
-                                -- (the contradiction string is proven to match auras and is
-                                -- no longer pushed), so reading the string would report
-                                -- every parked slot as shown=true — the same lie the
-                                -- retired empty-string comparison used to tell, one
-                                -- convention later. The CF park constant is now the only
-                                -- thing that darkens a slot, so it is the only honest
-                                -- source for this column.
-                                -- ★ NOW AN ENGINE READ, NOT AN INFERENCE. The CF park is
-                                -- retired too (see AuraContainer's SLOT_PARK_CF tombstone):
-                                -- a dark slot carries its own filter AND its own
-                                -- candidates, so both would report every parked slot as
-                                -- shown. IsAuraSlotEnabled answers the question directly
-                                -- instead of asking what we last pushed, which is the whole
-                                -- reason this column has been wrong twice.
+                                -- An engine read: a dark slot keeps its own filter and
+                                -- candidates, so neither says whether it is shown, and
+                                -- IsAuraSlotEnabled answers directly.
                                 local pf = h and h._pushedFilter
                                 local cc = h and h.owner and h.owner.container
                                 local darkEn
