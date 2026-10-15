@@ -1296,15 +1296,6 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Dead branch: `scrollBar` is never assigned, so this never runs.
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
-        
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
@@ -1701,15 +1692,6 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Dead branch: `scrollBar` is never assigned, so this never runs.
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
-        
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
@@ -1992,14 +1974,6 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
-
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
 
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
