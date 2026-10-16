@@ -2325,18 +2325,19 @@ end
 --
 -- Why this shape: UnitSpellTargetName returns a secret-tainted string on nameplates -- it
 -- cannot be used as a table key or compared to anything -- so the filter is
--- UnitInParty("nameplateXtarget"), a compound-vs-party-token test that returns a usable
--- boolean for this specific shape.
+-- UnitInParty("nameplateXtarget"), a compound-vs-party-token test believed to return a
+-- usable boolean for this specific shape (TS3 uses the same check post-hotfix). That is
+-- an assertion, not something measured on the current build -- see the warning below.
 --
 -- We don't return WHICH party member is targeted -- we don't need to. The render pipeline
 -- fetches the target name via UnitSpellTargetName and feeds it straight into a
 -- FontString:SetText sink, which requires no comparing or indexing.
 -- Returns ok, reason (see TargetedList_IsActive for why).
 --
--- ⚠ The last check is the one to distrust if bars go missing in a group: if a future build
--- sealed UnitInParty on a compound token, this would return false for every real party
--- target and the only bars you'd ever see would be untargeted casts. The trace below
--- distinguishes the two cases.
+-- ⚠ The last check is the one to distrust if bars go missing in a group: if the build
+-- has sealed UnitInParty on a compound token, this returns false for every real party
+-- target and the only bars you'd ever see are untargeted casts -- which looks exactly
+-- like "the list misses a lot". The trace below distinguishes the two cases.
 local function TargetedList_CastTargetIsPartyMember(casterUnit)
     local target = casterUnit .. "target"
     if not TL_UnitExists(target) then return false, "cast has no target" end

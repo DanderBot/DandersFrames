@@ -3191,7 +3191,7 @@ function DF:GetCurrentMode()
     return "party"
 end
 
--- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
+-- Note: DeepCopy and CopyProfile are defined in Profile.lua
 
 -- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
 -- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator, a key no

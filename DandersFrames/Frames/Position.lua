@@ -1077,12 +1077,8 @@ local function writeRecord(rec, pos, x, y)
     rec.x, rec.y = x, y
     rec.anchor = nil
     if type(pos.anchor) == "table" then
-        local a = pos.anchor
-        rec.anchor = {
-            target = a.target, mode = a.mode, edge = a.edge, align = a.align,
-            point = a.point, relPoint = a.relPoint,
-            offsetX = a.offsetX, offsetY = a.offsetY,
-        }
+        -- copyAnchor carries the fallback too; a hand copy here used to drop it.
+        rec.anchor = copyAnchor(pos.anchor)
     else
         rec.anchor = prev
     end

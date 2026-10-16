@@ -8,8 +8,10 @@
 
 ### Bug Fixes
 
-- (Auto Layouts) Moving frames while editing an auto layout saves the move into the layout again, and settings changed afterwards no longer end up in your main profile. A layout also keeps its own anchor from DandersMover, and nobody's existing frames move. (by Krathe)
+- (Auto Layouts) Moving frames while editing an auto layout saves the move into the layout again, and settings changed afterwards no longer end up in your main profile. A layout can also keep its own DandersMover anchor. Existing layouts stay where they are. (by Krathe)
 - (Frames) With Pixel Perfect on, raid and party frames no longer shift back and forth by a pixel when people join, leave or go out of range. (by Krathe)
+- (Blizzard Frames) The Edit Mode party side panel now follows the party side-menu setting instead of always hiding. (by Krathe)
+- (Profiles) Importing a 4.x profile string no longer puts status icons, missing buff and defensive icons underneath the health bar. (by Krathe)
 
 ## [5.4.0]
 
