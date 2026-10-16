@@ -249,6 +249,7 @@ function Sess:Suspend()
     -- OnUpdate) hides, and a stale `linking` flag would keep the ClickSelect
     -- guard and the glyph dead after Resume.
     if self.linking then self:CancelLink() end
+    if Proxy.EndActiveDrag then Proxy:EndActiveDrag() end
     self.suspended = true
     Proxy:GetUnlockFrame():Hide()
     Grid:Hide()

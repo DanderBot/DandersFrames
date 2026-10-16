@@ -768,6 +768,16 @@ function P:IsDragging()
     return false
 end
 
+-- Finish a drag in flight where it stands, as a release there would. A combat suspend
+-- hides the slab (it is a child of the unlock frame), and a hidden frame never gets its
+-- OnDragStop -- the drag would be left half-done: no undo entry, the tether armed, and
+-- IsDragging stuck true after Resume.
+function P:EndActiveDrag()
+    for _, b in pairs(self.proxies) do
+        if b.dragging then onDragStop(b) end
+    end
+end
+
 function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         applyLook(b, id == selectedId, b.hovered)
