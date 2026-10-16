@@ -204,6 +204,21 @@ local function IsKeyOverridable(key)
     return true
 end
 
+-- A stored raid position record that says nothing raidAnchorX/raidAnchorY do not --
+-- CENTER, no anchor, the same X/Y -- is dropped, keeping the layout in the shape it had
+-- before the record existed (DF:GetPositionRecord builds exactly that record from the
+-- scalars). So a layout only gains a record when it really carries an anchor or point.
+local function NormalizeLayoutPositionRecord(overrides)
+    local rec = overrides and overrides.position
+    if type(rec) ~= "table" then return end
+    if rec.anchor == nil and (rec.point or "CENTER") == "CENTER"
+        and overrides.raidAnchorX ~= nil and overrides.raidAnchorY ~= nil
+        and tonumber(rec.x) == tonumber(overrides.raidAnchorX)
+        and tonumber(rec.y) == tonumber(overrides.raidAnchorY) then
+        overrides.position = nil
+    end
+end
+
 -- Drop any global-key override a layout already carries (captured before GLOBAL_KEYS
 -- existed). ApplyRuntimeProfile already skips them; this is so the layout list stops
 -- counting and showing them.
@@ -1109,6 +1124,20 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     end
     DF:Debug("AUTOPROFILE", "EnterEditing: applied %d overrides for live preview", overrideCount)
 
+    -- A layout that stores raidAnchorX/Y but no position record owns its X/Y and NO
+    -- anchor (DF:GetPositionRecord) -- preview it the same way, or the profile's
+    -- DandersMover anchor would pull the frames off the layout's position mid-edit.
+    do
+        local ov = self.editingProfile.overrides
+        if ov and ov.position == nil and (ov.raidAnchorX ~= nil or ov.raidAnchorY ~= nil) then
+            SetRaidValue("position", {
+                point = "CENTER",
+                x = tonumber(GetRaidValue("raidAnchorX")) or 0,
+                y = tonumber(GetRaidValue("raidAnchorY")) or 0,
+            })
+        end
+    end
+
     -- ☠☠ THE OVERRIDES JUST BYPASSED EVERY GUI CALLBACK, SO NOTHING BUMPED THE AURA
     -- LAYOUT VERSION. The row drives are version-gated (dfBuffFactoryVersion /
     -- dfDebuffFactoryVersion / dfDefFactoryVersion / dfMissingFactoryVersion vs
@@ -1312,6 +1341,8 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                 end
             end
         end
+
+        NormalizeLayoutPositionRecord(overrides)
 
         -- Remove orphan keys created during editing that aren't tracked overrides
         local orphansRemoved = 0
@@ -1911,6 +1942,19 @@ function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)
         DF.raidOverrides[xKey] = x
         DF.raidOverrides[yKey] = y
     end
+    return true
+end
+
+-- Store the active layout's whole raid position record (point, X/Y, DandersMover anchor)
+-- with the layout. The live overlay already holds `rec` itself -- DF:GetPositionRecord
+-- hands DandersMover that table -- so only the stored copy is written here.
+function AutoProfilesUI:SetActiveLayoutRaidRecord(rec)
+    if self:IsEditing() then return false end
+    local p = self.activeRuntimeProfile
+    if not p or type(rec) ~= "table" then return false end
+    p.overrides = p.overrides or {}
+    p.overrides.position = DeepCopyValue(rec)
+    NormalizeLayoutPositionRecord(p.overrides)
     return true
 end
 

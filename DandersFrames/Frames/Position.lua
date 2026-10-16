@@ -979,6 +979,115 @@ local function recordUnchanged(rec)
     return (not m) or (m.x == rec.x and m.y == rec.y)
 end
 
+local function copyAnchor(a)
+    if type(a) ~= "table" then return nil end
+    local c = {
+        target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+        point = a.point, relPoint = a.relPoint,
+        offsetX = a.offsetX, offsetY = a.offsetY,
+    }
+    if type(a.fallback) == "table" then
+        local fb = a.fallback
+        c.fallback = {
+            target = fb.target, mode = fb.mode, edge = fb.edge, align = fb.align,
+            point = fb.point, relPoint = fb.relPoint,
+            offsetX = fb.offsetX, offsetY = fb.offsetY,
+        }
+    end
+    return c
+end
+
+-- ★ THE ACTIVE AUTO LAYOUT'S RAID POSITION. A layout overrides the raid position
+-- wholesale -- X/Y AND the DandersMover anchor -- like every other setting it overrides.
+-- nil only when no layout is active, so the profile's record applies.
+-- The record lives in the live overlay; what a layout STORES is written by
+-- AutoProfilesUI:SetActiveLayoutRaidRecord when the frames are moved or anchored.
+--   * the layout stores a record          -> that record;
+--   * it stores only raidAnchorX/Y        -> its X/Y and NO anchor. Every layout saved
+--     before the record existed has this shape, and that is where those layouts have
+--     always put the frames, so the profile's anchor must not pull them away;
+--   * it leaves the position to the profile -> a COPY of the profile's record, which
+--     looks identical.
+-- ☠ NEVER HAND OUT THE PROFILE'S OWN RECORD WHILE A LAYOUT IS ACTIVE. DandersMover
+-- mutates the record it was given IN PLACE before onChanged, and every write is routed
+-- to the active layout -- so the profile's record would be changed behind the routing
+-- and the frames would jump when the layout ends.
+-- Copies standing in for the profile's record (the third case above). They keep
+-- following the profile -- point and anchor here, X/Y through the scalar fold -- until a
+-- move is routed into the layout, which then owns the record (see SetPositionRecord).
+local followsProfile = setmetatable({}, { __mode = "k" })
+
+local function layoutRaidRecord(spec, db)
+    if spec ~= RECORD_SPECS.raid then return nil end
+    local ov = DF.raidOverrides
+    if type(ov) ~= "table" then return nil end
+    local rec = ov[spec.key]
+    if type(rec) == "table" then
+        if followsProfile[rec] and recordUnchanged(rec) then
+            local base = DF._realRaidDB and DF._realRaidDB[spec.key]
+            if type(base) == "table" then
+                rec.point = base.point or "CENTER"
+                rec.anchor = copyAnchor(base.anchor)
+            end
+        end
+        return rec
+    end
+    if ov[spec.xKey] ~= nil or ov[spec.yKey] ~= nil then
+        rec = {
+            point = "CENTER",
+            x = tonumber(db[spec.xKey]) or spec.x,
+            y = tonumber(db[spec.yKey]) or spec.y,
+        }
+    else
+        local base = db[spec.key]
+        if type(base) == "table" then
+            rec = {
+                point = base.point or "CENTER",
+                x = tonumber(base.x) or tonumber(db[spec.xKey]) or spec.x,
+                y = tonumber(base.y) or tonumber(db[spec.yKey]) or spec.y,
+                anchor = copyAnchor(base.anchor),
+            }
+            followsProfile[rec] = true
+        else
+            rec = {
+                point = "CENTER",
+                x = tonumber(db[spec.xKey]) or spec.x,
+                y = tonumber(db[spec.yKey]) or spec.y,
+            }
+        end
+    end
+    ov[spec.key] = rec
+    return rec
+end
+
+-- Write an incoming position into a record. `pos` may be the record itself (DandersMover
+-- mutates in place, then calls onChanged) or a fresh table from a drag handler.
+local function writeRecord(rec, pos, x, y)
+    if rec == pos then
+        -- The lib mutated the live record in place; just normalise it.
+        rec.point = rec.point or "CENTER"
+        rec.x, rec.y = x, y
+        return
+    end
+    -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
+    -- anchor the record already holds. Only the lib's in-place mutation (the
+    -- `rec == pos` branch above, which is where its Detach lands) may clear one.
+    local prev = rec.anchor
+    rec.point = pos.point or "CENTER"
+    rec.x, rec.y = x, y
+    rec.anchor = nil
+    if type(pos.anchor) == "table" then
+        local a = pos.anchor
+        rec.anchor = {
+            target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+            point = a.point, relPoint = a.relPoint,
+            offsetX = a.offsetX, offsetY = a.offsetY,
+        }
+    else
+        rec.anchor = prev
+    end
+end
+
 -- The live record for a mode. Seeds it from the scalars when absent (belt for a profile
 -- that dodged DF:MigrateContainerPositionRecords -- an import, or a downgrade/upgrade
 -- round trip).
@@ -991,7 +1100,7 @@ function DF:GetPositionRecord(mode)
         return { point = "CENTER", x = spec.x, y = spec.y }
     end
 
-    local rec = db[spec.key]
+    local rec = layoutRaidRecord(spec, db) or db[spec.key]
     if type(rec) ~= "table" then
         rec = {
             point = "CENTER",
@@ -1069,14 +1178,26 @@ function DF:SetPositionRecord(mode, pos, reason)
             end
         end
         if routed then
-            -- The layout took it (override + live overlay). Keep the record on the same
-            -- value and note it, so the next read sees record and effective scalar agree
-            -- rather than a phantom mutation. The base scalars are NOT written -- that is
-            -- the whole point of routing.
-            local live = db[spec.key]
-            if type(live) == "table" then
-                live.x, live.y = x, y
-                noteRecord(live, x, y)
+            -- The layout took it (override + live overlay). The base scalars are NOT
+            -- written -- that is the whole point of routing.
+            if spec == RECORD_SPECS.raid then
+                -- ...and the layout owns the WHOLE record from here: point, X/Y and
+                -- anchor, stored with the layout so the next activation restores it.
+                local live = layoutRaidRecord(spec, db)
+                if live then
+                    writeRecord(live, pos, x, y)
+                    followsProfile[live] = nil
+                    noteRecord(live, x, y)
+                    if apu.SetActiveLayoutRaidRecord then apu:SetActiveLayoutRaidRecord(live) end
+                end
+            else
+                -- Keep the record on the same value and note it, so the next read sees
+                -- record and effective scalar agree rather than a phantom mutation.
+                local live = db[spec.key]
+                if type(live) == "table" then
+                    live.x, live.y = x, y
+                    noteRecord(live, x, y)
+                end
             end
             return
         end
@@ -1088,29 +1209,7 @@ function DF:SetPositionRecord(mode, pos, reason)
         db[spec.key] = rec
     end
 
-    if rec == pos then
-        -- The lib mutated the live record in place; just normalise it.
-        rec.point = rec.point or "CENTER"
-        rec.x, rec.y = x, y
-    else
-        -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
-        -- anchor the record already holds. Only the lib's in-place mutation (the
-        -- `rec == pos` branch above, which is where its Detach lands) may clear one.
-        local prev = rec.anchor
-        rec.point = pos.point or "CENTER"
-        rec.x, rec.y = x, y
-        rec.anchor = nil
-        if type(pos.anchor) == "table" then
-            local a = pos.anchor
-            rec.anchor = {
-                target = a.target, mode = a.mode, edge = a.edge, align = a.align,
-                point = a.point, relPoint = a.relPoint,
-                offsetX = a.offsetX, offsetY = a.offsetY,
-            }
-        else
-            rec.anchor = prev
-        end
-    end
+    writeRecord(rec, pos, x, y)
 
     -- The mirror. Every legacy reader takes these.
     db[spec.xKey], db[spec.yKey] = x, y
