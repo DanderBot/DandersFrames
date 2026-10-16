@@ -1268,7 +1268,7 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
                 -- the resolver falls back to FrameMode when the stamp is nil).
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
-                f:SetSize(frameWidth, frameHeight)
+                DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
                 f.isRaidFrame = IsInRaid()
             end
         end
@@ -1851,7 +1851,7 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset).
             child.dfAuraPresetOverride = set.auraDesignerPreset
             child.dfTextPresetOverride = set.textDesignerPreset
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, effDB or db)
             -- Also update the isRaidFrame flag for proper DB selection in other functions
             child.isRaidFrame = IsInRaid()
             -- Re-render the border now so border edits apply live (the per-frame
@@ -3705,7 +3705,7 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
                 f.dfPinnedEffDB = effDB
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
-                f:SetSize(frameWidth, frameHeight)
+                DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
                 f.isRaidFrame = isRaidMode
 
                 local slotIndex = i - 1

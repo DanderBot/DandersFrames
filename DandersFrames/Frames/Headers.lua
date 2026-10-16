@@ -5240,7 +5240,7 @@ function DF:UpdateRaidGroupFrameSizes()
     if DF.raidPlayerHeader then
         local child = DF.raidPlayerHeader:GetAttribute("child1")
         if child then
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
         end
     end
 
@@ -5410,7 +5410,7 @@ function DF:UpdatePartyHeaderLayout()
         -- Update frame sizes
         DF:IteratePartyFrames(function(frame)
             if frame then
-                frame:SetSize(db.frameWidth or 120, db.frameHeight or 50)
+                DF:SetPixelPerfectSize(frame, db.frameWidth or 120, db.frameHeight or 50, db)
             end
         end)
     end
@@ -5446,7 +5446,7 @@ function DF:UpdatePartyHeaderLayout()
         -- Update frame sizes
         DF:IterateArenaFrames(function(frame)
             if frame then
-                frame:SetSize(db.frameWidth or 120, db.frameHeight or 50)
+                DF:SetPixelPerfectSize(frame, db.frameWidth or 120, db.frameHeight or 50, db)
             end
         end)
     end
@@ -5502,7 +5502,7 @@ function DF:UpdateRaidHeaderLayout()
     -- Update frame sizes
     DF:IterateRaidFrames(function(frame)
         if frame then
-            frame:SetSize(db.frameWidth or 80, db.frameHeight or 40)
+            DF:SetPixelPerfectSize(frame, db.frameWidth or 80, db.frameHeight or 40, db)
         end
     end)
 end

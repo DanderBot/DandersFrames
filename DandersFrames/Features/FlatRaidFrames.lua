@@ -515,7 +515,7 @@ function FlatRaidFrames:CreateFrames()
         local child = self.header:GetAttribute("child" .. i)
         if child then
             childCount = childCount + 1
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
             child.isRaidFrame = true
             if DF.RegisterRaidFrame then DF:RegisterRaidFrame(child) end
         end
@@ -787,7 +787,7 @@ function FlatRaidFrames:RefreshLayout()
     for i = 1, 40 do
         local child = header:GetAttribute("child" .. i)
         if child then
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
             child.isRaidFrame = true
             if DF.RegisterRaidFrame then DF:RegisterRaidFrame(child) end
         end
@@ -1184,7 +1184,7 @@ function FlatRaidFrames:SetEnabled(enabled)
             for i = 1, 40 do
                 local child = header:GetAttribute("child" .. i)
                 if child then
-                    child:SetSize(frameWidth, frameHeight)
+                    DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
                     child.isRaidFrame = true
                     if DF.RegisterRaidFrame then DF:RegisterRaidFrame(child) end
                 end
@@ -1209,7 +1209,7 @@ function FlatRaidFrames:SetEnabled(enabled)
         for i = 1, 40 do
             local child = header:GetAttribute("child" .. i)
             if child then
-                child:SetSize(frameWidth, frameHeight)
+                DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
                 child.isRaidFrame = true
                 if DF.RegisterRaidFrame then DF:RegisterRaidFrame(child) end
             end
