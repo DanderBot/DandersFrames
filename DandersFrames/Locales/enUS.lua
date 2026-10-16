@@ -1854,6 +1854,7 @@ L["That's a click casting string. Import it from the Click Casting page instead.
 L["That's a profile string. Import it from the Profiles page instead."] = true
 L["That's a setup wizard string, not a filter."] = true
 L["These defaults apply to all text elements that haven't been individually customized."] = true
+L["These frames are anchored to another frame, so dragging opens DandersMover instead."] = true
 L["These indicators trigger no matter who casts the buff."] = true
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
 L["Thick"] = true

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- (Permanent Mover) Dragging the handle moves your frames directly again instead of opening DandersMover. It still opens DandersMover when the frames are anchored to something.
+
 ## [5.4.0]
 
 ### New Features

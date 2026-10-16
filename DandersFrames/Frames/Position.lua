@@ -383,8 +383,21 @@ function DF:CreatePermanentMover(container, mode)
             self.fadeIn:Play()
         end
         ApplyHandleColors(true)
+        -- Anchored records drag through a mover session (see OnDragStart); say so.
+        if Mover and DF.GUI and DF:GetPositionRecord(isRaid and "raid" or "party").anchor then
+            DF.GUI:ShowTooltip(self, {
+                title = L["Permanent Mover"],
+                tone = "caution",
+                lines = { L["These frames are anchored to another frame, so dragging opens DandersMover instead."] },
+            })
+            self.shownAnchorTip = true
+        end
     end)
     handle:SetScript("OnLeave", function(self)
+        if self.shownAnchorTip then
+            self.shownAnchorTip = nil
+            DF.GUI:HideTooltip()
+        end
         if self.isDragging then return end  -- Stay visible while dragging
         local hoverDb = isRaid and DF:GetRaidDB() or DF:GetDB()
         if hoverDb.permanentMoverShowOnHover then
@@ -398,12 +411,12 @@ function DF:CreatePermanentMover(container, mode)
     -- Manual cursor tracking instead of StartMoving() — WoW's StartMoving
     -- doesn't handle scaled frames correctly and causes a position jump
     handle:SetScript("OnDragStart", function(self)
-        -- Lib present: one editing surface. Open a mover session instead of
-        -- dragging raw -- SetPositionRecord PRESERVES a record's `anchor`, so a
-        -- raw drag under a live anchor moves x/y and the next Mover:Apply yanks
-        -- the container back. The raw drag below is the lib-ABSENT fallback only
-        -- (spec Decision 2).
-        if Mover then
+        -- Anchored to another frame: open a mover session instead of dragging
+        -- raw -- SetPositionRecord PRESERVES a record's `anchor`, so a raw drag
+        -- under a live anchor moves x/y and the next Mover:Apply yanks the
+        -- container back. Unanchored records drag raw with or without the lib.
+        local rec = DF:GetPositionRecord(isRaid and "raid" or "party")
+        if Mover and rec.anchor then
             if isRaid then DF:UnlockRaidFrames() else DF:UnlockFrames() end
             return
         end
@@ -425,6 +438,16 @@ function DF:CreatePermanentMover(container, mode)
         local anchorY = isRaid and (dragDb.raidAnchorY or 0) or (dragDb.anchorY or 0)
         local frameCX = sw / 2 + anchorX
         local frameCY = sh / 2 + anchorY
+        -- DandersMover can pin the record to a non-CENTER point, where x/y are not
+        -- the container's centre. Read the real centre instead (converted to
+        -- UIParent units); the drop below writes CENTER, as the lib's own drag does.
+        if (rec.point or "CENTER") ~= "CENTER" then
+            local cx, cy = container:GetCenter()
+            if cx and cy then
+                local ratio = container:GetEffectiveScale() / pScale
+                frameCX, frameCY = cx * ratio, cy * ratio
+            end
+        end
         handle._cursorOffX = frameCX - startCursorX
         handle._cursorOffY = frameCY - startCursorY
 
