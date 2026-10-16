@@ -2106,12 +2106,11 @@ P.BuildTextFilterChips = BuildTextFilterChips
 -- ============================================================
 local function BuildTextsHeadArea(GUI, parent, state, tdDB, page)
     local RIGHT_INSET = 22
-    -- ☠ THE COLUMN THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED --
-    -- see the Aura Designer's matching note in AuraDesigner/UI/Cards.lua. The
-    -- host was given an explicit width by the caller a line before this ran; a
-    -- CHILD's GetWidth is a derived number the layout pass has not resolved yet,
-    -- which is what made the chips flow at a hardcoded 260 and this function
-    -- report a height for a shape it was never going to have.
+    -- ☠ THE COLUMN THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED -- see the Aura
+    -- Designer's matching note in AuraDesigner/UI/Cards.lua. The host was given an explicit
+    -- width by the caller just before this runs; a CHILD's GetWidth is a derived number the
+    -- layout pass has not resolved yet, and would flow the chips at the wrong width and
+    -- report a height for a shape the area never takes.
     local hostW = parent:GetWidth() or 0
     local COL_W = (hostW > 40) and (hostW - 8 - RIGHT_INSET) or nil
     -- ── "+ Add Text Element" hero CTA ──
@@ -3094,21 +3093,16 @@ local function BuildTextDesignerIsland(GUI, page, db)
         -- Anchor dots disabled until drag-to-place is implemented (Phase 2).
     end
 
-    -- Live geometry — the twin of AuraDesigner/UI/Cards.lua's container.RefreshGeometry,
-    -- and it is here for the same two reasons that fix names.
-    --   * Frame width/height and Preview Scale were read ONCE, at build, so the preview
-    --     only caught up when something else forced a full page rebuild — resizing the
-    --     window, or leaving the settings and coming back (Aphoex, 2026-08-17, reporting
-    --     it as the twin of the Aura Designer one).
-    --   * ☠ CLAMP BOTH AXES. The panel is anchored on all four sides and the mock is
-    --     centred inside at the configured size times the user's scale, with nothing
-    --     bounding it — so a tall frame or a high Preview Scale spilled the mock out
-    --     through the panel edge. Fitting to the smaller of the two ratios keeps the
-    --     preview honest about proportions: it shrinks, it does not letterbox.
-    -- ⚠ The two fills are re-derived as well. AD's version does not need to (its own
-    -- resize path rebuilds), but here they are absolute pixel widths taken from the
-    -- build-time frame width, so sizing the mock without them would leave a 72% bar
-    -- reading as some other fraction of the new outline.
+    -- Live geometry -- the twin of AuraDesigner/UI/Cards.lua's container.RefreshGeometry.
+    --   * Frame width/height and Preview Scale are re-read here, so the preview follows them
+    --     without a full page rebuild.
+    --   * ☠ CLAMP BOTH AXES. The panel is anchored on all four sides and the mock is centred
+    --     inside at the configured size times the user's scale, with nothing bounding it, so
+    --     a tall frame or a high Preview Scale would spill out through the panel edge.
+    --     Fitting to the smaller ratio keeps proportions: it shrinks, it does not letterbox.
+    -- ⚠ The two fills are re-derived too: they are absolute pixel widths taken from the
+    -- build-time frame width, so sizing the mock without them would leave a 72% bar reading
+    -- as some other fraction of the new outline.
     previewPanel.RefreshGeometry = function()
         local m = state.mockFrame
         if not m then return end

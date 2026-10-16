@@ -253,23 +253,19 @@ DF.AuraDesigner.SpellIDs = DF.IS_FOREVER and {} or {
 
 -- ============================================================
 -- SELF-ONLY SPELL IDS
--- Auras that appear on the CASTER (the player) but which the game
--- credits to another unit — Symbiotic Relationship sits on the druid
--- with sourceUnit = the linked ally. A My Buffs indicator filters on
--- "HELPFUL|PLAYER", which can never pass one of these, so without an
--- exception the indicator never renders on the player's own frame.
+-- Auras that appear on the CASTER (the player) but which the game credits to another
+-- unit -- Symbiotic Relationship sits on the druid with sourceUnit = the linked ally. A
+-- My Buffs indicator filters on "HELPFUL|PLAYER", which can never pass one of these, so
+-- without an exception the indicator never renders on the player's own frame.
 --
--- ☠ READ BY THE RENDER PATH — this is live data, not documentation.
--- Factory.lua's resolvePoolMode consults it (via AuraAdapter's
--- IsSelfOnlyAura) and drops the caster filter for these auras ON THE
--- PLAYER'S OWN FRAME ONLY. Adding an entry here changes what renders.
+-- ☠ READ BY THE RENDER PATH -- this is live data, not documentation. Factory.lua's
+-- resolvePoolMode consults it (via AuraAdapter's IsSelfOnlyAura) and drops the caster
+-- filter for these auras ON THE PLAYER'S OWN FRAME ONLY. Adding an entry changes what
+-- renders.
 --
--- ⚠ Add an aura here ONLY with a live aura dump proving the source
--- unit is NOT the player. It was wrong once: Ebon Might's self-buff
--- 395296 was listed on the assumption it was foreign-sourced, and a
--- field test showed sourceUnit = "player" — it needed the ID union
--- (see AuraAdapter's GetSpecIdentity), not a filter exception. The
--- entry was removed 2026-08-12 rather than left as a false example.
+-- ⚠ Add an aura ONLY with a live aura dump proving the source unit is NOT the player.
+-- An aura whose sourceUnit is "player" needs the ID union (see AuraAdapter's
+-- GetSpecIdentity), not a filter exception -- Ebon Might's self-buff 395296 is one.
 -- ============================================================
 DF.AuraDesigner.SelfOnlySpellIDs = DF.IS_FOREVER and {} or {
     RestorationDruid = {

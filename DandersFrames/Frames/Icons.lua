@@ -171,7 +171,7 @@ function DF:UpdateAllDefensiveBars()
     -- sites in the Indicators page), so without it every setting there was inert on pinned
     -- frames until some aura event happened by — which for a quiet unit is minutes, and
     -- mid-fight never. DF:UpdateAllAuras a few lines down has always walked pinned; these
-    -- siblings were never given the same treatment. (Audit 2026-08-17.)
+    -- siblings were never given the same treatment.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(updateFrame)
     end
@@ -193,29 +193,22 @@ end
 
 -- Update auras on all frames (combat transitions and the full profile refresh).
 --
--- ☠☠ CHUNKED, and the reason is a HARD FAILURE, not a hitch. Run synchronously this
--- walks every party, raid and pinned frame and rebuilds the whole Aura Designer
--- signature set for each — placedCoSig/placedStructSig per indicator per member group,
--- string-built. On a full raid with a busy Aura Designer profile that is enough for
--- Blizzard's watchdog to fire "script ran too long", and the watchdog does not warn, it
--- ABORTS THE EXECUTION. Field report 2026-08-30, via an auto-profile switch:
---     Factory.lua:890 script ran too long
---     ... SyncFrame -> UpdateAuras -> IterateRaidFrames -> UpdateAllAuras
---         -> FullProfileRefresh -> ApplyRuntimeProfile -> EvaluateAndApply
--- Everything in FullProfileRefresh AFTER this call — the rested indicator, name
--- truncation, the rest of the pass — never ran. A profile switch could half-apply and
--- leave frames stale with nothing to re-drive them.
+-- ☠☠ CHUNKED, because the synchronous walk is a HARD FAILURE, not a hitch. It visits
+-- every party, raid and pinned frame and rebuilds the whole Aura Designer signature set
+-- for each (placedCoSig/placedStructSig per indicator per member group, string-built).
+-- On a full raid with a busy Aura Designer profile that trips Blizzard's "script ran too
+-- long" watchdog, which ABORTS the execution: everything in FullProfileRefresh after
+-- this call never runs, and a profile switch half-applies with nothing to re-drive it.
 --
 -- ⚠ THE WATCHDOG MEASURES ONE EXECUTION, so splitting the walk across frames removes the
--- failure outright rather than just making it less likely. Same shape as
--- AuraContainer._kickLiveParse (read its header): the work list is SNAPSHOTTED up front
--- because the iterators walk live registries that churn, each frame is RE-VALIDATED at
--- execution time, and a generation token lets a newer call supersede a pending one
--- instead of two walks interleaving.
+-- failure outright. Same shape as AuraContainer._kickLiveParse (read its header): the
+-- work list is SNAPSHOTTED up front because the iterators walk live registries that
+-- churn, each frame is RE-VALIDATED at execution time, and a generation token lets a
+-- newer call supersede a pending one instead of two walks interleaving.
 --
--- ⚠ The caller returns immediately now. That is the point — FullProfileRefresh completes
--- and the aura pass lands over the next few frames. Nothing downstream reads aura state
--- back out of this call; both call sites treat it as fire-and-forget.
+-- ⚠ The caller returns immediately: FullProfileRefresh completes and the aura pass lands
+-- over the next few frames. Nothing reads aura state back out of this call; both call
+-- sites treat it as fire-and-forget.
 local AURA_CHUNK = 8      -- frames refreshed per tick
 local updateAllGen = 0
 

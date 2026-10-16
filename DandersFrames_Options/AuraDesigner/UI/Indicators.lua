@@ -53,13 +53,11 @@ end
 -- ============================================================
 -- "SOMETHING STRUCTURAL CHANGED HERE: REDRAW WHAT SHOWS IT"
 -- ------------------------------------------------------------
--- Fifteen controls in this file reveal or hide a sibling when they are toggled --
--- the pandemic colour picker, the icon's text-only mode, every sound sub-control.
--- On the CARD that means a full page rebuild, which is fine there: the card is
--- rebuilt and re-expanded in place. One verb, so every such control says it the
--- same way. (It also used to re-flow a popout pane in place; that arm went with
--- the rows page on 2026-09-26. `host` is still accepted, unused, so the call
--- sites need not change.)
+-- Fifteen controls in this file reveal or hide a sibling when they are toggled -- the
+-- pandemic colour picker, the icon's text-only mode, every sound sub-control. On the CARD
+-- that means a full page rebuild, which is fine: the card is rebuilt and re-expanded in
+-- place. One verb, so every such control says it the same way. `host` is accepted and
+-- unused, so call sites need not change.
 local function ADStructuralRedraw(host)
     DF:AuraDesigner_RefreshPage()
 end
@@ -186,21 +184,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
     end
 
-    -- ☠ A HELPER EFFECT HAS NOTHING TO COUNT. Krathe, 2026-09-09: "the PI 'icon' has stacks
-    -- but PI does not have stacks, you only get 1 charge so that setting should at least be
-    -- off by default if not hidden."
-    -- ⚠ AND IT IS WORSE THAN A DEAD SETTING ON THE ICON: that icon's art is PINNED to Power
-    -- Infusion while the aura it matched is somebody's cooldown, so a stack count there would
-    -- be a number describing a spell the picture is not of.
-    -- ⚠ THE WHOLE GROUP GOES, not just the tick. Stack Font, Scale, Outline, Anchor and Offset
-    -- are six controls for a number that is never drawn -- leaving them and unticking one is
-    -- how a panel fills up with settings that do nothing.
-    -- ⚠ HIDDEN, NOT GREYED, and that is the opposite call from GateSWM above -- deliberately.
-    -- Show When Missing is greyed WITH A REASON because ticking it would silently break the
-    -- cooldown gate, and the user needs to know why they cannot. Stacks are not broken, they
-    -- are irrelevant, and a greyed control invites a "why?" that has no interesting answer.
+    -- ☠ A HELPER EFFECT HAS NOTHING TO COUNT. Power Infusion has one charge, and the icon's art
+    -- is PINNED to Power Infusion while the aura it matched is somebody's cooldown, so a stack
+    -- count there would describe a spell the picture is not of.
+    -- ⚠ THE WHOLE GROUP GOES, not just the tick: Stack Font, Scale, Outline, Anchor and Offset
+    -- are six controls for a number that is never drawn.
+    -- ⚠ HIDDEN, NOT GREYED -- the opposite call from GateSWM above, deliberately. Show When
+    -- Missing is greyed WITH A REASON because ticking it would silently break the cooldown
+    -- gate; stacks are not broken, they are irrelevant, and a greyed control invites a "why?"
+    -- with no interesting answer.
     -- ⚠ The stored value is forced false as well (pihCreateSignal stamps it, pihSweep step 7
-    -- backfills), so what renders and what is stored agree rather than relying on this.
+    -- backfills), so what renders and what is stored agree.
     local pihNoStacks = (proxy and proxy.pihSignal) and true or false
 
     local function AddWidget(widget, height)
@@ -610,7 +604,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- bar card called its looks section "Texture & Colors", which sounds harmless until
         -- you notice Frame Level and Alpha were living under it while every other card kept
         -- them in Appearance -- the same setting under three headings depending on which
-        -- indicator you opened (Krathe, 2026-08-19). Hold to these:
+        -- indicator you opened. Hold to these:
         --
         --   * "Appearance" means what the thing looks like IN ISOLATION -- size, scale,
         --     colour, alpha, texture, frame level. ☠ NEVER split it by material ("Texture
@@ -659,7 +653,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     artCb.tooltip = L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."]
                     g:AddWidget(artCb, 28)
 
-                    -- ★★ THE SAME FOUR SOURCES THE COOLDOWN ICONS GROUP HAS (2026-09-10).
+                    -- ★★ THE SAME FOUR SOURCES THE COOLDOWN ICONS GROUP HAS.
                     -- Krathe: "yes build the icon block the same". This was ONE tick --
                     -- "Ignore trinkets, potions and racials" -- over all three amplifiers at
                     -- once, which is the same mechanism (per-record mutes) at a coarser
@@ -745,21 +739,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 ADStructuralRedraw(parent)
             end), 28)
         end)
-        -- Border (Stage 5.1c — unified controls via CreateBorderControls).
-        -- Show / Thickness / Inset are the same widgets as before; the helper
-        -- adds Style / Texture / Color / Gradient / Shadow / BlendMode /
-        -- Offset / Alpha on top.  classColor, roleColor, and the colorByTime
-        -- checkbox are deliberately omitted — class/role don't fit aura
-        -- indicators (the indicator's job is to show aura state, not unit
-        -- identity), and AD's Expiring section already covers "colour by
-        -- time remaining" implicitly through its own colour curve.
-        -- Animation RESTORED 2026-08-29 (button-mode reopening): the placed
-        -- indicator's container opts into the declarative DF border animations
-        -- (config.adBorderAnim + the AuraContainer ANIMATION FILTER), and an
-        -- animation-key edit rebuilds the container (rawBorderAnimStructTok —
-        -- the effect is creation-frozen on a restricted button).
-        -- Text-only mode hides the icon texture, so the whole Border group is
-        -- hidden (the runtime force-disables the border there too).
+        -- Border, via the shared CreateBorderControls (Show / Thickness / Inset plus Style /
+        -- Texture / Color / Gradient / Shadow / BlendMode / Offset / Alpha). classColor, roleColor
+        -- and the colorByTime checkbox are deliberately omitted -- class/role do not fit aura
+        -- indicators (the indicator shows aura state, not unit identity), and AD's Expiring
+        -- section covers "colour by time remaining" through its own colour curve.
+        -- Animation: the placed indicator's container opts into the declarative DF border
+        -- animations (config.adBorderAnim + the AuraContainer ANIMATION FILTER), and an
+        -- animation-key edit rebuilds the container (rawBorderAnimStructTok -- the effect is
+        -- creation-frozen on a restricted button).
+        -- Text-only mode hides the icon texture, so the whole Border group is hidden (the runtime
+        -- force-disables the border there too).
         if not proxy.hideIcon then
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
@@ -927,12 +917,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
         end)
-        -- Border (Stage 5.2 — unified controls via CreateBorderControls).
-        -- Same full toolkit as the icon's base border: Style / Texture / Colour
-        -- / Gradient / Shadow / Blend / Offset / Alpha + Animation (restored
-        -- 2026-08-29 with the button-mode reopening — see the icon card).  The
-        -- square's expiring system tints the FILL (not the border), so the
-        -- icon's expiring-border overrides are intentionally NOT added here.
+        -- Border, via the shared CreateBorderControls: the same toolkit as the icon's base border,
+        -- Animation included (see the icon card). The square's expiring system tints the FILL, not
+        -- the border, so the icon's expiring-border overrides are intentionally not added here.
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
@@ -1075,11 +1062,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end
             matchInset.tooltip = L["Trims the matched size on every side. Use it to clear an Aura Designer border indicator, which the frame's own border inset does not know about. Negative values push the bar back out past the health bar's edge."]
         end)
-        -- Appearance  (group captured to scroll to; the Color Mode widget to flash)
-        -- ⚠ Named "Texture & Colors" until 2026-08-19. It held Frame Level and Alpha, which
-        -- live in Appearance on every other card — see the naming rules on the icon card.
-        -- The local stays `texColorsGroup` only because the |H link route below is keyed
-        -- "dfADScroll:texcolors" and renaming that would break saved links in old tooltips.
+        -- Appearance (group captured to scroll to; the Color Mode widget to flash). It holds Frame
+        -- Level and Alpha, which live in Appearance on every card. The local is `texColorsGroup`
+        -- because the |H link route below is keyed "dfADScroll:texcolors", and renaming that would
+        -- break saved links in old tooltips.
         local colorModeDrop
         local texColorsGroup, texColorsSection = AddGroup(L["Appearance"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
@@ -1100,13 +1086,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             UpdateColorModeGrey()   -- initial grey for the curve-gated Texture / Fill Color
         end)
-        -- Border (Stage 5.3 — unified controls via CreateBorderControls).
-        -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
-        -- Inset / Alpha + Animation, restored 2026-08-29 — see the icon card).
-        -- No offset (the bar has its own X/Y) and no class/role (it's an aura
-        -- bar, not unit identity).  The bar's expiring tints the FILL via its
-        -- colour curve, so the icon/square expiring-border overrides are
-        -- intentionally not added here.
+        -- Border, via the shared CreateBorderControls (Animation included -- see the icon card). No
+        -- offset (the bar has its own X/Y) and no class/role (it is an aura bar, not unit
+        -- identity). The bar's expiring tints the FILL via its colour curve, so the icon/square
+        -- expiring-border overrides are intentionally not added here.
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
@@ -1280,14 +1263,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 end,
                 sizeMin = 0, sizeMax = 8, sizeStep = 1,
             })
-            -- Draw order: lift this border above the frame's own class/role
-            -- border so it fully covers it (on by default).  Off tucks it back
-            -- underneath the frame border (the pre-5.4 stacking).
-            -- WIRED 2026-07-25 (was frosted as "engine-managed, not wired yet"). The frame's own
-            -- class/role border is a DF.Border child at frame+10, and the AD border container was
-            -- pinned at exactly +10 too -- same level, so which one won came down to creation
-            -- order. buildBorderConfig now resolves this flag to +11 (above) or +9 (below), and
-            -- the flag rides the border structSig so toggling it rebuilds at the new offset.
+            -- Draw order: lift this border above the frame's own class/role border so it fully covers
+            -- it (on by default); off tucks it underneath. The frame's own border is a DF.Border child
+            -- at frame+10, so buildBorderConfig resolves this flag to +11 (above) or +9 (below) --
+            -- never the same level, where creation order would decide. The flag rides the border
+            -- structSig, so toggling it rebuilds at the new offset.
             g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
             AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()

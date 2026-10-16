@@ -4,7 +4,6 @@ local addonName, NS = ...
 -- SOLVER
 -- Pure geometry. No frames, no WoW globals. All coordinates are UIParent
 -- units relative to UIParent CENTER. rect = {x=cx, y=cy, w, h}.
--- Snap-zone and resolve maths lifted from DandersCDM UI/Position.lua.
 -- ============================================================
 local S = {}
 NS.Solver = S
@@ -35,13 +34,11 @@ function S.DragDelta(startPos, startCx, startCy, cx, cy)
     return (startPos.x or 0) + (cx - startCx), (startPos.y or 0) + (cy - startCy)
 end
 
--- The X/Y pair the element panel's boxes show, and the pair the slab's own
--- coords readout repeats: the record's x/y for a free element, the anchor's
--- offsets for an anchored one, rounded half up. ONE producer for both, because
--- the slab used to quote its visible rect's CENTRE instead -- a different
--- quantity whenever the record's point is not CENTER, or the consumer's getRect
--- is offset from its record (DF's raid frames: the frames sit inside a larger
--- reserved container) -- so the two readouts disagreed on the same element.
+-- The X/Y pair the element panel's boxes show and the slab's coords readout repeats:
+-- the record's x/y for a free element, the anchor's offsets for an anchored one,
+-- rounded half up. ONE producer for both: the visible rect's centre is a different
+-- quantity whenever the record's point is not CENTER or the consumer's rect is offset
+-- from its record (DF's raid frames sit inside a larger reserved container).
 function S.Readout(pos)
     local a = pos.anchor
     if a then return floor((a.offsetX or 0) + 0.5), floor((a.offsetY or 0) + 0.5) end
@@ -298,9 +295,8 @@ function S.SnapZones(targetId, target, dragW, dragH, spacing, isOccupied)
     return zones
 end
 
--- Largest rectangle overlap with a minimum-fraction floor. No longer what the
--- drag uses (see NearestZone) -- kept because it is public surface and its
--- overlap maths is the tie-break NearestZone falls back to.
+-- Largest rectangle overlap with a minimum-fraction floor. Not what the drag uses (see
+-- NearestZone); kept as public surface, and its overlap maths is NearestZone's tie-break.
 function S.BestZone(cx, cy, w, h, zones, minFraction)
     local hw, hh = w / 2, h / 2
     local dl, dr, dt, db = cx - hw, cx + hw, cy + hh, cy - hh

@@ -950,16 +950,15 @@ end
 -- ☠ WHAT THE RECORD HELD THE LAST TIME DF AND THE SCALAR AGREED, per record table (weak
 -- keys: a profile switch or import swaps the table and the note goes with it).
 --
--- The raid scalar can legitimately differ from the record for two opposite reasons and
+-- The raid scalar can legitimately differ from the record for two opposite reasons, and
 -- the read path has to tell them apart:
 --   (a) an auto layout overrides raidAnchorX/raidAnchorY (or one just deactivated) --
---       the SCALAR is the truth and must be folded into the record, or the layout
---       would not drive the container and the base would not come back afterwards;
+--       the SCALAR is the truth and must be folded into the record, or the layout would
+--       not drive the container and the base would not come back afterwards;
 --   (b) DandersMover mutated the record IN PLACE and has not called onChanged yet --
 --       the RECORD is the truth. The lib's every write is `pos = getPos(); pos.x = v;
---       Notify()`, and Notify calls getPos AGAIN before onChanged, so folding the
---       scalar in here would erase the drag before DF ever saw it. The raid container
---       could not be moved by the lib at all.
+--       Notify()`, and Notify calls getPos AGAIN before onChanged, so folding the scalar
+--       in here would erase the drag before DF ever saw it.
 -- (b) is exactly "the record no longer holds what we last noted", so that is the test.
 local lastNoted = setmetatable({}, { __mode = "k" })
 
@@ -1152,15 +1151,12 @@ function DF:UpdateRaidContainerPosition()
     local x, y = rec.x or 0, rec.y or 0
     local scale = db.frameScale or 1.0
 
-    -- ☠ CENTER-anchor compensation, RETIRED 2026-08-18 -- this now always adds (0, 0).
-    -- It shifted the container to hold CENTER content still as the roster grew, against
-    -- #867. That was a workaround one layer below the real bug (the CENTER compounding,
-    -- fixed at source in 50a3e7c5), and it was actively harmful: CENTER already grows
-    -- symmetrically about the container centre, so the centroid never moved, and this
-    -- pinned the leading edge instead -- measured in game as the container and mover
-    -- dragged 316px left at Wrap 7 / Center Right / 8 groups (Krathe, 2026-08-18).
-    -- The call stays so the reasoning has one home: see ComputeRaidContainerCompensation
-    -- in Headers.lua before reinstating anything here.
+    -- ☠ NO CENTER-anchor compensation: this always adds (0, 0). CENTER already grows
+    -- symmetrically about the container centre, so the centroid never moves; shifting the
+    -- container to hold content still pinned the leading edge instead and was measured
+    -- dragging the container and mover 316px left (Wrap 7 / Center Right / 8 groups).
+    -- The call stays so the reasoning has one home: read ComputeRaidContainerCompensation in
+    -- Headers.lua before reinstating anything here.
     local dx, dy = 0, 0
     if DF.ComputeRaidContainerCompensation then
         dx, dy = DF:ComputeRaidContainerCompensation()
@@ -1191,11 +1187,9 @@ function DF:UpdateRaidContainerPosition()
     DF.raidContainer:ClearAllPoints()
     DF.raidContainer:SetPoint(point, UIParent, "CENTER", cx / scale, cy / scale)
 
-    -- ☠ THE TEST CONTAINER TAKES THE COMPENSATION TOO — both read the one number
-    -- ComputeRaidContainerCompensation returns (Aphoex, 2026-08-15). The comp rides
-    -- ON THE CONTAINER, mirroring live — the test frame calculator no longer folds
-    -- it into frame offsets. One accounting model in both modes; the calculator's
-    -- testMode comp fork is retired.
+    -- ☠ THE TEST CONTAINER TAKES THE COMPENSATION TOO -- both read the one number
+    -- ComputeRaidContainerCompensation returns, and it rides ON THE CONTAINER in both modes
+    -- (the test frame calculator does not fold it into frame offsets). One accounting model.
     if DF.testRaidContainer then
         DF.testRaidContainer:SetScale(scale)
         DF.testRaidContainer:ClearAllPoints()
@@ -1328,7 +1322,7 @@ end
 -- position" means; API.lua stays what it already is, a documented wall of global
 -- wrappers.
 --
--- Written for MSUF's Edit Mode (Mapko, 2026-08-06), which wants to drag DF's frames from
+-- Written for MSUF's Edit Mode, which wants to drag DF's frames from
 -- its own editor without touching DandersFramesDB_v2.
 --
 -- ☠ THE ID SPACE IS PUBLIC THE MOMENT AN ADDON SHIPS AGAINST IT. "party", "raid",

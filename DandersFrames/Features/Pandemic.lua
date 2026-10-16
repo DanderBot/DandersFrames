@@ -1,48 +1,43 @@
 local addonName, DF = ...
 
 -- ============================================================
--- DF.Pandemic — the refresh-window reveal (12.1.0 PTR 8, build 69111)
+-- DF.Pandemic -- the refresh-window reveal
 -- ============================================================
--- Turns a "pandemic*" config block into a style.pandemic spec that the AuraContainer
--- engine hands to CustomAuraButton:AddPandemicRegion. The engine stamps
--- Enum.SecretAspect.Shown on the registered object and drives SetShown itself from its
--- own window maths, so this is attach-and-inherit exactly like SetIcon: we build the art,
--- the game decides when it is visible, and nothing here reads an aura.
+-- Turns a "pandemic*" config block into a style.pandemic spec that the AuraContainer engine
+-- hands to CustomAuraButton:AddPandemicRegion. The engine stamps Enum.SecretAspect.Shown on
+-- the registered object and drives SetShown itself from its own window maths, so this is
+-- attach-and-inherit exactly like SetIcon: we build the art, the game decides when it is
+-- visible, and nothing here reads an aura.
 --
 -- WHAT THE WINDOW IS. Blizzard computes it (AuraContainerUtil.GetPandemicWindow):
---     carriedOverToNewCast = GetRefreshCarryOverDuration(u,id)      -- 12.1.5 PTR 3 (69952)
---       (before 69952: GetRefreshExtendedDuration(u,id) - GetAuraBaseDuration(u,id), which
---        mis-timed auras pushed past the refresh cap, e.g. Lifebloom under Tranquility)
+--     carriedOverToNewCast = GetRefreshCarryOverDuration(u,id)
 --     window exists when carriedOverToNewCast > 0
 --     start = expirationTime - carriedOverToNewCast ;  end = expirationTime
 -- i.e. it lights exactly while a refresh would clip NOTHING. In practice that is the last
--- 30% of the base duration, but it is the GAME's number per spell, not ours — there is
+-- 30% of the base duration, but it is the GAME's number per spell, not ours -- there is
 -- deliberately no threshold control anywhere in this feature.
 --
--- ⚠ MANY AURAS HAVE NO WINDOW AT ALL, and that is not a bug. Only a refreshable
--- duration has one. Charge-based auras (Prayer of Mending), fixed-duration procs, food,
--- flasks and anything you did not cast all return nil and stay dark forever. Confirmed in
--- game 2026-08-05 — a cue that never lights on a given spell is the feature working.
+-- ⚠ MANY AURAS HAVE NO WINDOW AT ALL, and that is not a bug. Only a refreshable duration has
+-- one. Charge-based auras (Prayer of Mending), fixed-duration procs, food, flasks and
+-- anything you did not cast stay dark forever -- a cue that never lights on a given spell is
+-- the feature working.
 --
--- ☠ ADD, NEVER REPLACE. This does NOT supersede DF.Expiration, and the two are meant to
--- run together:
---   * expiry alert  = "about to fall off" — a USER threshold, any aura, zero per-frame cost,
+-- ☠ ADD, NEVER REPLACE. This does NOT supersede DF.Expiration; the two run together:
+--   * expiry alert  = "about to fall off" -- a USER threshold, any aura, zero per-frame cost,
 --                     and the only one that can walk a colour ramp.
---   * pandemic      = "right moment to refresh" — the game's window, refreshable auras only,
---                     a boolean show/hide with no ramp, and a per-frame OnUpdate on the
---                     button while a window is open.
--- A 30s HoT enters its refresh window with ~9s left, which no sensible expiry threshold
--- would catch. They overlap in TIME on purpose; the editor only warns about SPACE.
+--   * pandemic      = "right moment to refresh" -- the game's window, refreshable auras only,
+--                     a boolean show/hide with no ramp.
+-- A 30s HoT enters its refresh window with ~9s left, which no sensible expiry threshold would
+-- catch. They overlap in TIME on purpose; the editor only warns about SPACE.
 --
--- ★ TWO TYPES, BORDER AND TINT. Custom Text and Glyph were built and then dropped
--- (Krathe, 2026-08-05): a boolean "now" cue wants to read at a glance from the edge of
--- vision, which is what a ring or a wash does and what a glyph competes with the icon to
--- do. Keeping two also means every control on the panel applies to both, so nothing hides.
+-- ★ TWO TYPES, BORDER AND TINT: a boolean "now" cue should read at a glance from the edge of
+-- vision, which a ring or a wash does and a glyph competes with the icon to do. With two,
+-- every control on the panel applies to both, so nothing hides.
 --
--- ★ THE BORDER IS A REAL DF.Border. Not a fixed-weight TGA — the full house toolkit
--- (style, thickness, inset, offsets, colour, gradient, shadow), keyed exactly like every
--- other DF border so CreateBorderControls drives it with no special case. See BuildSpec
--- for why this is registered as a FRAME rather than as its four edge textures.
+-- ★ THE BORDER IS A REAL DF.Border -- the full house toolkit (style, thickness, inset,
+-- offsets, colour, gradient, shadow), keyed exactly like every other DF border so
+-- CreateBorderControls drives it with no special case. See BuildSpec for why it is
+-- registered as a FRAME rather than as its four edge textures.
 --
 -- CONTRACT:
 --   cfg     the settings table holding the keys (the AD indicator record, or DF.db[mode]).
@@ -313,49 +308,33 @@ end
 
 -- ANIMATION.
 --
--- ☠☠ THIS SECTION USED TO SAY DF.Border's ANIMATION SET COULD NEVER COME HERE. THAT IS
--- NO LONGER TRUE, ON BOTH OF ITS PREMISES. It said every effect rides Border.lua's shared
--- OnUpdate driver (per-frame tainted Lua writing SetVertexColor / SetPoint / Hide on the
--- border's pieces, refused on a button child once auras are secret), and that animation
--- is therefore stripped unconditionally from every container border.
+-- The pandemic border takes the ordinary DF.Border animation set. Two things make that work:
+--   1. DECLARATIVE paths: `border._secretRect` -- true exactly when the border is hosted on a
+--      container button -- selects a C-side AnimationGroup build per effect instead of the
+--      OnUpdate tick (Border.lua: "CONTAINER-HOSTED BORDERS TAKE THE DECLARATIVE PATH"),
+--      which is what makes animation legal on a button child at all.
+--   2. 12.1.5's Enter/Active/Leave animation triggers on CustomAuraButton, so a declarative
+--      group is handed to the ENGINE and played only inside the refresh window instead of
+--      looping from creation -- applied where the border is bound (the pandemic-border
+--      registration in Frames/AuraContainer.lua).
+-- ⚠ A declarative builder that finds no usable geometry falls through to the tick, which on
+-- a button child is refused, dropped with ONE warn, and re-armed on the next restyle --
+-- bounded, and the same for every animated container border.
 --
--- ★ WHAT CHANGED, IN ORDER:
---   1. DF grew DECLARATIVE paths. `border._secretRect` — true exactly when the border is
---      hosted on a container button — now selects a C-side AnimationGroup build per
---      effect instead of the tick (Border.lua: "CONTAINER-HOSTED BORDERS TAKE THE
---      DECLARATIVE PATH"). Animation on container borders is not stripped any more; it is
---      the shipping `config.adBorderAnim` opt-in on placed indicators, bars, mgroup
---      members and filter/debuff groups.
---   2. 12.1.5 added Enter/Active/Leave animation triggers to CustomAuraButton, so a
---      declarative group can be handed to the ENGINE and played only inside the refresh
---      window instead of looping from creation.
+-- ★ THE FLASH: a native AnimationGroup, built ONCE inside initializeFrame (secure context)
+-- and run entirely C-side -- zero Lua per frame, nothing tainted touching the button after
+-- init.
+-- ☠ ...but ONLY an Alpha animation. Scale does NOT run on the registered holder (FLASH pulsed;
+-- a Scale-based PULSE and a combined BREATHE did nothing): the holder carries
+-- SecretAspect.Shown plus the forbidden aspects AddPandemicRegion stamps on it, and a scale
+-- transform evidently does not survive that where an alpha one does. That limit applies to
+-- the flash's own group on the holder; the border set animates the border's own regions.
+-- ⚠ An empirical result, not a documented rule -- re-test Scale on a later build before
+-- assuming it is permanently dead.
 --
--- ⇒ The pandemic border now takes the ordinary DF.Border animation set. (1) is what makes
--- it legal at all and needs no 12.1.5; (2) is what makes it good, and is applied where the
--- border is bound — see the pandemic-border registration in Frames/AuraContainer.lua.
--- ⚠ A declarative builder that finds no usable geometry falls through to the tick, which
--- on a button child is refused, dropped with ONE warn, and re-armed on the next restyle.
--- Bounded, and pre-existing behaviour for every other animated container border.
---
--- ★ WHAT DOES WORK: a native AnimationGroup, built and :Play()ed ONCE inside
--- initializeFrame (secure context) and then run entirely C-side — zero Lua per frame, and
--- nothing tainted touching the button after init.
---
--- ☠ ...but ONLY an Alpha animation. Scale was tried and does NOT run on the registered
--- holder (in game, 2026-08-05: FLASH pulsed, a Scale-based PULSE and a combined BREATHE
--- did nothing at all). The holder carries SecretAspect.Shown plus the forbidden aspects
--- AddPandemicRegion stamps on it, and a scale transform evidently does not survive that
--- where an alpha one does. ⚠ That limit applies to the FLASH's own group on the registered
--- holder; the border set above animates the border's own regions and is not bound by it.
--- ⚠ Re-test Scale on a later build before assuming it is permanently dead — this is an
--- empirical result, not a documented rule. (The "Blizzard are looking at pandemic
--- animation for 12.1.5, so don't build anything clever" note that used to close this
--- paragraph has been overtaken: they shipped it, and the flash is now handed over rather
--- than self-played.)
---
--- CREATION-FROZEN, hence part of StructSig: the group's animation and its duration are
--- baked when it is built, and reaching back in later would be a tainted write to a
--- forbidden child. So the toggle AND the speed both rebuild the slot.
+-- CREATION-FROZEN, hence part of StructSig: the group's animation and duration are baked
+-- when it is built, and reaching back in later would be a tainted write to a forbidden
+-- child. So the toggle AND the speed both rebuild the slot.
 function Pandemic:Flash(cfg, prefix)
     if not get(cfg, prefix, "Flash") then return nil end
     -- Seconds for a full dim-and-back cycle. Clamped: below ~0.2 reads as a strobe rather
@@ -414,13 +393,9 @@ function Pandemic:StructSig(cfg, prefix)
     return mode .. ":F" .. tostring(self:Flash(cfg, prefix)) .. anim
 end
 
--- The DF.Border keys whose values must move the COSMETIC signature. Still deliberately
--- excludes the Border*Animation* family, but ☠ THE REASON HAS CHANGED and the old one was
--- load-bearing: it used to be "animations are stripped on container borders, so hashing
--- them would churn the sig for settings that provably cannot render". They render now.
--- They are excluded here because they are STRUCTURAL — creation-frozen groups that need a
--- fresh button — so they live in StructSig instead. Excluded from the cosmetic sig either
--- way; hashed in exactly one place rather than none.
+-- The DF.Border keys whose values move the COSMETIC signature. Excludes the
+-- Border*Animation* family: animations are STRUCTURAL (creation-frozen groups that need a
+-- fresh button), so they are hashed in StructSig instead -- exactly one place.
 local BORDER_KEYS = {
     "BorderStyle", "BorderTexture", "BorderSize", "BorderInset",
     "BorderOffsetX", "BorderOffsetY", "BorderBlendMode",
@@ -462,20 +437,20 @@ function Pandemic:CoSig(cfg, prefix)
     return tconcat(parts, ",")
 end
 
--- The style.pandemic block, or nil when off (which includes an unsupported client —
--- Mode() carries that gate, so nothing downstream repeats the probe).
+-- The style.pandemic block, or nil when off (which includes an unsupported client -- Mode()
+-- carries that gate, so nothing downstream repeats the probe).
 --
--- ☠ BOTH TYPES REGISTER A FRAME, never a texture. Confirmed in game 2026-08-05:
--- `Frame:IsObjectType("Region")` is true, so AddPandemicRegion accepts one. That matters
--- for BORDER specifically: DF.Border's applyTexPieces calls Show() on every edge piece on
--- every Apply, so registering the PIECES would hand their Shown aspect to the engine and
--- turn DF.Border's own routine writes into forbidden writes on a button child. Registering
--- the holder frame instead leaves DF.Border in full control of everything inside it, and
--- gives the flash animation a frame to live on. TINT uses the same shape for one code path.
+-- ☠ BOTH TYPES REGISTER A FRAME, never a texture. `Frame:IsObjectType("Region")` is true, so
+-- AddPandemicRegion accepts one. That matters for BORDER specifically: DF.Border's
+-- applyTexPieces calls Show() on every edge piece on every Apply, so registering the PIECES
+-- would hand their Shown aspect to the engine and turn DF.Border's own routine writes into
+-- forbidden writes on a button child. Registering the holder frame leaves DF.Border in full
+-- control of everything inside it, and gives the flash animation a frame to live on. TINT
+-- uses the same shape for one code path.
 --
 -- ctx carries what a border spec needs but the config cannot know: the slot's configured
--- pixel size (DF_DASH lays its dashes out from it — the button's real rect is SECRET) and
--- the container's render scale.
+-- pixel size (DF_DASH lays its dashes out from it -- the button's real rect is SECRET) and the
+-- container's render scale.
 function Pandemic:BuildSpec(cfg, prefix, ctx)
     local mode = self:Mode(cfg, prefix)
     if not mode then return nil end
@@ -483,20 +458,15 @@ function Pandemic:BuildSpec(cfg, prefix, ctx)
     local spec = { mode = mode, flash = self:Flash(cfg, prefix) }
 
     -- ☠ THE TWO TYPES WANT OPPOSITE Z-ORDER, so the level is per mode.
-    --   BORDER — the TOP of the ladder. A ring traces the edge, so it has to read over
-    --            the icon's own border and the dispel ring or it is simply hidden.
-    --   TINT   — BELOW the duration text, the stack count, the dispel ring and
-    --            DF.Border, but above the icon art and the cooldown swipe. A wash covers
-    --            the whole button, so at the top it washed over the timer and the stack
-    --            count and made both hard to read (Krathe, 2026-08-05). Tint the ICON,
-    --            not the information on top of it.
+    --   BORDER -- the TOP of the ladder. A ring traces the edge, so it has to read over the icon's
+    --            own border and the dispel ring or it is simply hidden.
+    --   TINT   -- BELOW the duration text, the stack count, the dispel ring and DF.Border, but
+    --            above the icon art and the cooldown swipe: tint the ICON, not the information
+    --            on top of it.
     --
-    -- ☠☠ THESE ARE READ FROM `DF.AuraButtonLevels` (Frames/AuraContainer.lua), NEVER
-    -- HARDCODED. This block used to carry its own absolutes — 9 and 15, reasoned against
-    -- a ladder of 10/12/13/14. The 2026-08-07 squash renumbered that ladder and did not
-    -- touch this file, so TINT at 9 rose above ALL of it and re-broke the very thing the
-    -- 2026-08-05 fix addressed. Read the table; do not re-derive the numbers here.
-    -- Read at CALL time (this runs long after load; AuraContainer loads first anyway).
+    -- ☠☠ READ FROM `DF.AuraButtonLevels` (Frames/AuraContainer.lua), NEVER HARDCODED: absolute
+    -- numbers here would silently break the moment that ladder is renumbered. Read at CALL time
+    -- (this runs long after load; AuraContainer loads first anyway).
     local LEVELS = DF.AuraButtonLevels
     spec.level = (mode == "TINT") and LEVELS.PANDEMIC_TINT or LEVELS.PANDEMIC_BORDER
 
@@ -510,21 +480,13 @@ function Pandemic:BuildSpec(cfg, prefix, ctx)
     else
         if not (DF.Border and DF.Border.BuildSpec) then return nil end
         spec.border = DF.Border:BuildSpec(cfg, self:BorderPrefix(prefix), ctx)
-        -- ☠ THE ANIMATION STRIP THAT USED TO LIVE HERE IS GONE. It read
-        -- `spec.border.animation = nil`, justified as belt-and-braces against a per-frame
-        -- forbidden error on a button child. Both halves of that reasoning have expired:
-        -- container-hosted borders take the DECLARATIVE path (no per-frame Lua at all),
-        -- and the container's own chokepoint no longer strips either — animated container
-        -- borders are a shipping feature. Leaving the strip in would mean the pandemic
-        -- section is the ONE border in DF that silently ignores its animation controls.
-        -- ⚠ The AD canvas preview, named in the old comment as the reason for belt AND
-        -- braces, is a plain frame: _secretRect is false there, so it takes the OnUpdate
-        -- tick exactly as every other previewed border does, and retunes live while a
-        -- slider is dragged. That was an argument FOR passing the animation through, not
-        -- against it.
-        -- ⚠ Animation is CREATION-FROZEN on a container border, so the keys are
-        -- STRUCTURAL — see StructSig, which hashes them so an edit rebuilds the slot
-        -- rather than trying to retune a frozen group.
+        -- The animation passes through: container-hosted borders take the DECLARATIVE path (no
+        -- per-frame Lua at all), and the AD canvas preview is a plain frame (_secretRect false) that
+        -- takes the OnUpdate tick like every other previewed border and retunes live while a slider
+        -- is dragged.
+        -- ⚠ Animation is CREATION-FROZEN on a container border, so the keys are STRUCTURAL -- see
+        -- StructSig, which hashes them so an edit rebuilds the slot rather than trying to retune a
+        -- frozen group.
     end
 
     return spec

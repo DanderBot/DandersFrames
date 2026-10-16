@@ -269,54 +269,39 @@ function UI:CreateSettingsGroup(parent, width, opts)
     group.padding = padding
     group.margin = margin
 
-    -- 8%, not 16%: the border no longer splits across two device rows, so it does
-    -- not need the doubled alpha that made a split edge readable at the cost of
-    -- the whole border reading too heavy when it did not split.
+    -- 8%, not 16%: the border sits on one device row, so it does not need a doubled alpha
+    -- (which would make the whole border read too heavy).
     --
-    -- opts.chromeless skips the box entirely -- no fill, no border. For a group
-    -- that is not a box ON a page but the whole CONTENTS of another surface: a
-    -- popout pane already draws its own panel, and a faint bordered rectangle
-    -- inside it reads as a second, smaller panel rather than as the panel's
-    -- contents.
+    -- opts.chromeless skips the box entirely -- no fill, no border. For a group that is not a
+    -- box ON a page but the whole CONTENTS of another surface: a popout pane already draws its
+    -- own panel, and a faint bordered rectangle inside it reads as a second, smaller panel.
     --
-    -- ⚠ THE BOX FOLLOWS THE CONSUMER'S SURFACE STYLE, and it is the one surface
-    -- here that takes it from the HOST rather than from an opt. Every other
-    -- shell that can wear either shape is built at a handful of call sites and
-    -- can be told; a settings group is built at something over a hundred, on
-    -- every page, and threading a style through all of them would mean the ONE
-    -- that got missed is the box that stays square in a round window. So the
-    -- style is asked for once, here, off the host that declared it -- a consumer
-    -- that declared nothing gets exactly the square box it always had.
+    -- ⚠ THE BOX FOLLOWS THE CONSUMER'S SURFACE STYLE, taken from the HOST rather than an opt.
+    -- A settings group is built at over a hundred call sites, so threading a style through all
+    -- of them would leave the ONE that got missed square in a round window. The style is asked
+    -- for once, here, off the host that declared it; a consumer that declared nothing gets
+    -- the square box.
     --
-    -- ☠ THIS SKINS EVERY GROUP. Pages arrange their boxes differently, but they
-    -- draw the SAME group frame, so rounding it rounds all of them -- the skin
-    -- is shared chrome, like the header.
+    -- ☠ THIS SKINS EVERY GROUP. Pages arrange their boxes differently but draw the SAME group
+    -- frame, so rounding it rounds all of them -- the skin is shared chrome, like the header.
     --
     -- ===== opts.bandStyle -- THE THIRD SHAPE ==========================
-    -- A page that has converted some of its sections into BANDS (a header above
-    -- a stack of full-width popout-row plates) and left others inline ends up
-    -- speaking two visual languages at once: the bands are header-outside plus
-    -- fat plates, the survivors are the dense box with its title INSIDE
-    -- a faint white rectangle. Danders, on the converted Frame page: "Layout
-    -- Direction does not match the Appearance settings."
-    --
-    -- bandStyle is the survivors' half of that conversion, and it is exactly two
+    -- A page whose other sections are BANDS (a header above a stack of full-width plates)
+    -- needs its remaining inline boxes to speak the same visual language. bandStyle is two
     -- moves -- no widget in the box changes, no factory is swapped:
     --
-    --   1. THE TITLE LEAVES THE BOX. The header is still groupChildren[1] and is
-    --      still the same CreateHeader the bands use; LayoutChildren simply
-    --      starts the plate BELOW it, so the accent title sits on the page at
-    --      the same x and the same gap-to-content a band's header does.
-    --   2. THE BOX BECOMES A PLATE. Same fill, same border, same R8 at the ROW
-    --      weight as a PopoutRow -- read off the row's own tokens, not restated
-    --      -- so an inline box and the plates beside it are one surface.
+    --   1. THE TITLE LEAVES THE BOX. The header is still groupChildren[1] and the same
+    --      CreateHeader the bands use; LayoutChildren starts the plate BELOW it, so the accent
+    --      title sits on the page at the same x and gap-to-content a band's header does.
+    --   2. THE BOX BECOMES A PLATE. Same fill, same border, same R8 at the ROW weight as a
+    --      PopoutRow -- read off the row's own tokens, not restated -- so an inline box and
+    --      the plates beside it are one surface.
     --
-    -- ☠ IT IS A SEPARATE FRAME, NOT THE GROUP'S OWN BACKDROP, and it has to be:
-    -- the plate stops short of the group's top edge (that is the whole point),
-    -- and a backdrop on the group covers the whole rect by definition. Its level
-    -- is pinned to the GROUP's own so it stays under every widget added to the
-    -- group -- those land a level above their parent, and a plate left at the
-    -- default child level would be a coin flip against them.
+    -- ☠ IT IS A SEPARATE FRAME, NOT THE GROUP'S OWN BACKDROP: the plate stops short of the
+    -- group's top edge, and a backdrop on the group covers the whole rect by definition. Its
+    -- level is pinned to the GROUP's own so it stays under every widget added to the group --
+    -- those land a level above their parent, and a plate at the default child level would be
+    -- a coin flip against them.
     if opts.bandStyle and not opts.chromeless then
         local plate = CreateFrame("Frame", nil, group, "BackdropTemplate")
         plate:SetFrameLevel(group:GetFrameLevel())
@@ -997,29 +982,22 @@ function UI:CreateSettingsGroup(parent, width, opts)
 
     -- Re-read every child's BOUND VALUE out of the settings table and repaint it.
     --
-    -- ☠ THIS IS NOT WHAT RefreshChildStates DOES, and the difference is the bug
-    -- it was added for. That one is about a widget's STATE -- greyed or not, and
-    -- whatever `refreshContent` a page bolted on for dynamic captions. A
-    -- checkbox's tick, a slider's thumb, a dropdown's caption and a swatch's
-    -- colour are none of those: the factories paint them once at build and then
-    -- on their own OnShow, on the reasonable assumption that nothing changes a
-    -- setting except the widget bound to it.
+    -- ☠ THIS IS NOT WHAT RefreshChildStates DOES. That one is about a widget's STATE -- greyed
+    -- or not, and whatever `refreshContent` a page bolted on for dynamic captions. A
+    -- checkbox's tick, a slider's thumb, a dropdown's caption and a swatch's colour are none
+    -- of those: the factories paint them at build and on their own OnShow, assuming nothing
+    -- changes a setting except the widget bound to it. A GROUP RESET breaks that (it writes a
+    -- dozen keys behind every widget's back), and so does the UNDO of one; without this, an
+    -- open popout would keep showing the old numbers.
     --
-    -- A GROUP RESET breaks that assumption -- it writes thirteen keys behind
-    -- every widget's back -- and so does the UNDO of one, which replays the same
-    -- apply. With the popout open, the reset moved the frames and the row summary
-    -- and left every control inside the panel showing the old numbers.
+    -- ⚠ DELIBERATELY NOT FOLDED INTO RefreshChildStates. That runs on every page RefreshStates,
+    -- including ones a slider drag triggers, and a value repaint mid-drag would snap the thumb
+    -- from the mouse to the last quantised step, every step. This runs only where a write
+    -- happened that the widgets could not have seen.
     --
-    -- ⚠ DELIBERATELY NOT FOLDED INTO RefreshChildStates. That runs on every page
-    -- RefreshStates, including ones a slider drag triggers -- and a value repaint
-    -- in the middle of a drag would snap the thumb from where the mouse is to the
-    -- last quantised step, every step. This runs where a write happened that the
-    -- widgets could not have seen.
-    --
-    -- `refreshValue` is the one name a factory opts in with; the four spellings
-    -- the factories used to expose privately (Refresh / RefreshValue /
-    -- UpdateText / UpdateSwatch) are aliased onto it at their own definitions,
-    -- so a consumer never has to know which kind of control it is holding.
+    -- `refreshValue` is the one name a factory opts in with; each factory's own spelling
+    -- (Refresh / RefreshValue / UpdateText / UpdateSwatch) is aliased onto it at its
+    -- definition, so a consumer never has to know which kind of control it is holding.
     group.RefreshChildValues = function(self)
         for _, entry in ipairs(self.groupChildren) do
             local widget = entry.widget

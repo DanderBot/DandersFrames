@@ -83,11 +83,9 @@ end
 -- registered refresh fn so Core rebuilds them after the overlay.
 local CONTENT_TYPES = {}
 
--- ☠ Rebuilds IN PLACE. It used to reassign CONTENT_TYPES, which was harmless
--- while everything lived in one file. It is not now: the settings page reads
--- this table from _priv, and a locale refresh reassigning the engine's local
--- would leave the page holding the previous table forever -- stale labels, no
--- error. Keeping the table's identity stable makes any reference safe.
+-- ☠ Rebuilds IN PLACE. The settings page reads this table from _priv, so a locale refresh
+-- that reassigned the engine's local would leave the page holding the previous table
+-- forever -- stale labels, no error. A stable identity makes any reference safe.
 local function RefreshContentTypes()
     local rebuilt = {
         {
@@ -148,7 +146,7 @@ local function ParsePinnedKey(key)
 end
 
 -- Settings that can be overridden per pinned frame set.
--- Decoupled from auto layouts (2026-06-07): pinned frames are a global,
+-- Decoupled from auto layouts: pinned frames are a global,
 -- per-mode modular highlight. The ONLY thing a raid auto layout overrides is
 -- whether each set is shown (enabled) for that layout — everything else is
 -- global and edited on the Pinned Frames page. This keeps pinned settings out
@@ -1065,18 +1063,12 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     
     -- ☠ PERSIST THE VALUES, NOT JUST THE KEY NAMES.
     --
-    -- EnterEditing writes every stored override straight into the REAL serialized raid
-    -- table (SetRaidValue -> DF._realRaidDB, which IS
-    -- DandersFramesDB_v2.profiles[current].raid). The user's true globals live only in
-    -- the in-memory self.globalSnapshot. There is NO PLAYER_LOGOUT handler anywhere in
-    -- either addon -- verified, zero hits -- so a /reload or a crash mid-edit saves the
-    -- PREVIEW as the user's real settings.
-    --
-    -- This used to persist only the key NAMES, so the recovery pass on next login could
-    -- do nothing better than DF.db.raid[key] = DF.RaidDefaults[key]: a user whose raid
-    -- frameWidth was 150, editing a layout that overrides it to 110, got the FACTORY 125
-    -- back and a message saying settings were recovered. Persisting the values makes the
-    -- recovery exact.
+    -- EnterEditing writes every stored override straight into the REAL serialized raid table
+    -- (SetRaidValue -> DF._realRaidDB, which IS DandersFramesDB_v2.profiles[current].raid).
+    -- The user's true globals live only in the in-memory self.globalSnapshot, and nothing
+    -- handles PLAYER_LOGOUT, so a /reload or a crash mid-edit saves the PREVIEW as the user's
+    -- real settings. Persisting the values lets the next login's recovery restore exactly
+    -- (key names alone could only fall back to the factory defaults).
     --
     -- Snapshot values are already deep-copied by DeepCopyValue above, so this is a plain
     -- reference to data we own; it is dropped in ExitEditing along with the flag.
@@ -1125,8 +1117,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- come straight from the stored overrides, so the drives saw an unchanged version
     -- and skipped: an auto layout carrying a smaller debuffSize opened with the GLOBAL
     -- icon size still on the preview frames, and only nudging that slider in the editor
-    -- (LightweightUpdateAuraPosition -> InvalidateAuraLayout) made it take
-    -- (Krathe, 2026-08-25).
+    -- (LightweightUpdateAuraPosition -> InvalidateAuraLayout) made it take.
     --
     -- ⚠ EXITING was never affected, which is why this looked one-way: ExitEditing calls
     -- DF:UpdateAll, which invalidates. Only the entry lacked it.
@@ -1231,16 +1222,15 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     local liveOwner = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
     if self.globalSnapshot and snapOwner and snapOwner ~= liveOwner then
         DF:DebugWarn("AUTOPROFILE", "ExitEditing: profile changed during editing (%s -> %s); abandoning the diff rather than writing one profile's values into another", tostring(snapOwner), tostring(liveOwner))
-        -- Drop ONLY the diff/restore inputs, then FALL THROUGH to the shared exit
-        -- tail: every block below is nil-guarded on globalSnapshot, so nothing from
-        -- the stale edit can be written -- but the editing-state clears, the
-        -- crash-recovery flag, the sidebar hint, the override stars and
-        -- EvaluateAndApply still run. An early return here skipped them all,
-        -- leaving the GUI wearing editing chrome for an edit that no longer existed.
-        -- ⚠ Restoring the snapshot into the SOURCE profile by name is possible (it
-        -- still exists in DandersFramesDB_v2.profiles) and deliberately NOT done:
-        -- a cross-profile write is the exact hazard this guard exists to stop, and
-        -- doing it safely against the raw table is its own change.
+        -- Drop ONLY the diff/restore inputs, then FALL THROUGH to the shared exit tail: every
+        -- block below is nil-guarded on globalSnapshot, so nothing from the stale edit can be
+        -- written -- but the editing-state clears, the crash-recovery flag, the sidebar hint, the
+        -- override stars and EvaluateAndApply still run. An early return would leave the GUI
+        -- wearing editing chrome for an edit that no longer exists.
+        -- ⚠ Restoring the snapshot into the SOURCE profile by name is possible (it still exists in
+        -- DandersFramesDB_v2.profiles) and deliberately NOT done: a cross-profile write is the
+        -- exact hazard this guard exists to stop, and doing it safely against the raw table is
+        -- its own change.
         self.editingProfile = nil
         self.globalSnapshot = nil
         self.globalSnapshotOwner = nil
@@ -1558,30 +1548,25 @@ function AutoProfilesUI:ResetProfileSetting(key)
 end
 
 -- ☠☠ growDirection IS MODE-RELATIVE, AND ITS MEANING IS SET BY A KEY A LAYOUT CAN
--- OVERRIDE. Flat HORIZONTAL lays frames left-to-right (rows); grouped HORIZONTAL stacks
--- each group five deep and runs the groups across (columns). So the SAME orientation
--- needs OPPOSITE raw values in the two modes -- which is why toggling Use Group-Based
--- Layout rewrites growDirection to keep the layout looking the same.
+-- OVERRIDE. Flat HORIZONTAL lays frames left-to-right (rows); grouped HORIZONTAL stacks each
+-- group five deep and runs the groups across (columns). So the SAME orientation needs
+-- OPPOSITE raw values in the two modes -- which is why toggling Use Group-Based Layout
+-- rewrites growDirection to keep the layout looking the same.
 --
--- The consequence for auto layouts: a flat layout matching a grouped global MUST store
--- the opposite raw value, and every value-based comparison then reports a difference
--- that does not exist for the user. Field-captured: profile flat+HORIZONTAL against
--- global grouped+VERTICAL -- both read "Rows", both drew rows, and the row still showed
--- an override dot, a reset button, and a global of "Columns" (Krathe, 2026-08-25).
+-- For auto layouts that means a flat layout matching a grouped global MUST store the
+-- opposite raw value, and every value-based comparison would report a difference the user
+-- does not have (an override dot, a reset button, a global of "Columns" beside a page
+-- reading "Rows").
 --
--- ★ THE FIX LIVES HERE, NOT IN THE WIDGETS. Three separate widget-level attempts to
--- explain or suppress it did not hold, and the reason is that this is not a display
--- question: "what is the global, for this profile" is a profile-layer question, and
--- every consumer (the dot, the reset, the readout, the tab stars) wants the same answer.
--- Translating once at the source fixes all of them -- PROVIDED each one actually routes
--- through it. ⚠ ResetProfileSetting did not, and the first cut of this note claimed it was
--- "fixed as a bonus" anyway; it read the snapshot directly and kept writing the raw value.
--- Corrected 2026-08-26 (Danders review of #251). If a new consumer needs the global, it
--- calls GetGlobalValue -- reading globalSnapshot directly is how this recurs.
--- ⚠ The maps are exact inverses, which is what makes a plain flip correct; if a third
--- orientation is ever added this needs a real mapping instead.
--- ⚠ The real cure is splitting the key per mode, which retires this, the toggle rewrite
--- and the inverted dropdown labels together.
+-- ★ THE TRANSLATION LIVES HERE, NOT IN THE WIDGETS. "What is the global, for this profile"
+-- is a profile-layer question, and every consumer (the dot, the reset, the readout, the
+-- tab stars) wants the same answer, so it is translated once at the source -- PROVIDED each
+-- consumer routes through it. A new consumer of the global calls GetGlobalValue; reading
+-- globalSnapshot directly reintroduces the bug.
+-- ⚠ The maps are exact inverses, which is what makes a plain flip correct; a third
+-- orientation would need a real mapping.
+-- ⚠ The real cure is splitting the key per mode, which retires this, the toggle rewrite and
+-- the inverted dropdown labels together.
 local GROW_INVERSE = { HORIZONTAL = "VERTICAL", VERTICAL = "HORIZONTAL" }
 
 -- True when the profile and the global disagree about grouped-vs-flat, i.e. when the two
@@ -1754,30 +1739,27 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
         overlay[key] = DeepCopyValue(value)
     end
 
-    -- Table keys: a LIVE VIEW of the real parent, not a deep copy — the same
-    -- treatment the pinned block below already got, and for the same reason.
+    -- Table keys: a LIVE VIEW of the real parent, not a deep copy -- the same treatment the
+    -- pinned block below gets, and for the same reason.
     --
-    -- ☠ THE DEEP COPY FROZE THE SIBLINGS. An override is per INDEX
-    -- ("raidGroupVisible_1"), but the copy snapshotted the whole parent table at
-    -- activation. So with group 1 overridden, groups 2-8 were served from a stale
-    -- snapshot for as long as the layout stayed active: untick group 3 on the Options
-    -- page and the write reached the real table, but every read still came off the
-    -- copy, so the checkbox sprang back and the frames never changed until the layout
-    -- switched. Only the OVERRIDDEN indices should be frozen; the rest must read live.
+    -- ☠ A DEEP COPY WOULD FREEZE THE SIBLINGS. An override is per INDEX ("raidGroupVisible_1"),
+    -- but a copy snapshots the whole parent table at activation, so with group 1 overridden,
+    -- groups 2-8 would be served from a stale snapshot while the layout stayed active (untick
+    -- group 3 on the Options page and the checkbox would spring back). Only the OVERRIDDEN
+    -- indices are frozen; the rest read live.
     --
-    -- Overridden indices are rawset on the view, so they shadow __index — and
-    -- __newindex never fires for them, exactly as with pinned `enabled`: their value
-    -- stays view-local while HandleRuntimeWrite persists edits to the global.
-    -- Everything else falls through to the real table for reads AND writes.
+    -- Overridden indices are rawset on the view, so they shadow __index -- and __newindex never
+    -- fires for them, exactly as with pinned `enabled`: their value stays view-local while
+    -- HandleRuntimeWrite persists edits to the global. Everything else falls through to the
+    -- real table for reads AND writes.
     --
-    -- ⚠ `rawget(view, index) ~= nil` is now THE test for "is this index overridden",
-    -- used by both HandleRuntimeWrite and IsOverriddenByRuntime. Those two used to ask
-    -- `DF.raidOverrides[tableName] ~= nil`, which answered for the whole table and so
-    -- reported all eight groups overridden whenever any one of them was.
+    -- ⚠ `rawget(view, index) ~= nil` is THE test for "is this index overridden", used by both
+    -- HandleRuntimeWrite and IsOverriddenByRuntime; a whole-table test would report all eight
+    -- groups overridden whenever any one of them is.
     --
-    -- ⚠ pairs() on the view enumerates only the overridden indices. Safe here because
-    -- every consumer indexes numerically (BuildGroupFilter's `for i = 1, 8`, the header
-    -- and test-mode group loops) and export reads _realProfile, never the overlay.
+    -- ⚠ pairs() on the view enumerates only the overridden indices. Safe because every
+    -- consumer indexes numerically (BuildGroupFilter's `for i = 1, 8`, the header and
+    -- test-mode group loops) and export reads _realProfile, never the overlay.
     for tableName, indices in pairs(tableGroups) do
         local realParent = DF._realRaidDB[tableName]
         local view = {}

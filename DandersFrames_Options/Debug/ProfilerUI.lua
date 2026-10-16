@@ -566,10 +566,8 @@ function Profiler:CreateUI()
     hookBanner.body:SetPoint("TOPLEFT", hookBanner.icon, "TOPRIGHT", 8, -5)
     hookBanner.body:SetPoint("RIGHT", hookLabel, "LEFT", -10, 0)
 
-    -- ☠ The strip stays VISIBLE in both states. It used to Hide() itself once
-    -- the hook was on — and the checkbox lives inside it, so the only way to
-    -- turn tracking back off was the /df debug profiler hook command. A toggle
-    -- you can reach in one direction only is not a toggle.
+    -- ☠ The strip stays VISIBLE in both states: the checkbox lives inside it, and a
+    -- toggle you can reach in one direction only is not a toggle.
     function UpdateHookBanner()
         if self.onUpdateHookEnabled then
             hookBanner:SetTone("info")
@@ -635,13 +633,9 @@ function Profiler:CreateUI()
         dataRows[i] = row
     end
 
-    -- Column legend, stacked ABOVE the hook banner.
-    -- ☠ It used to be anchored to the frame's own bottom at y=8 — which is inside
-    -- the banner's rect. That was survivable only while the banner HID itself
-    -- whenever tracking was on; now that the banner is always visible (so the
-    -- toggle is reachable in both directions) the legend sat behind it
-    -- permanently, bleeding through as ghost text. Anchor to the banner instead
-    -- of to the frame, so it also tracks the banner if its text ever wraps.
+    -- Column legend, stacked ABOVE the hook banner and anchored to it rather than to the
+    -- frame: the banner is always visible, so a frame-anchored legend would sit behind it,
+    -- and this also tracks the banner if its text wraps.
     local infoLabel = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     infoLabel:SetPoint("BOTTOMLEFT", f.hookBanner, "TOPLEFT", 2, 6)
     infoLabel:SetTextColor(0.4, 0.4, 0.4)

@@ -172,25 +172,23 @@ end
 -- ============================================================
 -- RAID VISIBLE RECT
 -- ============================================================
--- ☠ THE FRAMES, NOT THE CONTAINER. This used to measure the raid container, and the
--- container is RESERVED for forty frames in every layout, by design: grouped mode sizes
--- it for all eight groups (SecureSort:CalculateRaidGroupContainerSize, "fixed, so
--- dragging works"), flat mode for forty units (FlatRaidFrames:UpdateContainerSize and the
--- test copy in LightweightPositionRaidTestFramesFlat). So the mover preview was the
--- forty-frame box whatever the raid or the test-mode count was -- at 20 test frames,
--- twice the frames -- and it collided with things the frames never touch. It had nothing
--- to do with the Groups Anchor either: the frames sit in one corner (or the middle) of
--- that box, the preview was the box. Reported by Aphoex against v5.4.0-alpha.12.
+-- ☠ THE FRAMES, NOT THE CONTAINER. The raid container is RESERVED for forty frames in
+-- every layout, by design: grouped mode sizes it for all eight groups
+-- (SecureSort:CalculateRaidGroupContainerSize, "fixed, so dragging works"), flat mode for
+-- forty units (FlatRaidFrames:UpdateContainerSize and the test copy in
+-- LightweightPositionRaidTestFramesFlat). Measuring it would make the mover preview the
+-- forty-frame box whatever the raid or test count, colliding with things the frames
+-- never touch.
 --
--- Now the union of the raid frames actually on screen: the test pool while the raid
--- preview is up (a mover session always has it up -- see the Unlocked callback), the
--- live raid unit frames otherwise. nil when none is visible: the lib's "not available"
--- signal (Registry:IsTargetAvailable), so nothing snaps to raid frames that are not up
--- and a child anchored to them holds instead of jumping.
+-- So: the union of the raid frames actually on screen -- the test pool while the raid
+-- preview is up (a mover session always has it up; see the Unlocked callback), the live
+-- raid unit frames otherwise. nil when none is visible: the lib's "not available" signal
+-- (Registry:IsTargetAvailable), so nothing snaps to raid frames that are not up and a
+-- child anchored to them holds instead of jumping.
 --
--- The record still places the CONTAINER, and the frames are offset inside it; that
--- offset is what raidVisibleOffset below hands the lib, so a solve against this rect
--- puts the frames -- not the container -- on the seat.
+-- The record still places the CONTAINER and the frames are offset inside it; that offset
+-- is what raidVisibleOffset below hands the lib, so a solve against this rect puts the
+-- frames -- not the container -- on the seat.
 
 -- Plain upvalues, not a table per call: these unions run on every layout sweep, which
 -- is every rendered frame while a settings slider is held.
@@ -492,21 +490,21 @@ end
 -- PINNED SETS
 -- ============================================================
 -- One element per EXISTING set per mode: party.pinned.<uid> / raid.pinned.<uid>.
--- MAX_SETS is 4 but only 2 are defaulted and RemoveSet COMPACTS indices, so a fixed
--- 1..4 list would show phantom sets -- the list is rebuilt on add/remove and on a
--- profile refresh (RefreshPinnedElements).
+-- MAX_SETS is 4 but only 2 are defaulted and RemoveSet COMPACTS indices, so a fixed 1..4
+-- list would show phantom sets -- the list is rebuilt on add/remove and on a profile
+-- refresh (RefreshPinnedElements).
 --
--- ☠ THE KEY IS THE UID, NOT THE INDEX (Phase D). Compaction used to silently re-point a
--- saved anchor.target = "DandersFrames:raid.pinned3" at whatever set slid into slot 3,
--- and moved the user's /mover config toggle with it. The uid does not move, so a child
--- anchored to a DELETED set now simply holds (an unresolvable target), which is the
--- correct answer. Everything else here stays INDEX-based -- PinnedFrames owns nothing
--- keyed by uid, so every accessor below is still called with (mode, i).
+-- ☠ THE KEY IS THE UID, NOT THE INDEX. Compaction would silently re-point a saved
+-- anchor.target = "DandersFrames:raid.pinned3" at whatever set slid into slot 3, and move
+-- the user's /mover config toggle with it. A uid does not move, so a child anchored to a
+-- DELETED set simply holds (an unresolvable target), which is the correct answer.
+-- Everything else here is INDEX-based -- PinnedFrames owns nothing keyed by uid, so every
+-- accessor below is called with (mode, i).
 --
 -- Containers are plain frames hosting a SecureGroupHeaderTemplate (or secure boss
 -- buttons) -> secure = true. `point` is the growth corner, derived -> pointLocked.
--- PinnedFrames.lua owns every accessor (the record, the on-screen container for a
--- mode, its rect, the commit funnel) so nothing here reaches into its internals.
+-- PinnedFrames.lua owns every accessor (the record, the on-screen container for a mode,
+-- its rect, the commit funnel) so nothing here reaches into its internals.
 
 local PINNED_KEY = { party = "party.pinned.", raid = "raid.pinned." }
 
@@ -595,9 +593,8 @@ local function pinnedDef(mode, i)
 end
 
 -- The keys this bridge currently has registered, per mode. ☠ TRACKED, NOT DERIVED: the
--- keys are uids now, so "every possible key for the mode" is no longer a 1..MAX_SETS
--- list -- after a remove there is nothing left in the DB that names the uid that just
--- went away, and an untracked unregister would leave its proxy on screen forever.
+-- keys are uids, and after a remove nothing in the DB names the uid that just went away,
+-- so an untracked unregister would leave its proxy on screen forever.
 Bridge.pinnedKeys = { party = {}, raid = {} }
 
 -- Unregister what we registered last time, then register one element per EXISTING set.

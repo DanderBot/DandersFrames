@@ -15,14 +15,11 @@ local tsort = table.sort
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
--- ☠ SPELL IDS ARE 32-BIT. This is the real ceiling, and it is not a style choice:
--- string.format("%d", n) throws "integer overflow attempting to store <n>" for anything
--- above it, so an id past this point cannot even be DISPLAYED, let alone looked up.
---
--- Both add-by-ID boxes used to cap on DIGIT COUNT (`#text > 10`) instead, and 2147483647
--- is itself ten digits -- so every id from 2147483648 to 9999999999 passed the guard and
--- then blew up when the list tried to render it. That is exactly why #1111111111 was
--- accepted quietly and #2222222222 errored (Aphoex, alpha 15). Cap on VALUE.
+-- ☠ SPELL IDS ARE 32-BIT. This is the real ceiling, not a style choice:
+-- string.format("%d", n) throws "integer overflow attempting to store <n>" above it, so
+-- an id past this point cannot even be DISPLAYED. Cap on VALUE, not digit count:
+-- 2147483647 is itself ten digits, so a `#text > 10` guard lets 2147483648..9999999999
+-- through to blow up when the list renders.
 R.MAX_SPELL_ID = 2147483647   -- 2^31 - 1
 
 -- Render a spell id for display. Never use "%d" on an id that came from STORAGE: the
@@ -61,9 +58,9 @@ function R:GetStore()
     return g[key]
 end
 
--- Read-only view of the account-wide store. Never creates, so drawing a frame no longer
--- materialises an auraFilters table for a user who has never made a custom filter.
--- Returns a shared EMPTY shape -- callers must not mutate it.
+-- Read-only view of the account-wide store. Never creates, so drawing a frame does not
+-- materialise an auraFilters table for a user who has never made a custom filter. Returns
+-- a shared EMPTY shape -- callers must not mutate it.
 local EMPTY_STORE = { nextFilterID = 1, customFilters = {} }
 function R:ReadStore()
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
@@ -171,25 +168,23 @@ function R:DuplicateFilter(srcRef, name)
 end
 
 -- ============================================================
--- ★★ A CURATED CUSTOM FILTER — a list WE seeded, not one the user built
+-- ★★ A CURATED CUSTOM FILTER -- a list WE seeded, not one the user built
 -- ============================================================
--- ☠ THE TWO KINDS OF CUSTOM FILTER BEHAVE DIFFERENTLY, AND THE DIFFERENCE IS WHOSE LIST IT
--- IS. One the user built by adding spells: membership IS the truth, so removing a spell with
--- the ✕ is exactly right -- they put it there. One WE seeded from a curated set (the Power
--- Infusion Helper's cooldown list): removing a spell is destructive and unrecoverable, and
--- there was no way back. Krathe, 2026-09-09: "it's a pre created list by us that should
--- toggle on off and be able to reset to default if someone ticks something off."
+-- ☠ THE TWO KINDS OF CUSTOM FILTER BEHAVE DIFFERENTLY, BY WHOSE LIST IT IS. In one the user
+-- built by adding spells, membership IS the truth, so removing a spell with the ✕ is right.
+-- In one WE seeded from a curated set (the Power Infusion Helper's cooldown list),
+-- removing a spell would be destructive and unrecoverable; the user needs on/off and a
+-- reset to default.
 --
 -- ⭐ SO A CURATED FILTER GETS WHAT A PRESET HAS: a per-spell ENABLED layer over a membership
--- nobody edits, plus a reset. Deliberately the same shape as R:IsSpellEnabled /
--- R:SetSpellEnabled / R:ResetPreset -- the two kinds of list now answer the same questions,
--- so the UI can offer the same controls.
+-- nobody edits, plus a reset -- deliberately the same shape as R:IsSpellEnabled /
+-- R:SetSpellEnabled / R:ResetPreset, so the UI can offer the same controls.
 --
--- ⚠ THE STATE LIVES ON THE FILTER, not in the preset overrides table. It is per-filter data
--- with the filter's own lifetime: it travels with a profile export and it dies with a
--- DeleteCustomFilter, neither of which would be true of a side table keyed by filter id.
--- ⚠ ABSENT MEANS ENABLED, so every existing custom filter behaves byte-for-byte as before
--- and only one that has actually been ticked off carries anything.
+-- ⚠ THE STATE LIVES ON THE FILTER, not in the preset overrides table: it travels with a
+-- profile export and dies with a DeleteCustomFilter, neither of which a side table keyed
+-- by filter id would do.
+-- ⚠ ABSENT MEANS ENABLED, so only a filter that has actually been ticked off carries
+-- anything.
 -- ⚠ `dfDefaults` IS THE MARK *AND* THE ANSWER. Its presence says "we seeded this"; its
 -- contents say what back-to-default means. One field, so the two cannot disagree.
 function R:IsCustomSpellEnabled(cfId, spellID)
@@ -212,14 +207,11 @@ function R:SetCustomSpellEnabled(cfId, spellID, enabled)
 end
 
 -- How many of a custom filter's spells are ON, and how many there are.
--- ⚠ ONE COUNTER, THREE CONSUMERS: the Filter Designer's left list, its right-hand header, and
--- R:ListFilters (which the Buff Bar's picker reads). They showed a plain total each, computed
--- three ways, and none of them moved when a curated list's spell was ticked off -- Krathe,
--- 2026-09-09: "the number does not change as I tick them on/off". A count that ignores the
+-- ⚠ ONE COUNTER, THREE CONSUMERS: the Filter Designer's left list, its right-hand header,
+-- and R:ListFilters (which the Buff Bar's picker reads). A count that ignores the on/off
 -- control next to it is worse than no count.
 -- ⚠ A HAND-BUILT FILTER ANSWERS enabled == total, because IsCustomSpellEnabled is true when
--- there is no disabled set -- so those rows keep the single number they have always shown and
--- no caller needs to branch on which kind it is.
+-- there is no disabled set, so no caller needs to branch on which kind it is.
 function R:CustomFilterCounts(cfId)
     local f = self:GetCustomFilter(cfId)
     if not f then return 0, 0 end
@@ -357,9 +349,8 @@ local sanitizeName
 -- ☠ TYPE-CHECK `def`. Its values come straight off an imported payload, and
 -- ValidatePayloadShape is deliberately shallow ("deep validation of every setting would
 -- reject payloads from a NEWER build") -- it checks that customAuraFilters is a table,
--- never what is IN it. A number or string value here used to throw "attempt to index a
--- number value" from the render-adjacent import path, after filterPresetOverrides had
--- already been replaced.
+-- never what is IN it. An unchecked number or string here would throw from the import
+-- path after filterPresetOverrides had already been replaced.
 local function defHasContent(def)
     if type(def) ~= "table" then return false end
     return next(def.spells or {}) ~= nil or next(def.rawIDs or {}) ~= nil
@@ -1179,35 +1170,28 @@ local failOpenLogged = setmetatable({}, { __mode = "k" })
 
 -- ★★★ A CUSTOM FILTER MAY NAME OTHER FILTERS (`f.includes`), AND THIS IS WHERE THAT IS READ.
 --
--- ☠ WHAT IT REPLACES: COPYING. The Power Infusion Helper's three amplifier ticks used to copy
--- 51 spell IDs out of the Trinkets, Potions and Racials lists INTO its own, so its list read
--- 91 and the same spells existed in two places. Krathe, 2026-09-10: "despite the fact those
--- additional filters link to our actual filters, ticking them on actually just adds those to
--- the PI helper filter, so they are now twice on? this is very confusing." He is right: each
--- row has a pencil that opens the real list, which promises a REFERENCE, and the tick made a
--- COPY. The pencil was a promise the tick did not keep.
+-- A REFERENCE, NOT A COPY. The Power Infusion Helper's amplifier ticks include the
+-- Trinkets, Potions and Racials lists; copying their IDs in would put the same spells in
+-- two places, and each row's pencil (which opens the real list) promises a reference.
 --
--- ⚠ HERE AND NOT IN THE AURA DESIGNER, and the reason is that a filter must mean ONE thing.
--- The AD resolves a filter ref through DF:ResolveADFilterRef, the layout groups resolve a
--- selection of their own, and the helper's SOUND registrations resolve a third way
--- (Engine.lua's pihResolvedMap) -- and the user can also pick that same list in the Buff Bar's
--- own picker. Folding in any one of those would make one list mean different things in
--- different places, which is a worse fault than the copy it replaces.
+-- ⚠ HERE AND NOT IN THE AURA DESIGNER, because a filter must mean ONE thing. The AD
+-- resolves a filter ref through DF:ResolveADFilterRef, the layout groups resolve a
+-- selection of their own, the helper's SOUND registrations resolve a third way
+-- (Engine.lua's pihResolvedMap), and the user can pick the same list in the Buff Bar's
+-- picker; folding in any one of those would make one list mean different things in
+-- different places.
 --
--- ⚠ INERT FOR EVERY FILTER WITHOUT `includes`, which today is every filter but ours: no
--- allocation, the caller's own table is handed straight back, and nothing else in this file
--- learns a new shape.
+-- ⚠ INERT FOR EVERY FILTER WITHOUT `includes`: no allocation, the caller's own table is
+-- handed straight back.
 --
 -- ☠ ONE LEVEL, DELIBERATELY, AND SO NO RECURSION GUARD IS NEEDED. An included filter's own
--- includes are NOT folded. Nothing writes a chain today (the helper includes two presets and
--- one flat list of ours), and "resolve until it stops changing" on the render path is a cycle
--- waiting to be created by hand-editing a profile. If a chain is ever wanted, it needs a seen
--- set and a depth cap, not the removal of this sentence.
--- ⚠ `selection.noIncludes` OPTS OUT, for a consumer that names its sources itself. The Power
--- Infusion Helper's Cooldown Icons group can be set to show, say, class cooldowns only while
--- the Triggers tab still fires on trinkets -- and it says so by listing the sources it wants.
--- Without this flag it could not: selecting our cooldown list would drag that list's own
--- includes in behind it, and "cooldowns only" would be unsayable.
+-- includes are NOT folded: "resolve until it stops changing" on the render path is a cycle
+-- waiting to be created by hand-editing a profile. A chain would need a seen set and a
+-- depth cap, not the removal of this sentence.
+-- ⚠ `selection.noIncludes` OPTS OUT, for a consumer that names its sources itself. The
+-- helper's Cooldown Icons group can show, say, class cooldowns only while the Triggers tab
+-- still fires on trinkets; without the flag, selecting the cooldown list would drag its
+-- own includes in behind it.
 local function foldIncludes(self, selection)
     if selection and selection.noIncludes then return selection end
     if not (selection and selection.customs) then return selection end

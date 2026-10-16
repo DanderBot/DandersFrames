@@ -153,11 +153,9 @@ UI.RowGap = 14
 -- recorded on labelPad, and the reason a stack of sliders needs real air even
 -- though a stack of checkboxes does not.
 UI.RowGapTight = 8
--- ☠ NO `toggle` ENTRY. One was here and could never match: only six values are ever
--- written to rowKind (checkbox, colorpicker, dropdown, editbox, header, slider), so
--- the lookups in this file and in each consumer's section layout had nothing to find
--- in GUI.RowHeight was removed for the same reason -- see the note there -- and this
--- one was missed, which is exactly how a pair like that drifts apart.
+-- ☠ NO `toggle` ENTRY, matching GUI.RowHeight: only six values are ever written to
+-- rowKind (checkbox, colorpicker, dropdown, editbox, header, slider), so a toggle entry
+-- could never match.
 UI.RowCompact = {
     checkbox    = true,
     colorpicker = true,
@@ -381,7 +379,7 @@ UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
 UI.PopoutFooter = {
     -- The strip. 18px button plus 7 above and below. Was 26 (4 each side): with
     -- the R8 ring the bottom arc ate the visual clearance and the buttons read
-    -- as touching the border (Danders, 2026-08-27) -- 7 keeps clear air under
+    -- as touching the border -- 7 keeps clear air under
     -- the row at every radius.
     height    = 32,
     -- The buttons in it. Smaller than the 22 a settings button stands at: this
@@ -505,7 +503,7 @@ UI.PopoutRow = {
     plate     = 44,
     gap       = 10,   -- was 6, then 8; the strip needs the rows further apart than
                       -- plain plates did, or its lighter band groups with the row
-                      -- below (2026-09-04, twice)
+                      -- below
     padX      = 10,
     labelGap  = 10,
     colGap    = 6,
@@ -600,8 +598,7 @@ UI.PopoutRow = {
     --          changes the width at which it splits.
     nameH        = 12,
     controlH     = 24,
-    linePad      = 10,   -- was 4; the controls sat hard on the strip ("maybe the
-                         -- controls are too close to the bottom bar", 2026-09-04)
+    linePad      = 10,   -- keeps the controls clear of the strip below them
     cellGap      = 10,     -- between the two cells on a line
     nameSize     = 9,
     minControl   = 98,
@@ -616,25 +613,16 @@ UI.PopoutRow = {
     -- nothing hoisted at all. 18 is the smallest strip that holds the cog with
     -- air around it.
     footer       = 18,
-    footerFill   = 0.85,   -- of C_ELEMENT: a RAISED band, lighter than the plate.
-                           -- It was 0.5 of C_BACKGROUND -- "a hole in the plate" --
-                           -- and in game a hole in a 0.12 plate over a 0.08 window
-                           -- is just more black; the strip vanished into the ground
-                           -- ("blends into the black background too much").
-    -- ☠ AND THE STRIP IS THE ONLY THING THAT LIGHTS ON A STRIP ROW. The plate
-    -- stopped lifting when the way in moved onto the band (the team asked for it:
-    -- "the popout should only be triggered from the bottom bar, same with the on
-    -- hover highlight"), so these two carry the whole of the row's hover feedback
-    -- and they have to be a step anybody can see.
+    footerFill   = 0.85,   -- of C_ELEMENT: a RAISED band, lighter than the plate; a
+                           -- darker band vanishes into a 0.12 plate over a 0.08 window
+    -- ☠ THE STRIP IS THE ONLY THING THAT LIGHTS ON A STRIP ROW: the popout opens from
+    -- the band, so these two carry the whole of the row's hover feedback and have to be
+    -- a step anybody can see.
     --
-    -- footerHover  1.0 of C_HOVER -- the PLATE's own idiom, one shape over: the
-    --          plate rested on C_ELEMENT and hovered to C_HOVER (restFill 0.55 ->
-    --          hoverFill 0.75), and the strip inherits the pair now that it is the
-    --          thing being hovered. Alpha alone had nowhere to go: the rest fill is
-    --          already 0.85 of a 0.18 grey over a 0.12 plate, so every drop of
-    --          headroom to 1.0 moves the band from 0.171 to 0.18 and reads as
-    --          nothing. The hue swap takes it to 0.22, which is the size of step
-    --          the plate used to make.
+    -- footerHover  1.0 of C_HOVER -- the plate's own rest/hover idiom (C_ELEMENT ->
+    --          C_HOVER). Alpha alone has nowhere to go: the rest fill is already 0.85
+    --          of a 0.18 grey over a 0.12 plate, so raising it to 1.0 moves the band
+    --          from 0.171 to 0.18 and reads as nothing; the hue swap takes it to 0.22.
     -- footerOnHover  0.30 of the accent against footerOn's 0.22 -- the same ~1.4x
     --          the plate's activeFill 0.14 -> activeHover 0.20 makes, and still a
     --          WASH: an open row has to brighten under the cursor without the strip
@@ -674,7 +662,7 @@ UI.PopoutRow = {
     -- at 48+10, against 612 at these numbers.
     --
     -- ⚠ 32, NOT THE 26 IT SHIPPED AT: at 26 the 12pt name sat too close to the
-    -- plate's top and bottom edges (2026-09-19). Every strip row with nothing
+    -- plate's top and bottom edges. Every strip row with nothing
     -- on its plate is drawn at this height too now (PopoutRow's applyShape), so
     -- it is a settings-page row height as well as a list row's.
     --
@@ -771,28 +759,18 @@ local function PixelsPerUnit(frame)
 end
 P.PixelsPerUnit = PixelsPerUnit
 
--- ⚠ THERE IS NO RUNTIME GEOMETRY CORRECTION, AND THERE SHOULD NOT BE ONE.
---
--- This GUI used to carry a registry that nudged every bordered box onto the
--- pixel grid after the layout had placed it. It is gone, and the reason is
--- structural rather than a bug in the implementation: Lua-side snapping can only
--- correct a frame at REST, and the symptom it was chasing -- a thin border going
--- soft -- is at its worst while the content is MOVING, during a scroll.
--- Correcting mid-scroll does not fix that, it adds a half-pixel jump on top of
--- it, which reads as flicker. It also cost us the button-row drift, where an
--- unordered sweep corrected chained anchors in a different order each pass.
---
--- Three things replaced it, and between them they are enough:
---   * the LAYOUT picks whole-pixel numbers in the first place (SnapLen below, at
---     the point an offset, width or height is chosen). No runtime cost, nothing
---     to drift, nothing to flicker -- it just picks better numbers.
---   * the CLIP SURFACES are snapped (page viewport insets, the content panel,
---     the nav chain). Those were real bugs: a box clipped by a fractional edge
---     loses part of its border no matter how well the box itself is placed.
+-- ⚠ THERE IS NO RUNTIME GEOMETRY CORRECTION, AND THERE SHOULD NOT BE ONE. Lua-side
+-- snapping can only correct a frame at REST, and a thin border goes soft worst while the
+-- content is MOVING (a scroll): correcting mid-scroll adds a half-pixel jump that reads
+-- as flicker, and an unordered sweep corrects chained anchors in a different order each
+-- pass. Three things cover it instead:
+--   * the LAYOUT picks whole-pixel numbers in the first place (SnapLen below, at the
+--     point an offset, width or height is chosen) -- no runtime cost, nothing to drift;
+--   * the CLIP SURFACES are snapped (page viewport insets, the content panel, the nav
+--     chain): a box clipped by a fractional edge loses part of its border however well
+--     the box itself is placed;
 --   * the BORDER is drawn as two device pixels of our own texture rather than a
---     one-unit backdrop edge, so it cannot land badly in the first place. See
---     PIXEL BORDER further down -- that is the part that actually solved it.
-
+--     one-unit backdrop edge, so it cannot land badly (see PIXEL BORDER below).
 -- Round a LENGTH or OFFSET (in UI units) to a whole number of device pixels at
 -- the scale `frame` is drawn at. This is the layout-side half of the pixel-grid
 -- work, and the half that was missing.

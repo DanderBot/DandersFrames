@@ -191,33 +191,23 @@ function DF:DesignerFrameMode(frame)
 end
 
 -- ☠☠ THE AURA DESIGNER'S ENABLE IS A PROPERTY OF THE MODE, NOT OF THE TEMPLATE.
--- It used to live on the preset table (`cfg.enabled`), and GetModeAuraDesigner hands that
--- table back SHARED -- so two modes pointing at one template were reading and writing one
--- boolean. Enabling the designer on the Party tab enabled it on Raid. The field report
--- describes the same fault from the other side: "Aura designer enables itself by changing
--- between Party & Raid tabs" (Neosaro, v5.1.3) -- the tab was not enabling anything, it was
--- showing the value the other tab had already written. "Even if they are using the same
--- template the enable should not be connected between modes" (Krathe, 2026-08-22) is the
--- rule, and it is the right one: a template is a LOOK, and which modes use it is a separate
--- question from whether a mode is using it at all.
+-- GetModeAuraDesigner hands the preset table back SHARED, so an enable stored on the
+-- preset would make two modes pointing at one template read and write one boolean
+-- (enabling the designer on Party enables it on Raid). A template is a LOOK; whether a
+-- mode is using it is a separate question.
 --
 -- ★ LAZY, PRESENCE-GATED, AND DELIBERATELY NOT IN THE DEFAULTS TABLE. Seeding
--- `auraDesignerEnabled` in Config.lua would fill the key on every profile before this could
--- read it, and a presence-gated migration that runs after the defaults backfill never fires
--- -- this codebase has been caught by exactly that three times. Absent from defaults means
--- nil here means "not migrated yet", so the first read adopts whatever the mode's CURRENT
--- template says. Nobody's setup changes on upgrade: each mode keeps rendering exactly what
--- it rendered before, including a value it only held because the other mode set it. The two
--- simply stop being the same storage.
--- ☠☠ AND THE `not DF.db` GUARD IS PART OF THAT — absence from defaults only works if
--- nothing WRITES the key into the defaults table by the back door. DF:GetDB returns
--- DF.PartyDefaults / DF.RaidDefaults when DF.db is nil (any call before ADDON_LOADED
--- adopts the SV), and the seed below writes THROUGH that handle: one pre-profile read
--- would stamp auraDesignerEnabled into the defaults table itself, the backfill would
--- copy it into every profile, and this nil-gate could never fire again — the mode
--- enable frozen at whatever the first early caller happened to compute. Same family as
--- the migration-after-backfill trap above, one level up: there the defaults table
--- poisons profiles, here a getter poisons the defaults table.
+-- `auraDesignerEnabled` in Config.lua would fill the key on every profile before this
+-- could read it, and a presence-gated migration that runs after the defaults backfill
+-- never fires. Absent from defaults means nil here means "not migrated yet", so the
+-- first read adopts whatever the mode's CURRENT template says: each mode keeps rendering
+-- exactly what it rendered before, and the two simply stop sharing storage.
+-- ☠☠ AND THE `not DF.db` GUARD IS PART OF THAT. DF:GetDB returns DF.PartyDefaults /
+-- DF.RaidDefaults when DF.db is nil (any call before ADDON_LOADED adopts the SV), and the
+-- seed below writes THROUGH that handle: one pre-profile read would stamp
+-- auraDesignerEnabled into the defaults table itself, the backfill would copy it into
+-- every profile, and this nil-gate could never fire again. Same family as the
+-- migration-after-backfill trap, one level up: a getter poisoning the defaults table.
 function DF:IsAuraDesignerEnabledForMode(mode)
     if not DF.db then return false end
     local modeDB = DF:GetDB(mode)
@@ -396,21 +386,15 @@ local function MigrateDesigner(profile, libKey, refKey, inlineKey, factory)
             local modeDb = profile[mode]
             if modeDb then
                 if modeDb[inlineKey] then modeDb[inlineKey] = nil end
-                -- ☠☠ NEVER POINT BOTH MODES AT ONE PRESET TABLE. This used to fall back to
-                -- DF.DEFAULT_PRESET whenever the mode's own preset was missing from the
-                -- library — and it runs for party AND raid, so when both were missing it
-                -- WELDED the two modes to a single config, permanently, in saved data.
-                -- After that they are not "linked", they ARE one table: enable the Aura
-                -- Designer on Party and Raid reads back enabled, with nothing written on the
-                -- tab switch and nothing to find by grepping for a write. That is the
-                -- reported "Aura Designer enables itself when you change between Party and
-                -- Raid tabs" (Aphoex 2) — no write exists because none was needed.
-                -- ⇒ [[feedback_migration_before_defaults_backfill]]: a UI-time fallback that
-                -- WRITES saved data is a second migration, and this one wrote a data loss.
-                -- Materialise the mode's own preset from Default instead, so the two modes
-                -- stay independent. Also repairs a ref that NAMES a preset the library no
-                -- longer holds, which reaches the same shared-table state through
-                -- GetModeBaseAuraDesigner's `or lib[DF.DEFAULT_PRESET]`.
+                -- ☠☠ NEVER POINT BOTH MODES AT ONE PRESET TABLE. This runs for party AND raid, so falling
+                -- back to DF.DEFAULT_PRESET when the mode's own preset is missing would WELD the two modes
+                -- to a single config, permanently, in saved data -- after which enabling the Aura
+                -- Designer on Party reads back enabled on Raid with no write to find. A UI-time fallback
+                -- that WRITES saved data is a second migration ([[feedback_migration_before_defaults_backfill]]).
+                -- Materialise the mode's own preset from Default instead, so the two modes stay
+                -- independent. Also repairs a ref that NAMES a preset the library no longer holds, which
+                -- reaches the same shared-table state through GetModeBaseAuraDesigner's
+                -- `or lib[DF.DEFAULT_PRESET]`.
                 local presetName = DefaultPresetNameForMode(mode)
                 local ref = modeDb[refKey]
                 if not ref or not lib[ref] then
@@ -912,12 +896,11 @@ function DF:SetModeDesignerPreset(kind, mode, name)
     end
 end
 
--- Everything OTHER than `excludeMode` that points at `name` right now, as an
--- array of display labels (the other mode, pinned set names, auto-layout names).
--- Presentation-only: a preset with users is a SHARED preset, and editing it
--- changes all of them — which nothing in the UI used to say. Reads the refs
--- themselves rather than the party/raid sync flag, so it is equally right when
--- someone shares a preset by hand instead of by syncing.
+-- Everything OTHER than `excludeMode` that points at `name` right now, as an array of
+-- display labels (the other mode, pinned set names, auto-layout names). Presentation
+-- only: a preset with users is a SHARED preset, and editing it changes all of them, which
+-- the UI says. Reads the refs themselves rather than the party/raid sync flag, so it is
+-- equally right when someone shares a preset by hand instead of by syncing.
 function DF:ListDesignerPresetUsers(kind, name, excludeMode)
     local refKey = DESIGNER_KINDS[kind] and DESIGNER_KINDS[kind].ref
     if not refKey or not name then return {} end
@@ -931,7 +914,7 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
     -- ☠ A USER-CHOSEN NAME MUST CARRY ITS KIND. Party and Raid name themselves, but a
     -- pinned set or an auto layout is called whatever the player called it -- so this
     -- list read "Also used by: test", which says nothing about where "test" lives or
-    -- which of the three pages to go looking on (Krathe, 2026-08-10).
+    -- which of the three pages to go looking on.
     --
     -- Only the NAMED branches get the suffix. The unnamed fallbacks below already say
     -- their kind ("Pinned Frames 2", "Auto Layouts"), and suffixing those would read

@@ -75,21 +75,19 @@ function GUI:CreateLabel(parent, text, width, color)
             lbl:SetText(t)
         end
     end
-    -- The layout engine resizes this frame to the column's available width (see the
-    -- anchor note above), and GetStringHeight can return a stale single-line value until
-    -- the FontString has rendered at that final width — so converge ONCE on the next
-    -- frame, after LayoutChildren has run. Re-flow only when this label OWNS its slot:
-    -- inside a SettingsGroup (nothing else tracks a stored height) and with no call-site
-    -- number (_slotHeightExplicit, stamped by AddWidget) to override. Deliberately NOT an
-    -- OnSizeChanged binding — that cascade is the Aura Designer indicator-card lockup
-    -- documented on CreateInfoBanner; the cost is that a label added with no height does
-    -- not re-measure if its width changes again later.
-    -- ☠ Do NOT try to Reflow()+Remeasure() synchronously here to get a correct height at
-    -- creation. Tried 2026-08-05 and it does not work: nothing has been drawn yet at card
-    -- build time, so GetStringHeight still returns 0 whatever the wrap state. Worse, if it
-    -- ever DID succeed it would make the deferred Remeasure below return false (no change),
-    -- which is what arms the RelayoutHost that tells the host its slot moved — so a partial
-    -- success would silently disable the correction. The converge is the mechanism; let it.
+    -- The layout engine resizes this frame to the column's available width (see the anchor
+    -- note above), and GetStringHeight can return a stale single-line value until the
+    -- FontString has rendered at that final width -- so converge ONCE on the next frame,
+    -- after LayoutChildren has run. Re-flow only when this label OWNS its slot: inside a
+    -- SettingsGroup (nothing else tracks a stored height) and with no call-site number
+    -- (_slotHeightExplicit, stamped by AddWidget) to override. Deliberately NOT an
+    -- OnSizeChanged binding -- that cascade is the Aura Designer indicator-card lockup
+    -- documented on CreateInfoBanner; the cost is that a label added with no height does not
+    -- re-measure if its width changes again later.
+    -- ☠ Do NOT Reflow()+Remeasure() synchronously here for a correct height at creation:
+    -- nothing has been drawn at card build time, so GetStringHeight returns 0 whatever the
+    -- wrap state, and a partial success would make the deferred Remeasure report no change,
+    -- which is what arms the RelayoutHost that tells the host its slot moved.
     local function Measure()
         Remeasure()
         if C_Timer and C_Timer.After then

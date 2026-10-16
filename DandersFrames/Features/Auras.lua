@@ -122,13 +122,9 @@ DF.DispelTypeMap = DISPEL_TYPES
 
 -- ============================================================
 -- ☠ THE ENGINE'S DISPEL FLAGS MISS TOTEM-BASED REMOVAL.
--- RAID_PLAYER_DISPELLABLE (and the older RAID flag) are computed from the
--- player's direct dispel SPELLS, and a Shaman's poison answer is Poison
--- Cleansing Totem -- not a targeted dispel, so the engine never counts it.
--- Field report: a Shaman's dispel overlay stayed dark on poisons (Krathe,
--- 2026-08-22). VuhDo and ElvUI both hand-count the totem for exactly this
--- reason (VuhDoDebuffConst SHAMAN Poison = {383013}; LibDispel CheckSpell
--- 383013); Grid2 and Ellesmere trust the flag and share the gap.
+-- RAID_PLAYER_DISPELLABLE (and the RAID flag) are computed from the player's direct
+-- dispel SPELLS, and a Shaman's poison answer is Poison Cleansing Totem -- not a
+-- targeted dispel, so the engine never counts it.
 --
 -- This helper is the ONE place that knowledge lives. Returns the dispel-type
 -- map the engine flag misses for the current character, or nil when there is
@@ -138,71 +134,40 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- below for why it is RAID and not the raid-scoped RAID_PLAYER_DISPELLABLE)
 -- so the repair never double-renders what the flag already catches.
 --
--- ★ THIS WORKS IN COMBAT, and the reason is worth stating because I twice
--- claimed the opposite. ADDON Lua genuinely cannot read aura data in combat
--- (~450k spells secret against a ~60 entry NeverSecret whitelist -- Krathe,
--- 2026-08-22, and he is right about that). But candidateFilters are NOT
--- evaluated by us: the container hands them to
+-- ★ THIS WORKS IN COMBAT. ADDON Lua cannot read aura data in combat, but
+-- candidateFilters are NOT evaluated by us: the container hands them to
 -- AuraContainerUtil.DoesAuraPassCandidateFilters, and Blizzard_AuraContainer
 -- declares `## UseSecureEnvironment: 1`, so that matcher is TRUSTED code
 -- reading REAL values. Proof by something already shipping: maxDuration is
 -- compared in the very same function, and Hide Long Debuffs works in combat.
 -- ☠ "Secret to addons" and "secret to Blizzard's own filter" are different
--- questions -- do not collapse them again.
+-- questions -- do not collapse them.
 --
 -- ⚠ Real limits, which are narrower: includeSpellIDs / excludeSpellIDs (NOT
 -- the dispel-type maps) are the pair gated by CanApplyIdentityCandidateFilters,
--- so a spell-ID filter is refused on a harmful aura on an assistable unit --
--- see [[identity_gate_reference]]. Type maps are outside that gate.
+-- so a spell-ID filter is refused on a harmful aura on an assistable unit.
+-- Type maps are outside that gate.
 --
--- The peers hold the same knowledge but wire it into their own LEGACY Lua
--- scan paths (VuhDo VUHDO_PLAYER_DISPEL_ABILITIES; ElvUI UF:AuraDispellable),
--- which read aura data in ADDON code and therefore really do go dark in
--- combat. VuhDo's container path narrows RAID_PLAYER_DISPELLABLE by
--- includeDispelTypes -- an intersection, which cannot add back a type the
--- token already dropped.
---
--- ⚠ 2026-08-26, AMENDED: this used to end "so DF's ADDITIVE record is the only
--- shape in the surveyed set that repairs the gap". That was true of the set
--- surveyed at the time and is now INCOMPLETE. EllesmereUI ships a third shape
--- that also works -- SUBSTITUTIVE: it keeps a slot PER DISPEL TYPE, so for the
--- Poison slot it simply drops the token and lets that slot's own
--- includeDispelTypes do the narrowing (EUI_RaidFrames_AuraContainers.lua,
--- DispelSlotFilter). Neither shape is better; each is the only one its own
--- architecture allows. Ours collapsed the overlay to ONE slot, so there is no
--- per-type slot left to relax and the repair has to add. Do not re-derive the
--- "only shape" claim -- it is a statement about DF's topology, not about the
--- API.
--- ★ Where they ARE ahead: they also repair BLEED via the Dwarf racial (see
--- ENGINE_GAP_BLEED below), which we copied. Where we are ahead: they probe with
--- IsPlayerSpell, which on 12.1 lives in Blizzard_DeprecatedSpellBook behind
--- `if not GetCVarBool("loadDeprecationFallbacks") then return end` -- verified in
--- the local dump -- so their repair silently no-ops for anyone with that CVar
--- off. That is the exact trap the note below records us falling into first.
+-- The repair is ADDITIVE because the overlay is ONE slot: there is no per-type slot
+-- to relax, so the gap has to be added back as its own record (a per-type-slot design
+-- could instead drop the token for that type's slot). An intersection with the token
+-- (narrowing RAID_PLAYER_DISPELLABLE by includeDispelTypes) cannot add back a type the
+-- token already dropped. BLEED via the Dwarf racial is repaired the same way (see
+-- ENGINE_GAP_BLEED below).
 --
 -- ⚠ Re-checked on every call, never cached: the totem is a TALENT, so a cached answer
 -- would survive exactly the event that changes it.
 --
--- ☠ THE RE-DRIVE ROUTE IS NOT WHAT THIS COMMENT USED TO SAY. It claimed talent swaps
--- reach the plans "through the coalesced PLAYER_TALENT_UPDATE -> UpdateAllFrames path".
--- UpdateAllFrames does NOT bump auraLayoutVersion, and the drives are version-gated, so
--- that route on its own leaves the overlay on its fast path and never re-plans. What
--- actually carried it was the AD engine: the same handler calls
--- Engine:ForceRefreshAllFrames, which ends in DF:InvalidateAuraLayout. A dispel feature
--- depending on the Aura Designer's refresh to notice a talent is the kind of link nobody
--- would look for when it breaks, so the talent handler now bumps the version itself
--- (Core.lua) and this no longer rides a sibling feature.
+-- ☠ THE RE-DRIVE ROUTE: UpdateAllFrames does NOT bump auraLayoutVersion, and the drives
+-- are version-gated, so the talent handler bumps the version itself (Core.lua) -- a talent
+-- swap must not depend on a sibling feature's refresh to re-plan the overlay.
 --
--- ☠☠ NOT IsPlayerSpell. The first cut used it, and on a 12.1 client that
--- function EXISTS ONLY IF A CVAR IS ON: it lives in Blizzard_DeprecatedSpellBook
--- behind `if not GetCVarBool("loadDeprecationFallbacks") then return end`, is
--- absent from the 12.1 API documentation entirely, and is slated for removal
--- next expansion. With the CVar off it is nil, the `IsPlayerSpell and ...`
--- guard short-circuits, and the whole repair becomes a SILENT NO-OP with no
--- error and no log -- the silent-capability-skip antipattern, shipped by me.
--- C_SpellBook.IsSpellInSpellBook is the documented call and the one BOTH peers
--- use on current builds (ElvUI LibDispel CheckSpell, VuhDo VUHDO_isSpellKnown),
--- with includeOverrides = true so a talent-granted override still counts.
+-- ☠☠ NOT IsPlayerSpell. On 12.1 that function EXISTS ONLY IF A CVAR IS ON: it lives in
+-- Blizzard_DeprecatedSpellBook behind `if not GetCVarBool("loadDeprecationFallbacks")
+-- then return end` and is absent from the 12.1 API documentation. With the CVar off it is
+-- nil, an `IsPlayerSpell and ...` guard short-circuits, and the whole repair becomes a
+-- SILENT NO-OP. C_SpellBook.IsSpellInSpellBook is the documented call, with
+-- includeOverrides = true so a talent-granted override still counts.
 --
 -- ★ THREE OUTCOMES, NOT TWO. nil means "cannot tell" and is logged once --
 -- distinct from a confident false. A capability probe that cannot run must say
@@ -213,12 +178,9 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- ☠ THE ENGINE'S FLAG IS CLASS/SPEC SHAPED AND TALENTS ARE NOT PART OF IT — in BOTH
 -- directions. It misses capability a talent GRANTS (a shaman's Poison Cleansing Totem) and
 -- asserts capability a talent GATES (a priest's disease cure, which needs Improved Purify).
--- Field-reported both ways.
 --
 -- ★ THIS IS A SPELLBOOK QUESTION, NOT AN AURA QUESTION, which is why it is answerable at
--- all under the 12.1 lockdown. Aura DATA is sealed; the player's own spellbook never was. I
--- told Krathe more than once that talent-aware dispels were impossible, and that was the
--- two conflated — worth remembering before repeating it.
+-- all under the 12.1 lockdown. Aura DATA is sealed; the player's own spellbook never was.
 --
 -- ⚠ EVERY ID IN THIS TABLE NEEDS FIELD VALIDATION, class by class. A wrong ID silently
 -- mis-renders dispels for a whole class, and offline there is no way to confirm one. That
@@ -227,27 +189,15 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- you rather than as a quietly wrong overlay. Entries marked UNVERIFIED have not been
 -- checked on a live character yet.
 --
--- ⚠ NOT COPIED. Peer libraries solve the same problem (ElvUI's LibDispel, VuhDo's
--- VUHDO_PLAYER_DISPEL_ABILITIES) and the METHOD is theirs — probe the spellbook per class,
--- treat talent entries separately. The table below is ours, retail-only, and deliberately
--- omits the classic/vanilla branches those libraries carry.
---
 -- ☠ `talent = true` selects the probe. C_SpellBook.IsSpellKnown answers "does the player
 -- KNOW this", which is the only correct question for a talent; IsSpellInSpellBook answers
 -- "should this appear in the spellbook" and returns TRUE FOR UNKNOWN TALENT ENTRIES by
--- Blizzard's own documentation. We shipped the wrong one once already. ⚠ ElvUI's LibDispel
--- makes exactly this split — IsSpellKnown for Improved Purify, the spellbook probe for the
--- shaman totem — which is why their shaman case has the bug we just fixed and their priest
--- case does not.
+-- Blizzard's own documentation.
 --
--- ★ THE IDS AND THE GATING ARE CROSS-CHECKED AGAINST THE ADDONS THAT ALREADY DO THIS ON
--- RETAIL — ElvUI's LibDispel and VuhDo — rather than authored from memory. That check found
--- four errors in my first pass: Monk had the talent's types backwards, Mage and Paladin were
--- each missing a spell, and HUNTER was absent altogether. Spell IDs are game data, not
--- authored code; reading a peer to confirm one is research, and it is the difference between
--- a table that is right and one that merely looks right.
--- ⚠ Retail only. The peers carry classic/TBC branches (Abolish Poison, Devour Magic ranks,
--- Disease Cleansing Totem) that have no place here.
+-- ★ Spell IDs are game data, not authored code: cross-check each one against a source
+-- that already uses it on retail rather than writing it from memory.
+-- ⚠ Retail only: no classic/TBC entries (Abolish Poison, Devour Magic ranks, Disease
+-- Cleansing Totem).
 local DISPEL_SPELLS = {
     DRUID = {
         { id = 88423,  types = { Magic = true, Poison = true, Curse = true } },  -- Nature's Cure (Resto)
@@ -266,65 +216,54 @@ local DISPEL_SPELLS = {
         { id = 459517, types = { Poison = true, Disease = true }, talent = true },
     },
     MAGE = {
-        -- ✅ 2026-08-26: verified BOTH ways on one character — unspecced it reads unknown,
-        -- with default talents it reads known. ★ So a talent-gated spell does NOT always
-        -- need `talent = true`: that flag exists only for grants the spellbook probe
-        -- OVER-reports, which is the override-linked kind (Poison Cleansing Totem). An
-        -- ordinary talent that simply is or is not in the book tracks correctly as a base
-        -- entry. Do not flag every talent-gated spell on principle — flag the ones that
-        -- lie.
+        -- ✅ Verified both ways on one character: unspecced it reads unknown, with default
+        -- talents it reads known. ★ So a talent-gated spell does NOT always need `talent = true`:
+        -- that flag exists only for grants the spellbook probe OVER-reports, which is the
+        -- override-linked kind (Poison Cleansing Totem). An ordinary talent that simply is or is
+        -- not in the book tracks correctly as a base entry. Flag only the ones that lie.
         { id = 475,    types = { Curse = true } },                               -- Remove Curse
         -- ⚠ Grants Magic AS WELL as Curse — the half a from-memory entry drops.
         -- ☠ 412113 WAS HERE AND DOES NOT RESOLVE ON RETAIL — "(name unavailable)" in the
-        -- first mage dump, the same failure as the paladin's 1152. Taken from LibDispel,
-        -- where it is probed with no era guard and would have contributed a Magic claim
-        -- mages do not have. Second import from the same source to fail the name check,
-        -- which is the argument for the name column existing at all.
+        -- first mage dump; it would have contributed a Magic claim mages do not have. Verify
+        -- each ID RESOLVES on retail -- that is what the name column exists for.
     },
     MONK = {
         { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)
-        -- ✅ 2026-08-26, confirmed from the talent tooltip itself: SpellID 218164,
-        -- "Removes all Poison and Disease effects", Rank 0/1 — a talent NOT in the default
-        -- loadout. So a monk who has not taken it genuinely cannot dispel, and reading
-        -- unknown here is the right answer rather than a missing capability.
-        -- ★ Another non-override talent that tracks correctly as a BASE entry, like the
-        -- mage's Remove Curse — the spellbook probe returned false untalented. See the note
-        -- on the talent flag above.
+        -- ✅ Confirmed from the talent tooltip itself: SpellID 218164, "Removes all Poison and
+        -- Disease effects", a talent NOT in the default loadout. So a monk who has not taken it
+        -- genuinely cannot dispel, and reading unknown here is the right answer.
+        -- ★ Another non-override talent that tracks correctly as a BASE entry, like the mage's
+        -- Remove Curse — see the note on the talent flag above.
         { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (Brewmaster/Windwalker)
         -- ⚠ Poison/Disease, NOT Magic. My first pass had this one exactly backwards.
         { id = 388874, types = { Poison = true, Disease = true }, talent = true },-- Improved Detox
     },
     PALADIN = {
         { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)
-        -- ☠ 1152 "Purify" WAS HERE AND IS NOT A RETAIL SPELL. LibDispel probes it without a
-        -- retail guard, so it came across when I said the classic branches were dropped —
-        -- they were, except the ones the peer does not label. It showed as
-        -- "(name unavailable)" in the very first paladin dump, which is precisely the check
-        -- the name column exists for. ⚠ Cross-checking a peer is not the same as inheriting
-        -- its era assumptions: verify each ID RESOLVES, not just that someone else uses it.
+        -- ☠ 1152 "Purify" IS NOT A RETAIL SPELL ("(name unavailable)" in a paladin dump) and
+        -- does not belong here. ⚠ Verify each ID RESOLVES, not just that someone else uses it.
         { id = 213644, types = { Poison = true, Disease = true } },              -- Cleanse Toxins
     },
     PRIEST = {
         { id = 527,    types = { Magic = true } },                               -- Purify (Disc/Holy)
         { id = 32375,  types = { Magic = true } },                               -- Mass Dispel
         { id = 213634, types = { Disease = true } },                             -- Purify Disease (Shadow)
-        -- ★ THE REPORTED CASE. ✅ Confirmed both directions in game, 2026-08-26.
+        -- ✅ Confirmed both directions in game.
         { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify
     },
     SHAMAN = {
         { id = 77130,  types = { Magic = true, Curse = true } },                 -- Purify Spirit (Resto)
         { id = 51886,  types = { Curse = true } },                               -- Cleanse Spirit
-        -- ✅ Confirmed both directions in game, 2026-08-26 (Krathe).
+        -- ✅ Confirmed both directions in game.
         { id = 383013, types = { Poison = true }, talent = true },                -- Poison Cleansing Totem
     },
     WARLOCK = {
         -- ☠ A PET SPELL, and the only one here that is. Singe Magic belongs to the Imp, so
-        -- the probe must ask the PET spellbook rather than the player's. Both peers also
-        -- re-check it on UNIT_PET, which is why that event joins the capability watcher.
-        -- ✅ 2026-08-26, verified BOTH ways: unknown with no Imp out, known with one
-        -- summoned. That is the only live proof the PET bank resolves at all — nothing else
-        -- in this table takes that branch, so a broken Enum.SpellBookSpellBank.Pet would
-        -- have shown up as "?" here and nowhere else.
+        -- the probe must ask the PET spellbook rather than the player's, and UNIT_PET joins the
+        -- capability watcher.
+        -- ✅ Verified both ways: unknown with no Imp out, known with one summoned. That is the
+        -- only live proof the PET bank resolves at all -- a broken Enum.SpellBookSpellBank.Pet
+        -- would show up as "?" here and nowhere else.
         { id = 89808,  types = { Magic = true }, pet = true },                   -- Singe Magic (Imp)
     },
 }
@@ -559,8 +498,7 @@ local ENGINE_GAP_POISON = { Poison = true }
 -- anyone else's frame -- hence the selfOnly argument rather than a class-wide answer.
 -- Stoneform also clears poison/disease/curse, but any class that dispels those already
 -- passes the token, and treating a two-minute racial as a dispel would overlay most of
--- what a dwarf ever catches. Both scoping decisions match EllesmereUI's, which reached
--- them first; the reasoning is theirs and it holds for us.
+-- what a dwarf ever catches.
 local ENGINE_GAP_BLEED  = { Bleed = true }
 local ENGINE_GAP_BOTH   = { Poison = true, Bleed = true }   -- a dwarf shaman is a real thing
 local POISON_CLEANSING_TOTEM = 383013
@@ -578,7 +516,7 @@ local function KnowsPoisonCleansingTotem()
         -- Poison Cleansing Totem is precisely a talent-linked entry, so the spellbook probe
         -- answered true for every shaman alive and the poison gap slot was added whether or
         -- not the totem was talented. Field-reported: "it's still showing when they don't
-        -- have the totem talent. It's a half fix." (Krathe, 2026-08-26.)
+        -- have the totem talent. It's a half fix."
         -- ⚠ A capability probe must ask about the CAPABILITY. "Would this appear in the
         -- spellbook UI" is a rendering question and was never the right one.
         if sb.IsSpellKnown then
@@ -722,8 +660,7 @@ end
 -- trigger this week: the state has an edge, and only one side of it had a listener.
 --
 -- ⚠ Both events, for the two different lags — the trait config landing, and the spellbook
--- grant that follows it. EllesmereUI reached the same pair from the same bug and says so
--- in its own note; the reasoning is theirs and it holds here.
+-- grant that follows it.
 --
 -- ★ FLIP-GATED. SPELLS_CHANGED fires constantly (every login, every book open, every
 -- temporary grant), so the version is bumped only when the CAPABILITY actually changes.
@@ -1291,16 +1228,12 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
                 -- Mirrors the category-mode split: the token when the build has
                 -- it, else the dispel-type map (same semantics, no token).
                 --
-                -- ☠ MODE-MATCHED TOKEN (2026-08-30). This used to negate
-                -- DISPELLABLE unconditionally, which is only correct when the
-                -- claiming group actually shows the whole superset. A PLAYER-mode
-                -- group ("only dispellable by you") shows a strict SUBSET of it, so
-                -- negating the superset deleted every dispellable-by-SOMEONE-ELSE
-                -- debuff from the row while no group displayed it — the aura showed
-                -- NOWHERE. Show All is the default mode, so that hole was open on
-                -- ordinary setups. claimed.dispellableAll is set only when a
-                -- claiming group runs ALL/ANY; otherwise subtract the by-me token,
-                -- which is exactly the set the group renders.
+                -- ☠ MODE-MATCHED TOKEN. Negating DISPELLABLE is only correct when the claiming group
+                -- shows the whole superset. A PLAYER-mode group ("only dispellable by you") shows a
+                -- strict SUBSET of it, so negating the superset would delete every
+                -- dispellable-by-SOMEONE-ELSE debuff from the row while no group displays it.
+                -- claimed.dispellableAll is set only when a claiming group runs ALL/ANY; otherwise
+                -- subtract the by-me token, which is exactly the set the group renders.
                 local claimTok = claimed.dispellableAll and AuraFilters.Dispellable
                     or (AuraFilters.Raid or "RAID")
                 if claimTok then
@@ -1369,32 +1302,25 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
     end
     local dispelOn = db.debuffFilterDispellable
     local dispelMode = db.directDebuffDispellableMode
-    -- ★ BOTH non-player modes ride the DISPELLABLE token, not just ANY. ALL mode
-    -- used to build the Lua map form (includeDispelTypes = DISPEL_TYPES); the token
-    -- says the same thing in Blizzard's own words -- "Include only auras that are
-    -- dispellable, regardless of whether the player's raid can dispel them"
-    -- (Blizzard_FrameXMLUtil/AuraUtil.lua) -- in one filter component, with no
-    -- five-entry table to keep in step with Blizzard's own list. That is the whole
-    -- justification: it is simpler and canonical.
+    -- ★ BOTH non-player modes ride the DISPELLABLE token. The token says the same thing as
+    -- the Lua map (includeDispelTypes = DISPEL_TYPES) in Blizzard's own words -- "Include only
+    -- auras that are dispellable, regardless of whether the player's raid can dispel them"
+    -- (Blizzard_FrameXMLUtil/AuraUtil.lua) -- in one filter component, with no five-entry
+    -- table to keep in step with Blizzard's own list. Simpler and canonical.
     --
-    -- ☠☠ IT IS **NOT** A SECRECY FIX, whatever the commit that introduced it said.
-    -- I claimed the map was secrecy-blind (dispelName secret => raw index never
-    -- matches) and that this is why "All Dispellable" showed nothing. That is
-    -- FALSE: the matcher lives in Blizzard_AuraContainer, which is
-    -- `## UseSecureEnvironment: 1`, so it reads real values -- and maxDuration,
-    -- compared in the same function, demonstrably works in combat (Hide Long
-    -- Debuffs). ⚠ SO THE ORIGINAL REPORT IS STILL UNDIAGNOSED: dispellable debuffs
-    -- missing from the row while the overlay showed them (Krathe, 2026-08-22).
-    -- Do not treat it as closed, and do not re-derive the secrecy theory --
-    -- see DF:GetEngineDispelFlagGaps below for the evidence chain.
+    -- ☠☠ IT IS **NOT** A SECRECY FIX. The map is not secrecy-blind: the matcher lives in
+    -- Blizzard_AuraContainer, which is `## UseSecureEnvironment: 1`, so it reads real values
+    -- -- and maxDuration, compared in the same function, demonstrably works in combat (Hide
+    -- Long Debuffs). ⚠ A report of dispellable debuffs missing from the row while the
+    -- overlay showed them is STILL UNDIAGNOSED. Do not treat it as closed, and do not
+    -- re-derive the secrecy theory -- see DF:GetEngineDispelFlagGaps for the evidence chain.
     --
     -- Defensive read like CrowdControl: on a client without the token this stays
     -- nil and both modes fall back to the map form below, which is equivalent.
-    -- ⚠ "ANY" is a RETIRED stored value, not a live mode: its dropdown row was
-    -- collapsed into ALL (2026-08-22) once both rode this token and became one
-    -- query. It stays accepted here because an imported profile or shared
-    -- template can carry it forever; Core.lua rewrites it in profiles and the
-    -- editors self-heal group copies, but the engine must never depend on that.
+    -- ⚠ "ANY" is a RETIRED stored value, not a live mode: it means the same query as ALL.
+    -- It stays accepted here because an imported profile or shared template can carry it
+    -- forever; Core.lua rewrites it in profiles and the editors self-heal group copies, but
+    -- the engine must never depend on that.
     local dispelTypeToken = dispelOn and (dispelMode == "ALL" or dispelMode == "ANY") and AuraFilters.Dispellable or nil
     local playerMode = dispelOn and dispelMode ~= "ALL" and dispelMode ~= "ANY"
     -- Engine-flag gap (Shaman poison via totem): resolved once per build, consumed
@@ -1450,7 +1376,7 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
     end
 
     -- ★★ CLAIM SUBTRACTION — the OTHER half of the row/Aura-Designer dedup, and the
-    -- half that was missing (2026-08-30).
+    -- half that was missing.
     --
     -- Dropping a claimed category's RECORD is only half the job. The row's SURVIVING
     -- records still match auras the AD group displays whenever the ROW does not
@@ -1607,11 +1533,10 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
         filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false),
                                   key = "cc", candidateFilters = cfFor(false, notImportant()) }
     end
-    -- ★★ DROP ONLY WHEN THE CLAIM COVERS THE ROW (2026-08-30). A dispellable claim
-    -- used to drop this record whatever mode either side ran — the "simplest rule"
-    -- the claim builder still documents. It is wrong in exactly one direction:
+    -- ★★ DROP ONLY WHEN THE CLAIM COVERS THE ROW. Dropping this record whatever mode either
+    -- side runs is wrong in exactly one direction:
     --   row ALL + group PLAYER -> the group renders only what YOU can dispel, so
-    --   dropping the row's record deleted every dispellable-by-someone-ELSE debuff
+    --   dropping the row's record would delete every dispellable-by-someone-ELSE debuff
     --   from the display entirely. Not a duplicate — a disappearance.
     -- Blizzard's own token table is the authority here (Blizzard_FrameXMLUtil/
     -- AuraUtil.lua, AuraUtil.AuraFilters):
@@ -1667,12 +1592,9 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
             -- The map form works: the matcher (DoesAuraPassCandidateFilters, in
             -- Blizzard_AuraContainerUtil.lua INSIDE the Blizzard_AuraContainer addon,
             -- whose TOC declares UseSecureEnvironment) reads real values, not secrets
-            -- -- see the evidence chain on DF:GetEngineDispelFlagGaps. An earlier
-            -- version of this comment claimed the map "matches NOTHING once dispel
-            -- names go secret"; that secrecy theory was falsified (lab discussion
-            -- 08ac7310, 2026-08-25). The token is preferred only because it is
-            -- Blizzard's own canonical filter component, with no local copy of the
-            -- type list to keep in step.
+            -- -- see the evidence chain on DF:GetEngineDispelFlagGaps. The token is preferred
+            -- only because it is Blizzard's own canonical filter component, with no local copy
+            -- of the type list to keep in step.
             local cf = notImportant({ includeDispelTypes = DISPEL_TYPES })
             cf.maxDuration = maxDur or (hidePermanent and PERMANENT_DEBUFF_CAP) or nil
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
@@ -1851,17 +1773,16 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
 end
 
 -- Public facade over BuildDirectDebuffFilters for the Aura Designer's debuff
--- category groups (C1). The AD factory builds a facade db table from a group's
+-- category groups. The AD factory builds a facade db table from a group's
 -- selection (directDebuffShowAll=false + the flat debuffFilter*/debuffMaxDuration*
 -- keys) and calls this — the records come out byte-identical to a row configured
 -- the same way.
--- `claimed` serves TWO callers now (2026-08-29): the ROW call sites in
--- DriveDebuffFactory (the full union from GetClaimedDebuffCategories, as always),
--- and the AD dgroup sync's ORDERED fold — each group receives the categories of
--- the enabled groups ABOVE it, so overlapping groups no longer repeat a debuff
--- once per group. The old "the AD path must NEVER pass claimed" rule was about
--- feeding the row's own derived set back in (circular); the ordered fold is not
--- circular and reuses these exact drop-record/keep-negation semantics.
+-- `claimed` serves TWO callers: the ROW call sites in DriveDebuffFactory (the full
+-- union from GetClaimedDebuffCategories), and the AD dgroup sync's ORDERED fold —
+-- each group receives the categories of the enabled groups ABOVE it, so overlapping
+-- groups do not repeat a debuff once per group. Feeding the row's own derived set back
+-- in would be circular; the ordered fold is not, and reuses these exact
+-- drop-record/keep-negation semantics.
 -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the toggle guard
 -- at the top of BuildDirectDebuffFilters cannot fire for AD calls — the dgroup
 -- sync gates on its OWN preset-level toggle (adDB.debuffGroupDedup) before
@@ -1885,8 +1806,8 @@ end
 -- C_UnitAuras.GetUnitAuraInstanceIDs cannot evaluate — all three carry the same filter
 -- string, so a count would be identical for each. Dividing blindly under-shows the
 -- common case (a unit with only ordinary debuffs would get max/3), and collapsing the
--- split to honour the cap silently deletes the highlight. Krathe's call, 2026-09-02:
--- never lose debuffs or functionality — SAY SO INSTEAD.
+-- split to honour the cap silently deletes the highlight. The rule: never lose debuffs or
+-- functionality — SAY SO INSTEAD.
 --
 -- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
 -- those gets an uncleansable twin. So the ceiling is the larger of the unclaimed and
@@ -2086,7 +2007,7 @@ end
 -- path:h:w:offX:offY:texW:texH:l:r:t:b:R:G:B — trailing vertex-colour args (0-255) do the tint,
 -- texW/texH + full texel range from the texture size. The art is a 64x64 square: h==w gives an
 -- even frame/wash (icons); h~=w stretches it — a solid TINT fills any rectangle cleanly, a
--- frame would distort, so only TINT is ever fed a non-square rect. [LIVE 2026-07-20] Defined
+-- frame would distort, so only TINT is ever fed a non-square rect. Defined
 -- after colorToHex so the public wrapper below can reach it (a local isn't in scope earlier).
 local function borderEscapeHex(width, height, hex, texture)
     local ts = EXPIRE_BORDER_TEXSIZE
@@ -2223,10 +2144,9 @@ end
 -- promote on exact matches, so each point is offset by one to keep the upper whole-second
 -- value in its current band."
 --
--- ☠ NUMBER USED TO PROMOTE AT 60 AND 3600, i.e. 31 seconds and 30 minutes earlier than
--- the game's own frames sitting next to it. That is the whole of the "it says Number but
--- shows me minutes" report — at 61s the game says "61s" and DF said "1m". Both paths
--- below now key off these, so the plain and banded builders cannot drift apart either.
+-- ☠ Promoting at 60 and 3600 instead would put DF's text 31 seconds and 30 minutes out of
+-- step with the game's own frames next to it (at 61s the game says "61s"). Both paths
+-- below key off these, so the plain and banded builders cannot drift apart either.
 local PROMOTE_MIN  = 1 + 1.5 * SECONDS_PER_MIN    -- 91
 local PROMOTE_HOUR = 1 + 1.5 * SECONDS_PER_HOUR   -- 5401
 
@@ -2386,12 +2306,11 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         return ok and f or nil
     end
     -- TIMER — "5:32". The only format needing a SECOND component: `div` yields the
-    -- minutes, `mod` the leftover seconds. Nothing in DF used `mod` before this, and no
-    -- other format here can express a clock without it.
+    -- minutes, `mod` the leftover seconds.
     -- ☠ ABOVE AN HOUR IT STOPS BEING A CLOCK. An h:mm reading of "1:02" is
     -- indistinguishable from 1m02s, which is worse than useless on a frame showing both,
     -- so past the hour it hands off to "1h" — the same shape the SecondsFormatter path
-    -- uses, and the same call the one 12.1 addon shipping this format makes.
+    -- uses.
     if format == "TIMER" then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
@@ -3002,11 +2921,6 @@ end
 -- Poking Blizzard-owned binding state on a live button remains the touch class behind
 -- the combat dirty-latch freeze.)
 
--- (Removed 2026-07-13: BuildBuffExcludeMap / the manual aura blacklist. The filter
--- registry supersedes it — per-spell control lives in Filter Designer presets and
--- per-row filter selections. The stored data (DF.db.auraBlacklist) is kept but no
--- longer enforced; the Aura Blacklist page is a retirement notice.)
-
 -- Stable signature of an excludeSpellIDs map (sorted IDs) — exclude-set changes
 -- (AD-dedup, missing-buff hide) are TUNING (Wave 1: SetAuraGroupCandidateFilters is a
 -- live mutator), so the row TUNING signature must move when the set does — the row
@@ -3075,8 +2989,7 @@ end
 -- Colour-mode ramps. A StatusBar CROPS its fill texture to the filled fraction, so a
 -- baked colour RAMP as the texture makes the visible tip colour walk the ramp as the
 -- native fill drains: colour-by-remaining with ZERO reads, which is the only way to do
--- it in 12.1 (remaining time is secret). Two hard constraints, both probe-confirmed
--- 2026-07-20 (see the 12.1 lockdown notes + DF_AuraLab "Duration bar" verdicts):
+-- it in 12.1 (remaining time is secret). Two hard constraints, both probe-confirmed:
 --   * it keys off FRACTION remaining, never seconds — so it CANNOT mirror the
 --     seconds-based durationColorByTimeBreakpoints thresholds, only their palette;
 --   * the ramps are baked images and deliberately NOT driven by the colour pickers.
@@ -3086,7 +2999,7 @@ end
 -- One orientation per curve. The ramp is painted for the DRAIN case: red at the left
 -- end, green at the right, so the tip walks green -> red as the bar empties. That is
 -- the only case there is - the bar always drains (see `direction` below), and Reverse
--- Fill needs NO mirrored art [confirmed in-game 2026-07-20]: the StatusBar flips the
+-- Fill needs NO mirrored art: the StatusBar flips the
 -- texture along with the fill, so the ramp's relationship to the tip already survives.
 -- VERTICAL bars need no second file either: SetRotatesTexture turns the same art.
 -- Because they key off fraction, the two DF ramps are baked from the PERCENT scale's
@@ -3095,8 +3008,8 @@ end
 -- stepped one floors to them, so the bar shows the same four hard bands the stepped
 -- duration text does. Both are generated by Tools/generate_curves.py — re-run it if the
 -- percent defaults ever move. The art carries the DEFAULTS, not the user's edited stops,
--- since a baked image cannot follow the pickers. Stored keys are frozen: DF has always
--- meant the smooth ramp, so existing profiles keep exactly the look they had.
+-- since a baked image cannot follow the pickers. Stored keys are frozen: DF means the
+-- smooth ramp.
 -- The files are named *_Curve on purpose. Bare DF_* names belong to the LibSharedMedia
 -- STATUSBAR textures registered in Config.lua — DF_Smooth is one of them, a bar texture
 -- a user can pick — so a ramp must never be given one of those file names.
@@ -3168,7 +3081,7 @@ function DF:BuildDurationBarSpec(store, keyPrefix)
     }
 end
 
--- Tooltips page -> native aura-button tooltip placement (68914+). The button's
+-- Tooltips page -> native aura-button tooltip placement. The button's
 -- SetTooltipAnchorPoint/SetHideTooltipInCombat are plain mixin state read at hover
 -- time (SetOwner anchor + the ShouldShowTooltip combat gate), so this spec rides
 -- style.* and hot-applies through the cosmetic ApplyStyle pass — no rebuild.
@@ -3329,12 +3242,11 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- friendly frames (the assist/attack gate).
     local candidateFilters
     if prefix == "buff" then
-        -- ("Only My Buffs" needs no candidate filter here. The PLAYER token it rides was
-        -- caught failing open on 2026-08-29, and the second lock that fixes it —
-        -- isFromPlayerOrPlayerPet — is applied for EVERY consumer at the one place a
-        -- record's filter string and candidate filters meet: recordCandidateFilters in
-        -- Frames/AuraContainer.lua, which carries the whole account. This row had its own
-        -- copy for one commit; two mechanisms doing one job is how they drift apart.)
+        -- ("Only My Buffs" needs no candidate filter here. The PLAYER token it rides can fail
+        -- open, and the second lock -- isFromPlayerOrPlayerPet -- is applied for EVERY consumer
+        -- at the one place a record's filter string and candidate filters meet:
+        -- recordCandidateFilters in Frames/AuraContainer.lua. A copy here would be two
+        -- mechanisms doing one job.)
         -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
         -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
         -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this
@@ -3529,7 +3441,6 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- user-facing level slider, so this moves nothing a user configured — which is why
         -- the fix goes here rather than shifting the AD default and forcing a migration.
         -- Span: 32..39 (container +1, button +2, border +4, holders +3..+7).
-        -- (Z-order review, 2026-08-07.)
         frameLevelOffset = 32,
         -- Test-mode preview cap: the test panel's Buffs/Debuffs count sliders
         -- (hot-applied via Handle:SetTestMax from the test drive seam).
@@ -3580,7 +3491,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             -- returns nil for every one of them. A Pandemic section on Debuffs would be a
             -- panel of live controls wired to a cue that can never light: the
             -- silent-capability-skip antipattern, with the impossibility coming from the
-            -- game's rules rather than the client build. (Krathe, 2026-08-05.) If DF ever
+            -- game's rules rather than the client build. If DF ever
             -- grows an enemy-target DoT row, that surface is where this belongs.
             --
             -- ctx is DF.Border's build context: the unit for class/role colour sources,
@@ -3645,13 +3556,11 @@ local function cfSig(cf)
     return table.concat(parts, "&")
 end
 
--- ☠ CORRECTED 2026-08-04. This used to say "a group's filterString can't be changed
--- live" and that claim is what put filter strings in the struct sig in the first place.
--- SetAuraGroupFilterString / SetAuraSlotFilterString have always existed and destroy
--- nothing — proven in game via the DF_AuraLab /alfilter A/B probe. What AddAuraGroup
--- really freezes is the record SET: the topology is add-only, so a record appearing or
--- disappearing needs a new container. Only the KEYS (and per-record style) are
--- structural now; strings and candidateFilters are both live-tunable (filterTuningSig).
+-- ☠ FILTER STRINGS ARE NOT STRUCTURAL. SetAuraGroupFilterString / SetAuraSlotFilterString
+-- are live mutators that destroy nothing (proven in game with an A/B probe). What
+-- AddAuraGroup really freezes is the record SET: the topology is add-only, so a record
+-- appearing or disappearing needs a new container. Only the KEYS (and per-record style)
+-- are structural; strings and candidateFilters are both live-tunable (filterTuningSig).
 -- A record's per-button STYLE (important-debuff highlight). STRUCTURAL, not tuning:
 -- it decides whether the group gets its own initializeFrame closure, whether the badge
 -- regions exist at all, and the group's layout cell size — none of which ApplyStyle can
@@ -3671,7 +3580,7 @@ end
 -- STRUCT half of a filter list: the KEY SET and the per-record style, NOT the filter
 -- strings.
 --
--- ☠ WHY THE KEY SET AND NOT THE STRING (2026-08-04). AddAuraGroup/AddAuraSlot are
+-- ☠ WHY THE KEY SET AND NOT THE STRING. AddAuraGroup/AddAuraSlot are
 -- add-only — there is no remove — so a record APPEARING or DISAPPEARING genuinely needs
 -- a new container. A record keeping its key while its filter string changes does not:
 -- SetAuraGroup/SlotFilterString mutate that live and destroy nothing, and the engine
@@ -3704,8 +3613,8 @@ end
 -- string is "F:"-prefixed, cfSig parts always contain "=", includeSig is "I:"-prefixed,
 -- and excludeSig is bare digits — any new token must keep its component recognisable
 -- within that grammar.
--- The filter string joined this half on 2026-08-04; see filterStructSig for why that is
--- safe while the key set stays structural.
+-- See filterStructSig for why the filter string is safe here while the key set stays
+-- structural.
 local function filterTuningSig(f)
     if type(f) ~= "table" then return "" end
     local parts = {}
@@ -3735,8 +3644,7 @@ function DF:DebuffFilterRecordsTuningSig(records)
     return filterTuningSig(records)
 end
 
--- Row signatures, SPLIT (Wave 1). The old combined buffFactorySig forced a
--- teardown+recreate for every delta; now:
+-- Row signatures, SPLIT:
 --   rowStructSig  — changes need a Rebuild (new container): the record KEY SET
 --     (add-only topology — no RemoveAuraGroup) and per-record style, region-presence
 --     toggles (ApplyStyle can't CREATE or REMOVE a region), tooltips and the native
@@ -3744,10 +3652,10 @@ end
 --   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
 --     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
 --     every candidateFilters facet — config-wide include/exclude spell maps,
---     maxDuration, per-record flags/dispel maps — and, since 2026-08-04, each
---     record's FILTER STRING. That last one is what makes buff-row "Only Mine"
---     (HELPFUL <-> HELPFUL|PLAYER) and the dispel row's All/By-Me token swap free:
---     same key, different string, no container recreated.
+--     maxDuration, per-record flags/dispel maps — and each record's FILTER STRING.
+--     That last one is what makes buff-row "Only Mine" (HELPFUL <-> HELPFUL|PLAYER)
+--     and the dispel row's All/By-Me token swap free: same key, different string, no
+--     container recreated.
 -- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
 -- Border animation on a row that opted in (config.adBorderAnim — the defensive row).
 -- The effect is built once in the button's secure init and cannot be retuned on a live
@@ -3779,23 +3687,16 @@ local function rowStructSig(cfg)
         filterStructSig(cfg.filter), tostring(cfg.tooltips),
         -- Duration text PRESENCE only. The region is create-once, so whether it exists
         -- stays structural.
-        -- ☠ formatKey / zeroText / updateInterval used to sit here on the claim that
-        -- "SetDurationText forwards them to the binding once per slot". That is FALSE
-        -- against Blizzard's source: the setter is reset-then-apply and explicitly
-        -- re-callable — OnLoad_Intrinsic says "Retain the duration text binding across
-        -- reconfiguration". The freeze was our own _boundDur flag, now replaced by a
-        -- spec-identity re-bind in bindNative that runs from ApplyStyle on both handle
-        -- kinds. A format edit is a restyle.
-        -- ★ formatKey was the costliest entry in the file: it folds in
-        -- DF:GetAuraDurationUpdateInterval(), so ONE account-wide setting tore down and
-        -- recreated every container on every frame.
+        -- ☠ formatKey / zeroText / updateInterval are NOT structural: Blizzard's SetDurationText
+        -- is reset-then-apply and explicitly re-callable (OnLoad_Intrinsic: "Retain the duration
+        -- text binding across reconfiguration"), and bindNative re-binds on a spec-identity
+        -- change from ApplyStyle on both handle kinds. A format edit is a restyle. formatKey
+        -- folds in DF:GetAuraDurationUpdateInterval(), so keying the struct sig on it would let
+        -- ONE account-wide setting recreate every container on every frame.
         tostring(s.duration ~= nil),
-        -- ☠ s.stacks.formatKey used to sit here and was DEAD. Nothing in the addon ever
-        -- assigns it (only dur.formatKey is written anywhere), so it serialised to the
-        -- constant "nil" and could never move the signature. It could not have mattered
-        -- either: bindNative deliberately passes {} to SetApplicationCount and never
-        -- forwards a stacks formatter at all, because a Lua formatter running on a
-        -- secret stack count throws inside the engine's dirty pass.
+        -- No stacks formatter in the sig: bindNative deliberately passes {} to
+        -- SetApplicationCount and never forwards a stacks formatter, because a Lua formatter
+        -- running on a secret stack count throws inside the engine's dirty pass.
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
         -- Wave 5b: the dispel spec hosts TWO independent create-once regions (colour
@@ -3849,12 +3750,11 @@ local function rowTuningSig(cfg)
 end
 
 -- ☠ CONFIRM THE RETARGET ACTUALLY RE-PARSED, AND SAY SO WHEN IT DID NOT.
--- NativeBackend:setUnit already does a partition bounce out of combat, which is SUPPOSED to
--- make the container drop the previous occupant's parse. Field evidence says it does not
--- always land: a shaman's own Earth Shield stayed on a frame after "party3 -> party2", out
--- of combat, with the log showing the three retargets and then nothing at all
--- (2026-08-26 22:14). A buff nobody re-casts generates no UNIT_AURA on the new unit, so a
--- missed re-parse has nothing to correct it and the icon sits there until a reload.
+-- NativeBackend:setUnit does a partition bounce out of combat, which is SUPPOSED to
+-- make the container drop the previous occupant's parse, and does not always land (a
+-- shaman's own Earth Shield stayed on a frame after "party3 -> party2", out of combat).
+-- A buff nobody re-casts generates no UNIT_AURA on the new unit, so a missed re-parse has
+-- nothing to correct it and the icon sits there until a reload.
 --
 -- Handle:Refresh is the addon-callable re-parse and it RETURNS whether a genuine one
 -- happened, so this is a fix and an instrument at once: it forces the parse, and a "did NOT
@@ -3865,8 +3765,8 @@ end
 -- ⚠ Handle:Refresh never throws (it pcalls internally) and answers false BOTH for a
 -- failed bounce and for a backend that simply has not attached yet — a deferred
 -- backend has nothing to re-parse and will parse fresh when it attaches, so warning
--- there was a false alarm. The warn is gated on the backend being present: only then
--- is "false" a re-parse that should have happened and did not.
+-- there would be a false alarm. The warn is gated on the backend being present: only
+-- then is "false" a re-parse that should have happened and did not.
 local function confirmRetarget(h, label, unit)
     if not (h and h.Refresh) then return end
     -- ★ CONFIRM THE BINDING, NOT JUST THE PARSE. This only ever checked whether a
@@ -3974,11 +3874,10 @@ function DF:DriveBuffFactory(frame, db)
             -- structSig doubles as the container PARKING key: its definition is exactly
             -- "changing this needs a new container", which is precisely the condition
             -- for safely re-adopting a parked one. A/B/A (profile swap, preset toggle,
-            -- AutoProfiles zone transition) now reuses instead of stranding.
-            -- ☠ SIGS RESTORED ON ERROR. An error mid-rebuild (e.g. a forbidden write
-            -- during PvP prep) used to leave the NEW sig recorded against an OLD
-            -- container — the edit silently stranded for the whole session, because
-            -- every later drive compared equal and took the no-op branch. A restored
+            -- AutoProfiles zone transition) reuses instead of stranding.
+            -- ☠ SIGS RESTORED ON ERROR. An error mid-rebuild (e.g. a forbidden write during PvP
+            -- prep) must not leave the NEW sig recorded against an OLD container, or every later
+            -- drive compares equal and takes the no-op branch for the whole session. A restored
             -- sig makes the next drive simply retry.
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips) — discrete, leak-safe
             if not okRB then
@@ -4080,7 +3979,7 @@ function DF:DriveDebuffFactory(frame, db)
     -- ★ PER-FRAME IMPORTANT-HIGHLIGHT OPT-OUT (preview only; nothing sets this stamp on a
     -- live frame). The enlarged + badged treatment is right for a real row but wrong on
     -- EVERY preview frame at once: it swamped the raid grid, and on the party tank it sat
-    -- over the AFK countdown (Krathe, 2026-08-08).
+    -- over the AFK countdown.
     --
     -- ⚠ Done by SHADOWING ONE KEY, not by threading a flag through the resolver, because
     -- the resolver already gates on exactly this key and the Aura Designer facade already
@@ -4359,17 +4258,11 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- P5 preview: HELPFUL category alone would page the buff pool — show
         -- curated defensives instead.
         testPool = "defensives",
-        -- ☠ The line above used to end "(TestMode drives testMax per role)". It did
-        -- NOT — nothing ever set testMax here, so the preview fell through to the row's
-        -- full `max` and declared one AuraGroup per icon, each eagerly allocating ten
-        -- buttons, for a curated pool of FOUR defensives. Another comment asserting a
-        -- behaviour no code implemented.
-        -- ⚠ It was then capped at `testBuffCount` on the reasoning "this is a HELPFUL
-        -- row, so the Buffs count is the one the user set for it". That is wrong from
-        -- the user's side: nothing on the panel says the Buffs slider governs the
-        -- defensive icon, so the row silently drew 2 while its own Max Icons read 5.
-        -- It has its own count now (default 1). ☠ Keep this in step with the
-        -- SetTestMax in TestMode.lua's defensive drive — two writers, one value.
+        -- The row's own preview count (default 1), not the Buffs count: nothing on the panel
+        -- says the Buffs slider governs the defensive icon. Without a testMax the preview would
+        -- fall through to the row's full `max` and declare one AuraGroup per icon for a curated
+        -- pool of four defensives. ☠ Keep this in step with the SetTestMax in TestMode.lua's
+        -- defensive drive — two writers, one value.
         testMax = db.testDefensiveCount or 0,
         tooltips = db.tooltipDefensiveEnabled ~= false,
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
@@ -4402,21 +4295,13 @@ function DF:BuildDefensiveRowConfig(db, unit)
             tooltip  = buildTooltipSpec(db, "Defensive"),
             -- Duration bar strip (nil when disabled — byte-neutral; see the buff row).
             bar      = DF:BuildDurationBarSpec(db, "defensiveDurationBar"),
-            -- Shared TextStyle spec, same as the buff and debuff rows. This was a
-            -- hardcoded table whose own comment read "defensive stacks have no db keys —
-            -- legacy fixed look", which is precisely what a user ran into: 12.1 pushed
-            -- some stack counts to three digits and only the DURATION text could be
-            -- resized.
-            -- ☠ THE DEFAULTS RENDER IDENTICALLY TO THAT TABLE: baseSize 14 × Scale 1 =
-            -- 14, same anchor and offsets, Outline defaulted to "OUTLINE" in Config.
-            -- Color gets NO default on purpose — an absent key reads nil and TextStyle
-            -- leaves the colour alone, exactly as the old table did by omission.
-            -- ⚠ Font DOES have a Config default now ("DF Roboto SemiBold", 2026-08-22).
-            -- This comment used to claim a nil font meant "DF default font"; it did not
-            -- — SafeSetFont resolves nil to FRIZQT__ (the Blizzard fallback), so unset
-            -- profiles were rendering the stack count in a different font from every
-            -- other DF text element. The seed makes the house font explicit, and the
-            -- deliberate restyle is the point (Krathe), not an accident to avoid.
+            -- Shared TextStyle spec, same as the buff and debuff rows, so the stack count can be
+            -- resized like the duration text (12.1 pushes some stack counts to three digits).
+            -- The Config defaults render baseSize 14 × Scale 1 = 14 with OUTLINE.
+            -- Color gets NO default on purpose — an absent key reads nil and TextStyle leaves the
+            -- colour alone.
+            -- ⚠ Font HAS a Config default ("DF Roboto SemiBold"): SafeSetFont resolves a nil font to
+            -- FRIZQT__ (the Blizzard fallback), not to the DF house font.
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
             stacks = (function()
@@ -4503,16 +4388,14 @@ function DF:DriveDefensiveFactory(frame, db)
 end
 
 -- ============================================================
--- MISSING-BUFF FACTORY BRIDGE — read-free layout-push inversion (probe 32,
--- live-confirmed 2026-07-10). One "missing"-mode handle per tracked raid buff:
--- an empty spellID-filtered group parks the badge inside a clip window; the
--- buff's (blank) button pushes it out. ZERO aura reads — works in combat on
--- every assistable unit, independent of the transitional whitelist. Replaces
--- the legacy UnitHasBuff 4-method scan on 12.1.
--- Behaviour change vs legacy (flagged in the port plan §2.5): manual multi-buff
--- mode shows EVERY tracked-and-missing buff as a strip of badges — the old
--- "first missing only" priority pick was a cross-aura read, which is dead.
--- Class-detection mode (one buff) is identical to legacy.
+-- MISSING-BUFF FACTORY BRIDGE — read-free layout-push inversion (live-confirmed probe).
+-- One "missing"-mode handle per tracked raid buff: an empty spellID-filtered group
+-- parks the badge inside a clip window; the buff's (blank) button pushes it out. ZERO
+-- aura reads — works in combat on every assistable unit, independent of the
+-- transitional whitelist.
+-- Manual multi-buff mode shows EVERY tracked-and-missing buff as a strip of badges: a
+-- "first missing only" priority pick would be a cross-aura read, which is impossible.
+-- Class-detection mode tracks one buff.
 -- ============================================================
 
 local MISSING_BADGE_SIZE = 24   -- fallback when missingBuffIconSize is unset; missingBuffIconScale scales the strip
@@ -4576,12 +4459,11 @@ local function buildMissingCellConfig(info, unit, size)
         -- `parent:GetFrameLevel() + (frameLevelOffset or 40)`, and this is the ONE
         -- Create site whose parent is not the unit frame but an already-offset
         -- child of it: the strip, which layoutMissingStrip puts at
-        -- frame + missingBuffIconFrameLevel. Omitting the key therefore stacked a
-        -- SECOND +40 on top — at the default 35 the badges rendered at frame+75 and
-        -- drew over the defensive row at 65, and the Frame Level slider was off by
-        -- 40 at every setting (Krathe, 2026-08-07). 0 puts the cells on the strip's
-        -- own level, which is what the setting says. Every other Create with a
-        -- non-frame parent already passes an explicit offset — swept 2026-08-07.
+        -- frame + missingBuffIconFrameLevel. Omitting the key would stack a SECOND +40 on
+        -- top -- at the default 35 the badges would render at frame+75, over the defensive row
+        -- at 65, and the Frame Level slider would be off by 40 at every setting. 0 puts the
+        -- cells on the strip's own level, which is what the setting says. Every other Create
+        -- with a non-frame parent passes an explicit offset too.
         frameLevelOffset = 0,
         enabled = true,
     }
@@ -4665,11 +4547,10 @@ local function styleMissingBadge(h, db, frame, info)
     -- feed the configured badge size for the dash math to use instead.
     spec.knownWidth = db.missingBuffIconSize or MISSING_BADGE_SIZE
     spec.knownHeight = spec.knownWidth
-    -- Animate only via the DF-owned (taint-safe) types — the LCG glows SetParent
-    -- their pooled frames onto the secretRect badge, which is forbidden on the native
-    -- button subtree. Continuous animation is safe now: the shared anim driver hosts on
+    -- Animate only via the DF-owned (taint-safe) types — a glow library that SetParents
+    -- pooled frames onto the secretRect badge is forbidden on the native button subtree. Continuous animation is safe now: the shared anim driver hosts on
     -- UIParent and the badge's border is torn down in _teardownContainer's StopAnimation
-    -- pass (the GUI already hides the LCG types; this guards stale/imported profiles).
+    -- pass (the GUI offers only DF types; this guards stale/imported profiles).
     local safeAnim = DF.AuraContainer and DF.AuraContainer.SAFE_BORDER_ANIM
     if spec.animation and not (safeAnim and safeAnim[spec.animation.type]) then
         spec.animation = nil
@@ -4726,7 +4607,7 @@ local function layoutMissingStrip(frame, db, strip, cellCount)
     -- under the very icons they exist to sit over. Same drifted-fallback shape as the
     -- oor*Alpha constants: invisible while Config seeds the key, wrong the moment it does
     -- not (an old import, a hand-edited SavedVariables). Keep equal to Config's
-    -- missingBuffIconFrameLevel. (Z-order review, 2026-08-07.)
+    -- missingBuffIconFrameLevel.
     strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 60)))
 end
 
@@ -4979,15 +4860,12 @@ function DF:RefreshFactoryRows()
     C_Timer.After(0, function()
         factoryRefreshQueued = false
         if InCombatLockdown() then
-            -- ⚠ RE-QUEUE AT REGEN, DON'T DROP. This used to return outright ("version
-            -- catches up at next drive") — true per frame, since the version IS bumped,
-            -- but the next drive is the next UNIT_AURA on that frame, which after
-            -- combat may be arbitrarily far away on a quiet frame. A mid-combat GUI
-            -- change then looked half-applied until some aura event wandered by:
-            -- disabling Defensive Icons hid the row at once (UpdateDefensiveBar's
-            -- combat-safe hide) while the buff row kept CLAIMING the deduplicated
-            -- defensives until its next drive — auras missing from both displays.
-            -- The restyle itself must stay out of combat (native buttons are
+            -- ⚠ RE-QUEUE AT REGEN, DON'T DROP. The version IS bumped, but the next drive is the next
+            -- UNIT_AURA on that frame, which after combat may be arbitrarily far away on a quiet
+            -- frame -- so a mid-combat GUI change would look half-applied: disabling Defensive Icons
+            -- hides the row at once (UpdateDefensiveBar's combat-safe hide) while the buff row keeps
+            -- CLAIMING the deduplicated defensives until its next drive, leaving auras missing from
+            -- both displays. The restyle itself must stay out of combat (native buttons are
             -- combat-forbidden); regen is the earliest it can legally run.
             if not factoryRefreshRegen then
                 factoryRefreshRegen = CreateFrame("Frame")
@@ -5026,14 +4904,13 @@ function DF:UpdateAuras_Enhanced(frame)
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
 
-    -- Factory buff row (experimental). Compute once. If a container was built but the factory
-    -- path is no longer active (dev toggle off, test mode, or showBuffs off),
-    -- hide it via its plain anchor frame (combat-safe, queues no backend op) so the legacy
-    -- render can't double up. DriveBuffFactory re-shows it when it drives.
-    -- ☠ SetIntentShown, never GetFrame():Hide(). The raw hide left the handle's
-    -- intent reading "wants shown", and the identity-gate sweep (target change,
-    -- roster, loading screens) re-showed the disabled row with live auras in it —
-    -- the "buff bar comes back while disabled" reports. Intent survives sweeps.
+    -- Factory buff row. Compute once. If a container was built but the factory path is no
+    -- longer active (test mode, or showBuffs off), hide it via its plain anchor frame
+    -- (combat-safe, queues no backend op) so it can't double up. DriveBuffFactory re-shows
+    -- it when it drives.
+    -- ☠ SetIntentShown, never GetFrame():Hide(). A raw hide leaves the handle's intent
+    -- reading "wants shown", and the identity-gate sweep (target change, roster, loading
+    -- screens) re-shows the disabled row with live auras in it. Intent survives sweeps.
     local buffFactoryActive = db.showBuffs and DF:UseFactoryForBuffs(frame, db)
     if frame.buffFactory and not buffFactoryActive then
         frame.buffFactory:SetIntentShown(false)
@@ -5131,7 +5008,7 @@ end)
 -- HIDE/SHOW BLIZZARD RAID FRAMES
 -- Blizzard mode: hide containers, strip events but keep UNIT_AURA
 -- Direct mode: fully disable frames (unregister ALL events,
---   reparent party frames to hidden parent — Grid2 pattern)
+--   reparent party frames to a hidden parent)
 -- ============================================================
 
 -- Track if we've installed hooks (only do once)
@@ -5149,7 +5026,7 @@ local reparentedFrames = {}
 -- #1127) and the raid frames' out-of-range alpha (flicker + FPS drop, bug #1126).
 local dfHiddenFrames = {}
 
--- Hidden parent frame for fully disabling Blizzard frames (Grid2 pattern)
+-- Hidden parent frame for fully disabling Blizzard frames
 local blizzardHiddenParent = CreateFrame("Frame")
 blizzardHiddenParent:Hide()
 
@@ -5314,14 +5191,12 @@ function DF:UpdateBlizzardFrameVisibility()
     local hidePartyFrames = partyDb.hideBlizzardPartyFrames
     local hideRaidFrames = raidDb.hideBlizzardRaidFrames
 
-    -- ⚠ THESE TWO LOCALS STAY. They look like leftovers -- both hardcoded true, and
-    -- the DF.blizzardFramesFullyDisabled line that used to combine them here is gone
-    -- (see the note at its declaration) -- but they are read five more times further
-    -- down this same function: two `hidePartyFrames and partyDirectMode` guards and
-    -- three StripUnitFrameEvents(frame, ...) calls, where the value is the
-    -- `fullDisable` argument. Delete them and those resolve as nil GLOBALS: the
-    -- guards silently go false and the strip calls flip to fullDisable = false,
-    -- leaving UNIT_AURA registered on frames that should be fully disabled.
+    -- ⚠ THESE TWO LOCALS STAY. They look like leftovers -- both hardcoded true -- but they
+    -- are read five more times further down this same function: two `hidePartyFrames and
+    -- partyDirectMode` guards and three StripUnitFrameEvents(frame, ...) calls, where the
+    -- value is the `fullDisable` argument. Delete them and those resolve as nil GLOBALS: the
+    -- guards silently go false and the strip calls flip to fullDisable = false, leaving
+    -- UNIT_AURA registered on frames that should be fully disabled.
     local partyDirectMode = true -- direct is the only aura source (4.6.1)
     local raidDirectMode = true
 
@@ -5540,8 +5415,8 @@ function DF:UpdateBlizzardFrameVisibility()
     end
 end
 
--- One-shot HARD disable of Blizzard's compact raid/party system (mirrors ElvUI's
--- UF:DisableBlizzard). UpdateBlizzardFrameVisibility above only alpha-hides the
+-- One-shot HARD disable of Blizzard's compact raid/party system.
+-- UpdateBlizzardFrameVisibility above only alpha-hides the
 -- frames and strips per-frame events reactively — the CompactRaidFrameManager
 -- (Raid Utility) keeps running its roster/layout work and the container keeps its
 -- own events. This kills all of that once, at load, out of combat:
@@ -5889,10 +5764,9 @@ local WATCH_ROWS = {
     { "defensive", "defensiveFactory" },
 }
 -- ☠ WHAT THIS WATCH CAN AND CANNOT SEE. groupFrameCount is the group's OWNED pool
--- size (see its header), NOT the visible count — the first cut compared summed pools
--- against cfg.max and would have cried OVERFLOW on every healthy row (a 6-record row
--- reads 60 forever: six 10-frame batches; the 2026-08-26 field log's "60 against a max
--- of 3" was exactly that arithmetic). Visible counts are not readable from outside.
+-- size (see its header), NOT the visible count — comparing summed pools against
+-- cfg.max would cry OVERFLOW on every healthy row (a 6-record row reads 60 forever: six
+-- 10-frame batches). Visible counts are not readable from outside.
 -- The one true engine-side signal is pool GROWTH: a pool only steps past its first-seen
 -- size when MORE auras than it owned were simultaneously assigned in that ONE group,
 -- so any growth is the overflow event, latched for the handle's lifetime. Baselines are
@@ -5969,8 +5843,7 @@ C_Timer.NewTicker(WATCH_INTERVAL, function()
     -- ☠ NOT IN TEST MODE. The preview deliberately fills every group from the curated
     -- sample pool — Handle:_slotCount returns testSlotCount there, NOT config.max — so a
     -- six-record debuff row reports 60 against a max of 3 and every frame in the raid
-    -- fires at once. That is the preview working, not a fault, and one toggle buried the
-    -- real findings under 50 false lines (field log, 2026-08-26 11:49:35).
+    -- would fire at once. That is the preview working, not a fault.
     if DF.AuraContainer and DF.AuraContainer._testMode then return end
     if DF.testMode or DF.raidTestMode then return end
     DF:ScanAuraRowOverflow()

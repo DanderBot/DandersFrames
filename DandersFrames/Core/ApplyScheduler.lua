@@ -4,72 +4,60 @@ local addonName, DF = ...
 -- APPLY SCHEDULER
 -- The single sink every heavy "apply the settings" sweep funnels into.
 --
--- WHY: a settings widget used to run its heavy sweep synchronously, once per
--- callback. A slider drag fires its callback on every mouse tick, and one click
--- on a checkbox can chain several sweeps, so a 40-man raid paid the same full
--- pass many times inside one rendered frame. The five publics below are now
--- arm-stubs: they mark a kind dirty and return. A hidden frame's OnUpdate then
--- drains every dirty kind exactly once, at most one rendered frame later.
+-- WHY: a slider drag fires its callback on every mouse tick, and one checkbox click can
+-- chain several sweeps, so running each sweep synchronously would make a 40-man raid pay
+-- the same full pass many times inside one rendered frame. The five publics below are
+-- arm-stubs: they mark a kind dirty and return, and a hidden frame's OnUpdate drains
+-- every dirty kind exactly once, at most one rendered frame later.
 --
--- THE BEHAVIOUR CONTRACT: no setting changes WHAT it does -- only WHEN the work
--- runs (at most one frame later). Nothing is dropped, nothing is merged away.
--- Code that must see the apply land before its very next statement calls the
--- `_Now` form directly, or DF.Apply:Flush() after a batch. Those seams are
--- listed in the task's caller audit and are the only places that skip the sink.
+-- THE BEHAVIOUR CONTRACT: no setting changes WHAT it does -- only WHEN the work runs (at
+-- most one frame later). Nothing is dropped, nothing is merged away. Code that must see
+-- the apply land before its very next statement calls the `_Now` form directly, or
+-- DF.Apply:Flush() after a batch; those are the only places that skip the sink.
 --
--- ☠ NO SUPERSEDE-DROPPING. An early draft had "all" swallow the other four
--- "because UpdateAll already contains them". It does not:
---   * UpdateAll never calls ApplyHeaderSettings (UpdateAllFrames explicitly
---     refuses to, see the NOTE in Frames/Init.lua),
+-- ☠ NO SUPERSEDE-DROPPING. "all" does NOT contain the other four:
+--   * UpdateAll never calls ApplyHeaderSettings (UpdateAllFrames explicitly refuses to,
+--     see the NOTE in Frames/Init.lua),
 --   * it does not reach RefreshLiveFrames on the live-party branch,
 --   * and it covers frames / raidLayout only on mode-dependent branches.
--- Dropping a kind would drop work, which is a behaviour change. So each kind
--- coalesces with ITSELF only (N requests in one frame = 1 run), and a drain
--- runs every dirty kind at most once. Worst case is five heavies per rendered
--- frame, which is still bounded -- the unbounded repeat is what this removes.
+-- So each kind coalesces with ITSELF only (N requests in one frame = 1 run), and a drain
+-- runs every dirty kind at most once: at worst five heavies per rendered frame, which is
+-- still bounded.
 --
 -- FIXED DRAIN ORDER
 --   headers -> raidLayout -> frames -> visible -> all
--- chosen to preserve the two load-bearing orderings in the settings pages
--- (both in DandersFrames_Options/GUI/Pages/Options.lua, in the local
--- UpdateFrames() built for the Frames page):
---   (a) ~1697-1705: LightweightUpdateFrameSize(true) must run BEFORE
---       ApplyHeaderSettings -- it is the only path that re-anchors the health
---       bar to framePadding, and ApplyHeaderSettings then re-applies frame
---       width/height through the secure header. That pre-work is a direct
---       synchronous call at the site, outside this sink, so no drain order can
---       reorder it; the drain then keeps the rest of that sequence.
---   (b) ~1706-1718: the raid layoutSig cache is invalidated (a plain DB write
---       at the call site) BEFORE ApplyHeaderSettings, and ApplyHeaderSettings
---       must run BEFORE UpdateRaidLayout (PR #134) or ApplyRaidGroupSorting
---       bails and raidGroupRowGrowth never applies. headers before raidLayout
---       in the drain is exactly that constraint.
--- The one source order the fixed drain does invert is "UpdateAllFrames then
--- UpdateRaidLayout" (Frames/Core.lua's UI_SCALE_CHANGED handler and the Global
--- Fonts page). That is safe: the raid positioners compute from DB values, not
--- from live frame geometry -- frame sizing for raid comes from
--- ApplyHeaderSettings (UpdateRaidGroupFrameSizes / UpdateRaidFlatFrameSizes),
--- which the drain still runs first. FullProfileRefresh, which has the same
--- source order and DOES depend on it, calls the `_Now` forms instead.
+-- chosen to preserve the two load-bearing orderings in the Frames page's local
+-- UpdateFrames() (DandersFrames_Options/GUI/Pages/Options.lua):
+--   (a) LightweightUpdateFrameSize(true) must run BEFORE ApplyHeaderSettings -- it is the
+--       only path that re-anchors the health bar to framePadding, and ApplyHeaderSettings
+--       then re-applies frame width/height through the secure header. That pre-work is a
+--       direct synchronous call at the site, outside this sink, so no drain order can
+--       reorder it.
+--   (b) the raid layoutSig cache is invalidated (a plain DB write at the call site)
+--       BEFORE ApplyHeaderSettings, and ApplyHeaderSettings must run BEFORE
+--       UpdateRaidLayout or ApplyRaidGroupSorting bails and raidGroupRowGrowth never
+--       applies. headers before raidLayout is exactly that constraint.
+-- The one source order the drain inverts is "UpdateAllFrames then UpdateRaidLayout"
+-- (Frames/Core.lua's UI_SCALE_CHANGED handler and the Global Fonts page). That is safe:
+-- the raid positioners compute from DB values, not live frame geometry, and raid frame
+-- sizing comes from ApplyHeaderSettings, which the drain runs first. FullProfileRefresh,
+-- which has the same source order and DOES depend on it, calls the `_Now` forms.
 --
--- COMBAT: the drain re-checks InCombatLockdown() AT FIRE TIME. Every kind is
--- combat-unsafe (they all write secure frame size / attributes), so an in-combat
--- drain runs nothing, keeps the kinds queued and replays them on
--- PLAYER_REGEN_ENABLED -- the same re-queue-don't-drop idiom RefreshFactoryRows
--- uses in Features/Auras.lua. The `_Now` bodies keep their own combat guards
+-- COMBAT: the drain re-checks InCombatLockdown() AT FIRE TIME. Every kind writes secure
+-- frame size / attributes, so an in-combat drain runs nothing, keeps the kinds queued and
+-- replays them on PLAYER_REGEN_ENABLED (the re-queue-don't-drop idiom RefreshFactoryRows
+-- uses in Features/Auras.lua). The `_Now` bodies keep their own combat guards
 -- (UpdateAll_Now sets DF.needsUpdate, UpdateRaidLayout_Now sets
--- pendingFlatLayoutRefresh / needsUpdate); belt and braces, but the scheduler's
--- regen replay is the prompt one.
+-- pendingFlatLayoutRefresh / needsUpdate); the scheduler's regen replay is the prompt one.
 --
--- HEADLESS: every WoW API here is optional. With no CreateFrame there is no
--- drain frame and no event wiring -- Request still marks kinds dirty and Flush
--- still drains, which is what Tools/mover-tests/test_apply.lua drives.
--- InCombatLockdown is resolved as a GLOBAL at call time (not cached in an
--- upvalue) so a test can swap it between calls.
+-- HEADLESS: every WoW API here is optional. With no CreateFrame there is no drain frame
+-- and no event wiring -- Request still marks kinds dirty and Flush still drains, which is
+-- what Tools/mover-tests/test_apply.lua drives. InCombatLockdown is resolved as a GLOBAL
+-- at call time (not cached) so a test can swap it between calls.
 --
--- LOAD ORDER: this file loads right after Core.lua, so the `_Now` bodies in
--- Frames/*.lua do not exist yet when the stubs below are defined. That is fine
--- -- both halves are only ever looked up at runtime.
+-- LOAD ORDER: this file loads right after Core.lua, so the `_Now` bodies in Frames/*.lua
+-- do not exist yet when the stubs below are defined; both halves are only looked up at
+-- runtime.
 -- ============================================================
 
 local type = type

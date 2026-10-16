@@ -264,7 +264,7 @@ end
 
 -- Frames examined per tick. The scan walks the entire frame universe, and doing
 -- that in one pass froze the client long enough to look like a crash on a
--- machine with many addons loaded (Aphoex, 2026-08-12). Yielding between chunks
+-- machine with many addons loaded. Yielding between chunks
 -- costs a few extra frames of wall-clock and keeps the UI responsive throughout.
 local SCAN_CHUNK = 1500
 

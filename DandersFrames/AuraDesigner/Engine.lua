@@ -98,7 +98,7 @@ function Engine:ForceRefreshAllFrames()
     end
     -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
     -- PinnedFrames.headers only, so an Aura Designer edit never reached a pinned BOSS
-    -- frame, and neither did the AD-off teardown. (Audit 2026-08-17.)
+    -- frame, and neither did the AD-off teardown.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(TryUpdate)
     end
@@ -130,14 +130,9 @@ end
 -- recipe live on the Options side (AuraDesigner/UI/Cards.lua); this is the resident half, and
 -- it must work with the settings panel never having been opened.
 --
--- The gate itself lives in AuraContainer (recordCandidateFilters). This file only decides
--- WHEN it is shut and broadcasts the edge. That split is the point: config is never touched,
--- so a rebuild produces something already gated rather than something we correct.
---
--- Superseded design, for the record: a per-container map swap plus a re-assert after every
--- rebuild. It worked, and it was a race we would have had to keep winning against every
--- rebuild path added later. Watched failing 2026-08-23 -- clobber recorded in combat,
--- rendered at combat end.
+-- The gate itself lives in AuraContainer (recordCandidateFilters); this file only decides WHEN
+-- it is shut. That split is the point: config is never touched, so a rebuild produces
+-- something already gated rather than something we correct after every rebuild path.
 -- ============================================================
 
 -- The spell whose cooldown drives the gate. Power Infusion, and the panel offers no way to
@@ -155,7 +150,7 @@ local pihGateOpen = true        -- true = show (gate spell ready), false = dark 
 -- nil = watcher drives; true/false = held by hand until `/df debug pi auto`.
 local pihManual = nil
 
--- ★★★ SHOW IN COMBAT ONLY (2026-09-10), an option Krathe asked for.
+-- ★★★ SHOW IN COMBAT ONLY, an option Krathe asked for.
 -- ⚠ FORWARD-DECLARED. pihShouldShow reads pihGateEnabled, declared a couple of hundred lines
 -- below, while pihSet -- which is above it -- has to call it. Same idiom as pihSyncWatcher.
 local pihCombatOnly = false
@@ -212,43 +207,28 @@ local function pihHasHelper(adDB)
     return false
 end
 
--- ⚠ FIRST PRESET THAT HAS A HELPER WINS, PARTY FIRST. The gate is ONE switch for the
--- whole addon, so two presets carrying different helper settings is an ambiguity no read can
--- resolve -- taking the first is a choice, not a derivation. Party first because that is where
--- the feature is used. A preset whose settings table survived a Remove no longer shadows one
--- that actually has a helper, because the marks decide.
--- ☠☠ THE *LIVE* DESIGNER, NOT THE MODE BASE (2026-09-10). This read GetModeBaseAuraDesigner,
--- which is the EDITOR's variant -- Presets.lua says so directly: "GetMode*Designer ... the
--- ACTIVE designer a mode resolves to right now ... Used by LIVE consumers (SoundEngine,
--- migrations) that must match what's on screen. The EDITOR uses the GetModeBase* variants".
--- The helper is a live consumer and was reading the editor's answer.
+-- ⚠ FIRST PRESET THAT HAS A HELPER WINS, PARTY FIRST. The gate is ONE switch for the whole
+-- addon, so two presets carrying different helper settings is an ambiguity no read can
+-- resolve -- taking the first is a choice, not a derivation. A preset whose settings table
+-- survived a Remove does not shadow one that actually has a helper, because the marks decide.
+-- ☠☠ THE *LIVE* DESIGNER, NOT THE MODE BASE. GetMode*Designer is the ACTIVE designer a mode
+-- resolves to right now (Presets.lua: used by LIVE consumers that must match the screen);
+-- GetModeBase* is the EDITOR's variant. A raid auto layout can point its own AD preset at
+-- something other than the mode base, and the frames render from THAT
+-- (DF:ResolveAuraDesigner honours the overlay) -- so reading the base would arm the gate, the
+-- roles and the SOUND for a preset that is not on screen. With no helper in the live preset,
+-- the helper is silent and ungated, and the readout SAYS so.
+-- ☠☠ STRAY-MARK DETECTION LIVES HERE, IN THE RESIDENT ADDON. The repair (pihSweep /
+-- pihPurgeStrayMarks) is in the load-on-demand companion, but a stray marked layout group in
+-- adDB.layoutGroups[spec] renders regardless (Factory.lua renders spec groups with no mark
+-- filter; VisibleLayoutGroups, which hides marked groups, exists ONLY on the options side). A
+-- player who never opens the designer would keep stray "PI Helper" groups painting on every
+-- frame with no control able to turn them off.
 --
--- ☠ WHAT IT COST, from Krathe's raid: a raid auto-layout can point its own AD PRESET at
--- something other than the mode base -- his 21-30 layout uses a "Flex 21-30" preset. The
--- frames render from THAT (DF:ResolveAuraDesigner honours the overlay) and it holds no
--- helper, so nothing draws; this read carried on finding the helper in the BASE preset and
--- happily armed the gate, the roles and THE SOUND for a preset that is not on screen.
--- ⇒ "I could hear the sound trigger but did not see the border or PI icon at all" is this,
--- and so is a status readout that reports a healthy helper while nothing renders. The
--- feature could not diagnose itself because its two halves were reading different presets.
--- ⚠ IT DOES NOT MAKE HIS HELPER APPEAR -- the records genuinely are not in that preset,
--- which is a choice the preset system offers and the user has to make. What it fixes is
--- the engine agreeing with the screen: no helper there means silent, ungated, and a
--- readout that SAYS so.
--- ☠☠ STRAY-MARK DETECTION LIVES HERE, IN THE RESIDENT ADDON, AND THAT IS THE WHOLE POINT.
--- The repair itself (pihSweep / pihPurgeStrayMarks) is in the companion, which is
--- LoadOnDemand -- so before this, every path that could run it began with "the user opens
--- the Aura Designer". The symptom does not wait for that: a stray marked layout group sits
--- in adDB.layoutGroups[spec] and Factory.lua renders spec groups with no mark filter at all,
--- while VisibleLayoutGroups -- the thing that hides marked groups -- exists ONLY on the
--- options side. The panel hides them; the renderer draws them. A player who never opens the
--- designer therefore kept eight "PI Helper" groups painting on every frame with no control
--- anywhere able to turn them off, which is the complaint the sweep was written for.
---
--- ⇒ Detect here, repair there. This walk is the cheapest half and needs no editor state;
--- finding something pulls the companion in ONCE and calls the sweep that already exists,
--- rather than reimplementing a destructive migration in a second place where the two copies
--- could drift. Nothing is deleted by this file.
+-- ⇒ Detect here, repair there. This walk is the cheap half and needs no editor state; finding
+-- something pulls the companion in ONCE and calls the sweep that already exists, rather than
+-- reimplementing a destructive migration in a second place where the copies could drift.
+-- Nothing is deleted by this file.
 --
 -- ⚠ THE SPEC STORE IS THE TELL, not the mark. A marked group in otherLayoutGroups is the
 -- helper's REAL group and must render. One in layoutGroups[spec] cannot work at all -- the
@@ -352,64 +332,39 @@ end
 
 -- Flip the gate. ☠ No early return on an unchanged state: our variable records INTENT, never
 -- what any container is carrying, and the two are allowed to differ -- a rebuild restores the
--- live map in config while this still reads "dark". An early return made "/df debug pi off" decline
--- to act while the border was lit.
--- ☠☠ NOTHING FIRES WHEN A COOLDOWN QUIETLY EXPIRES. `SPELL_UPDATE_COOLDOWN` fires when
--- cooldowns START or change, not when one runs out on its own. Watched 2026-08-23: the gate
--- shut on a Dispersion cast, Dispersion's cooldown ended, and the border stayed dark until the
--- player cast something unrelated -- which fired the event as a side effect of the GCD.
---
--- Earlier tests hid this because the player was casting throughout, so the reopen always had
--- an event to ride on. It is the exact mirror of the GCD bug above: that was an event firing
--- when it should not matter, this is no event firing when it should.
---
--- So while the gate is DARK we poll. Only while dark, one boolean read per tick, and it stops
--- itself the moment the spell is ready -- so the cost is a couple of reads per second during a
--- cooldown and nothing at all the rest of the time.
+-- live map in config while this still reads "dark", and "/df debug pi off" must still act.
+-- ☠☠ NOTHING FIRES WHEN A COOLDOWN QUIETLY EXPIRES. SPELL_UPDATE_COOLDOWN fires when cooldowns
+-- START or change, not when one runs out on its own, so the reopen would wait for some
+-- unrelated cast's GCD. So while the gate is DARK we poll: only while dark, one boolean read
+-- per tick, stopping itself the moment the spell is ready -- a couple of reads per second
+-- during a cooldown and nothing at all the rest of the time.
 -- Reads FLAGS ONLY. `isActive` is plain in combat and `isOnGCD` is guarded below; startTime /
 -- duration / modRate all seal and none of them is touched, so nothing here compares a secret.
 --
--- ☠☠ BUT `isActive` CANNOT TELL A REAL COOLDOWN FROM THE GLOBAL COOLDOWN. Casting ANY spell
--- makes EVERY spell report active for the duration of the GCD. Watched 2026-08-23: with the
--- gate pointed at Dispersion, casting Power Word: Shield made Dispersion read unready and the
--- gate shut. With Power Infusion the flaw is masked -- its cooldown is minutes long, so the
--- GCD flicker hides inside a real cooldown -- but it is still there: every spell the player
--- casts would blink the helper off for a moment.
+-- ☠☠ `isActive` ALONE CANNOT TELL A REAL COOLDOWN FROM THE GLOBAL COOLDOWN: casting ANY spell
+-- makes EVERY spell report active for the GCD, which would blink the helper off on every
+-- cast. ⇒ SO IT IS ONLY EVER USED FOR "IS IT READY AGAIN", NEVER FOR "HAS IT JUST GONE DOWN".
+-- Opening on `not isActive` is safe (the GCD lapsing and the real cooldown ending both mean
+-- genuinely ready); shutting is driven by the CAST -- see the watcher below.
+-- ⭐⭐ A REAL COOLDOWN IS `isActive` AND NOT `isOnGCD`. `isOnGCD` is the sibling flag that says
+-- which of the two it is, and both stay readable in combat while startTime / duration /
+-- modRate seal -- clean boolean flags, no duration or magnitude maths.
 --
--- ⇒ SO THIS IS ONLY EVER USED FOR "IS IT READY AGAIN", NEVER FOR "HAS IT JUST GONE DOWN".
--- Opening on `not isActive` is safe: the GCD lapsing and the real cooldown ending both mean
--- genuinely ready. Shutting is driven by the CAST instead -- see the watcher below.
--- ⭐⭐ A REAL COOLDOWN IS `isActive` AND NOT `isOnGCD`. Danders' answer to our GCD finding
--- (2026-08-23), and it replaces the workaround rather than sitting beside it: `isActive` alone
--- reads true for EVERY spell while the global cooldown runs, so the helper blinked off whenever
--- the player cast anything. `isOnGCD` is the sibling flag that says which of the two it is, and
--- both stay readable in combat while startTime / duration / modRate seal.
+-- ⚠ NO DURATION FALLBACK for a missing `isOnGCD`: this client always carries the field and it
+-- has never been observed sealing, so that branch could never be exercised. The
+-- `issecretvalue` GUARD stays -- a compare on a sealed value throws -- and when it fires the
+-- answer comes from charges instead.
 --
--- Shape follows DandersCDM's `ClassifyCooldown` (Display/CooldownBar.lua), which credits
--- Ellesmere's hooks for the same discriminator -- "no duration/magnitude math, only the clean
--- bool flags". Danders pasted that function on 2026-08-24, so the branches below are checked
--- against the original rather than against a paraphrase of it.
+-- ⚠ CHARGES. With the flags readable a charge spell needs no special handling: a charge in
+-- hand reads not-active (or active + isOnGCD during the global), and zero charges reads active
+-- and NOT on GCD, which is exactly "genuinely on cooldown". With the flags UNREADABLE,
+-- "assume on cooldown" would darken the helper while the player still held a charge, so the
+-- unknown case resolves from `currentCharges`, which stays non-secret. (The panel offers no
+-- gate-spell picker, so the gate spell is always Power Infusion, which has no charges; this
+-- is correctness for the capability underneath.)
 --
--- ⚠ WE DELIBERATELY DO NOT COPY ITS DURATION FALLBACK, and the reason is our own rule. CDM
--- compares `duration` against the GCD when `isOnGCD` is missing, because CDM also serves clients
--- whose info table genuinely lacks the field. Ours never will, and Danders checked the history:
--- nobody has ever observed `isOnGCD` sealing. That branch would be one we could never exercise.
--- The `issecretvalue` GUARD stays -- a compare on a sealed value throws, so it prevents a hard
--- error rather than being dead weight -- but when it fires we resolve from charges instead.
---
--- ⚠ CHARGES, and this is where the old fail-safe hurt. With the flags readable a charge spell
--- needs no special handling: a charge in hand reads not-active (or active + isOnGCD during the
--- global), and zero charges reads active and NOT on GCD, which is exactly "genuinely on
--- cooldown". With the flags UNREADABLE, "assume on cooldown" would darken the helper while the
--- player still held a charge and could infuse right now. `currentCharges` stays non-secret and
--- answers precisely that, so it is what the unknown case resolves from.
---
--- ⚠ Latent, not live. The shipped panel has no gate-spell picker, so the gate spell is always
--- Power Infusion, which has no charges. This is correctness for a capability that exists
--- underneath, not a fix for anything a user can hit today.
---
--- ⚠ Charges also fire their own event -- SPELL_UPDATE_COOLDOWN does not cover a charge coming
--- back. SPELL_UPDATE_CHARGES is registered with the watcher below for that reason.
+-- ⚠ SPELL_UPDATE_COOLDOWN does not cover a charge coming back, so SPELL_UPDATE_CHARGES is
+-- registered with the watcher below.
 local function pihReadCharges(spellID)
     if not (C_Spell and C_Spell.GetSpellCharges) then return nil end
     local c = C_Spell.GetSpellCharges(spellID)
@@ -453,18 +408,12 @@ local function pihStopTicker()
     if pihReadyTicker then pihReadyTicker:Cancel(); pihReadyTicker = nil end
 end
 
--- ★★★ THE FEATURE SWITCH, AS DISTINCT FROM THE COOLDOWN GATE (2026-09-09).
+-- ★★★ THE FEATURE SWITCH, AS DISTINCT FROM THE COOLDOWN GATE.
 --
--- ☠☠ "DISABLE" USED TO MEAN "DELETE THE RECORDS". The helper had no enabled flag of its own
--- -- its existence WAS its records -- so the panel's tick implemented off as a wholesale
--- delete with a stash to fake reversibility. Every bug in that area had one root: a switch
--- pretending to be a switch while actually being a delete. Krathe, 2026-09-09: "when I disable
--- the PI tracker, it seems to remove my border effect I added", then "it should function like
--- the rest of AD" -- and the rest of AD writes ONE BOOLEAN (modeDB.auraDesignerEnabled) and
--- deletes nothing.
--- ⇒ The records stay exactly where they are. This is what makes them not draw, and it costs
--- one file-local, because the gate's own machinery already means "dark, and nothing will
--- open it".
+-- ☠☠ "DISABLE" IS A SWITCH, NOT A DELETE: the records stay exactly where they are, like the
+-- rest of the Aura Designer (one boolean, modeDB.auraDesignerEnabled, deletes nothing). This
+-- is what makes them not draw, and it costs one file-local, because the gate's own machinery
+-- already means "dark, and nothing will open it".
 --
 -- ⚠ TWO SWITCHES, THREE STATES, AND THEY DO NOT COLLAPSE INTO ONE:
 --     enabled = false                -> forced DARK  (the feature is off)
@@ -481,7 +430,7 @@ local function pihSet(dark)
         deferred, hSkip = deferred or 0, hSkip or 0
     end
 
-    -- ★★★ ONE LINE PER EDGE, IN THE LOG, CARRYING EVERYTHING (2026-09-10).
+    -- ★★★ ONE LINE PER EDGE, IN THE LOG, CARRYING EVERYTHING.
     -- ☠ KRATHE CANNOT RUN A SLASH COMMAND MID-RAID, and said so twice before I listened.
     -- A readout behind "/df debug pi" is useless for a fault that only happens with twenty
     -- people in combat: by the time it can be typed, the state has moved. This goes in the
@@ -645,20 +594,19 @@ function Engine:PIH_SetSound(lsmKey)
 end
 
 -- ☠ THE RESIDENT HALF READS THE SAVED SETTINGS ITSELF. The panel that writes them lives in
--- the load-on-demand options addon, so anything that only applied when the panel was open
--- would silently not apply to a player who never opens their settings -- which is most of
--- them, most of the time. §1b's whole point.
+-- the load-on-demand options addon, so anything applied only while the panel was open would
+-- silently not apply to a player who never opens their settings -- most of them, most of the
+-- time.
 --
 -- Reads whichever preset actually has a helper installed, party first (see pihSettings); a
--- party/raid split sharing one preset shares the helper, which is the addon's model for
--- every other effect.
+-- party/raid split sharing one preset shares the helper, the addon's model for every effect.
 --
--- ☠ ALSO THE RESET PATH. Called on login AND after a profile switch, and the new
--- profile may have no helper -- in which case everything the old one pushed must come back
--- out: roles, the gate, and above all the sound registrations, which would otherwise keep
--- playing for a helper that no longer exists anywhere.
+-- ☠ ALSO THE RESET PATH. Called on login AND after a profile switch, and the new profile may
+-- have no helper -- in which case everything the old one pushed must come back out: roles,
+-- the gate, and above all the sound registrations, which would otherwise keep playing for a
+-- helper that no longer exists anywhere.
 local pihSyncWatcher   -- defined beside the watcher below; registration follows helper existence
--- ★★★ NOT A PRIEST: THE WHOLE FEATURE IS A NO-OP (2026-09-10).
+-- ★★★ NOT A PRIEST: THE WHOLE FEATURE IS A NO-OP.
 --
 -- ☠ REPORTED FROM THE ALPHA: helper borders and icons rendering for NON-PRIESTS. There was
 -- no class gate on this side at all -- only the Options UI checked (DF.IsPIHelperAvailable
@@ -763,12 +711,11 @@ function Engine:PIH_ApplySaved()
     -- wrong until the next transition -- the same ordering the sound line below records.
     pihCombatOnly = s.combatOnly == true
     Engine:PIH_SetGateEnabled(s.gateEnabled ~= false)
-    -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate
-    -- has to be in place first (PIH_SetEnabled says the same from its side).
-    -- ⚠ DEFAULTS TRUE FOR A PROFILE THAT PREDATES THE FLAG. `enabled` did not exist before
-    -- 2026-09-09, and every such profile that has helper records had a WORKING helper -- so
-    -- absent must read as on, or the fix for a destructive switch would silently switch
-    -- everyone off. A profile with no records shows nothing either way.
+    -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate has to
+    -- be in place first (PIH_SetEnabled says the same from its side).
+    -- ⚠ ABSENT `enabled` READS AS ON: a profile with helper records but no flag had a working
+    -- helper, so treating absent as off would switch everyone off. A profile with no records
+    -- shows nothing either way.
     Engine:PIH_SetEnabled(s.enabled ~= false)
     -- After the gate, never before: SetSound arms against the gate's current state, so calling
     -- it first would arm against the state we are about to leave.
@@ -903,17 +850,12 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         -- is switched on, so this is NOT behind the pihEnabled early-outs below.
         pihRepairStrayMarks()
         Engine:PIH_ApplySaved()   -- saved settings, before any gate decision
-        -- ☠ RE-CHECK THE SWITCH AFTER APPLYING, because at login the file-locals
-        -- still hold their initialisers until ApplySaved loads the saved values. Without
-        -- this, a saved "don't hide" was overridden by the cooldown read below: reload
-        -- mid-cooldown and the helper hid anyway -- the exact opposite of the setting --
-        -- for the rest of that cooldown.
-        -- ⚠ pihEnabled joins the same re-check, and for the identical reason: ApplySaved has
-        -- just loaded it, and the cooldown read below would otherwise light up a helper the
-        -- user has switched off.
-        -- ⚠ pihGateEnabled IS NO LONGER AN EARLY-OUT HERE. It used to be, because it was the
-        -- only condition below; pihShouldShow now folds it in alongside "combat only", and
-        -- returning early would skip the combat test for anyone with the cooldown gate off.
+        -- ☠ RE-CHECK THE SWITCHES AFTER APPLYING: at login the file-locals hold their initialisers
+        -- until ApplySaved loads the saved values, and the cooldown read below would otherwise
+        -- override a saved "don't hide" (reload mid-cooldown and the helper hides anyway) or light up
+        -- a helper the user has switched off.
+        -- ⚠ pihGateEnabled is not an early-out here: pihShouldShow folds it in alongside "combat
+        -- only", and returning early would skip the combat test for anyone with the cooldown gate off.
         if not pihEnabled or pihManual ~= nil then return end
         -- ☠ THE ONE PLACE isActive MAY SHUT THE GATE. On load we never saw the cast, so a
         -- reload mid-cooldown would otherwise leave the helper showing for the rest of it.
@@ -1027,11 +969,9 @@ SlashCmdList["DFPI"] = function(msg)
             local t = {}; for k in pairs(r) do t[#t + 1] = k end; table.sort(t)
             return table.concat(t, ", ")
         end)())
-        -- ⚠ READ OFF THE CONTAINER, NOT THE PROFILE, and that is the whole value of the
-        -- line. The panel stores this list and something has to PUSH it; when the push
-        -- was missing (it was, until 2026-09-10) the profile showed names and the engine
-        -- held none, with nothing anywhere able to say so. A field that repeated the
-        -- setting would have agreed with the panel and hidden the fault.
+        -- ⚠ READ OFF THE CONTAINER, NOT THE PROFILE, and that is the whole value of the line: the
+        -- panel stores this list and something has to PUSH it, so a field that repeated the setting
+        -- would agree with the panel and hide a missing push.
         :Field("players watched", (function()
             local AC = DF.AuraContainer
             local m = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()

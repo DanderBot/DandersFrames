@@ -774,23 +774,15 @@ end
 -- ============================================================
 -- RENDER COALESCING
 -- ============================================================
--- ☠ THE SHAPE OF THE PROBLEM, so nobody "optimises" the wrong half again.
--- Per-element hint filtering already existed (see the CONTENT_HINTS gate in
--- Render:UpdateFrame), and the per-resolve cost is already at the floor:
--- resolveAppearance is pooled, ApplyHighlightStyle early-outs, and
--- RESOLVERS.hp_current is IRREDUCIBLE because UnitHealth boxes a secret per call.
--- There is no fat leaf left. The remaining cost is simply that we RENDER TOO OFTEN --
--- health, power, range and threat can each fire for the same unit inside a single
--- frame, and each one previously ran the whole pipeline: GetFrameDB,
--- ResolveTextDesigner, the enabled/acquire sweep, the delete sweep, the OOR block.
---
--- So: mark dirty, render ONCE per frame with the union of the hints asked for. A
--- unit that gets four different hints in one frame now costs one render instead of
--- four, and a hint union still resolves strictly fewer elements than "all".
---
--- The visible cost is that text lands up to one frame (~16 ms) later. Nothing in DF
--- reads a FontString's contents back after asking for an update, and no caller needs
--- the render to have happened before its next statement.
+-- Per-element hint filtering exists (the CONTENT_HINTS gate in Render:UpdateFrame) and
+-- the per-resolve cost is at the floor: resolveAppearance is pooled,
+-- ApplyHighlightStyle early-outs, and RESOLVERS.hp_current is IRREDUCIBLE because
+-- UnitHealth boxes a secret per call. What remains is rendering too OFTEN -- health,
+-- power, range and threat can each fire for the same unit inside one frame. So: mark
+-- dirty, render ONCE per frame with the union of the hints asked for; a hint union still
+-- resolves fewer elements than "all".
+-- The cost is that text lands up to one frame (~16 ms) later. Nothing in DF reads a
+-- FontString's contents back after asking for an update.
 local tdBufA, tdBufB = {}, {}
 local tdPending = tdBufA        -- frame -> "all" | { [hint] = true }
 local tdSetPool = {}            -- recycled hint sets; steady state allocates nothing

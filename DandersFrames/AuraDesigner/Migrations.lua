@@ -582,35 +582,24 @@ end
 DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
 DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy = MigrateAbsoluteLevelsV2Lazy
 
--- ☠ STRAND: a per-indicator frameStrata of BACKGROUND buries the indicator where NO frame
--- level can reach it, and there is no longer any control that can clear it.
+-- ☠ STRAND: a per-indicator frameStrata of BACKGROUND (or LOW) buries the indicator where
+-- NO frame level can reach it, and no control can clear it: the editor offers only the
+-- GLOBAL default (shipped "INHERIT"), while resolveStrata still honours a stored
+-- per-indicator value. Strata outranks level absolutely, so such an indicator sits below
+-- the health bar whatever its Frame Level says.
 --
--- The per-indicator Frame Strata picker was removed from the editor (only the GLOBAL
--- default survives, and it ships "INHERIT"). The stored values were never migrated, and
--- resolveStrata still honours them — so a profile carrying a legacy "BACKGROUND" pins that
--- indicator below every MEDIUM frame on the unit button, health bar included. Strata
--- outranks level absolutely, which is why raising Frame Level to 100 changed nothing.
+-- The baseline: nobody carries a per-indicator strata, everything inherits the unit
+-- frame's, and FRAME LEVEL makes every ordering decision (which is what the absolute
+-- levels, V1/V2 above, are for).
 --
--- Field-proven by a /df debug zorder dump (2026-08-19): on one frame, three indicators read
--- strata=BACKGROUND at levels 51/67/106 while their siblings on MEDIUM at level 46 rendered
--- correctly. The user's reported symptom was exactly "bar indicators are below the health
--- bar … I can't seem to get it to change even though the square indicators do rest on top" —
--- the squares happened to be the MEDIUM ones.
---
--- The baseline is: nobody carries a per-indicator strata, everything inherits the unit
--- frame's, and FRAME LEVEL makes every ordering decision. That is what the levels being
--- absolute (V1/V2 above) was for; the strata half was simply never done.
---
--- ☠☠ VALUE-TARGETED: ONLY the burying strata. A blanket clear is WRONG here, and the first
--- cut of this migration got it wrong — resolveStrata documents that a stored literal
--- "INHERIT" is an explicit CHOICE that STOPS the fallback chain, while a genuinely unset key
--- falls through to the global default. Nil-ing an "INHERIT" therefore does not preserve
--- behaviour: it re-opens that indicator to a global default it was deliberately opted out of.
--- The real profile that produced this report carries 18 "INHERIT" and 10 "MEDIUM" values;
--- a blanket clear would have silently rewired all 28 to fix the zero BACKGROUND ones.
--- MEDIUM and HIGH are equally left alone: they order against the frame's band, not beneath it.
+-- ☠☠ VALUE-TARGETED: ONLY the burying strata. A blanket clear is WRONG: resolveStrata
+-- treats a stored literal "INHERIT" as an explicit CHOICE that STOPS the fallback chain,
+-- while an unset key falls through to the global default, so nil-ing an "INHERIT" would
+-- re-open that indicator to a default it opted out of. MEDIUM and HIGH are left alone
+-- too: they order against the frame's band, not beneath it.
 -- ⚠ Clears the legacy per-type sub-tables too (icon/square/bar), which pre-date the
--- instances migration and are the shape old profiles still carry — see the AD storage map.
+-- instances migration and are the shape old profiles still carry -- see the AD storage
+-- map.
 local BURYING_STRATA = { BACKGROUND = true, LOW = true }
 
 local function ClearIndicatorStrata(auraCfg, counter)

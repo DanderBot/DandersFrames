@@ -59,7 +59,7 @@ end
 -- ★ EXPOSED. The preview kept its own ShowTestIconAsText, which additionally
 -- re-applied the font and the text colour -- work ApplyIconSettings already does,
 -- and re-applying it AFTER meant any per-state tint (the AFK icon's DND red) was
--- silently overwritten in the preview but not live. (Audit, 2026-08-07.)
+-- silently overwritten in the preview but not live.
 local function ShowIconAsText(icon, text, showText)
     if showText then
         icon.texture:Hide()
@@ -294,7 +294,6 @@ end
 -- ★ EXPOSED so the preview uses this exact geometry rather than restating it.
 -- UpdateTestStatusIcons hand-rolled scale / anchor / x / y / alpha / frameLevel for
 -- all eight icons -- pure db maths with no unit reads, i.e. no reason to fork.
--- (Audit, 2026-08-07.)
 local function ApplyIconSettings(icon, db, prefix)
     if not icon or not db then return end
     
@@ -310,14 +309,11 @@ local function ApplyIconSettings(icon, db, prefix)
     -- icon -> contentOverlay -> unit frame.
     local frame = icon:GetParent() and icon:GetParent():GetParent()
     icon:SetPoint(anchor, frame, anchor, x, y)
-    -- ★ THE ONE PLACE THESE ICONS' ALPHA IS SET, so the out-of-range / dead fade
-    -- belongs here rather than in a second pass that would fight it.
-    -- ☠ Before this they could not fade LIVE at all: CreateStatusIcon sets
-    -- SetIgnoreParentAlpha(true) so the whole-frame cascade cannot reach them, and
-    -- ElementAppearance never named any of the eight. Only the preview dimmed them,
-    -- off its own hand-written table -- the preview showing something live was
-    -- structurally incapable of. Summon and resurrection are exempt from the RANGE
-    -- half (not the dead half); DF:GetStatusIconFadeAlpha holds the reasoning.
+    -- ★ THE ONE PLACE THESE ICONS' ALPHA IS SET, so the out-of-range / dead fade belongs
+    -- here rather than in a second pass that would fight it. CreateStatusIcon sets
+    -- SetIgnoreParentAlpha(true), so the whole-frame cascade cannot reach them. Summon and
+    -- resurrection are exempt from the RANGE half (not the dead half);
+    -- DF:GetStatusIconFadeAlpha holds the reasoning.
     if DF.GetStatusIconFadeAlpha then
         alpha = alpha * DF:GetStatusIconFadeAlpha(frame, prefix)
     end
@@ -512,7 +508,7 @@ function DF:UpdateResurrectionIcon(frame)
             -- through ShowIconAsText; the resurrection icon did not, so Show Text and
             -- Casting Text were inert here and the fontstring kept whatever visibility
             -- it was last left with. The preview did honour them, which is how the
-            -- divergence surfaced. (Audit, 2026-08-07.)
+            -- divergence surfaced.
             ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             return
@@ -554,17 +550,15 @@ function DF:HasPendingResurrection(unit)
 end
 
 -- ============================================================
--- PHASED ICON (Grid2-style cached polling + event-driven)
+-- PHASED ICON (cached polling + event-driven)
 -- ============================================================
 -- UnitPhaseReason() only returns reliable results within ~250 yards.
 -- Beyond that it returns nil, which looks like "not phased".
--- Grid2 solves this with:
+-- So:
 --   1. A per-unit cache (avoids redundant indicator updates)
 --   2. A 1-second polling timer with UnitDistanceSquared gating
 --   3. Events (UNIT_PHASE etc.) for instant updates when they fire
--- We follow the same approach, with one difference:
--- Grid2 stops the timer inside instances; we keep it running but skip
--- distance gating, so UnitInOtherParty and UnitPhaseReason still poll.
+-- Inside instances the timer keeps running but skips distance gating, so UnitInOtherParty and UnitPhaseReason still poll.
 -- CheckUnitPhase checks UnitInOtherParty first (returns -1 for LFG),
 -- then UnitPhaseReason/UnitInPhase for actual phasing.
 -- ============================================================
@@ -649,7 +643,7 @@ function DF:UpdatePhasedCacheForUnit(unit)
     end
 end
 
--- Polling timer callback — iterates all grouped units (Grid2 style).
+-- Polling timer callback — iterates all grouped units.
 -- In the open world, uses UnitDistanceSquared gating for UnitPhaseReason reliability.
 -- Inside instances, still polls (without distance gating) so UnitInOtherParty is caught.
 local function PhasedTimerUpdate()
@@ -839,19 +833,16 @@ function DF:UpdateAFKIcon(frame, isAFKOverride)
     local unit = frame.unit
     local showIcon = false
 
-    -- ⚠ AFK ONLY. UnitIsDND was consulted here and rendered on this same widget; it was
-    -- dropped deliberately (Krathe, 2026-08-08 — "somewhat useless info on a raid frame").
-    -- A DND unit now shows nothing. Re-adding it means a second cache state AND its own
-    -- art: sharing the clock is what made DND indistinguishable from AFK in the first place.
+    -- ⚠ AFK ONLY: DND is deliberately not shown ("somewhat useless info on a raid frame").
+    -- Re-adding it needs a second cache state AND its own art; sharing the clock makes DND
+    -- indistinguishable from AFK.
     -- Check AFK status (secret-safe), keyed by GUID so the timer survives transient nil
     -- returns (cross-realm latency, instance loading).
-    -- ☠ TEST FRAMES GET THEIR OWN CACHE LANE. Pooled test frames carry REAL unit
-    -- tokens ("player", "party1", "raid1"...), so GetAFKKey resolves REAL GUIDs for
-    -- them -- and the preview's forced isAFK stamped genuine group members' keys
-    -- into afkStateCache/afkStartTimes, restarting their live AFK clocks. (An
-    -- earlier claim that GetAFKKey "falls back to the unit token" for test frames
-    -- was wrong: it only falls back when the GUID is secret or inaccessible, which
-    -- a real token's is not.) Same pathway, different KEY -- the preview still runs
+    -- ☠ TEST FRAMES GET THEIR OWN CACHE LANE. Pooled test frames carry REAL unit tokens
+    -- ("player", "party1", "raid1"...), so GetAFKKey resolves REAL GUIDs for them (it only
+    -- falls back to the token when the GUID is secret or inaccessible), and the preview's
+    -- forced isAFK would stamp genuine group members' keys into afkStateCache/afkStartTimes,
+    -- restarting their live AFK clocks. Same pathway, different KEY -- the preview still runs
     -- this live renderer, per the previews-run-live rule.
     local afkKey = frame.dfIsTestFrame and ("test:" .. unit) or GetAFKKey(unit)
     local isAFK = nil
@@ -1209,7 +1200,7 @@ function DF:UpdateAllCombatGatedIcons()
     -- its icons hidden until something unrelated refreshed it, which for a quiet unit is
     -- never. A boss frame makes it near-certain: its own UNIT_FACTION handler calls
     -- FullFrameRefresh. ⇒ the EXIT half is the one that goes missing, every time.
-    -- ⚠ The pinned walker takes a bare callback and is called with a DOT. (Audit 2026-08-17.)
+    -- ⚠ The pinned walker takes a bare callback and is called with a DOT.
     if DF.IteratePinnedFrames then DF.IteratePinnedFrames(regate) end
 end
 

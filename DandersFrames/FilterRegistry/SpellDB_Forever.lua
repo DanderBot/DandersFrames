@@ -5,8 +5,7 @@ local addonName, DF = ...
 -- Built by _Reference/tools/forever_spelldb.py from Blizzard's client tables
 -- (wago.tools DB2, build 1.60.1.70205). Each record lists EVERY rank: vanilla-era
 -- spells change spell id per rank, and aura matching is by exact id.
--- Categories: retail SpellDB's category for the same class+name, else
--- EllesmereUI's; raid buffs fold their group version (Prayer of / Greater
+-- Categories: retail SpellDB's category for the same class+name; raid buffs fold their group version (Prayer of / Greater
 -- Blessing of / Gift of) into the single buff. Regenerate, don't edit.
 -- SpellDB.lua reads R.ForeverSpells / R.ForeverStamp through its
 -- `DF.IS_FOREVER and (...)` prefixes; this file loads first and is a no-op on retail.

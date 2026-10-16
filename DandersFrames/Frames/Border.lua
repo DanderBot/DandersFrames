@@ -69,37 +69,25 @@ function Border:New(parent, opts)
     -- replaces it with two SetPoint calls translated by the offset).
     border.anchorTo = opts.anchorTo or parent
     border:SetAllPoints(border.anchorTo)
-    -- DEFAULT +2. Sized for a LEAF parent — an aura button, a badge, an icon — whose own
-    -- content is regions (textures/fontstrings) rather than child frames. At parent+2 the
-    -- border clears the parent's regions and a cooldown swipe, and stays inside the tight
-    -- band the aura rows budget for it (Factory.ALERT_ROW_LIFT is measured against this
-    -- number — re-measure it if this moves).
+    -- DEFAULT +2. Sized for a LEAF parent -- an aura button, a badge, an icon -- whose own content
+    -- is regions (textures/fontstrings) rather than child frames. At parent+2 the border clears
+    -- the parent's regions and a cooldown swipe, and stays inside the tight band the aura rows
+    -- budget for it (Factory.ALERT_ROW_LIFT is measured against this number -- re-measure it if
+    -- this moves).
     --
-    -- ☠ THIS DEFAULT IS WRONG FOR A FRAME THAT STACKS CHILD FRAMES OVER ITS OWN RECT, and
-    -- such a parent MUST pass frameLevelOffset explicitly. The comment that used to sit here
-    -- claimed "+2 clears both" because it reasoned about regions on the parent and about
-    -- SIBLING frames, and never considered a CHILD frame covering the same rect. A unit
-    -- frame is exactly that: healthBar is a child at frame+3 with SetAllPoints and
-    -- framePadding defaulting to 0, so it covers the whole rect and buries a border at +2 —
-    -- completely at 100% health, half of it at 50%. Shipped that way briefly in alpha 15;
-    -- caught in review, never released. The measured unit-frame stack (/df debug zorder,
-    -- 2026-08-14) is health +3, heal-absorb +8, heal prediction +10, absorb +11,
-    -- overflow +11, overshield host +13, power +20, contentOverlay +25 — hence the
-    -- explicit +14 those consumers now pass, the free slot between the bars and the
-    -- resource/text/icon layer.
-    -- ⚠ This paragraph drifted once already: it said "+12 / +13" from when the prediction
-    -- still sat ABOVE the absorb, and stayed that way after the band was rebuilt and the
-    -- offset became 14. A band description is only worth having if it is re-measured with
-    -- the band — read /df debug zorder before trusting the list.
-    -- ☠ THAT NUMBER WAS +10, AND IT WENT STALE UNDER A GROWING BAND. It was right while
-    -- the band ended at absorb +7 / heal-absorb +8; the 2026-08-13 z-order convergence
-    -- lifted absorb to +11 and prediction to +12 without moving the frame border, so both
-    -- drew OVER it until 2026-08-14. A consumer's offset is a claim about its PARENT'S
-    -- CHILDREN, and it expires when they move.
+    -- ☠ THIS DEFAULT IS WRONG FOR A FRAME THAT STACKS CHILD FRAMES OVER ITS OWN RECT, and such a
+    -- parent MUST pass frameLevelOffset explicitly. A unit frame is exactly that: healthBar is a
+    -- child at frame+3 with SetAllPoints and framePadding defaulting to 0, so it covers the
+    -- whole rect and would bury a border at +2. The measured unit-frame stack (/df debug zorder)
+    -- is health +3, heal-absorb +8, heal prediction +10, absorb +11, overflow +11, overshield
+    -- host +13, power +20, contentOverlay +25 -- hence the explicit +14 those consumers pass,
+    -- the free slot between the bars and the resource/text/icon layer. A consumer's offset is a
+    -- claim about its PARENT'S CHILDREN and expires when they move: re-read /df debug zorder
+    -- before trusting the list.
     --
-    -- ⚠ The rule, for anyone adding a consumer: read the PARENT's children, not its regions,
-    -- and not its siblings. If any child covers the parent's rect, this default will hide
-    -- your border and nothing will error.
+    -- ⚠ The rule, for anyone adding a consumer: read the PARENT's children, not its regions, and
+    -- not its siblings. If any child covers the parent's rect, this default will hide your
+    -- border and nothing will error.
     border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 2))
 
     local layer = opts.layer or "BORDER"
@@ -192,7 +180,7 @@ end
 local ANIM_GOLD  = { r = 0.95, g = 0.95, b = 0.32, a = 1 }
 local ANIM_WHITE = { r = 1, g = 1, b = 1, a = 1 }
 
--- ★★ THE EFFECT'S BLEND MODE, A SETTING RATHER THAN A CONSTANT (2026-09-10).
+-- ★★ THE EFFECT'S BLEND MODE, A SETTING RATHER THAN A CONSTANT.
 --
 -- ☠ THE BUG THIS ANSWERS. Krathe: "if I've set it to red it will show orange when over a
 -- yellow border." DF Chase's sparkles were created with a hardcoded SetBlendMode("ADD"), and
@@ -200,8 +188,8 @@ local ANIM_WHITE = { r = 1, g = 1, b = 1, a = 1 }
 -- over the dark icon in the corner of his frame and turned orange the moment it crossed the
 -- yellow border. Working exactly as written, and not what a colour picker promises.
 --
--- ☠☠ AND IT WAS INCONSISTENT, WHICH IS THE REAL FAULT. When c4b4e5eb replaced LibCustomGlow
--- with our own effects, each one had a blend mode chosen by hand: DF_ORBIT and DF_PROC got
+-- ☠☠ AND IT WAS INCONSISTENT, WHICH IS THE REAL FAULT. Each DF effect had a blend mode
+-- chosen by hand: DF_ORBIT and DF_PROC got
 -- ADD, and the other three got none at all, which is BLEND. Same colour picker, two different
 -- meanings depending on which effect you happened to pick, and nothing anywhere saying so.
 --
@@ -237,27 +225,23 @@ local function readColor(color)
            color[4] or color.a or 1
 end
 
--- Build a ready-to-Apply spec from a dbTable using the canonical key naming
--- mirror of CreateBorderControls: prefix .. "BorderSize" / "BorderStyle" /
--- "BorderGradientStartColor" etc. Each consumer's Apply call site collapses
--- to `DF.Border:Apply(border, DF.Border:BuildSpec(db, prefix))` (with optional
--- post-hoc overrides like a locally pixel-perfected size). Missing keys fall
--- back to sensible defaults — same defaults the Config blocks would seed.
+-- Build a ready-to-Apply spec from a dbTable using the canonical key naming mirror of
+-- CreateBorderControls: prefix .. "BorderSize" / "BorderStyle" / "BorderGradientStartColor"
+-- etc. Each consumer's Apply call site collapses to
+-- `DF.Border:Apply(border, DF.Border:BuildSpec(db, prefix))` (with optional post-hoc
+-- overrides like a locally pixel-perfected size). Missing keys fall back to sensible
+-- defaults -- the same defaults the Config blocks seed.
 --
--- ctx (optional, Stage 2): { unit, auraInstanceID, remaining, totalDuration,
--- timeMode = "SECONDS"|"PERCENT", timeCurve, roleColors }. When a colour-
--- resolver toggle is enabled in db (`UseClassColor` / `UseRoleColor` /
--- `ColorByTime` / `ColorByType`), BuildSpec resolves the colour via the
--- matching Border:Resolve* helper. Priority order (most specific wins):
---   type > time > class > role > static spec.color
--- Resolvers silently fall through when their required ctx is missing, so a
--- consumer that only knows the unit can still flip on classColor without
--- worrying about time/type ctx.
--- Memoised db-key strings, per prefix. BuildSpec calls k() 37 times and each call
--- used to concatenate a fresh string -- 37 allocations per BuildSpec, on a function
--- that shows up in both the steady-state traces (2.7% of a boss run) and the rebuild
--- traces (2.6%). The prefix set is tiny and fixed, and prefix .. suffix is
--- deterministic, so the built keys are cached and reused forever.
+-- ctx (optional): { unit, auraInstanceID, remaining, totalDuration,
+-- timeMode = "SECONDS"|"PERCENT", timeCurve, roleColors }. When a colour-resolver toggle is
+-- enabled in db (`UseClassColor` / `UseRoleColor` / `ColorByTime` / `ColorByType`),
+-- BuildSpec resolves the colour via the matching Border:Resolve* helper. Priority order
+-- (most specific wins): type > time > class > role > static spec.color. Resolvers silently
+-- fall through when their required ctx is missing, so a consumer that only knows the unit
+-- can still flip on classColor.
+-- Memoised db-key strings, per prefix: BuildSpec calls k() 37 times, it shows up in both the
+-- steady-state and the rebuild traces, and the prefix set is tiny and fixed, so the built
+-- keys are cached and reused rather than concatenated per call.
 local borderKeyMemo = {}
 
 -- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call --
@@ -523,70 +507,54 @@ function Border:ResolveTimeColor(curve, remaining, totalDuration, mode, fallback
     return fr, fg, fb, fa
 end
 
--- Dispel-type colour for a debuff, via C_UnitAuras.GetAuraDispelTypeColor.
--- Lazy-builds `DF.debuffBorderCurve` from C_CurveUtil if it isn't already
--- present. DF:GetDispelColorCurve is the ONLY builder of that curve;
--- Features/Dispel.lua only invalidates it (DF:InvalidateDispelColorCurve).
--- Account-wide dispel-type colour curve, built from DF.db.dispelColors (edited on
--- the Colors page; seeded from the old debuff-border palette). Per the API doc,
--- GetAuraDispelTypeColor "remaps the dispel type to a colour via a curve, with the
--- dispel type ID used as the 'x' value" — so the curve's X positions ARE the
--- Enum.AuraDispelType values. Feature-detected: returns nil (caller keeps the
--- game/native colour) when C_CurveUtil / the enum is absent. Cached on
--- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
+-- Dispel-type colour for a debuff, via C_UnitAuras.GetAuraDispelTypeColor. Lazy-builds
+-- `DF.debuffBorderCurve` from C_CurveUtil if it isn't already present. DF:GetDispelColorCurve
+-- is the ONLY builder of that curve; Features/Dispel.lua only invalidates it
+-- (DF:InvalidateDispelColorCurve).
+-- Account-wide dispel-type colour curve, built from DF.db.dispelColors (edited on the Colors
+-- page). Per the API doc, GetAuraDispelTypeColor "remaps the dispel type to a colour via a
+-- curve, with the dispel type ID used as the 'x' value" -- so the curve's X positions ARE the
+-- Enum.AuraDispelType values. Feature-detected: returns nil (caller keeps the game/native
+-- colour) when C_CurveUtil / the enum is absent. Cached on DF.debuffBorderCurve;
+-- DF:InvalidateDispelColorCurve() nils it on any change.
 -- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df debug dispelids).
--- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
--- auraData.dispelName ("Magic"/"Curse"/... ; live 69382 keys `dispelName or "None"`,
--- and map[""] is kept as a belt-and-braces alias of None) straight into this table
--- private-side. NO enum IDs involved (unlike the curve form, whose X axis is the
--- Enum.AuraDispelType values). Values are ColorMixin objects (their code calls
+-- Name-keyed colour map for customDispelColorMap: Blizzard indexes auraData.dispelName
+-- ("Magic"/"Curse"/... ; keyed `dispelName or "None"`, with map[""] kept as an alias of None)
+-- straight into this table private-side. NO enum IDs involved (unlike the curve, whose X
+-- axis is the Enum.AuraDispelType values). Values are ColorMixin objects (their code calls
 -- color:GetRGBA()). Cached; invalidated with the curve by DF:InvalidateDispelColorCurve().
--- ☠ FALLBACK, not primary — this comment used to call the map "the primary
--- custom-colour carrier for both the overlay and the debuff-icon ring", and that framing
--- hid a real bug: the private-side index is a RAW TABLE LOOKUP, so a SECRET dispelName
--- matches no key and the colour apply no-ops, leaving the style step's white base coat
--- (the "dispel overlay goes white in dungeons" field report, 2026-08-19). The
--- SECRET-SAFE tint is the curve — resolved C-side by auraInstanceID — and both bind
--- sites (the overlay in Features/Dispel.lua, the row ring in Frames/AuraContainer.lua)
--- pass both, the curve winning when present.
--- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
--- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
--- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.
--- This is what every default, the Colors-page "Reset", and each fallback resolve to, so an
--- untouched palette is byte-identical to the game's own dispel colours. None/Physical is
--- kept only for the map's "" fallback (never user-editable — the border is hidden on
--- no-dispel-type auras and the overlay never fires on them).
--- SHARED dispel-texture style resolver (the debuff-icon ring + every overlay carrier
--- resolve through this one function — never a local copy).
--- DF names its two styles the way the ORIGINAL 12.1 enum did:
+-- ☠ THE MAP IS THE FALLBACK, NOT THE PRIMARY: its private-side index is a RAW TABLE LOOKUP,
+-- so a SECRET dispelName matches no key and the colour apply no-ops, leaving the style
+-- step's white base coat. The SECRET-SAFE tint is the curve, resolved C-side by
+-- auraInstanceID; both bind sites (the overlay in Features/Dispel.lua, the row ring in
+-- Frames/AuraContainer.lua) pass both, the curve winning when present.
+-- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor (the
+-- exact colours the game paints), cached, with a per-type fallback to DF.DispelDefaultColors
+-- (which mirror the classic DebuffTypeColor values) if the API is missing or returns nil.
+-- Every default, the Colors-page "Reset" and each fallback resolve to this, so an untouched
+-- palette is byte-identical to the game's own dispel colours. None/Physical is kept only for
+-- the map's "" fallback (never user-editable -- the border is hidden on no-dispel-type auras
+-- and the overlay never fires on them).
+-- SHARED dispel-texture style resolver (the debuff-icon ring + every overlay carrier resolve
+-- through this one function -- never a local copy).
+-- DF names its two styles:
 --   "Color" = keep OUR asset, recolour it by dispel type  (gradient / ring / strips)
 --   "Atlas" = draw Blizzard's own dispel-type border art
--- ★ 68914 renamed AND renumbered the enum: CustomAuraButtonBorderStyle{Atlas=0,Color=1}
--- became CustomAuraButtonDispelTypeTextureStyle{Border=0,BorderWithIcon=1,Icon=2,
--- PreserveAsset=3,CustomAsset=4}. Blizzard's own shim (Blizzard_Deprecated/
--- Deprecated_12_1_0.lua) maps Atlas->BorderWithIcon and Color->PreserveAsset, and is
--- flagged for removal — so resolve against the CURRENT enum first and keep the shim
--- only as a pre-68914 fallback. The old numeric fallbacks were the real hazard: `1`
--- now means BorderWithIcon (Blizzard's art WITH a badge, drawn over our gradient) and
--- `0` means Border — either would silently replace our own art, so the last-resort
--- literals below are the NEW values, not the old ones.
--- ★ Atlas maps to Border, NOT to the shim's BorderWithIcon: the shim mirrors the OLD
--- default (showIcon defaulted true), but both DF bind sites pass showIcon = false, so
--- the faithful equivalent of DF's "Atlas" is the badge-LESS variant. `showIcon` no
--- longer exists on 68914's options, so the style is the only place that intent can
--- live. Use "BorderWithIcon" here if a corner dispel badge is ever wanted.
--- ★ `Icon` below is that "if": it lets a carrier ask Blizzard for the dispel-type
--- ART rather than just its colour, which is what lets one badge on the dispel
--- overlay's slot agree with the overlay by construction -- same aura, Blizzard picks
--- both -- instead of us guessing a type we cannot read.
+-- ★ They resolve against CustomAuraButtonDispelTypeTextureStyle{Border=0,BorderWithIcon=1,
+-- Icon=2,PreserveAsset=3,CustomAsset=4} BY NAME, never by literal: Color -> PreserveAsset,
+-- Atlas -> Border. A hardcoded number from the older enum (Atlas=0, Color=1) would silently
+-- draw Blizzard's art over ours, so the last-resort literal table holds the current values
+-- and the old enum names are a fallback only.
+-- ★ Atlas maps to Border, NOT BorderWithIcon: both DF bind sites want the badge-LESS variant,
+-- and the style is the only place that intent can live. Use "BorderWithIcon" if a corner
+-- dispel badge is ever wanted.
+-- ★ `Icon` lets a carrier ask Blizzard for the dispel-type ART rather than just its colour, so
+-- one badge on the dispel overlay's slot agrees with the overlay by construction -- same
+-- aura, Blizzard picks both -- instead of us guessing a type we cannot read.
 --
--- The enum's other two art styles, BorderWithIcon and Border, are deliberately NOT
--- mapped: they are ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit
--- frame they render as a square box around the symbol (tried live 2026-08-03).
---
--- Resolved BY NAME, never by literal: the numbers were RENUMBERED for 68914, so any
--- hardcoded `style = 1` that used to mean "Color" now draws BorderWithIcon instead. The
--- literal table is a last resort for clients without the enum at all.
+-- BorderWithIcon and Border are deliberately NOT mapped beyond that: they are
+-- ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit frame they render as a
+-- square box around the symbol.
 local DISPEL_STYLE_NEW = {
     Color = "PreserveAsset", Atlas = "Border",
     Icon = "Icon",
@@ -697,7 +665,7 @@ end
 -- border -- the same data loss as doing nothing, pointed the other way.
 --
 -- Order per type: OVERLAY if customised -> BORDER if customised -> game palette.
--- Krathe's call (2026-08-06). The conflict case is narrow by construction -- it needs
+-- Krathe's call. The conflict case is narrow by construction -- it needs
 -- BOTH families customised to DIFFERENT colours -- and the overlay is the more visible
 -- element of the two, so it takes the tiebreak.
 --
@@ -712,16 +680,14 @@ DF.LegacyDispelDefaults = {   -- v4's shipped defaults; IDENTICAL across both fa
     Bleed   = { r = 1,   g = 0,   b = 0 },
 }
 
--- Deliberately loose (1e-3): a colour-picker round-trip can perturb the low bits, and a
--- user who nudged a slider and put it back should read as untouched. A false "untouched"
--- costs nothing here -- it falls through to the other family or the game palette, which
--- for an at-default value is the same colour either way.
--- ☠ ALL THREE CHANNELS ARE TYPE-CHECKED, not just r. This used to guard `c.r` alone and
--- then read c.g and c.b in the `or` chain below, so a partial table -- {r = <default>},
--- which reaches the second term because the first compares equal -- threw "attempt to
--- perform arithmetic on a nil value". That throw lands inside ADDON_LOADED, which aborts
--- the rest of the migration chain for that login and leaves a half-migrated profile with
--- no recovery path. Guarding the one field you happen to read first is not a guard.
+-- Deliberately loose (1e-3): a colour-picker round-trip can perturb the low bits, and a user
+-- who nudged a slider and put it back should read as untouched. A false "untouched" costs
+-- nothing here -- it falls through to the other family or the game palette, which for an
+-- at-default value is the same colour either way.
+-- ☠ ALL THREE CHANNELS ARE TYPE-CHECKED, not just r: a partial table ({r = <default>}) reaches
+-- the second term because the first compares equal, and reading c.g/c.b would throw inside
+-- ADDON_LOADED -- aborting the rest of the migration chain for that login and leaving a
+-- half-migrated profile with no recovery path.
 local function dispelColorCustomised(c, def)
     if type(c) ~= "table" then return false end
     if type(c.r) ~= "number" or type(c.g) ~= "number" or type(c.b) ~= "number" then
@@ -849,8 +815,7 @@ function DF:FindDispelTypeEnum()
     -- live 69382 by /df debug dispelids ("no Enum table with Magic/Curse/Disease/Poison
     -- found", "curve built: no") while GetAuraDispelTypeColor reported PRESENT. So the
     -- dispel overlay kept falling back to customDispelColorMap and kept rendering white on
-    -- secret dispel names — the fix in 81122cb1 was a no-op for exactly this reason
-    -- (Krathe, 2026-08-19).
+    -- secret dispel names — the fix in 81122cb1 was a no-op for exactly this reason.
     --
     -- These are the SpellDispelType DB2 ids, i.e. game data rather than anyone's
     -- invention, and they are the same values another 12.1 unit-frame addon hardcodes for
@@ -881,7 +846,7 @@ function DF:GetDispelColorCurve()
     -- (Magic/Curse/Disease/Poison/Bleed). The moment it exists it SHADOWED the complete
     -- game palette wholesale, so `colors.None` was nil and the loop below skipped the
     -- point at index 0 entirely. Verified against a live profile carrying exactly those
-    -- five keys (2026-08-20).
+    -- five keys.
     --
     -- ☠☠ WHY A HOLE AT 0 MATTERS MORE THAN IT LOOKS: the engine lets the curve
     -- UNCONDITIONALLY OVERRIDE the colour map --
@@ -1037,23 +1002,20 @@ local function ensureSharedAnimDriver()
             if border._secretRect or border:IsShown() then
                 e.elapsed = e.elapsed + dt
                 if border._secretRect then
-                    -- ☠ A secretRect border's edge textures are DESCENDANTS of a Blizzard
-                    -- aura button, which refuses tainted writes while auras are secret
-                    -- (DenyTaintedAccessWhenAurasAreSecret, descendants included since
-                    -- 12.1.0.69382). A tick that writes into a refused subtree throws
-                    -- EVERY FRAME, in exactly the content these borders exist for -- which
-                    -- is why container animation was retired wholesale rather than guarded.
+                    -- ☠ A secretRect border's edge textures are DESCENDANTS of a Blizzard aura button, which
+                    -- refuses tainted writes while auras are secret (DenyTaintedAccessWhenAurasAreSecret,
+                    -- descendants included), so a tick writing into a refused subtree would throw EVERY FRAME in
+                    -- exactly the content these borders exist for.
                     --
-                    -- Guard rather than forbid: probe under pcall and DROP the border on the
-                    -- first refusal, so the cost of being wrong is one error and a stopped
-                    -- effect instead of a per-frame flood. Nothing re-arms it here; the next
-                    -- Apply does, via StartAnimation's dead-driver recovery (a DRIVER_ANIMS
-                    -- type whose registry entry has gone re-registers even though the spec
-                    -- hash is unchanged). So leaving an instance and restyling restores it.
+                    -- Guard rather than forbid: probe under pcall and DROP the border on the first refusal, so
+                    -- the cost of being wrong is one error and a stopped effect instead of a per-frame flood.
+                    -- Nothing re-arms it here; the next Apply does, via StartAnimation's dead-driver recovery (a
+                    -- DRIVER_ANIMS type whose registry entry has gone re-registers even though the spec hash is
+                    -- unchanged), so leaving an instance and restyling restores it.
                     --
-                    -- ⚠ Deliberately NOT gated on CanBeAccessedInContext(): that answers for
-                    -- the object it is called on, and what we need to know is whether a WRITE
-                    -- to this border's own regions lands. Only the write answers that.
+                    -- ⚠ Deliberately NOT gated on CanBeAccessedInContext(): that answers for the object it is
+                    -- called on, and what we need to know is whether a WRITE to this border's own regions lands.
+                    -- Only the write answers that.
                     if not pcall(e.fn, border, e.elapsed, dt) then
                         unregisterAnimTick(border)
                         if not warnedTickRefused then
@@ -1234,17 +1196,15 @@ function ensureAnimRect(border, inset, offsetX, offsetY)
 end
 
 -- ===== DF_ORBIT (orbiting sparkles — DF-owned AutoCastGlow stand-in) =====
--- A faithful reimplementation of LibCustomGlow's AutoCastGlow: N*4 shine
--- sparkles in four size layers orbit the border perimeter at four staggered
--- speeds, producing the shimmering "autocast" trail. It uses the SAME Blizzard
--- shine texture LCG does (a plain game asset, not a library-owned one), so the
--- look matches — but it runs on OUR shared OnUpdate driver off our own
--- textures parented to the animRect, so unlike the LCG glow it is taint-safe on
+-- An autocast-style glow: N*4 shine sparkles in four size layers orbit the border
+-- perimeter at four staggered speeds, producing the shimmering "autocast" trail, using a
+-- plain Blizzard shine texture. It runs on OUR shared OnUpdate driver off our own
+-- textures parented to the animRect, so it is taint-safe on
 -- 12.1 aura container buttons (it never SetParents onto the native button, and
 -- reads _knownW/_knownH so it never measures a secret rect).
 local ORBIT_SHINE_TEX   = [[Interface\Artifacts\Artifacts]]
 local ORBIT_SHINE_COORD = { 0.8115234375, 0.9169921875, 0.8798828125, 0.9853515625 }
-local ORBIT_LAYER_SIZES = { 7, 6, 5, 4 }   -- four layers, outer→inner (LCG parity)
+local ORBIT_LAYER_SIZES = { 7, 6, 5, 4 }   -- four layers, outer→inner
 -- Seconds for one full orbit at Frequency 1 (the effect's natural resting pace).
 -- Frequency scales this: freq 2 = twice as fast, freq 0.5 = half. The motion is
 -- size-independent (advances in perimeter fractions), so this reads the same on a
@@ -1325,7 +1285,7 @@ local function setupOrbitParticles(border, anim)
 end
 
 -- Position every sparkle around the perimeter; four layers advance at staggered
--- speeds (period*k) for the shimmer. Mirrors LCG acUpdate. Reads _knownW/_knownH
+-- speeds (period*k) for the shimmer. Reads _knownW/_knownH
 -- first so it never measures (and taints) a secret container-button rect.
 local function orbitTick(border, anim, dt)
     local host = border._orbitHost; if not host then return end
@@ -1603,8 +1563,7 @@ end
 
 -- A looping flipbook over a grid, the native equivalent of the hand-stepped
 -- SetTexCoord walks in DF Proc and DF Flash. frameW/frameH of 0 means "derive from the
--- texture's own rect", which is what makes it work on an ATLAS sub-rect — the recipe
--- LibCustomGlow uses on these very same Blizzard sheets.
+-- texture's own rect", which is what makes it work on an ATLAS sub-rect.
 local function playFlipBook(region, rows, cols, frames, frameW, frameH, duration, groups)
     local ag = region:CreateAnimationGroup()
     ag:SetLooping("REPEAT")
@@ -2069,7 +2028,7 @@ local function setupProcGlow(border, anim)
     -- strong colour over gold goes muddy).
     local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
-    -- LCG-style hand-off: the LOOP fills the icon, while the intro BURST is a
+    -- Hand-off: the LOOP fills the icon, while the intro BURST is a
     -- larger, CENTERED texture whose flipbook art contracts down onto the loop by
     -- its final frame — so playing the burst fully then swapping to the loop reads
     -- as one smooth motion (no cross-fade). Alpha-only visibility (never IsShown —
@@ -2112,7 +2071,7 @@ local function procTick(border, anim, dt)
     local t = border.procTex; if not t then return end
     local s = border.procStartTex
     local host = border._procHost
-    -- Apply LCG geometry once w is known: the loop spills PROC_LOOP_SPILL beyond the
+    -- Apply the geometry once w is known: the loop spills PROC_LOOP_SPILL beyond the
     -- icon (a border glow, not icon-fill), and the burst is PROC_BURST_SCALE× centered
     -- so its art contracts onto the loop. _knownW first — never read the secret rect.
     local w = border._knownW or (host and host:GetWidth())
@@ -2127,19 +2086,13 @@ local function procTick(border, anim, dt)
     if host and w and w > 0 and h and h > 0
         and (border._procGeomW ~= w or border._procGeomH ~= h) then
         border._procGeomW, border._procGeomH = w, h
-        -- ☠ SPILL AND BURST ARE PER-AXIS, and both used to come from WIDTH alone.
-        -- That is invisible on a square aura icon — where this effect grew up — and
-        -- wrong on anything else: on a wide unit-frame border a width-derived vertical
-        -- spill made the glow several times the frame's height, and a square burst
-        -- ignored the frame's shape completely. Deriving each axis from its own
-        -- dimension keeps the glow the same shape as the thing it is glowing around,
-        -- and is a no-op wherever w == h.
-        -- ★ SCALE multiplies the reach. The band's midline lands on the frame edge at
-        -- scale 1; there is no exact "on the border" beyond that, because the bright
-        -- band is a soft gradient baked into the art — so the residual is a knob, not a
-        -- constant. At scale 1 the loop rect is identical to the pre-slider render; the
-        -- burst is within 2px of it (it now sizes off the ROUNDED loop, which lands the
-        -- contract-onto-loop hand-off on our actual rect rather than the ideal one).
+        -- ☠ SPILL AND BURST ARE PER-AXIS: each derives from its own dimension, so the glow keeps the
+        -- shape of the thing it glows around (a width-derived vertical spill would make a wide
+        -- unit-frame glow several times the frame's height). A no-op wherever w == h.
+        -- ★ SCALE multiplies the reach. The band's midline lands on the frame edge at scale 1; there
+        -- is no exact "on the border" beyond that, because the bright band is a soft gradient baked
+        -- into the art, so the residual is a knob, not a constant. The burst sizes off the ROUNDED
+        -- loop, which lands the contract-onto-loop hand-off on our actual rect.
         local sc = anim.scale or 1
         local offX = floor(w * PROC_LOOP_SPILL * sc + 0.5)
         local offY = floor(h * PROC_LOOP_SPILL * sc + 0.5)
@@ -2173,8 +2126,8 @@ end
 --
 -- ★ SetAtlas, NOT SetTexture(info.file). A FlipBook with frame width/height 0 derives
 -- its grid from the region's own texture rect, which is what confines the walk to the
--- atlas sub-rect instead of the whole sheet. This is LibCustomGlow's recipe on these
--- exact Blizzard atlases, and it is why the manual texcoord maths is not needed here.
+-- atlas sub-rect instead of the whole sheet, which is why the manual texcoord maths is
+-- not needed here.
 --
 -- The intro burst is a second, NON-looping group: flipbook once, then alpha to 0, with
 -- SetToFinalAlpha so it stays gone. The loop's own fade-in is delayed by the intro
@@ -2289,15 +2242,11 @@ local function setupFlashGlow(border, anim)
     -- other colour desaturates first so the tint reads clean.
     local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
-    -- ⚠ COLOUR PROCESSING IS THE SHIPPED BEHAVIOUR, ON PURPOSE, for the A/B baseline.
-    -- Two attempts to make gold-ish colours render the native art (a stock-gold
-    -- special case, then a warm-hue rule) were both REVERTED at Krathe's call — the
-    -- warm-rule tint read as off-colour in the field, and the honest measurement
-    -- (128x256 IconAlert pulled from the client; band/inner contrast 1.10 tinted vs
-    -- 1.04 desaturated) showed the gain was marginal anyway. So: white renders the
-    -- native art, everything else desaturates and tints, exactly as before
-    -- 2026-08-27. Re-judge side by side against the real thing before touching this
-    -- again — LCG passes no colour at all on its default path.
+    -- ⚠ COLOUR PROCESSING: white renders the native art, everything else desaturates and tints.
+    -- Special-casing gold-ish colours to the native art read as off-colour in the field, and the
+    -- measured gain was marginal (band/inner contrast 1.10 tinted vs 1.04 desaturated on the
+    -- 128x256 IconAlert sheet). Re-judge side by side against the real thing before touching
+    -- this.
     local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
     local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
     local innerOver = flashSheetTexture(border, "flashInnerOver", "ARTWORK",    1, FLASH_UV_GLOWOVER)
@@ -2333,13 +2282,9 @@ local function setupFlashGlow(border, anim)
     ants:SetAlpha(showIntro and 0 or a)
     border._flashTimer = border._flashTimer or 0
     local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or nil
-    -- ⚠ FREQUENCY IS NOT COMPARABLE TO LCG's. Ours is cycles: period = 1/freq (freq 1 =
-    -- one 22-frame lap per second). LCG's is a throttle divisor: frame time
-    -- 0.25/freq*0.01 → a full lap in 0.055/freq seconds — at "the same" freq 1 LCG
-    -- marches ~18x faster, and its no-freq default (0.01s/frame = 0.22s lap) is still
-    -- 2.3x our 0.5 default. Field-confirmed 2026-08-27 ("LCG is much faster at the same
-    -- freq"). Left at the shipped mapping for the A/B baseline; if DF Flash is retuned
-    -- to match, this mapping — not just the default — is what has to move.
+    -- ⚠ FREQUENCY IS IN CYCLES: period = 1/freq (freq 1 = one 22-frame lap per second). A
+    -- throttle-divisor convention would march much faster at "the same" number; if DF Flash is
+    -- retuned to match one, this mapping -- not just the default -- is what has to move.
     border._flashPeriod = freq and (1 / freq) or 0.5   -- ants march speed (classic = brisk)
 end
 
@@ -2359,10 +2304,9 @@ local function flashTick(border, anim, dt)
     -- Inset entirely on container icons. (The non-secret fallback host:GetWidth()
     -- is already inset-adjusted.)
     if w and border._knownW then w = w - 2 * (anim.inset or 0) end
-    -- ☠ PER-AXIS, same correction as DF Proc: F used to be a single width-derived
-    -- number and every layer was sized (F, F), so on a wide unit-frame border the glow
-    -- was a big square that ignored the frame's shape. No-op wherever w == h, which is
-    -- every aura icon — the surface this effect was built for.
+    -- ☠ PER-AXIS, same as DF Proc: each layer sizes off its own dimension, so on a wide
+    -- unit-frame border the glow follows the frame's shape. No-op wherever w == h, which is
+    -- every aura icon.
     local h = border._knownH or (host and host:GetHeight())
     if h and border._knownH then h = h - 2 * (anim.inset or 0) end
     local Fw, Fh = border._flashFw, border._flashFh
@@ -2473,17 +2417,14 @@ end
 
 -- DF_FLASH, DECLARATIVE.
 --
--- ☠ THE INTRO IS SIMPLIFIED HERE, DELIBERATELY, AND THIS IS THE ONE EFFECT THAT IS NOT
--- A FAITHFUL PORT. The tick's intro is a SIZE choreography — the outer glow collapses
--- 2F->F while the inner expands F/2->F under a spark that grows and shrinks. Expressing
--- that declaratively needs Scale animations, and Scale was built and tried on a
--- container button child in August and did NOTHING while Alpha worked (pandemic FLASH,
--- 2026-08-05). Shipping a size timeline that might silently not run would leave the
--- outer glow parked at 2F and read as broken, so the sizes are set to their STEADY
--- values at build time and the intro is played in alpha alone: the glows fade up, the
--- spark peaks and goes, the ants crawl in behind it. The steady state — an outer glow
--- at F under marching ants — is identical to the tick's, and that is what is on screen
--- for all but the first fraction of a second.
+-- ☠ THE INTRO IS SIMPLIFIED HERE, DELIBERATELY -- the one effect that is not a faithful port.
+-- The tick's intro is a SIZE choreography (the outer glow collapses 2F->F while the inner
+-- expands F/2->F under a spark that grows and shrinks), and expressing that declaratively
+-- needs Scale animations, which do not run on a container button child while Alpha does. A
+-- size timeline that silently does not run would park the outer glow at 2F, so the sizes are
+-- set to their STEADY values at build time and the intro plays in alpha alone: the glows fade
+-- up, the spark peaks and goes, the ants crawl in behind it. The steady state -- an outer glow
+-- at F under marching ants -- is identical to the tick's.
 -- ⚠ Re-test Scale on a later build; if it works, the size timeline can come back here.
 local function buildFlashAnims(border, anim)
     local outer, ants, host = border.flashOuter, border.flashAnts, border._flashHost
@@ -2544,41 +2485,35 @@ local function buildFlashAnims(border, anim)
     return true
 end
 
--- ===== MARCHING_ANTS (Blizzard's own widget, 12.1.5) =====
--- The one effect in this file DF does not draw. 12.1.5 added
--- Blizzard_SharedXML/MarchingAnts.lua — MarchingAntsTemplate plus the
--- MarchingAnts_* constructors — as a general-purpose reusable border. SharedXML
--- carries no UseSecureEnvironment, so it is ordinary addon-reachable UI code.
+-- ===== MARCHING_ANTS (Blizzard's own widget) =====
+-- The one effect in this file DF does not draw: Blizzard_SharedXML/MarchingAnts.lua --
+-- MarchingAntsTemplate plus the MarchingAnts_* constructors -- a general-purpose reusable
+-- border. SharedXML carries no UseSecureEnvironment, so it is ordinary addon-reachable UI
+-- code.
 --
 -- ★ WHY IT EARNS A SLOT NEXT TO DF_DASH, which is also marching ants:
---   · It is the DEFAULT UI's look. Blizzard drive their new raid-frame dispel
---     ants with it, so "match the game" is now a thing a user can reasonably
---     want and could not previously have.
---   · Its motion is four TextureCoordTranslations on wrap-addressed atlases —
---     the texture scrolls under a fixed quad. DF_DASH instead clips and
---     translates a POOL of dash textures. Different mechanism, different look
---     (a continuous crawl versus discrete dashes), and cheaper.
---   · It is declarative on EVERY host. Unlike our own effects there is no
---     driver twin to fall back to, so it renders identically on a container
---     button and on the AD canvas — no _secretRect branch, nothing to diverge.
+--   · It is the DEFAULT UI's look: Blizzard drive their raid-frame dispel ants with it, so
+--     "match the game" is a thing a user can reasonably want.
+--   · Its motion is four TextureCoordTranslations on wrap-addressed atlases -- the texture
+--     scrolls under a fixed quad. DF_DASH clips and translates a POOL of dash textures.
+--     Different mechanism, different look (a continuous crawl versus discrete dashes), and
+--     cheaper.
+--   · It is declarative on EVERY host. There is no driver twin to fall back to, so it renders
+--     identically on a container button and on the AD canvas -- no _secretRect branch.
 --
--- ☠ NEVER CALL SetInsetCorners / SetInsetLeft / SetInsetRight / SetInsetBottom.
--- They are BROKEN in the shipped 12.1.5 file: SetInsetsInternal takes
--- (container, element, elementKey, ...) and then assigns to a bare `self`, which
--- is a nil global there, and it calls AnchorElement with three arguments when
--- that function takes two. All four setters throw. There is no SetInsetTop at
--- all and the file is dotted with FIXME/TODO, so treat the whole family as
--- unfinished. The offsets are plain fields the mixin reads back off the frame
--- (elementSetupData -> container[keyOffsetP1X]), so we set them directly and let
--- SetupAssets do the anchoring — which is also what Blizzard's own dispel
--- template does, via KeyValues, presumably having hit exactly this.
+-- ☠ NEVER CALL SetInsetCorners / SetInsetLeft / SetInsetRight / SetInsetBottom. They are
+-- BROKEN in the shipped file: SetInsetsInternal takes (container, element, elementKey, ...)
+-- and then assigns to a bare `self` (a nil global there), and calls AnchorElement with three
+-- arguments when it takes two, so all four setters throw. There is no SetInsetTop at all and
+-- the file is dotted with FIXME/TODO. The offsets are plain fields the mixin reads back off
+-- the frame (elementSetupData -> container[keyOffsetP1X]), so we set them directly and let
+-- SetupAssets do the anchoring -- which is also what Blizzard's own dispel template does, via
+-- KeyValues.
 --
--- ⚠ SetupAssets and Play are called EXPLICITLY rather than left to the
--- template's OnLoad/OnShow. A frame parented under a native aura button inherits
--- forbidden aspects and is recorded as never getting scripts, so relying on
--- those handlers would leave the ants unbuilt and still exactly where a
--- capability check would report success. Both calls are idempotent, so doing
--- them ourselves costs nothing on hosts where the scripts do run.
+-- ⚠ SetupAssets and Play are called EXPLICITLY rather than left to the template's
+-- OnLoad/OnShow. A frame parented under a native aura button inherits forbidden aspects and is
+-- recorded as never getting scripts, so relying on those handlers would leave the ants
+-- unbuilt while a capability check reported success. Both calls are idempotent.
 local MARCH_SPEED = 1.25   -- Blizzard's own dispel-ant rate at Frequency 1.
 
 local function hideMarchingAnts(border)
@@ -2598,12 +2533,9 @@ local function buildMarchingAnts(border, anim)
         -- create-in-secure-context-or-never, like every other region here.
         local ok, made = pcall(MarchingAnts_CreateAsChildOf, host, "MarchingAntsTemplate", "dfAnts")
         if not ok or not made then
-            -- ☠ THIS USED TO RETURN SILENTLY, which is the silent-capability-skip
-            -- antipattern: the effect simply does not appear and nothing says why. The
-            -- first field report against this feature ("shows on the AD preview but not on
-            -- live frames") had a different cause — the SAFE_OVERLAY_ANIM allow-list — and
-            -- took a code read to find precisely because BOTH failure paths were quiet.
-            -- One-shot: a refused create will repeat on every button in the batch.
+            -- ☠ NEVER SILENT: a refused create warns, or the effect would simply not appear with nothing
+            -- saying why (the silent-capability-skip antipattern). One-shot: a refused create repeats on
+            -- every button in the batch.
             if not warnedAntsBuild then
                 warnedAntsBuild = true
                 if DF.DebugWarn then
@@ -2798,14 +2730,6 @@ local function applyCornersOnly(border, anim)
     paint(co.brv)
 end
 
--- (Removed 2026-07-16: Register/UnregisterExternalAnimTick — generic external
--- access to the shared anim driver, added for the AD expiry-alert element's
--- alpha animations. The element's region is a button child now, and PTR-5
--- forbids animating a forbidden button's subtree while auras are secret, so
--- the feature died with its only consumer. Re-add the thin wrappers around
--- registerAnimTick/unregisterAnimTick if a DF-owned off-button frame ever
--- needs the shared driver again.)
-
 -- Tear down every animator this border might be running: the shared driver tick,
 -- the declarative groups and the overlay / particle pools. Cheap: each teardown is
 -- a no-op when its textures never existed, as is the driver Hide with no driver.
@@ -2817,7 +2741,7 @@ function Border:StopAnimation(border)
     -- that never started an animation they are pure no-ops -- and on an aura
     -- CONTAINER border they are no-ops on a Blizzard aura button's descendants.
     -- Those buttons carry DenyTaintedAccessWhenAurasAreSecret; the 12.1.0.69382
-    -- client (2026-08-18) refuses tainted writes on their DESCENDANTS too, where
+    -- client refuses tainted writes on their DESCENDANTS too, where
     -- earlier builds refused only the button itself. Container borders have
     -- animation stripped unconditionally (AuraContainer's ANIMATION FILTER), so
     -- this reset was the one write _teardownContainer still made to a restricted
@@ -3034,9 +2958,8 @@ function Border:StartAnimation(border, spec)
 
     -- DF Orbit: DF-owned orbiting-sparkle effect (the AutoCastGlow stand-in).
     -- Runs on the shared driver off our own shine textures parented to the
-    -- animRect, so it works on 12.1 aura container buttons where the LCG Chase
-    -- glow can't (no SetParent onto the native button; _knownW/_knownH avoid
-    -- secret-rect reads).
+    -- animRect, so it works on 12.1 aura container buttons (no SetParent onto the
+    -- native button; _knownW/_knownH avoid secret-rect reads).
     if anim.type == "DF_ORBIT" then
         setupOrbitParticles(border, anim)
         -- ★ CONTAINER-HOSTED BORDERS TAKE THE DECLARATIVE PATH. Their textures sit under
@@ -3144,19 +3067,15 @@ function Border:StartAnimation(border, spec)
         return
     end
 
-    -- DF Pulsate: soft alpha fade pulse on the border's 4 edges.  Distinct
-    -- from the LCG-driven Pulsate (which surrounds the border with a
-    -- particle ring) — DF_PULSATE keeps the border itself visible and just
-    -- fades its opacity smoothly between 0.05 and 1.0.  Exposed as a
+    -- DF Pulsate: soft alpha fade pulse on the border's 4 edges. It keeps the
+    -- border itself visible and just fades its opacity smoothly between 0.05 and 1.0.  Exposed as a
     -- first-class animation type so it works as either a continuous Border
     -- Animation OR as the value the Expiring Animation dropdown swaps in
     -- below threshold.  Uses the shared anim driver; on
     -- StopAnimation the existing resetEdgeAlphas() restores the edges
     -- back to alpha 1 so the next render is clean.
     if anim.type == "DF_PULSATE" then
-        -- Frequency mapping is per-type.  LCG glow types interpret frequency
-        -- as cycles-per-second of a particle animation; that maps 1:1 to the
-        -- slider.  DF_PULSATE is a gentle alpha fade and reads better at
+        -- Frequency mapping is per-type. DF_PULSATE is a gentle alpha fade and reads better at
         -- ~half that rate, so we use period = 2 / freq.  Result:
         --   slider 0.5 → 4 s cycle (slow, ambient)
         --   slider 1.0 → 2 s cycle (matches the old AD legacy pulse rate)
@@ -3189,17 +3108,13 @@ function Border:StartAnimation(border, spec)
             local ph = ((border._dfPulsatePhase or 0) + dt / p) % 1
             border._dfPulsatePhase = ph
             local wave = (1 - math.cos(ph * 2 * math.pi)) * 0.5
-            -- Fade between 0.05 (dim trough) and 1.0 (full) — a gentle pulse.
+            -- Fade between 0.05 (dim trough) and 1.0 (full) -- a gentle pulse.
             --
-            -- ☠ DF_PULSATE is the one effect that drives the widget's OWN alpha every
-            -- frame, so it clobbers the out-of-range fade unless it folds it in itself.
-            -- This used to multiply by `border.dfRangeAlpha`, which NOTHING ever wrote --
-            -- the multiplier was permanently 1 and the OOR dim was simply overwritten.
-            --
-            -- It cannot be a number, because `inRange` may be SECRET: a secret boolean
-            -- can't be tested here, so `pulse * (inRange and 1 or oor)` is impossible in
-            -- Lua. DF:UpdateBorderAppearance instead stamps the secret plus a PLAIN
-            -- companion flag; test the flag, forward the secret, and let
+            -- ☠ DF_PULSATE is the one effect that drives the widget's OWN alpha every frame, so it would
+            -- clobber the out-of-range fade unless it folds it in itself. It cannot fold in a number,
+            -- because `inRange` may be SECRET: a secret boolean can't be tested here, so
+            -- `pulse * (inRange and 1 or oor)` is impossible in Lua. DF:UpdateBorderAppearance stamps the
+            -- secret plus a PLAIN companion flag; test the flag, forward the secret, and let
             -- SetAlphaFromBoolean pick between the two pre-multiplied values C-side.
             local pulse = 0.05 + 0.95 * wave
             local oor = border.dfOORAlpha

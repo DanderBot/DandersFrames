@@ -692,7 +692,7 @@ function UI:StyleButton(btn, opts)
     -- half that actually clears it.
     -- Reported on a standing frame a page
     -- SetShown()s per tab and per Party/Raid switch — hover it, switch mode, and it is
-    -- hidden before the mouse ever leaves (Krathe, 2026-08-09). Fixed here rather than
+    -- hidden before the mouse ever leaves. Fixed here rather than
     -- there: nothing about it is specific to that button, and several pooled/standing
     -- buttons in this addon are shown and hidden under a stationary mouse.
     -- ⚠ HookScript, not SetScript: OnHide is a script a CALLER may already own (unlike
@@ -1995,8 +1995,7 @@ end
 -- ------------------------------------------------------------
 -- A drag is a stream of values the user is still choosing between, ending in
 -- ONE value they chose. Those are different events and they get different
--- callbacks (the same split Cell draws between its onValueChangedFn and
--- afterValueChangedFn):
+-- callbacks:
 --
 --   opts.lightweight   PREVIEW. Runs only while the bar is being dragged, at
 --                      most once per rendered frame, and only when the snapped
@@ -2250,28 +2249,25 @@ function UI:CreateSlider(parent, opts)
     -- ============================================================
     -- QUANTIZE -- THE SEAM BETWEEN THE THUMB AND THE VALUE
     -- ------------------------------------------------------------
-    -- The bar no longer obeys its step while it is dragged (see the
-    -- construction above), so slider:GetValue() mid-drag is wherever the mouse
-    -- is, to the pixel. This is the ONE function that turns that back into a
-    -- value, and every read-out of the bar goes through it: the db write, the
-    -- value box, the drag bubble's text, the preview pump's changed-check, and
-    -- the settle on release.
+    -- The bar does not obey its step while it is dragged (see the construction above), so
+    -- slider:GetValue() mid-drag is wherever the mouse is, to the pixel. This is the ONE
+    -- function that turns that back into a value, and every read-out of the bar goes through
+    -- it: the db write, the value box, the drag bubble's text, the preview pump's
+    -- changed-check, and the settle on release.
     --
     -- Two roundings, and the second is not decoration:
-    --   * to the nearest step, measured FROM min -- a bar that starts at 40 has
-    --     its grid at 40, 41, 42..., not at 0, 1, 2..., and a 0.5-min bar with a
-    --     step of 1 must stay on halves;
-    --   * then to the number of decimals the step itself carries. No binary
-    --     float holds 0.05, so min + 3 * 0.05 is 0.15000000000000002, and that
-    --     is the number that would go into the settings file, come back out on
-    --     the next login, and compare unequal to the 0.15 a default table or an
-    --     export written by hand holds. FormatValue would still print "0.15",
-    --     so the drift is invisible right up until something compares.
+    --   * to the nearest step, measured FROM min -- a bar that starts at 40 has its grid at
+    --     40, 41, 42..., not at 0, 1, 2..., and a 0.5-min bar with a step of 1 must stay on
+    --     halves;
+    --   * then to the number of decimals the step itself carries. No binary float holds
+    --     0.05, so min + 3 * 0.05 is 0.15000000000000002, which would go into the settings
+    --     file and compare unequal to the 0.15 a default table or a hand-written export holds
+    --     -- invisibly, since FormatValue still prints "0.15".
     --
-    -- ⚠ THE DECIMAL COUNT COMES FROM min AS WELL AS step. container.SetRange can
-    -- re-scale a bar at runtime (a dial that flips a slider from seconds to
-    -- percent) onto a min with more decimals than the step has, and rounding to
-    -- the step's precision alone would then round the min itself away.
+    -- ⚠ THE DECIMAL COUNT COMES FROM min AS WELL AS step. container.SetRange can re-scale a
+    -- bar at runtime (a dial that flips a slider from seconds to percent) onto a min with
+    -- more decimals than the step has, and rounding to the step's precision alone would round
+    -- the min itself away.
     local stepFactor = 1
     local function DecimalsOf(n)
         local d, s = 0, math.abs(n or 0)
@@ -2554,16 +2550,14 @@ function UI:CreateSlider(parent, opts)
         return q
     end
 
-    -- The end of a drag, from either door: the real OnMouseUp, or the OnUpdate
-    -- noticing the button is no longer held (see OnDragUpdate).
+    -- The end of a drag, from either door: the real OnMouseUp, or the OnUpdate noticing the
+    -- button is no longer held (see OnDragUpdate).
     --
-    -- ORDER MATTERS. isDragging is cleared FIRST -- it is the commit-once flag,
-    -- and a stolen mouseup followed by the real OnMouseUp must produce one
-    -- commit, not two. Then the host's drag bookkeeping is released (that call
-    -- is pure bookkeeping now: nothing applies from it), then the commit runs,
-    -- then the generic full sweep. `refreshNow` is the sweep every other widget
-    -- asks for; the consumer is free to coalesce it with whatever onChanged
-    -- already scheduled.
+    -- ORDER MATTERS. isDragging is cleared FIRST -- it is the commit-once flag, and a stolen
+    -- mouseup followed by the real OnMouseUp must produce one commit, not two. Then the host's
+    -- drag bookkeeping is released (pure bookkeeping: nothing applies from it), then the
+    -- commit runs, then the generic full sweep. `refreshNow` is the sweep every other widget
+    -- asks for; the consumer is free to coalesce it with whatever onChanged already scheduled.
     local function ReleaseDrag()
         if not isDragging then return end
         isDragging = false
@@ -2702,17 +2696,12 @@ function UI:CreateSlider(parent, opts)
         if not (dbTable or customSet) then return end
         value = Quantize(value)
 
-        -- ☠ THE OTHER HALF OF THE GLIDE. With the engine no longer stepping the
-        -- thumb, this fires for every PIXEL the handle travels -- twenty ticks
-        -- per step on a 0..10 bar. The fill and the bubble want all of them:
-        -- they draw the handle's POSITION, which is the thing now moving
-        -- smoothly. Nothing below this guard does, so none of it runs until the
-        -- stepped value actually moves.
-        --
-        -- Not just a saving: without it a legacy host (no drag hooks, commits on
-        -- every value change) would fire onChanged and a full refresh on every
-        -- mouse-move frame instead of once per step crossed. Obeying the step on
-        -- drag used to buy that for free; the guard buys it back.
+        -- ☠ THE OTHER HALF OF THE GLIDE. The engine does not step the thumb, so this fires for
+        -- every PIXEL the handle travels -- twenty ticks per step on a 0..10 bar. The fill and the
+        -- bubble want all of them (they draw the handle's POSITION); nothing below this guard
+        -- does, so none of it runs until the stepped value actually moves. Without the guard, a
+        -- host with no drag hooks (committing on every value change) would fire onChanged and a
+        -- full refresh on every mouse-move frame instead of once per step crossed.
         if isDragging and value == lastQuantized then
             UpdateFill()
             return
@@ -2937,20 +2926,16 @@ function UI:RaiseMenuOverOpener(menu, opener)
     RaiseMenuOverOpener(menu, opener)
 end
 
--- ☠ Lives with the registry it iterates, deliberately. This was in a consumer
--- for a while, which left the pack able to REGISTER a menu but not close one --
--- and CreateDropdown below does register. Nothing broke, because one caller
--- lived in the pack and one in a consumer, but a bulk "dismiss whatever is
--- open" call that is nil half the time fails SILENTLY: the menu just stays
--- floating, which is the exact symptom this registry exists to prevent. Four
--- lines is not worth an addon boundary.
--- ☠ THE ONLY RELIABLE CLOSER, and why the single-slot tracker is not.
--- Every menu is parented to its own dropdown BUTTON, so a tab switch hides it via its
--- ancestor. That fires the menu's OnHide, which clears S.currentOpenDropdown -- but the
--- menu's OWN shown flag was never touched, so returning to that tab re-shows it, now
--- untracked. From then on CloseOpenDropdown() is a no-op against it: it stays floating,
--- overlaps whatever you open next, and only closes if you click its own button
--- (Krathe, 2026-08-09 -- all three dropdown symptoms are this one fault).
+-- ☠ Lives with the registry it iterates, deliberately: a pack that can REGISTER a menu
+-- (CreateDropdown below does) must also be able to close one. A bulk "dismiss whatever is
+-- open" call that is nil half the time fails SILENTLY -- the menu stays floating, the
+-- exact symptom this registry exists to prevent.
+-- ☠ THE ONLY RELIABLE CLOSER, and why the single-slot tracker is not. Every menu is
+-- parented to its own dropdown BUTTON, so a tab switch hides it via its ancestor. That
+-- fires the menu's OnHide, which clears S.currentOpenDropdown -- but the menu's OWN shown
+-- flag is untouched, so returning to that tab re-shows it, untracked. From then on
+-- CloseOpenDropdown() is a no-op against it: it floats, overlaps whatever opens next, and
+-- only closes from its own button.
 -- ⇒ Iterating the registry and calling Hide() clears the frame's own flag, which
 -- ancestor-hiding never does. Prefer this over CloseOpenDropdown at every open site.
 function UI:CloseAllMenus()
@@ -2970,7 +2955,7 @@ end
 -- (Top/Bottom) three controls apart, in two different vocabularies. Nobody read them as
 -- one thing, and Row Order in particular reads as a sequencing control while in the
 -- common configuration it only moves the block to the other end of the reserved space.
--- Field-reported twice (Aphoex 2026-08-14, Krathe 2026-08-17).
+-- Field-reported twice.
 --
 -- keyH takes START/CENTER/END, keyV takes START/END -- hence 3x2, not 3x3. Giving the
 -- vertical axis a CENTER means teaching all three positioners a CENTER branch for the
@@ -2998,18 +2983,16 @@ function UI:CreateAnchorGrid(parent, opts)
     local setH = opts.setH or function(v) if dbTable then dbTable[keyH] = v end end
     local setV = opts.setV or function(v) if dbTable then dbTable[keyV] = v end end
     local CELL_W, CELL_H, GUTTER = 34, 18, 2
-    -- ☠ THE TWO KEYS SWAP SCREEN AXES WITH THE GROWTH DIRECTION. Do not hard-code one
-    -- key to the columns. keyH (the ALIGN key, 3 values) moves things along the axis the
-    -- groups run down; keyV (the WRAP key, 2 values) moves them along the axis the grid
-    -- wraps on -- and which of those is left/right versus up/down flips:
+    -- ☠ THE TWO KEYS SWAP SCREEN AXES WITH THE GROWTH DIRECTION. Do not hard-code one key to
+    -- the columns. keyH (the ALIGN key, 3 values) moves things along the axis the groups run
+    -- down; keyV (the WRAP key, 2 values) moves them along the axis the grid wraps on -- and
+    -- which of those is left/right versus up/down flips:
     --   Columns growth: groups run ACROSS, so align = Left/Center/Right, wrap = Top/Bottom
     --   Rows growth:    groups run DOWN,   so align = Top/Center/Bottom, wrap = Left/Right
-    -- Verified in the positioners, not inferred: the vertical arm computes
-    -- `yOff = (totalHeight - rcH) + …` from groupAnchor and `rcX = xStart + rcIdx * …`
-    -- from the row-growth key, i.e. exactly the transpose of the horizontal arm. Shipping
-    -- this hard-coded made "Top right" drive bottom-right in Rows mode (Krathe,
-    -- 2026-08-17). opts.transposedFn returns true when the grid must be drawn 2 wide x 3
-    -- tall instead of 3 wide x 2 tall.
+    -- Verified in the positioners: the vertical arm computes `yOff = (totalHeight - rcH) + …`
+    -- from groupAnchor and `rcX = xStart + rcIdx * …` from the row-growth key, exactly the
+    -- transpose of the horizontal arm. opts.transposedFn returns true when the grid must be
+    -- drawn 2 wide x 3 tall instead of 3 wide x 2 tall.
     local ALIGN = { "START", "CENTER", "END" }
     local WRAP  = { "START", "END" }
     -- Caption words, indexed [vertical][horizontal]. CENTER on the vertical axis only
