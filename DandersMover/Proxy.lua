@@ -119,22 +119,18 @@ function P:GetUnlockFrame()
     f:SetFrameStrata("HIGH")
     f:SetFrameLevel(OVERLAY_LEVEL)
     -- ☠ The overlay must NEVER take the mouse. It covers the whole screen, so
-    -- EnableMouse(true) on it captures every click a session is open for -- the
-    -- camera cannot be dragged, nothing behind the movers can be clicked. It
-    -- used to do exactly that so a click on empty space could deselect; the
-    -- deselect moved to Esc (Session's OnKeyDown) and the screen went back to
-    -- the game. Only the CHILDREN (slabs, strip, panels) take clicks now.
+    -- EnableMouse(true) would capture every click while a session is open -- the camera
+    -- could not be dragged and nothing behind the movers could be clicked. Esc deselects
+    -- (Session's OnKeyDown); only the CHILDREN (slabs, strip, panels) take clicks.
     --
-    -- Alt-peek. The event is only registered while a session is up (Build /
-    -- DestroyAll), so this cannot fire outside one.
+    -- Alt-peek. The event is only registered while a session is up (Build / DestroyAll), so
+    -- this cannot fire outside one.
     --
-    -- ☠ THE EVENTS DECIDE, NOT IsAltKeyDown. Each event's own payload says which
-    -- way that key went (1 = pressed), and the two Alts are tracked apart, so a
-    -- release only keeps the peek up while the OTHER Alt's own press stands.
-    -- Asking IsAltKeyDown() on a release instead read the client's lagging
-    -- state: after an alt-tab, or a burst of fast taps, it still answered "down"
-    -- for a second or two, so a real release left the overlay faded until Alt
-    -- was held long enough for the client to catch up.
+    -- ☠ THE EVENTS DECIDE, NOT IsAltKeyDown. Each event's payload says which way that key
+    -- went (1 = pressed), and the two Alts are tracked apart, so a release only keeps the
+    -- peek up while the OTHER Alt's own press stands. IsAltKeyDown() reads the client's
+    -- lagging state: after an alt-tab, or a burst of fast taps, it answers "down" for a
+    -- second or two after a real release.
     f:SetScript("OnEvent", function(_, _, key, down)
         if key ~= "LALT" and key ~= "RALT" then return end
         P.altDown[key] = (down == 1 or down == true) or nil
@@ -514,19 +510,14 @@ local function create(el)
     b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
-    -- ☠ NO SetClampedToScreen HERE. The slab used to be clamped by the client,
-    -- which clamps FULLY, while the element it stands for is only ever clamped
-    -- loosely (an anchored solve keeps any seat that leaves part of it on
-    -- screen -- Core's KeepOnScreen). So an element overhanging an edge had its
-    -- slab shoved inward, off the frames: the preview sat on screen while the
-    -- frames it described did not, the coords quoted a place nothing was, and
-    -- the FIRST drag "fixed" it -- DragTo starts from the slab's clamped centre
-    -- and moves the element there. syncGeometry now places the slab through
-    -- Solver.KeepOnScreen, the exact rule the element itself gets, so slab and
-    -- element agree whenever any of the element is visible. The one case they
-    -- still part is an element with NOTHING on screen: its slab is pulled to
-    -- the nearest visible spot as the rescue handle, and dragging it re-places
-    -- the element there.
+    -- ☠ NO SetClampedToScreen HERE. The client clamps FULLY, while the element the slab
+    -- stands for is only clamped loosely (an anchored solve keeps any seat that leaves part
+    -- of it on screen -- Core's KeepOnScreen), so a client-clamped slab would sit on screen
+    -- off its frames, quote coords for a place nothing is, and make the first drag move the
+    -- element. syncGeometry places the slab through Solver.KeepOnScreen, the exact rule the
+    -- element gets, so slab and element agree whenever any of the element is visible. The
+    -- one case they part is an element with NOTHING on screen: its slab is pulled to the
+    -- nearest visible spot as the rescue handle, and dragging it re-places the element.
 
     -- Role edge: full height, flush left, and UNDER the pixel border (which draws
     -- at ARTWORK sublevel 7) so the selection outline always reads over it.
@@ -759,9 +750,9 @@ function P:Refresh(id)
     self:Highlight(NS.Session and NS.Session.selected)
 end
 
--- Every slab re-measured, then ONE repaint -- the SyncMany shape. It used to be
--- Refresh per slab, and each Refresh repaints EVERY slab, so a drag (DragTo
--- runs this every frame) painted n*n slabs a frame for the answer one pass gives.
+-- Every slab re-measured, then ONE repaint -- the SyncMany shape. Each Refresh repaints
+-- EVERY slab, so refreshing per slab would paint n*n slabs a frame during a drag (DragTo
+-- runs this every frame).
 function P:RefreshAll()
     local any = false
     for _, b in pairs(self.proxies) do
@@ -775,6 +766,16 @@ end
 function P:IsDragging()
     for _, b in pairs(self.proxies) do if b.dragging then return true end end
     return false
+end
+
+-- Finish a drag in flight where it stands, as a release there would. A combat suspend
+-- hides the slab (it is a child of the unlock frame), and a hidden frame never gets its
+-- OnDragStop -- the drag would be left half-done: no undo entry, the tether armed, and
+-- IsDragging stuck true after Resume.
+function P:EndActiveDrag()
+    for _, b in pairs(self.proxies) do
+        if b.dragging then onDragStop(b) end
+    end
 end
 
 function P:Highlight(selectedId)
@@ -1408,14 +1409,13 @@ end
 -- ============================================================
 -- TOOLTIP
 -- ============================================================
--- Through the kit's ShowTooltip (never raw GameTooltip), placed OFF the slab:
--- below it in the upper half of the screen, above it in the lower half
--- (NS.TooltipAnchor with `beside`). It used to hang off the slab's right edge,
--- which the client clamps back over the slab -- and the cursor -- whenever the
--- slab sits near the right or top edge.
+-- Through the kit's ShowTooltip (never raw GameTooltip), placed OFF the slab: below it in
+-- the upper half of the screen, above it in the lower half (NS.TooltipAnchor with
+-- `beside`). Off the slab's right edge the client would clamp it back over the slab --
+-- and the cursor -- whenever the slab sits near the right or top edge.
 --
--- One spec and one set of line tables, refilled per hover: a hover is not a hot
--- path, but there is no reason for it to build garbage either.
+-- One spec and one set of line tables, refilled per hover: not a hot path, but no reason
+-- to build garbage either.
 local tipLines = { {}, {}, " ", {}, {}, {}, {} }
 local tipSpec = { lines = {} }
 local C_TIP_BODY = { r = 0.8, g = 0.8, b = 0.8 }
@@ -1495,9 +1495,8 @@ end
 -- frame of a drag, so the weight is only re-laid out when it actually changes;
 -- a recolour goes through the pixel border's cheap shim.
 local function paintZone(z, fill, fillAlpha, line, lineAlpha, weight)
-    -- The dashes ARE the outline; the backdrop border stays off so the slot
-    -- reads dashed, exactly like the approved mock. `weight` is kept in the
-    -- signature for call-site stability but no longer drawn.
+    -- The dashes ARE the outline; the backdrop border stays off so the slot reads dashed.
+    -- `weight` stays in the signature for call-site stability and is not drawn.
     z:SetBackdropColor(fill.r, fill.g, fill.b, fillAlpha)
     z:SetBackdropBorderColor(0, 0, 0, 0)
     for _, d in ipairs(z.dashes) do d:SetVertexColor(line.r, line.g, line.b, lineAlpha) end

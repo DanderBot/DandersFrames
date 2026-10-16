@@ -134,18 +134,14 @@ function DF:ApplyHealthFadeAlpha(frame)
         local color = UnitHealthPercent(frame.unit, true, curve)
         if not color then return false end
 
-        -- ☠ APPLY AND RETURN HERE. `a` is a SECRET -- the alpha channel of a colour
-        -- the engine resolved from secret health -- so it may be passed to a setter
-        -- and to nothing else. It must not reach the `if not alpha` below: a boolean
-        -- test on a secret raises "execution tainted" and spams errors on every
-        -- health tick of every frame (see Range.lua's note at the issecretvalue
-        -- guards). This branch used to fall through to that test; the rule was
-        -- written one line above it and broken two lines below.
+        -- ☠ APPLY AND RETURN HERE. `a` is a SECRET -- the alpha of a colour the engine resolved
+        -- from secret health -- so it may be passed to a setter and to nothing else. It must not
+        -- reach the `if not alpha` below: a boolean test on a secret raises "execution tainted"
+        -- on every health tick of every frame (see Range.lua's issecretvalue notes).
         --
-        -- ⚠ Do NOT "simplify" this back into a shared tail. The two branches produce
-        -- different KINDS of value -- a plain number from the test path, a secret
-        -- from the live one -- and only the plain number can be nil-checked. That is
-        -- also why the nil-check cannot simply be deleted: the test path needs it.
+        -- ⚠ Do NOT fold this into a shared tail. The two branches produce different KINDS of
+        -- value -- a plain number from the test path, a secret from the live one -- and only the
+        -- plain number can be nil-checked, which the test path needs.
         local _, _, _, a = color:GetRGBA()
         frame:SetAlpha(a)
         return true
@@ -176,7 +172,7 @@ function DF:UpdateHealthFade(frame)
     -- dfHealthPct data fork) but the driver that sets dfHealthFadeActive still bailed —
     -- and UpdateFrameAppearance gates its fade branch on exactly that flag. So the shared
     -- appearance pass always took the else-branch and reset the frame to alpha 1.0, and
-    -- previews stayed opaque (Krathe, 2026-08-08). The applier's preview support existed
+    -- previews stayed opaque. The applier's preview support existed
     -- but was unreachable through the live path.
     -- ⚠ Animate Health MASKED it: UpdateTestFrameHealthOnly calls ApplyHealthFadeAlpha
     -- directly from the ticker, AFTER the appearance pass, so it won by running last.

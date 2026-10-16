@@ -5,136 +5,69 @@ if not UI then return end
 -- ============================================================
 -- ROUNDED SURFACE -- a rounded-corner backdrop, from TWO nine-sliced textures.
 --
--- A PARALLEL primitive to CreateElementBackdrop / CreatePanelBackdrop, not a
--- replacement for either. Which of the two a surface wears is the SURFACE STYLE
--- (Theme.lua's UI.SurfaceStyle, and the host opt-in beside it): a consumer that
--- declares one gets the rounded paint through the shells that read it -- the
--- popout, the popout row, the settings group -- and a consumer that declares
--- nothing keeps the square backdrop it has always had. The library names no
--- consumer; see Core.lua.
---
--- The nine-slice has been judged in-game at every baked radius and at four UI
--- scales, and the settings shell ships rounded at R8. The chrome workbench's
--- Corners button remains -- it is still the only place several radii can be
--- compared side by side -- but it drives the same first-class options every
--- real surface does, not shadows of its own.
+-- A PARALLEL primitive to CreateElementBackdrop / CreatePanelBackdrop, not a replacement
+-- for either. Which of the two a surface wears is the SURFACE STYLE (Theme.lua's
+-- UI.SurfaceStyle, and the host opt-in beside it): a consumer that declares one gets the
+-- rounded paint through the shells that read it -- the popout, the popout row, the settings
+-- group -- and a consumer that declares nothing keeps the square backdrop. The library names
+-- no consumer; see Core.lua. The settings shell ships rounded at R8, judged in game at every
+-- baked radius and four UI scales; the chrome workbench's Corners button compares radii
+-- side by side through the same options every real surface uses.
 --
 -- ------------------------------------------------------------
--- ☠ WHY THIS IS NOT FIFTEEN TEXTURES ANY MORE -- read this first.
+-- ☠ WHY TWO SLICED TEXTURES, NOT A BUTT-JOINED ASSEMBLY. A butt joint between two quads is
+-- seamless only when both land on the same DEVICE-pixel grid. Fx drives the popout's scale
+-- through a continuum of fractional values, every quad is rasterised independently at each
+-- one, and two neighbours whose shared edge falls near x.5 can round APART for a frame --
+-- a hairline of the world flickering through the panel. Nothing anchor-side can fix that.
 --
--- It used to be. A surface was four quarter-disc corners, four quarter-arc
--- corners and seven flat SetColorTexture strips, each one anchored to butt
--- exactly against its neighbours at a whole-number offset from the frame. The
--- arithmetic was right. The joints still opened up:
---
---     "I can see gaps when the popout animates in and out"
---
--- A butt joint between two quads is seamless only when both quads land on the
--- same DEVICE-pixel grid. Fx drives the popout's scale through a continuum of
--- fractional values, every quad is rasterised independently at each one, and two
--- neighbours whose shared edge falls near x.5 can round APART for a frame. Fifteen
--- quads is fourteen chances per frame to flicker a hairline of the world through
--- the middle of a panel. Nothing anchor-side fixes that, because nothing
--- anchor-side was wrong.
---
--- THE ENGINE HAS THE PRIMITIVE. Texture:SetTextureSliceMargins(l, t, r, b) plus
--- SetTextureSliceMode(Enum.UITextureSliceMode.Stretched) cuts ONE texture into a
--- 3 x 3: the four corner cells are held at their baked pixel size and only the
--- edge and centre cells stretch. One texture, one quad, one draw call -- there is
--- no joint to open, by construction, at any scale.
---
--- So a surface is now TWO textures:
+-- Texture:SetTextureSliceMargins(l, t, r, b) plus
+-- SetTextureSliceMode(Enum.UITextureSliceMode.Stretched) cuts ONE texture into a 3 x 3: the
+-- four corner cells are held at their baked size and only the edge and centre cells
+-- stretch. One texture, one quad -- no joint to open, at any scale. So a surface is:
 --
 --     fill   rect_rN.tga      the whole rounded rectangle
---     ring   ring_rN_wW.tga   the matching border, stroke W inside the same
---                             outline, on the sublevel above
---
--- and that is the entire object. The gaps are gone because the things that could
--- gap are gone.
+--     ring   ring_rN_wW.tga   the matching border, stroke W inside the same outline, on the
+--                             sublevel above
 --
 -- ------------------------------------------------------------
 -- THE SLICE CONTRACT -- margins are TEXTURE PIXELS, radius is UI UNITS.
 --
--- SetTextureSliceMargins is measured in the texture's own pixels. The art is
--- baked at ONE TEXEL PER UI UNIT -- a radius-6 shape has a 6px corner band -- so
--- passing `radius` as all four margins is what is INTENDED to make `radius = 6`
--- mean "6 UI units of curve" at the far end.
---
--- That density is a contract between this file and Tools/generate_rounded.py, not
--- a quality setting: rebake at 2 texels per unit and every consumer's radius
--- changes meaning with nothing here to notice it. The generator's CANVAS note is
--- the other half of it, and test_round.lua pins the margins.
---
--- ☠ WHETHER THE ENGINE HONOURS THAT 1:1 IS NOT VERIFIED, AND THERE IS EVIDENCE
--- AGAINST IT. This has to be checked in the demo before the trial is judged.
---
--- BuzzardFrames -- which ships sliced rounded borders and has clearly fought this
--- -- states the opposite rule from live observation:
---
---     "THE ENGINE'S SLICING RULE (fit-short): a nine-sliced texture renders its
---      texels scaled by regionShort/artSize -- corners are NOT drawn at a fixed
---      art scale."
---                      (_retail_/Interface/AddOns/BuzzardFrames/UnitFrames/
---                       oUF_Shared.lua, the v90.8 header ~line 135, with four
---                       corroborating observations; and again at ~4267, "sliced
---                       masks scaled their corner with the region")
---
--- Under that rule the corner is `margin * regionShortInPhysicalPixels / artSize`,
--- so a 300-unit panel and a 26-unit row plate asked for the same radius would NOT
--- get the same curve -- which is the exact failure the old 15-piece assembly was
--- built to avoid, and which its header called out as the reason not to nine-slice.
--- Their fix is to host the texture on a frame scaled so one texel is one physical
--- pixel; that is a bigger change than this one and is not made here.
---
--- ⚠ THE SAME FILE ALSO SAYS THE OPPOSITE ("Slicing keeps thickness/radius
--- constant at any frame size", Indicators/Container.lua ~line 35), so the two
--- readings cannot both be right and neither can be settled from source comments.
---
--- HOW TO SETTLE IT, in one look: the demo puts a whole WINDOW, a POPOUT and
--- several small ROW PLATES on screen at one radius. If every corner reads the
--- same size, the 1:1 contract holds and this note can be cut down to its first
--- paragraph. If the window's corner is a great sweep while a row plate's is a
--- nick, fit-short is real and the surface needs the pixel-host treatment before
--- it can be a system.
---
--- A second, sharper tell if it IS fit-short: r4 and r6 are baked on a 16px canvas
--- and r8 on a 32px one, so under that rule R8 would render a SMALLER corner than
--- R6. Cycling the radii out of order is the giveaway, and the fix for it alone
--- would be to bake every radius on one canvas size.
+-- SetTextureSliceMargins is measured in the texture's own pixels. The art is baked at ONE
+-- TEXEL PER UI UNIT -- a radius-6 shape has a 6px corner band -- so passing `radius` as all
+-- four margins makes `radius = 6` mean "6 UI units of curve".
+-- That density is a contract between this file and Tools/generate_rounded.py, not a quality
+-- setting: rebake at 2 texels per unit and every consumer's radius changes meaning with
+-- nothing here to notice. The generator's CANVAS note is the other half, and test_round.lua
+-- pins the margins.
+-- ⚠ If corners ever read different sizes on a window and a small row plate at one radius,
+-- the engine is scaling sliced corners with the region rather than holding them 1:1, and
+-- the surface would need hosting on a frame scaled so one texel is one physical pixel.
 --
 -- ------------------------------------------------------------
--- WHICH CORNERS ARE ROUND -- and why the answer is a SHAPE, not four flags.
---
--- The old assembly could round any subset of the four, because a square corner
--- was simply an arc it did not draw. A single sliced texture cannot: the shape is
--- baked in, so every combination anyone wants is a FILE.
---
--- v1 bakes the two the trial actually uses:
+-- WHICH CORNERS ARE ROUND -- a SHAPE, not four flags. A sliced texture bakes its shape in, so
+-- every combination is a FILE. Two are baked:
 --
 --     all four round     panels, popouts, row plates
---     tl + tr only       a TITLE STRIP -- it sits against the top of a rounded
---                        panel, so its upper corners follow that curve while its
---                        lower edge is a straight join into the body
+--     tl + tr only       a TITLE STRIP -- it sits against the top of a rounded panel, so its
+--                        upper corners follow that curve while its lower edge is a straight
+--                        join into the body
 --
--- `opts.corners` keeps its old shape and its old reading (see normCorners), and
--- anything that is not one of those two is REFUSED with a message naming the
--- generator, rather than silently drawing the nearest thing. Adding a combination
--- means adding it to that script's SHAPES table and to SHAPE_OF below -- both, or
--- the module asks for a file that does not exist and the surface is invisible.
---
--- ------------------------------------------------------------
--- ⚠ NO SLICE SUPPORT, NO CURVE. SetTextureSliceMargins arrived around 10.0. If it
--- is missing -- an ancient client, or the headless harness -- the surface falls
--- back to a plain SetColorTexture rectangle with NO ring and flags itself
--- (`s.sliced == false`). Deliberately visibly square rather than clever: a
--- degraded surface that still looks rounded would hide the fact that the art is
--- not drawing at all.
+-- `opts.corners` keeps its shape and reading (see normCorners), and anything else is REFUSED
+-- with a message naming the generator rather than silently drawing the nearest thing. A new
+-- combination goes in that script's SHAPES table AND in SHAPE_OF below -- both, or the module
+-- asks for a file that does not exist and the surface is invisible.
 --
 -- ------------------------------------------------------------
--- Snapping is turned OFF on both textures for the pixel border's reason
--- (Theme.lua): vertex snapping rounds a quad's edges independently, so a snapped
--- surface changes SIZE by a pixel depending where it lands -- and during the very
--- animation this file exists to fix, that is a corner that visibly breathes.
+-- ⚠ NO SLICE SUPPORT, NO CURVE. Without SetTextureSliceMargins (an ancient client, or the
+-- headless harness) the surface falls back to a plain SetColorTexture rectangle with NO ring
+-- and flags itself (`s.sliced == false`) -- deliberately visibly square, so a missing art
+-- path cannot hide behind a surface that still looks rounded.
+--
+-- ------------------------------------------------------------
+-- Snapping is OFF on both textures for the pixel border's reason (Theme.lua): vertex
+-- snapping rounds a quad's edges independently, so a snapped surface changes SIZE by a
+-- pixel depending where it lands -- during an animation, a corner that visibly breathes.
 -- ============================================================
 
 local rawget, type, ipairs = rawget, type, ipairs
@@ -428,9 +361,9 @@ function Surface:GetCorners()
     return { tl = c.tl, tr = c.tr, bl = c.bl, br = c.br }
 end
 
--- Which baked shape is on screen: "all" or "top". Published because the corner
--- table no longer tells the whole story -- an unsupported combination is refused
--- and falls back, and this is where that is observable.
+-- Which baked shape is on screen: "all" or "top". Published because the corner table alone
+-- does not tell the whole story -- an unsupported combination is refused and falls back,
+-- and this is where that is observable.
 function Surface:GetShape() return self.shape end
 
 -- Re-shape, which is now purely a different FILE -- no relayout (the textures

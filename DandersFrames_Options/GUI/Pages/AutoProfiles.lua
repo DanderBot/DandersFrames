@@ -67,20 +67,12 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
 
     AddSpace(5, "both")
 
-    -- When "Enable Raid Auto-Switching Layouts" is OFF the page stays VISIBLE,
-    -- but the layout MANAGEMENT sections are covered by the shared disabled
-    -- overlay (built at the bottom of this function) — the same treatment the
-    -- Aura and Text Designers get. The toggle's callback runs pageFrame:Refresh()
-    -- (a full rebuild), so reading autoDb.enabled at build time is
-    -- self-refreshing — no disableOn/RefreshStates wiring needed for these raw
-    -- frames (they have no SetEnabled, so the page gate loop skips them anyway).
-    --
-    -- ⚠ This REVERSES an earlier "configure-while-off" decision, which left add /
-    -- edit / delete / rename / copy fully live on the theory that people build
-    -- layouts before switching auto-switching on. In practice that read as though
-    -- the feature were already running: you could build a whole set of layouts
-    -- that would never fire, with nothing on the page saying so. Krathe called it
-    -- 2026-07-27. Turning it back on is the one line at the bottom.
+    -- When "Enable Raid Auto-Switching Layouts" is OFF the page stays VISIBLE, but the
+    -- layout MANAGEMENT sections are covered by the shared disabled overlay (built at the
+    -- bottom of this function), as the Aura and Text Designers are: building layouts that
+    -- can never fire, with nothing on the page saying so, reads as if the feature were
+    -- running. The toggle's callback rebuilds the page, so reading autoDb.enabled at build
+    -- time is self-refreshing; these raw frames have no SetEnabled for the gate loop anyway.
     local autoOff = not autoDb.enabled
 
     -- =============================================

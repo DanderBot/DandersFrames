@@ -591,7 +591,7 @@ function DF:UpdateRaidGroupLabels(activeGroupsTable, db, horizontal)
                     -- anchors to the separated header, which spans the group, so END
                     -- and CENTER only agree if the preview anchors to a span too.
                     -- Falls back to the first frame for the one pass before
-                    -- UpdateTestGroupExtents has run. (Audit, 2026-08-07.)
+                    -- UpdateTestGroupExtents has run.
                     anchorFrame = (DF.testGroupExtent and DF.testGroupExtent[g])
                         or groupFirstFrame[g]
                 else

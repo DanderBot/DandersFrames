@@ -147,8 +147,8 @@ RESOLVERS.faction = function(elem, source)
     return getMS().SafeText(source:GetFaction() or "")
 end
 
--- Kept for backward compat with any element saved before level/race/faction
--- were split into separate content types. No longer offered in the picker.
+-- Resolves elements saved with the combined level/race/faction content type; the
+-- picker offers the three separately.
 RESOLVERS.race_level_faction = function(elem, source)
     -- Migration-only (not in the picker). Identity strings can be secret, so
     -- avoid `~= ""` and table.concat (both throw on secrets): build with `..`

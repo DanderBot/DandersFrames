@@ -68,31 +68,28 @@ end
 -- TARGET RESOLUTION
 -- ============================================================
 -- Every row hands back the DF-owned window frame it renders into. A row that is
--- disabled, parked or not previewing has no rect worth labelling, so it drops out
--- here rather than producing a tag pointing at nothing.
--- ☠☠ THE ROW'S REAL RECT CANNOT BE MEASURED. Two dead ends, both learned the hard way:
+-- disabled, parked or not previewing has no rect worth labelling, so it drops out here
+-- rather than producing a tag pointing at nothing.
+-- ☠☠ THE ROW'S REAL RECT CANNOT BE MEASURED:
 --   * `handle.frame` is only SIZED in `missing` mode; for the buff / debuff / defensive
 --     rows it is a bare anchor ORIGIN the container pins to, so it has no rect at all.
---   * the CustomAuraContainer's own rect is SECRET — `GetRight()` on it returns a secret
---     number and the first subtraction throws ("attempt to perform arithmetic on local
---     'r' (a secret number value)"). The no-rect-math rule covers the container, not
---     just its buttons.
+--   * the CustomAuraContainer's own rect is SECRET -- `GetRight()` returns a secret
+--     number and the first subtraction throws. The no-rect-math rule covers the
+--     container, not just its buttons.
 --
--- ★ So the region is obtained the way every other preview surface obtains one: ask the
--- LIVE flow. AuraContainer.FlowSlots pins a box and lays plain DF frames into it with
--- the same AnchorUtil flow, growth, wrap headroom and strip reservation the real
--- container uses — and OUR frames are plain, so their rects are readable. This is the
--- shared entry point the AD canvas uses; its contract says a caller must never
--- substitute maths of its own, and this one does not: when the flow is unavailable the
--- element simply goes unlabelled.
--- ⚠ COST, stated because it scales with the raid preview: one probe box plus `count`
--- slot frames per labelled element per visible test frame. The three fixed rows are
--- ~9 frames a frame; the Aura Designer adds one probe per PLACEMENT on top, and since
--- layout groups became measurable those are no longer one slot each — a group probes
--- its own `_slotCount()`, so a design with a few multi-icon groups can double the
--- per-frame figure. Pooled and created once, never per pass, and only while the option
--- is on; WoW never frees a frame, so if that ceiling ever matters the fix is to probe
--- fewer frames rather than to rebuild them.
+-- ★ So the region comes from the LIVE flow, as every other preview surface gets one.
+-- AuraContainer.FlowSlots pins a box and lays plain DF frames into it with the same
+-- AnchorUtil flow, growth, wrap headroom and strip reservation the real container uses,
+-- and OUR frames' rects are readable. This is the shared entry point the AD canvas uses;
+-- its contract says a caller must never substitute maths of its own, so when the flow is
+-- unavailable the element simply goes unlabelled.
+-- ⚠ COST, scaling with the raid preview: one probe box plus `count` slot frames per
+-- labelled element per visible test frame. The three fixed rows are ~9 frames a frame;
+-- each Aura Designer placement adds a probe, and a layout group probes its own
+-- `_slotCount()`, so a design with a few multi-icon groups can double the per-frame
+-- figure. Pooled and created once, never per pass, and only while the option is on; WoW
+-- never frees a frame, so if the ceiling ever matters, probe fewer frames rather than
+-- rebuilding them.
 local function ensureProbe(frame, key, count)
     frame.dfTestLabelProbes = frame.dfTestLabelProbes or {}
     local p = frame.dfTestLabelProbes[key]
@@ -232,18 +229,15 @@ end
 
 -- The Aura Designer has no single window: every placement is its own handle in the
 -- per-frame factory store, bucketed by family.
--- ☠ ALL THREE ICON-BEARING FAMILIES, NOT JUST `placed`. This walked `placed` alone,
--- so LAYOUT GROUPS — filter groups and member groups (store.fgroups, keyed "fgroup:"
--- / "mgroup:") and debuff category groups (store.dgroups) — were invisible to the
--- whole feature: unhoverable, and with `placed` empty the element read as switched
--- OFF entirely, so a design built only from groups got no marks at all (Krathe,
--- 2026-08-21). ⚠ Keep in sync with the Factory's own family list (SyncFrame's unit
--- retarget loop, and AD_GATE_FAMILIES beside DebugDumpADGate).
+-- ☠ ALL THREE ICON-BEARING FAMILIES, NOT JUST `placed`: layout groups -- filter and
+-- member groups (store.fgroups, keyed "fgroup:" / "mgroup:") and debuff category groups
+-- (store.dgroups) -- carry icons too, and a design built only from groups would
+-- otherwise get no marks at all. ⚠ Keep in sync with the Factory's own family list
+-- (SyncFrame's unit retarget loop, and AD_GATE_FAMILIES beside DebugDumpADGate).
 -- The frame-level families are deliberately NOT here: `healthbar` / `background` /
 -- `border` / `nametext` / `healthtext` tint or edge an existing element rather than
--- placing an icon, so a region for one would span the whole health bar and swallow
--- the rows drawn over it. They are Aura Designer output too, and if they ever want
--- naming it has to be as a distinct element key, not folded in with the icons.
+-- placing an icon, so a region for one would span the whole health bar and swallow the
+-- rows drawn over it. If they ever want naming it has to be as a distinct element key.
 local AD_FAMILIES = { "placed", "fgroups", "dgroups" }
 
 -- ☠ ONE REGION PER PLACEMENT, NOT ONE UNION OF THEM ALL. The union was written when
@@ -299,7 +293,7 @@ end
 --     region list is rebuilt by TL:Update, so a check made only there freezes whatever
 --     was on when the list was last built: rows switched off after that kept their
 --     marks and rows switched on never got one, which reads exactly as "it only checks
---     what was on when you opened test mode" (Krathe, 2026-08-17). The hover driver
+--     what was on when you opened test mode". The hover driver
 --     therefore re-asks per tick — and that is also why this must be CHEAP.
 -- ★ RENDERED STATE, NOT A SHOWN-CACHE and not a re-reading of the test toggles. The
 -- first cut used `dfBuffFactoryShown` and friends: correct as far as it went, but it is
@@ -397,16 +391,15 @@ local function ensureWidgets(frame, key)
     host:SetFrameLevel(20)
 
     -- ☠ A TEXTURE'S DRAW LAYER ONLY ORDERS IT WITHIN ITS OWN FRAME. Strata wins across
-    -- frames, so the "BACKGROUND" tint that used to live on this host was drawing OVER
-    -- the icons, not under them — the comment claiming otherwise was simply wrong, and
-    -- raising its alpha would have washed out the very art being judged.
+    -- frames, so a "BACKGROUND" tint on the row's host would draw OVER the icons, and raising
+    -- its alpha would wash out the very art being judged.
     --
-    -- So the fill gets its OWN frame UNDER the row. Backing the region rather than
-    -- washing it is what makes a section of tightly-packed icons read as one block:
-    -- the colour shows in the inflation margin and between the icons while the icons
-    -- themselves stay untouched, so it can carry real weight.
-    -- ⚠ Its strata/level are DERIVED from the row it backs at place() time (one level
-    -- below), never hardcoded — the row's own level moves with the frame's.
+    -- So the fill gets its OWN frame UNDER the row. Backing the region rather than washing it
+    -- is what makes a section of tightly-packed icons read as one block: the colour shows in
+    -- the inflation margin and between the icons while the icons stay untouched, so it can
+    -- carry real weight.
+    -- ⚠ Its strata/level are DERIVED from the row it backs at place() time (one level below),
+    -- never hardcoded -- the row's own level moves with the frame's.
     local under = CreateFrame("Frame", nil, frame)
     local fill = under:CreateTexture(nil, "BACKGROUND")
     fill:SetAllPoints()
@@ -1054,7 +1047,7 @@ end
 -- measurable once its aura container has been built AND laid out, so on a fresh
 -- login the scan found no rects at all and left the registry empty. Nothing rebuilt
 -- it until a settings change came along -- hence "they don't show until you toggle
--- Indicator Info off and on" (Krathe, 2026-08-17).
+-- Indicator Info off and on".
 -- ★ RETRY ON AN EMPTY RESULT rather than guessing a longer fixed delay: it converges
 -- as soon as the rects exist, whether that is the next frame or the tenth, and it
 -- cannot outlive the budget. Bounded at ~1.5s total.
@@ -1109,7 +1102,7 @@ function TL:Update(settling)
     -- same tick were never scanned again: switch the Aura Designer preset with test
     -- mode open and the defensive icon — untouched, still measurable — ended the budget
     -- on pass one, so every indicator the new preset had just created stayed unlabelled
-    -- until Indicator Info was toggled off and on (Krathe, 2026-08-21). The `pending`
+    -- until Indicator Info was toggled off and on. The `pending`
     -- term is the fix: keep going while anything reports itself rendering and refuses
     -- to measure. The empty-result term stays exactly as it was, because on a fresh
     -- login the handles do not exist yet and nothing can report itself pending at all.
@@ -1151,7 +1144,7 @@ end
 -- therefore rebuilt every indicator behind a list nobody rebuilt: the new ones were
 -- unhoverable until Indicator Info was toggled off and on, while the elements the
 -- switch had not touched kept their marks throughout, which is what made it read as
--- "only the defensive icon has info" (Krathe, 2026-08-21).
+-- "only the defensive icon has info".
 -- ⚠ Hooking Engine:ForceRefreshAllFrames was tried first and fixed the editor's own
 -- actions only — the preset bar does not go through it. Chasing callers was the error,
 -- not the choice of caller.

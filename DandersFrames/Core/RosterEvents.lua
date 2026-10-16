@@ -4,60 +4,44 @@ local addonName, DF = ...
 -- ROSTER UNIT EVENT DISPATCHER
 -- ============================================================
 --
--- Provides a Grid2-style dispatcher for UNIT_* events that need to fire only
--- for the player's current roster (player + party1-4, or player + raid1-40).
+-- Dispatches UNIT_* events only for the player's current roster (player + party1-4, or
+-- player + raid1-40).
 --
--- The problem this solves:
---   * `frame:RegisterEvent("UNIT_AURA")` is global — fires for every unit
---     token in the game (nameplates, targettarget, focus, mouseover, pets,
---     etc.) which is wasteful and, after the 2026-04-07 UnitIsUnit hotfix,
---     causes secret-boolean taint issues in handlers that compare units.
---   * `frame:RegisterUnitEvent("UNIT_AURA", unit1, unit2, ...)` accepts up
---     to 8 unit tokens but each call REPLACES the previous registration on
---     that frame. So a per-unit loop silently drops all but the last unit.
---   * Even with varargs, you'd need multiple frames to cover a 40-man raid.
+-- Why:
+--   * `frame:RegisterEvent("UNIT_AURA")` is global -- it fires for every unit token in
+--     the game (nameplates, targettarget, focus, mouseover, pets, ...), which is wasteful
+--     and makes handlers that compare units meet secret-boolean results.
+--   * `frame:RegisterUnitEvent("UNIT_AURA", unit1, unit2, ...)` accepts up to 8 unit
+--     tokens, but each call REPLACES the previous registration on that frame, so a
+--     per-unit loop silently drops all but the last unit, and a 40-man raid would need
+--     several frames anyway.
 --
--- The dispatcher works around all of this by maintaining ONE hidden frame
--- per roster unit, each with a single permanent `RegisterUnitEvent(event, unit)`
--- call. The metatable lazily creates frames as units enter the roster, and
--- a control frame listens for `GROUP_ROSTER_UPDATE` to add/remove
--- registrations as the player joins / leaves / changes group composition.
+-- So: ONE hidden frame per roster unit, each with a single permanent
+-- `RegisterUnitEvent(event, unit)`. A metatable creates frames lazily as units enter the
+-- roster, and a control frame listens for GROUP_ROSTER_UPDATE to add/remove
+-- registrations as the group changes.
 --
 -- Consumer API:
 --   DF:RegisterRosterUnitEvent(object, event[, method])
---      Subscribe `object` to `event` for all current and future roster units.
---      When the event fires for any roster unit, calls
---      `object:method(event, unit, ...)`. If `method` is omitted, defaults
---      to the event name itself (e.g. `object:UNIT_AURA(event, unit, info)`).
+--      Subscribe `object` to `event` for all current and future roster units. When the
+--      event fires for any roster unit, calls `object:method(event, unit, ...)`; `method`
+--      defaults to the event name (e.g. `object:UNIT_AURA(event, unit, info)`).
 --
 --   DF:UnregisterRosterUnitEvent(object, event)
---      Remove this object's subscription for this event. If no other
---      subscribers remain, the event is unregistered from the per-unit
---      frames entirely.
+--      Remove this object's subscription for this event. With no subscribers left, the
+--      event is unregistered from the per-unit frames entirely.
 --
 --   DF:UnregisterAllRosterUnitEvents(object)
---      Convenience for module shutdown — removes all of this object's
---      subscriptions across every event.
---      ⚠ No internal caller: nothing in DF tears a subscriber down wholesale
---      today. Kept as the bulk half of the Register/Unregister pair, so a module
---      that does need shutdown is not the one that has to write it.
+--      Removes all of this object's subscriptions across every event -- the bulk half of
+--      the pair, for a module that needs shutdown (no internal caller).
 --
 -- Test mode boundary:
---   Test mode uses fake unit tokens like "testparty1" which the WoW engine
---   doesn't recognize for `RegisterUnitEvent`. The dispatcher does NOT and
---   CAN NOT fire for test units. Test mode populates frame data via direct
---   function calls (DF:UpdateTestFrame / DF:RefreshTestFrames), bypassing the event
---   This is intentional and pre-existing behavior.
+--   Test mode uses fake unit tokens like "testparty1", which RegisterUnitEvent does not
+--   recognise, so the dispatcher CANNOT fire for test units. Test mode populates frame
+--   data by direct calls (DF:UpdateTestFrame / DF:RefreshTestFrames) instead.
 --
--- Pet / vehicle support:
---   The roster set is player + party1-4 OR player + raid1-40. Pets, vehicles,
---   target, focus, mouseover, and nameplates are deliberately excluded. No
---   current consumer needs them. If a future feature does, the architecture
---   can be extended without breaking the existing API.
---
--- Reference: Grid2's GridRosterUnitEvents.lua. We're not copying their code,
--- but the architectural pattern (lazy per-unit frame pool with shared
--- dispatch table) is the same and has been battle-tested for years.
+-- Pets, vehicles, target, focus, mouseover and nameplates are deliberately excluded; no
+-- consumer needs them, and the architecture can be extended without breaking the API.
 -- ============================================================
 
 local pairs, next, type = pairs, next, type

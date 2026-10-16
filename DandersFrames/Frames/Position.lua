@@ -950,16 +950,15 @@ end
 -- ☠ WHAT THE RECORD HELD THE LAST TIME DF AND THE SCALAR AGREED, per record table (weak
 -- keys: a profile switch or import swaps the table and the note goes with it).
 --
--- The raid scalar can legitimately differ from the record for two opposite reasons and
+-- The raid scalar can legitimately differ from the record for two opposite reasons, and
 -- the read path has to tell them apart:
 --   (a) an auto layout overrides raidAnchorX/raidAnchorY (or one just deactivated) --
---       the SCALAR is the truth and must be folded into the record, or the layout
---       would not drive the container and the base would not come back afterwards;
+--       the SCALAR is the truth and must be folded into the record, or the layout would
+--       not drive the container and the base would not come back afterwards;
 --   (b) DandersMover mutated the record IN PLACE and has not called onChanged yet --
 --       the RECORD is the truth. The lib's every write is `pos = getPos(); pos.x = v;
---       Notify()`, and Notify calls getPos AGAIN before onChanged, so folding the
---       scalar in here would erase the drag before DF ever saw it. The raid container
---       could not be moved by the lib at all.
+--       Notify()`, and Notify calls getPos AGAIN before onChanged, so folding the scalar
+--       in here would erase the drag before DF ever saw it.
 -- (b) is exactly "the record no longer holds what we last noted", so that is the test.
 local lastNoted = setmetatable({}, { __mode = "k" })
 
@@ -980,6 +979,115 @@ local function recordUnchanged(rec)
     return (not m) or (m.x == rec.x and m.y == rec.y)
 end
 
+local function copyAnchor(a)
+    if type(a) ~= "table" then return nil end
+    local c = {
+        target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+        point = a.point, relPoint = a.relPoint,
+        offsetX = a.offsetX, offsetY = a.offsetY,
+    }
+    if type(a.fallback) == "table" then
+        local fb = a.fallback
+        c.fallback = {
+            target = fb.target, mode = fb.mode, edge = fb.edge, align = fb.align,
+            point = fb.point, relPoint = fb.relPoint,
+            offsetX = fb.offsetX, offsetY = fb.offsetY,
+        }
+    end
+    return c
+end
+
+-- ★ THE ACTIVE AUTO LAYOUT'S RAID POSITION. A layout overrides the raid position
+-- wholesale -- X/Y AND the DandersMover anchor -- like every other setting it overrides.
+-- nil only when no layout is active, so the profile's record applies.
+-- The record lives in the live overlay; what a layout STORES is written by
+-- AutoProfilesUI:SetActiveLayoutRaidRecord when the frames are moved or anchored.
+--   * the layout stores a record          -> that record;
+--   * it stores only raidAnchorX/Y        -> its X/Y and NO anchor. Every layout saved
+--     before the record existed has this shape, and that is where those layouts have
+--     always put the frames, so the profile's anchor must not pull them away;
+--   * it leaves the position to the profile -> a COPY of the profile's record, which
+--     looks identical.
+-- ☠ NEVER HAND OUT THE PROFILE'S OWN RECORD WHILE A LAYOUT IS ACTIVE. DandersMover
+-- mutates the record it was given IN PLACE before onChanged, and every write is routed
+-- to the active layout -- so the profile's record would be changed behind the routing
+-- and the frames would jump when the layout ends.
+-- Copies standing in for the profile's record (the third case above). They keep
+-- following the profile -- point and anchor here, X/Y through the scalar fold -- until a
+-- move is routed into the layout, which then owns the record (see SetPositionRecord).
+local followsProfile = setmetatable({}, { __mode = "k" })
+
+local function layoutRaidRecord(spec, db)
+    if spec ~= RECORD_SPECS.raid then return nil end
+    local ov = DF.raidOverrides
+    if type(ov) ~= "table" then return nil end
+    local rec = ov[spec.key]
+    if type(rec) == "table" then
+        if followsProfile[rec] and recordUnchanged(rec) then
+            local base = DF._realRaidDB and DF._realRaidDB[spec.key]
+            if type(base) == "table" then
+                rec.point = base.point or "CENTER"
+                rec.anchor = copyAnchor(base.anchor)
+            end
+        end
+        return rec
+    end
+    if ov[spec.xKey] ~= nil or ov[spec.yKey] ~= nil then
+        rec = {
+            point = "CENTER",
+            x = tonumber(db[spec.xKey]) or spec.x,
+            y = tonumber(db[spec.yKey]) or spec.y,
+        }
+    else
+        local base = db[spec.key]
+        if type(base) == "table" then
+            rec = {
+                point = base.point or "CENTER",
+                x = tonumber(base.x) or tonumber(db[spec.xKey]) or spec.x,
+                y = tonumber(base.y) or tonumber(db[spec.yKey]) or spec.y,
+                anchor = copyAnchor(base.anchor),
+            }
+            followsProfile[rec] = true
+        else
+            rec = {
+                point = "CENTER",
+                x = tonumber(db[spec.xKey]) or spec.x,
+                y = tonumber(db[spec.yKey]) or spec.y,
+            }
+        end
+    end
+    ov[spec.key] = rec
+    return rec
+end
+
+-- Write an incoming position into a record. `pos` may be the record itself (DandersMover
+-- mutates in place, then calls onChanged) or a fresh table from a drag handler.
+local function writeRecord(rec, pos, x, y)
+    if rec == pos then
+        -- The lib mutated the live record in place; just normalise it.
+        rec.point = rec.point or "CENTER"
+        rec.x, rec.y = x, y
+        return
+    end
+    -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
+    -- anchor the record already holds. Only the lib's in-place mutation (the
+    -- `rec == pos` branch above, which is where its Detach lands) may clear one.
+    local prev = rec.anchor
+    rec.point = pos.point or "CENTER"
+    rec.x, rec.y = x, y
+    rec.anchor = nil
+    if type(pos.anchor) == "table" then
+        local a = pos.anchor
+        rec.anchor = {
+            target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+            point = a.point, relPoint = a.relPoint,
+            offsetX = a.offsetX, offsetY = a.offsetY,
+        }
+    else
+        rec.anchor = prev
+    end
+end
+
 -- The live record for a mode. Seeds it from the scalars when absent (belt for a profile
 -- that dodged DF:MigrateContainerPositionRecords -- an import, or a downgrade/upgrade
 -- round trip).
@@ -992,7 +1100,7 @@ function DF:GetPositionRecord(mode)
         return { point = "CENTER", x = spec.x, y = spec.y }
     end
 
-    local rec = db[spec.key]
+    local rec = layoutRaidRecord(spec, db) or db[spec.key]
     if type(rec) ~= "table" then
         rec = {
             point = "CENTER",
@@ -1032,12 +1140,27 @@ function DF:GetPositionRecord(mode)
     return rec
 end
 
+-- DandersMover onChanged reasons that are the LIB re-solving or re-applying a record, not
+-- the user moving anything: a re-apply (login, profile/layout switch), a parent moving
+-- under an anchored child, and Discard putting a snapshot back.
+local LIB_REASONS = { reapply = true, parent = true, discard = true }
+
+-- Does the active auto layout own this record's position (a stored override for it)?
+local function layoutOwnsPosition(spec)
+    local ov = DF.raidOverrides
+    if type(ov) ~= "table" then return false end
+    if ov[spec.xKey] ~= nil or ov[spec.yKey] ~= nil then return true end
+    local rec = ov[spec.key]
+    return spec == RECORD_SPECS.raid and type(rec) == "table" and not followsProfile[rec]
+end
+
 -- The ONE funnel. Writes the record and its scalar mirror together.
 -- `pos` may be the live record itself (DandersMover mutates in place and then calls
 -- onChanged) or a fresh table from a legacy drag handler; both are handled.
 -- `reason` is the DF:LogRaidAnchorWrite label -- pass the call site's name so the RAIDPOS
 -- debug channel keeps reading the way it does today.
-function DF:SetPositionRecord(mode, pos, reason)
+-- `libReason` is DandersMover's onChanged reason, when the write comes from the lib.
+function DF:SetPositionRecord(mode, pos, reason, libReason)
     if type(pos) ~= "table" then return end
     local spec = recordSpec(mode)
     local db = spec.db()
@@ -1050,36 +1173,74 @@ function DF:SetPositionRecord(mode, pos, reason)
     -- personal only in a raid / raid test (its db() then IS the raid overlay).
     if spec.route and db == DF:GetRaidDB() then
         if spec == RECORD_SPECS.raid and DF.LogRaidAnchorWrite then
-            DF:LogRaidAnchorWrite(reason or "SetPositionRecord", x, y)
+            DF:LogRaidAnchorWrite(reason or libReason or "SetPositionRecord", x, y)
         end
-        -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
-        -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
-        -- position; writing the base anchors underneath it does not move anything and
-        -- quietly corrupts the user's base position instead. Falls through when the
-        -- routing declines (no active layout, or mid-edit where the preview path
-        -- captures it). Keep all three call sites in step.
-        local apu = DF.AutoProfilesUI
-        local routed = false
-        if apu then
+        -- ☠ A LIB RE-SOLVE IS NOT A USER MOVE. DandersMover re-applies every record when a
+        -- layout turns on and re-solves an anchored one whenever its target moves; routing
+        -- those to the active layout stamped the profile's position into every layout that
+        -- had none of its own, the first time it activated. While the layout leaves the
+        -- position to the profile, a lib write updates the PROFILE's position -- exactly
+        -- what it would do with no layout active.
+        if LIB_REASONS[libReason] and DF.raidOverrides and not layoutOwnsPosition(spec) then
             if spec == RECORD_SPECS.raid then
-                -- Refreshes the raid container itself (unchanged Phase A behaviour).
-                routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
-            else
-                -- The caller applies afterwards (mode.apply / onChanged).
-                routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
+                local real = DF._realRaidDB
+                local base = real and real[spec.key]
+                if type(base) == "table" then
+                    base.x, base.y = x, y
+                    noteRecord(base, x, y)
+                end
+                if real then real[spec.xKey], real[spec.yKey] = x, y end
+                local live = layoutRaidRecord(spec, db)
+                if live then
+                    live.x, live.y = x, y
+                    noteRecord(live, x, y)
+                end
+                return
             end
-        end
-        if routed then
-            -- The layout took it (override + live overlay). Keep the record on the same
-            -- value and note it, so the next read sees record and effective scalar agree
-            -- rather than a phantom mutation. The base scalars are NOT written -- that is
-            -- the whole point of routing.
-            local live = db[spec.key]
-            if type(live) == "table" then
-                live.x, live.y = x, y
-                noteRecord(live, x, y)
+            -- Personal: the record is the profile's own (no layout copy); fall through to
+            -- the plain write below.
+        else
+            -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
+            -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
+            -- position; writing the base anchors underneath it does not move anything and
+            -- quietly corrupts the user's base position instead. Falls through when the
+            -- routing declines (no active layout, or mid-edit where the preview path
+            -- captures it). Keep all three call sites in step.
+            local apu = DF.AutoProfilesUI
+            local routed = false
+            if apu then
+                if spec == RECORD_SPECS.raid then
+                    -- Refreshes the raid container itself (unchanged Phase A behaviour).
+                    routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
+                else
+                    -- The caller applies afterwards (mode.apply / onChanged).
+                    routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
+                end
             end
-            return
+            if routed then
+                -- The layout took it (override + live overlay). The base scalars are NOT
+                -- written -- that is the whole point of routing.
+                if spec == RECORD_SPECS.raid then
+                    -- ...and the layout owns the WHOLE record from here: point, X/Y and
+                    -- anchor, stored with the layout so the next activation restores it.
+                    local live = layoutRaidRecord(spec, db)
+                    if live then
+                        writeRecord(live, pos, x, y)
+                        followsProfile[live] = nil
+                        noteRecord(live, x, y)
+                        if apu.SetActiveLayoutRaidRecord then apu:SetActiveLayoutRaidRecord(live) end
+                    end
+                else
+                    -- Keep the record on the same value and note it, so the next read sees
+                    -- record and effective scalar agree rather than a phantom mutation.
+                    local live = db[spec.key]
+                    if type(live) == "table" then
+                        live.x, live.y = x, y
+                        noteRecord(live, x, y)
+                    end
+                end
+                return
+            end
         end
     end
 
@@ -1089,29 +1250,7 @@ function DF:SetPositionRecord(mode, pos, reason)
         db[spec.key] = rec
     end
 
-    if rec == pos then
-        -- The lib mutated the live record in place; just normalise it.
-        rec.point = rec.point or "CENTER"
-        rec.x, rec.y = x, y
-    else
-        -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
-        -- anchor the record already holds. Only the lib's in-place mutation (the
-        -- `rec == pos` branch above, which is where its Detach lands) may clear one.
-        local prev = rec.anchor
-        rec.point = pos.point or "CENTER"
-        rec.x, rec.y = x, y
-        rec.anchor = nil
-        if type(pos.anchor) == "table" then
-            local a = pos.anchor
-            rec.anchor = {
-                target = a.target, mode = a.mode, edge = a.edge, align = a.align,
-                point = a.point, relPoint = a.relPoint,
-                offsetX = a.offsetX, offsetY = a.offsetY,
-            }
-        else
-            rec.anchor = prev
-        end
-    end
+    writeRecord(rec, pos, x, y)
 
     -- The mirror. Every legacy reader takes these.
     db[spec.xKey], db[spec.yKey] = x, y
@@ -1140,6 +1279,44 @@ function DF:UpdateContainerPosition()
     end
 end
 
+-- ★ RAID CONTAINER PING-PONG DETECTOR, in the debug log rather than behind a command.
+-- A wiggle is the container being placed back and forth between two spots; a drag or a
+-- slider moves it one way. So it counts BOUNCES -- a move that returns to where the
+-- container was two moves ago -- and warns once (per 30s) when several land within a
+-- few seconds, with what was driving the position at the time and the recent callers.
+local abs, GetTime = math.abs, GetTime
+local PING_EPS, PING_WINDOW, PING_BOUNCES, PING_QUIET = 0.5, 3, 3, 30
+local ping = { trail = {} }
+
+function DF:NoteRaidContainerMove(cx, cy, rec)
+    if ping.x1 and abs(cx - ping.x1) <= PING_EPS and abs(cy - ping.y1) <= PING_EPS then return end
+    local now = GetTime()
+    local trail = ping.trail
+    if DF:DebugActive("RAIDPOS") then
+        trail[#trail + 1] = string.format("(%.1f,%.1f)@%s", cx, cy, ShortCaller(4))
+        if #trail > 6 then table.remove(trail, 1) end
+    end
+    if ping.x2 and abs(cx - ping.x2) <= PING_EPS and abs(cy - ping.y2) <= PING_EPS then
+        if not ping.t0 or now - ping.t0 > PING_WINDOW then ping.t0, ping.n = now, 0 end
+        ping.n = ping.n + 1
+        if ping.n >= PING_BOUNCES and now - (ping.warned or -PING_QUIET) >= PING_QUIET then
+            ping.warned = now
+            local apu = DF.AutoProfilesUI
+            local layout = apu and apu.activeRuntimeProfile
+            DF:DebugWarn("RAIDPOS",
+                "raid container bounced %d times in %.1fs between (%.1f,%.1f) and (%.1f,%.1f) -- layout=%s editing=%s anchored=%s moverSession=%s trail=%s",
+                ping.n, now - ping.t0, cx, cy, ping.x1, ping.y1,
+                tostring(layout and layout.name or "none"),
+                tostring(apu and apu.IsEditing and apu:IsEditing() or false),
+                tostring(rec and rec.anchor and rec.anchor.target or false),
+                tostring(Mover and Mover:IsUnlocked() or false),
+                #trail > 0 and table.concat(trail, " ") or "(turn on RAIDPOS for callers)")
+        end
+    end
+    ping.x2, ping.y2 = ping.x1, ping.y1
+    ping.x1, ping.y1 = cx, cy
+end
+
 function DF:UpdateRaidContainerPosition()
     if not DF.raidContainer then return end
     if InCombatLockdown() then return end
@@ -1152,15 +1329,12 @@ function DF:UpdateRaidContainerPosition()
     local x, y = rec.x or 0, rec.y or 0
     local scale = db.frameScale or 1.0
 
-    -- ☠ CENTER-anchor compensation, RETIRED 2026-08-18 -- this now always adds (0, 0).
-    -- It shifted the container to hold CENTER content still as the roster grew, against
-    -- #867. That was a workaround one layer below the real bug (the CENTER compounding,
-    -- fixed at source in 50a3e7c5), and it was actively harmful: CENTER already grows
-    -- symmetrically about the container centre, so the centroid never moved, and this
-    -- pinned the leading edge instead -- measured in game as the container and mover
-    -- dragged 316px left at Wrap 7 / Center Right / 8 groups (Krathe, 2026-08-18).
-    -- The call stays so the reasoning has one home: see ComputeRaidContainerCompensation
-    -- in Headers.lua before reinstating anything here.
+    -- ☠ NO CENTER-anchor compensation: this always adds (0, 0). CENTER already grows
+    -- symmetrically about the container centre, so the centroid never moves; shifting the
+    -- container to hold content still pinned the leading edge instead and was measured
+    -- dragging the container and mover 316px left (Wrap 7 / Center Right / 8 groups).
+    -- The call stays so the reasoning has one home: read ComputeRaidContainerCompensation in
+    -- Headers.lua before reinstating anything here.
     local dx, dy = 0, 0
     if DF.ComputeRaidContainerCompensation then
         dx, dy = DF:ComputeRaidContainerCompensation()
@@ -1187,15 +1361,15 @@ function DF:UpdateRaidContainerPosition()
         end
     end
 
+    if DF.NoteRaidContainerMove then DF:NoteRaidContainerMove(cx, cy, rec) end
+
     DF.raidContainer:SetScale(scale)
     DF.raidContainer:ClearAllPoints()
     DF.raidContainer:SetPoint(point, UIParent, "CENTER", cx / scale, cy / scale)
 
-    -- ☠ THE TEST CONTAINER TAKES THE COMPENSATION TOO — both read the one number
-    -- ComputeRaidContainerCompensation returns (Aphoex, 2026-08-15). The comp rides
-    -- ON THE CONTAINER, mirroring live — the test frame calculator no longer folds
-    -- it into frame offsets. One accounting model in both modes; the calculator's
-    -- testMode comp fork is retired.
+    -- ☠ THE TEST CONTAINER TAKES THE COMPENSATION TOO -- both read the one number
+    -- ComputeRaidContainerCompensation returns, and it rides ON THE CONTAINER in both modes
+    -- (the test frame calculator does not fold it into frame offsets). One accounting model.
     if DF.testRaidContainer then
         DF.testRaidContainer:SetScale(scale)
         DF.testRaidContainer:ClearAllPoints()
@@ -1328,7 +1502,7 @@ end
 -- position" means; API.lua stays what it already is, a documented wall of global
 -- wrappers.
 --
--- Written for MSUF's Edit Mode (Mapko, 2026-08-06), which wants to drag DF's frames from
+-- Written for MSUF's Edit Mode, which wants to drag DF's frames from
 -- its own editor without touching DandersFramesDB_v2.
 --
 -- ☠ THE ID SPACE IS PUBLIC THE MOMENT AN ADDON SHIPS AGAINST IT. "party", "raid",

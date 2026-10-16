@@ -232,8 +232,8 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
         DF:OnPetFrameEvent(self, event, ...)
     end)
     
-    -- PERFORMANCE FIX 2025-01-20: Use RegisterUnitEvent for C++ level filtering
-    -- Pet frames need to listen to both the pet unit AND the owner unit:
+    -- RegisterUnitEvent for C++ level filtering. Pet frames listen to both the pet unit AND
+    -- the owner unit:
     -- - Pet unit: for health, name updates
     -- - Owner unit: for death detection (hide pet when owner dies) and UNIT_PET
     frame:RegisterUnitEvent("UNIT_HEALTH", unit, ownerUnit)  -- Need both pet and owner
@@ -246,24 +246,18 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     frame:RegisterUnitEvent("UNIT_DISPLAYPOWER", unit)       -- Pet power type change
     
     
-    -- Mouse interaction - use HookScript to not interfere with other handlers
-    -- ☠ RE-RESOLVE PER CALL. This closure used to read the `db` captured at
-    -- CreatePetFrame, and Core/Profile.lua REPLACES DF.db[mode] with a fresh DeepCopy on
-    -- a profile reset, copy or AutoProfiles swap -- so the frame went on reading the
-    -- RETIRED table. Pet frames are created once and reused, so the Pet Tooltip checkbox
-    -- silently stopped responding on that frame for the rest of the session. Every other
-    -- function in this file already re-resolves through DF:GetFrameDB(frame) per call.
-    -- ☠☠ THE THIRD HOVER PATH. Pet frames are built here, not by Frames/Create.lua and
-    -- not by the header child in Frames/Headers.lua, so every visibility rule those two
-    -- grew had to be repeated here by hand -- and none ever were. This checked
-    -- `tooltipFrameEnabled` and nothing else, so it ignored the ORIGINAL Disable In
-    -- Combat boolean just as completely as it ignored the modifier that replaced it.
-    -- A long-standing hole, not a regression of the 2026-08-23 visibility rework.
-    -- ★ Named and registered like the other two, so the modifier/combat watcher can
-    -- re-decide a hovered pet in place AND the GameTooltip OnShow refusal (which keys
-    -- off the registered hover frame) covers pets too -- without that registration a
-    -- pet would still flash. Hides rather than skipping, ownership-checked, via the
-    -- shared helper.
+    -- Mouse interaction - HookScript so other handlers are not disturbed.
+    -- ☠ RE-RESOLVE PER CALL. Core/Profile.lua REPLACES DF.db[mode] with a fresh DeepCopy on a
+    -- profile reset, copy or AutoProfiles swap, and pet frames are created once and reused, so
+    -- a `db` captured at CreatePetFrame would read the RETIRED table for the rest of the
+    -- session. Every function in this file re-resolves through DF:GetFrameDB(frame) per call.
+    -- ☠☠ THE THIRD HOVER PATH. Pet frames are built here, not by Frames/Create.lua nor by the
+    -- header child in Frames/Headers.lua, so every visibility rule those two have must be
+    -- repeated here by hand.
+    -- ★ Named and registered like the other two, so the modifier/combat watcher can re-decide
+    -- a hovered pet in place AND the GameTooltip OnShow refusal (which keys off the registered
+    -- hover frame) covers pets too -- without that registration a pet would still flash.
+    -- Hides rather than skipping, ownership-checked, via the shared helper.
     local function OnPetFrameEnter(self)
         local fdb = DF:GetFrameDB(self)
         if DF.NoteTooltipHover then DF:NoteTooltipHover(self, OnPetFrameEnter) end
@@ -488,30 +482,21 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
     
     -- ☠☠ THE RECOVERY EDGE. Read this before touching either branch below.
     --
-    -- UNIT_PET is a ONE-SHOT and it can arrive before the pet token is populated: the
-    -- branch above then takes its else-arm and HIDES, and no second UNIT_PET is coming
-    -- for that summon. Everything else here was hide-only -- the pet's own UNIT_FLAGS
-    -- could hide the frame and never show it, and its UNIT_HEALTH only repainted a
-    -- frame that was already visible -- so once the race was lost the ONLY route back
-    -- was an owner event, or the user toggling Pet Frames off and on. That is the
-    -- reported workaround, and the report is exactly this shape: "die, release,
-    -- resummon, pet frame missing; not 100% but more often than not" (moose,
-    -- 2026-08-20, delve). A race is precisely what "more often than not" looks like.
+    -- UNIT_PET is a ONE-SHOT and can arrive before the pet token is populated: the branch above
+    -- then takes its else-arm and HIDES, and no second UNIT_PET is coming for that summon
+    -- (die, release, resummon -- "not 100% but more often than not" is what a race looks like).
+    -- A gate needs a refresh on BOTH transitions, so every arm that can hide has a matching
+    -- show here: the pet's FIRST health or flags event after it appears puts the frame back,
+    -- with no new registration and no polling.
     --
-    -- A gate needs a refresh on BOTH transitions and this one only had the hide half.
-    -- Every arm that can hide now has a matching show, so the pet's FIRST health or
-    -- flags event after it appears puts the frame back with no new registration and no
-    -- polling.
-    --
-    -- ⚠ EDGE-GATED ON dfPetHidden, so this costs one field read on the hot path. Pet
-    -- and owner UNIT_HEALTH fire constantly for every pet in the group; running a full
-    -- refresh on each would be a storm. The flag is set by SetPetFrameVisible itself,
-    -- so it is the frame's own record of which side of the gate it is on.
-    -- ★ Through RefreshPetFrame, not SetPetFrameVisible: a pet arriving outside a track
-    -- pass has to be REPOSITIONED as well as shown, or it appears under whichever
-    -- teammate it was last anchored to. Same reasoning as OnPetChanged's.
-    -- (recoverIfHidden is at file scope above -- a per-call closure here would allocate
-    -- on every UNIT_HEALTH.)
+    -- ⚠ EDGE-GATED ON dfPetHidden, so this costs one field read on the hot path. Pet and owner
+    -- UNIT_HEALTH fire constantly for every pet in the group; a full refresh on each would be a
+    -- storm. The flag is set by SetPetFrameVisible itself, so it is the frame's own record of
+    -- which side of the gate it is on.
+    -- ★ Through RefreshPetFrame, not SetPetFrameVisible: a pet arriving outside a track pass
+    -- has to be REPOSITIONED as well as shown, or it appears under whichever teammate it was
+    -- last anchored to. (recoverIfHidden is at file scope above -- a per-call closure here
+    -- would allocate on every UNIT_HEALTH.)
 
     -- Check for owner unit events (for death detection)
     if unit == frame.ownerUnit then
@@ -729,22 +714,16 @@ function DF:UpdatePetHealth(frame)
     DF:ApplyPetHealthColor(frame, db, ownerUnit, unit)
 end
 
--- ★★ PET HEALTH BAR COLOUR — ONE IMPLEMENTATION, LIVE AND PREVIEW.
+-- ★★ PET HEALTH BAR COLOUR -- ONE IMPLEMENTATION, LIVE AND PREVIEW.
 --
--- ☠ THE PREVIEW USED TO HARDCODE ONE COLOUR: SetStatusBarColor(0.2, 0.8, 0.2), a
--- flat green that is not even live's default green (0, 0.8, 0). Every pet
--- health-colour setting was therefore invisible in test -- and the shipped default
--- mode is HEALTH, so out of the box live drew a red->yellow->green gradient while
--- the preview drew flat green. (Audit, 2026-08-07.)
---
--- `test` is the only fork and it is pure DATA: { pct = 0..1, class = "MAGE" }.
--- Live resolves those two from unit APIs, which fabricated pet tokens fail.
+-- `test` is the only fork and it is pure DATA: { pct = 0..1, class = "MAGE" }. Live
+-- resolves those two from unit APIs, which fabricated pet tokens fail.
 --   * CLASS  -- needs the OWNER's class token.
---   * HEALTH -- live takes the colour straight out of UnitHealthPercent(unit, true,
---     curve), which is secret-safe and needs a real unit; the preview interpolates
---     the same stops in Lua. Safe to restate the ramp because it is hardcoded on
---     both sides -- GetPetHealthGradientCurve builds it from constants, not from db,
---     so there is no user setting here that could drift.
+--   * HEALTH -- live takes the colour straight out of UnitHealthPercent(unit, true, curve),
+--     which is secret-safe and needs a real unit; the preview interpolates the same stops
+--     in Lua. Safe to restate the ramp because it is hardcoded on both sides --
+--     GetPetHealthGradientCurve builds it from constants, not from db, so no user setting
+--     can drift.
 --   * CUSTOM and the default arm are pure db reads, shared verbatim.
 local PET_HEALTH_STOPS = {
     { pos = 0.0, r = 1, g = 0,   b = 0 },
@@ -1167,11 +1146,10 @@ function DF:LightweightUpdatePetFrames()
             end
         end
     elseif DF:ActivePetTrack() == PET_TRACK_PARTY then
-        -- ☠ ONLY WHEN PARTY IS THE ACTIVE TRACK. PositionPetFrame re-resolves the owner
-        -- through GetFrameForUnit, which is arena-aware, so restyling the party set
-        -- while an arena is on screen re-parents it onto the arena header. This is the
-        -- slider path — every pet option change comes through here — which is why
-        -- touching any pet slider in an arena used to drag the party pets into it.
+        -- ☠ ONLY WHEN PARTY IS THE ACTIVE TRACK. PositionPetFrame re-resolves the owner through
+        -- GetFrameForUnit, which is arena-aware, so restyling the party set while an arena is on
+        -- screen would re-parent it onto the arena header -- and every pet option change (the
+        -- slider path) comes through here.
         if DF.petFrames.player then
             DF:ApplyPetFrameStyle(DF.petFrames.player)
             DF:PositionPetFrame(DF.petFrames.player)
@@ -1193,12 +1171,10 @@ function DF:LightweightUpdatePetFrames()
             end
         end
     else
-        -- ☠ ONE TRACK AT A TIME. This used to walk raidPetFrames AND arenaPetFrames
-        -- unconditionally, which meant that in an arena the hidden raid set was
-        -- restyled and repositioned too -- and PositionPetFrame re-resolves the owner
-        -- through the arena-aware GetFrameForUnit, so it did not just waste work, it
-        -- re-parented the raid pets onto the arena header. That is the whole "dragging
-        -- a pet slider in an arena dragged the raid pets onto the arena frames" bug.
+        -- ☠ ONE TRACK AT A TIME. Walking raidPetFrames AND arenaPetFrames in an arena would restyle
+        -- and reposition the hidden raid set too, and PositionPetFrame re-resolves the owner
+        -- through the arena-aware GetFrameForUnit, re-parenting the raid pets onto the arena
+        -- header.
         local track = DF:ActivePetTrack()
 
         -- Live mode: update real raid pet frames
@@ -2006,21 +1982,16 @@ local function UpdateArenaPetFrames()
         return
     end
 
-    -- Everything below this point touches protected state: CreatePetFrame builds a
-    -- SecureUnitButtonTemplate and calls SetSize/SetAttribute, and PositionPetFrame
-    -- does ClearAllPoints/SetParent/SetPoint. Arena reaches it constantly: a pet
-    -- summoned or resurrected mid-match, a Solo Shuffle round transition, or Core's
-    -- PLAYER_REGEN_DISABLED handler ending test mode all land here with the lockdown up.
+    -- Everything below touches protected state: CreatePetFrame builds a
+    -- SecureUnitButtonTemplate and calls SetSize/SetAttribute, and PositionPetFrame does
+    -- ClearAllPoints/SetParent/SetPoint. Arena reaches it constantly: a pet summoned or
+    -- resurrected mid-match, a Solo Shuffle round transition, or Core's PLAYER_REGEN_DISABLED
+    -- handler ending test mode all land here with the lockdown up.
     --
-    -- ☠ This comment used to claim the raid track "gets away without a guard because
-    -- you only reach it forming a group, out of combat". That was FALSE — the Options
-    -- sliders are usable in combat and reach it. The guard now lives on
-    -- PositionPetFrame and InitializePetFrames themselves, covering every track; this
-    -- one stays because deferring the whole arena pass is cheaper than deferring each
-    -- frame within it.
-    --
-    -- Defer rather than drop, so the pets appear the moment combat ends instead of
-    -- waiting for whatever roster event happens to come next.
+    -- PositionPetFrame and InitializePetFrames carry their own guards for every track (the
+    -- Options sliders are usable in combat); this one stays because deferring the whole arena
+    -- pass is cheaper than deferring each frame within it. Defer rather than drop, so the pets
+    -- appear the moment combat ends instead of on whatever roster event comes next.
     if InCombatLockdown() then
         DF.pendingArenaPetUpdate = true
         return
@@ -2230,13 +2201,11 @@ local function PetSetForRaidIndex()
     return DF.raidPetFrames
 end
 
--- Update AND reposition. Every branch below used to call UpdatePetFrame alone, so a
--- pet arriving through UNIT_PET -- a warlock resummoning mid-arena is the everyday
--- case -- was SHOWN at whatever anchor it last held. That is the "right pet under the
--- wrong teammate" symptom for anything that arrives here rather than through a track
--- pass. Owner death and rez arrive as UNIT_HEALTH / UNIT_FLAGS and never reach here.
--- Assigns the forward-declared local above; a `local function` here would shadow it
--- and leave the recovery arms in OnPetFrameEvent calling nil.
+-- Update AND reposition: a pet arriving through UNIT_PET (a warlock resummoning
+-- mid-arena is the everyday case) must not be SHOWN at whatever anchor it last held, under
+-- the wrong teammate. Owner death and rez arrive as UNIT_HEALTH / UNIT_FLAGS and never
+-- reach here. Assigns the forward-declared local above; a `local function` here would
+-- shadow it and leave the recovery arms in OnPetFrameEvent calling nil.
 function RefreshPetFrame(frame)
     if not frame then return end
     DF:UpdatePetFrame(frame)

@@ -218,29 +218,24 @@ end
 
 -- One setting value -> one short display string.
 --
---   numbers        as-is: whole numbers plain, fractions to six significant
---                  figures (%.6g, which prints 0.35 as "0.35" and 26 as "26"
---                  without inventing trailing zeros on either).
+--   numbers        as-is: whole numbers plain, fractions to six significant figures
+--                  (%.6g, which prints 0.35 as "0.35" and 26 as "26" without inventing
+--                  trailing zeros on either).
 --   booleans       On / Off
 --   media paths    the name the media dropdown shows, never the path
 --   colour tables  #RRGGBB
---   other tables   an ellipsis -- a nested block (the aura designer's, a
---                  position) has no honest one-line form, and pretending
---                  otherwise reads worse than admitting it.
+--   other tables   an ellipsis -- a nested block (the aura designer's, a position) has
+--                  no honest one-line form, and pretending otherwise reads worse.
 --
--- ☠ THE ELLIPSIS IS THREE DOTS, NOT U+2026. It used to be the single character
--- on the page and ASCII only in the copy block, and the page half rendered as an
--- EMPTY BOX in game: the settings panel draws in the user's Settings Font and
--- the shipped default ("DF Roboto SemiBold") carries Latin, digits and
--- punctuation and nothing else -- the same reason the ledger's arrow had to
--- become an icon. An arrow has art to fall back on; an ellipsis does not need
--- any, because "..." says the identical thing in a glyph every font has.
+-- ☠ THE ELLIPSIS IS THREE DOTS, NOT U+2026. The settings panel draws in the user's
+-- Settings Font, and the shipped default ("DF Roboto SemiBold") carries Latin, digits and
+-- punctuation only, so U+2026 renders as an EMPTY BOX; "..." says the same thing in a
+-- glyph every font has.
 --
--- `ascii` therefore no longer changes this branch -- it is now only about the
--- localised words (On/Off), which the copy block drops so a pasted report reads
--- the same in a support thread whatever locale wrote it.
--- NaN is named rather than run through %g, whose output for it is
--- platform-dependent and would make the tests answer differently per machine.
+-- `ascii` only affects the localised words (On/Off), which the copy block drops so a
+-- pasted report reads the same in a support thread whatever locale wrote it.
+-- NaN is named rather than run through %g, whose output for it is platform-dependent and
+-- would make the tests answer differently per machine.
 function ChangedSettings.FormatValue(v, ascii)
     if v == nil then return "-" end
 

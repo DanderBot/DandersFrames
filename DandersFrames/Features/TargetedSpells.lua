@@ -1,101 +1,30 @@
 local addonName, DF = ...
 
--- ############################################################
--- ⚰ DEPRECATED-TARGETED-SPELLS — GROUP HALF REMOVED FROM THIS FILE 2026-07-29
--- ############################################################
--- Grep DEPRECATED-TARGETED-SPELLS to find every site. THIS comment is the
--- canonical one; the others are signposts back to here.
---
--- ☠ THREE THINGS THIS CHECKLIST GOT WRONG — it was written as a plan and never
--- checked against the code. Following it literally breaks LIVE features:
---   1. `activeCasters` is NOT group state. It is the shared "which enemies are
---      casting" registry: HandleTargetChange gates the PERSONAL display on it,
---      and the history interrupt marking reads its startTime. It STAYS.
---   2. `RegisterTargetedSpellEvents` is NOT group code — it registers the event
---      frame that Personal AND the Targeted List both run on. It STAYS.
---   3. `DF:UpdateTargetedSpellEventRegistration` is shared infrastructure, called
---      by the personal toggle, the list toggle and InitTargetedSpells. It STAYS.
--- The general trap: a function whose body names no personal/list symbol can still
--- be infrastructure both depend on. Symbol counting cannot see that — read the
--- callers. Everything else below held up.
---
--- DONE in this file: the icons, pool, layout, PositionIcons, Show/Hide/HideAll,
--- ShowInterruptedVisual, the whole roster-fingerprint resolver, GetFrameForUnit,
--- ShouldShow(Raid)TargetedSpells, Enable/Disable/ToggleTargetedSpells, the
--- write-only DF.targetedSpellsEnabled flag, and the group branches inside
--- ProcessCastInternal / HandleCastStop / OnEvent / NeedsCastEvents.
---
--- WHAT WENT: the GROUP-FRAME (on-frame) targeted-spell icons — the Indicators >
--- Targeted Spells page, and the icon pool / cast tracking / roster-fingerprint
--- machinery that fed them. Saved `targetedSpell*` keys were deliberately left on
--- existing profiles (see the note at the end of this block).
---
--- WHAT IS NOT: the PERSONAL display (`personalTargetedSpell*`, Indicators >
--- Personal Targeted) and the Targeted List. Both are live, both are supported,
--- and BOTH SHARE THIS FILE — the personal path compares against "player", which
--- is in UnitIsUnit's always-allowed list, so Blizzard's change never touched it.
--- ⚠ Do not delete this file. Deleting the feature means deleting the group half
--- OUT of it.
---
--- WHY: Blizzard's 2026-04-07 UnitIsUnit hotfix (detailed in the API
--- COMPATIBILITY block below) removed the only way to answer "is this enemy
--- casting at THIS group member". The feature has been force-disabled
--- unconditionally at load ever since — every setting on its page configured
--- something that could not render.
---
--- STATUS: the page was pulled from the sidebar 2026-07-27, and the group code was
--- DELETED 2026-07-29/30. This is no longer reversible by flipping a flag — the API
--- never came back across the remaining PTR builds. Restoring the feature means
--- restoring it from history, and it would still need an answer to UnitIsUnit.
---
--- The checklist below is kept as a RECORD, not a plan: it is what the removal
--- worked from, and the four places it was wrong are listed at the top of this
--- block. Read those before trusting any similar list.
---
--- DELETION CHECKLIST — what the removal covered:
---   Features\TargetedSpells.lua   the group half of this file: activeCasters,
---                                 the icon pool, PositionIcons,
---                                 Show/HideTargetedSpellIcon, the roster
---                                 fingerprint resolver, the cast/roster event
---                                 handlers, the setup wizard.
---                                 ⚠ NOT a contiguous block — the personal
---                                 helpers (ShouldShowPersonalTargetedSpells,
---                                 GetPersonalDB, the Show/Hide/Update Personal*
---                                 functions) are interleaved with them, and the
---                                 unit/content-type helpers near the top are
---                                 shared by both. Cut by function, not by range.
---   Options\Options.lua           the Indicators > Targeted Spells page,
---                                 GUI.RefreshTargetedSpellsOverlay, the
---                                 apiBlockedOverlay
---   Config.lua                    the targetedSpell* defaults (party + raid)
---   ExportCategories.lua          the targetedSpell export category
---   TestMode\TestMode.lua         the on-frame test painter + its panel checkbox
---                                 (⚠ shared with Personal Targeted — check
---                                 UpdateAllTestTargetedSpell before cutting)
---   Core.lua                      migrations + the wizard auto-fire (already out)
---   Features\ElementAppearance.lua, Frames\Position.lua (mover),
---   Frames\Headers.lua, Options\AutoProfiles.lua (override→page map),
---   Profile.lua, Debug\Profiler.lua, Debug\MemoryTest.lua
---   Locales\enUS.lua              the page's strings, once nothing else uses them
---   DandersFrames.toc             only if the file itself ever goes, which it
---                                 does not — Personal Targeted lives here
---
--- ⚠ Saved profiles keep their targetedSpell* keys either way. Stripping them is
--- a separate call (see the change-the-baseline rule) — do NOT fold it in.
--- ############################################################
-
 -- ============================================================
 -- TARGETED SPELLS SYSTEM
--- Shows incoming enemy casts, so healers get warning of incoming damage.
+-- Shows incoming enemy casts, so healers get warning of incoming damage. Two displays live
+-- here:
+--   * Personal Targeted (`personalTargetedSpell*`, Indicators > Personal Targeted) -- the
+--     player-only icon; compares against "player", which is in UnitIsUnit's always-allowed
+--     list.
+--   * The Targeted List -- the party-only display for the group use case, in its own
+--     section at the bottom of this file.
+-- Shared by both: nameplate-only caster detection (and therefore the nameplateShowOffscreen
+-- dependency), and C_Spell.IsSpellImportant highlighting.
 --
--- What actually lives here now, both maintained:
---   * Personal Targeted -- the player-only icon; compares against "player", which
---     survived the UnitIsUnit lockdown.
---   * The Targeted List -- the party-only replacement for the per-frame use case,
---     in its own section at the bottom of this file.
+-- There are no group-frame (on-frame) targeted-spell icons -- see API COMPATIBILITY below.
 --
--- Shared by both: nameplate-only caster detection (and therefore the
--- nameplateShowOffscreen dependency), and C_Spell.IsSpellImportant highlighting.
+-- ☠ SHARED INFRASTRUCTURE, NOT GROUP CODE -- these serve both displays and must stay, even
+-- though their bodies name neither:
+--   * `activeCasters` -- the "which enemies are casting" registry: HandleTargetChange gates
+--     the PERSONAL display on it, and the history interrupt marking reads its startTime.
+--   * `RegisterTargetedSpellEvents` -- the event frame Personal AND the Targeted List run on.
+--   * `DF:UpdateTargetedSpellEventRegistration` -- called by the personal toggle, the list
+--     toggle and InitTargetedSpells.
+-- Symbol counting cannot see a dependency like that; read the callers.
+--
+-- ⚠ Saved profiles keep their old targetedSpell* keys; stripping them would be a separate
+-- change (see the change-the-baseline rule).
 -- ============================================================
 
 local pairs, ipairs, wipe = pairs, ipairs, wipe
@@ -116,33 +45,17 @@ local C_CVar = C_CVar
 local activeCasters = {}
 
 -- ============================================================
--- API COMPATIBILITY: Group-frame targeted spells (REMOVED)
+-- API COMPATIBILITY: no group-frame targeted spells
 -- ------------------------------------------------------------
--- Blizzard hotfixed UnitIsUnit on 2026-04-07 so that comparing a
--- compound token like "nameplateXtarget" against a party/raid
--- token now returns nil. That kills our per-frame "is this enemy
--- targeting THIS party member" detection.
---
--- There is no in-addon workaround:
---   * UnitGUID/UnitName on nameplate units become secret in
---     instance combat, so we can't compare those either.
---   * The new PlayerIsSpellTarget API only answers for the player,
---     not for arbitrary group members.
---
--- The change is now live on retail. Group-frame Targeted Spells was removed
--- from this file entirely. The personal-display path (compares against
--- "player") still works and is unaffected, since "player" is in the
--- always-allowed list of UnitIsUnit args.
---
--- The "Targeted List" feature replaced the per-frame icon use case. It is built and
--- shipped -- it lives in this same file, in the Targeted List section below.
+-- UnitIsUnit returns nil when comparing a compound token like "nameplateXtarget" against a
+-- party/raid token, so per-frame "is this enemy targeting THIS party member" detection is
+-- impossible, and there is no in-addon workaround:
+--   * UnitGUID/UnitName on nameplate units are secret in instance combat, so they cannot be
+--     compared either.
+--   * PlayerIsSpellTarget only answers for the player, not for arbitrary group members.
+-- The personal-display path compares against "player" and is unaffected; the Targeted List
+-- (below in this file) covers the group use case.
 -- ============================================================
-
--- (Removed) DF.GroupTargetedSpellsAPIBlocked/Party and
--- ForceDisableGroupTargetedSpellSettings — all write-only, and their readers
--- went with the group display's Options page.
--- ⚠ The change-the-baseline rule preserves USER data; it does not cover a write
--- that manufactures a key nothing reads, so removing such a write is in scope.
 
 -- Personal display variables (declared early for HandleTargetChange access)
 local personalContainer = nil
@@ -239,17 +152,16 @@ function DF:GetPersonalTargetedDB()
 end
 
 -- Check if a unit is valid for targeted spell tracking.
--- We ONLY track nameplate units: the same caster also fires on target/softenemy/
--- boss/arena, and dedup is keyed on the unit-token STRING, so accepting those
--- would put the same cast in the list twice.
+-- We ONLY track nameplate units: the same caster also fires on target/softenemy/boss/arena,
+-- and dedup is keyed on the unit-token STRING, so accepting those would put the same cast in
+-- the list twice.
 --
--- ⚠ That reasoning assumes every caster we care about HAS a nameplate, which is
--- only true while the nameplateShowOffscreen CVar is on. With it off, an enemy
--- outside your view gets no nameplate — so a mob you have targeted and can watch
--- casting arrives here as "target" only, and is rejected. Confirmed in game
--- 2026-07-30. Hence the checkbox on the Targeted List / Personal Targeted pages;
--- see DF:SetNameplateOffscreen. Accepting target/softenemy as a fallback would
--- need GUID-based dedup instead of token-string dedup, which is a bigger change.
+-- ⚠ That assumes every caster we care about HAS a nameplate, which is only true while the
+-- nameplateShowOffscreen CVar is on. With it off, an enemy outside your view gets no
+-- nameplate, so a targeted mob casting arrives as "target" only and is rejected -- hence the
+-- checkbox on the Targeted List / Personal Targeted pages (see DF:SetNameplateOffscreen).
+-- Accepting target/softenemy as a fallback would need GUID-based dedup instead of
+-- token-string dedup, which is a bigger change.
 local function IsValidCasterUnit(unit)
     if not unit then return false end
     
@@ -372,12 +284,10 @@ local function ProcessCastInternal(casterUnit, isChannel)
     -- is still permitted under the new UnitIsUnit rules.
     secrets.targets["player"] = UnitIsUnit(casterUnit .. "target", "player")
 
-    -- Per-party-member targeting is no longer recoverable after Blizzard's
-    -- 2026-04-07 UnitIsUnit hotfix — UnitIsUnit returns nil for
-    -- nameplateXtarget vs partyN. We deliberately don't store nil here
-    -- because the cast history UI feeds these values to SetAlphaFromBoolean,
-    -- which errors on nil. The history will simply show "N/A" for party
-    -- member targeting columns.
+    -- Per-party-member targeting is not recoverable (UnitIsUnit returns nil for
+    -- nameplateXtarget vs partyN). We deliberately don't store nil here because the cast history
+    -- UI feeds these values to SetAlphaFromBoolean, which errors on nil; the history shows "N/A"
+    -- for party member targeting columns.
     
     -- Store isImportant secret
     if C_Spell and C_Spell.IsSpellImportant and spellID then
@@ -679,7 +589,7 @@ eventFrame:SetScript("OnEvent", OnEvent)
 -- Targeted List / Personal Targeted checkboxes read and write it directly via
 -- these two, and re-read on OnShow so a change made in the game menu shows up.
 --
--- Why the features care (confirmed in game 2026-07-30, on 12.1): with this OFF,
+-- Why the features care: with this OFF,
 -- an enemy outside your view gets NO nameplate at all, so there is no
 -- nameplateN unit token — and IsValidCasterUnit accepts nameplate tokens only.
 -- A mob casting behind you is invisible to both features until you turn to face
@@ -1063,17 +973,13 @@ local function GetPersonalIcon(index)
     return personalIcons[index]
 end
 
--- Apply settings to a personal icon
--- ★ `importantOverride` is the ONE value a preview cannot get from the game and the
--- only fork this function permits: true/false forces the importance answer, nil means
--- ask C_Spell.IsSpellImportant as live does. It exists because the preview MUST be able
--- to show the important-spell border -- none of the three demo spell IDs is flagged
--- important, so without it that border could never be seen while configuring it.
---
--- ☠ The preview used to get there by calling this function and then re-deciding
--- Show/Hide/SetAlpha(1) on icon.highlightFrame two lines later: two computations of one
--- visual with the second silently winning, which is the shape the live-pathway rule
--- exists to prevent. The fabricated flag is DATA and belongs here, in the live decision.
+-- Apply settings to a personal icon.
+-- ★ `importantOverride` is the ONE value a preview cannot get from the game and the only fork
+-- this function permits: true/false forces the importance answer, nil asks
+-- C_Spell.IsSpellImportant as live does. The preview MUST be able to show the
+-- important-spell border, and none of the three demo spell IDs is flagged important. The
+-- fabricated flag is DATA and belongs here, in the live decision -- not in a second
+-- Show/Hide pass on icon.highlightFrame that would silently win.
 
 local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
@@ -1242,39 +1148,29 @@ local function PositionPersonalIcons()
     local scaledSize = iconSize * scale
     local scaledSpacing = spacing * scale
     
-    -- ★ THE ROW IS ALWAYS PACKED AND ALWAYS CENTRED ON WHAT IS ACTUALLY SHOWING.
-    -- Two requirements that sound opposed and are not:
-    --   1. "the icons jump around as they add/expire" (Krathe, 2026-08-22)
-    --   2. "I really wanted it to recenter icons if there are only 1-2" (same day)
-    -- (2) REQUIRES the group to re-measure as membership changes, so a
-    -- fixed-slot layout that leaves holes cannot satisfy it -- one icon left
-    -- alive in slot 3 would sit off to the right of centre with two gaps beside
-    -- it. An earlier cut of this function did exactly that and had to be undone.
+    -- ★ THE ROW IS ALWAYS PACKED AND ALWAYS CENTRED ON WHAT IS ACTUALLY SHOWING. Two requirements
+    -- that sound opposed and are not:
+    --   1. icons must not jump around as casts add and expire
+    --   2. one or two icons must re-centre
+    -- (2) REQUIRES the group to re-measure as membership changes, so a fixed-slot layout with
+    -- holes cannot satisfy it -- one icon left alive in slot 3 would sit off-centre with gaps
+    -- beside it.
     --
-    -- ☠ SO THE FIX FOR (1) IS THE SORT KEY, NOT THE PACKING. The original bug was
-    -- ordering by casterKey: "nameplate3" sorts BETWEEN "nameplate1" and
-    -- "nameplate5", so a new cast could appear in the MIDDLE of the row and shove
-    -- every icon after it sideways -- unpredictable, and unrelated to anything the
-    -- player did. Ordering by startTime instead means a new cast can only ever
-    -- APPEND: existing icons never reorder among themselves, whatever the unit
-    -- tokens happen to be. (casterKey survives only as the tiebreak for two casts
-    -- that start in the same frame, so the order is still total and stable.)
+    -- ☠ SO (1) IS SOLVED BY THE SORT KEY, NOT THE PACKING. Ordering by casterKey would let
+    -- "nameplate3" sort BETWEEN "nameplate1" and "nameplate5", so a new cast could appear in the
+    -- MIDDLE of the row and shove every icon after it sideways. Ordering by startTime means a
+    -- new cast can only ever APPEND: existing icons never reorder among themselves. (casterKey is
+    -- only the tiebreak for two casts that start in the same frame, so the order is still total
+    -- and stable.) What still moves, by design: an expiry packs the survivors up one place, and
+    -- in the CENTER modes the group re-centres on the new count.
     --
-    -- What still moves, by design: an expiry packs the survivors up one place, and
-    -- in the CENTER modes the group re-centres on the new count. That is the
-    -- behaviour (2) asks for, and it is the same shape every peer ships.
-    --
-    -- ☠☠ AND THE ROW CANNOT BE TRIMMED BY RANK -- Max Icons used to Hide() anything
-    -- past its count, which is a CORRECTNESS bug, not a cosmetic one. Every cast
-    -- gets an icon and visibility is decided by SetAlphaFromBoolean against
-    -- "is this aimed at the player" -- a SECRET boolean, so we cannot know which
-    -- icons are the visible ones. Rank is therefore unrelated to visibility, and
-    -- capping by rank could hide the ONE icon aimed at the player behind five
-    -- invisible ones. Hiding costs nothing to remove: an icon not aimed at you is
-    -- already alpha 0, so an "uncapped" row is exactly as clean on screen and can
-    -- no longer suppress the cast that matters.
-    -- ⚠ Max Icons no longer decides what renders, and does NOT bound the icon pool
-    -- (ShowPersonalTargetedSpellIcon adds icons past it). Label fix: a separate call.
+    -- ☠☠ AND THE ROW CANNOT BE TRIMMED BY RANK. Every cast gets an icon and visibility is decided
+    -- by SetAlphaFromBoolean against "is this aimed at the player" -- a SECRET boolean, so we
+    -- cannot know which icons are the visible ones. Capping by rank could hide the ONE icon aimed
+    -- at the player behind five invisible ones; an icon not aimed at you is already alpha 0, so
+    -- an uncapped row is exactly as clean on screen.
+    -- ⚠ Max Icons therefore does not decide what renders, and does NOT bound the icon pool
+    -- (ShowPersonalTargetedSpellIcon adds icons past it). Fixing its label is a separate call.
     wipe(personalOrderBuf)
     for _, iconIndex in pairs(personalActiveSpells) do
         local icon = personalIcons[iconIndex]
@@ -2215,10 +2111,9 @@ function DF:RefreshCastHistoryUI()
                     local targetSecret = secrets.targets[unit]
                     local indicator = row.targetIndicators[idx]
 
-                    -- We can compare to nil (type check, doesn't propagate secret
-                    -- taint). After Blizzard's 2026-04-07 UnitIsUnit hotfix the
-                    -- per-party-member targeting result is nil, so anything other
-                    -- than the player will fall through to the N/A branch.
+                    -- We can compare to nil (a type check, which doesn't propagate secret taint). The
+                    -- per-party-member targeting result is nil, so anything other than the player falls through
+                    -- to the N/A branch.
                     if hasName and indicator and targetSecret ~= nil then
                         -- Use SetAlphaFromBoolean for secret display
                         indicator.yesFrame:SetAlphaFromBoolean(targetSecret, 1, 0)
@@ -2266,16 +2161,13 @@ end
 -- ============================================================
 -- TARGETED LIST
 -- ============================================================
--- Stacked cast-bar display showing enemy casts targeting party
--- members. Anchored to the party frame container. Replaces the
--- group-frame Targeted Spells icons that Blizzard's 2026-04-07
--- UnitIsUnit hotfix permanently broke.
+-- Stacked cast-bar display showing enemy casts targeting party members, anchored to the
+-- party frame container -- the group use case that per-frame icons cannot serve.
 --
 -- Party-mode only by design. We will not add raid support.
 --
--- The user-facing name "Targeted List" is intentionally decoupled
--- from the internal `targetedList*` db prefix. Renaming the feature
--- is a locale-only change; no code touches the string.
+-- The user-facing name "Targeted List" is intentionally decoupled from the internal
+-- `targetedList*` db prefix. Renaming the feature is a locale-only change.
 -- ============================================================
 
 -- File-scope cached APIs (project convention). Used by the cast lifecycle and
@@ -2431,35 +2323,26 @@ end
 
 -- Returns true if the caster's current cast target is a party member.
 --
--- Why this shape: the "name-matching" approach the findings doc
--- originally proposed is dead because UnitSpellTargetName returns a
--- secret-tainted string on nameplates — it can't be used as a table
--- key or compared to anything. Instead we use TS3's filter
--- (Driver.lua:317): UnitInParty("nameplateXtarget"). This is a
--- compound-vs-party-token comparison that the findings doc warned
--- might be blocked by the 2026-04-07 hotfix. Empirically (and per
--- TS3's working implementation) it is NOT blocked — it returns a
--- usable boolean for this specific shape.
+-- Why this shape: UnitSpellTargetName returns a secret-tainted string on nameplates -- it
+-- cannot be used as a table key or compared to anything -- so the filter is
+-- UnitInParty("nameplateXtarget"), a compound-vs-party-token test that returns a usable
+-- boolean for this specific shape.
 --
--- We don't return WHICH party member is targeted — we don't need to.
--- The render pipeline fetches the target name via
--- UnitSpellTargetName and feed it directly into a FontString:SetText
--- secret-safe sink, which doesn't require comparing or indexing.
+-- We don't return WHICH party member is targeted -- we don't need to. The render pipeline
+-- fetches the target name via UnitSpellTargetName and feeds it straight into a
+-- FontString:SetText sink, which requires no comparing or indexing.
 -- Returns ok, reason (see TargetedList_IsActive for why).
 --
--- ⚠ The last check is the one to distrust if bars go missing in a group. The comment
--- block above claims UnitInParty on a compound token is "empirically NOT blocked" by
--- the 2026-04-07 hotfix. That is an ASSERTION, not something we have measured on this
--- build. If 12.1 did seal it, this returns false for every real party target and the
--- only bars you'd ever see are untargeted casts — which looks exactly like "the list
--- misses a lot". The trace below distinguishes the two cases.
+-- ⚠ The last check is the one to distrust if bars go missing in a group: if a future build
+-- sealed UnitInParty on a compound token, this would return false for every real party
+-- target and the only bars you'd ever see would be untargeted casts. The trace below
+-- distinguishes the two cases.
 local function TargetedList_CastTargetIsPartyMember(casterUnit)
     local target = casterUnit .. "target"
     if not TL_UnitExists(target) then return false, "cast has no target" end
     -- Reject mob-targeting-mob casts (we'd never care about those)
     if TL_UnitCanAttack("player", target) then return false, "target is an enemy (mob vs mob)" end
     -- The actual filter: is the targeted unit a party member?
-    -- TS3 uses this exact compound-vs-party check post-hotfix.
     if TL_IsInGroup() and not TL_UnitInParty(target) then
         return false, "UnitInParty(<caster>target) false — not a party member, OR the API is sealed"
     end
@@ -2476,7 +2359,7 @@ end
 -- Delay before we read cast data after UNIT_SPELLCAST_START. At the
 -- instant the event fires, UnitSpellTargetName / UnitCastingDuration /
 -- UnitChannelDuration all return nil — the engine populates them a
--- few frames later. TS3 uses 0.2s; match that. (gotcha #1)
+-- few frames later; 0.2s is enough. (gotcha #1)
 local TARGETEDLIST_PICKUP_DELAY = 0.2
 
 -- Is this unit a nameplate we're willing to look at? Filters out
@@ -2516,8 +2399,7 @@ local TL_C_Spell_IsSpellImportant = C_Spell and C_Spell.IsSpellImportant
 -- code that does (endMS - startMS) / 1000 raises:
 --   "attempt to perform arithmetic on a secret number value"
 --
--- The mitigation here mirrors TS3's approach (Driver.lua lines
--- 391-407):
+-- The mitigation:
 --   * Don't extract time fields from Unit{Casting,Channel}Info — only
 --     pull spellId (and castID for casts) via positional discard.
 --   * Get spellId from the EVENT payload when possible — it's clean.
@@ -2662,8 +2544,8 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     -- not correctness: that one had the right predicate and named mob death in its own
     -- comment, but ran every 5 SECONDS. So a mob killed mid-cast left its row on screen
     -- for up to five seconds with every read behind it returning empty -- "if a mob dies
-    -- whilst casting the bar will stay on screen but go blank ... lots of blank bars"
-    -- (Krathe, 2026-08-22). The bug was never that nothing cleaned up; it was that
+    -- whilst casting the bar will stay on screen but go blank ... lots of blank bars".
+    -- The bug was never that nothing cleaned up; it was that
     -- cleanup arrived long after the player had seen the hole.
     --
     -- ★ ONE SHARED TICKER, NOT ONE TIMER PER RECORD. Same predicate for every bar
@@ -2773,28 +2655,23 @@ end
 
 -- Pick up a cast that was ALREADY IN PROGRESS when its nameplate appeared.
 --
--- Why this exists: everything above is driven by UNIT_SPELLCAST_*_START, so the
--- nameplate has to already exist at the moment the cast begins. Walk into range, turn
--- the camera, or have a mob stream into a pull mid-cast and the bar never appears for
--- that cast at all — it only shows up on the mob's NEXT cast. The Personal Targeted
--- branch has always handled this (OnEvent's NAME_PLATE_UNIT_ADDED case); the Targeted
--- List never did. Confirmed in game 2026-07-30.
+-- Everything above is driven by UNIT_SPELLCAST_*_START, so the nameplate has to exist at the
+-- moment the cast begins. Walk into range, turn the camera, or have a mob stream into a pull
+-- mid-cast and the bar would never appear for that cast, only for the mob's NEXT one. (The
+-- Personal Targeted branch does the same in OnEvent's NAME_PLATE_UNIT_ADDED case.)
 --
--- There is no event payload here, so spellId comes from the unit APIs by positional
--- discard. Positions verified against Blizzard_APIDocumentationGenerated/
--- UnitDocumentation.lua, not memory:
+-- There is no event payload here, so spellId comes from the unit APIs by positional discard.
+-- Positions per Blizzard_APIDocumentationGenerated/UnitDocumentation.lua:
 --   UnitCastingInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
 --                       isTradeskill, castID, notInterruptible, castingSpellID  (9th)
 --   UnitChannelInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
 --                       isTradeskill, notInterruptible, spellID                 (8th)
--- Deliberately NOT touching startTimeMs / endTimeMs — those are the secret-tainted
--- fields that gotcha #0 is about. Duration comes from Unit*Duration inside
--- DelayedPickup as usual.
+-- Deliberately NOT touching startTimeMs / endTimeMs -- those are the secret-tainted fields
+-- gotcha #0 is about. Duration comes from Unit*Duration inside DelayedPickup as usual.
 --
--- No 0.2s delay: that delay exists because target/duration data is not populated at
--- the instant START fires. A cast already in flight has long since settled, so we go
--- straight to the shared pickup, which re-derives cast-vs-channel and re-runs every
--- gate itself.
+-- No 0.2s delay: that delay exists because target/duration data is not populated at the
+-- instant START fires. A cast already in flight has long since settled, so we go straight to
+-- the shared pickup, which re-derives cast-vs-channel and re-runs every gate itself.
 local function TargetedList_PickupInProgressCast(casterUnit)
     -- Cheap structural gate first; the shared pickup re-checks everything anyway.
     if not TargetedList_IsRelevantCaster(casterUnit) then return end
@@ -2833,20 +2710,17 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
     local active = activeTargetedListCasts[casterUnit]
     if not active then return end
 
-    -- ☠☠ NAMEPLATE REMOVAL IS UNCONDITIONAL AND BEATS EVERY GUARD BELOW -- including
-    -- the wasInterrupted+fading early-return, which is exactly where the "slow to
-    -- remove dead bars" report survived my first fix. The real death sequence, read
-    -- from Krathe's 19:24-19:52 log (77 INTERRUPTED events, ZERO dead-drops): the
-    -- engine fires INTERRUPTED while the unit still READS alive -- UnitIsDead lags
-    -- the event, so the event-time check below never fires -- the record enters the
-    -- 1.0s interrupted flash, the nameplate is removed a frame later, and this event
-    -- arrived here only to be swallowed by the fading guard. The sweep couldn't save
-    -- it either: once the token unmaps, UnitIsDead(token) is false forever.
+    -- ☠☠ NAMEPLATE REMOVAL IS UNCONDITIONAL AND BEATS EVERY GUARD BELOW, including the
+    -- wasInterrupted+fading early-return. The real death sequence: the engine fires INTERRUPTED
+    -- while the unit still READS alive (UnitIsDead lags the event, so the event-time check below
+    -- never fires), the record enters the 1.0s interrupted flash, the nameplate is removed a
+    -- frame later -- and once the token unmaps, UnitIsDead(token) is false forever, so nothing
+    -- later can catch it.
     --
-    -- ★ A removed nameplate is terminal no matter why it was removed: the token no
-    -- longer refers to this mob (and can be RECYCLED to a different one, at which
-    -- point a lingering record would eat the new mob's events). Any fade or flash
-    -- tied to it is painting a dead token. Drop now, render now.
+    -- ★ A removed nameplate is terminal no matter why it was removed: the token no longer refers
+    -- to this mob (and can be RECYCLED to a different one, at which point a lingering record
+    -- would eat the new mob's events). Any fade or flash tied to it is painting a dead token.
+    -- Drop now, render now.
     if event == "NAME_PLATE_UNIT_REMOVED" then
         activeTargetedListCasts[casterUnit] = nil
         if DF._TargetedListRender then DF._TargetedListRender() end
@@ -2886,7 +2760,7 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
     -- caster by a whole second wearing an "Interrupted:" state with no interrupter
     -- behind it and every read empty: "it does now seem to hide when a mob dies mid
     -- cast but it seems to take 1-2s to fade out ... it still shows blank bars for a
-    -- few seconds" (Krathe, 2026-08-22).
+    -- few seconds".
     --
     -- ⚠ THE LIVENESS BACKSTOP CANNOT COVER THIS ONE, BY DESIGN. It skips any record
     -- that is already fading -- deliberately, because a fade in progress is a bar on
@@ -3078,15 +2952,11 @@ local function TargetedList_ValidateTrackedBars()
             if not TL_UnitExists(unit) then
                 activeTargetedListCasts[unit] = nil
                 anyRemoved = true
-            -- ★ Check: is the caster DEAD? A mob killed mid-cast keeps its nameplate
-            -- for the death animation, so it still "exists" -- but it is not casting
-            -- any more and never will be, and the record was rendering a bar with no
-            -- spell behind it. That is the blank bar: the row survives because the
-            -- entry survives, and every read behind it comes back empty ("if a mob
-            -- dies whilst casting the bar will stay on screen but go blank", Krathe,
-            -- 2026-08-22). Tested BEFORE the casting-info check because it is the
-            -- specific, certain answer -- the cast is over because the caster is --
-            -- where a nil cast is merely the symptom shared with several other causes.
+            -- ★ Check: is the caster DEAD? A mob killed mid-cast keeps its nameplate for the death
+            -- animation, so it still "exists" -- but it is not casting and never will be, and its record
+            -- would render a blank bar (the row survives because the entry survives, and every read
+            -- behind it comes back empty). Tested BEFORE the casting-info check because it is the
+            -- specific, certain answer, where a nil cast is merely a symptom shared with other causes.
             elseif TL_UnitIsDead(unit) then
                 activeTargetedListCasts[unit] = nil
                 anyRemoved = true
@@ -3400,7 +3270,7 @@ local function TargetedList_BuildBar(parent)
             -- release resets the fill but does not touch the timer channel -- and this
             -- OnUpdate re-reads GetTimerDuration() every tick, so it found that stale
             -- object and printed its long-expired remaining time. That is the
-            -- "9999999s" (Krathe, 2026-08-22): not a huge cast, a dead clock.
+            -- "9999999s": not a huge cast, a dead clock.
             self.duration:SetText("")
         else
             -- Live bar: read duration fresh from the StatusBar each tick
@@ -3410,7 +3280,7 @@ local function TargetedList_BuildBar(parent)
             -- ☠☠ A ZERO-SPAN DURATION HAS NO COUNTDOWN -- AND IsZero() IS ITSELF SECRET,
             -- so the answer can only ever be SPENT INTO A SINK, never read. Testing it
             -- threw "attempt to perform boolean test on a secret boolean value" at this
-            -- line in game (Krathe, 2026-08-22).
+            -- line in game.
             --
             -- ⚠ THE MISREAD THAT CAUSED IT, recorded so it is not repeated: Blizzard's
             -- Blizzard_CustomAuraButton.lua:528 is
@@ -3830,15 +3700,11 @@ function TargetedList_ApplyBarContent(bar, activeRec)
     if isTest and activeRec.testTargetName then
         bar.targetName:SetText(arrowPrefix .. activeRec.testTargetName .. arrowSuffix)
     else
-        -- ☠ ASK THE GATE, NEVER THE VALUE. This used to read the name and then do
-        -- `if targetName then` -- a truth test on a SecretReturns value, which throws in
-        -- restricted content. It sits inside the render pass, so the throw would abort the
-        -- whole list mid-pull and repeat on every cast. It has not bitten because the value
-        -- only actually goes secret in the contexts this gate exists to describe; outside
-        -- them it comes back plain and the test worked by luck.
-        --
-        -- UnitShouldDisplaySpellTargetName returns a plain bool, so it is safe to test. The
-        -- name is then forwarded to a FontString sink without ever being inspected.
+        -- ☠ ASK THE GATE, NEVER THE VALUE. `if targetName then` would be a truth test on a
+        -- SecretReturns value, which throws in restricted content -- inside the render pass, aborting
+        -- the whole list mid-pull on every cast. UnitShouldDisplaySpellTargetName returns a plain
+        -- bool, so it is safe to test; the name is then forwarded to a FontString sink without ever
+        -- being inspected.
         if TL_UnitShouldDisplaySpellTargetName and TL_UnitShouldDisplaySpellTargetName(casterUnit) then
             local targetName = TL_UnitSpellTargetName(casterUnit)
             if arrowPrefix ~= "" or arrowSuffix ~= "" then
@@ -4238,7 +4104,7 @@ local function TargetedList_SortOldestFirst(a, b)
 end
 
 -- ============================================================
--- INCREMENTAL RENDER (TS3-style)
+-- INCREMENTAL RENDER
 -- ============================================================
 -- Instead of tearing down and rebuilding ALL bars every state
 -- change, bars persist in casterToBar[unit]. Render:

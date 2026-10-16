@@ -542,46 +542,36 @@ function DF:UpdateUnitFrame(frame, source)
     -- UNIT_CONNECTION ever fires for an NPC, so nothing but a roster refresh
     -- re-evaluated the frame. Only a player can be offline.
 
-    -- ★★ VISIBILITY LATCH EDGE (restored 2026-08-30 — see
-    -- AuraContainer.SetUnitVisibilityLatched for the whole story). Sits ABOVE the
-    -- offline and dead branches on purpose: both return early, and a unit in another
-    -- instance can be alive, dead or offline — gating the probe behind either branch
-    -- would miss most of the cases it exists for.
+    -- ★★ VISIBILITY LATCH EDGE (see AuraContainer.SetUnitVisibilityLatched for the whole
+    -- story). Sits ABOVE the offline and dead branches on purpose: both return early, and a
+    -- unit in another instance can be alive, dead or offline -- gating the probe behind
+    -- either branch would miss most of the cases it exists for.
     --
     -- ⚠ FULL-UPDATE PATH ONLY, deliberately NOT UpdateHealthFast's twin (where the death
-    -- latch does have a belt). An instance crossing is not a health event; it arrives
-    -- with roster/zone traffic, which drives this path. Probing UnitIsVisible on every
-    -- UNIT_HEALTH tick for up to 40 units would be a real per-tick cost for a state that
-    -- changes a handful of times per session. Cost of that choice: the latch can be one
-    -- full-update cycle late, which is acceptable for a persistent condition.
+    -- latch does have a belt). An instance crossing is not a health event; it arrives with
+    -- roster/zone traffic, which drives this path. Probing UnitIsVisible on every UNIT_HEALTH
+    -- tick for up to 40 units would be a real per-tick cost for a state that changes a
+    -- handful of times per session; the price is that the latch can be one full-update cycle
+    -- late, which is acceptable for a persistent condition.
     --
-    -- ☠ FAIL-SAFE, WHICH IS THE OPPOSITE OF THE ASSIST GATE'S RULE: latch ONLY on a
-    -- definite, non-secret FALSE. Any doubt — pcall failure, a secret value, the API
-    -- missing — leaves the unit SHOWN. Blanking a healthy player's auras on a bad read
-    -- is far worse than the leak this closes.
+    -- ☠ FAIL-SAFE, THE OPPOSITE OF AN ASSIST GATE'S RULE: latch ONLY on a definite, non-secret
+    -- FALSE. Any doubt -- pcall failure, a secret value, the API missing -- leaves the unit
+    -- SHOWN. Blanking a healthy player's auras on a bad read is far worse than the leak this
+    -- closes.
     -- ⚠ issecretvalue FIRST, as its own statement: `okv and not vis` would boolean-test a
-    -- secret first — the exact bug fixed in AuraContainer.lua's checkOutOfRangeAttribution.
-    -- ⚠ You are always visible to yourself, so the own-unit case never latches. UnitIsUnit,
-    -- not a string compare: in raid layouts your own token is "raidN", so `unit ==
-    -- "player"` silently never matched your own frame.
+    -- secret first.
+    -- ⚠ You are always visible to yourself, so the own-unit case never latches. Identity,
+    -- not a string compare: in raid layouts your own token is "raidN".
     if DF.AuraContainer and DF.AuraContainer.SetUnitVisibilityLatched and UnitExists(unit) then
         local invisible = false
-        -- ☠☠ THE SELF-EXEMPTION WAS A STATE TEST, AND IT RACED. `UnitIsUnit(unit,
-        -- "player")` answers FALSE for your OWN raidN token in the window after a reload
-        -- where UnitExists is already true and the roster has not resolved — so the
-        -- branch ran on yourself and latched you. Field, Krathe 2026-09-07: "--- UI
-        -- Reload ---" at 19:19:57, "visibility latch ON unit=raid9" — his own token — at
-        -- 19:19:58, one second later. Joining a raid is exactly when this window opens.
-        -- ⚠ Review note (2026-09-09): the same trail also reads as raid9 being a DIFFERENT,
-        -- out-of-range player at 19:19:58 who became him after the shuffle — in which case
-        -- a plain GUID that differs latches exactly as UnitIsUnit did. This gate is a
-        -- fail-safe, not a proven cure; the derive-not-store actuation in AuraContainer is
-        -- what heals a stranded latch either way.
-        -- ⇒ Require the identity to have RESOLVED before trusting any answer, and treat
-        -- unresolved as "not latchable". Two GUIDs that both read back as plain strings
-        -- are settled; anything else (nil during roster build, a secret under identity
-        -- restriction, a pcall failure) leaves the unit SHOWN, which is this latch's
-        -- standing rule — blanking a healthy player is worse than the leak it closes.
+        -- ☠☠ THE SELF-EXEMPTION MUST WAIT FOR IDENTITY TO RESOLVE. UnitIsUnit(unit, "player")
+        -- answers FALSE for your OWN raidN token in the window after a reload where UnitExists
+        -- is already true and the roster has not resolved, which would latch you (joining a raid
+        -- opens exactly that window). This gate is a fail-safe; the derive-not-store actuation in
+        -- AuraContainer is what heals a stranded latch either way.
+        -- ⇒ Two GUIDs that both read back as plain strings are settled; anything else (nil during
+        -- roster build, a secret under identity restriction, a pcall failure) leaves the unit
+        -- SHOWN, which is this latch's standing rule.
         -- ⚠ issecretvalue FIRST and as its own statement, on BOTH values: UnitGUID is
         -- SecretWhenUnitIdentityRestricted, so comparing two of them unguarded throws.
         if not playerGUID then
@@ -606,7 +596,7 @@ function DF:UpdateUnitFrame(frame, source)
         -- a unit latched ON by a frame that then moved away has NO edge left to clear
         -- it, because the frame now showing it already reads "not invisible" and so
         -- never fires a transition. That unit's rows stay parked until a reload.
-        -- ☠ Caught in the field within one session (Krathe, 2026-08-30): the gate trail
+        -- ☠ Caught in the field within one session: the gate trail
         -- shows "latch ON unit=party3" with no matching OFF, plus an "OFF unit=party4"
         -- that never had an ON — the same desync in both directions.
         -- Comparing against the registry makes the state single-sourced and
@@ -671,12 +661,10 @@ function DF:UpdateUnitFrame(frame, source)
         -- Apply dead fade for offline units
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
-        -- ☠ This branch RETURNS, so the Text Designer render and the
-        -- missing-buff visibility gate further down this function are never
-        -- reached. Without them the TD keeps painting the last ALIVE state
-        -- (a blank status) and the badge keeps claiming "missing" on a unit
-        -- that can no longer be buffed — the field-reported follower-dungeon
-        -- bug. Both are no-ops when nothing changed.
+        -- ☠ This branch RETURNS, so the Text Designer render and the missing-buff visibility gate
+        -- further down are never reached; without them the TD keeps painting the last ALIVE
+        -- state and the badge keeps claiming "missing" on a unit that can no longer be buffed.
+        -- Both are no-ops when nothing changed.
         if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
         if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
@@ -1079,7 +1067,7 @@ function DF:UpdateHealthFast(frame)
     -- unit stayed latched — its auras hidden after the rez until a reload.
     -- ⚠ Found by analogy, not in the field: the VISIBILITY latch shipped with the exact
     -- same two-source defect and was caught in one session by an orphaned "latch ON" in
-    -- the gate trail (party3, 2026-08-30). This is the same shape, one branch over.
+    -- the gate trail. This is the same shape, one branch over.
     -- ⚠ One table lookup per tick on the live path. Cheap, and the alternative is a
     -- class of bug that only a reload clears.
     if deathLatchedUnits and deathLatchedUnits[unit] then
@@ -1237,16 +1225,14 @@ function DF:UpdateFrame(frame)
         end
     end
 
-    -- ☠ THE HEALTH-ATTACHED BARS WERE MISSING FROM THIS PASS. This is the per-frame
-    -- worker behind DF:UpdateAllFrames -- the callback every absorb / heal-absorb /
-    -- heal-prediction OPTION runs -- and without these calls a Display Mode change sat
-    -- unapplied on live frames until each unit's next UNIT_ABSORB / UNIT_HEAL_PREDICTION
-    -- event wandered by, which for a unit with a static shield is "a while" (reported
-    -- 2026-08-14). The absorb's layout cache invalidates on the mode change and its
-    -- fast path makes the no-change case cheap; what was missing was any TRIGGER.
-    -- Heal absorb, prediction, absorb LAST (it chains onto the prediction). On test
-    -- frames these are no-ops by the test-data guards -- the test branch of
-    -- UpdateAllFrames repaints those through RefreshTestFramesWithLayout.
+    -- ☠ THE HEALTH-ATTACHED BARS BELONG IN THIS PASS. This is the per-frame worker behind
+    -- DF:UpdateAllFrames -- the callback every absorb / heal-absorb / heal-prediction OPTION
+    -- runs -- so without these calls a Display Mode change would sit unapplied until each
+    -- unit's next UNIT_ABSORB / UNIT_HEAL_PREDICTION event (for a static shield, a while).
+    -- The absorb's layout cache invalidates on the mode change and its fast path keeps the
+    -- no-change case cheap. Heal absorb, prediction, absorb LAST (it chains onto the
+    -- prediction). On test frames these are no-ops by the test-data guards; the test branch
+    -- of UpdateAllFrames repaints them through RefreshTestFramesWithLayout.
     if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
     if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end

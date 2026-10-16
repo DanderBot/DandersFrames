@@ -868,7 +868,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local maxPerTab = math.min(TAB_MAX_W, math.floor((stripW - (count - 1) * TAB_GAP) / math.max(count, 1)))
             if maxPerTab < TAB_MIN_W then maxPerTab = TAB_MIN_W end
 
-            local x = 0  -- running left offset; tabs are no longer uniform-width
+            local x = 0  -- running left offset; tabs are not uniform width
             for i, tab in ipairs(tabButtons) do
                 local set = db.pinnedFrames.sets[i]
                 if not set then

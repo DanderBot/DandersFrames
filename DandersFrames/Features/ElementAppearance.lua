@@ -253,7 +253,6 @@ end
 -- `if DF.testMode then return end` guards throughout this file are really defending
 -- against; it is NOT a fabricated-token problem. Stamping is what makes removing
 -- those guards safe, so do not remove one before its inputs are stamped.
--- (Audit, 2026-08-07.)
 local function IsDeadOrOffline(frame)
     if frame.dfIsDead ~= nil then return frame.dfIsDead end
     local unit = frame.unit
@@ -273,7 +272,7 @@ end
 -- file has never referenced summon/resurrection/phased/afk/vehicle/raidRole/
 -- bgCarrier/combat — so neither route existed. Only the PREVIEW dimmed them, off its
 -- own hand-written alpha table. That is the rare case where the preview was showing
--- something live was structurally incapable of (audit, 2026-08-07).
+-- something live was structurally incapable of.
 --
 -- Keeping SetIgnoreParentAlpha is deliberate: we now set the alpha explicitly, and
 -- ignoring the parent is what stops the simple-mode cascade multiplying it a second
@@ -469,12 +468,11 @@ function DF:UpdateHealthBarAppearance(frame)
     else
         -- Priority 3: Normal color based on mode
         if colorMode == "PERCENT" then
-            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin.
-            -- ☠ TEST FRAMES TAKE DF:GetHealthGradientColor INSTEAD -- the same stops,
-            -- interpolated in Lua. Live cannot do that (the health value is secret and
-            -- may never be compared), and test cannot use the curve (it needs a real
-            -- unit). Verified equivalent point-for-point during the 2026-08-07 audit:
-            -- same positions, same weight flooring, same percent == 1 boundary.
+            -- PERCENT mode: UnitHealthPercent with curve -- returns ColorMixin.
+            -- ☠ TEST FRAMES TAKE DF:GetHealthGradientColor INSTEAD -- the same stops, interpolated in
+            -- Lua. Live cannot do that (the health value is secret and may never be compared), and test
+            -- cannot use the curve (it needs a real unit). The two are equivalent point-for-point: same
+            -- positions, same weight flooring, same percent == 1 boundary.
             local testPct = frame.dfHealthPct
             if testPct and DF.GetHealthGradientColor then
                 local c = DF:GetHealthGradientColor(testPct, db, frame.dfClassToken, "healthColor")
@@ -958,7 +956,7 @@ function DF:UpdateBuffIconsAppearance(frame)
     -- that did not include it -- so the row opacity slider was silently reset to 1
     -- by the next range/appearance pass, and the cache meant the drive never put
     -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
-    -- and live was wrong. (Audit, 2026-08-07.)
+    -- and live was wrong.
     local base = db.buffAlpha or 1
     local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
@@ -998,7 +996,7 @@ function DF:UpdateDebuffIconsAppearance(frame)
     -- that did not include it -- so the row opacity slider was silently reset to 1
     -- by the next range/appearance pass, and the cache meant the drive never put
     -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
-    -- and live was wrong. (Audit, 2026-08-07.)
+    -- and live was wrong.
     local base = db.debuffAlpha or 1
     local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
@@ -1171,22 +1169,16 @@ function DF:UpdateDispelOverlayAppearance(frame)
         deadAlpha = db.fadeDeadBackground or 1
     end
 
-    -- ★ ONE CHANNEL PER VALUE. The paint (StyleOverlayRegions) owns the CONFIGURED
-    -- opacity and puts it on the gradient texture's VERTEX alpha and the ring's vertex;
-    -- this sweep owns only the dead/out-of-range FADES, on the FRAME alpha. The two
-    -- channels multiply at render, so putting the configured value in both — which is
-    -- what the line below used to do, via the resolver — rendered it SQUARED whenever
-    -- both had run: dragging the opacity slider showed the test preview at alpha²
-    -- while release showed alpha ("about half", exactly half at 0.5 — field-caught,
-    -- Krathe 2026-08-13).
-    -- ☠ The old comment here justified the resolver read with an OOR snap-back from an
-    -- era when the FRAME alpha was the configured value's carrier. It is not any more;
-    -- vertex holds the config through every fade transition, so base 1 cannot snap
-    -- anything bright.
+    -- ★ ONE CHANNEL PER VALUE. The paint (StyleOverlayRegions) owns the CONFIGURED opacity and
+    -- puts it on the gradient texture's VERTEX alpha and the ring's vertex; this sweep owns only
+    -- the dead/out-of-range FADES, on the FRAME alpha. The two channels multiply at render, so
+    -- putting the configured value in both would render it SQUARED (half at 0.5 shows a
+    -- quarter). Vertex holds the config through every fade transition, so base 1 here cannot
+    -- snap anything bright.
     -- ICONS are the one element whose config lives on the FRAME alpha (the paint sets
-    -- icon:SetAlpha(dispelIconAlpha) — vertex there is the bleed-colour tint), so this
-    -- sweep must COMPOSE the config in rather than overwrite it: the old hardcoded 1.0
-    -- clobbered Symbol Opacity back to full on every range tick.
+    -- icon:SetAlpha(dispelIconAlpha) -- vertex there is the bleed-colour tint), so this sweep
+    -- must COMPOSE the config in rather than overwrite it, or Symbol Opacity would snap back to
+    -- full on every range tick.
     local gradAlpha = 1.0 * deadAlpha
     local brdAlpha  = 1.0 * deadAlpha
     local icnAlpha  = (db.dispelIconAlpha or 1) * deadAlpha
@@ -1248,7 +1240,7 @@ function DF:UpdateMissingBuffAppearance(frame)
     -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
     -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
     -- correctly. LIVE frames still bail while test mode is on -- they are hidden
-    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    -- behind the preview and repainting them is wasted work.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
@@ -1289,7 +1281,6 @@ function DF:UpdateAbsorbBarAppearance(frame)
     -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
     -- which already prefers frame.dfInRange. The preview had NO counterpart for
     -- this key at all, so the bar simply never faded out of range there.
-    -- (Audit, 2026-08-07.)
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     if not db.oorEnabled then return end
 
@@ -1337,7 +1328,6 @@ function DF:UpdateHealAbsorbBarAppearance(frame)
     -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
     -- which already prefers frame.dfInRange. The preview had NO counterpart for
     -- this key at all, so the bar simply never faded out of range there.
-    -- (Audit, 2026-08-07.)
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local inRange = GetInRange(frame)
@@ -1365,7 +1355,6 @@ function DF:UpdateHealPredictionBarAppearance(frame)
     -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
     -- which already prefers frame.dfInRange. The preview had NO counterpart for
     -- this key at all, so the bar simply never faded out of range there.
-    -- (Audit, 2026-08-07.)
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local inRange = GetInRange(frame)
@@ -1398,7 +1387,7 @@ function DF:UpdateDefensiveIconAppearance(frame)
     -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
     -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
     -- correctly. LIVE frames still bail while test mode is on -- they are hidden
-    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    -- behind the preview and repainting them is wasted work.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
@@ -1415,72 +1404,56 @@ end
 -- Handles OOR alpha for placed AD indicators (icons, squares, bars)
 -- ============================================================
 
--- Walk every Aura Designer indicator on a frame, handing the caller the region to
--- set alpha on plus that indicator's own base alpha.
+-- Walk every Aura Designer indicator on a frame, handing the caller the region to set alpha
+-- on plus that indicator's own base alpha.
 --
 -- ★ SHARED WITH TEST MODE ON PURPOSE. The preview cannot just call
--- UpdateAuraDesignerAppearance: it computes its own per-element alphas because it has
--- no whole-frame SetAlpha cascade to fall back on in simple range-fade mode. Copying
--- the walk over there is exactly how the missing-buff strip and defensive row
--- silently stopped fading in the preview. One walk, two alpha policies.
+-- UpdateAuraDesignerAppearance: it computes its own per-element alphas because it has no
+-- whole-frame SetAlpha cascade to fall back on in simple range-fade mode. One walk, two alpha
+-- policies -- a copy of the walk is how surfaces silently stop fading in the preview.
 --
--- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). This used to fade h:GetFrame(), which
--- for a per-indicator container is DF's own anchor frame -- fine. A collapsed slot's
--- GetFrame() is the aura BUTTON, which carries DenyTaintedAccessWhenAurasAreSecret:
--- this walk runs from the range update, which is tainted, so every call threw the
--- moment auras went secret (43 errors, "forbidden object", reported 2026-08-06).
--- GetAlphaHost answers with the DF-owned frame that every one of that indicator's
--- regions hangs off — its own anchor frame for a container, dfLevelHost for a
--- collapsed slot — so fading it fades the indicator whole. Nil only if host creation
--- failed, hence the guard. See SlotHandle:GetAlphaHost.
--- ☠☠ "fgroups"/"dgroups" WERE MISSING FROM THIS LIST, AND THAT WAS THE WHOLE
--- "AD groups don't fade out of range" bug (element mode, 2026-08-26). The Factory's own
--- retarget list names all eight stores; this one named six. Group containers therefore
--- had NO alpha writer at all in element mode — the frame is pinned at base there, so the
--- cascade that covers them in whole-frame mode never runs, and nothing else touches them.
--- Placed indicators kept fading (slot-owner anchor), which made it look like the old
--- anchor fix had regressed. It had not: groups are a different pathway that never had the
--- fade wired.
--- ⚠ Krathe's differential located it — "my AD single PI is working, it's a group that
--- doesn't fade" — after four wrong theories from me about the anchor path.
--- ★ Group handles are ROW handles: entry.handle.button is nil, so the walk's existing
--- callback routes them onto the fade branch (base-only in whole-frame mode, where the
--- cascade already fades them — no squared fade, see [ad_oor_fade_two_layers]).
--- ☠ If the Factory ever grows a ninth store, IT GOES IN BOTH LISTS — this one and the
--- retarget walk at Factory.lua ~5464 — or its containers will silently skip either fades
--- or unit reassignment.
+-- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). A collapsed slot's GetFrame() is the aura
+-- BUTTON, which carries DenyTaintedAccessWhenAurasAreSecret; this walk runs from the
+-- (tainted) range update, so every call would throw the moment auras went secret.
+-- GetAlphaHost answers with the DF-owned frame every one of that indicator's regions hangs
+-- off -- its own anchor frame for a container, dfLevelHost for a collapsed slot -- so fading
+-- it fades the indicator whole. Nil only if host creation failed, hence the guard. See
+-- SlotHandle:GetAlphaHost.
+-- ★ Group handles ("fgroups"/"dgroups") are ROW handles: entry.handle.button is nil, so the
+-- walk's callback routes them onto the fade branch (base-only in whole-frame mode, where the
+-- cascade already fades them -- no squared fade, see [ad_oor_fade_two_layers]). In element
+-- mode the frame is pinned at base, so this walk is their only alpha writer.
+-- ☠ This list must name every Factory store the retarget walk names (Factory.lua's own
+-- list). A store missing here gets NO out-of-range fade; one missing there gets no unit
+-- reassignment. A new store goes in BOTH lists.
 local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
                         "nametext", "healthtext", "fgroups", "dgroups" }
 
 -- ☠ THE WRITE IS PROTECTED, AND A DENIED HOST IS REMEMBERED.
--- GetAlphaHost is supposed to answer with a DF-owned frame, so in principle a tainted
--- alpha write to it is always legal. In practice it is not guaranteed: the host is a CHILD
--- of the aura button, and the button carries DenyTaintedAccessWhenAurasAreSecret. DF's
--- design rests on access restrictions NOT descending to children (see SlotHandle:GetAlphaHost)
--- — a Blizzard-side implementation detail, not a contract, and one that has already bitten
--- once (43 errors) and again on a later build (75 errors from this exact call):
+-- GetAlphaHost answers with a DF-owned frame, so in principle a tainted alpha write to it is
+-- always legal -- but the host is a CHILD of the aura button, and the button carries
+-- DenyTaintedAccessWhenAurasAreSecret. DF's design rests on access restrictions NOT
+-- descending to children (see SlotHandle:GetAlphaHost), a Blizzard-side implementation
+-- detail rather than a contract, and some builds refuse it:
 --     calling 'SetAlphaFromBoolean' on bad self (Attempt to access forbidden object
 --     from code tainted by an AddOn)
 --
--- Two things were wrong with letting it throw:
+-- Letting it throw would be twice wrong:
 --   1. It errors PER HOST PER RANGE UPDATE. Range runs on a timer over every frame, so one
---      denied host is not one error, it is a permanent storm — the 75x is the loop, not 75
---      separate faults.
---   2. It aborts the whole walk. Everything after the first denied host in that pass — the
---      other indicators, the other store keys — silently stops being faded at all.
+--      denied host is a permanent error storm, not one error.
+--   2. It aborts the whole walk: everything after the first denied host in that pass -- the
+--      other indicators, the other store keys -- silently stops being faded.
 --
--- So: pcall the callback, and latch the failure on the handle so a host that is denied once
--- is skipped from then on rather than retried every tick. The indicator keeps its base alpha
--- (no out-of-range fade) instead of taking the frame down, which is the same degrade the
--- nil-host path already takes. AuraContainer's own base-alpha write to this very host is
--- already pcall'd for the same reason (`pcall(host.SetAlpha, host, ...)`); this closes the
--- gap on the OOR side, and covers every consumer of the walker rather than just that one.
+-- So: pcall the callback, and latch the failure on the handle so a host denied once is
+-- skipped from then on rather than retried every tick. The indicator keeps its base alpha (no
+-- out-of-range fade) instead of taking the frame down -- the same degrade the nil-host path
+-- takes. AuraContainer's own base-alpha write to this host is pcall'd for the same reason.
 --
 -- ⚠ The latch is per HANDLE, so it clears naturally when the slot is rebuilt or re-acquired.
--- If a build makes the restriction descend permanently, the visible symptom is AD indicators
--- that no longer fade out of range — not an error storm, and not a dead range pass.
--- `retryDenied` re-arms the refusal latch for ONE pass. See the note on the latch below
--- and the range-edge call in UpdateAuraDesignerAppearance.
+-- If a build makes the restriction descend permanently, the symptom is AD indicators that do
+-- not fade out of range -- not an error storm, and not a dead range pass.
+-- `retryDenied` re-arms the refusal latch for ONE pass. See the note on the latch below and
+-- the range-edge call in UpdateAuraDesignerAppearance.
 function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
     local store = frame and frame.dfADFactory
     if not (store and fn) then return end
@@ -1503,8 +1476,7 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                 -- write stayed faded until the user happened to change a setting. Krathe
                 -- hit this repeatedly: "I can let the buff drop, put it back up and it's
                 -- still faded", and changing any AD setting cleared it instantly, which is
-                -- what proved the refusal transient rather than the host unwritable
-                -- (2026-08-13).
+                -- what proved the refusal transient rather than the host unwritable.
                 -- ⇒ `retryDenied` re-arms for one pass on a RANGE EDGE, which is exactly
                 -- when a stale alpha becomes visible and exactly when the value we want to
                 -- write has changed. Cost stays bounded: one failed call per transition,
@@ -1539,17 +1511,13 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                         local okPlain = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
                         if not okPlain then
                             h._dfAlphaHostDeniedVer = ver
-                            -- ★ RESTRICTION-LIFT RE-QUEUE (EllesmereUI's shape). A host that
-                            -- refuses even a plain write is restricted RIGHT NOW — for a
-                            -- slot host that means auras are secret, i.e. combat — and the
-                            -- range-edge retry can be consumed while that holds (edge fires
-                            -- mid-fight, write refused, re-latched, and no second edge comes
-                            -- after combat because the unit is already in range; field report
-                            -- 2026-08-14, "enter combat while someone is out of range").
-                            -- So remember the FRAME and retry its walk when combat drops,
-                            -- which is exactly when writability returns. The regen handler
-                            -- below clears the entry before retrying; a still-refused host
-                            -- lands back here and re-queues itself.
+                            -- ★ RESTRICTION-LIFT RE-QUEUE. A host that refuses even a plain write is restricted RIGHT
+                            -- NOW -- for a slot host that means auras are secret, i.e. combat -- and the range-edge retry
+                            -- can be consumed while that holds (edge fires mid-fight, write refused, re-latched, and no
+                            -- second edge comes after combat because the unit is already in range). So remember the
+                            -- FRAME and retry its walk when combat drops, which is when writability returns. The regen
+                            -- handler below clears the entry before retrying; a still-refused host lands back here and
+                            -- re-queues itself.
                             DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
                             DF._adDeniedHostFrames[frame] = true
                         end
@@ -1559,16 +1527,10 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                         -- all", and those have completely different fixes.
                         if not DF._warnedADAlphaHost then
                             DF._warnedADAlphaHost = true
-                            -- ☠ EVERY probe of a refused object must itself be pcall'd.
-                            -- This block previously called f:GetDebugName() bare while
-                            -- building the log arguments — inside the very handler that
-                            -- exists because calls to this object throw. It threw, before
-                            -- DebugWarn ever ran, so the fault it was meant to describe was
-                            -- replaced by a fresh error and nothing was logged at all.
-                            -- GetDebugName is a pure READ and it is still refused: the host
-                            -- is forbidden to tainted code for ALL access, not just setters.
-                            -- (The plain-write probe moved ABOVE this block: its result now
-                            -- decides whether to latch, instead of only being logged once.)
+                            -- ☠ EVERY probe of a refused object must itself be pcall'd: the host is forbidden to tainted
+                            -- code for ALL access, reads included (GetDebugName is refused too), so an unguarded probe
+                            -- here would replace the fault being described with a fresh error before DebugWarn runs.
+                            -- (The plain-write probe sits above this block: its result decides whether to latch.)
                             local okName, name = pcall(f.GetDebugName, f)
                             DF:DebugWarn("AURACONTAINER",
                                 "AD alpha host refused a tainted write. plainSetAlphaOK=%s readableName=%s host=%s err=%s",
@@ -1597,7 +1559,7 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
     -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
     -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
     -- correctly. LIVE frames still bail while test mode is on -- they are hidden
-    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    -- behind the preview and repainting them is wasted work.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
@@ -1622,16 +1584,13 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
     end
 
     DF:ForEachAuraDesignerAlphaHost(frame, function(f, base, h)
-        -- ☠ SLOT-BACKED HOSTS TAKE BASE ONLY, NEVER THE FADE. Their range fade is the
-        -- slot OWNER host's job (below) — the walk writing fades here too meant the two
-        -- multiplied (0.2 × 0.2 = the "super faded" field report), and a fade written
-        -- out of combat could strand when combat made the host unwritable. The header
-        -- above the slot-owner block claims walk writes on these are "refused" — that
-        -- is only true IN COMBAT; out of combat they land, which is how the fade got in.
-        -- EllesmereUI reached the same rule from the same bug: never write fades into
-        -- a Blizzard button's subtree; fade the DF-owned ancestor and let it cascade.
-        -- Base still applies (it is per-indicator and the cascade cannot carry it),
-        -- and an unconditional base write self-repairs any fade stranded before this fix.
+        -- ☠ SLOT-BACKED HOSTS TAKE BASE ONLY, NEVER THE FADE. Their range fade is the slot OWNER
+        -- host's job (below): writing fades here too would multiply the two (0.2 x 0.2), and a fade
+        -- written out of combat could strand when combat made the host unwritable (walk writes on
+        -- these are refused only IN COMBAT). Never write fades into a Blizzard button's subtree;
+        -- fade the DF-owned ancestor and let it cascade. Base still applies (it is per-indicator and
+        -- the cascade cannot carry it), and an unconditional base write self-repairs any stranded
+        -- fade.
         if h and h.button then
             f:SetAlpha(base)
         elseif oorOn then
@@ -1674,28 +1633,21 @@ end
 -- ============================================================
 -- AD ALPHA HOST PROBE  (/df debug adalpha [unit])
 -- ============================================================
--- ☠ ANSWERS ONE QUESTION: has the aura button's access restriction started DESCENDING
--- TO ITS CHILDREN?
+-- ☠ ANSWERS ONE QUESTION: has the aura button's access restriction started DESCENDING TO
+-- ITS CHILDREN? The whole AD fade design rests on it not doing so (see
+-- ForEachAuraDesignerAlphaHost), and the symptom if it does is AD indicators that no longer
+-- fade out of range, with "AD alpha host refused a tainted write ... plainSetAlphaOK=false"
+-- in the log.
 --
--- The whole AD fade design rests on it not doing so. The note above
--- ForEachAuraDesignerAlphaHost says it outright: the host is a CHILD of the aura button,
--- the button carries DenyTaintedAccessWhenAurasAreSecret, and DF assumes restrictions do
--- not descend — "a Blizzard-side implementation detail, not a contract". It even names
--- the symptom to expect if that assumption breaks: *AD indicators that no longer fade out
--- of range — not an error storm, and not a dead range pass.* Which is the field report
--- this probe exists to settle (Krathe, 2026-08-26, with `AD alpha host refused a tainted
--- write ... plainSetAlphaOK=false` in the log).
---
--- ☠☠ IT NEVER CALLS A METHOD ON A HOST TO IDENTIFY IT. The refused object rejects READS
--- too — `readableName=false` in that log line is GetDebugName being refused — so probing
--- it for identity is how you replace the fault with a fresh error and learn nothing (the
--- exact mistake recorded at the warning site). Identity comes from `rawequal` against
--- frames we already hold, which cannot dispatch into the object, and everything that does
--- touch a host is pcall'd and writes only the base alpha the walk writes anyway.
+-- ☠☠ IT NEVER CALLS A METHOD ON A HOST TO IDENTIFY IT. A refused object rejects READS too
+-- (`readableName=false` is GetDebugName being refused), so probing it for identity replaces
+-- the fault with a fresh error. Identity comes from `rawequal` against frames we already
+-- hold, which cannot dispatch into the object, and everything that does touch a host is
+-- pcall'd and writes only the base alpha the walk writes anyway.
 --
 -- Read the output as a PATTERN, not per row: a child refused while its DF-owned ancestor
--- accepts is the descent, and the cure is to fade the ancestor and let it cascade — which
--- is what the slot-owner block already does, and what EllesmereUI does throughout.
+-- accepts is the descent, and the cure is to fade the ancestor and let it cascade -- which is
+-- what the slot-owner block already does.
 function DF:DebugADAlphaHosts(unit)
     unit = (unit and unit ~= "" and unit) or "player"
     local o = DF:Out("AD Alpha Hosts", "unit " .. unit)
@@ -1754,17 +1706,16 @@ function DF:DebugADAlphaHosts(unit)
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
     o:Field("slot-owner anchor", probe(slotHost), "NEUTRAL")
 
-    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted — a fade can
-    -- be broken while every write probe answers "fine" (2026-08-26: the group containers
-    -- were missing from the walk entirely, so no write was ever attempted; writability
-    -- probes had nothing to refuse).
-    -- ☠ THE TWO OOR MODES TAKE DIFFERENT ROUTES, and a reading means nothing without
-    -- knowing which is active:
-    --   whole-frame (oorEnabled off) -- the FRAME is faded and alpha CASCADES down.
-    --     Nothing needs to write to an AD host at all.
-    --   element (oorEnabled on) -- the frame is PINNED at base so each element owns its own
-    --     look; slot-backed indicators fade via one write to the slot-owner anchor, group
-    --     containers via the walk writing their own wrapper.
+    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted -- a fade can be
+    -- broken while every write probe answers "fine" (a container missing from the walk is never
+    -- written to, so there is nothing to refuse).
+    -- ☠ THE TWO OOR MODES TAKE DIFFERENT ROUTES, and a reading means nothing without knowing
+    -- which is active:
+    --   whole-frame (oorEnabled off) -- the FRAME is faded and alpha CASCADES down. Nothing
+    --     needs to write to an AD host at all.
+    --   element (oorEnabled on) -- the frame is PINNED at base so each element owns its own look;
+    --     slot-backed indicators fade via one write to the slot-owner anchor, group containers
+    --     via the walk writing their own wrapper.
     local pdb = GetDB(frame)
     o:Section("Alpha readings")
     o:Line(string.format("mode: %s", (pdb and pdb.oorEnabled)
@@ -1927,8 +1878,8 @@ end
 -- encounter and drop on ENCOUNTER_END or a zone change instead, so a queue drained
 -- on PLAYER_REGEN_ENABLED alone could retry while still restricted, fail, re-queue,
 -- and then wait for a combat that never comes (the unit is already in range, so no
--- range edge arrives either). EllesmereUI's AuraKit converged on the same watcher
--- shape from the same bug: regen + PEW + zone + encounter end, gated on
+-- range edge arrives either). So the watcher listens on regen + PEW + zone + encounter
+-- end, gated on
 -- C_Secrets.ShouldAurasBeSecret(). If the probe says still secret, keep the queue
 -- and wait for the next edge -- a retry now would only re-fail.
 local function AurasStillSecret()
@@ -2161,7 +2112,7 @@ function DF:UpdateAllFrameAppearances()
     -- Pinned frames.
     -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this one walked
     -- PinnedFrames.headers only, so pinned BOSS frames got no colour or alpha refresh at
-    -- all, including from FullProfileRefresh on a profile switch. (Audit 2026-08-17.)
+    -- all, including from FullProfileRefresh on a profile switch.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(updateFrame)
     end

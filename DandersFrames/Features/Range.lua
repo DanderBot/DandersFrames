@@ -4,7 +4,7 @@ local addonName, DF = ...
 -- OUT OF RANGE ALPHA SYSTEM
 -- Fades frames/elements when party members are out of range
 --
--- RANGE CHECK STRATEGY (matches Grid2's proven approach):
+-- RANGE CHECK STRATEGY:
 -- 1. Player → always in range
 -- 2. Phased units → always out of range (UnitPhaseReason)
 -- 3. Hostile → IsSpellInRange(hostileSpell)
@@ -15,7 +15,7 @@ local addonName, DF = ...
 --    UnitInRange() in combat, default in-range as last resort
 --
 -- IsSpellInRange returns normal booleans - NOT secret values.
--- We trust the result directly (== true) like Grid2 does.
+-- We trust the result directly (== true).
 -- UnitInRange() may return secret values so we still guard that.
 --
 -- DEBUG: /dfrange debug  - toggle debug output
@@ -489,7 +489,7 @@ local function CheckUnitRange(unit)
         return true
     end
 
-    -- Phased units are always out of range (matches Grid2)
+    -- Phased units are always out of range
     -- UnitPhaseReason returns nil for same-phase, a number if phased
     if UnitPhaseReason and UnitPhaseReason(unit) then
         return false
@@ -513,7 +513,7 @@ local function CheckUnitRange(unit)
 
     -- FRIENDLY UNITS (party/raid members)
     -- IsSpellInRange returns clean booleans - NOT secret values.
-    -- We trust the result directly (== true/false) like Grid2 does.
+    -- We trust the result directly (== true/false).
     if currentFriendlySpell then
         local inRange = C_Spell_IsSpellInRange(currentFriendlySpell, unit)
         if inRange == true then
@@ -521,7 +521,7 @@ local function CheckUnitRange(unit)
         elseif inRange == false then
             -- Spell says OOR; OR with CheckInteractDistance out of combat
             -- for leniency (avoids false OOR from spec/talent edge cases).
-            -- Both Grid2 and LibRangeCheck gate this behind !InCombat.
+            -- Gated behind !InCombat, as LibRangeCheck does.
             if not InCombatLockdown() and CheckInteractDistance(unit, 4) then
                 return true
             end
@@ -540,7 +540,7 @@ local function CheckUnitRange(unit)
 
     -- No spell result available.
     -- Out of combat: CheckInteractDistance (~28yd follow distance)
-    -- Both Grid2 and LibRangeCheck avoid CheckInteractDistance in combat.
+    -- CheckInteractDistance is avoided in combat (as LibRangeCheck does).
     if not InCombatLockdown() then
         return CheckInteractDistance(unit, 4) and true or false
     end
@@ -571,9 +571,8 @@ local function CheckUnitRange(unit)
     end
 
     -- No method available or inconclusive — assume in range.
-    -- This matches Grid2's approach for classes without friendly spells
-    -- in combat: "return InCombat or CheckInteractDistance(unit, 4)"
-    -- which always returns true when in combat.
+    -- For classes without friendly spells, in combat this is effectively
+    -- "return InCombat or CheckInteractDistance(unit, 4)", which is always true.
     return true
 end
 
@@ -660,29 +659,20 @@ function DF:UpdateRange(frame)
         pcall(DF.AuraContainer.NoteRangeTransition, unit, inRange)
     end
 
-    -- ★★ COMING BACK INTO RANGE CLEARS A STALE VISIBILITY LATCH.
-    -- ☠ NOTHING ELSE WAS ASKING. The latch is set on the frames' full-update path and cleared
-    -- by a reconcile that runs on PLAYER_REGEN_ENABLED and PLAYER_ENTERING_WORLD only -- and a
-    -- party member walking out of visible range and back produces neither. Krathe, 2026-09-09:
-    -- "AD indicators not showing on a player in my party until I reload again, seems to happen
-    -- every time I go out of range and back into range." His trail shows the latch going on at
-    -- 01:53:39, the unit back in range at 01:53:49, and the latch clearing at 01:54:17 -- 38
-    -- seconds later, and only because combat happened to end. Out of combat it never clears.
+    -- ★★ COMING BACK INTO RANGE CLEARS A STALE VISIBILITY LATCH. The reconcile otherwise runs
+    -- only on PLAYER_REGEN_ENABLED and PLAYER_ENTERING_WORLD, and a party member walking out
+    -- of visible range and back produces neither, so out of combat the latch would never
+    -- clear and their Aura Designer indicators would stay dark until a reload.
     -- ⚠ THIS PATH IS THE RIGHT ONE because it is the only place that knows a unit came BACK.
-    -- Range-in is a strictly stronger condition than visible (spell range is inside the render
-    -- radius), so it cannot fire for a unit that is still away -- and the verb re-asks
-    -- UnitIsVisible anyway rather than trusting the implication.
-    -- ⚠ COSTS A TABLE LOOKUP when the unit is not latched, which is every crossing but the
-    -- ones this exists for: ReconcileUnitLatch reads the registry before it touches the API.
-    -- ⚠ pcall'd for the same reason as the diagnostic above -- a heal must never be able to
-    -- break the range pass it rides on.
-    -- ☠☠ issecretvalue FIRST, AS ITS OWN STATEMENT, and this file is why the rule exists:
-    -- `inRange` comes from the UnitInRange fallback and CAN be secret -- the cache comparison
-    -- twenty lines up says so in as many words. A bare `if inRange then` boolean-tests it and
-    -- throws, taking the range pass with it. The local `isSecret` above is not the right test
-    -- either: it folds in the CACHED value, so it reads true for a clean inRange beside a
-    -- secret cached one, and we would skip a heal we could have made.
-    -- ⚠ A SECRET READ SIMPLY DOES NOT HEAL HERE. The 3s tick is the net under it.
+    -- Range-in is strictly stronger than visible (spell range is inside the render radius),
+    -- and the verb re-asks UnitIsVisible anyway rather than trusting the implication.
+    -- ⚠ Costs one table lookup when the unit is not latched: ReconcileUnitLatch reads the
+    -- registry before it touches the API. pcall'd so a heal can never break the range pass.
+    -- ☠☠ issecretvalue FIRST, AS ITS OWN STATEMENT: `inRange` comes from the UnitInRange
+    -- fallback and CAN be secret, and a bare `if inRange then` would throw and take the range
+    -- pass with it. The local `isSecret` above is not the right test -- it folds in the
+    -- CACHED value, so it reads true beside a clean inRange and would skip a possible heal.
+    -- ⚠ A secret read simply does not heal here; the 3s tick is the net under it.
     local rangeSecret = issecretvalue and issecretvalue(inRange) or false
     if not rangeSecret and inRange
         and DF.AuraContainer and DF.AuraContainer.ReconcileUnitLatch then
@@ -793,7 +783,7 @@ end
 -- Safety-net polling that runs alongside UNIT_IN_RANGE_UPDATE.
 -- The event gives instant response for Blizzard's ~38yd range,
 -- but doesn't cover spell-based ranges or all edge cases.
--- Both Grid2 and ElvUI use polling; we keep both for reliability.
+-- Event plus polling, both kept for reliability.
 -- ============================================================
 
 local rangeAnimFrame = CreateFrame("Frame")
@@ -952,10 +942,8 @@ local unitFrameMap
 
 -- UNIT_IN_RANGE_UPDATE is routed through the roster unit event dispatcher
 -- (RosterEvents.lua) so it only fires for player/partyN/raidN — never for
--- nameplates, target, focus, mouseover, or any other unit token. This is one
--- of only two events Grid2 specifically routes through its dispatcher (the
--- other being UNIT_AURA) because the per-unit cost adds up enough during
--- movement to justify the C++-level filter.
+-- nameplates, target, focus, mouseover, or any other unit token: the per-unit
+-- cost adds up enough during movement to justify the C++-level filter.
 local rangeSubscriber = {}
 function rangeSubscriber:OnUnitInRange(event, unit)
     if not unit then return end
@@ -1020,8 +1008,7 @@ DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_IN_RANGE_UPDATE", "OnUnitInRan
 -- until the poll happened to disagree with the cache, the frame kept the old alpha.
 -- Forget the unit's cache and the frame's stamp, then re-evaluate: UpdateRange sees a
 -- change no matter what the answer is and re-drives the whole element chain. Same
--- shape as the roster re-assignment reset in Frames/Headers.lua, and the two events
--- EllesmereUI re-seeds on for the same reason. Rare events, so the full sweep of a
+-- shape as the roster re-assignment reset in Frames/Headers.lua. Rare events, so the full sweep of a
 -- unit's frames (main + pinned) is affordable.
 function rangeSubscriber:OnUnitRangeReseed(event, unit)
     if not unit or unit == "player" then return end

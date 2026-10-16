@@ -18,32 +18,27 @@ local L = DF.L
 
 DF.TestData = {
     units = {
-        -- ☠ isAFK LIVES HERE, NOT ON THE OUT-OF-RANGE UNIT. The AFK icon carries a
-        -- TICKING TIMER, and it used to sit on Мишок below — the only outOfRange unit —
-        -- so the one element that exists to be READ was on the one frame that is
-        -- deliberately dimmed, and it was lost (Krathe, 2026-08-08).
+        -- ☠ isAFK LIVES HERE, NOT ON THE OUT-OF-RANGE UNIT. The AFK icon carries a TICKING
+        -- TIMER, and the one element that exists to be READ must not sit on the one frame that
+        -- is deliberately dimmed.
         -- ⇒ RULE: a TIMED or ANIMATED element must not share a frame with the range fade
         -- or the dead state. This unit's other states are all static badges (leader
         -- crown, skull marker, combat flag), so nothing competes with a countdown.
-        -- ★ ONE JOB PER FRAME (Krathe, 2026-08-08). Each of the five demonstrates a
-        -- distinct set and nothing doubles up: this one is the AFK TIMER plus the leader
-        -- badges. Both icon strips are off — the defensive row would show here by default
-        -- (TANK role) and the missing-buff strip shows everywhere by default, and between
-        -- them they crowded the timer this frame exists for. They live on Healsworth and
-        -- Xx respectively.
-        -- ⚠ This unit KEEPS its debuff row — `showDebuffs = false` was tried here and was
-        -- the wrong tool. The ask was to drop the IMPORTANT (enlarged + badged) debuff
-        -- sitting over the AFK timer, not every debuff. `showImportantDebuff = false` is
-        -- the right one, and it now exists: the row renders plain, so the countdown this
-        -- frame is here to demonstrate has the space to itself.
+        -- ★ ONE JOB PER FRAME. Each of the five demonstrates a distinct set and nothing doubles
+        -- up: this one is the AFK TIMER plus the leader badges. Both icon strips are off — the
+        -- defensive row would show here by default (TANK role) and the missing-buff strip shows
+        -- everywhere by default, and between them they crowd the timer. They live on Healsworth
+        -- and Xx respectively.
+        -- ⚠ This unit KEEPS its debuff row; only the IMPORTANT (enlarged + badged) debuff is
+        -- off (`showImportantDebuff = false`), so the row renders plain and the countdown has
+        -- the space to itself.
         -- ☠ showReadyCheck = false, AND THIS ONE IS NOT COSMETIC. The ready-check demo is
         -- gated on isLeader, which is this unit — and readyCheckIcon and afkIcon share
-        -- anchor CENTER, offset 0,0 AND frame level 30, i.e. the same point. With the AFK
-        -- timer here they overlapped. The ready check moved to Мишок: it is a static icon
-        -- and survives being faded, where a countdown does not.
+        -- anchor CENTER, offset 0,0 AND frame level 30, i.e. the same point. The ready check
+        -- lives on Мишок instead: it is a static icon and survives being faded.
         -- ⚠ THE LIVE COLLISION IS UNFIXED — a real unit that is AFK during a real ready
         -- check still gets both at the same point, draw order by creation order. That is
-        -- a defaults/precedence decision for after 12.1; this only moves the preview.
+        -- a defaults/precedence decision; this only moves the preview.
         {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
         -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
         -- role rule — no override needed). The missing-buff strip is off: with both, this
@@ -52,7 +47,7 @@ DF.TestData = {
         -- Heal prediction and an attached absorb can only render into EMPTY bar, and
         -- "Show Overheal" is off by default, so at 0.95 there were five percent of bar for
         -- both to share: raising healPrediction did nothing at all, because the ceiling was
-        -- the headroom, not the value. Reported as "hard to notice" (Krathe, 2026-08-14).
+        -- the headroom, not the value. Reported as "hard to notice".
         -- ⇒ A preview value is only visible if the frame has ROOM for it. Same trap on
         -- Tankerino above, which is at health 1.0 and therefore cannot show its
         -- healPrediction at all.
@@ -64,7 +59,7 @@ DF.TestData = {
         -- ⚠ showDefensive = true OVERRIDES the role rule (this is a DAMAGER, so the row
         -- would not show here otherwise) and showMissingBuff = false swaps the badge
         -- strip out for it — one surface per frame rather than both stacked on the one
-        -- unit that is also faded (Krathe, 2026-08-08).
+        -- unit that is also faded.
         -- ☠ NETTING IS ASYMMETRIC (Blizzard's model, see the heal-absorb calculator in
         -- Frames/Bars.lua): the WASH renders at its FULL amount, the incoming HEAL
         -- renders NET of it — full wash + shortened heal is what makes the interplay
@@ -137,12 +132,10 @@ DF.TestData = {
         -- ☠ EVERY icon path in this file MUST use DOUBLE backslashes. Lua 5.1 passes an
         -- unknown escape through WITHOUT the backslash (\I -> I), so the single-backslash
         -- form of a path silently collapses to "InterfaceIconsSpell_Foo" -- it parses, it
-        -- never loads. "\a" is worse still: it is a KNOWN escape (BEL, 0x07), which is how
-        -- this one entry was caught while its 18 neighbours stayed broken for months.
-        -- ⚠ THE REASON NOBODY SAW IT: these paths are a FALLBACK. _paintTestSlot prefers
-        -- the game's own texture for the resolved spell ID and only reaches for `icon`
-        -- when the client cannot resolve the spell at all -- so on enUS they were never
-        -- rendered, and a comment here used to claim they "work". They do not.
+        -- never loads ("\a" is a KNOWN escape, BEL, and garbles the path differently).
+        -- ⚠ These paths are a FALLBACK: _paintTestSlot prefers the game's own texture for the
+        -- resolved spell ID and only reaches for `icon` when the client cannot resolve the
+        -- spell, so a broken path here stays invisible on most clients.
         -- Do NOT "tidy" any of these back to single backslashes.
         {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
         -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
@@ -150,15 +143,11 @@ DF.TestData = {
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
         -- exercising that setting — the pool then needs another duration-less buff.
         {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
-        -- ☠ NO RAID BUFFS IN THIS POOL. Slots 7, 9 and 10 used to be Power Word:
-        -- Fortitude, Arcane Intellect and Battle Shout at 1 hour each. All three are
-        -- entries in `DF.RaidBuffs` (Frames/Bars.lua) — i.e. the spells MISSING BUFFS
-        -- exists to track — so the preview was teaching the wrong thing twice over:
-        -- it invited "why is Fortitude in the buff row AND on the missing-buff badge",
-        -- and `missingBuffHideFromBar` DEFAULTS TO TRUE, which unions every RaidBuffs id
-        -- into the row's `excludeSpellIDs` (Features/Auras.lua). So on a default profile
-        -- a live buff row can never show them and the preview showed three — a
-        -- test-vs-live divergence, not just a confusing choice.
+        -- ☠ NO RAID BUFFS IN THIS POOL. Spells in `DF.RaidBuffs` (Frames/Bars.lua) are what
+        -- MISSING BUFFS tracks, and `missingBuffHideFromBar` DEFAULTS TO TRUE, which unions every
+        -- RaidBuffs id into the row's `excludeSpellIDs` (Features/Auras.lua). So on a default
+        -- profile a live buff row can never show them, and a preview that did would be a
+        -- test-vs-live divergence.
         -- ⇒ Anything added here must NOT appear in `DF.RaidBuffs`. Check it.
         {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
         {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
@@ -233,26 +222,20 @@ DF.TestData = {
 }
 
 -- ============================================================
--- ★ THE RAID PREVIEW ALLOCATION  (Krathe, 2026-08-08)
+-- ★ THE RAID PREVIEW ALLOCATION
 -- ============================================================
--- Which raid frame demonstrates WHAT. This replaces the index arithmetic the raid
--- branch used to carry (`i % 4 == 3` for range, `i == 3` for AFK, and so on), which
--- was unauditable: two rules written months apart silently landed on the same frame
--- and nobody could see it without evaluating the modulos by hand.
+-- Which raid frame demonstrates WHAT, as explicit lists rather than index arithmetic
+-- (`i % 4 == 3` for range, `i == 3` for AFK, ...): two modulo rules can silently land
+-- on the same frame, and nobody can see it without evaluating them by hand. That is
+-- how the AFK countdown once ended up on a deliberately faded frame.
 --
--- ☠ THAT IS NOT HYPOTHETICAL — IT SHIPPED TWICE. `outOfRange = (i % 4 == 3)` selects
--- {3,7,11,15,19,…}. `isAFK = (i == 3)` was IN that set, so the AFK countdown sat on a
--- deliberately faded frame — the same bug the party table carries a ☠ note about,
--- reintroduced here because the raid side expressed the idea as arithmetic, not a list.
--- (Its DND twin had the identical fault; DND was later dropped from the addon.)
---
--- ★ THE RULES THESE SETS ENCODE (same as the party table, now checkable at a glance):
+-- ★ THE RULES THESE SETS ENCODE (same as the party table, checkable at a glance):
 --   1. A TIMED or ANIMATED element never shares a frame with the range fade or death.
 --   2. At most ONE centre-region element per frame — afkIcon, readyCheckIcon,
 --      summon/resurrect all draw at CENTER 0,0, so two on one frame
 --      is a guaranteed overlap, not a near miss.
 --   3. The missing-buff strip and the defensive row never share a frame: they occupy
---      the same band, and together they were the "busiest frame" problem in party.
+--      the same band.
 --   4. A dead frame carries the resurrect marker and nothing else.
 --   5. An out-of-range frame carries STATIC badges only.
 --
@@ -491,13 +474,10 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         -- Dead frames come from RAID_ALLOC.DEAD (9, 17 and their +20 mirrors).
         local isDead = inRaidSet("DEAD", i)
         
-        -- ☠ THE OVERLAY NAMES A DEBUFF THAT IS ACTUALLY ON THE FRAME. This used to be a
-        -- hardcoded index pattern ("i % 5 == 1 -> Magic") while the debuff ICONS came
-        -- from the curated pool — two sources that were never linked, and once the
-        -- per-frame rotation stopped them coinciding a unit showed a Poison overlay with
-        -- three debuffs, none of them Poison. Ask the engine which types the frame's own
-        -- debuff window holds; nil when it holds none, which is how the pool's untyped
-        -- entries set how often an overlay appears at all.
+        -- ☠ THE OVERLAY NAMES A DEBUFF THAT IS ACTUALLY ON THE FRAME. Ask the engine which
+        -- types the frame's own debuff window holds rather than picking a type by index, or a
+        -- unit shows a Poison overlay over three debuffs, none of them Poison. nil when it holds
+        -- none, which is how the pool's untyped entries set how often an overlay appears at all.
         local dispelType = nil
         if not isDead then  -- Dead frames don't show dispels
             dispelType = DF.GetTestDebuffDispelType
@@ -535,17 +515,15 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             isMainTank = inRaidSet("MAINTANK", i),
             isMainAssist = inRaidSet("MAINASSIST", i),
             -- ☠ THE AFK ICON CARRIES A TICKING COUNTDOWN. It must never land on an
-            -- out-of-range or dead frame -- see rule 1 on RAID_ALLOC. It used to be
-            -- `i == 3`, and 3 is in the old `i % 4 == 3` range set.
+            -- out-of-range or dead frame -- see rule 1 on RAID_ALLOC.
             isAFK = inRaidSet("AFK", i) and not isDead,
             isPhased = inRaidSet("PHASED", i),
             inVehicle = inRaidSet("VEHICLE", i),
             isBGCarrier = inRaidSet("BGCARRIER", i),
             isInCombat = inRaidSet("COMBAT", i),
             -- ☠ WHITELIST -- see the party branch's note. These four are the per-frame
-            -- overrides; without them here the raid preview ignored the unit allocation
-            -- entirely and drove the missing-buff strip on EVERY frame (Krathe, 2026-08-08:
-            -- "we also have missing buff showing on everyone").
+            -- overrides; without them the raid preview ignores the unit allocation and drives the
+            -- missing-buff strip on EVERY frame.
             -- Written as hard true/false rather than left nil: the fallback rules are
             -- "missing buff shows everywhere" and "defensive shows for TANK/HEALER", and
             -- both are exactly what we are overriding.
@@ -619,8 +597,8 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         -- ☠ THIS TABLE IS A WHITELIST, NOT A COPY. Every field a consumer reads has to
         -- be listed here or it is silently dropped between DF.TestData.units and the
         -- drives — adding a field to a unit row alone does NOTHING, with no error to say
-        -- so. That is exactly how showDefensive/showMissingBuff first shipped inert
-        -- (2026-08-08): the units table said one thing and the preview ignored it.
+        -- so. That is exactly how showDefensive/showMissingBuff first shipped inert:
+        -- the units table said one thing and the preview ignored it.
         -- ⇒ ADD ANY NEW PER-UNIT FIELD HERE TOO, and check it arrives.
         -- Both are tri-state; nil must survive as nil so the fallback rule still applies.
         showDefensive = data.showDefensive,
@@ -647,7 +625,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     -- Animate Health on erased the five frames' distinct levels (100 / 70 / 60 / 30)
     -- and switching it off brought them back. The raid and boss branches always did
     -- this correctly -- `baseHealth + wave * 0.15` -- and this now matches them, so
-    -- the three agree and the scenarios survive the toggle. (Audit, 2026-08-07.)
+    -- the three agree and the scenarios survive the toggle.
     if db.testAnimateHealth and DF.TestData.animationPhase then
         local phase = DF.TestData.animationPhase
         local offset = (index * 0.2) % 1
@@ -732,17 +710,12 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         return
     end
     
-    -- ☠ THIS USED TO ADD A SECOND SINE ON TOP OF AN ALREADY-ANIMATED VALUE.
-    -- GetTestUnitData applies the animation itself (see its party/raid/boss
-    -- branches), so testData.healthPercent arrives animated -- and this then added
-    -- its OWN wave, with a different per-frame phase offset (`index` radians rather
-    -- than 2*pi*(0.2*index % 1)). Two waves at different phases summed to an
-    -- amplitude near 0.5 and clamped flat at a full bar once per cycle, and because
-    -- any settings change re-renders through GetTestUnitData's formula alone, the
-    -- bar visibly jumped between the two whenever anything was touched.
-    --
-    -- ★ One formula now: the ticker advances animationPhase and simply RENDERS what
-    -- GetTestUnitData produced. Do not reintroduce a wave here. (Audit, 2026-08-07.)
+    -- ☠ NO SECOND WAVE HERE. GetTestUnitData applies the animation itself (see its
+    -- party/raid/boss branches), so testData.healthPercent arrives animated. Adding another
+    -- sine at a different phase would sum to a bar that clamps flat once per cycle, and
+    -- because any settings change re-renders through GetTestUnitData alone, the bar would
+    -- jump between the two. The ticker advances animationPhase and simply RENDERS what
+    -- GetTestUnitData produced.
     local health = testData.healthPercent or testData.health or 0.75
 
     -- Store animated health for bar updates
@@ -752,7 +725,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- write -- live, the full test render, and the missing-health companion five lines
     -- below -- goes through the smoothed setter, so with Smooth Bar Animation on the two
     -- halves of an animated preview bar moved on different rules and the setting read as
-    -- having no effect in test mode (Aphoex, 2026-08-14). Interpolation and a 20 Hz ticker
+    -- having no effect in test mode. Interpolation and a 20 Hz ticker
     -- compose: each tick eases toward the new target instead of snapping to it, which is
     -- exactly what live does when health events arrive.
     DF.SetBarValueSmoothed(frame.healthBar, health, db and db.smoothBars)
@@ -763,7 +736,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- below-threshold alpha was a flat 1.0, ignoring rangeFadeAlpha -- so an
     -- out-of-range unit under the threshold dimmed live and did not in the preview.
     -- Stamping the ANIMATED fraction and calling the real function fixes both, and
-    -- keeps every other dfHealthPct consumer honest mid-animation. (Audit, 2026-08-07.)
+    -- keeps every other dfHealthPct consumer honest mid-animation.
     frame.dfHealthPct = health
     frame.dfTestMaxHealth = testData.maxHealth
     frame.dfTestCurrentHealth = math.floor((testData.maxHealth or 100000) * health)
@@ -791,14 +764,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     end
 
     -- ★ Live's formatter, driven by the stamps above -- the preview kept two of its
-    -- own, both of which disagreed with live. (Audit, 2026-08-07.)
+    -- own, both of which disagreed with live.
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
     -- Update bars to follow animated health (use animated health value).
     -- ⚠ NOT COPIED. testData is this call's own fresh table (GetTestUnitData builds a
-    -- new one per call and keeps no reference), so it carries the animated value
-    -- itself. The copy it used to make was a second ~40-field throwaway table per
-    -- frame per 20 Hz tick.
+    -- new one per call and keeps no reference), so writing into it is safe and saves a
+    -- ~40-field throwaway table per frame per 20 Hz tick.
     testData.healthPercent = health
     local animatedTestData = testData
     
@@ -806,7 +778,6 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- calls it explicitly for exactly that reason; this ticker never did, so with
     -- Reduced Max Health + Clip Health Bar on, the clipped edge was set once by
     -- UpdateTestFrame and then stayed put while the bar animated underneath it.
-    -- (Audit, 2026-08-07.)
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
     -- ☠ LIVE'S ORDER — heal absorb, prediction, absorb LAST. The absorb chains to the
@@ -885,7 +856,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- UnitClass would answer about a real player standing next to you rather than
     -- about this scenario -- which is what forced those helpers to be walled off from
     -- test mode in the first place. Stamping is what lets the live appearance code run
-    -- on a preview frame at all. (Audit, 2026-08-07.)
+    -- on a preview frame at all.
     frame.dfIsDead = (testData.status == "Dead") or (testData.status == "Offline") or false
     frame.dfIsOffline = (testData.status == "Offline") or false
     frame.dfClassToken = testData.class
@@ -961,32 +932,15 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
     -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
     
-    -- ☠ THE HEALTH-BAR AND BACKGROUND COLOUR BLOCKS USED TO LIVE HERE (~135 lines).
-    -- DF:UpdateHealthBarAppearance and DF:UpdateBackgroundAppearance own both now and
-    -- accept test frames, so the shared appearance pass at the end of this function
-    -- applies them. The copy was not merely redundant, it was WRONG in two ways:
-    --   * it MULTIPLIED the OOR alpha into the base (classColorAlpha * healthBarAlpha)
-    --     where live REPLACES it -- so at Health Bar Alpha 0.5 with the stock OOR 0.2
-    --     the preview rendered 0.10 against live's 0.20, and the background, which
-    --     multiplies twice, rendered 0.03 against live's 0.10;
-    --   * its PERCENT-mode gradient took the raw class token from testData while live
-    --     resolves through the same stops with the frame's own colour weights.
-    -- (Audit, 2026-08-07.)
+    -- ☠ HEALTH-BAR AND BACKGROUND COLOUR are not set here: DF:UpdateHealthBarAppearance
+    -- and DF:UpdateBackgroundAppearance accept test frames, so the shared appearance pass
+    -- at the end of this function applies them. A preview copy would drift (live REPLACES
+    -- the base alpha with the OOR alpha where a copy is easily written to multiply it).
 
-    -- ☠ THE FRAME-LEVEL ALPHA BLOCK USED TO LIVE HERE — a preview reimplementation of
-    -- DF:UpdateFrameAppearance's four branches (OOR / above-threshold / normal / the
-    -- element-specific mode). DELETED: the shared appearance pass below owns frame alpha
-    -- outright, and it runs LAST, so this could only ever be overwritten or disagree.
-    --
-    -- ⚠ IT ALREADY DISAGREED. Its threshold test was `healthPct >= threshold - 0.5` on a
-    -- 0-100 percent; live's is `dfHealthPct > threshold/100` on a fraction. At EXACTLY the
-    -- threshold this faded and live did not. Invisible only because live wrote second.
-    --
-    -- ★ And keeping it is what hid the bug it was meant to solve. When the appearance
-    -- functions were shared (d3c6d046, 2026-08-07) the live path became authoritative and
-    -- started overwriting this — but its health-fade branch was gated on a flag whose
-    -- driver still bailed out in test mode, so the preview got NEITHER and every frame
-    -- rendered opaque. A second pathway does not fail loudly; it fails by looking handled.
+    -- ☠ NO FRAME-LEVEL ALPHA HERE. The shared appearance pass below owns frame alpha
+    -- outright, and it runs LAST, so a preview reimplementation could only be overwritten or
+    -- disagree -- and worse, it hides live-path bugs: a second pathway does not fail loudly,
+    -- it fails by looking handled.
     -- ⇒ Preview differs from live in DATA (dfHealthPct, dfIsDead, the dfTestShow* stamps),
     -- never in RENDERING. If a live appearance function cannot run on a preview frame,
     -- teach it the data fork — do not copy it here.
@@ -998,16 +952,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- ☠ LIVE'S ORDER — heal absorb, PREDICTION, absorb LAST — because the absorb DEPENDS
     -- on the prediction: it chains to the prediction's tail (ResolveAbsorbChainAnchor)
     -- and its clamp reads the netted-heal stamps UpdateHealPrediction writes
-    -- (dfTotalHeals). This ran absorb FIRST, so a single pass over frames with no
-    -- previous state computed the shield against a prediction that did not exist yet.
-    -- ENTRY hid that: its After(0) geometry repaint runs a second full pass that
-    -- converges everything. The panel-toggle path (RefreshTestFrames) runs ONE pass —
-    -- so flipping the toggles on after a reload that started with them off left the
-    -- cross-dependent frames wrong until the next repaint happened by: the interplay
-    -- unit lost its heal and shield, the reduced-max unit its heal, while a unit whose
-    -- bars barely depend on each other looked fine (Aphoex's video, 2026-08-15 — the
-    -- patchiness IS the dependency graph). ApplyFrameLayout has carried this exact
-    -- ordering note since the band rework; the preview painter just never matched it.
+    -- (dfTotalHeals). Absorb first would compute the shield against a prediction that does
+    -- not exist yet. Entry's After(0) repaint would converge it, but the panel-toggle path
+    -- (RefreshTestFrames) runs ONE pass, leaving cross-dependent frames wrong until the next
+    -- repaint. ApplyFrameLayout carries the same ordering note.
     if db.testShowAbsorbs then
         DF:UpdateHealAbsorb(frame, testData)
     else
@@ -1020,11 +968,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if db.testShowHealPrediction ~= false then
         DF:UpdateHealPrediction(frame, testData)
     else
-        -- ☠ BOTH SEGMENTS. Only segment 1 was hidden, and ChainEndKey tests seg2 FIRST --
-        -- so with Show Heal Prediction off the preview's shield still chained behind a
-        -- segment the user had just switched off, hanging in the gap where the other-heal
-        -- bar used to be. The toggle has to leave the same rendered state the live
-        -- pathway would, or the chain reads a bar nobody can see.
+        -- ☠ BOTH SEGMENTS. ChainEndKey tests seg2 FIRST, so hiding only segment 1 would leave
+        -- the preview's shield chained behind a segment the user just switched off. The toggle
+        -- has to leave the same rendered state the live pathway would.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
     end
@@ -1147,33 +1093,24 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- able to HIDE the 12.1 container row, not just skip painting a legacy icon.
     DF:UpdateTestDefensiveBar(frame, testData)
 
-    -- ★ FADES NOW COME FROM THE LIVE FUNCTIONS. These three used to be hand-mirrored
-    -- here -- and each one shipped a bug first (the missing-buff strip, the defensive
-    -- row and the AD indicators all silently stopped fading out of range, one at a
-    -- time, because each had an oor*Alpha key in ElementAppearance with no counterpart
-    -- in this file). ElementAppearance's own functions now accept test frames: every
-    -- unit read they make goes through GetInRange / IsDeadOrOffline, both of which
-    -- prefer the stamps set at the top of this function. One policy, one place.
+    -- ★ FADES COME FROM THE LIVE FUNCTIONS. ElementAppearance's own functions accept test
+    -- frames: every unit read they make goes through GetInRange / IsDeadOrOffline, both of
+    -- which prefer the stamps set at the top of this function. One policy, one place -- a
+    -- hand-mirrored copy here silently stops fading each time an oor*Alpha key is added.
     --
     -- ⚠ AFTER the two drives above, not before: both widgets are created LAZILY by
     -- those drives, so earlier in the pass they are still nil on a frame's first
     -- paint. Neither drive touches alpha, so setting it here sticks.
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
-    -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
+    -- bulk previews can't drift.
     --
     -- ☠ THIS MUST RUN *BEFORE* THE APPEARANCE PASS, NOT AFTER. SyncFrame re-styles
     -- each indicator, which resets its alpha host to the indicator's BASE alpha --
-    -- so with it below, every out-of-range AD fade the appearance pass had just
-    -- applied was wiped a few lines later. It is signature-gated, which is what made
-    -- the bug look intermittent and sent three fixes to the wrong place: toggling a
-    -- setting that changes nothing structural makes SyncFrame a no-op, the fade
-    -- survives, and the preview looks correct -- while a fresh Test Mode open or a
-    -- Quick Preset swap DOES change the signature, re-styles, and drops the AD
-    -- indicator back to full opacity on an out-of-range frame. Measured with
-    -- /df debug zorder: buff 0.20, debuff 0.20, missing-buff 0.50, AD 1.00, and one
-    -- re-run of UpdateAuraDesignerAppearance took it straight to 0.20.
-    -- (Audit follow-up, 2026-08-07.)
+    -- so after the pass it wipes every out-of-range AD fade the pass just applied. It is
+    -- signature-gated, so that bug looks intermittent: a setting that changes nothing
+    -- structural makes SyncFrame a no-op and the fade survives, while a fresh Test Mode
+    -- open or a Quick Preset swap re-styles and drops the AD indicator back to full opacity.
     local ADFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
     if ADFactory then
         if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
@@ -1189,17 +1126,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- it looks like under range / dead / health fade, so nothing may run after it.
     -- ElementAppearance owns colour AND alpha for the border, the name/health/status
     -- text, the power bar, the four header icons, the dispel overlay, the aura rows,
-    -- the four bars, missing buff, defensive and the Aura Designer -- 16 of its 19
-    -- functions accept test frames now. The three that still bail (health bar,
-    -- background, frame-level health fade) need a health stamp that does not exist
-    -- yet, and keep their own blocks above.
+    -- the four bars, missing buff, defensive and the Aura Designer.
     --
-    -- ☠ THIS IS THE FIX FOR A WHOLE CLASS OF BUG. The pattern was: an oor*Alpha or
-    -- fadeDead* key gets added to ElementAppearance and silently not to the copy that
-    -- used to live here, and the preview quietly stops matching live. That happened to
-    -- the missing-buff strip, the defensive row and the AD indicators in three separate
-    -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES,
-    -- and ADD NOTHING BELOW IT that touches alpha. (Audit, 2026-08-07.)
+    -- ☠ ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES, and ADD NOTHING BELOW IT
+    -- that touches alpha: a copy here misses each new oor*Alpha or fadeDead* key and the
+    -- preview quietly stops matching live.
     -- ⚠ BEFORE the appearance pass, not after. UpdateHealthFade's job here is to set
     -- frame.dfHealthFadeActive, and UpdateFrameAppearance (inside the pass below) gates
     -- its health-fade branch on that flag — so a call afterwards would set the flag one
@@ -1321,7 +1252,7 @@ end
 -- work DF:ApplyStatusIconSettings already does, and doing it a second time AFTERWARDS
 -- clobbered any per-state tint. The second was already a one-line forward to
 -- DF:ApplyTimerTextSettings, which ApplyStatusIconSettings also calls. The preview now
--- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
+-- uses DF:ShowStatusIconAsText, which IS live's function.
 
 -- ☠ (Removed) FormatTestAFKTime and testAFKStartTimes, the last two pieces of the
 -- preview's private AFK implementation.
@@ -1342,11 +1273,10 @@ function DF:UpdateTestStatusIcons(frame, testData)
     local db = DF:GetFrameDB(frame)
     
     -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
-    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
-    -- longer rides the leader.
-    -- ★ THE ONLY ready-check block. Its twin in DF:UpdateTestIcons was deleted (see the
-    -- note there): this function runs unconditionally after that one, so the twin's
-    -- result was overwritten by this one on every render.
+    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it does
+    -- not ride the leader.
+    -- ★ THE ONLY ready-check block: this function runs unconditionally after
+    -- DF:UpdateTestIcons, so a twin there would always be overwritten.
     if frame.readyCheckIcon then
         local wantReady = testData.showReadyCheck
         if wantReady == nil then wantReady = testData.isLeader end
@@ -1457,16 +1387,10 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
             frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
 
-            -- ☠ THE LIVE APPLIER, like the other seven icons. This block used to
-            -- hand-roll scale/anchor/x/y, and the commit that converted the rest
-            -- ("preview uses the live geometry applier") deleted this one's SetAlpha and
-            -- SetFrameLevel WITHOUT converting it -- so it lost combatIconAlpha, lost
-            -- combatIconFrameLevel, and lost the out-of-range/dead fade that
-            -- ApplyStatusIconSettings folds in via GetStatusIconFadeAlpha. A new
-            -- preview-vs-live fork, created by the change that was removing forks, and
-            -- invisible at default settings because combatIconAlpha seeds to 1.
-            -- The hand-rolled fallbacks disagreed with live's as well ("TOPLEFT"/2/-2
-            -- against CENTER/0/0), which is another reason not to keep a second copy.
+            -- ☠ THE LIVE APPLIER, like the other seven icons. ApplyStatusIconSettings carries
+            -- combatIconAlpha, combatIconFrameLevel and the out-of-range/dead fade (via
+            -- GetStatusIconFadeAlpha); a hand-rolled scale/anchor block would lose all three and
+            -- disagree with live's defaults (CENTER/0/0).
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.combatIcon, db, "combatIcon")
             end
@@ -1592,7 +1516,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         -- ☠ WAS `~= false`, which shows the icon when the key is nil; live tests
         -- it plainly, so a nil key hides it. Config seeds both to true, so the two
         -- only disagree on a profile predating the keys -- exactly where a preview
-        -- is most likely to be trusted. Match live. (Audit, 2026-08-07.)
+        -- is most likely to be trusted. Match live.
         elseif testData.isMainTank and db.raidRoleIconShowTank then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainTankIcon")
             
@@ -1632,7 +1556,7 @@ end
 -- strips buffs and debuffs outright, and the defensive icon and missing-buff badge
 -- describe things that only mean something on a living unit — a dead frame covered
 -- in icons is a shape live play never produces, which makes it a bad reference for
--- judging layout (Krathe, 2026-08-06). The dispel overlay already did this.
+-- judging layout. The dispel overlay already did this.
 --
 -- Reads the stamp UpdateTestFrame leaves rather than re-resolving the unit data:
 -- the bulk refreshers (UpdateAllTestAuras / MissingBuff / DefensiveBar /
@@ -1661,19 +1585,15 @@ function DF:UpdateTestAuras(frame)
             -- ☠ A COUNT OF 0 MEANS "DON'T PREVIEW THIS ROW", AND HAS TO HIDE IT.
             -- `testSlotCount` floors at 1 — a container with no slots is a degenerate
             -- thing to declare — so a 0 that reaches the drive comes back as ONE sample
-            -- icon (Krathe, 2026-08-08: "setting buffs and debuffs to 0 still shows 1").
-            -- Gate it HERE, before the drive, and let the existing else-branch hide the
+            -- icon. Gate it HERE, before the drive, and let the existing else-branch hide the
             -- row: that reuses the same shown-cache path as "Show Auras" off, so
             -- re-raising the slider re-shows correctly. Do NOT instead teach the
             -- container to build zero slots — slots are add-only and a 0-slot rebuild
             -- would strand frames for the session.
-            -- ⚠ THE LIVE MAX IS THE OTHER WAY IN, and it was not gated. The container
-            -- resolves a preview count as min(testMax, max) and only THEN floors the
-            -- slot count at 1, so Max Buffs / Max Debuffs = 0 arrived as one sample icon
-            -- — the identical symptom, reached through the Buff Bar page's slider rather
-            -- than the test panel's (Aphoex, 2026-08-12). Clamp by both here so either
-            -- zero hides the row. Mirrors the defensive bar, which has always clamped
-            -- the pair: min(testDefensiveCount, defensiveBarMax).
+            -- ⚠ THE LIVE MAX IS THE OTHER WAY IN. The container resolves a preview count as
+            -- min(testMax, max) and only THEN floors the slot count at 1, so Max Buffs / Max
+            -- Debuffs = 0 would arrive as one sample icon too. Clamp by both here so either zero
+            -- hides the row. Mirrors the defensive bar's min(testDefensiveCount, defensiveBarMax).
             local buffCount = math.min(db.testBuffCount or 2, db.buffMax or 4)
             local debuffCount = math.min(db.testDebuffCount or 2, db.debuffMax or 5)
             if db.showBuffs and showAuras and buffCount > 0 and DF.DriveBuffFactory then
@@ -1755,19 +1675,13 @@ function DF:UpdateTestPowerBar(frame, testData)
     -- override precisely so the preview can drive it without a real unit -- a test path
     -- that is a PARAMETER of the live function, not a copy of it.
     --
-    -- ☠ Do not reinstate a local copy of the role logic. The copy that used to live here
-    -- had lost BOTH of the live function's solo arms (`inSoloMode and
-    -- db.resourceBarShowInSoloMode`), so the preview showed only the role-filtered subset
-    -- while live, driven solo, put a bar on your frame regardless. The setting was simply
-    -- not previewable.
-    -- ⚠ That older note said live "showed the bar on every frame". It only ever showed it
-    -- on the one frame solo HAS -- yours. The gate itself was unscoped and the preview,
-    -- with five frames on screen, is where that finally showed; see below.
-    -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
+    -- ☠ Do not add a local copy of the role logic: it would lose the live function's solo
+    -- arms (`inSoloMode and db.resourceBarShowInSoloMode`) and make that setting
+    -- unpreviewable. Role AND class are both handed over as data, so the ENTIRE gate is the
+    -- live one.
     --
     -- ★ WHO THE SOLO BYPASS APPLIES TO is the fourth piece of data the gate needs, and
-    -- without it the solo arm applied to all five previews -- "Show in Solo Mode enables
-    -- the resource bar for every frame" (Aphoex, 2026-08-14).
+    -- without it the solo arm would apply to all five previews.
     -- The two arms of live's own scope, mirrored: your own frame -- the FIRST slot in
     -- either container (party is 0-based, raid 1-based) -- and any pinned frame, which
     -- keeps the bypass live because the user pinned that unit by hand. Live resolves the
@@ -1987,32 +1901,21 @@ function DF:RefreshTestFrames()
 
     -- Section labels re-place LAST and one tick later: they measure the rows they
     -- label, and a row rebuilt during this pass has a zero rect until the layout
-    -- settles (the creation-tick rule that bit the bar toggles). A stale label is
-    -- worse than a late one — it points at where an element used to be.
+    -- settles (the creation-tick rule). A stale label is worse than a late one — it points
+    -- at where an element used to be.
     if DF.UpdateTestLabels then
         C_Timer.After(0, function() if DF.UpdateTestLabels then DF:UpdateTestLabels() end end)
     end
 end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
--- This should be called when visual settings change, not just when data changes
--- ☠ THIS USED TO RE-IMPLEMENT DF:ApplyFrameLayout AND THEN CALL IT. ~80 lines of
--- frame size, health-bar texture/orientation, missing-health orientation, border and
--- resource-bar layout -- every one of them already done inside ApplyFrameLayout,
--- which it invoked at the end via the ApplyFrameStyle alias (Update.lua: that alias
--- is a one-line forward). So the copy ran first and the real thing overwrote it.
---
--- Two things the copy got WRONG while it was there:
---   * raw SetSize instead of DF:SetPixelPerfectSize, and it read db.frameWidth where
---     live reads frame.dfPinnedWidth or db.frameWidth -- so it would have sized a
---     pinned frame by the global width. Inert only because it was never called on one.
---   * a missing-health TEXTURE write, which looked unique but is not: both test
---     update paths already set it, because both call DF.SetMissingHealthBarValue --
---     the LIVE setter, which applies the texture itself. (This file has no
---     SafeSetStatusBarTexture call of its own, and never had one.)
---
--- Kept as a named function rather than deleted because call sites pair it with
--- UpdateTestFrame and the pairing reads clearly. (Audit, 2026-08-07.)
+-- This should be called when visual settings change, not just when data changes.
+-- ☠ A THIN FORWARD to DF:ApplyFrameLayout (via the ApplyFrameStyle alias). Do not
+-- re-implement frame size, textures, borders or resource-bar layout here: the live
+-- function does all of it (pixel-perfect, pinned-width aware), and a copy would run
+-- first only to be overwritten.
+-- Kept as a named function because call sites pair it with UpdateTestFrame and the
+-- pairing reads clearly.
 function DF:ApplyTestFrameLayout(frame)
     if not frame then return end
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(frame) end
@@ -2090,24 +1993,19 @@ function DF:RefreshTestFramesWithLayout()
     end
 end
 
--- ☠ (Removed) DF.lastLayoutRefresh, and the "throttled layout refresh for slider
--- changes (avoids flickering)" comment that labelled it. It was assigned 0 here and
--- read by nothing, in either addon -- whatever throttle once consulted it is long
--- gone, so the name was documenting a mechanism that no longer exists.
-
 -- Engine-side test-mode teardown: the state that is NOT owned by the test frames
 -- themselves -- the global aura data provider, and the pinned-frame preview.
 --
 -- HideTestFrames / HideRaidTestFrames do this inline, but two OTHER paths tear test
 -- mode down by clearing DF.testMode / DF.raidTestMode directly: combat entry
 -- (Core.lua, PLAYER_REGEN_DISABLED) and zone change (Frames/Headers.lua,
--- PLAYER_ENTERING_WORLD). Both used to skip it, which left C_UnitAuras on the
--- SAMPLE provider for the rest of the session -- the restore lives only in
--- AuraContainer.SetTestMode's `else` branch. The [combat] state driver shows the
--- LIVE frames the instant combat starts, so they then rendered fake auras, with the
--- identity gate off, aura row caps stuck at the test slider value and missing-buff
--- badges on corpses. The watchdog could not recover it either: ensureProviderWatch
--- returns early while _ownsProviderSwitch is set, and only this path clears it.
+-- PLAYER_ENTERING_WORLD). Skipping this would leave C_UnitAuras on the SAMPLE provider
+-- for the rest of the session -- the restore lives only in AuraContainer.SetTestMode's
+-- `else` branch. The [combat] state driver shows the LIVE frames the instant combat
+-- starts, so they would render fake auras, with the identity gate off, aura row caps
+-- stuck at the test slider value and missing-buff badges on corpses. The watchdog
+-- cannot recover it either: ensureProviderWatch returns early while
+-- _ownsProviderSwitch is set, and only this path clears it.
 --
 -- Call AFTER the mode flags are cleared: the provider is shared between party and
 -- raid, so it goes back to real data only when NEITHER mode is left running.
@@ -2279,10 +2177,10 @@ function DF:ToggleTestMode()
         return
     end
 
-    -- Flip the USER's claim. Unlock holds its own, so this no longer needs to
-    -- refuse while frames are unlocked: turning the preview off mid-unlock drops
-    -- your claim, unlock keeps the frames it still needs to have something to
-    -- drag, and locking then hides them because nobody is left asking.
+    -- Flip the USER's claim. Unlock holds its own, so this need not refuse while frames
+    -- are unlocked: turning the preview off mid-unlock drops your claim, unlock keeps the
+    -- frames it still needs to have something to drag, and locking then hides them
+    -- because nobody is left asking.
     local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
     -- The "frames stay visible while unlocked" line is emitted by SetTestModeOwner,
     -- not here: the toolbar button releases the claim through the panel's OnHide and
@@ -2550,7 +2448,7 @@ function DF:UpdateRaidTestFrames()
     -- unticking Show Auras / Missing Buff / Aura Designer emptied the raid grid and
     -- left the pinned preview fully dressed. `true` because this pass applies layout
     -- to each raid frame (ApplyTestFrameLayout above), so the pinned frames get the
-    -- same treatment their raid siblings just had. (Krathe, 2026-08-17.)
+    -- same treatment their raid siblings just had.
     if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
         DF.PinnedFrames:RefreshTestMode(true)
     end
@@ -2663,13 +2561,9 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- Update group layout params from current settings
     SecureSort:UpdateRaidGroupLayoutParams()
     local lp = SecureSort.raidGroupLayoutParams
-    -- ☠ DEBUG-ONLY FLAG. The claim that used to sit here -- that this signals
-    -- PositionRaidFrameToGroupSlot to mirror the live snippet's BOTTOMLEFT anchor when
-    -- playerAnchor=END (#875) -- is false. Grep .testMode in SecureSort.lua: the only
-    -- remaining reads are the LEAK-TEST print and two params-swap log lines. The END
-    -- mirror comes from playerAnchor itself, in both the snippet and the calculator, which
-    -- is exactly why the preview matches live without this. Retiring the CENTER comp block
-    -- in 2026-08-15 took the last real consumer with it.
+    -- ☠ DEBUG-ONLY FLAG. Placement does not read it: the END mirror comes from playerAnchor
+    -- itself, in both the snippet and the calculator, which is why the preview matches live
+    -- without it. The only reads are the LEAK-TEST print and two params-swap log lines.
     -- Kept because the leak test prints it and is the tripwire for test params reaching
     -- live frames. Safe either way: UpdateRaidGroupLayoutParams replaces the whole table
     -- on its next call, so the flag cannot survive into the live path.
@@ -2750,7 +2644,7 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- preview, i.e. inside the group; CENTER centred on the first frame instead of the
     -- group. START happened to agree, which is why it went unnoticed. The preview now
     -- builds a per-group extent frame spanning first..last and anchors to that, so all
-    -- three positions read the same geometry live does. (Audit, 2026-08-07.)
+    -- three positions read the same geometry live does.
     DF.testGroupFirstFrame = DF.testGroupFirstFrame or {}
     DF.testGroupLastFrame = DF.testGroupLastFrame or {}
     wipe(DF.testGroupFirstFrame)
@@ -2936,12 +2830,6 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
         return
     end
 
-    -- ☠ A SECOND, UNREACHABLE PARTY LAYOUT USED TO LIVE HERE -- ~76 lines behind
-    -- 'Fallback: if SecureSort not available'. Features/SecureSort.lua is
-    -- unconditional in the .toc and assigns DF.SecureSort at load, so the
-    -- branch above always returns and this never ran. It also used a DIFFERENT
-    -- growthAnchor formula to CalculateSlotPosition -- a third statement of the same
-    -- geometry that no longer had to agree with anything. (Audit, 2026-08-07.)
 end
 
 -- Throttled version of UpdateRaidTestFrames for slider callbacks
@@ -2968,23 +2856,17 @@ end
 -- Presets are DECLARATIVE and EXHAUSTIVE: each lists only the toggles it turns
 -- ON, and applying it forces every other key in TEST_TOGGLE_KEYS OFF. So a new
 -- test toggle is OFF in every preset until it's explicitly listed here — and
--- automatically ON in Full, which is built from the key list.
---
--- The old hand-written branches only covered 11 of the 19 panel toggles, so the
--- other 8 (pets, heal prediction, reduced max, Text Designer, Aura Designer,
--- animate targeted list, selection, aggro) kept whatever value they happened to
--- have. "Full" wasn't full, and "Static" wasn't a reproducible baseline.
+-- automatically ON in Full, which is built from the key list. That is what makes
+-- "Full" full and "Static" a reproducible baseline.
 --
 -- Sliders are deliberately NOT touched: they're a working preference, not part of a
 -- preset's visual identity.
 --
 -- ☠ ONE EXCEPTION — `testDefensiveCount`. It is a count, but it is also the defensive
--- row's ONLY on/off since the "Defensive Icon" checkbox was removed, so a preset that
--- used to turn that row on or off has to keep doing it (Krathe, 2026-08-08). It is
+-- row's ONLY on/off, so a preset has to be able to turn that row on or off. It is
 -- declared in TEST_TOGGLE_KEYS like any toggle and listed `= true` in the presets that
 -- want it; the apply/match helpers translate that to 1 / 0. The frame, buff and debuff
 -- counts stay untouched — they only change HOW MUCH of a row shows, never whether it does.
--- ============================================================
 
 local TEST_TOGGLE_KEYS = {
     -- General
@@ -3077,7 +2959,7 @@ local TEST_PRESETS = {
 -- decorative layer: Render.lua hides EVERY TD font string when it is off, and the
 -- unit name and health text are TD elements — so a preset without it previews
 -- nameless blank bars. This shipped for a few minutes as an empty "None" for
--- exactly that reason and was unusable (Krathe, 2026-08-06).
+-- exactly that reason and was unusable.
 -- ⚠ Config.lua's test-mode defaults MIRROR THIS TABLE. Change one, change both.
 TEST_PRESETS.DEFAULT = {
     testShowPets             = true,
@@ -3125,7 +3007,7 @@ local TEST_TOGGLE_DEFAULT_ON = {
 -- ☠ COUNT-SHAPED TOGGLE KEYS. These live in TEST_TOGGLE_KEYS and are written `= true` in
 -- a preset like any other, but they store a NUMBER: >0 is on, 0 is off. `testDefensiveCount`
 -- is one because it is simultaneously the defensive row's on/off and how many icons it
--- previews — one control, two jobs, which is why the checkbox beside it was removed.
+-- previews — one control, two jobs.
 -- Anything added here must read as off at 0 and on above it, or the matcher will lie.
 local TEST_COUNT_KEYS = {
     testDefensiveCount = true,
@@ -3146,11 +3028,9 @@ end
 -- none of them.
 --
 -- ☠ DERIVED, NEVER READ FROM db.testPreset. That key records the last preset CLICKED, which
--- stops being true the moment any toggle is flipped afterwards: click Default, turn on
--- Auras, and the panel went on highlighting Default while the settings were no longer
--- Default (Krathe, 2026-08-07). A preset button is a claim about state, so it has to be
--- answered from state. db.testPreset is still written by ApplyTestPreset -- it is a useful
--- record of intent -- but nothing may drive UI from it.
+-- stops being true the moment any toggle is flipped afterwards. A preset button is a claim
+-- about state, so it has to be answered from state. db.testPreset is still written by
+-- ApplyTestPreset -- it is a useful record of intent -- but nothing may drive UI from it.
 --
 -- ⚠ Party-only keys are skipped in raid mode, mirroring ApplyTestPreset, which does not
 -- write them there. Comparing keys a raid preset never sets would mean no raid state could
@@ -3265,7 +3145,6 @@ end
 -- it here rather than at the call sites means the individual panel toggles (Aura
 -- Designer, Defensive Icon, Missing Buff, Dispel Overlay), which rebuild without going
 -- through RefreshAllTestSurfaces at all, are covered by the same fix.
--- (Audit follow-up, 2026-08-07.)
 local function RepaintTestSurface(frame, which)
     if not frame then return end
     if which == "auras" then
@@ -3470,18 +3349,13 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             DF:DriveDefensiveFactory(frame, db)
             local h = frame.defensiveFactory
             if h then
-                -- ☠ ONE SOURCE FOR THE PREVIEW COUNT. This used to override with a
-                -- role-scaled 3-on-tanks / 1-on-everyone-else AFTER the drive had
-                -- already applied BuildDefensiveRowConfig's testMax. Two values
-                -- fighting, and since SetTestMax rebuilds on any change, every
-                -- defensive tweak in test paid an extra container rebuild while they
-                -- argued. The role scaling was a leftover of the legacy preview.
-                -- ⚠ Both values now come from `testDefensiveCount` (its own panel
-                -- slider, default 1). They must stay in step — this line and
-                -- BuildDefensiveRowConfig in Features/Auras.lua are the two writers.
-                -- ☠ Still clamped by `defensiveBarMax`: the slider goes to 5 and the
-                -- row's own cap can be lower, in which case the row wins. That is not
-                -- the old bug — it is the row honouring its own Max Icons.
+                -- ☠ ONE SOURCE FOR THE PREVIEW COUNT: `testDefensiveCount` (its own panel slider,
+                -- default 1). A second value here would fight BuildDefensiveRowConfig's testMax, and
+                -- since SetTestMax rebuilds on any change, every defensive tweak would pay an extra
+                -- container rebuild. This line and BuildDefensiveRowConfig in Features/Auras.lua are the
+                -- two writers -- keep them in step.
+                -- ⚠ Still clamped by `defensiveBarMax`: the slider goes to 5 and the row's own cap can
+                -- be lower, in which case the row honours its own Max Icons.
                 if h.SetTestMax then
                     h:SetTestMax(math.min(db.testDefensiveCount or 0, db.defensiveBarMax or 4))
                 end
@@ -3559,7 +3433,7 @@ function DF:UpdateAllTestTargetedList()
     -- So ticking the feature's own Enable on the Indicators page called straight through
     -- and showed the demo list on screen with test mode off entirely; it then stayed up,
     -- because the only routes to HideTestTargetedList are this else-branch (which needs
-    -- the feature turned back off) and the main test-mode teardown (Krathe, 2026-08-09).
+    -- the feature turned back off) and the main test-mode teardown.
     -- ⚠ A "show X in test mode" flag is a filter on test mode, never a trigger for it.
     if DF.testMode and not DF.raidTestMode
         and db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
@@ -3887,30 +3761,18 @@ function DF:CreateTestPanel()
             labelText:SetPoint("LEFT", 0, 0)
             labelText:SetText(text)
             labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            -- ☠ A TEXTURE, NOT A TEXT GLYPH. This was `SetText("›")` in the small font at
-            -- 0.4 grey × 0.6 alpha — about a quarter opacity on a dark panel, and the
-            -- only chevron in the addon drawn as text rather than as
-            -- Media\Icons\chevron_right (which the Aura Designer card headers, and this
-            -- panel's own section headers, already use). Krathe, 2026-08-08: "they are so
-            -- small I can't see them".
-            -- ⚠ The size was not the whole story: `DFFontHighlightSmall` is not known to
-            -- cover U+203A, and AutoProfiles.lua already records this font missing "→".
-            -- A missing glyph renders as nothing, which no amount of recolouring fixes —
-            -- so this is a texture and the question does not arise.
-            -- The icons are white masks, so vertex colour tints them exactly as
-            -- SetTextColor did; every recolour site below moved to SetVertexColor.
+            -- ☠ A TEXTURE, NOT A TEXT GLYPH -- Media\Icons\chevron_right, the same icon the Aura
+            -- Designer card headers and this panel's section headers use. A "›" glyph in the small
+            -- font is nearly invisible, and `DFFontHighlightSmall` is not known to cover U+203A
+            -- (AutoProfiles.lua records it missing "→"); a missing glyph renders as nothing.
+            -- The icons are white masks, so vertex colour tints them exactly as SetTextColor
+            -- would; every recolour site below uses SetVertexColor.
             --
-            -- ⚠ 8, NOT 10 — and the first swap DID ship at 10, which was too heavy
-            -- (Krathe, 2026-08-08: "does it dominate the listing now?"). Two things had
-            -- changed at once: a thin text stroke became a SOLID glyph, and the effective
-            -- brightness went ~0.29 -> ~0.55 against a 0.9 label, i.e. from a third of the
-            -- label's weight to nearly two thirds. What tips it is the REPETITION — the
-            -- section header carries one 12px chevron, a section body carries five of
-            -- these, so the same per-icon weight reads far heavier in the list.
-            -- 8 sits below the label's cap height, so it reads as a hint rather than a
-            -- peer, while staying in the section chevrons' tonal family. The COLOUR was
-            -- deliberately left alone: dropping both at once is how it became invisible
-            -- the first time round.
+            -- ⚠ 8, NOT 10. What tips the weight is the REPETITION — the section header carries one
+            -- 12px chevron, a section body carries five of these, so the same per-icon weight reads
+            -- far heavier in the list. 8 sits below the label's cap height, so it reads as a hint
+            -- rather than a peer, while staying in the section chevrons' tonal family. Change size
+            -- OR colour, not both at once.
             local arrow = labelBtn:CreateTexture(nil, "OVERLAY")
             arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right.png")
             arrow:SetSize(8, 8)
@@ -3930,7 +3792,7 @@ function DF:CreateTestPanel()
                 -- and puts the caller's string in `lines`). This passed the hint as the
                 -- TITLE with no body, so it rendered as one large white header with
                 -- nothing under it, which reads as a stray game tooltip rather than one
-                -- of ours (Krathe, 2026-08-08).
+                -- of ours.
                 -- ⚠ Still hand-rolled rather than converted to GUI:AttachTooltip: that
                 -- helper builds its own mouse-enabled hit frame OVER the label, and this
                 -- label is a Button you click to open the page — the hit frame would
@@ -3988,14 +3850,9 @@ function DF:CreateTestPanel()
                 -- its bars during this pass, and an anchor-derived rect is 0 for the
                 -- whole creation tick — so anything anchored to a new bar's own
                 -- texture (the absorb chained to the brand-new prediction fill)
-                -- painted at width 0 and stayed invisible until another toggle pass
-                -- happened by. That is exactly the trap entry's After(0) repaint
-                -- exists for; its comment even says "goes through the SAME
-                -- UpdateTestFrame pathway — no second painter". Field-caught twice on
-                -- the interplay unit (Aphoex + Krathe, 2026-08-15): the first fix
-                -- reordered the painters to live's order — necessary, but it fixed
-                -- the within-pass dependency, not the rects. Hide-then-reshow
-                -- "correcting" it was the tell: a second pass over settled rects.
+                -- paints at width 0 and stays invisible until another toggle pass. The painter order
+                -- fixes the within-pass dependency; this fixes the rects. It goes through the SAME
+                -- UpdateTestFrame pathway — no second painter.
                 C_Timer.After(0, function()
                     if DF.raidTestMode and DF.UpdateRaidTestFrames then
                         DF:UpdateRaidTestFrames()
@@ -4019,10 +3876,10 @@ function DF:CreateTestPanel()
                 container.section:UpdateBadge()
             end
             -- ☠ RE-EVALUATE THE PRESET HIGHLIGHT. Flipping a toggle can make the state
-            -- stop matching the highlighted preset -- or start matching another one --
-            -- and nothing here used to tell the footer that. The full panel refresh is
-            -- not usable from inside a checkbox handler (it re-runs SetChecked on every
-            -- box, including this one, mid-click), so refresh just the preset row.
+            -- stop matching the highlighted preset -- or start matching another one.
+            -- The full panel refresh is not usable from inside a checkbox handler (it re-runs
+            -- SetChecked on every box, including this one, mid-click), so refresh just the
+            -- preset row.
             if panel.RefreshPresetHighlight then panel:RefreshPresetHighlight() end
         end)
 
@@ -4531,13 +4388,11 @@ function DF:CreateTestPanel()
     end)
     buffSlider:HookScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        -- ☠ THE TAB, NOT THE RUNNING PREVIEW. This read `DF.raidTestMode` while the
-        -- panel DISPLAYS and GREYS every control off `DF.GUI.SelectedMode` — twelve
-        -- sites decide "am I in raid mode?" and only these three count sliders used the
-        -- other source. The moment they disagree (raid preview up, Party tab selected,
-        -- or the reverse) the slider showed one profile's value and WROTE to the other's
-        -- (Krathe, 2026-08-08: reset to defaults in raid, click party, defensives back).
-        -- A panel is a view of the selected tab, so a control must write where it reads.
+        -- ☠ THE TAB, NOT THE RUNNING PREVIEW. The panel DISPLAYS and GREYS every control off
+        -- `DF.GUI.SelectedMode`; reading `DF.raidTestMode` here would let a slider show one
+        -- profile's value and WRITE to the other's whenever they disagree (raid preview up,
+        -- Party tab selected). A panel is a view of the selected tab, so a control must write
+        -- where it reads.
         local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
         local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
         db.testBuffCount = value
@@ -4606,7 +4461,7 @@ function DF:CreateTestPanel()
         -- and nothing else, and the Defensive Icon settings page has no route to
         -- DF.TestPanel. So the grey outlived the setting that caused it, and a disabled
         -- box also swallows its own click-through to that page -- the one control on this
-        -- panel that could have switched the feature back on (aphoex, 2026-09-06).
+        -- panel that could have switched the feature back on.
         -- Every other icon toggle in this section gates on Test Mode's own state or on
         -- nothing at all, and the preview itself already no-ops while the feature is off,
         -- so this pair now behaves the same way.
@@ -4628,8 +4483,8 @@ function DF:CreateTestPanel()
     -- --- INDICATORS & ICONS ---
     local secIndicators = CreateSection(panel, L["Indicators & Icons"], "indicators")
 
-    -- ☠ THERE IS NO "Defensive Icon" CHECKBOX, AND `testShowExternalDef` IS GONE WITH IT
-    -- (Krathe, 2026-08-08). The count slider below is the whole control: 0 hides the row,
+    -- ☠ THERE IS NO "Defensive Icon" CHECKBOX, AND `testShowExternalDef` IS GONE WITH IT.
+    -- The count slider below is the whole control: 0 hides the row,
     -- 1-5 previews that many. A checkbox plus a slider whose 0 means the same thing is two
     -- controls for one decision, and they can disagree — checkbox off with the slider at 3
     -- reads as broken.
@@ -4647,10 +4502,9 @@ function DF:CreateTestPanel()
     --
     -- ☠ THE AddWidget CALL IS AT THE END OF THE SECTION, NOT HERE. `AddWidget` anchors
     -- to `GetGridBottom()`, which is computed from the checkbox count AT CALL TIME — so
-    -- adding it after the first checkbox parked it one row down and the next four
-    -- checkboxes were then laid out straight over the top of it (Krathe's screenshot,
-    -- 2026-08-08). The widget must be added once every checkbox in the section exists,
-    -- which is exactly what the Auras section does with its own slider row.
+    -- adding it after the first checkbox would park it one row down and lay the next four
+    -- checkboxes over it. The widget must be added once every checkbox in the section
+    -- exists, which is exactly what the Auras section does with its own slider row.
     local defSliderRow = CreateFrame("Frame", nil, secIndicators.content)
     defSliderRow:SetHeight(18)
 
@@ -4722,7 +4576,7 @@ function DF:CreateTestPanel()
         if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
     end, "indicators_icons")
 
-    -- ★ THE DEFENSIVES ON/OFF, BACK BY REQUEST (Krathe, 2026-08-22) -- and deliberately
+    -- ★ THE DEFENSIVES ON/OFF, BACK BY REQUEST -- and deliberately
     -- NOT a second stored value. The block above records why the old checkbox was
     -- removed: "a checkbox plus a slider whose 0 means the same thing is two controls
     -- for one decision, and they can disagree -- checkbox off with the slider at 3 reads

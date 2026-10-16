@@ -384,7 +384,7 @@ function CC:InitializeSecureFrames()
     -- the same template for free. hooksecurefunc post-hooks run insecurely,
     -- so this never taints the secure path.
     --
-    -- SCOPE (traced 2026-07-20): this only fires for frames whose unit is set
+    -- SCOPE: this only fires for frames whose unit is set
     -- via CompactUnitFrame_SetUnit — i.e. Blizzard's own raid/party frames.
     -- DandersFrames' own children do NOT go through it: they are
     -- SecureUnitButtonTemplate frames whose clicks are registered once in
@@ -446,7 +446,7 @@ end
 
 function CC:CreateClickCastHeader()
     -- The ClickCastHeader is a secure frame that wraps unit frame OnEnter/OnLeave
-    -- This is the approach used by Cell and Clique for in-combat keyboard bindings
+    -- The same approach Clique uses for in-combat keyboard bindings
     
     -- Validate, don't just presence-check. If this field ever holds a frame that
     -- is not a secure handler, the old `if self.header then return end` kept the
@@ -572,13 +572,10 @@ function CC:CreateClickCastHeader()
     ]])
     RegisterStateDriver(self.header, "mouseoverstate", "[@mouseover, exists] true; false")
     
-    -- Track registered frames. Preserve an existing registry: this function is
-    -- no longer called only once before anything is registered — the header
-    -- validation above and the two recovery paths (SetupSecureHandlers,
-    -- RewrapSecureHandlers) can re-enter it mid-session, and blanking the
-    -- registry there would silently strip every Blizzard and third-party frame
-    -- while leaving frame.dfClickCastRegistered true, so nothing would notice
-    -- or re-register them.
+    -- Track registered frames. Preserve an existing registry: the header validation above and
+    -- the two recovery paths (SetupSecureHandlers, RewrapSecureHandlers) can re-enter this
+    -- mid-session, and blanking the registry would strip every Blizzard and third-party frame
+    -- while frame.dfClickCastRegistered stayed true, so nothing would re-register them.
     self.registeredFrames = self.registeredFrames or {}
     
     -- Store reference to module in header for secure snippets
@@ -654,8 +651,7 @@ function CC:DisableBlizzardClickCasting()
                             CC:ApplyBindingsToFrameUnified(frame)
                             -- And again on next frame in case Blizzard does something after
                             C_Timer.After(0, function()
-                                -- ApplyBindingsToFrameUnified defers itself in
-                                -- combat, so this no longer drops the work
+                                -- ApplyBindingsToFrameUnified defers itself in combat, so nothing is dropped here.
                                 if not InCombatLockdown() then
                                     CC:ClearBlizzardClickCastFromFrame(frame)
                                 end
@@ -925,24 +921,17 @@ local function clickCastFrameEligible(frame)
     return unit ~= nil
 end
 
--- Register a frame with click casting, or remember it for when it becomes
--- eligible. This is the ONE entry point -- ClickCastFrames' __newindex, DF's own
--- RegisterFrameWithClickCast, and the unit-assignment path all come through here.
+-- Register a frame with click casting, or remember it for when it becomes eligible. This is
+-- the ONE entry point -- ClickCastFrames' __newindex, DF's own RegisterFrameWithClickCast,
+-- and the unit-assignment path all come through here.
 --
--- Why it exists: __newindex fires only for keys the table does not already have,
--- and it rawsets before testing eligibility. A header child is created BEFORE the
--- header assigns its unit ("the header pre-creates children but units aren't set
--- until group members actually appear" -- Frames/Init.lua), so a fresh child was
--- rawset (key now present, __newindex spent) and then failed the unit test, and
--- every later write bypassed the metatable entirely. The frame stayed
--- unregistered for the session while dfClickCastRegistered claimed otherwise: no
--- hooks, no binds, keys falling through to the action bar.
---
--- Field-proven (2026-08-02 16:18): a party->raid mode change recreated 40 pinned
--- children; the next 15 seconds of hovering and pressing a bound key produced
--- ZERO OnEnter/PreClick entries, and the sweep saw 357 frames against 375 after a
--- reload. ScanForThirdPartyFrames would have caught it, but it only runs 1s and
--- 3s after setup -- login only -- which is exactly why a reload was the only cure.
+-- Why: __newindex fires only for keys the table does not already have, and it rawsets
+-- before testing eligibility. A header child is created BEFORE the header assigns its unit
+-- (Frames/Init.lua), so a fresh child would be rawset (key present, __newindex spent), fail
+-- the unit test, and bypass the metatable on every later write -- unregistered for the
+-- session while dfClickCastRegistered claimed otherwise: no hooks, no binds, keys falling
+-- through to the action bar. A party->raid mode change recreating 40 pinned children is
+-- the common trigger, and ScanForThirdPartyFrames only runs at login.
 function CC:EnsureRegistered(frame)
     if not frame then return false end
     if self.registeredFrames and self.registeredFrames[frame] then return true end
@@ -1529,11 +1518,11 @@ function CC:UpdateBlizzardFrameRegistration()
     -- CC:BuildHovercastSetupScript.)
 end
 
--- Build a virtual button name from binding (like Cell's approach: "shiftQ", "ctrlF1", etc.)
+-- Build a virtual button name from binding ("shiftQ", "ctrlF1", etc.)
 function CC:GetVirtualButtonName(binding)
     local parts = {}
     
-    -- Add modifiers in lowercase (Cell's format)
+    -- Add modifiers in lowercase
     if binding.modifiers and binding.modifiers ~= "" then
         local mods = binding.modifiers:lower()
         if mods:find("alt") then table.insert(parts, "alt") end
@@ -1610,17 +1599,15 @@ function CC:RegisterFrame(frame)
     -- actually registers, not one of the several routes into it.
     if ClickCastFrames and ClickCastFrames[frame] == false then return end
 
-    -- An unnamed frame can never be a click-cast target. HANDLE:SetBindingClick
-    -- resolves its target through GetName() and errors on a nil name
-    -- (RestrictedFrames.lua), so no hover bind can ever point here.
+    -- An unnamed frame can never be a click-cast target. HANDLE:SetBindingClick resolves its
+    -- target through GetName() and errors on a nil name (RestrictedFrames.lua), so no hover
+    -- bind can ever point here.
     --
-    -- Registering one was actively destructive rather than merely useless:
-    -- ClearBlizzardClickCastFromFrame runs early and has no name check, wiping
-    -- type1/type2 and every modifier variant, while the three functions that
-    -- would have installed our bindings each bail on the missing name further
-    -- down. Net effect on a third-party frame: left-click no longer targets,
-    -- right-click no longer opens the menu, and nothing replaces either, until
-    -- a reload. If we cannot bind it, we do not touch it.
+    -- Registering one would be destructive, not just useless: ClearBlizzardClickCastFromFrame
+    -- runs early with no name check, wiping type1/type2 and every modifier variant, while the
+    -- three functions that would install our bindings each bail on the missing name -- leaving
+    -- a third-party frame that no longer targets on left-click or opens its menu on
+    -- right-click until a reload. If we cannot bind it, we do not touch it.
     if frame.GetName and not frame:GetName() then
         DF:DebugWarn("CLICK", "Refusing to register an unnamed frame — SetBindingClick requires a name")
         return
@@ -1730,13 +1717,10 @@ function CC:StartDiagnosticTicker(frame)
 
         -- Detect transition: bindings were active, now they're not.
         --
-        -- Only meaningful while this frame is STILL the one the cursor is on. The
-        -- ticker polls one frame, and a fast sweep across the raid grid leaves it
-        -- polling a frame the cursor has already left -- whose binds the state
-        -- driver then legitimately cleared. That is correct behaviour being read as
-        -- a fault: it logged BINDINGS VANISHED and requested a repair that
-        -- re-wrapped every registered frame, for nothing (field log 2026-07-27,
-        -- nine enter/leave pairs inside one second).
+        -- Only meaningful while this frame is STILL the one the cursor is on. The ticker polls one
+        -- frame, and a fast sweep across the raid grid leaves it polling a frame the cursor has
+        -- already left -- whose binds the state driver then legitimately cleared. Treating that as
+        -- a fault would log BINDINGS VANISHED and re-wrap every registered frame for nothing.
         local stillOurs = (CC.currentHoveredFrame == frame) and frame:IsMouseOver()
         if CC.diagLastBindState and not bindingsActive and stillOurs then
             DF:DebugError("CLICK", "BINDINGS VANISHED on %s at tick %d! wrapEnter=%d wrapLeave=%d isSecureMO=%s visible=%s mouseOver=%s combat=%s",
@@ -2036,12 +2020,10 @@ function CC:SetupSecureHandlers(frame)
             end
         ]]
 
-        -- Keep the snippets for re-wrapping: a frame's wrap can DIE mid-session
-        -- (field-verified 2026-07-20: after a player-housing session, the party
-        -- buttons' OnEnter wraps stopped executing entirely — enterCount stayed
-        -- 0 while the insecure hooks still fired — so hover keybinds fell
-        -- through to the action bars until /reload). RewrapSecureHandlers
-        -- reuses these to unwrap + re-wrap; the repair path calls it.
+        -- Keep the snippets for re-wrapping: a frame's wrap can DIE mid-session (after a
+        -- player-housing session the party buttons' OnEnter wraps stop executing -- enterCount stays
+        -- 0 while the insecure hooks still fire -- so hover keybinds fall through to the action
+        -- bars). RewrapSecureHandlers reuses these to unwrap + re-wrap; the repair path calls it.
         self.wrapSnippets = {
             enter = onEnterSnippet,
             leave = onLeaveSnippet,
@@ -2358,7 +2340,7 @@ function CC:SetupSecureHandlers(frame)
             -- GetMouseFoci can omit the frame during the flicker, so the
             -- overRegisteredFrame check above does not catch it.
             --
-            -- Field log (mythic pull, 2026-07-27): DandersPinnedBoss1Raid_3
+            -- Field log: DandersPinnedBoss1Raid_3
             -- reported "OnLeave DID NOT FIRE" twice with underMouse=true and
             -- mouseoverbutton still itself. Bindings being active there is
             -- CORRECT, and the queued repair then ran at combat end and wiped
@@ -2438,7 +2420,7 @@ end
 
 -- Set up WrapScript on child elements (auras, defensive icons) so mouseoverbutton
 -- Update the binding attributes stored on a frame
--- Builds a snippet string with SetBindingClick calls (Cell-style approach)
+-- Builds a snippet string with SetBindingClick calls
 -- The _onenter attribute runs this snippet on every hover
 function CC:UpdateFrameBindingAttributes(frame)
     if not frame or InCombatLockdown() then return end
@@ -2584,17 +2566,15 @@ function CC:RefreshKeyboardBindings()
 end
 
 -- ============================================================
--- SELF-HEALING BINDING REPAIR (bug #976)
--- Keyboard hover-binds can die mid-session (stale mouseoverbutton in the
--- restricted environment, spurious state-driver clears, wiped snippets)
--- and previously only /reload recovered. The OnEnter/ticker diagnostics
--- already DETECT all of these; this repair path fixes them out of combat:
+-- SELF-HEALING BINDING REPAIR
+-- Keyboard hover-binds can die mid-session (stale mouseoverbutton in the restricted
+-- environment, spurious state-driver clears, wiped snippets). The OnEnter/ticker
+-- diagnostics DETECT all of these; this repair path fixes them out of combat:
 --   1. reset the restricted env's mouseoverbutton tracking
 --   2. clear stray override bindings so keys can't stay stolen
 --   3. rebuild the macro map + every frame's binding snippet
--- All repair actions are insecure out-of-combat calls the addon already
--- uses elsewhere — no new taint surface. In combat the repair is queued
--- and OnCombatEnd runs it.
+-- All repair actions are insecure out-of-combat calls the addon already uses elsewhere --
+-- no new taint surface. In combat the repair is queued and OnCombatEnd runs it.
 -- ============================================================
 
 local REPAIR_COOLDOWN = 5  -- seconds between repair attempts
@@ -2737,7 +2717,7 @@ function CC:RunBindingRepair(reason, force)
     -- the live hover: nothing re-establishes it, so the binds stay dead until
     -- the user moves off and back on.
     --
-    -- Field log (mythic pull, 2026-07-27): a repair deferred from a boss-frame
+    -- Field log: a repair deferred from a boss-frame
     -- false positive drained at combat end while the cursor was on
     -- DandersRaidGroup3HeaderUnitButton5, and the very next tick reported
     -- BINDINGS VANISHED + MOUSEOVERBUTTON DESYNC on that frame. Combat end is
@@ -2775,10 +2755,9 @@ function CC:RunBindingRepair(reason, force)
 
     DF:DebugWarn("CLICK", "Running binding repair (%s)", tostring(reason))
 
-    -- 1. Reset restricted-env hover tracking (handle + string mirror).
-    --    OnEnter no longer method-calls the shared handle, but the
-    --    mouseoverstate driver still reads geometry through it, so a stale
-    --    reference can still waste driver runs until something resets it.
+    -- 1. Reset restricted-env hover tracking (handle + string mirror). OnEnter does not
+    --    method-call the shared handle, but the mouseoverstate driver still reads geometry
+    --    through it, so a stale reference can waste driver runs until something resets it.
     if self.header and self.header.Execute then
         pcall(function()
             self.header:Execute([[ mouseoverbutton = nil mouseovername = nil ]])

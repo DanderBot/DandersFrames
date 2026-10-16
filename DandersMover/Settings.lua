@@ -224,10 +224,9 @@ local function build()
     local function place(box) tinsert(f.leftBoxes, box) end
 
     -- ---- Scale: its own row, first thing under the title ---------------
-    -- It sizes this very window (and the strip, the panel, the toast and the
-    -- text on the slabs -- see NS:ChromeScale), so it is the one control that
-    -- has to be findable at a glance. It used to sit last in the Editor box, at
-    -- the bottom of the window (tester report, alpha.12).
+    -- It sizes this very window (and the strip, the panel, the toast and the text on the
+    -- slabs -- see NS:ChromeScale), so it is the one control that has to be findable at a
+    -- glance.
     f.scaleSlider = UI:CreateSlider(f, {
         label = L["Scale"], min = 0.5, max = 1.5, step = 0.05,
         tooltip = { title = L["Scale"],
@@ -405,15 +404,13 @@ local function clearRows(f)
     wipe(f.rows)
 end
 
--- ☠ ROWS ARE CACHED BY IDENTITY, NEVER RE-CREATED. Frames cannot be
--- garbage-collected, and this list redraws on every open, every expand and every
--- registry burst (DandersFrames re-registers its targets on each unlock and sort)
--- -- it used to build a fresh box, heading and checkbox row per entry on each of
--- those and hide the old ones, so every redraw leaked the whole list. Each row now
--- lives in f.rowCache under a key naming exactly what it shows (and, for a row,
--- its label), so a redraw re-positions the one it already has. The get/set
--- closures are bound at creation to that same identity, so reuse cannot point a
--- checkbox at the wrong setting.
+-- ☠ ROWS ARE CACHED BY IDENTITY, NEVER RE-CREATED. Frames cannot be garbage-collected,
+-- and this list redraws on every open, every expand and every registry burst
+-- (DandersFrames re-registers its targets on each unlock and sort), so building rows
+-- per redraw would leak the whole list each time. Each row lives in f.rowCache under a
+-- key naming exactly what it shows (and, for a row, its label); the get/set closures
+-- are bound at creation to that identity, so reuse cannot point a checkbox at the wrong
+-- setting.
 local function cached(f, key)
     local r = f.rowCache[key]
     if r then tinsert(f.rows, r); r:Show() end

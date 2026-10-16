@@ -210,10 +210,9 @@ DF.unitFrameMap = unitFrameMap  -- Expose for cross-file access (e.g., Auras.lua
 
 -- ============================================================
 -- HEADER CHILD EVENT MANAGEMENT
--- Enable/disable event processing on all children of a header.
--- Events are registered GLOBALLY on headerChildEventFrame (centralized dispatch),
--- so this just sets a flag that the central handler checks.
--- Used to fully disable hidden frames (performance optimization).
+-- Enable/disable event processing on all children of a header. Events are registered
+-- GLOBALLY on headerChildEventFrame (centralized dispatch), so this just sets a flag the
+-- central handler checks -- a cheap way to fully quiet hidden frames.
 -- ============================================================
 
 -- Public function to enable/disable event processing on all children of a header
@@ -598,7 +597,7 @@ local UnregisterStateDriver = UnregisterStateDriver
 -- those engine checks misfire and the chain resolves a PET-family menu
 -- (field capture: OTHERBATTLEPET, bug #1102). The default UI never runs this
 -- code path -- Blizzard frames resolve the menu type per frame -- so only
--- togglemenu addons show it. Credit: Ellesmere (EllesmereUI) for the approach.
+-- togglemenu addons show it.
 --
 -- Fix: post-hook the opener. A PET-family menu opening for a raid/party token
 -- whose GUID is a Player is that exact misfire -- re-open the correct player
@@ -1252,23 +1251,19 @@ function DF:CreatePartyHeader()
     -- re-applying the correct value behind it. Symptom: a party layout change queued
     -- during combat flips you to vertical when combat ends.
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
-    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    -- the preview was right and live was wrong.
     local horizontal = (db.growDirection == "HORIZONTAL")
-    -- ☠☠ SNAP THE STRIDE, or every frame after the first walks off the pixel grid.
-    -- Blizzard's header lays children out by REPEATED OFFSET, so a fractional spacing is
-    -- not a one-off rounding error — it ACCUMULATES down the party. Measured on a live
-    -- party at UIParent scale 0.64, where 1 UI unit = 1.2 physical px, so the default
-    -- spacing of 1 carries 0.2px of fraction: the five frames landed at -0.4, -0.2, 0.0,
-    -- +0.2 and +0.4 physical px, walking 0.8px across a pixel boundary. Anything anchored
-    -- to a frame inherits its host's sub-pixel offset and rounds differently per frame --
-    -- reported as the resource bar's Offset Y showing a gap on some frames and not others,
-    -- and as test mode disagreeing with live (Aphoex, 2026-08-19; /df debug ppdump showed
-    -- every live host frac at ±0.2/±0.4 against 0.000 for every test frame).
-    -- ⚠ Snap the LOCAL too, not just the stored attribute: the local feeds xOffset/yOffset,
-    -- which IS the stride the header repeats. Snapping only the "spacing" attribute below
-    -- would leave the actual layout fractional and look like a fix.
-    -- ★ The grouped raid handler already does this (its own snapInit). Party and arena
-    -- were the two headers that never got it.
+    -- ☠☠ SNAP THE STRIDE, or every frame after the first walks off the pixel grid. Blizzard's
+    -- header lays children out by REPEATED OFFSET, so a fractional spacing ACCUMULATES down the
+    -- party. At UIParent scale 0.64 (1 UI unit = 1.2 physical px) the default spacing of 1
+    -- carries 0.2px of fraction: five frames land at -0.4, -0.2, 0.0, +0.2 and +0.4 physical px.
+    -- Anything anchored to a frame inherits its host's sub-pixel offset and rounds differently
+    -- per frame (the resource bar's Offset Y showing a gap on some frames, and test mode
+    -- disagreeing with live; /df debug ppdump shows each host's frac).
+    -- ⚠ Snap the LOCAL too, not just the stored attribute: the local feeds xOffset/yOffset, which
+    -- IS the stride the header repeats. Snapping only the "spacing" attribute would leave the
+    -- layout fractional and look like a fix.
+    -- ★ The grouped raid handler does the same (its own snapInit).
     local function snapInit(value)
         if db.pixelPerfect and DF.PixelPerfect then
             return DF:PixelPerfect(value)
@@ -1371,7 +1366,7 @@ function DF:CreateArenaHeader()
     -- re-applying the correct value behind it. Symptom: a party layout change queued
     -- during combat flips you to vertical when combat ends.
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
-    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    -- the preview was right and live was wrong.
     local horizontal = (db.growDirection == "HORIZONTAL")
     -- Same stride snap as the party header above, for the same reason — the arena header
     -- is that code with a different frame set, so a fractional spacing accumulates here
@@ -1454,7 +1449,7 @@ function DF:CreateRaidHeaders()
     -- Create both modes, only one will be active at a time
     DF:CreateRaidCombinedHeader()
     DF:CreateRaidSeparatedHeaders()
-    -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning.
+    -- The player's raid position comes from the nameList; there is no separate player header.
 
     -- Create secure position handler for raid groups
     DF:CreateRaidPositionHandler()
@@ -1609,20 +1604,12 @@ SlashCmdList["DFFLATDEBUG"] = function()
     end
 end
 
--- Comprehensive state dump function. No longer its own slash command: it was
--- /dfflatstate, half of the flat-raid picture, while /df debug flatraid info printed
--- the other half. Both now run from /df debug flatraid.
--- Second half of the flat-raid picture, emitted INTO the caller's block.
--- ☠ Takes the writer rather than opening its own — it used to call DF:Out three
--- times, which turned three SECTIONS of one dump into three separate top-level
--- blocks, each with its own rule and title. /df debug flatraid looked like it was
--- running four commands. Promoting a section to a block is the inverse of the
--- bug that left dumps with no header at all, and the same conversion caused both.
---
--- Deliberately does NOT re-print module state or the settings FlatRaidFrames:
--- DebugPrint already covers — merging the two commands exposed that both were
--- printing raidUseGroups, growDirection and raidPlayersPerRow. Only what the
--- other half does not have lives here.
+-- Comprehensive flat-raid state, the second half of /df debug flatraid, emitted INTO the
+-- caller's block.
+-- ☠ Takes the writer rather than opening its own: DF:Out per section would turn sections of
+-- one dump into separate top-level blocks, each with its own rule and title.
+-- Deliberately does NOT re-print module state or the settings FlatRaidFrames:DebugPrint
+-- covers (raidUseGroups, growDirection, raidPlayersPerRow); only what that half lacks.
 function DF:DumpFlatLayoutState(o)
     if not o then return end
     local db = DF:GetRaidDB()
@@ -1973,134 +1960,20 @@ end
 -- Lua only sets attributes, secure code does all positioning
 -- ============================================================
 
--- ☠ RETIRED. Returns (0, 0) UNCONDITIONALLY. See the block inside the function for why,
--- and read that before changing anything here.
---
--- This header used to describe the live mechanism: an inverse offset that shifted the
--- container to hold CENTER content still as popRows grew, against #867. Every word of
--- that is now false, including the list of cases it claimed to return (0,0) for -- there
--- are no cases, it always does. It is replaced rather than kept as history because a
--- reader who stops above the signature would take the retired story as current fact, and
--- the description it gave was itself the reasoning that got reversed twice in 24h.
---
--- Two facts worth having here so nobody re-derives them:
---   * CENTER has no drift to cancel. The container is always sized for all eight groups
---     and the block is centred with (total - populated) / 2, so it grows SYMMETRICALLY
---     about the container centre and the centroid is invariant under popRows. Verified
---     numerically across 512 configurations, both positioners, both axes.
---   * #867 was the compounding defect (a centred block also taking a row index flipped
---     over the FULL grid), fixed at source in 50a3e7c5 -- not centring drift.
+-- ☠ RETIRED: always (0, 0). Read this before reinstating anything.
+-- CENTER has no drift to cancel: the container is always sized for all eight groups and
+-- the populated block is centred with (total - populated) / 2, so it grows SYMMETRICALLY
+-- about the container centre and its centroid is invariant under the populated row count
+-- (verified across 512 configurations, both positioners, both axes). Pinning the block's
+-- leading edge instead INTRODUCES a drift of (populatedDim - groupDim) / 2 -- measured as
+-- the container and mover dragged half a group-column left (Wrap 7 / Center Right / 8).
+-- Frames jumping when the roster changes is the positioner's compounding (a centred block
+-- also taking a row index flipped over the FULL grid), fixed at source: if it ever
+-- returns, fix the positioner -- do not nudge the container.
+-- Kept as a function because Position.lua and MoverBridge.lua ask it, so the reasoning has
+-- one home.
 function DF:ComputeRaidContainerCompensation()
-    -- ☠ RETIRED, ALWAYS ZERO. It was zeroed in b0e84ae3, restored in b0e58e79 on the
-    -- argument below, and re-zeroed the same day when the restore was tested in game.
-    -- Read the whole block before touching it -- the restore looked well reasoned and
-    -- was still wrong.
-    --
-    -- WHY THERE IS NOTHING TO COMPENSATE. CENTER grows the populated block SYMMETRICALLY
-    -- ABOUT THE CONTAINER CENTRE, because the container is always sized for all eight
-    -- groups and xStart is (totalWidth - populatedWidth) / 2. Two columns' worth of box,
-    -- one populated column: content sits [0.5col, 1.5col], centred at 1col. Two
-    -- populated columns: content sits [0, 2col], still centred at 1col. THE CENTROID IS
-    -- ALREADY INVARIANT UNDER popRows. The body below instead pins the block's LEADING
-    -- EDGE to the popRows==1 position, so it does not cancel a drift -- it INTRODUCES
-    -- one, of (populatedDim - groupDim) / 2. Observed in game as the whole container and
-    -- mover dragged half a group-column left, frames correctly placed inside it, at
-    -- Wrap 7 / Center Right / 8 groups (Krathe, 2026-08-18).
-    --
-    -- WHAT #867 ACTUALLY WAS. Not centring drift: the compounding. Born 2026-03-10 in
-    -- eb878888 with the wrap growth setting -- a block centred by yStart also took a row
-    -- index already flipped over the FULL grid, two reference frames summed, error
-    -- (fullGridRC - popRows) group rows. That changes as the roster changes, which is
-    -- the reported "frames shoot off the top of the screen when a player joins a group".
-    -- ☠ THE TELL IS IN #867's OWN CHANGELOG: recovery "required a Groups Grow From
-    -- toggle" -- Grow From is groupRowGrowth, the exact setting that triggers the
-    -- compounding. f3216d3c (2026-05-02, 4.3.7) compensated the CONTAINER instead of
-    -- fixing the maths, i.e. a workaround one layer below the bug. The bug itself is
-    -- fixed at source in 50a3e7c5, so this has nothing left to do.
-    --
-    -- ☠ IF #867-STYLE JUMPING EVER COMES BACK, IT IS THE POSITIONER, NOT THIS. Do not
-    -- reinstate a container nudge to hide it. The body stays only as the record of what
-    -- was tried; delete it outright in the next tidy-up.
-    do return 0, 0 end
-
-    local db = DF:GetRaidDB()
-    if not db then return 0, 0 end
-    if not db.raidUseGroups then return 0, 0 end
-    if (db.raidGroupAnchor or "START") ~= "CENTER" then return 0, 0 end
-
-    local numPopulated = 0
-    if DF.raidTestMode then
-        local testCount = db.raidTestFrameCount or 10
-        numPopulated = math.min(8, math.ceil(testCount / 5))
-    else
-        if not DF.raidPositionHandler then return 0, 0 end
-        if not DF.raidSeparatedHeaders then return 0, 0 end
-        -- Mirror the snippet: a group is "populated" when its child count > 0.
-        -- Read counts from the same handler attributes the snippet reads, so the
-        -- compensation always agrees with the snippet's view of the world.
-        local handler = DF.raidPositionHandler
-        for i = 1, 8 do
-            local count = handler:GetAttribute("group" .. i .. "count") or 0
-            if count > 0 then numPopulated = numPopulated + 1 end
-        end
-    end
-    if numPopulated == 0 then return 0, 0 end
-
-    -- Mirror the snippet's totalHeight / populatedHeight calculation.
-    local groupsPerRow = db.raidGroupsPerRow or 8
-    if groupsPerRow < 1 then groupsPerRow = 1 end
-    if groupsPerRow > 8 then groupsPerRow = 8 end
-
-    local growDirection = db.growDirection or "HORIZONTAL"
-    local isHorizontal = (growDirection == "HORIZONTAL")
-    local frameWidth = db.frameWidth or 80
-    local frameHeight = db.frameHeight or 40
-    local spacing = db.frameSpacing or 2
-    local rowColSpacing = db.raidRowColSpacing or 30
-
-    local groupHeight, groupWidth
-    if isHorizontal then
-        groupWidth = frameWidth
-        groupHeight = 5 * frameHeight + 4 * spacing
-    else
-        groupWidth = 5 * frameWidth + 4 * spacing
-        groupHeight = frameHeight
-    end
-
-    -- popRows = ceil(numPopulated / groupsPerRow)
-    local popRem = numPopulated % groupsPerRow
-    local popRows = (numPopulated - popRem) / groupsPerRow
-    if popRem > 0 then popRows = popRows + 1 end
-
-    -- popRows == 1 is the reference state — compensation is zero there. Skip the
-    -- rest to avoid pointless arithmetic and to match existing behaviour exactly
-    -- when the bug doesn't apply.
-    if popRows <= 1 then return 0, 0 end
-
-    -- The drift dimension depends on growDirection: HORIZONTAL = vertical drift,
-    -- VERTICAL = horizontal drift. (Per the snippet's totalHeight/populatedHeight
-    -- vs totalWidth/populatedWidth selection.)
-    local groupDim, populatedDim
-    if isHorizontal then
-        groupDim = groupHeight
-        populatedDim = popRows * groupHeight + (popRows - 1) * rowColSpacing
-    else
-        groupDim = groupWidth
-        populatedDim = popRows * groupWidth + (popRows - 1) * rowColSpacing
-    end
-
-    -- Compensation = (groupDim - populatedDim) / 2. This is yStart_now minus
-    -- yStart_at_popRows1, so popRows=1 yields zero (existing behaviour preserved)
-    -- and popRows>1 yields a negative offset that shifts the container in the
-    -- direction opposite to the snippet's content drift. Net visual: visible
-    -- content's TOP edge stays where popRows=1 layout placed it for every
-    -- larger populated count.
-    local compensation = (groupDim - populatedDim) / 2
-    if isHorizontal then
-        return 0, compensation
-    else
-        return compensation, 0
-    end
+    return 0, 0
 end
 
 -- "Anchor To: Main Group" — the CONSTANT anchor-reference offset.
@@ -3708,13 +3581,11 @@ function DF:UpdatePlayerGroupTracking()
     end
 end
 
--- Update group display order attributes on the secure handler
--- ☠ THE ORDER BUILDER LIVES IN Frames/Init.lua AS DF:GetEffectiveRaidGroupOrder, and
--- this function used to carry a second copy of it. Do not reintroduce one here: a
--- duplicate definition on DF silently wins or loses by file load order, and the two
--- copies had already drifted on validation strictness. Init.lua's is now the single
--- producer, shared with this attribute push, CreateRaidPositionHandler's seed and
--- DF:SortActiveGroupListByDisplayOrder.
+-- Update group display order attributes on the secure handler.
+-- ☠ THE ORDER BUILDER LIVES IN Frames/Init.lua AS DF:GetEffectiveRaidGroupOrder -- do not add
+-- a second copy here: a duplicate definition on DF silently wins or loses by file load order.
+-- Init.lua's is the single producer, shared with this attribute push,
+-- CreateRaidPositionHandler's seed and DF:SortActiveGroupListByDisplayOrder.
 function DF:UpdateRaidGroupOrderAttributes()
     if InCombatLockdown() then
         DF.pendingGroupOrderUpdate = true
@@ -3861,7 +3732,7 @@ function DF:ApplyRaidGroupSorting()
         DF:Debug("HEADERS", "  needsAdvancedSorting= %s playerNeedsNameList= %s", tostring(needsAdvancedSorting), tostring(playerNeedsNameList))
     end
     
-    -- Legacy: Hide raidPlayerHeader if it exists (no longer created, but may exist from old sessions)
+    -- A raidPlayerHeader can only exist from an older session state; hide it if present.
     if DF.raidPlayerHeader then
         DF.raidPlayerHeader:Hide()
     end
@@ -4197,20 +4068,6 @@ function DF:ApplyRaidGroupSorting()
 
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
-
--- ☠ (Removed) DF:RefreshRaidGroupFrames, DF:RefreshRaidFlatFrames and
--- DF:RefreshPartyFrames -- the three "refresh all X frames after sorting changes"
--- helpers. None had a caller in either addon.
---
--- ⚠ THEIR NAMES DESCRIBED A CONTRACT THAT NO LONGER EXISTS, which is why all three
--- rotted together: sorting does not call anything to refresh afterwards any more.
--- Each sat directly beneath a sort path ending in "OnFramesSorted callback is fired
--- from child OnAttributeChanged" -- the frames re-render from that attribute change,
--- so there is nothing left for a post-sort sweep to do.
---
--- Their only other mention was in Profiler's PROFILED_FUNCTIONS, which wraps
--- DF[name] rather than calling it; those entries are gone too. DF:FullFrameRefresh,
--- which they called, is live and has other callers.
 
 -- Comprehensive frame refresh - updates ALL visual elements
 -- Called when unit assignment changes due to sorting
@@ -4567,8 +4424,8 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         classPriority[className] = i
     end
     
-    -- ★ ONE SHARED TABLE (Core/Config.lua). This used to be a local copy; see the
-    -- header there for the three-way disagreement it caused.
+    -- ★ ONE SHARED TABLE (Core/Config.lua), so this file, Sort.lua and FlatRaidFrames.lua cannot
+    -- disagree.
     local meleeSpecs = DF.MELEE_SPECS
     
     local meleeClasses = DF.MELEE_CLASSES
@@ -4594,7 +4451,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
                 end
             end
             if not specID then
-                specID = GetInspectSpecialization(unit)
+                specID = (C_SpecializationInfo.GetInspectSpecialization or GetInspectSpecialization)(unit)
             end
         end
 
@@ -5174,23 +5031,17 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
         return
     end
 
-    -- ⚠ AUDITED, NOT FIXED (2026-08-10). This function has no IsInRaid() gate, and the
-    -- combat-deferred replay has none either: park a visibility update during combat,
-    -- leave the raid before combat ends, and PLAYER_REGEN_ENABLED drains
-    -- pendingRaidHeaderVisibility straight into here, showing the raid container and the
-    -- flat raid header to someone no longer in a raid. The sibling branch beside that
-    -- drain DOES test IsInRaid() before showing the container -- and then calls this
-    -- unguarded function anyway.
-    --
-    -- ☠ An early `if not IsInRaid() then return end` here is NOT the fix, and was tried
-    -- and reverted. This function is not show-only: further down it calls
-    -- FlatRaidFrames:SetEnabled(false) and header:Hide() on the paths that tear raid
-    -- headers back down. Bailing early would skip that teardown, so the frames stay up in
-    -- the very case the guard was added for -- a different bug wearing the same clothes.
-    --
-    -- The real fix gates the SHOW paths while leaving the hide logic reachable, which
-    -- needs a client to confirm against leaving a raid, a raid converting to a party, and
-    -- the combat-deferred replay.
+    -- ⚠ KNOWN GAP, NOT FIXED: no IsInRaid gate here or on the combat-deferred replay. Park a
+    -- visibility update during combat, leave the raid before combat ends, and
+    -- PLAYER_REGEN_ENABLED drains pendingRaidHeaderVisibility straight into here, showing the
+    -- raid container and the flat raid header to someone no longer in a raid (the sibling
+    -- branch beside that drain tests IsInRaid() before showing the container, then calls this
+    -- anyway).
+    -- ☠ An early `if not IsInRaid() then return end` is NOT the fix: this function also tears raid
+    -- headers down further on (FlatRaidFrames:SetEnabled(false), header:Hide()), and bailing
+    -- early would skip that teardown. The fix gates the SHOW paths while leaving the hide logic
+    -- reachable, and needs a client to confirm against leaving a raid, a raid converting to a
+    -- party, and the combat-deferred replay.
     local db = DF:GetRaidDB()
 
     -- Show container
@@ -5389,7 +5240,7 @@ function DF:UpdateRaidGroupFrameSizes()
     if DF.raidPlayerHeader then
         local child = DF.raidPlayerHeader:GetAttribute("child1")
         if child then
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
         end
     end
 
@@ -5508,7 +5359,7 @@ function DF:UpdatePartyHeaderLayout()
     -- re-applying the correct value behind it. Symptom: a party layout change queued
     -- during combat flips you to vertical when combat ends.
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
-    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    -- the preview was right and live was wrong.
     local horizontal = (db.growDirection == "HORIZONTAL")
     -- ☠ SNAP HERE TOO, or the create-time snap lasts until the first settings change.
     -- CreatePartyHeader / CreateArenaHeader snap the stride; this updater rewrites the
@@ -5559,7 +5410,7 @@ function DF:UpdatePartyHeaderLayout()
         -- Update frame sizes
         DF:IteratePartyFrames(function(frame)
             if frame then
-                frame:SetSize(db.frameWidth or 120, db.frameHeight or 50)
+                DF:SetPixelPerfectSize(frame, db.frameWidth or 120, db.frameHeight or 50, db)
             end
         end)
     end
@@ -5595,7 +5446,7 @@ function DF:UpdatePartyHeaderLayout()
         -- Update frame sizes
         DF:IterateArenaFrames(function(frame)
             if frame then
-                frame:SetSize(db.frameWidth or 120, db.frameHeight or 50)
+                DF:SetPixelPerfectSize(frame, db.frameWidth or 120, db.frameHeight or 50, db)
             end
         end)
     end
@@ -5651,7 +5502,7 @@ function DF:UpdateRaidHeaderLayout()
     -- Update frame sizes
     DF:IterateRaidFrames(function(frame)
         if frame then
-            frame:SetSize(db.frameWidth or 80, db.frameHeight or 40)
+            DF:SetPixelPerfectSize(frame, db.frameWidth or 80, db.frameHeight or 40, db)
         end
     end)
 end
@@ -7052,18 +6903,11 @@ function DF:ApplyHeaderSettings_Now()
         DF:Debug("FLATRAID", "ApplyHeaderSettings:   -> calling ApplyRaidFlatSorting")
         DF:ApplyRaidFlatSorting()
         
-        -- ☠ A "FINAL SIZE FORCING" block used to sit here. It has never run for anyone.
-        -- Its gate was `raidFlatPlayerAnchor ~= "CENTER"` and that key was seeded "CENTER"
-        -- by the defaults table (seed since removed) and written by no control anywhere in
-        -- this repo's history, so the condition was false on every profile, on every apply.
-        --
-        -- It is deleted rather than repointed at raidFlatFrameAnchor along with the
-        -- readers above. That key only offers START/END, so repointing would have turned
-        -- a block that has executed zero times into one that executes on every settings
-        -- apply -- force-sizing the flat header and toggling showRaid off/on to provoke
-        -- a re-layout. Untested code that moves live frames is not something to switch on
-        -- as a side effect of fixing a different bug. If flat mode ever does need the
-        -- size forcing, it should be added deliberately and confirmed in game.
+        -- No final flat-header size forcing here, deliberately: a block that force-sized the flat
+        -- header and toggled showRaid off/on was gated on a key nothing wrote, so it never ran, and
+        -- switching untested code that moves live frames on as a side effect of an unrelated fix
+        -- is not acceptable. If flat mode needs size forcing, add it deliberately and confirm it in
+        -- game.
     end
     
 end
@@ -7325,7 +7169,6 @@ function DF:RefreshAllHeaderChildFrames()
     -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
     -- PinnedFrames.headers only, so the whole per-frame refresh block (role, absorb, raid
     -- target, dispel, missing buff, highlights) never reached a pinned BOSS frame.
-    -- (Audit 2026-08-17.)
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(RefreshFrame)
     end
@@ -7559,11 +7402,10 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                 DF:StopTestAnimation()
                 if DF.testRaidContainer then DF.testRaidContainer:Hide() end
             end
-            -- Both mode flags are down now, so hand the shared engine state back:
-            -- the aura data provider and the pinned preview. This path clears the
-            -- flags inline rather than going through HideTestFrames, and skipping
-            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
-            -- the rest of the session (live frames then rendered fake auras).
+            -- Both mode flags are down, so hand the shared engine state back: the aura data provider and
+            -- the pinned preview. This path clears the flags inline rather than through
+            -- HideTestFrames, and skipping the handback would strand C_UnitAuras on the SAMPLE provider
+            -- for the rest of the session (live frames rendering fake auras).
             if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
             -- ...and the FRAME-side teardown. This path was the thinnest of the three:
             -- it called frame:Hide() and nothing else, so it left the Aura Designer
@@ -8789,32 +8631,24 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
     
-    -- INCOMING_RESURRECT_CHANGED: Update resurrection icon
+    -- INCOMING_RESURRECT_CHANGED: update the resurrection icon on EVERY frame.
     --
-    -- ☠☠ THE PAYLOAD IS DELIBERATELY IGNORED. This used to route the update to
-    -- unitFrameMap[arg1] -- the one frame whose token matches the event's -- and that
-    -- is the one status icon where a single missed update is PERMANENT.
+    -- ☠☠ THE PAYLOAD IS DELIBERATELY IGNORED. This is the one status icon where a single missed
+    -- update is PERMANENT: UpdateResurrectionIcon's only SHOW driver is this event, its resCache
+    -- "pending accept" (yellow) state is derived from having OBSERVED the cast, and
+    -- ResTimerCleanup only ever hides. The only other recovery is UpdateAllStatusIcons (a
+    -- full-frame refresh or a combat transition), so inside an M+ pull or a boss fight a missed
+    -- update would never recover.
     --
-    -- Why permanent: UpdateResurrectionIcon's only SHOW driver is this event. Its
-    -- resCache "pending accept" (yellow) state is derived from having previously
-    -- OBSERVED the cast (resCache[unit] == 1), so a frame that never saw the casting
-    -- edge cannot reach either state -- it falls through to Hide(). ResTimerCleanup
-    -- only ever hides; it never discovers. The only recovery is UpdateAllStatusIcons,
-    -- reachable from a full-frame refresh or a combat transition -- so inside an M+
-    -- pull or a boss fight there is NO recovery at all, which is exactly the reported
-    -- envelope ("sometimes", "in M+", "all of my BRes").
+    -- A map lookup can miss: the payload is typed UnitTokenVariant (UnitDocumentation.lua), so
+    -- the token that arrives is not guaranteed to be the one unitFrameMap is keyed by (party vs
+    -- raid vs player naming for the same player, or a frame mid-reassignment).
     --
-    -- Why the lookup can miss: the payload is typed UnitTokenVariant (retail dump,
-    -- UnitDocumentation.lua:3497) -- the token that arrives is not guaranteed to be the
-    -- token unitFrameMap is keyed by. party vs raid vs player naming for the same
-    -- player is the obvious case; a frame mid-reassignment is another.
-    --
-    -- ⚠ So DO NOT "optimise" this back into a map lookup. Blizzard's own
-    -- CompactUnitFrame registers this with a plain RegisterEvent and calls
-    -- CompactUnitFrame_UpdateCenterStatusIcon(self) WITHOUT reading the payload, i.e.
-    -- every frame refreshes itself. This mirrors that. It is affordable because the
-    -- event is rare -- it fires when a resurrection starts or stops on a group member,
-    -- not on a timer -- and each call is a cheap state read.
+    -- ⚠ So DO NOT "optimise" this into a map lookup. Blizzard's own CompactUnitFrame registers
+    -- this with a plain RegisterEvent and calls CompactUnitFrame_UpdateCenterStatusIcon(self)
+    -- WITHOUT reading the payload -- every frame refreshes itself -- and this mirrors that. It is
+    -- affordable because the event is rare (a resurrection starting or stopping on a group
+    -- member) and each call is a cheap state read.
     if event == "INCOMING_RESURRECT_CHANGED" then
         if DF.UpdateResurrectionIcon then
             if DF.IterateAllFrames then

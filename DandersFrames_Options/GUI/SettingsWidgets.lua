@@ -89,19 +89,15 @@ function GUI:RelayoutHost(widget, slotHeight)
     end
     local p = (g or widget):GetParent()
     while p do
-        -- ☠ AD INDICATOR CARDS FIRST. A card stacks its groups by hand at fixed y offsets
-        -- and has no RefreshStates seam, so the walk below used to run past it to the page
-        -- (or off the top) and the card never re-anchored. The group's own LayoutChildren
-        -- had already run, so the group KNEW its new height and its siblings still sat
-        -- where the old one put them — seen as the Duration Bar header overlapping the
-        -- Pandemic section's collapse bar, which cleared the moment anything toggled that
-        -- section and forced a manual reflow.
+        -- ☠ AD INDICATOR CARDS FIRST. A card stacks its groups by hand at fixed y offsets and has no
+        -- RefreshStates seam, so the walk below would run past it to the page (or off the top) and
+        -- the card would never re-anchor -- its group knows its new height while the siblings sit
+        -- where the old one put them (a Duration Bar header overlapping the Pandemic section).
         --
-        -- This is the tail of the measured-label path: a wrapped note cannot know its
-        -- height until it has been drawn, so it converges a frame after build and calls
-        -- back here. Pages self-healed; cards did not. dfAD_ReflowWidgets re-anchors the
-        -- whole stack reading each group's calculatedHeight, which is exactly what
-        -- LayoutChildren above just refreshed.
+        -- This is the tail of the measured-label path: a wrapped note cannot know its height until
+        -- it has been drawn, so it converges a frame after build and calls back here.
+        -- dfAD_ReflowWidgets re-anchors the whole stack reading each group's calculatedHeight,
+        -- which LayoutChildren above just refreshed.
         if type(p.dfAD_ReflowWidgets) == "function" then
             p.dfAD_ReflowWidgets()
             return
@@ -700,45 +696,36 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- ============================================================
     -- Optional PIN, at the header's FAR RIGHT -- one small icon and nothing else.
     -- ------------------------------------------------------------
-    -- ☠ WHAT THIS IS FOR, AND WHAT IT IS NOT. Popouts are no longer how settings
-    -- are REVEALED on a converted page -- the section folds open in place, which
-    -- is the whole point of the rework. The one job pinning survives for is
-    -- COMPARISON: keeping a section's settings open in a window of their own so
-    -- two pages can be read, or matched, side by side. So there is no gear, no
-    -- chevron and no count here -- every one of those was a second way IN, and
-    -- the header already is the way in.
+    -- ☠ WHAT THIS IS FOR. A section folds open in place, so a popout is not how settings are
+    -- revealed; the pin's one job is COMPARISON -- keeping a section's settings open in a window
+    -- of their own so two pages can be read, or matched, side by side. So there is no gear, no
+    -- chevron and no count here: the header already is the way in.
     --
-    -- ☠ IT OPENS ALREADY PINNED, which is why it is a pin and not an "open".
-    -- An unpinned panel lives in the host's shared pool, ONE per key: opening a
-    -- second section's panel would re-target the first's rather than stand
-    -- beside it, so the compare this exists for could never have two panels in
-    -- it. Popout:Pin takes the instance OUT of that pool, so the next section
-    -- gets a fresh one -- and a pinned panel also survives a page switch, which
-    -- is what makes Buff Bar beside Debuff Bar possible at all.
+    -- ☠ IT OPENS ALREADY PINNED, which is why it is a pin and not an "open". An unpinned panel
+    -- lives in the host's shared pool, ONE per key, so a second section's panel would re-target
+    -- the first's rather than stand beside it. Popout:Pin takes the instance OUT of that pool,
+    -- so the next section gets a fresh one -- and a pinned panel also survives a page switch,
+    -- which is what makes Buff Bar beside Debuff Bar possible at all.
     --
-    -- ⚠ THE SECTION DOES NOT MOVE. It keeps its header, its fold state, its
-    -- summary and its controls, and stays fully usable while its panel is up --
-    -- the pin only lights. Nothing is ever hidden behind the panel, so there is
-    -- no dead end if the panel is dragged off-screen or forgotten.
+    -- ⚠ THE SECTION DOES NOT MOVE. It keeps its header, fold state, summary and controls and
+    -- stays fully usable while its panel is up -- the pin only lights -- so there is no dead end
+    -- if the panel is dragged off-screen or forgotten.
     --
-    -- ⚠ TWO LIVE COPIES OF ONE SETTING, AND WE ONLY SYNC STATE. The panel holds
-    -- a SECOND instance of the same builder bound to the same keys, and a write
-    -- in one repaints the other's grey-gating (the mount's reflow ends in the
-    -- page's RefreshStates) but NOT its bound values -- a slider moved in the
-    -- panel leaves the page's copy drawing the old thumb until the page is
-    -- rebuilt. Known, and the reason the pin is offered for COMPARING pages
-    -- rather than for editing one setting from two places at once.
+    -- ⚠ TWO LIVE COPIES OF ONE SETTING, AND WE ONLY SYNC STATE. The panel holds a SECOND
+    -- instance of the same builder bound to the same keys; a write in one repaints the other's
+    -- grey-gating (the mount's reflow ends in the page's RefreshStates) but NOT its bound values,
+    -- so a slider moved in the panel leaves the page's copy drawing the old thumb until the
+    -- page is rebuilt. Known, and the reason the pin is for COMPARING pages, not for editing one
+    -- setting from two places.
     --
     -- opts.pin, all opt-in -- a caller that passes nothing builds nothing:
-    --   build    the mount fn from tools.PopoutContent -- the SAME builder the
-    --            section's own band was built from, so the panel is the section
-    --            rather than a curated subset of it
-    --   title    the panel's header. PAGE-QUALIFIED by the caller ("Buff Bar /
-    --            Appearance"): two pinned panels both reading "Appearance" is
-    --            the exact complaint this answers
+    --   build    the mount fn from tools.PopoutContent -- the SAME builder the section's own band
+    --            was built from, so the panel is the section rather than a curated subset of it
+    --   title    the panel's header. PAGE-QUALIFIED by the caller ("Buff Bar / Appearance"),
+    --            or two pinned panels would both read "Appearance"
     --   window   the settings window the panel docks outside of
-    --   clipTo   the scroll frame that clips this header (the connected chrome
-    --            hides while the section is scrolled out of it)
+    --   clipTo   the scroll frame that clips this header (the connected chrome hides while the
+    --            section is scrolled out of it)
     --   db       the table (or fn -> table) the row re-resolves on refresh
     --   accent   per-panel accent override; absent = the host's
     local pinOpts = opts and type(opts.pin) == "table" and opts.pin or nil
@@ -774,13 +761,10 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 -- panel would dock in the corner of the screen with its beam
                 -- pointing at nothing. See PopoutRow's opts.tetherTo.
                 tetherTo = section,
-                -- ☠ A CLOSED PIN IS KEPT, NOT LEAKED. Every press opens a panel
-                -- pinned, and WoW never frees a frame, so each pin-and-close
-                -- used to strand a whole panel for good. The kit keeps it as a
-                -- spare and the next press (any section's) revives it: the
-                -- pane cache is per ROW, so it shows that section's content
-                -- under that section's title, and it re-enters the store the
-                -- mode switch's CloseAllPopoutRows sweeps.
+                -- ☠ A CLOSED PIN IS KEPT, NOT LEAKED. WoW never frees a frame, so the kit keeps a closed
+                -- pinned panel as a spare and the next press (any section's) revives it: the pane cache is
+                -- per ROW, so it shows that section's content under that section's title, and it re-enters
+                -- the store the mode switch's CloseAllPopoutRows sweeps.
                 recyclePinned = true,
                 -- ...and the header goes back to plain the moment the panel
                 -- does -- its own cross, the family sweep, a mode switch's
@@ -1068,28 +1052,23 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
     -- ============================================================
     -- Optional ON/OFF TICK, between the chevron and the title (opts.toggle).
     -- ------------------------------------------------------------
-    -- For a section whose feature has a switch: the switch moves OUT of the
-    -- body and into the header, so it can be flipped without opening the
-    -- section. The caller stops building its in-body copy (the builders'
-    -- hoistToggle seam) -- two live copies of one checkbox is the defect.
+    -- For a section whose feature has a switch: the switch lives in the header, so it can be
+    -- flipped without opening the section. The caller does not build an in-body copy (the
+    -- builders' hoistToggle seam) -- two live copies of one checkbox is a defect.
     --
-    -- ☠ THE REAL CHECKBOX, NOT A LOOK-ALIKE. GUI:CreateCheckbox, bound to the
-    -- same table and key and handed the same commit the in-body one had, so
-    -- the write, the undo record, the override bracket and DF:UpdateAll are
-    -- all the ones it always ran. Built HERE, after SetCurrentSection, so its
-    -- search entry lands under this section's title under its own label --
-    -- exactly the entry the in-body checkbox used to register.
+    -- ☠ THE REAL CHECKBOX, NOT A LOOK-ALIKE. GUI:CreateCheckbox, bound to the same table and key
+    -- with the same commit, so the write, the undo record, the override bracket and DF:UpdateAll
+    -- are the normal ones. Built HERE, after SetCurrentSection, so its search entry lands under
+    -- this section's title with its own label.
     --
-    -- ☠ ABOVE THE CLICK AREA, the pin's fix: clickArea covers the header and
-    -- folds it, and a press on the tick must toggle, never fold.
+    -- ☠ ABOVE THE CLICK AREA: clickArea covers the header and folds it, and a press on the tick
+    -- must toggle, never fold.
     --
-    -- ⚠ THE CAPTION IS HIDDEN, the title beside it is the name. Its tooltip
-    -- hit (built over the caption) goes with it, and the tooltip rides the box
-    -- instead, through the shared helper.
+    -- ⚠ THE CAPTION IS HIDDEN; the title beside it is the name. Its tooltip hit (built over the
+    -- caption) goes with it, and the tooltip rides the box instead, through the shared helper.
     --
     -- toggle = { db, key, label, onChanged, tooltip?, disableOn?, isOn? }
-    --   disableOn  fn(db) -> bool: greys the tick itself (the gates its
-    --              in-body copy carried). Repainted by refreshContent.
+    --   disableOn  fn(db) -> bool: greys the tick itself. Repainted by refreshContent.
     --   isOn       fn(db) -> bool, when "off" is not simply a falsy key.
     if toggleOpts then
         local tick = GUI:CreateCheckbox(section, toggleOpts.label, toggleOpts.db,
@@ -1370,14 +1349,10 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts
                 local co = data.coords
                 DF:SetIconTextureOrAtlas(slot.tex, data.texture, co and co[1], co and co[2], co and co[3], co and co[4])
                 slot.tex:SetDesaturated(dim)
-                -- ☠ TINT THE SWATCH. data.color was honoured for TEXT entries only, so an
-                -- icon whose frame appearance comes from a colour setting previewed at its
-                -- RAW texture colour. For a white mask that means WHITE — the AFK clock
-                -- renders gold on a frame but showed white here, and its baked-black
-                -- interior then read as a heavy dark outline rather than as clock hands
-                -- (Krathe, 2026-08-08: "still looks bad on the preview ... almost like it
-                -- still has a black border around it"). The art was fine; the swatch lied.
-                -- ⚠ Must come AFTER the texture call — SetTexture/SetAtlas reset vertex colour.
+                -- ☠ TINT THE SWATCH: an icon whose frame appearance comes from a colour setting must preview
+                -- in that colour, not its raw texture colour -- a white mask (the AFK clock, gold on a frame)
+                -- would otherwise show white with its baked-black interior reading as a heavy outline.
+                -- ⚠ Must come AFTER the texture call -- SetTexture/SetAtlas reset vertex colour.
                 if not dim and data.color then
                     slot.tex:SetVertexColor(data.color.r or 1, data.color.g or 1, data.color.b or 1, data.color.a or 1)
                 else
@@ -1682,16 +1657,13 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         return CurrentName()
     end
 
-    -- Dropdown button + menu (rebuilt on each open so it always reflects the lib)
+    -- Dropdown button + menu (rebuilt on each open so it always reflects the lib).
     --
-    -- ☠ THE DROPDOWN TAKES WHATEVER IS LEFT, rather than a fixed 150. This bar
-    -- used to be laid out left-to-right in one chain -- label, a 150px dropdown,
-    -- then the four action buttons -- which totals 467px in the labelled form and
-    -- 317px in the icon form. Both fitted the designers' old 850px island and
-    -- neither fits the ~410px band a 640px window gives them, so Delete ran off
-    -- the page. The actions now chain from the bar's RIGHT edge inwards (see
-    -- below) and this spans the gap, so the bar costs exactly its fixed parts at
-    -- any width instead of a constant 467.
+    -- ☠ THE DROPDOWN TAKES WHATEVER IS LEFT, rather than a fixed width. The four action buttons
+    -- chain from the bar's RIGHT edge inwards (see below) and this spans the gap, so the bar
+    -- costs exactly its fixed parts at any width -- a left-to-right chain with a fixed dropdown
+    -- (467px labelled, 317px icon form) runs Delete off the page in the ~410px band a 640px
+    -- window gives the designers.
     local ddBtn = CreateFrame("Button", nil, bar, "BackdropTemplate")
     ddBtn:SetHeight(22)
     ddBtn:SetPoint("LEFT", label, "RIGHT", 6, 0)
@@ -1711,9 +1683,8 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     GUI:RegisterMenu(menu)
     menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -1)
-    -- The menu is the button's own list, so it is the button's own width -- and
-    -- the button no longer HAS a constant one. Anchored rather than measured: a
-    -- width read here would be read before the first layout pass.
+    -- The menu is the button's own list, so it is the button's own width. Anchored rather than
+    -- measured: a width read here would come before the first layout pass.
     menu:SetPoint("TOPRIGHT", ddBtn, "BOTTOMRIGHT", 0, -1)
     CreatePanelBackdrop(menu)
     menu:Hide()
@@ -1779,14 +1750,12 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         end
     end)
 
-    -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
-    -- set or an auto layout, and editing it then changes every one of them --
-    -- which nothing on this bar used to say. The dropdown has no room for the
+    -- SHARING MARKER. A template can be pointed at by the other mode, a pinned set or an auto
+    -- layout, and editing it then changes every one of them. The dropdown has no room for the
     -- names, so the FACT rides as a glyph and the NAMES go in the tooltip.
     --
-    -- Deliberately NOT clickable. Splitting a shared template off for this mode
-    -- is exactly what Duplicate does, two buttons to the right, and Duplicate
-    -- also lets you name the copy.
+    -- Deliberately NOT clickable. Splitting a shared template off for this mode is exactly what
+    -- Duplicate does, two buttons to the right, and Duplicate also lets you name the copy.
     local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
     shareIcon:SetSize(12, 12)
     shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
@@ -2475,15 +2444,10 @@ function GUI:CreateCheckRow(parent, opts)
     cb.check = GUI:StyleCheckButton(cb, { accent = opts.accent, manualCheck = manual })
     cb.manualCheck = manual
 
-    -- ☠ PARENTED TO THE CHECKBOX, NOT TO `parent`.
-    --
-    -- A FontString hung off the container survives cb:Hide(), so a hidden checkbox
-    -- leaves its text on screen. The binding editor's Enable box is hidden except for
-    -- macros and items, and with the label on the panel its "Enable" floated over the
-    -- Active radios underneath. The hand-rolled version this replaced parented to the
-    -- checkbox for exactly this reason; parenting to the container was my regression.
-    --
-    -- Safe for the call sites that used to parent to a column: cb is a child of that
+    -- ☠ PARENTED TO THE CHECKBOX, NOT TO `parent`. A FontString hung off the container survives
+    -- cb:Hide(), so a hidden checkbox would leave its text on screen (the binding editor's Enable
+    -- box is hidden except for macros and items, and its "Enable" would float over the Active
+    -- radios underneath). Safe for call sites that hand in a column: cb is a child of that
     -- column, so anything hiding the column still hides the label.
     local txt = cb:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
     txt:SetPoint("LEFT", cb, "RIGHT", opts.labelGap or 8, 0)
@@ -2529,9 +2493,9 @@ function GUI:CreateCheckRow(parent, opts)
         if opts.get then self:Apply(opts.get()) end
     end
 
-    -- ⚠ ASSIGNABLE, and read at click time rather than captured. Call sites that used to
-    -- do cb:SetScript("OnClick", fn) set `cb.onClick = fn` instead -- if they kept using
-    -- SetScript they would REPLACE the handler below and silently lose set/veto/texture.
+    -- ⚠ ASSIGNABLE, and read at click time rather than captured. Call sites set `cb.onClick = fn`;
+    -- cb:SetScript("OnClick", fn) would REPLACE the handler below and silently lose
+    -- set/veto/texture.
     cb.onClick = opts.onClick
 
     -- ⚠ NO "veto" HOOK HERE, and that is a considered omission. The one call site that
@@ -3913,14 +3877,14 @@ function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inher
         { storedValue = compose })
 end
 
--- The border animations' display names, keyed by the saved type value -- the
--- list CreateAnimationControls' type dropdown offers. Published so a card's
--- folded summary can name the chosen effect without keeping a copy of it.
--- ⚠ A FRESH TABLE ON EVERY CALL, built from L at call time: the dropdown adds
--- its own _order and may delete excluded types from what it is handed, and a
--- table built once at file scope would freeze on the load-time language.
--- CORNERS_ONLY is not in it (no longer pickable), so a caller must cope with
--- a nil name for a legacy saved value.
+-- The border animations' display names, keyed by the saved type value -- the list
+-- CreateAnimationControls' type dropdown offers. Published so a card's folded summary can
+-- name the chosen effect without keeping a copy of it.
+-- ⚠ A FRESH TABLE ON EVERY CALL, built from L at call time: the dropdown adds its own _order
+-- and may delete excluded types from what it is handed, and a table built once at file scope
+-- would freeze on the load-time language.
+-- CORNERS_ONLY is not offered (an existing saved value still renders), so a caller must cope
+-- with a nil name for it.
 function GUI:AnimationTypeNames()
     return {
         NONE = L["None"],
@@ -4001,14 +3965,12 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
 
     local w = {}
 
-    -- All DF-owned border effects (no external glow library). The "DF " labels
-    -- are kept from when they sat alongside the retired LCG glows. The names
+    -- All DF-owned border effects (no external glow library). The names
     -- come from GUI:AnimationTypeNames() (above), the one list a card summary
     -- also reads.
     local animTypeOptions = GUI:AnimationTypeNames()
-    -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY
-    -- is intentionally absent — it's kept in the engine (an existing saved
-    -- value still renders) but no longer offered as a pickable animation.
+    -- None first (the "off" option), then alphabetical by label. CORNERS_ONLY is intentionally
+    -- absent: the engine still renders an existing saved value, but it is not pickable.
     animTypeOptions._order = { "NONE", "BLINK", "DF_ORBIT",
                                "DF_DASH", "DF_FLASH", "DF_PIXEL", "DF_PROC", "DF_PULSATE" }
     -- Marching Ants (12.1.5, capability-gated) is added by GUI:AnimationTypeNames itself;
@@ -4034,8 +3996,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- extra gate (Expiring override) it's always visible.
     w.animationType.hideOn = hideExtra or function() return false end
 
-    -- Perf warning: animations run an OnUpdate (or LCG internal animation)
-    -- per active border, which adds up in 20-30 player raids.
+    -- Perf warning: animations run an OnUpdate per active border, which adds up in 20-30 player raids.
     if showPerfBanner then
         -- staticHeight ONLY where the host reflows widget WIDTHS on every layout
         -- pass — i.e. the Aura Designer indicator card (its parent carries
@@ -4157,19 +4118,15 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         dbTable, aKey("ProcStart"), fullUpdate, hideIntroGet), 30)
     w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
     w.animationHideIntro.tooltip = L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."]
-    -- introInert (aura-button border cards): the intro cannot fire on a pooled
-    -- container button — animation timelines advance while the button is hidden
-    -- and no OnShow script runs in the restricted subtree, so a build-time
-    -- one-shot is spent before the first aura ever shows. The runtime forces the
-    -- intro off for row-mode buttons (AuraContainer's ANIMATION FILTER), so this
-    -- checkbox is permanently greyed there and the tooltip explains why instead
-    -- of describing a burst the user will never see.
-    -- ☠ GREY DIRECTLY at build, not only via disableOn: the AD cards never run
-    -- the RefreshChildStates pass that applies disableOn predicates (the group
-    -- card's refreshStates comment documents this on purpose), so a
-    -- predicate-only grey renders enabled there — field-caught on the AD icon
-    -- card, 2026-08-29. disableOn stays as well, so a context that DOES apply
-    -- predicates cannot re-enable it.
+    -- introInert (aura-button border cards): the intro cannot fire on a pooled container button
+    -- -- animation timelines advance while the button is hidden and no OnShow script runs in the
+    -- restricted subtree, so a build-time one-shot is spent before the first aura ever shows.
+    -- The runtime forces the intro off for row-mode buttons (AuraContainer's ANIMATION FILTER),
+    -- so this checkbox is permanently greyed there and the tooltip explains why.
+    -- ☠ GREY DIRECTLY at build, not only via disableOn: the AD cards never run the
+    -- RefreshChildStates pass that applies disableOn predicates (the group card's refreshStates
+    -- comment documents this on purpose), so a predicate-only grey would render enabled there.
+    -- disableOn stays as well, so a context that DOES apply predicates cannot re-enable it.
     if opts.introInert then
         w.animationHideIntro.disableOn = function() return true end
         w.animationHideIntro:SetEnabled(false)
@@ -4322,11 +4279,9 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- the actual border state (e.g. proxy.BorderStyle, not the unrelated
     -- DF.db.party.BorderStyle which doesn't exist).
     local function hideShow() return hideWhen and hideWhen(dbTable) or false end
-    -- Show Border OFF no longer HIDES the border controls — they stay visible and
-    -- GREY OUT (disableOn = borderOff, applied by the loop at the end of this
-    -- function) so the panel previews them. `hideOff` now means "hidden by the
-    -- parent/variant gate only" (whatever the consumer passes via hideWhen); the
-    -- name is kept so the existing `.hideOn = hideOff` references read unchanged.
+    -- Show Border OFF GREYS the border controls (disableOn = borderOff, applied by the loop at
+    -- the end of this function) so the panel previews them. `hideOff` means "hidden by the
+    -- parent/variant gate only" (whatever the consumer passes via hideWhen).
     local function hideOff()  return hideShow() end
     local function borderOff() return dbTable[showKey] == false end
 

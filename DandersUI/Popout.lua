@@ -133,38 +133,22 @@ local BASE_STRATA = "DIALOG"
 
 -- ☠ ONE STRATA ABOVE THE WINDOW, NOT A HIGH LEVEL WITHIN IT.
 --
--- In outsideOf mode the beam's crossing segment is drawn over the window's body
--- on the way to the row, so it has to outrank everything the window CONTAINS and
--- not merely the window. Two attempts at that stayed inside the window's own
--- strata, and both failed in-game:
+-- In outsideOf mode the beam's crossing segment is drawn over the window's body on the way to
+-- the row, so it has to outrank everything the window CONTAINS, not merely the window -- and
+-- no level inside the window's own strata does: widgets bump their own level off their
+-- container freely (+10 for a control drawing over its neighbours, +50 for a disabled overlay
+-- across a group), and even window level + 60 did not draw at DIALOG. Something within DIALOG
+-- outranks any level we can set, while beam:SetFrameStrata("TOOLTIP") renders it correctly.
+-- The chrome leaves the strata.
 --
---   window level + 10  under the ROW itself (window -> content -> page -> scroll
---                      child -> row -> plate is already +5), and far under the
---                      widgets, which bump their own level off their container
---                      freely -- +10 for a control that has to draw over its
---                      neighbours, +50 for a disabled overlay laid across a group.
---   window level + 60  clears the deepest bump a window is known to make, with
---                      room to spare -- and STILL did not draw. Reported in-game
---                      2026-08-27 with the window at 100% scale, i.e. with the
---                      scale conversion of _SyncWindowScale already ruled out.
+-- With the strata boundary doing the work, the LEVEL carries none of it -- a boundary is
+-- absolute -- and it stays a small constant, which it must:
 --
--- Danders' decisive experiment settled it. With the geometry proven correct (see
--- test_popout's section 16) and the level maths proven correct, the crossing
--- segment never rendered at DIALOG at ANY level -- and beam:SetFrameStrata
--- ("TOOLTIP") rendered it fully and correctly. The occluder was never identified;
--- what is certain is that something within DIALOG outranks any level we can set,
--- and so no arithmetic inside that strata can win. The chrome leaves the strata.
---
--- With the strata boundary doing the work the LEVEL carries none of it -- a
--- boundary is absolute, so nothing in the window's subtree reaches us whatever
--- its level -- and it goes back to being a small constant. Which it must be:
---
--- ⚠ THE WINDOW'S OWN TITLE BAR IS NOT IN THE WINDOW'S STRATA. DandersFrames'
--- settings window is DIALOG, but its title bar sits at FULLSCREEN_DIALOG 200 and
--- its close and info buttons at 210 -- in the very strata the chrome moves up to.
--- The popout must not cover those if the two ever overlap, so the chrome's level
--- has to stay well below 200. 10 leaves that whole gap spare, and still leaves the
--- beam somewhere to sit one level under the popout.
+-- ⚠ THE WINDOW'S OWN TITLE BAR IS NOT IN THE WINDOW'S STRATA. DandersFrames' settings window
+-- is DIALOG, but its title bar sits at FULLSCREEN_DIALOG 200 and its close and info buttons
+-- at 210 -- in the very strata the chrome moves up to. The popout must not cover those if the
+-- two ever overlap, so the chrome's level has to stay well below 200. 10 leaves that gap
+-- spare, and still leaves the beam somewhere to sit one level under the popout.
 local STACK_BASE = 10
 
 -- ---- the stacking order ------------------------------------------
@@ -424,42 +408,31 @@ end
 
 -- ---- the one coordinate space ------------------------------------
 
--- ☠ A FRAME'S OWN GEOMETRY IS NOT IN UIPARENT UNITS, and every rect in this file
--- is declared to be. GetCenter / GetWidth / GetHeight answer in the frame's OWN
--- coordinate space -- the screen divided by its EFFECTIVE scale -- and a SetPoint
--- offset is read back in that same space. So a region living under a SCALED
--- window and a popout on a scale of its own are measured with two different
--- rulers, and this file compares them constantly: the dock, the beam, the clip
--- gate and the connection point are all differences between the two.
+-- ☠ A FRAME'S OWN GEOMETRY IS NOT IN UIPARENT UNITS, and every rect in this file is declared
+-- to be. GetCenter / GetWidth / GetHeight answer in the frame's OWN coordinate space -- the
+-- screen divided by its EFFECTIVE scale -- and a SetPoint offset is read back in that same
+-- space. So a region under a SCALED window and a popout on a scale of its own are measured
+-- with two different rulers, and this file compares them constantly: the dock, the beam, the
+-- clip gate and the connection point are all differences between the two.
 --
--- ⚠ AND THE POPOUT IS ONE OF THE SCALED THINGS NOW. In outsideOf mode it takes
--- the window's scale as its own (see _SyncWindowScale) so its controls match the
--- page's -- so "the popout is at UIParent scale" is no longer the safe reading it
--- once was, and nothing below may assume it. Every one of these three functions
--- already converts, which is exactly why that change needed nothing else.
+-- ⚠ AND THE POPOUT IS ONE OF THE SCALED THINGS. In outsideOf mode it takes the window's scale
+-- as its own (see _SyncWindowScale) so its controls match the page's, so nothing below may
+-- assume it is at UIParent scale. Every one of these three functions converts.
 --
--- The error is not a rounding wobble. It is (distance from UIParent's centre) x
--- (1/scale - 1) on BOTH axes, so out at the edge of a settings window scaled to
--- 85% it is well over a hundred pixels -- which is what the beam's far end
--- stopping dead in the gutter beside its row, and the panel docking a long way
--- clear of the window, both were (in-game, 2026-08-26). DandersFrames' settings
--- window carries a user scale slider, and an unscaled window is the one case
--- where the two spaces agree -- which is why nothing else ever showed this.
+-- The error is not a rounding wobble: it is (distance from UIParent's centre) x (1/scale - 1)
+-- on BOTH axes -- well over a hundred pixels at the edge of a settings window scaled to 85%,
+-- leaving the beam stopping short of its row and the panel docking far from the window.
+-- (The source outline is ANCHORED to the region rather than computed from it, so it is
+-- immune.)
 --
--- Note which half was NOT wrong: the source outline is ANCHORED to the region
--- rather than computed from it, so it stayed on the plate throughout. That is
--- exactly the asymmetry the report describes -- the outline lighting the row
--- while the beam pointed at empty space beside it.
+-- This ratio converts a region's own units to UIParent's. Everything that reads geometry off
+-- a frame multiplies by it; everything that hands a number BACK to a frame (a SetPoint
+-- offset, a line endpoint) divides by that frame's own.
 --
--- This ratio converts a region's own units to UIParent's. Everything that reads
--- geometry off a frame multiplies by it; everything that hands a number BACK to
--- a frame (a SetPoint offset, a line endpoint) divides by that frame's own.
---
--- ⚠ TEXTURES AND FONTSTRINGS HAVE NO GetEffectiveScale. They are regions, so
--- they answer GetCenter/GetWidth perfectly well -- in their PARENT's space --
--- and `tetherSource` is documented as a region, not as a frame. So walk up to
--- the nearest thing that has one rather than quietly falling back to 1, which
--- would be the whole bug again for a consumer that tethers to a texture.
+-- ⚠ TEXTURES AND FONTSTRINGS HAVE NO GetEffectiveScale. They are regions, so they answer
+-- GetCenter/GetWidth -- in their PARENT's space -- and `tetherSource` is documented as a
+-- region, not as a frame. So walk up to the nearest thing that has one rather than quietly
+-- falling back to 1.
 local function scaleRatio(region)
     local us = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
     if type(us) ~= "number" or us <= 0 then return 1 end
@@ -473,24 +446,17 @@ local function scaleRatio(region)
     return 1
 end
 
--- Rect of a region in UIParent-centre units, inset to its ink; nil while it has
--- no geometry yet.
--- ☠☠ FILLS A TABLE THE CALLER OWNS, and that exists because the old shape of this
--- returned a FRESH TABLE and two of its callers are on an OnUpdate. A pinned popout
--- ticks forever by design, and each tick read two rects -- so every pinned popout was
--- allocating two tables a frame, about 120 a second, and four of them about 480. The
--- symptom is memory that climbs fast, gets collected, and immediately climbs again
--- (field report, 2026-09-16: "pin about three or four and it makes the memory rapidly
--- increase"). It reads as a leak and is really pure garbage churn.
--- ⚠ IT SHOWED UP UNDER WHICHEVER ADDON LOADED THE KIT. Popout.lua is in DandersUI's
--- base half, which DandersFrames and DandersMover both load at startup; LibStub keeps
--- the first copy, and WoW bills the allocation to the addon that owns the file the
--- running function came from. So the addon named in the report is bookkeeping, not the
--- culprit -- nothing about the mover was involved.
--- ⚠ THE FIFTEEN COLD CALLERS ARE UNTOUCHED: rectOf still allocates, because they run on
--- a click or a drop and a shared scratch table across them would be a real hazard for no
--- gain. Only the per-frame path opts in, and only because its rects are read straight
--- into scalars and never kept (see _Tick).
+-- Rect of a region in UIParent-centre units, inset to its ink; nil while it has no geometry
+-- yet.
+-- ☠☠ FILLS A TABLE THE CALLER OWNS, because two of its callers are on an OnUpdate: a pinned
+-- popout ticks forever by design and each tick reads two rects, so a fresh table per read
+-- would allocate ~120 tables a second per pinned popout -- memory that climbs, collects and
+-- climbs again. (The allocation is billed to whichever addon loaded the kit first, so a
+-- report naming DandersMover can be this.)
+-- ⚠ The cold callers keep rectOf, which allocates: they run on a click or a drop, and a
+-- shared scratch table across them would be a real hazard for no gain. Only the per-frame
+-- path opts in, and only because its rects are read straight into scalars and never kept
+-- (see _Tick).
 local function rectInto(region, out)
     if not region or not region.GetCenter then return nil end
     local cx, cy = region:GetCenter()
@@ -886,26 +852,15 @@ function Popout:_SyncHeaderLevel()
     if bar and bar.SetFrameLevel and (bar:GetFrameLevel() or 0) ~= base + BAR_LIFT then
         bar:SetFrameLevel(base + BAR_LIFT)
     end
-    -- Named one by one rather than walked: several are optional (no pin on an
-    -- unpinnable popout, no header controls on most), and a nil in an ipairs
-    -- list stops the walk at index 1 and silently skips everything after it --
-    -- which is the same class of bug this function exists to fix.
-    -- ☠☠ UNROLLED, AND THE TABLE IT REPLACES WAS THE REST OF THE POPOUT MEMORY CHURN.
-    -- This built `{ closeBtn, pinBtn, headerLeft, headerRight }` to loop over four fixed
-    -- fields -- a fresh table on every call, and the call is every frame: _Tick ->
-    -- _SyncWindowLevel -> _ApplyStackLevel -> here, for every popout with a window to sit
-    -- outside of. A pinned popout ticks forever by design, so four pinned ones threw away
-    -- four tables a frame purely to iterate a list that never changes shape.
-    -- ⚠ IT SURVIVED THE FIRST PASS AT THIS BUG (the rectOf fix in the same file) because
-    -- the rect allocations were the obvious two and this one is three calls deep. The
-    -- symptom only halved; field test, 2026-09-16: stopping every popout's OnUpdate
-    -- stopped the climb dead, which is what sent the search back down this chain.
-    -- ⚠ A file-scope scratch table would also have worked. Four lines of nothing is
-    -- better: no buffer to reason about, no aliasing question, and the compiler-visible
-    -- shape says these are four named widgets rather than a collection.
-    -- ⚠ A FILE-SCOPE HELPER, NOT A LOCAL ONE. `local function lift(w)` closing over `want`
-    -- would be built fresh on every call -- a closure is a heavier allocation than the
-    -- table this replaced, so it would have made the very thing it is fixing worse.
+    -- Named one by one rather than walked: several are optional (no pin on an unpinnable popout,
+    -- no header controls on most), and a nil in an ipairs list stops the walk at index 1 and
+    -- silently skips everything after it.
+    -- ☠☠ UNROLLED, NOT A TABLE: this runs every frame (_Tick -> _SyncWindowLevel ->
+    -- _ApplyStackLevel -> here) for every popout with a window to sit outside of, and pinned
+    -- popouts tick forever, so a `{ closeBtn, pinBtn, ... }` literal would be per-frame garbage.
+    -- ⚠ A FILE-SCOPE HELPER, NOT A LOCAL ONE: `local function lift(w)` closing over `want` would
+    -- be built fresh on every call -- a closure is a heavier allocation than the table it
+    -- replaces.
     local want = base + HEADER_LIFT
     liftTo(self.closeBtn, want)
     liftTo(self.pinBtn, want)
@@ -958,16 +913,15 @@ function Popout:_SyncWindowLevel()
             self:_SetChromeStrata(want)
         end
     end
-    -- A SLOT IN THE HOST'S STACK, not the constant this used to be -- see THE
-    -- STACKING ORDER for why one constant across every docked panel is what let
-    -- two of them interleave. The strata boundary still does the work of getting
-    -- the chrome over the window's whole subtree; the level now only orders the
-    -- panels against EACH OTHER, and it still leaves room above the popout for
-    -- its own children (which is what a dropdown menu derives its level from).
+    -- A SLOT IN THE HOST'S STACK, not one constant for every docked panel (see THE STACKING ORDER
+    -- for why a constant lets two of them interleave). The strata boundary gets the chrome over
+    -- the window's whole subtree; the level only orders the panels against EACH OTHER, and still
+    -- leaves room above the popout for its own children (a dropdown menu derives its level from
+    -- it).
     --
-    -- Claimed once, on the first sync after the popout enters the docked
-    -- placement; every tick after that only re-asserts it, because this runs on
-    -- the follow ticker and a fresh slot per frame would be a strobe.
+    -- Claimed once, on the first sync after the popout enters the docked placement; every tick
+    -- after that only re-asserts it, because this runs on the follow ticker and a fresh slot per
+    -- frame would be a strobe.
     if not self._stackSlot then
         pushStack(self)         -- claims the top slot AND applies the level
     else
@@ -1468,19 +1422,17 @@ end
 
 -- ---- the retarget glide ------------------------------------------
 
--- Pointing an OPEN popout at a different thing used to teleport it, and a panel
--- that vanishes here and reappears there reads as a NEW panel rather than as the
--- same one now about something else -- which is exactly the wrong story when the
--- whole point of a single following panel is that there is only ever one of it.
+-- Pointing an OPEN popout at a different thing SLIDES it: a panel that vanishes here and
+-- reappears there reads as a NEW panel rather than as the same one now about something else,
+-- which is the wrong story when the point of a single following panel is that there is only
+-- ever one. Automatic in Follow whenever a SHOWN, FOLLOWING popout is handed a new region;
+-- PlaceFree and a pinned popout are untouched.
 --
--- So it slides. Automatic in Follow whenever a SHOWN, FOLLOWING popout is handed
--- a new region; PlaceFree and a pinned popout are untouched.
---
--- ☠ THE RE-DOCK IS SUSPENDED FOR THE DURATION. A following popout is anchored to
--- its source, so it cannot be driven independently while that anchor holds --
--- the glide takes an EXPLICIT screen anchor, and _Tick's "the source moved,
--- re-dock" arm must not fire underneath it or the frame would be yanked onto the
--- destination on the first frame of the slide. Landing hands the anchor back.
+-- ☠ THE RE-DOCK IS SUSPENDED FOR THE DURATION. A following popout is anchored to its source,
+-- so it cannot be driven independently while that anchor holds -- the glide takes an
+-- EXPLICIT screen anchor, and _Tick's "the source moved, re-dock" arm must not fire
+-- underneath it or the frame would be yanked onto the destination on the first frame of the
+-- slide. Landing hands the anchor back.
 function Popout:_StartGlide()
     local f = self.frame
     local sr = rectOf(self.source)
@@ -1608,47 +1560,33 @@ local CASCADE_DEPTH = 8
 
 -- Repaint the accent-bearing widgets a consumer mounted INSIDE this popout.
 --
--- ⚠ The chrome is not the whole panel. SetAccent used to repaint the border, the
--- point, the beam and the source outline and stop there -- so a popout whose
--- accent changed under an open panel ended up a purple-bordered box full of
--- orange sliders. The widgets do not read the popout's colour: they were built
--- against the HOST accent and registered themselves on their parent's
--- `ThemeListeners`, the kit's existing repaint list.
+-- ⚠ The chrome is not the whole panel. The widgets do not read the popout's colour: they were
+-- built against the HOST accent and registered themselves on their parent's `ThemeListeners`,
+-- the kit's repaint list, so repainting only the border, point, beam and outline would leave
+-- a panel of the wrong-coloured sliders.
 --
--- So the popout walks its own tree, finds those lists and repaints them with ITS
--- colour through `ApplyThemeColor(c)` -- the kit's published "tint to THIS
--- colour" entry point, which sliders, buttons, check boxes and collapse arrows
--- all carry.
+-- So the popout walks its own tree, finds those lists and repaints them with ITS colour
+-- through `ApplyThemeColor(c)` -- the kit's published "tint to THIS colour" entry point, which
+-- sliders, buttons, check boxes and collapse arrows all carry.
 --
--- ☠ ApplyThemeColor, NEVER UpdateTheme. UpdateTheme means "repaint to the HOST
--- accent" and takes no arguments -- and it cannot be made to take one, because
--- several call sites in the wild reach it through COLON syntax
--- (`slider:UpdateTheme()`), which would fill that parameter with the widget
--- table itself and paint every channel nil.
+-- ☠ ApplyThemeColor, NEVER UpdateTheme. UpdateTheme means "repaint to the HOST accent" and
+-- takes no arguments -- and it cannot be made to take one, because call sites reach it through
+-- COLON syntax (`slider:UpdateTheme()`), which would fill that parameter with the widget table
+-- and paint every channel nil.
 --
--- KNOWN LIMIT (gate one): a widget re-tints only if it registered on a
--- ThemeListeners list under this popout AND publishes ApplyThemeColor. A widget
--- built with an explicit opts.accent registers no listener at all, deliberately
--- -- that colour is the call site's choice, not an inherited one. And any
--- repaint that reads host:GetAccent() at CLICK time rather than at theme time (a
--- dropdown menu building its rows, an anchor grid cell re-activating) still
--- comes up in the host colour until it is next rebuilt.
+-- KNOWN LIMIT: a widget re-tints only if it registered on a ThemeListeners list under this
+-- popout AND publishes ApplyThemeColor. A widget built with an explicit opts.accent registers
+-- no listener, deliberately -- that colour is the call site's choice. And any repaint that
+-- reads host:GetAccent() at CLICK time (a dropdown menu building its rows, an anchor grid cell
+-- re-activating) still comes up in the host colour until it is next rebuilt.
 --
--- ☠ A SUBTREE MAY OWN ITS OWN REPAINT -- `frame.dfCascadeInto = fn(c)`, and the
--- walk hands that frame the colour and goes no further down it.
---
--- The reason is the pool, and it is a cost that GROWS. One panel serves every
--- row on a host, and each row's pane is built ONCE and then KEPT under the same
--- mount -- shown or hidden -- for the rest of the session. So the mount's
--- children are every group the user has ever opened, on every page, and a walk
--- rooted above it re-tints all of them on every open. Measured on a 14-row page
--- at 8 controls a row: 226 ApplyThemeColor calls and 292 nodes per open of ONE
--- row, still climbing. That is the stutter.
---
--- A hidden pane does not need the colour AT the moment it changes -- it needs it
--- before it is next SHOWN. So the owner takes the call, repaints the pane that is
--- actually up, and catches the rest up as they come round. The shell keeps the
--- rule (this colour, through ApplyThemeColor) and stops keeping the inventory.
+-- ☠ A SUBTREE MAY OWN ITS OWN REPAINT -- `frame.dfCascadeInto = fn(c)`, and the walk hands that
+-- frame the colour and goes no further down it. One panel serves every row on a host, and
+-- each row's pane is built ONCE and KEPT under the same mount for the session, so a walk
+-- rooted above it re-tints every group the user has ever opened on every open (226
+-- ApplyThemeColor calls per open on a 14-row page, still climbing). A hidden pane only needs
+-- the colour before it is next SHOWN, so the owner repaints the pane that is up and catches
+-- the rest up as they come round.
 local function cascadeInto(frame, c, depth)
     if type(frame) ~= "table" or depth > CASCADE_DEPTH then return end
     local own = rawget(frame, "dfCascadeInto")
@@ -1810,29 +1748,21 @@ function Popout:GetSurface() return self.surface end
 
 -- Is the thing the chrome points at actually DRAWN?
 --
--- ⚠ IsShown() CANNOT ANSWER THIS. A row scrolled out of a scroll child is still
--- shown -- it is CLIPPED by the scroll frame, and clipping leaves no flag on the
--- row. So the honest test is geometric: does the row's rect still overlap the
--- thing that clips it. With nothing declared to clip against, the answer is
--- always yes.
+-- ⚠ IsShown() CANNOT ANSWER THIS. A row scrolled out of a scroll child is still shown -- it is
+-- CLIPPED by the scroll frame, and clipping leaves no flag on the row. So the honest test is
+-- geometric: does the row's rect still overlap the thing that clips it. With nothing declared
+-- to clip against, the answer is always yes.
 --
--- ☠ THE CLIPPER IS NOT THE WINDOW. This used to test against `outsideOf`, and
--- that is the wrong rect by exactly the window's own chrome: a settings window
--- has a title bar, a blurb and its padding ABOVE the viewport, so a row scrolled
--- off the top of the list stops being drawn while its rect still overlaps the
--- window by 50-60px. For that whole stretch the beam, the point and the outline
--- were drawn over the window's own title bar, pointing at a row nobody could
--- see -- chrome hanging in mid-air, which is exactly what it looked like.
+-- ☠ THE CLIPPER IS NOT THE WINDOW. A settings window has a title bar, a blurb and padding
+-- ABOVE the viewport, so a row scrolled off the top of the list stops being drawn while its
+-- rect still overlaps the window by 50-60px, and the beam would hang over the title bar
+-- pointing at a row nobody can see. `Follow`'s opts.clipTo names the region that really clips
+-- (the scroll frame); `outsideOf` remains the fallback for a caller that declares none.
 --
--- `Follow`'s opts.clipTo names the region that really clips (the scroll frame),
--- and `outsideOf` remains the fallback so an existing caller keeps the old
--- behaviour rather than silently losing the gate.
---
--- Only the CHROME is gated. The popout stays up and stays docked (its y clamps
--- into the window's span, see PopoutOutsidePos) -- scrolling a list must not
--- close the panel you scrolled the list to configure. The beam, the connection
--- point and the source outline go, because all three are claims about a row that
--- is no longer on screen.
+-- Only the CHROME is gated. The popout stays up and docked (its y clamps into the window's
+-- span, see PopoutOutsidePos) -- scrolling a list must not close the panel you scrolled the
+-- list to configure. The beam, the connection point and the source outline go, because all
+-- three are claims about a row that is no longer on screen.
 function Popout:_TetherClipped()
     local clip = self.clipTo or self.outsideOf
     if not clip then return false end
@@ -1878,30 +1808,21 @@ end
 
 -- ---- the source outline ------------------------------------------
 
--- A 1px accent outline laid over the tether source, so the popout and the thing
--- it is about wear the SAME border and the beam reads as a join between two
--- pieces of one object rather than a line to something unrelated.
+-- A 1px accent outline laid over the tether source, so the popout and the thing it is about
+-- wear the SAME border and the beam reads as a join between two pieces of one object rather
+-- than a line to something unrelated.
 --
--- ☠ AND "THE SAME BORDER" IS WHY IT HAS TWO PAINTS. The outline used to be
--- ApplyPixelBorder and nothing else, which is square by construction. Lay that
--- over a ROUNDED row plate and you get the complaint the trial actually
--- produced: a second corner around a selected object -- a hard rectangle traced
--- round a plate that had just been given a curve. The trial's answer was to
--- suppress the outline entirely in rounded mode and let the row's own active
--- ring stand for it; that only worked because the row happened to have one, and
--- it silently dropped the shell's half of the shared-edge story for every other
--- kind of source.
+-- ☠ "THE SAME BORDER" IS WHY IT HAS TWO PAINTS. A pixel border is square by construction, and
+-- laid over a ROUNDED row plate it draws a second, hard corner around the selected object. So
+-- the outline follows the SOURCE'S shape: a source declares its curve on the tether contract
+-- (`region.popoutRadius`, beside the popoutInset it already declares), and a rounded popout
+-- tracing such a source draws a rounded RING at that radius; a square source, or a square
+-- popout, keeps the pixel border. The two are mutually exclusive and each paint takes the
+-- other down -- see _PaintSourceOutline.
 --
--- So the outline follows the SOURCE'S shape instead. A source declares its curve
--- on the tether contract (`region.popoutRadius`, beside the popoutInset it
--- already declares) and a rounded popout tracing a source that declares one
--- draws a rounded RING at that radius; a square source, or a square popout,
--- keeps the pixel border exactly as it shipped. The two are mutually exclusive
--- and each paint takes the other down -- see _PaintSourceOutline.
---
--- Its own frame, parented to the popout's PARENT for the same reason the beam
--- is: a consumer that parents its popouts to a session overlay (so hiding the
--- overlay suspends everything) must get this in that bargain too.
+-- Its own frame, parented to the popout's PARENT for the same reason the beam is: a consumer
+-- that parents its popouts to a session overlay (so hiding the overlay suspends everything)
+-- must get this in that bargain too.
 function Popout:_EnsureSourceOutline()
     if self.srcOutline ~= nil then return self.srcOutline end
     local o = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)

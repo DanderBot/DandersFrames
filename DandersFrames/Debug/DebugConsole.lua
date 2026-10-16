@@ -252,9 +252,8 @@ function DebugConsole:Init()
     -- expired log costs one comparison at login rather than a walk plus a prune.
     -- Uses debugDb.logStamp (see DEFAULTS): entries store no date of their own.
     local maxAge = debugDb.logMaxAgeDays or 0
-    -- A log captured before this feature existed has no stamp. Without seeding one it
-    -- would be immortal — the exact forgotten-log case this is meant to catch. Stamp
-    -- it now so it ages from this login rather than being dropped unread.
+    -- A log with no stamp would be immortal -- the forgotten-log case this exists to catch.
+    -- Stamp it now so it ages from this login rather than being dropped unread.
     if #debugLog > 0 and not debugDb.logStamp then
         debugDb.logStamp = time()
     end
@@ -277,15 +276,11 @@ function DebugConsole:Init()
     -- Categories are rebuilt on demand, not here — see `categoriesDirty`.
     categoriesDirty = true
 
-    -- Add reload separator if the log has prior entries AND logging is on.
-    --
-    -- ☠ THE `enabled` GATE IS LOAD-BEARING, not tidiness. This block is the only
-    -- other writer of logStamp, and it used to run on every login regardless: a
-    -- user who turned logging OFF and forgot their log would get a separator (and
-    -- so a fresh stamp) at each login, which reset the age clock and made the log
-    -- IMMORTAL — defeating logMaxAgeDays in precisely the case it exists for.
-    -- Gating it is also right on its own terms: appending an entry to a log while
-    -- logging is switched off is a write to a disabled log.
+    -- Add a reload separator if the log has prior entries AND logging is on.
+    -- ☠ THE `enabled` GATE IS LOAD-BEARING. This is the only other writer of logStamp: a
+    -- separator written at every login while logging is OFF would re-stamp a forgotten log
+    -- each time and make it IMMORTAL, defeating logMaxAgeDays in exactly the case it is for.
+    -- It is also right on its own terms -- a disabled log takes no writes.
     if #debugLog > 0 and debugDb.enabled then
         tinsert(debugLog, {
             date("%H:%M:%S"),
@@ -401,23 +396,14 @@ local function sanitizeLogMessage(msg)
 end
 
 function DebugConsole:Log(level, category, fmt, ...)
-    -- ☠☠ MINIMUM LOG LEVEL NOW DROPS THE LINE, IT DOES NOT JUST HIDE IT.
-    -- This used to be a VIEW filter only: CollectFilteredLines applied logLevel when
-    -- rendering the console and the export, while every INFO line was still formatted,
-    -- sanitised, stored and counted against maxLines. So "Errors Only" cost exactly as
-    -- much as "Info (All)" and gave exactly as little buffer -- the setting that looks
-    -- like the spam control was the one thing that could not control spam. A tester who
-    -- set it and then reproduced a bug still had their trace evicted by INFO chatter they
-    -- had explicitly asked not to see.
-    --
-    -- Filtering here instead makes it a real lever: no format, no pcall, no string, no
-    -- eviction. Combined with the per-category tickboxes it is the honest way to keep a
-    -- long capture readable, and it is reversible -- raise the level, reproduce again.
-    --
-    -- ⚠ The trade, stated: a line dropped here is GONE, not hidden, so raising the level
-    -- mid-session cannot recover earlier INFO. That is the same bargain as unticking a
-    -- category, and it is what "minimum log level" sitting directly above "max log
-    -- entries" reads as -- both are buffer controls.
+    -- ☠☠ MINIMUM LOG LEVEL DROPS THE LINE, IT DOES NOT JUST HIDE IT. A view-only filter
+    -- would still format, sanitise, store and count every INFO line against maxLines, so
+    -- "Errors Only" would cost as much as "Info (All)" and a tester's trace would still be
+    -- evicted by chatter they asked not to see. Filtering here costs no format, no pcall, no
+    -- string and no eviction.
+    -- ⚠ The trade: a line dropped here is GONE, so raising the level mid-session cannot
+    -- recover earlier INFO -- the same bargain as unticking a category, and what "minimum log
+    -- level" beside "max log entries" reads as: both are buffer controls.
     local minLevel = SEVERITY[(debugDb and debugDb.logLevel) or "INFO"]
     local thisLevel = SEVERITY[level]
     if minLevel and thisLevel and thisLevel.level < minLevel.level then return end

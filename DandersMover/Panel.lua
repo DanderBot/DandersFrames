@@ -1131,8 +1131,8 @@ function Pn:Create()
     return po
 end
 
--- The Scale setting moved: every live panel takes it, then re-docks, because a
--- bigger panel may no longer fit on the side it chose.
+-- Apply a new Scale to every live panel, then re-dock: a bigger panel may no longer
+-- fit on the side it chose.
 function Pn:ApplyChromeScale()
     local s = chromeScale()
     for _, po in ipairs(self.live) do

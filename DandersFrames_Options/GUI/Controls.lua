@@ -302,7 +302,7 @@ end
 -- a static wash is trivial here and impossible there, which is why the two are
 -- complementary rather than redundant. Keep both.
 --
--- ★ TWO TYPES. Custom Text and Glyph were built and dropped (Krathe, 2026-08-05): a
+-- ★ TWO TYPES. Custom Text and Glyph were built and dropped: a
 -- boolean "now" cue wants to read at a glance from the edge of vision, which is what a ring
 -- or a wash does and what a glyph competes with the icon to do.
 --
@@ -1296,15 +1296,6 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Dead branch: `scrollBar` is never assigned, so this never runs.
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
-        
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
@@ -1404,7 +1395,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     -- records the mechanism: on a FRESH SESSION the file may not be resident when
     -- SetTexture runs, and the region goes on rendering the PREVIOUS texture -- "the
     -- texture preview can bug out and not faithfully represent the selected texture,
-    -- most noticeably after a /reload or start of session" (Renegade, 2026-08-22).
+    -- most noticeably after a /reload or start of session".
     -- #1071 fixed the half that was ours, a second SetTexture racing the first. This is
     -- the half that is the client's, and no care at call time avoids it: the file is
     -- simply not there yet.
@@ -1701,15 +1692,6 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Dead branch: `scrollBar` is never assigned, so this never runs.
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
-        
         -- Create new buttons
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
@@ -1992,14 +1974,6 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
-
-        if scrollBar then
-            if #sortedOptions <= MAX_VISIBLE then
-                scrollBar:Hide()
-            else
-                scrollBar:Show()
-            end
-        end
 
         for i, opt in ipairs(sortedOptions) do
             local menuBtn = rowPool[i]
@@ -4125,23 +4099,16 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         
         for _, tex in ipairs(f.TexPool) do tex:Hide() end
         
-        -- ☠ THE RAMP IS BUILT IN ONE PLACE, AND THIS IS NOT IT. This function used to
-        -- hold a THIRD copy of the point-array build -- its own GetStageColor, its own
-        -- weight expansion -- alongside the two in Frames/Colors.lua. When the health
-        -- gradient moved to a stop list those two were converged and this one was
-        -- missed, so the strip kept painting the legacy Low/Medium/High stages: editing
-        -- a stop's colour changed the frames and did nothing to the preview above them.
-        -- A preview that disagrees with what it previews is worse than no preview.
-        --
-        -- DF.BuildColorStops is the shared builder. It answers for BOTH shapes (stop
-        -- list, or the legacy stages for a profile the migration has not reached), so
-        -- this reads whatever the renderer would read, by construction.
-        -- ⚠ THE PLAYER'S CLASS, NOT nil. A stop with useClass set resolves against the
-        -- unit's class at render time; passing nil makes BuildColorStops ignore the flag
-        -- and fall back to the stored colour, so the strip would show one thing and the
-        -- frames another the moment class colouring was switched on. Sampling the
-        -- player's own class is the preview differing in DATA, which is allowed -- it
-        -- shows what a frame for someone of your class would look like.
+        -- ☠ THE RAMP IS BUILT IN ONE PLACE, AND THIS IS NOT IT. DF.BuildColorStops
+        -- (Frames/Colors.lua) is the shared builder and answers for BOTH shapes (stop list, or
+        -- the legacy stages for a profile the migration has not reached), so this strip reads
+        -- whatever the renderer would read, by construction. A preview that disagrees with what
+        -- it previews is worse than no preview.
+        -- ⚠ THE PLAYER'S CLASS, NOT nil. A stop with useClass set resolves against the unit's
+        -- class at render time; passing nil makes BuildColorStops ignore the flag and fall back
+        -- to the stored colour, so the strip would disagree with the frames once class colouring
+        -- is on. Sampling the player's own class is the preview differing in DATA, which is
+        -- allowed -- it shows what a frame for someone of your class would look like.
         local _, previewClass = UnitClass("player")
         local stops = DF.BuildColorStops and DF.BuildColorStops(db, prefix, previewClass)
         if not stops or #stops < 2 then return end
@@ -4726,18 +4693,17 @@ GUI.QuietLabels   = QuietLabels
 -- ============================================================
 -- THE PAGE TOOLS -- THE CARD SECTIONS' SHARED MACHINERY
 -- ------------------------------------------------------------
--- Everything a settings page needs to build its card sections. This is the
--- ONLY copy: a per-page fork would drift, and the first thing to drift would be
--- one of the load-bearing notes rather than the code under it. The essays below
--- are the only place each piece is explained.
+-- Everything a settings page needs to build its card sections. This is the ONLY copy: a
+-- per-page fork would drift, and the first thing to drift would be one of the
+-- load-bearing notes rather than the code under it. The essays below are the only place
+-- each piece is explained.
 --
 -- USAGE, at the top of a BuildPage builder:
 --
 --     local tools = GUI:CreatePopoutPageTools(self)
 --
--- WHAT COMES BACK (all closing over this page's own state -- its mounted panes
--- and its holders -- so two pages built in one session cannot reflow each
--- other's panels):
+-- WHAT COMES BACK (all closing over this page's own state -- its mounted panes and its
+-- holders -- so two pages built in one session cannot reflow each other's panels):
 --
 --   OpenSection(...) / CloseSection(...)   -- one card section
 --   RegisterSection(section)               -- joins the Expand/Collapse All roster
@@ -4747,11 +4713,8 @@ GUI.QuietLabels   = QuietLabels
 --   ReflowMounted(values)
 --   RowDB()
 --   BandWidth(col)
---
--- (2026-09-26: the popout-row, hoisted-control and inline-pane machinery that
--- used to live here -- ClaimKeys, WireModifiedTick, WireFooter,
--- RegisterHoistedToggle, RegisterControlRow, the inline arm and INLINE_BOX --
--- was deleted with the designers' rows pages, its last callers.)
+--   DeferCard(key, mount) / MountCardGroups(Add, groups)
+--                                          -- card groups (see below)
 -- ============================================================
 function GUI:CreatePopoutPageTools(page)
     if not page then return nil end

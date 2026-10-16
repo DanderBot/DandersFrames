@@ -37,11 +37,8 @@ local activeHighlights = {}
 -- pulsing orange background that fades out after a few seconds.
 -- ============================================================
 
--- FALLBACK ONLY. This was the highlight's actual colour, hard-coded, and it reads
--- as the RAID theme -- so a pulse fired while Party was active looked like the GUI
--- had switched modes under you (Krathe, 2026-08-10, following an Aura Designer edit
--- link). ApplyHighlightOverlay now tints from the live theme; this stands in only if
--- the theme cannot be resolved.
+-- FALLBACK ONLY. ApplyHighlightOverlay tints from the live theme; this orange reads
+-- as the raid theme, so it stands in only when the theme cannot be resolved.
 local HIGHLIGHT_COLOR = {r = 1.0, g = 0.5, b = 0.1}  -- orange
 local HIGHLIGHT_PULSES = 4      -- number of pulse cycles
 local HIGHLIGHT_PULSE_DUR = 0.4 -- seconds per half-cycle

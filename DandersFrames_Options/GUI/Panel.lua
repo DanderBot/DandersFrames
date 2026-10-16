@@ -38,30 +38,22 @@ local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 -- Every number between the right edge of a widget on a page and the right edge
 -- of the settings window, in one table -- because the popout a feature row opens
 -- DOCKS OUTSIDE THAT EDGE and runs a beam back to the row, so this stack is the
--- length of that beam and it was five literals in four functions.
+-- length of that beam.
 --
 --   window edge -> content box      windowPad  (paired with the nav's own left
 --                                              margin: the two boxes sit at the
 --                                              same distance from the window)
 --   content box -> page viewport    inset on the left/top/bottom, GUTTER on the
 --                                   right
---   the gutter                      is the SCROLLBAR's, and now holds it
+--   the gutter                      is the SCROLLBAR's, and holds it
 --   page viewport -> first widget   SettingsBox.colMargin, both sides
 --
--- ☠ THE GUTTER WAS BEING PAID FOR TWICE. The scroll CHILD was built at
--- `content:GetWidth() - 30` -- the page's two 8px insets plus 14 of scrollbar
--- room -- so page content stopped 14px short of the viewport it sits in. But
--- ScrollFrameTemplate anchors its bar OUTSIDE the ScrollFrame, so the bar was
--- never in that 14: it sat beyond the viewport, in the page's own inset and the
--- window's margin, while the 14 stayed blank. The corridor carried the
--- scrollbar's width twice and showed it once.
---
--- Now the RIGHT edge of the viewport is inset by the gutter instead of by
--- `inset`, the bar is pinned into that gutter against the content box (the
--- idiom the settings nav has used by hand since it was built -- see navPad
--- below), and the child fills the viewport. Same bar, same air beside it, 8px
--- of blank returned to the page and 14px of it now occupied by something you
--- can see.
+-- ☠ PAY FOR THE GUTTER ONCE. ScrollFrameTemplate anchors its bar OUTSIDE the
+-- ScrollFrame, so the viewport's RIGHT edge is inset by the gutter (not by `inset`),
+-- the bar is pinned into that gutter against the content box (the idiom the settings
+-- nav uses -- see navPad below), and the scroll child fills the viewport. Shrinking the
+-- child by the scrollbar's width as well would leave a blank strip the bar never
+-- occupies.
 local PageBox = {
     windowPad = 12,   -- window edge -> the nav pane / the content box
     navGap    = 8,    -- nav pane -> content box
@@ -137,14 +129,14 @@ end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
--- in none of them and rendered at 100% forever (Krathe, 2026-08-09).
+-- in none of them and rendered at 100% forever.
 -- ⚠ DFPopupFrame is created LAZILY, so it is resolved through _G each call rather than
 -- captured: it usually does not exist yet when the scale is first applied. Popup.lua
 -- seeds the saved scale at creation for exactly that gap.
 --
 -- ☠ AND THE HAND-WRITTEN LIST FAILED AGAIN. DFPopupFrame was the first surface it
 -- missed; the Aura Designer's filter picker, its drag ghost and its buff popup were
--- the next three, all rendering at 100% beside a GUI at 70% (Krathe, 2026-08-10).
+-- the next three, all rendering at 100% beside a GUI at 70%.
 -- The list cannot work: it lives here, and the surfaces are created in five other
 -- files by people who have no reason to come and edit this function.
 --
@@ -176,8 +168,7 @@ end
 -- ☠☠ keepPlace: SCALE ABOUT THE WINDOW, NOT ABOUT THE SCREEN CENTRE.
 -- The window carries a single CENTER-to-UIParent point, so SetScale multiplies the
 -- anchor OFFSET along with everything else and the window walks toward or away from
--- the middle of the screen as you drag the slider. Reported 2026-09-16: "it always
--- scales from the center of the screen -- can it scale independently?"
+-- the middle of the screen as you drag the slider.
 -- ⇒ Read the centre in UIParent units before, then re-anchor to the same screen point
 -- after. A SetPoint offset is in the ANCHORED frame's OWN units, so the displacement
 -- has to be divided back by the new effective scale -- that conversion is the whole
@@ -276,16 +267,12 @@ end
 -- run for every widget on the open page. It is the settings window's half of
 -- the apply path: one write from a control drives this over the whole page.
 --
--- ☠ ONE SHARED FUNCTION, not a closure built per page. It used to be defined
--- inside BuildPage, which made it unreachable from DF and therefore
--- unmeasurable -- the profiler resolves its targets as paths against DF, so a
--- per-page local can never be one. Published as GUI.PageRefreshStates below,
--- and pages DISPATCH through that name rather than capturing this value (see
--- the assignment in BuildPage for why).
+-- ☠ ONE SHARED FUNCTION, not a closure built per page: the profiler resolves its
+-- targets as paths against DF, so a per-page local can never be measured. Published
+-- as GUI.PageRefreshStates below, and pages DISPATCH through that name rather than
+-- capturing this value (see the assignment in BuildPage for why).
 --
--- The parameter is named `self` because it IS the page and the body is the
--- former closure verbatim: renaming it would have put 250 lines of noise in a
--- diff whose whole point is that nothing changed.
+-- The parameter is named `self` because it IS the page.
 local function PageRefreshStates(self)
     if not self.children then return end
     local db = DF.db[GUI.SelectedMode]
@@ -445,8 +432,7 @@ local function PageRefreshStates(self)
             widget:ClearAllPoints()
             -- Both offsets snapped: this widget is the HEAD of the
             -- Reset/Sync/Copy chain, so a fraction here is inherited by
-            -- every button to its left, and the buttons are no longer
-            -- nudged back onto the grid individually.
+            -- every button to its left.
             widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
                 SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
         end
@@ -657,33 +643,26 @@ function DF:CreateGUI()
     
     -- Default and saved sizes
     --
-    -- ★ 640x600, AND ONLY THE DEFAULT. A first-run window is 120px narrower and
-    -- 80px taller than the 760x520 it was -- an interim step toward the slim
-    -- shell, and the height is what pays for the width: a narrower page is a
-    -- longer one.
+    -- ★ 640x600 is the DEFAULT only: a narrower page is a longer one, so the height pays
+    -- for the width.
     --
-    -- ⚠ IT STAYS SINGLE-COLUMN, and it already was. The cutover is 590 CONTENT
-    -- pixels (SettingsBox.minCol * 2 + colGutter), which is a 777px window once
-    -- the two margins, the 155 nav and its gap are paid for -- so 760 was under
-    -- it too. Narrowing to 640 does not change the column count of any page; it
-    -- just stops the window claiming 120px it was not laying anything out in.
+    -- ⚠ IT STAYS SINGLE-COLUMN. The cutover is 590 CONTENT pixels (SettingsBox.minCol * 2
+    -- + colGutter), which is a 777px window once the two margins, the 155 nav and its gap
+    -- are paid for.
     --
-    -- ⚠ NOBODY WHO ALREADY HAS A WINDOW MOVES. guiDb.width/height are read
-    -- below and win outright -- these two are what a profile with no stored size
-    -- falls back to, which after the account-wide move (see DF:GetWindowState)
-    -- means a fresh install and nothing else.
+    -- ⚠ guiDb.width/height are read below and win outright -- these two are what a
+    -- profile with no stored size falls back to, which after the account-wide move (see
+    -- DF:GetWindowState) means a fresh install and nothing else.
     --
-    -- ...and the RESIZE FLOOR is untouched at 520x400, deliberately: the default
-    -- is not a minimum, and a user who wants it smaller than it opens should
-    -- keep being able to drag it there. See normalMinWidth below, and
-    -- ApplyPageWidthBounds, which raises the floor to 850 on the wide pages --
-    -- opening one of those from a 640 window widens it.
+    -- ...and the RESIZE FLOOR is 520x400, deliberately: the default is not a minimum, and
+    -- a user who wants it smaller than it opens should be able to drag it there. See
+    -- normalMinWidth below, and ApplyPageWidthBounds, which raises the floor to 850 on
+    -- the wide pages -- opening one of those from a 640 window widens it.
     --
     -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
     -- `/df resetgui` writes the default back into the window state from Core.lua,
     -- which can run before this companion has ever loaded -- so a literal here
-    -- and a literal there were free to disagree, and a reset would "restore the
-    -- default" to a size the addon no longer ships.
+    -- and a literal there would be free to disagree.
     local defaultWidth  = GUI.WindowDefaults.width
     local defaultHeight = GUI.WindowDefaults.height
     local minWidth, minHeight = 520, 400
@@ -786,11 +765,13 @@ function DF:CreateGUI()
     -- Exit profile editing when GUI is closed
     frame:SetScript("OnHide", function()
         local AutoProfilesUI = DF.AutoProfilesUI
-        if AutoProfilesUI and AutoProfilesUI:IsEditing() then
+        -- Not when a DandersMover session hid us: the edit outlives the session
+        -- (see the Unlocked callback in Features/MoverBridge.lua).
+        if AutoProfilesUI and AutoProfilesUI:IsEditing() and not DF._guiHiddenForMoverSession then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
             -- ...which also skips its InvalidateAllPages. The builds made while
             -- editing show the LAYOUT's values (frame previews at its size), and
-            -- opening the window no longer rebuilds the page on screen (DF:ToggleGUI
+            -- opening the window does not rebuild the page on screen (DF:ToggleGUI
             -- goes through the cache), so they are thrown away here instead.
             if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
         end
@@ -984,8 +965,7 @@ function DF:CreateGUI()
     -- DECK 1 RIGHT CLUSTER: profile chip, scale, changelog, close
     -- -------------------------------------------------------------------------
     -- Chained right-to-left off the close button, so the cluster's right edge is
-    -- fixed and it grows leftward into the title's space -- the same direction
-    -- the UI Scale row used to grow for the same reason (a long label has room
+    -- fixed and it grows leftward into the title's space (a long label has room
     -- on the left and none on the right).
     -- =========================================================================
 
@@ -1005,9 +985,8 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
-    -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
-    -- and it used to be answerable only by walking to the Profiles page. The
-    -- chip is the shared inline dropdown -- same opener, same menu, same
+    -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting.
+    -- The chip is the shared inline dropdown -- same opener, same menu, same
     -- keyboard-free click -- reading and writing through the profile system's
     -- own accessors (DF:GetProfiles / DF:GetCurrentProfile / DF:SetProfile), so
     -- a switch from here is the same switch the Profiles page performs.
@@ -2171,18 +2150,14 @@ function DF:CreateGUI()
                     -- This is the ONLY action that does: nothing else in the GUI writes
                     -- windowState.scale, and moving or resizing the window leaves it alone.
                     GUI:RefreshPixelBorders()
-                    -- ☠ AND THE PAGE IS RE-LAID AT THE NEW SCALE, because until now
-                    -- nothing did (the Compact-layout blanking, reported 2026-09-16,
-                    -- still there after the alpha.9 memo fix). Every offset, width and
-                    -- height on the page was chosen through SnapLen at the OLD pixels-
-                    -- per-unit, and neither this path nor a scroll -- the two things
-                    -- the user reports as trigger and repair -- runs a line of layout.
-                    -- So after a rescale the page was left on geometry derived for a
-                    -- scale it is no longer drawn at, and whatever was wrong stayed
-                    -- wrong until something unrelated happened to re-anchor it. A
-                    -- relayout re-places every widget (ClearAllPoints + SetPoint) at
-                    -- numbers snapped for the scale actually on screen, which is the
-                    -- state a resize already leaves the page in.
+                    -- ☠ AND THE PAGE IS RE-LAID AT THE NEW SCALE. Every offset, width
+                    -- and height on the page was chosen through SnapLen at the OLD
+                    -- pixels-per-unit, and neither this path nor a scroll runs a line of
+                    -- layout -- so without this the page stays on geometry derived for a
+                    -- scale it is no longer drawn at (blank or misplaced panes until
+                    -- something unrelated re-anchors them). A relayout re-places every
+                    -- widget (ClearAllPoints + SetPoint) at numbers snapped for the scale
+                    -- actually on screen, the state a resize already leaves the page in.
                     -- ⚠ RE-LAY, NEVER REBUILD: RefreshCurrentPage leaks the whole page
                     -- into GUI._trashFrame. See RelayoutCurrentPage.
                     if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
@@ -2377,17 +2352,13 @@ function DF:CreateGUI()
     GUI.UpdateThemeColors = UpdateThemeColors
 
     -- ☠ RE-THEME EVERY TIME THE WINDOW SHOWS, not only when a mode tab is clicked.
-    -- Field report (Neosaro, v5.1.3; still reported current 2026-08-22): the title
-    -- text keeps "the color of the tab it was first enabled at the start of the
-    -- session or after a reload". Every mode-tab handler and DF:ToggleGUI call
-    -- UpdateThemeColors, so the ordinary paths are covered -- but any path that
-    -- shows the frame WITHOUT going through them presents the chrome in whatever
-    -- colour the last pass painted (/df resetgui's direct GUIFrame:Show() is one
-    -- such path in-repo, and nothing stops another appearing). Hooking OnShow makes
-    -- the invariant structural: a visible window is a re-themed window, whoever
-    -- showed it. Idempotent and cheap (a handful of SetTextColor/SetActive calls),
-    -- and HookScript so an existing or future OnShow handler is composed with, not
-    -- replaced.
+    -- Every mode-tab handler and DF:ToggleGUI call UpdateThemeColors, but any path that
+    -- shows the frame WITHOUT going through them (/df resetgui's direct
+    -- GUIFrame:Show() is one) would present the chrome in whatever colour the last pass
+    -- painted -- the title keeping the colour of the first tab of the session. Hooking
+    -- OnShow makes the invariant structural: a visible window is a re-themed window,
+    -- whoever showed it. Idempotent and cheap, and HookScript so an existing or future
+    -- OnShow handler is composed with, not replaced.
     frame:HookScript("OnShow", function() UpdateThemeColors() end)
 
     -- Function to update test button state (called externally)
@@ -2757,10 +2728,10 @@ function DF:CreateGUI()
     end
 
     -- ...and ONE selection rail for the whole nav, by the same argument as the
-    -- plate above it: the left accent bar used to be a texture on every row,
-    -- switched off on the row being left and on on the row being entered, and two
-    -- textures changing in one frame is a pair nothing can synchronise. This one
-    -- bar GLIDES vertically between rows instead (UI:CreateSelectionMarker).
+    -- plate above it: a per-row accent texture switched off on the row being left and
+    -- on on the row being entered is two textures changing in one frame, a pair nothing
+    -- can synchronise. This one bar GLIDES vertically between rows instead
+    -- (UI:CreateSelectionMarker).
     --
     -- Parented to tabContainer, the SCROLL CHILD, so it scrolls with the rows it
     -- marks -- and hides with whichever row it is on when a category collapses,
@@ -2835,15 +2806,12 @@ function DF:CreateGUI()
     -- =========================================================================
     -- THE PAGE DOCK
     -- -------------------------------------------------------------------------
-    -- ☠ EVERY BUILT PAGE USED TO STAY PARENTED TO `content`, SHOWN OR NOT, and
-    -- that is what made opening the settings window take EIGHT SECONDS. Settings
-    -- search indexes by BUILDING every page (Search:BuildFullRegistry), so one
-    -- search leaves all 34 of them fully populated -- 700+ widgets, plus the
-    -- Aura/Text Designer machinery -- hanging hidden off this one frame. From
-    -- then on GUIFrame:Show() measured 7774ms and Hide() about 2000ms, with only
-    -- ~52 of our own OnShow handlers firing in the whole 7.7s: the cost is the
-    -- ENGINE walking that hidden subtree for visibility, not Lua we run.
-    -- Reparenting the non-current pages away dropped the same Show to 90ms.
+    -- ☠ A BUILT PAGE THAT IS NOT ON SCREEN MUST NOT HANG OFF `content`. Settings search
+    -- indexes by BUILDING every page (Search:BuildFullRegistry), so one search leaves all
+    -- of them fully populated -- 700+ widgets plus the Aura/Text Designer machinery. Left
+    -- hidden under this frame, GUIFrame:Show() measured 7774ms and Hide() about 2000ms,
+    -- with only ~52 of our own OnShow handlers firing: the cost is the ENGINE walking that
+    -- hidden subtree for visibility, not Lua we run. Docked away, the same Show is 90ms.
     --
     -- So a page that is not the one on screen lives HERE instead: a detached,
     -- permanently hidden frame with no parent at all, outside the window's tree
@@ -2855,11 +2823,10 @@ function DF:CreateGUI()
     -- `content`. Anchored there, every step of a resize-grip drag re-resolves
     -- every built page's whole subtree: the window resizes about its centre, so
     -- every rect under `content` moves each frame, and the resize stutters once
-    -- enough pages have been opened with their cards expanded, or after the
-    -- Changed Settings page has listed a lot. Pinned, a
-    -- parked page still measures at a real size and can be BUILT in place, which
-    -- is what search's index pass does to all 34 of them; it is the size the page
-    -- last had, and AdoptPage puts it back on `content` at the current one.
+    -- enough pages have been opened with their cards expanded. Pinned, a parked page
+    -- still measures at a real size and can be BUILT in place, which is what search's
+    -- index pass does to all of them; it is the size the page last had, and AdoptPage
+    -- puts it back on `content` at the current one.
     GUI._pageDock = CreateFrame("Frame")
     GUI._pageDock:Hide()
     GUI._pageDock:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
@@ -3249,8 +3216,8 @@ function DF:CreateGUI()
         -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
         -- single-slot tracker) while leaving the menu's own shown flag set. Come back to
         -- that tab and it reappears, untracked: it floats over the page, overlaps the next
-        -- dropdown you open, and only closes if you click its own button
-        -- (Krathe, 2026-08-09). Hiding them here is what stops them being stranded.
+        -- dropdown you open, and only closes if you click its own button.
+        -- Hiding them here is what stops them being stranded.
         -- ⚠ Before HideResults and the page swap, so nothing is mid-teardown when it runs.
         if GUI.CloseAllMenus then GUI:CloseAllMenus() end
 
@@ -3466,26 +3433,23 @@ function DF:CreateGUI()
     -- page:Refresh(), which is DoBuild: every widget on the page is hidden and parked in
     -- GUI._trashFrame, and a fresh set is built. WoW never collects a frame, and nothing
     -- ever empties the trash -- so each rebuild keeps the whole previous page, and the Lua
-    -- tables and closures hanging off it, alive until /reload. Measured in game
-    -- (2026-09-18): the rebuild allocates ~804 KB a call; the relayout below, 35 KB.
-    -- The resize grip ran the rebuild on every release -- one click on it leaked a page.
-    -- Reported as "memory climbs in both Options and DandersMover when resizing, and
-    -- only /reload gives it back": the kit's options half bills to Options, its base
-    -- half to whichever addon's embedded copy won the load race.
+    -- tables and closures hanging off it, alive until /reload. Measured in game: the
+    -- rebuild allocates ~804 KB a call; the relayout below, 35 KB. (The kit's options half
+    -- bills to Options, its base half to whichever addon's embedded copy won the load
+    -- race.)
     --
     -- ⚠ RefreshStates IS RUN TWICE, AND THE SECOND PASS IS NOT A MISTAKE. Inside it the
     -- groups lay their rows out FIRST and the layout loop sets their widths AFTER. After a
     -- resize that order lays every row out against the OLD width and only then widens the
-    -- group around it -- the rows are a pass behind. The rebuild used to hide that, because
-    -- it constructs each band at the new width to begin with. The second pass lays the rows
-    -- out against the widths the first pass just set. Two relayouts still cost a fraction
-    -- of one rebuild, and leak nothing.
+    -- group around it -- the rows are a pass behind. The second pass lays the rows out
+    -- against the widths the first pass just set. Two relayouts still cost a fraction of
+    -- one rebuild, and leak nothing.
     -- ⚠ WHAT IT SKIPS, ON PURPOSE: the rebuild itself, the theme recolour and the modified-
     -- setting marks. A resize changes none of what those read.
     -- ⚠ A PAGE THAT BAKES A WIDTH INTO ITS BUILD needs its own OnSizeChanged to follow a
-    -- resize now, because nothing rebuilds it any more. The Filter Designer and the Aura
-    -- Designer already carry one; a page that reads wrong after a resize and fixes itself
-    -- on a tab change is the symptom of one that does not.
+    -- resize, because nothing rebuilds it. The Filter Designer and the Aura Designer
+    -- carry one; a page that reads wrong after a resize and fixes itself on a tab change
+    -- is the symptom of one that does not.
     GUI.RelayoutCurrentPage = function()
         if DF.Search and DF.Search.LayoutResults
             and DF.Search.ResultsPanel and DF.Search.ResultsPanel:IsShown() then
@@ -3500,13 +3464,13 @@ function DF:CreateGUI()
             page:RefreshStates()
         end
         -- ☠ CLIENT WORKAROUND, NOT A FIX OF OURS: NUDGE THE SCROLL 1px AND BACK.
-        -- After a resize-grip drag some inline panes were left with NO RECT at all
+        -- After a resize-grip drag some inline panes can be left with NO RECT at all
         -- (GetRect() -> nil on the holder and everything under it) while their plate,
-        -- anchors, sizes, levels and visibility were all correct -- so the box drew
-        -- empty until a scroll. Measured in game 2026-09-19; UpdateScrollChildRect and
-        -- re-setting the SAME offset both did nothing, lifting the frame level did
-        -- nothing, a real 1px move and back repaired every pane. A scroll-offset
-        -- change makes the client re-resolve every rect under the scroll child.
+        -- anchors, sizes, levels and visibility are all correct -- so the box draws
+        -- empty until a scroll. UpdateScrollChildRect, re-setting the SAME offset and
+        -- lifting the frame level do nothing; a real 1px move and back repairs every
+        -- pane, because a scroll-offset change makes the client re-resolve every rect
+        -- under the scroll child.
         -- Next frame, so it lands after the relayout's own anchor changes settle.
         -- Moves away from whichever end the page is sitting at, so it never clamps.
         if page.GetVerticalScroll and C_Timer and C_Timer.After then
@@ -3583,21 +3547,21 @@ function DF:CreateGUI()
     end
 
     -- ★ THE SAME CACHED REFRESH FOR OPENING THE WINDOW (DF:ToggleGUI). Opening
-    -- changes no data either, and the forced rebuild it used to run leaked the
-    -- page on screen on every open. It is safe because everything that can
-    -- REPLACE a table a build is bound to while the window is closed invalidates:
+    -- changes no data either, and a forced rebuild would leak the page on screen on
+    -- every open. It is safe because everything that can REPLACE a table a build is
+    -- bound to while the window is closed invalidates:
     --   * a profile switch / reset / copy / import -> FullProfileRefresh ->
     --     InvalidateAllPages (window shown or not). Its combat early-return skips
     --     that, but a switch or import re-wraps DF.db and a raid reset swaps the
     --     real raid table -- both caught by BuildDbMatches below;
-    --   * the Party/Raid sync (DF:UpdateAll runs it, window open or not) now
-    --     copies INTO the destination's tables, so nothing is replaced -- see
-    --     THE SYNC KEEPS TABLES at the bottom of this file;
+    --   * the Party/Raid sync (DF:UpdateAll runs it, window open or not) copies INTO
+    --     the destination's tables, so nothing is replaced -- see THE SYNC KEEPS
+    --     TABLES at the bottom of this file;
     --   * leaving auto-layout editing by closing the window invalidates (the
     --     window's OnHide);
     --   * the mover, DandersMover and the API position calls write in place.
     -- Values written while closed are repainted by each widget's own OnShow.
-    -- An opted-out page (singleModeBuild) still rebuilds, as before.
+    -- An opted-out page (singleModeBuild) still rebuilds.
     GUI.RefreshCurrentPageCached = function()
         GUI._refreshCurrentPageCached = true
         GUI:RefreshCurrentPage()
@@ -3629,11 +3593,9 @@ function DF:CreateGUI()
     -- previews, which size their mock frame to the layout's frameWidth/Height at
     -- build time and so stay stuck at the first-edited layout's size. Call this
     -- whenever the active layout changes (enter/exit auto-profile editing).
-    -- ☠ GUI.InvalidateAllPages was DEFINED TWICE, both inside DF:CreateGUI, so both ran on
-    -- every panel build and the later one silently won. The copy that used to sit here had
-    -- the `if not GUI.Pages` guard; the survivor did not, so the version actually in force
-    -- was the less defensive of the pair. There is now one definition, further down, with
-    -- the guard folded into it. Do not reintroduce a second.
+    -- ☠ GUI.InvalidateAllPages has ONE definition, further down. Do not add a second
+    -- inside DF:CreateGUI: both would run on every panel build and the later one would
+    -- silently win.
 
     -- Category system
     GUI.Categories = {}
@@ -3866,16 +3828,11 @@ function DF:CreateGUI()
         -- offsets going in are the only lever, same as the page viewport.
         --
         -- The rows TILE: each one's height IS the stride to the next, so there is
-        -- no strip between them where the cursor is over nothing.
-        --
-        -- They used to be 28 tall on a 30 stride (and 26 on 28), leaving a 2-unit
-        -- dead band -- about 3 device pixels -- between every pair. /df debug navprobe
-        -- caught what that costs: crossing the band puts mouse focus on the plain
-        -- container Frame behind the list for a single frame, with NO row lit, so
-        -- the hover plate blinks off and back on mid-sweep. That one dark frame is
-        -- the "ghost" -- and because whether you land in the band depends on how
-        -- fast you are moving, the same crossing sometimes flashed and sometimes
-        -- did not, which is why it looked like a render hitch rather than layout.
+        -- no strip between them where the cursor is over nothing. A gap of even 2 units
+        -- puts mouse focus on the container Frame behind the list for a single frame
+        -- while crossing it, with NO row lit, so the hover plate blinks off and on
+        -- mid-sweep -- intermittently, depending on cursor speed (/df debug navprobe
+        -- shows it).
         --
         -- Tiling costs nothing visually: only one row is ever lit, so the plates
         -- have no neighbour to sit flush against. The height is taken FROM the
@@ -4013,22 +3970,19 @@ function DF:CreateGUI()
     -- ============================================================
     -- ONE RETAINED BUILD PER MODE
     -- ------------------------------------------------------------
-    -- ☠☠ WHY THIS EXISTS: A PARTY/RAID SWITCH USED TO LEAK A WHOLE PAGE. The cache
-    -- below was keyed on ONE mode, so every switch was a cache miss: DoBuild parked
-    -- every widget on the page in GUI._trashFrame and built a fresh set. WoW never
-    -- collects a frame and nothing ever empties the trash, so each switch kept the
-    -- previous page (~800 KB measured, 2026-09-18) alive until /reload -- in the
-    -- Options addon AND in whichever addon's embedded DandersUI copy won the load
-    -- race. Reported as "memory climbs every time I flip Party/Raid".
+    -- ☠☠ WHY THIS EXISTS: keyed on ONE mode, every Party/Raid switch would be a cache
+    -- miss, and DoBuild parks every widget on the page in GUI._trashFrame and builds a
+    -- fresh set. WoW never collects a frame and nothing ever empties the trash, so each
+    -- switch would keep the previous page (~800 KB) alive until /reload -- in the Options
+    -- addon AND in whichever addon's embedded DandersUI copy won the load race.
     --
-    -- So a page now keeps AT MOST ONE BUILD PER MODE. The build on screen lives in
-    -- the page's own fields exactly as before (children, builtForMode, cacheValid,
-    -- ...); switching mode HIDES it and parks those fields in
-    -- page._modeBuilds[itsMode], then loads the incoming mode's slot back into the
-    -- same fields. A slot that is still valid is shown again and re-stated; one
-    -- that is not (or none at all) is rebuilt by the ordinary DoBuild, which is the
-    -- only thing that ever trashes a build. Memory is bounded at "every page built
-    -- at most twice", not "once per click".
+    -- So a page keeps AT MOST ONE BUILD PER MODE. The build on screen lives in the
+    -- page's own fields (children, builtForMode, cacheValid, ...); switching mode HIDES
+    -- it and parks those fields in page._modeBuilds[itsMode], then loads the incoming
+    -- mode's slot back into the same fields. A slot that is still valid is shown again
+    -- and re-stated; one that is not (or none at all) is rebuilt by the ordinary DoBuild,
+    -- which is the only thing that ever trashes a build. Memory is bounded at "every page
+    -- built at most twice", not "once per click".
     --
     -- ⚠ VALUES STAY FRESH WITHOUT A REBUILD because every db-bound factory repaints
     -- its value from its bound table on its own OnShow (SettingsWidgets.lua: the
@@ -4046,8 +4000,8 @@ function DF:CreateGUI()
     --
     -- ⚠ A PAGE THAT KEEPS PER-BUILD STATE OUTSIDE THESE FIELDS must either list it
     -- in page.modeBuildFields (swapped with the build) or opt out with
-    -- page.singleModeBuild = true, which keeps the old one-build behaviour exactly
-    -- (rebuild on every switch). The opted-out pages say why at their CreateSubTab.
+    -- page.singleModeBuild = true, which keeps one build (rebuild on every switch).
+    -- The opted-out pages say why at their CreateSubTab.
     -- ============================================================
     -- The fields that belong to ONE build rather than to the page. _popoutHolders
     -- is the page tools' (GUI:CreatePopoutPageTools): the holders are off-page
@@ -4464,9 +4418,8 @@ function DF:CreateGUI()
 
     -- Invalidate all page caches (call before profile/mode switches so each
     -- page rebuilds with a fresh db reference on its next visit).
-    -- ☠ THE ONLY DEFINITION. A second one used to exist earlier in this same function and
-    -- was shadowed by this one at every panel build; the guard below came from that copy.
-    -- Callers guard the FUNCTION but not the TABLE, so the guard has to live here.
+    -- ☠ THE ONLY DEFINITION. Callers guard the FUNCTION but not the TABLE, so the
+    -- GUI.Pages guard has to live here.
     -- `mode` (optional): only that mode's builds -- for a write that touched the
     -- other mode's settings and nothing else (see SettingsUndo). Omitted = both.
     function GUI:InvalidateAllPages(mode)
@@ -4543,17 +4496,17 @@ end
 -- on every DF:UpdateAll, window open or not. It gives each table-valued key it
 -- copies a NEW table (DF:DeepCopy), and a page build bound to the table it
 -- replaced would then show, and write into, a table nothing reads any more --
--- which is why every switch used to invalidate (and so rebuild, leaking) every
--- synced page's retained build of the other mode. See ONE RETAINED BUILD PER
--- MODE, above BuildPage.
+-- so every switch would have to invalidate (and so rebuild, leaking) every synced
+-- page's retained build of the other mode. See ONE RETAINED BUILD PER MODE, above
+-- BuildPage.
 --
--- Wrapped HERE, in the companion, because the copy itself stays exactly as it
--- is: this runs it, then pours each replacement back INTO the table it replaced
--- and puts that table back, so the data is the copy's and every reference to the
--- old table -- a retained page build, a search card, an undo entry -- sees it.
--- The same move the auto layouts make when they restore a whole-table override
--- (Core/AutoProfiles.lua, DeepReplaceInPlace), for the same reason. Nothing is
--- retained before the companion loads, so the resident copy alone is fine then.
+-- Wrapped HERE, in the companion, so the copy itself stays as it is: this runs it,
+-- then pours each replacement back INTO the table it replaced and puts that table
+-- back, so the data is the copy's and every reference to the old table -- a retained
+-- page build, a search card, an undo entry -- sees it. The same move the auto layouts
+-- make when they restore a whole-table override (Core/AutoProfiles.lua,
+-- DeepReplaceInPlace), for the same reason. Nothing is retained before the companion
+-- loads, so the resident copy alone is fine then.
 -- ⚠ Only tables the copy REPLACED are touched: a scalar key, a key the proxy
 -- refused to write (an auto-profile override guard), a key the section does not
 -- own and a key that was not a table before all come out exactly as the copy

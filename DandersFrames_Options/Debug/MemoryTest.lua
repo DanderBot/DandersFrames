@@ -479,10 +479,6 @@ end
 DF:RegisterDebugSlash("DFMEMTEST", "Memory test suite", true, "/dfmemtest")
 SlashCmdList["DFMEMTEST"] = ToggleMemTestFrame
 
--- (Removed) A delayed monkey-patch of SlashCmdList["DANDERSFRAMES"] used to make
--- "/df perftest" and "/df perf" work (this panel's former name). It wrapped the
--- dispatcher, so it answered BEFORE any routing rule inside it could apply —
--- which is how "/df perf" kept working through three rounds of removing exactly
--- that. The command is a normal RegisterDebugSlash entry and reachable as
--- "/df debug memtest"; nothing else was needed.
--- ☠ Never wrap the dispatcher: register the command instead.
+-- "/df debug memtest" is a normal RegisterDebugSlash entry.
+-- ☠ Never wrap the SlashCmdList dispatcher: a wrapper answers before any routing rule
+-- inside it can apply, which makes a command impossible to remove. Register instead.

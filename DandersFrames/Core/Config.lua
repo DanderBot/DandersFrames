@@ -18,7 +18,7 @@ DandersFrames = DF
 -- So a Ret Paladin whose spec was not yet inspected sorted MELEE in the preview and
 -- in flat raid, and RANGED in live party and grouped raid. A Survival Hunter split
 -- the same way. Headers was the outlier and the wrong one: a Paladin DAMAGER is
--- Retribution, which is melee. (Audit, 2026-08-07.)
+-- Retribution, which is melee.
 DF.MELEE_SPECS = {
     [250] = true, [251] = true, [252] = true,   -- Death Knight (Blood/Frost/Unholy)
     [577] = true, [581] = true,                 -- Demon Hunter (Havoc/Vengeance)
@@ -171,22 +171,18 @@ DF.SharedFonts = {
 -- ============================================================
 -- SHIPPED MEDIA MANIFEST
 -- ============================================================
--- ☠ GENERATED from DandersFrames/Media/. Regenerate whenever art is added,
--- renamed or removed — a stale manifest is worse than none, because it makes the
--- healing below confidently wrong in both directions.
+-- ☠ GENERATED from DandersFrames/Media/. Regenerate whenever art is added, renamed or
+-- removed -- a stale manifest is worse than none, because it makes the healing below
+-- confidently wrong in both directions.
 --
--- WHY THIS EXISTS, rather than asking C_UIFileAsset.IsKnownFile:
---   That API answers from a loose-file index the client builds at launch, so it
--- reports a file as KNOWN until the index catches up. Proven in game 2026-08-09:
--- files renamed under a running client, /reload -> textures rendered green with
--- no fallback and no warning; a fresh client launch -> the same paths healed
--- correctly and the warning fired. Same API, same paths, different answers.
---   That timing is exactly our real-world case: an addon update renames files
--- under a running client. For OUR OWN media we do not need to ask — we know what
--- we ship. The manifest is authoritative from the first frame and cannot go
--- stale mid-session.
---   The API is still used for THIRD-PARTY paths, where it is the only signal
--- available and where being wrong is harmless (see DF:SafeSetStatusBarTexture).
+-- WHY THIS EXISTS, rather than asking C_UIFileAsset.IsKnownFile: that API answers from a
+-- loose-file index the client builds at LAUNCH, so a file renamed under a running client
+-- still reads as known after a /reload (textures render green with no fallback and no
+-- warning). That is our real-world case -- an addon update renames files under a running
+-- client -- and for OUR OWN media we know what we ship: the manifest is authoritative from
+-- the first frame and cannot go stale mid-session.
+-- The API is still used for THIRD-PARTY paths, where it is the only signal available and
+-- where being wrong is harmless (see DF:SafeSetStatusBarTexture).
 local SHIPPED_MEDIA_FILES = {
     "Classic_Curve.tga",
     "DF_Absorb_V1.png",
@@ -960,7 +956,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         outline = ""
     end
 
-    -- The stored outline value may carry a "SHADOW;" prefix (Grid2-style: a drop
+    -- The stored outline value may carry a "SHADOW;" prefix (a drop
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
     -- value "SHADOW" on its own means shadow with no outline. Shadow is rendered via
     -- SetShadow* below, never as a font flag, so strip it out of the flag string.
@@ -1008,8 +1004,9 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         -- precomputed variants, so toggling it needs no invalidation.
         actualOutline = parsed.slug
     end
-    if fontString.SetScaleAnimationMode and FontStringScaleAnimationMode then
-        fontString:SetScaleAnimationMode(useSlug and FontStringScaleAnimationMode.Vertex or FontStringScaleAnimationMode.FontSize)
+    local scaleModes = Enum and Enum.FontStringScaleAnimationMode
+    if fontString.SetScaleAnimationMode and scaleModes then
+        fontString:SetScaleAnimationMode(useSlug and scaleModes.Vertex or scaleModes.FontSize)
     end
 
     local LSM = GetLSM()
@@ -1078,13 +1075,11 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
                 end
             end)
 
-            -- IMPORTANT (12.0.7): the drop shadow lives on the font-family's
-            -- per-alphabet font objects (set in GetOrCreateFontFamily). Do NOT also
-            -- set a fontstring-level shadow here: once a fontstring carries its own
-            -- shadow it stops inheriting the font object's, and fontstring-level
-            -- SetShadow* no longer renders on 12.0.7 — so the net result is NO shadow
-            -- (this is what hid the AFK timer / status-icon shadows). Leaving the
-            -- fontstring untouched lets it inherit the font object's shadow.
+            -- IMPORTANT: the drop shadow lives on the font-family's per-alphabet font objects (set in
+            -- GetOrCreateFontFamily). Do NOT also set a fontstring-level shadow here: a fontstring that
+            -- carries its own shadow stops inheriting the font object's, and fontstring-level SetShadow*
+            -- does not render, so the result would be NO shadow. Leaving the fontstring untouched lets
+            -- it inherit the font object's shadow.
             return true
         end
     end
@@ -1194,19 +1189,15 @@ DF.GlobalDefaults = {
     -- four combinations; the expiry border/tint supports only stepped (see below).
     durationTextColorSmooth = true,        -- true = blend between stops, false = snap to the stop at or below
     durationTextColorScale  = "PERCENT",   -- "PERCENT" | "SECONDS" — which ramp text reads
-    -- The expiry BORDER/TINT reveal has NO ramp of its own — it reads the two above, the
-    -- same lists the duration text uses, picked by the reveal's own per-indicator unit
+    -- The expiry BORDER/TINT reveal has NO ramp of its own -- it reads the two above, the same
+    -- lists the duration text uses, picked by the reveal's own per-indicator unit
     -- (expiryAlertThresholdUnit). One set of colours for "time is running out".
     -- The reveal cannot BLEND between them: its colours are baked into |T inline-texture
-    -- escapes, and inline textures IGNORE the fontstring vertex colour the smooth curve
-    -- writes (probe-verified). So durationTextColorSmooth above is text-only by nature.
-    -- A stop at or above an indicator's Alert Below threshold never renders — the reveal
-    -- doesn't exist up there, the same way a text stop past the aura's duration never
-    -- shows. /df debug cbt lists the affected stops per indicator.
-    -- (Removed 2026-07-24: durationBorderColorScale + durationBorderColorStops +
-    -- durationBorderColorPercentStops. A separate border palette bought nothing once the
-    -- defaults were asked to match the text, and the account-wide scale could not express
-    -- a glyph at 5 seconds next to a border at 30%.)
+    -- escapes, and inline textures IGNORE the fontstring vertex colour the smooth curve writes
+    -- (probe-verified). So durationTextColorSmooth above is text-only by nature.
+    -- A stop at or above an indicator's Alert Below threshold never renders -- the reveal does
+    -- not exist up there, the same way a text stop past the aura's duration never shows.
+    -- /df debug cbt lists the affected stops per indicator.
 }
 
 -- ============================================================
@@ -1250,12 +1241,11 @@ DF.PartyDefaults = {
     absorbBarOvershieldStyle = "SPARK",
     absorbBarReverse = false,
     absorbBarShowOvershield = false,
-    -- DF Absorb V1 (Krathe, 2026-08-09; was DF_Minimalist, before that DF_Stripes).
-    -- Stored as the PATH, which is what LSM registers the display name against
-    -- (Config.lua ~85) and what every other texture default in this file holds.
-    -- ☠ The ".png" is REQUIRED and is not decoration: PNG paths do not resolve
-    -- without their extension, and DF.TILED_BAR_TEXTURES is keyed by this exact
-    -- string — drop it and the texture both fails to load and stops tiling.
+    -- DF Absorb V1. Stored as the PATH, which is what LSM registers the display name against
+    -- and what every other texture default in this file holds.
+    -- ☠ The ".png" is REQUIRED: PNG paths do not resolve without their extension, and
+    -- DF.TILED_BAR_TEXTURES is keyed by this exact string -- drop it and the texture both
+    -- fails to load and stops tiling.
     absorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
     absorbBarWidth = 46,
     absorbBarX = 0,
@@ -1273,10 +1263,10 @@ DF.PartyDefaults = {
     afkIconText = "AFK",
     afkIconTextColor = {r = 1, g = 0.5, b = 0, a = 1},
     afkIconTimerColor = {r = 1, g = 0.5, b = 0, a = 1},
-    -- afkIconTimerFont intentionally unset: the timer inherits the global status-icon
-    -- font. The countdown no longer wobbles because ApplyTimerTextSettings LEFT-
-    -- justifies it (the changing seconds sit on the right with nothing to push). A
-    -- monospace font is still selectable if perfectly zero movement is wanted.
+    -- afkIconTimerFont intentionally unset: the timer inherits the global status-icon font.
+    -- ApplyTimerTextSettings LEFT-justifies the countdown (the changing seconds sit on the
+    -- right with nothing to push), so it does not wobble; a monospace font is still selectable
+    -- for perfectly zero movement.
     afkIconTimerFontSize = 16,
     afkIconTimerX = 0,
     afkIconTimerY = 1,
@@ -1464,10 +1454,9 @@ DF.PartyDefaults = {
     -- BORDER: a real DF.Border, keyed the standard way (prefix .. "Border*") so
     -- DF.Border:BuildSpec and GUI:CreateBorderControls both drive it with no special case.
     -- ☠ SEED THE WHOLE SET, not just the keys the default style uses. CreateBorderControls
-    -- builds every control it was opted into regardless of the current Style, and an unset
-    -- key renders as a dropdown reading "nil" or a slider with an empty value box (Krathe,
-    -- 2026-08-05). Values mirror the AD icon card's Border block so a pandemic ring opens
-    -- on the same numbers any other icon border does.
+    -- builds every control it was opted into regardless of the current Style, and an unset key
+    -- renders as a dropdown reading "nil" or a slider with an empty value box. Values mirror
+    -- the AD icon card's Border block so a pandemic ring opens on the same numbers.
     buffPandemicShowBorder = true,            -- the Pandemic Enable toggle is the real master
     buffPandemicBorderStyle = "SOLID",
     buffPandemicBorderSize = 2,
@@ -1540,7 +1529,7 @@ DF.PartyDefaults = {
     debuffImportantHighlight = true,          -- master toggle for the treatment below
     debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
     debuffImportantBadge = true,              -- corner "!" badge
-    -- 12, not 10 (Krathe, 2026-08-08): at 10 the "!" mark lands ~1.5px wide and reads as a
+    -- 12, not 10: at 10 the "!" mark lands ~1.5px wide and reads as a
     -- smudge no matter how heavy the art is — the floor is the disc diameter, not the glyph.
     -- ⚠ Two render-side fallbacks mirror this (Features/Auras.lua, Frames/AuraContainer.lua).
     debuffImportantBadgeSize = 12,            -- badge diameter in px (centred inside the corner, inset by size/4)
@@ -1550,20 +1539,15 @@ DF.PartyDefaults = {
     debuffImportantBadgeColor = {r = 1, g = 0.616, b = 0.18, a = 1},   -- disc
     debuffImportantMarkColor = {r = 0.08, g = 0.055, b = 0.024, a = 1}, -- the "!" itself
     -- Debuff blacklist: hide these non-secret debuffs from the debuff row (12.1
-    -- excludeSpellIDs, friendly-safe — NeverSecret only). Default hides the
-    -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);
-    -- Deserters + Ride Along are opt-in on the Aura Blacklist page. Buffs are NOT
-    -- here by design — they're opt-in via the Filter Designer.
-    -- ⚠ EVERY entry in DF.AuraBlacklist.DebuffSpells, blacklisted out of the box
-    -- (Krathe, 2026-08-10). It used to be the Sated/Exhaustion family only, with the
-    -- Deserters, Ride Along and Challenger's Burden left as opt-in hides — but every
-    -- spell in that catalog is there BECAUSE it is a nuisance with no combat value
-    -- on a party frame, so defaulting them to visible made the list read as a
-    -- feature nobody had turned on.
+    -- excludeSpellIDs, friendly-safe -- NeverSecret only). Buffs are NOT here by design --
+    -- they are opt-in via the Filter Designer.
+    -- ⚠ EVERY entry in DF.AuraBlacklist.DebuffSpells, blacklisted out of the box: every spell
+    -- in that catalog is there BECAUSE it is a nuisance with no combat value on a party frame
+    -- (the post-Lust family, Deserters, Ride Along, Challenger's Burden).
     --
-    -- ☠ Keep this in step with AuraBlacklist/Config.lua. A catalog entry missing
-    -- here simply ships visible, which is silent -- there is no check that the two
-    -- agree, and the UI cannot tell an intentional omission from a forgotten one.
+    -- ☠ Keep this in step with AuraBlacklist/Config.lua. A catalog entry missing here simply
+    -- ships visible, which is silent -- nothing checks that the two agree, and the UI cannot
+    -- tell an intentional omission from a forgotten one.
     debuffBlacklist = {
         [57724]  = true,  -- Sated
         [57723]  = true,  -- Exhaustion
@@ -1619,9 +1603,9 @@ DF.PartyDefaults = {
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
     buffMax = 4,
-    -- -3 / 6 (Krathe, 2026-08-08; X was -2, Y already 6). Mirrors the debuff row's
-    -- +3 / 6 — the buff row grows LEFT and the debuff row RIGHT, so equal-and-opposite
-    -- X insets sit them symmetrically about the frame. Change one, change the other.
+    -- -3 / 6. Mirrors the debuff row's +3 / 6 -- the buff row grows LEFT and the debuff row
+    -- RIGHT, so equal-and-opposite X insets sit them symmetrically about the frame. Change
+    -- one, change the other.
     buffOffsetX = -3,
     buffOffsetY = 6,
     buffPaddingX = 2,
@@ -1694,14 +1678,13 @@ DF.PartyDefaults = {
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
     debuffDispelBorderInset = 0,    -- native dispel ring: + inward / - outward halo
-    -- Dispel symbol (Wave 5b, colourblind aid): the engine writes the dispel-type
-    -- letter into a DF-owned FontString (native SetAuraSymbol; zero aura reads).
-    -- Renders in-game ONLY while WoW's colorblindMode CVar is on (GUI tooltip caveat).
+    -- Dispel symbol (colourblind aid): the engine writes the dispel-type letter into a
+    -- DF-owned FontString (native SetDispelTypeText; zero aura reads). We pass our own
+    -- customDispelTextMap, so it renders without WoW's colorblindMode CVar.
     -- ☠ NAME DIVERGENCE, DELIBERATE -- do not "tidy" these to match the label.
     -- These drive the feature the UI calls DISPEL TEXT: the two-letter dispel code
-    -- (Ma/Po/Cu) on a debuff icon. The keys still say Symbol because that was the
-    -- pre-68914 API name; Blizzard itself renamed it (SetDispelTypeText is current,
-    -- SetAuraSymbol is the deprecated alias) and the UI followed. Renaming the keys
+    -- (Ma/Po/Cu) on a debuff icon. The keys say Symbol after Blizzard's original API
+    -- name (now SetDispelTypeText), and the UI followed the rename. Renaming the keys
     -- would need a migration over everyone's saved data plus import handling for the
     -- export strings already in the wild -- all for an internal name nobody sees.
     --
@@ -1760,7 +1743,7 @@ DF.PartyDefaults = {
     debuffGrowth = "RIGHT_UP",
     debuffHideSwipe = false,
     debuffMax = 5,
-    -- 3 / 6 (Krathe, 2026-08-08; was 2 / 5). The mirror of buffOffsetX/Y — see the note
+    -- 3 / 6. The mirror of buffOffsetX/Y — see the note
     -- there. Y was one off the buff row, which read as the two rows sitting at slightly
     -- different heights.
     debuffOffsetX = 3,
@@ -1792,7 +1775,7 @@ DF.PartyDefaults = {
     showDebuffs = true,
 
     -- Defensive Bar
-    -- Grow = "From Center" (Krathe, 2026-08-08). The stored form is
+    -- Grow = "From Center". The stored form is
     -- <direction>_<wrap>, so CENTER_DOWN keeps the row HORIZONTAL wrapping DOWN — the
     -- orientation and wrap of the old RIGHT_DOWN — and changes only where it grows from.
     defensiveBarGrowth = "CENTER_DOWN",
@@ -1863,25 +1846,22 @@ DF.PartyDefaults = {
     defensiveIconShowDuration = true,
     -- Stack ("count") text on a defensive icon. Was a hardcoded 14pt table in
     -- Features/Auras.lua with no keys at all, so 12.1's three-digit stacks could not be
-    -- shrunk — only the duration text could (user report, 2026-08-13).
+    -- shrunk — only the duration text could.
     -- ☠ These reproduce that fixed look EXACTLY: baseSize 14 × Scale 1 = 14pt.
     -- ☠ NO Font and NO Color key on purpose. Absent reads nil, and BuildSpec treats nil
     -- as "DF default font" / "don't touch the colour" — which is what the old table did
     -- by omitting them. Adding either default here would restyle every existing profile.
     defensiveIconStackAnchor = "BOTTOMRIGHT",
-    -- ⚠ Seeded 2026-08-22 (Krathe): the pair had no font default and scale 1, which
-    -- rendered the stack count in the Blizzard fallback font (SafeSetFont resolves a
-    -- nil font to FRIZQT__, NOT to a DF font -- despite what a consumer comment
-    -- claimed) at a full 14pt. New profiles and untouched keys get the house font at
-    -- 0.7; the scale half of that for EXISTING profiles rides the one-shot
-    -- _defensiveStackRestyleV1 migration in Core.lua, because scale was previously
-    -- seeded 1 by this very table and the backfill will not overwrite it.
+    -- ⚠ The house font at 0.7: a nil font resolves through SafeSetFont to FRIZQT__, not to a
+    -- DF font. The scale half for profiles seeded at 1 rides the one-shot
+    -- _defensiveStackRestyleV1 migration in Core.lua, because the backfill never overwrites a
+    -- stored value.
     defensiveIconStackFont = "DF Roboto SemiBold",
     defensiveIconStackOutline = "OUTLINE",
     defensiveIconStackScale = 0.7,
     defensiveIconStackX = 2,
     defensiveIconStackY = -1,
-    -- 26 (Krathe, 2026-08-08; was 30). ⚠ RAID keeps its own smaller value — see
+    -- 26. ⚠ RAID keeps its own smaller value — see
     -- RAID_DEFAULT_OVERRIDES at the bottom of this file.
     defensiveIconSize = 26,
     defensiveIconX = 0,
@@ -1987,7 +1967,7 @@ DF.PartyDefaults = {
     healAbsorbBarOrientation = "HORIZONTAL",
     healAbsorbBarOverlayReverse = false,
     healAbsorbBarReverse = false,
-    -- DF Absorb V1 (Krathe, 2026-08-09) — matching absorbBarTexture, since the two
+    -- DF Absorb V1 — matching absorbBarTexture, since the two
     -- bars sit on the same health bar and read as one surface. See the note
     -- there about the required ".png".
     healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
@@ -2001,9 +1981,8 @@ DF.PartyDefaults = {
     healPredictionBackgroundColor = {r = 0, g = 0, b = 0, a = 0.5},
     healPredictionBlendMode = "BLEND",
     healPredictionEnabled = true,
-    -- ☠ UNDER THE ABSORB (+11) BY DESIGN. Was 12, which drew the incoming heal OVER the
-    -- shield where the two overlap; the shield is the more important readout (Krathe,
-    -- 2026-08-14). See DF:ResolveHealPredictionBarLevel for the band around it.
+    -- ☠ UNDER THE ABSORB (+11) BY DESIGN: where the two overlap, the shield is the more
+    -- important readout. See DF:ResolveHealPredictionBarLevel for the band around it.
     healPredictionFrameLevel = 10,
     healPredictionHeight = 6,
     healPredictionMode = "OVERLAY",
@@ -2013,7 +1992,7 @@ DF.PartyDefaults = {
     healPredictionReverse = false,
     healPredictionShowMode = "MINE",
     healPredictionShowOverheal = false,
-    -- DF Minimalist (Krathe, 2026-08-08; was WHITE8x8) — matching every other DF bar fill.
+    -- DF Minimalist — matching every other DF bar fill.
     healPredictionTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     healPredictionWidth = 50,
     healPredictionX = 0,
@@ -2070,7 +2049,7 @@ DF.PartyDefaults = {
     reducedMaxHealthClipHealthBar = true,
     reducedMaxHealthColor = {r = 0.502, g = 0.502, b = 0.502, a = 0.8039},
     reducedMaxHealthEnabled = true,
-    -- ⚠ DELIBERATELY DF_Stripes, not DF_Minimalist (Krathe, 2026-08-08). Every other
+    -- ⚠ DELIBERATELY DF_Stripes, not DF_Minimalist. Every other
     -- bar-fill default is DF_Minimalist, so this reads as the odd one out in a sweep —
     -- it is not. The hatch is what makes lost max health legible as a distinct band.
     reducedMaxHealthTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
@@ -2095,7 +2074,7 @@ DF.PartyDefaults = {
     leaderIconAlpha = 1,
     leaderIconAnchor = "TOPLEFT",
     leaderIconEnabled = true,
-    -- 80, not the 30 every other status icon uses (Krathe, 2026-08-08). The leader
+    -- 80, not the 30 every other status icon uses. The leader
     -- crown is anchored at the frame EDGE, which is exactly where the selection/hover/
     -- aggro highlights draw -- at 30 the highlight crossed it. Those sit at 75/76/77
     -- (Features/Highlights.lua), so 80 clears them with room to spare.
@@ -2163,7 +2142,7 @@ DF.PartyDefaults = {
     -- frameLevelOffset and ApplyZOrder's `or 40` fallback silently added 40. Existing
     -- profiles move by _missingBuffBaselineV3 (Core.lua), value-targeted on 35.
     missingBuffIconFrameLevel = 60,
-    -- 1 (Krathe, 2026-08-08). The old value was 1.2000000476837 — a float32 round-trip
+    -- 1. The old value was 1.2000000476837 — a float32 round-trip
     -- of a slider drag that had been committed as the baseline; 1 is exact.
     missingBuffIconScale = 1,
     missingBuffIconShowBorder = true,
@@ -2435,7 +2414,7 @@ DF.PartyDefaults = {
     raidTargetIconEnabled = true,
     raidTargetIconFrameLevel = 30,
     raidTargetIconHideInCombat = false,
-    -- 1 (Krathe, 2026-08-08). The old value was 1.1000000238419 — a float32 round-trip
+    -- 1. The old value was 1.1000000238419 — a float32 round-trip
     -- of a slider drag committed as the baseline, the same shape as missingBuffIconScale.
     raidTargetIconScale = 1,
     raidTargetIconX = 36,
@@ -2536,7 +2515,7 @@ DF.PartyDefaults = {
     -- on purpose -- an earlier alpha-gated auto version of this key
     -- (resourceBarMatchAdjustBorder, never released) read as doing nothing.
     -- ⚠ Default TRUE, and the defaults backfill seeds it into EXISTING profiles too
-    -- -- deliberately (Krathe, 2026-08-22): stable 5.2.0 ships the always-inset
+    -- -- deliberately: stable 5.2.0 ships the always-inset
     -- behaviour, so true is what every upgrading profile already looks like. False
     -- here would have silently lengthened every matched bar on upgrade.
     resourceBarMatchAdjustFrameBorder = true,
@@ -2656,18 +2635,17 @@ DF.PartyDefaults = {
     summonIconY = 0,
 
     -- BG Objective Carrier Icon (flag / orb carrier)
-    -- ★ TOPRIGHT, NOT THE CENTRE BUS (Krathe, 2026-08-08; was CENTER 0,0).
-    -- afkIcon, readyCheckIcon, summonIcon, resurrectionIcon and phasedIcon are ALL
-    -- "CENTER", 0, 0 at frame level 30 -- five icons at one point, resolved only by draw
-    -- order. That is survivable for states that cannot co-occur, but a flag carrier who
-    -- goes AFK, or who dies and is being resurrected, is ordinary BG behaviour, so this
-    -- one had to come off the bus. TOPRIGHT is clear of leaderIcon and roleIcon (both
-    -- TOPLEFT); ⚠ raidTargetIcon sits at TOP +36, which is close on a narrow frame.
-    -- ⚠ The remaining five are STILL on the bus -- moving this one does not fix the
-    -- ready-check/AFK collision noted in the party test data.
+    -- ★ TOPRIGHT, NOT THE CENTRE BUS. afkIcon, readyCheckIcon, summonIcon, resurrectionIcon
+    -- and phasedIcon are ALL "CENTER", 0, 0 at frame level 30 -- five icons at one point,
+    -- resolved only by draw order. That is survivable for states that cannot co-occur, but a
+    -- flag carrier who goes AFK, or dies and is being resurrected, is ordinary BG behaviour.
+    -- TOPRIGHT is clear of leaderIcon and roleIcon (both TOPLEFT); ⚠ raidTargetIcon sits at
+    -- TOP +36, which is close on a narrow frame.
+    -- ⚠ The other five are STILL on the bus, so the ready-check/AFK collision noted in the
+    -- party test data remains.
     bgCarrierIconAlpha = 1,
     bgCarrierIconAnchor = "TOPRIGHT",
-    -- OFF by default (Krathe, 2026-08-08; was true). Opt-in like combatIcon and
+    -- OFF by default. Opt-in like combatIcon and
     -- raidRoleIcon -- it is a PvP-only cue and the detection ticker only runs inside a
     -- BG anyway, so leaving it on bought nothing for the majority who never see it.
     bgCarrierIconEnabled = false,
@@ -2748,7 +2726,7 @@ DF.PartyDefaults = {
     targetedListSpacing = 6,
     targetedListStylePreset = "DEFAULT",
     targetedListTargetNameClassColor = true,
-    -- DF Minimalist (Krathe, 2026-08-08; was WHITE8x8) — matching every other DF bar fill.
+    -- DF Minimalist — matching every other DF bar fill.
     targetedListTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     targetedListUninterruptibleColor = {r = 0.8, g = 0.302, b = 0.302, a = 1},
     targetedListSelfTargetColorEnabled = true,
@@ -2841,7 +2819,7 @@ DF.PartyDefaults = {
     testShowTextDesigner = true,
     -- Test-mode indicator identification: highlights whichever element the cursor is
     -- over and names it, with the settings page that owns it.
-    -- ★ ON by default (Krathe, 2026-08-17). It shipped OFF on the reasoning that test mode
+    -- ★ ON by default. It shipped OFF on the reasoning that test mode
     -- is also how people pixel-tune spacing — but the marks are HOVER-ONLY and mark ONE
     -- element at a time, so an untouched cursor shows nothing and the tuning case is
     -- unaffected. Off by default mostly meant nobody found the feature.
@@ -2864,10 +2842,7 @@ DF.PartyDefaults = {
     -- pair could not express the above without the two controls silently arguing:
     -- one said "never in combat", the other said "show when Alt is held", and
     -- which won depended on the order the checks happened to sit in. A single
-    -- vocabulary resolved against the current combat state has no such gap --
-    -- exactly the shape ElvUI settled on (visibility.unitFrames plus
-    -- visibility.combatOverride, same five values). Ellesmere reaches the same
-    -- place from the other side with one always/outOfCombat/never mode.
+    -- vocabulary resolved against the current combat state has no such gap.
     --
     -- Defaults mirror the retired booleans' behaviour: binding SHOW/SHOW, frame
     -- SHOW out of combat but HIDE in combat (its DisableInCombat defaulted true).
@@ -3080,7 +3055,7 @@ DF.PartyDefaults = {
 
 local RAID_DEFAULT_OVERRIDES = {
     defensiveBarMax = 3,      -- party: 4
-    -- 24 to MATCH THE RAID MISSING-BUFF STRIP (Krathe, 2026-08-08; was 20). The two sit in
+    -- 24 to MATCH THE RAID MISSING-BUFF STRIP. The two sit in
     -- the same band on a raid frame and read as one row, so a 4px difference looked like a
     -- mistake rather than a distinction. ⚠ Kept as a raid OVERRIDE rather than folded into
     -- the party default: party stays 26.

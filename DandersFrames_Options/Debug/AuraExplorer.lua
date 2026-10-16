@@ -95,11 +95,9 @@ AE.TOKENS = {
     "RAID_IN_COMBAT",
     "RAID_PLAYER_DISPELLABLE",
     "IMPORTANT",
-    -- ☠ Self-contradicting components, kept ONLY so the retired string park is
-    -- reproducible: "HELPFUL|!HELPFUL" was a park convention that FAILED OPEN on live
-    -- 5.3.1 and rendered debuffs on parked slots. Valid to the parser (a negated known
-    -- component), meaningless to a human, and the whole reason DF's park is a
-    -- candidateFilter lock now instead of a filter string.
+    -- ☠ Self-contradicting components, kept so the string park's failure stays
+    -- reproducible: "HELPFUL|!HELPFUL" is valid to the parser (a negated known component)
+    -- and returns the unit's DEBUFFS, which is why DF parks slots with the enable bit.
     "!HELPFUL",
     "!HARMFUL",
     "INCLUDE_NAME_PLATE_ONLY",

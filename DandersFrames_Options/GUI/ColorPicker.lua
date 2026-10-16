@@ -192,14 +192,11 @@ end
 -- Ensure Blizzard's picker is restored when our picker closes
 -- ============================================================
 
--- ☠ Installed LAZILY, on the first open that could have hidden Blizzard's
--- picker, because the pack builds its frame on the first open and there is
--- nothing to hook before that. It used to ride a hooksecurefunc on
--- GUI.OpenColorPicker; that function now lives on the library and is only
--- reachable through the host's metatable, which is not a table hooksecurefunc
--- can be trusted to hook. Timing is unchanged: it still lands after the frame
--- exists and before the frame can hide, and it still appends AFTER the picker's
--- own OnHide (which fires the cancel callback).
+-- ☠ Installed LAZILY, on the first open that could have hidden Blizzard's picker: the
+-- pack builds its frame on that first open, so there is nothing to hook before it.
+-- GUI.OpenColorPicker lives on the library behind the host's metatable, which is not a
+-- table hooksecurefunc can be trusted to hook. This lands after the frame exists and
+-- before it can hide, and appends AFTER the picker's own OnHide (which fires cancel).
 local cleanupInitialized = false
 local function EnsurePickerCleanup()
     if cleanupInitialized then return end
@@ -295,7 +292,7 @@ local function OpenDFColorPickerWithBlizzard(info, useBlizzardAsBackend)
         -- So after "Use DF Color Picker for All Addons" had routed another addon's picker
         -- through here, that addon's swatchFunc was still armed on the frame, and the next
         -- DF colour edit drove it too: picking a DF colour changed the other addon's colour
-        -- as well. Reported by Aphoex (2026-08-17) against Chattynator, Platynator and
+        -- as well. Reported by Aphoex against Chattynator, Platynator and
         -- WarpDeplete, with the two tells that name this exactly -- /reload fixed it (the
         -- fields go with the frame), and closing DF's window did not (nothing touches
         -- them); and it never happened between two NON-DF addons, because each of those
