@@ -205,16 +205,24 @@ local function IsKeyOverridable(key)
 end
 
 -- A stored raid position record that says nothing raidAnchorX/raidAnchorY do not --
--- CENTER, no anchor, the same X/Y -- is dropped, keeping the layout in the shape it had
--- before the record existed (DF:GetPositionRecord builds exactly that record from the
--- scalars). So a layout only gains a record when it really carries an anchor or point.
-local function NormalizeLayoutPositionRecord(overrides)
+-- CENTER, no anchor, at the layout's effective X/Y -- is dropped, keeping the layout in
+-- the shape it had before the record existed (DF:GetPositionRecord builds exactly that
+-- record from the scalars). So a layout only gains a record when it really carries an
+-- anchor or a point.
+-- ⚠ EFFECTIVE X/Y: an edit stores only the scalars that changed, so a vertical-only move
+-- leaves raidAnchorX unstored. The missing one is the profile's (`base`), which is also
+-- what DF:GetPositionRecord reads for it. At least one scalar must be the layout's own:
+-- without one, the layout leaves the position to the profile and the record is what
+-- says "no anchor here", so it stays.
+local function NormalizeLayoutPositionRecord(overrides, base)
     local rec = overrides and overrides.position
-    if type(rec) ~= "table" then return end
-    if rec.anchor == nil and (rec.point or "CENTER") == "CENTER"
-        and overrides.raidAnchorX ~= nil and overrides.raidAnchorY ~= nil
-        and tonumber(rec.x) == tonumber(overrides.raidAnchorX)
-        and tonumber(rec.y) == tonumber(overrides.raidAnchorY) then
+    if type(rec) ~= "table" or rec.anchor ~= nil or (rec.point or "CENTER") ~= "CENTER" then return end
+    local ox, oy = overrides.raidAnchorX, overrides.raidAnchorY
+    if ox == nil and oy == nil then return end
+    local ex = tonumber(ox) or tonumber(base and base.raidAnchorX)
+    local ey = tonumber(oy) or tonumber(base and base.raidAnchorY)
+    local rx, ry = tonumber(rec.x), tonumber(rec.y)
+    if ex and ey and rx and ry and math.abs(rx - ex) < 0.001 and math.abs(ry - ey) < 0.001 then
         overrides.position = nil
     end
 end
@@ -1342,7 +1350,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
             end
         end
 
-        NormalizeLayoutPositionRecord(overrides)
+        NormalizeLayoutPositionRecord(overrides, self.globalSnapshot)
 
         -- Remove orphan keys created during editing that aren't tracked overrides
         local orphansRemoved = 0
@@ -1954,7 +1962,7 @@ function AutoProfilesUI:SetActiveLayoutRaidRecord(rec)
     if not p or type(rec) ~= "table" then return false end
     p.overrides = p.overrides or {}
     p.overrides.position = DeepCopyValue(rec)
-    NormalizeLayoutPositionRecord(p.overrides)
+    NormalizeLayoutPositionRecord(p.overrides, DF._realRaidDB)
     return true
 end
 

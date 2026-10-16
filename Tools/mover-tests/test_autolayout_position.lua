@@ -166,3 +166,43 @@ do
     eq(layout.overrides.raidAnchorX, 300, "layout position: an owning layout keeps its X through a re-apply")
     eq(real.raidAnchorX, 10, "layout position: ...and the profile's X is untouched")
 end
+
+-- 9. NormalizeLayoutPositionRecord, the real one (Core/AutoProfiles.lua): a record that
+--    adds nothing to the layout's EFFECTIVE X/Y is dropped -- including when an edit
+--    stored only the scalar that changed (the vertical-move case: Y only).
+do
+    local asrc = df_file_source("Core/AutoProfiles.lua"):gsub("\r\n", "\n")
+    local h = "local function NormalizeLayoutPositionRecord(overrides, base)"
+    local s2 = asrc:find(h, 1, true)
+    local e2 = s2 and asrc:find("\nend\n", s2)
+    check(s2 and e2, "normalize: can be cut out of AutoProfiles.lua")
+    if s2 and e2 then
+        local norm = assert(loadstring(asrc:sub(s2, e2 + 4) .. "\nreturn NormalizeLayoutPositionRecord",
+            "@AutoProfiles.lua(normalize)"))()
+        local base = { raidAnchorX = -6.67, raidAnchorY = -25 }
+
+        local o = { raidAnchorY = -346.42, position = { point = "CENTER", x = -6.67, y = -346.42 } }
+        norm(o, base)
+        check(o.position == nil, "normalize: Y-only edit -> the redundant record is dropped")
+
+        o = { raidAnchorX = 10, raidAnchorY = 20, position = { point = "CENTER", x = 10, y = 20 } }
+        norm(o, base)
+        check(o.position == nil, "normalize: both scalars stored -> dropped")
+
+        o = { raidAnchorY = 20, position = { point = "CENTER", x = 10, y = 20, anchor = { target = "X" } } }
+        norm(o, base)
+        check(o.position ~= nil, "normalize: a record carrying an anchor is kept")
+
+        o = { raidAnchorY = 20, position = { point = "TOPLEFT", x = -6.67, y = 20 } }
+        norm(o, base)
+        check(o.position ~= nil, "normalize: a record with its own point is kept")
+
+        o = { position = { point = "CENTER", x = -6.67, y = -25 } }
+        norm(o, base)
+        check(o.position ~= nil, "normalize: no scalar of the layout's own -> kept (it is what says 'no anchor')")
+
+        o = { raidAnchorY = 30, position = { point = "CENTER", x = -6.67, y = 20 } }
+        norm(o, base)
+        check(o.position ~= nil, "normalize: a record that disagrees with the scalars is kept")
+    end
+end

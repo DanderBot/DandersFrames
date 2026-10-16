@@ -206,7 +206,7 @@ do
     end
     local code = "local AutoProfilesUI, DF = ...\n"
         .. body("local function DeepCopyValue(value)")
-        .. body("local function NormalizeLayoutPositionRecord(overrides)")
+        .. body("local function NormalizeLayoutPositionRecord(overrides, base)")
         .. body("function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)")
         .. body("function AutoProfilesUI:SetActiveLayoutRaidRecord(rec)")
         .. body("function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)")
