@@ -221,11 +221,10 @@ local function Apply(db, key, value, mode, applyFn)
             refreshed = true
         end
     end
-    -- ...and when it was NOT repainted now, that mode's retained page builds are
-    -- invalidated instead. A switch no longer rebuilds the page it lands on (one
-    -- build per mode is kept -- see ONE RETAINED BUILD PER MODE in the Options
-    -- addon's GUI/Panel.lua), and the write above stored a COPY, so a widget still
-    -- bound to the table it replaced would never see it.
+    -- ...and when it was NOT repainted now, that mode's retained page builds are invalidated
+    -- instead. A switch does not rebuild the page it lands on (one build per mode is kept --
+    -- see ONE RETAINED BUILD PER MODE in the Options addon's GUI/Panel.lua), and the write
+    -- above stored a COPY, so a widget still bound to the table it replaced would never see it.
     if not refreshed and (mode == "party" or mode == "raid")
        and GUI and GUI.InvalidateAllPages then
         GUI:InvalidateAllPages(mode)
@@ -273,13 +272,12 @@ function SettingsUndo:OnInterceptWrite(db, key, value)
     t[key] = { old = DeepCopy(db[key]) }
 end
 
--- ...and the commit half, from the host's onSettingWritten hook. `label` is the
--- widget's display name, forwarded by the kit; absent, the key is prettified.
+-- ...and the commit half, from the host's onSettingWritten hook. `label` is the widget's
+-- display name, forwarded by the kit; absent, the key is prettified.
 --
--- `applyFn` is the widget's OWN commit callback, by reference -- the exact
--- function it runs after this write. Optional, and optional at both ends: a
--- surface that does not forward one records an entry that falls back to the
--- generic sweep, which is what every entry did before this argument existed.
+-- `applyFn` is the widget's OWN commit callback, by reference -- the exact function it runs
+-- after this write. Optional at both ends: a surface that does not forward one records an
+-- entry that falls back to the generic sweep.
 function SettingsUndo:OnSettingWritten(db, key, value, label, applyFn)
     if suspendDepth > 0 then return end
     if type(db) ~= "table" or key == nil then return end

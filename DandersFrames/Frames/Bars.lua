@@ -24,34 +24,26 @@ local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFil
 -- RESOURCE BAR LOGIC
 -- ============================================================
 
--- Centralized role and class filter check for resource bar visibility
--- Returns true if the resource bar should be shown for this unit
--- Unit must pass BOTH role filter AND class filter
--- `roleOverride` supplies the role as DATA instead of resolving it from a real unit,
--- which is how test mode drives this. The preview must run the LIVE gate: it used to
--- carry its own copy of the role logic and that copy had drifted, losing BOTH solo arms
--- below. resourceBarShowInSoloMode defaults to true and test mode is almost always driven
--- solo, so live showed the bar on every frame while the preview showed it only on the
--- role-filtered subset -- a setting you could not judge from the preview at all.
+-- Centralized role and class filter check for resource bar visibility. Returns true if the
+-- resource bar should be shown for this unit; the unit must pass BOTH the role filter AND
+-- the class filter.
+-- `roleOverride` supplies the role as DATA instead of resolving it from a real unit, which is
+-- how test mode drives this: the preview runs the LIVE gate, so it cannot drift from it.
 --
--- ☠ THE SOLO ARM IS SCOPED, and that scope is the whole point.
--- "Show in Solo Mode" answers "when I'm not in a group, put a resource bar on the frame
--- I actually asked for, regardless of the role filters". Solo, the party header holds
--- exactly one frame -- yours -- so an UNSCOPED arm read as correct for years. It is not:
--- a preview renders five fake party members while the client is solo and every one of
--- them took the bypass. Field-reported as "enabling Show in Solo Mode enables the
--- resource bar for every frame" (Aphoex, 2026-08-14).
+-- ☠ THE SOLO ARM IS SCOPED, and that scope is the whole point. "Show in Solo Mode" answers
+-- "when I'm not in a group, put a resource bar on the frame I actually asked for, regardless
+-- of the role filters". Solo, the party header holds exactly one frame -- yours -- but a
+-- preview renders five fake party members while the client is solo, and an unscoped arm
+-- would give every one of them the bypass.
 --
--- ⚠ PINNED FRAMES KEEP THE BYPASS, deliberately. They are the other thing on screen
--- while solo, and unlike a preview slot they are there because the user pinned that unit
--- by hand -- an explicit request, the same kind of claim your own frame makes. Scoping
--- them out silently took the power bar off pinned boss/NPC frames (no role resolves, so
--- they fall to the DPS toggle, off by default), which no report asked for.
+-- ⚠ PINNED FRAMES KEEP THE BYPASS, deliberately. They are the other thing on screen while
+-- solo, and they are there because the user pinned that unit by hand -- an explicit request,
+-- the same kind of claim your own frame makes. Without it, pinned boss/NPC frames would lose
+-- their power bar (no role resolves, so they fall to the DPS toggle, off by default).
 --
--- `selfOverride` is the DATA half, exactly like roleOverride/classOverride -- a preview
--- has no real unit to answer UnitIsUnit with. `frame` is the live half: pinned-ness is a
--- property of the FRAME, not of the unit token, so the gate cannot see it from `unit`.
--- Exactly one of the two is ever supplied.
+-- `selfOverride` is the DATA half, exactly like roleOverride/classOverride -- a preview has no
+-- real unit to answer UnitIsUnit with. `frame` is the live half: pinned-ness is a property of
+-- the FRAME, not of the unit token. Exactly one of the two is ever supplied.
 function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOverride, frame)
     if not db.resourceBarEnabled then return false end
 
@@ -217,7 +209,7 @@ function DF:LayoutResourceBar(frame, db)
     --   * auto — inset only when the border is TRANSLUCENT (alpha < 1), borrowed from
     --     DF:GetAbsorbEdgeInset's "if alpha >= 1 then return 0": correct-looking in
     --     both states, but the toggle gating it then "does not seem to do anything"
-    --     (Krathe, 2026-08-22) with the opaque border nearly everyone runs, because
+    -- with the opaque border nearly everyone runs, because
     --     both positions produced identical geometry. An option whose two states can
     --     render the same pixels reads as broken, whatever the tooltip says.
     -- So it is DETERMINISTIC now: Adjust For Frame Border ON = the bar tucks inside
@@ -226,7 +218,7 @@ function DF:LayoutResourceBar(frame, db)
     -- overlaps the bar's ends (the bar draws at frame level +20, above the border's
     -- +13, so with a see-through border the overlap is visible art-on-art — which is
     -- now a look the user chose rather than one an alpha test chose for them).
-    -- ⚠ Default ON (Krathe, 2026-08-22): it matches what stable 5.2.0 already renders,
+    -- ⚠ Default ON: it matches what stable 5.2.0 already renders,
     -- so no upgrading profile changes look — see the key's note in Config.lua. Aphoex
     -- 5's resolution is the OFF position being one click away, not the default:
     -- continuity for every existing profile won over the new ideal.
@@ -539,18 +531,15 @@ local function CacheAbsorbLayoutState(frame, db)
     s.overshieldR, s.overshieldG, s.overshieldB = osc.r, osc.g, osc.b
 end
 
--- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
--- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
--- geometry: the border frame draws at parent frame level +14 while the absorb
--- overlay sits at +11, so an opaque border paints OVER a flush overlay and the
--- shield covers the health fill exactly with nothing showing through — no inset
--- needed.
--- ☠ THIS PREMISE WAS SILENTLY FALSE between 2026-08-13 and 2026-08-14: the z-order
--- convergence lifted the absorb overlay to +11 and left the border at +10, so the
--- border stopped painting over it and this function kept returning 0 for a case it
--- no longer covered. The border moving to +14 is what makes the sentence above true
--- again. If either number moves, RE-READ THIS — it is a dependency, not a note. Returns the pixel-snapped border size only when the border is
--- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
+-- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health bar) when the
+-- frame border is off or fully OPAQUE. This works by Z-ORDER, not geometry: the border frame
+-- draws at parent frame level +14 while the absorb overlay sits at +11, so an opaque border
+-- paints OVER a flush overlay and the shield covers the health fill exactly with nothing
+-- showing through -- no inset needed.
+-- ☠ A DEPENDENCY, NOT A NOTE: if the border or the absorb level moves so the border no longer
+-- sits above the overlay, this premise is false and the function returns 0 for a case it does
+-- not cover. Returns the pixel-snapped border size only when the border is TRANSLUCENT, so
+-- the shield doesn't bleed through the border's edge band.
 -- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
 function DF:GetAbsorbEdgeInset(frame, db)
     if not db or db.frameShowBorder == false then return 0 end
@@ -601,22 +590,10 @@ function DF:ResolveAbsorbBarLevel(frame, db)
     return frame:GetFrameLevel() + 11
 end
 
--- ★ THE OTHER TWO BOUND BARS. Same contract as the absorb resolver above and for the
--- same reason: the ladder is stated ONCE, here, and every mode branch asks for its slot
--- rather than doing its own arithmetic off the health bar.
---
--- ☠ What these replace was not a near-miss, it was a different ladder. Each updater
--- computed a level up top, applied it, then EVERY mode branch overwrote it with
--- healthLevel + 1..3. The real band was health +3, prediction +4, heal-absorb +5,
--- absorb +5, overflow +6 -- packed into four levels -- while the comments, the db keys
--- and DF:ResolveDispelGradientLevel all reasoned about +8/+11/+12. The dispel wash's
--- current-health slot of +4 was chosen to sit under that documented band and in fact
--- TIED with heal prediction; it drew correctly on creation order alone
--- (/df debug zorder on a live frame, 2026-08-13).
--- ⚠ The old branch comments justified themselves with "below dispel overlay (+6) and
--- aggro highlight (+9)". The overlay has been at +16 since 2026-08-07, and there is no
--- aggro-highlight level anywhere in the addon -- both numbers were fiction, and fiction
--- is what the arithmetic was protecting.
+-- ★ THE OTHER TWO BOUND BARS. Same contract as the absorb resolver above: the ladder is
+-- stated ONCE, here, and every mode branch asks for its slot rather than doing its own
+-- arithmetic off the health bar -- per-branch arithmetic silently packs the band into a few
+-- levels and makes neighbours tie on creation order (check with /df debug zorder).
 function DF:ResolveHealAbsorbBarLevel(frame, db)
     if not frame or not frame.GetFrameLevel then return nil end
     return frame:GetFrameLevel() + 8
@@ -625,14 +602,12 @@ end
 -- ⚠ The key is user-facing so it wins; 12 is the ladder's slot and the shipped default.
 function DF:ResolveHealPredictionBarLevel(frame, db)
     if not frame or not frame.GetFrameLevel then return nil end
-    -- ☠ DEFAULT 10, AND IT MUST STAY UNDER THE ABSORB (+11). Krathe's rule, 2026-08-14:
-    -- "incoming heals ... never sitting above absorbs, as they are more important." The
-    -- two bars share the missing-health region, so whichever is higher HIDES the other
-    -- where they overlap -- and the shield is the one you must not lose. This was 12,
-    -- which put the heal on top and buried the absorb behind it.
+    -- ☠ DEFAULT 10, AND IT MUST STAY UNDER THE ABSORB (+11): incoming heals never sit above
+    -- absorbs. The two bars share the missing-health region, so whichever is higher HIDES the
+    -- other where they overlap, and the shield is the one you must not lose.
     -- Band around it: heal-absorb +8 · >> heal prediction +10 << · absorb / overflow +11.
-    -- ⚠ Still a user slider (0-100): raising it past 11 puts the heal back over the
-    -- shield, which is then the user's explicit choice rather than the default.
+    -- ⚠ Still a user slider (0-100): raising it past 11 puts the heal back over the shield, which
+    -- is then the user's explicit choice.
     return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 10)
 end
 
@@ -648,8 +623,8 @@ end
 -- ☠ A cache key MUST derive from the same read as the thing it guards: an earlier cut
 -- compared a stamp written only at UpdateHealPrediction's tail, which four hide paths
 -- bypass, and the cache froze on "segment 1" while the resolver picked "fill".
--- ☠☠ TOMBSTONE: BLIZZARD'S HEAL-ABSORB NETTING WAS BUILT HERE AND REVERTED SAME-DAY
--- (2026-08-14). The model is right — a consuming heal absorb eats the first N points
+-- ☠☠ TOMBSTONE: BLIZZARD'S HEAL-ABSORB NETTING WAS BUILT HERE AND REVERTED SAME-DAY.
+-- The model is right — a consuming heal absorb eats the first N points
 -- of an incoming heal, so Blizzard back-shifts the heal to start at the heal-absorb
 -- region's inner edge and hangs the shield at the health edge. The anchor-only
 -- implementation rode the ATTACHED heal-absorb bar's fill texture. IT CANNOT BE MADE
@@ -910,20 +885,14 @@ function DF:UpdateAbsorb(frame, testIndex)
     
     local customBar = frame.dfAbsorbBar
     
-    -- Level. In the health-bar-BOUND modes (OVERLAY / ATTACHED / ATTACHED_OVERFLOW) the
-    -- level is DERIVED, by design: the Frame Level slider is FLOATING-only
-    -- (Pages/Auras.lua, `levelSlider.hideOn`), because a bar pinned to the health bar has
-    -- no meaningful level of its own to expose. FLOATING and ATTACHED override this below.
-    --
-    -- ☠ This +15 used to be one of three branches selected by an `absorbBarStrata` key that
-    -- had NO UI, no migration and no writer of any kind -- so every profile held the
-    -- "MEDIUM" default and the other two branches (+3 / +1) were unreachable. Collapsed to
-    -- the value that actually shipped. NOTHING MOVED; see the commit for the audit.
-    -- ⚠ OPEN, deliberately not changed here: healthBar sits at frame+3, so this lands the
-    -- bar at ~frame+18 -- above the dispel overlay's +16/+17 band -- while
-    -- absorbBarFrameLevel (the FLOATING slider), Core.lua's re-level and the z-order map all
-    -- say +11. Whether the bound modes SHOULD move to +11 is a design call needing in-game
-    -- measurement, not arithmetic. See [[zorder_layer_map]].
+    -- Level. In the health-bar-BOUND modes (OVERLAY / ATTACHED / ATTACHED_OVERFLOW) the level is
+    -- DERIVED, by design: the Frame Level slider is FLOATING-only (Pages/Auras.lua,
+    -- `levelSlider.hideOn`), because a bar pinned to the health bar has no meaningful level of its
+    -- own to expose. FLOATING and ATTACHED override this below.
+    -- ⚠ OPEN: healthBar sits at frame+3, so this lands the bar at ~frame+18 -- above the dispel
+    -- overlay's +16/+17 band -- while absorbBarFrameLevel (the FLOATING slider), Core.lua's
+    -- re-level and the z-order map all say +11. Whether the bound modes SHOULD move to +11 is a
+    -- design call needing in-game measurement, not arithmetic. See [[zorder_layer_map]].
     local healthLevel = frame.healthBar:GetFrameLevel()
     local absorbLevel = DF:ResolveAbsorbBarLevel(frame, db) or (healthLevel + 15)
 
@@ -1076,9 +1045,8 @@ function DF:UpdateAbsorb(frame, testIndex)
         customBar:ClearAllPoints()
         customBar:SetParent(frame.healthBar)
         customBar:SetFrameStrata(frame:GetFrameStrata())
-        -- ☠ The ladder's absorb slot, resolved once at the top of this function.
-        -- Was healthLevel + 2 (frame+5), justified by a dispel overlay at +6 that has
-        -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
+        -- The ladder's absorb slot, resolved once at the top of this function (see
+        -- DF:ResolveHealAbsorbBarLevel).
         customBar:SetFrameLevel(absorbLevel)
         
         -- Re-assert the texture's tiling mode. This runs AFTER the texture is applied
@@ -1120,13 +1088,10 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- (test values never exceed max), so the shield may overrun — exactly what
             -- those settings mean on live frames.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
-                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. This read the LIVE
-                -- enable (reducedMaxHealthEnabled) and subtracted the reduced share even
-                -- while the test panel's Reduced Max Health display was OFF -- no stripes
-                -- on screen, full-width bar, and the clamp still gave away 45% of it
-                -- (Xx: detached band again, 2026-08-14). The ruler is whatever the frame
-                -- DRAWS: reduced subtracts only when its overlay bar is actually shown
-                -- and the bar is not clipped (clipping already shrinks the ruler itself).
+                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
+                -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
+                -- clipped (clipping already shrinks the ruler itself). Keying on the live enable would give
+                -- the reduced share away while the test panel's Reduced Max Health display is off.
                 local rmb = frame.dfReducedMaxHealthBar
                 local reducedShare = (rmb and rmb:IsShown()
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
@@ -1146,16 +1111,14 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM:
-            -- the UI says 0=None / 1=Missing Health / 2=Max Health, but the value goes
-            -- straight to SetDamageAbsorbClampMode, where Blizzard defines
-            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
-            -- 2=MaximumHealth. So the user's "Missing Health" (1) ignores heals -- fine
-            -- while the shield started at the health fill, but chained BEHIND the heal it
-            -- hands the bar a length that no longer fits and it runs off the end. When the
-            -- chain is active, 1 is promoted to 0: the same "Missing Health" intent the
-            -- label promises, but heals-aware, which is what a chained bar has to mean. The
-            -- arithmetic stays inside the calculator, where secret values are legal.
+            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
+            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
+            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
+            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
+            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
+            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
+            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
@@ -1188,15 +1151,12 @@ function DF:UpdateAbsorb(frame, testIndex)
 
         -- Create/update overshield glow at max health position
         if db.absorbBarShowOvershield then
-            -- ★ THE GLOW NEEDS ITS OWN HOST, ABOVE THE WHOLE BAND.
-            -- It used to be a texture created straight on frame.healthBar (frame+3). A
-            -- draw layer only orders textures WITHIN one frame, so against any bar that
-            -- is a separate frame the level wins and the glow was buried whatever OVERLAY
-            -- sublevel it was given. Blizzard puts the equivalent (overAbsorbGlow) at
-            -- ARTWORK sublevel 2, above the prediction and the absorb both: it is the
+            -- ★ THE GLOW NEEDS ITS OWN HOST, ABOVE THE WHOLE BAND. A draw layer only orders textures
+            -- WITHIN one frame, so a texture on frame.healthBar (frame+3) would be buried by any bar that
+            -- is a separate frame, whatever OVERLAY sublevel it had. Blizzard puts the equivalent
+            -- (overAbsorbGlow) at ARTWORK sublevel 2, above the prediction and the absorb both: it is the
             -- alert that the shield ran past the bar, so it is the one element that wins.
-            -- ⚠ Every glow anchor below names frame.healthBar explicitly, so re-parenting
-            -- the texture moves nothing.
+            -- ⚠ Every glow anchor below names frame.healthBar explicitly, so the host moves nothing.
             if not frame.dfOvershieldHost then
                 frame.dfOvershieldHost = CreateFrame("Frame", nil, frame)
                 frame.dfOvershieldHost:SetAllPoints(frame.healthBar)
@@ -1395,9 +1355,8 @@ function DF:UpdateAbsorb(frame, testIndex)
         customBar:ClearAllPoints()
         customBar:SetParent(frame.healthBar)
         customBar:SetFrameStrata(frame:GetFrameStrata())
-        -- ☠ The ladder's absorb slot, resolved once at the top of this function.
-        -- Was healthLevel + 2 (frame+5), justified by a dispel overlay at +6 that has
-        -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
+        -- The ladder's absorb slot, resolved once at the top of this function (see
+        -- DF:ResolveHealAbsorbBarLevel).
         customBar:SetFrameLevel(absorbLevel)
         
         -- Re-assert the texture's tiling mode. This runs AFTER the texture is applied
@@ -1440,13 +1399,10 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- (test values never exceed max), so the shield may overrun — exactly what
             -- those settings mean on live frames.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
-                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. This read the LIVE
-                -- enable (reducedMaxHealthEnabled) and subtracted the reduced share even
-                -- while the test panel's Reduced Max Health display was OFF -- no stripes
-                -- on screen, full-width bar, and the clamp still gave away 45% of it
-                -- (Xx: detached band again, 2026-08-14). The ruler is whatever the frame
-                -- DRAWS: reduced subtracts only when its overlay bar is actually shown
-                -- and the bar is not clipped (clipping already shrinks the ruler itself).
+                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
+                -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
+                -- clipped (clipping already shrinks the ruler itself). Keying on the live enable would give
+                -- the reduced share away while the test panel's Reduced Max Health display is off.
                 local rmb = frame.dfReducedMaxHealthBar
                 local reducedShare = (rmb and rmb:IsShown()
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
@@ -1466,16 +1422,14 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM:
-            -- the UI says 0=None / 1=Missing Health / 2=Max Health, but the value goes
-            -- straight to SetDamageAbsorbClampMode, where Blizzard defines
-            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
-            -- 2=MaximumHealth. So the user's "Missing Health" (1) ignores heals -- fine
-            -- while the shield started at the health fill, but chained BEHIND the heal it
-            -- hands the bar a length that no longer fits and it runs off the end. When the
-            -- chain is active, 1 is promoted to 0: the same "Missing Health" intent the
-            -- label promises, but heals-aware, which is what a chained bar has to mean. The
-            -- arithmetic stays inside the calculator, where secret values are legal.
+            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
+            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
+            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
+            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
+            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
+            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
+            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
@@ -1594,20 +1548,10 @@ function DF:UpdateAbsorb(frame, testIndex)
 
         -- Configure the overflow bar (always, so it's ready when needed)
         overflowBar:ClearAllPoints()
-        -- ☠ DERIVED FROM THE ATTACHED BAR, the SAME level. The two are halves of one
-        -- readout, and that RELATION is the contract -- the absolute number is not.
-        -- A DF:ResolveAbsorbBarLevel call used to sit ten lines above this one and was
-        -- overwritten right here on every pass: dead code that read as a fix, and it
-        -- survived an in-game confirmation because what actually fixed that report was
-        -- the dispel wash dropping to +4, not this bar moving. Proved by
-        -- /df debug zorder -- attached +5, overflow +6, resolver claims +11 (2026-08-13).
-        -- ⚠ The comment here used to say "below dispel overlay (+6)". The overlay has
-        -- been at +16 since the 2026-08-07 z-order review, so that number was fiction
-        -- and it is what justified the hardcoded arithmetic.
-        -- ☠ SHARES the attached bar's level rather than sitting one above it. At the
-        -- old squashed levels +1 was free; on the real ladder absorb is +11 and +12 is
-        -- heal prediction's slot. The two segments are adjacent and never overlap, so
-        -- one level is correct and needs no tie-break.
+        -- ☠ DERIVED FROM THE ATTACHED BAR, the SAME level. The two are halves of one readout, and
+        -- that RELATION is the contract -- the absolute number is not. Sharing the level rather than
+        -- sitting one above: absorb is +11 and +12 is heal prediction's slot, and the two segments
+        -- are adjacent and never overlap, so one level is correct and needs no tie-break.
         overflowBar:SetFrameLevel(customBar:GetFrameLevel())
         
         -- Apply same texture/color as main absorb bar
@@ -2025,16 +1969,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             
             -- Set clamp mode: 0 = CurrentHealth (don't go past 0 health)
             if calc.SetHealAbsorbClampMode then calc:SetHealAbsorbClampMode(0) end
-            -- ☠☠ THE NETTING IS ASYMMETRIC, AND THAT IS THE WHOLE DESIGN. Blizzard's
-            -- model: the WASH draws at its FULL amount (CompactUnitFrame uses the raw
-            -- heal-absorb value) while the incoming HEAL is what gets netted. Full wash
-            -- + shortened heal = the relationship is VISIBLE: "your 25% heal shows only
-            -- 10% because this 15% wash eats the rest."
-            -- Mode 1, Total, here — this file briefly set 0 (net) on BOTH calculators,
-            -- and symmetric netting mathematically guarantees one side is always zero
-            -- (net wash = max(0, w−h), net heal = max(0, h−w)) — the interplay could
-            -- never be seen, only its survivor (Krathe, 2026-08-14: "the entire idea
-            -- was to see the INCOMING HEAL reducing in relation to the heal absorb").
+            -- ☠☠ THE NETTING IS ASYMMETRIC, AND THAT IS THE WHOLE DESIGN. Blizzard's model: the WASH draws
+            -- at its FULL amount (CompactUnitFrame uses the raw heal-absorb value) while the incoming
+            -- HEAL is what gets netted. Full wash + shortened heal = the relationship is VISIBLE: "your
+            -- 25% heal shows only 10% because this 15% wash eats the rest." Symmetric netting
+            -- mathematically guarantees one side is always zero (net wash = max(0, w-h), net heal =
+            -- max(0, h-w)), so the interplay could never be seen.
             -- ⇒ The wash is Total (1). The PREDICTION is net (0). Do not "align" them.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(1) end
             
@@ -2260,29 +2200,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- happen. If you find yourself wanting it back, the answer is almost certainly
     -- to feed the shared path a different NUMBER instead.
 
-    -- ★★ THE PREVIEW SUPPLIES AMOUNTS, NEVER GEOMETRY. Everything below this block
-    -- is shared with live: same anchors, same StatusBar values, same clamp.
+    -- ★★ THE PREVIEW SUPPLIES AMOUNTS, NEVER GEOMETRY. Everything below this block is shared with
+    -- live: same anchors, same StatusBar values, same clamp. A parallel geometry branch would
+    -- measure from healthBar:GetWidth() minus the border inset, which is NOT the basis the health
+    -- FILL uses, and disagree by inset * (1 - 2 * health) -- a hidden overlap at a static health
+    -- and a visible gap the moment Animate Health swings. Nothing in live's path is secret-bound
+    -- here (a StatusBar fed a plain value behaves as one fed a secret), so test follows live.
     --
-    -- ☠ IT USED TO FORK AT THE RENDER, and that is what this replaced. The overlay
-    -- had a whole parallel geometry branch computing widths from
-    -- healthBar:GetWidth() minus the border inset -- which is NOT the basis the
-    -- health FILL uses (the fill spans the bar's full width). The two therefore
-    -- disagreed by inset * (1 - 2 * health): a hidden overlap at a static health,
-    -- and a visible gap between health and prediction the moment Animate Health
-    -- swung it the other way (Krathe, 2026-08-07). The clamp added hours earlier had
-    -- gone into that same duplicated geometry rather than onto the amount, where
-    -- live's calculator puts it -- the fourth divergence of this shape in two days.
-    --
-    -- ★ Nothing in live's path is secret-bound here, so there is no reason to fork:
-    -- test values are plain numbers, and a StatusBar fed a plain value behaves the
-    -- same as one fed a secret. Standing rule -- test follows live wherever it can.
-    --
-    -- ★ ONE ceiling for live's calculator AND the test mirror, or they drift -- the
-    -- exact fast-path-copy trap this file has sprung twice. 1.05 is the field
-    -- consensus for the overheal tail: Blizzard's own compact party/raid frames cap
-    -- at 5% past the bar, and every surveyed implementation either matches that
-    -- sliver or shows no overhang at all. A first cut used 2.0 ("never the binding
-    -- constraint") -- functionally correct and visually an outlier nobody ships.
+    -- ★ ONE ceiling for live's calculator AND the test mirror, or they drift -- the fast-path-copy
+    -- trap this file is prone to. 1.05 matches Blizzard's own compact party/raid frames, which cap
+    -- the overheal tail at 5% past the bar.
     local OVERHEAL_CEILING = 1.05
     local function applyTestHeals(testData)
         maxHealth = (testData and testData.maxHealth) or 100000
@@ -2294,7 +2221,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- ☠ GATED ON THE TEST PANEL'S ABSORBS TOGGLE. In the preview, what is rendered
         -- IS the data: Absorbs off means "these units have no absorbs", so a hidden
         -- wash must not go on eating the heal -- toggling Absorbs off and watching the
-        -- heal NOT grow back is exactly how this shipped wrong (Krathe, 2026-08-14).
+        -- heal NOT grow back is exactly how this shipped wrong.
         -- Live is deliberately different: a real heal absorb eats healing whether or
         -- not it is displayed; only the preview's fiction follows its toggles.
         local haPct = (db.testShowAbsorbs and testData and testData.healAbsorbPercent) or 0
@@ -2361,7 +2288,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
             -- overflow term at all — so under mode 1 the ceiling never binds, the value
             -- may reach maxHealth on its own, and a near-full unit renders health+heal
             -- at close to DOUBLE the bar. That was field-caught as a full-bar blue
-            -- overhang (Kesara screenshot, 2026-08-15) the first time overheal actually
+            -- overhang the first time overheal actually
             -- rendered: an earlier cut set mode 1 for ON on the assumption the ceiling
             -- capped the sum in every mode. It caps only mode 0's.
             -- Mode 0 + ceiling is also literally Blizzard's compact-frame formula
@@ -2964,14 +2891,10 @@ function DF:UpdateLeaderIcon(frame)
     end
     
     -- Hide in combat check.
-    -- ☠ DF.playerInCombat, NOT InCombatLockdown(). InCombatLockdown() answers "are
-    -- secure frames locked?", which is NOT the same question as "is the player in
-    -- combat?" -- using it as a combat proxy left this icon (and MT/MA, and five
-    -- others) visible in combat with the option ticked, while the role icon, which
-    -- has always read the tracked flag, hid correctly. Proven in game 2026-08-14 by
-    -- A/B: role hid, leader and MT/MA did not, and the ONLY difference is this call.
-    -- DF.playerInCombat is set in Core.lua from PLAYER_REGEN_DISABLED/ENABLED, and
-    -- is set BEFORE the icon refreshes those handlers drive.
+    -- ☠ DF.playerInCombat, NOT InCombatLockdown(). InCombatLockdown() answers "are secure frames
+    -- locked?", not "is the player in combat?", and as a combat proxy it leaves the icon visible
+    -- in combat with the option ticked. DF.playerInCombat is set in Core.lua from
+    -- PLAYER_REGEN_DISABLED/ENABLED, BEFORE the icon refreshes those handlers drive.
     -- ⇒ One combat-state source for the whole addon. Do not reintroduce the other.
     if db.leaderIconHideInCombat and DF.playerInCombat then
         frame.leaderIcon:Hide()
@@ -3304,7 +3227,7 @@ DF.ClassToRaidBuff = {
 }
 
 -- Non-secret raid buff spell IDs (Blizzard-whitelisted, remain readable in combat)
--- Source: Ellesmere whitelist, cross-referenced with our RaidBuffs
+-- Cross-referenced with our RaidBuffs
 DF.NonSecretRaidBuffIDs = {}
 do
     local WHITELISTED = {

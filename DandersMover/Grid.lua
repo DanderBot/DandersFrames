@@ -7,7 +7,7 @@ if not NS.Lib then return end
 -- GRID OVERLAY
 -- Full-screen grid on BACKGROUND strata plus the snap-preview crosshairs.
 -- Line textures are pooled: textures cannot be freed, so a fresh set per
--- refresh would leak. (Pattern from DandersCDM UI/Position.lua.)
+-- refresh would leak.
 -- ============================================================
 local G = {}
 NS.Grid = G
@@ -220,7 +220,7 @@ end
 -- ============================================================
 -- MEASURE LINES (drag only)
 -- Thin lines from the dragged slab to the nearest screen edge on each axis,
--- with a px readout at the midpoint (idea from EllesmereUI's unlock mode).
+-- with a px readout at the midpoint.
 -- Same lavender as the rest of the session, on the grid frame's OVERLAY layer
 -- like the snap preview, and shown even while the grid itself is off.
 -- ============================================================

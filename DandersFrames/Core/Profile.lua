@@ -41,14 +41,13 @@ end
 -- ============================================================
 -- SETTINGS-WINDOW STATE (ACCOUNT-WIDE, NOT PROFILE CONTENT)
 -- ============================================================
--- Scale, size and position of the settings window are machine state, not
--- settings -- ExportCategories declares them local-only. Holding that state
--- account-wide rather than in db.party is what enforces the declared intent:
--- switching or creating a profile can no longer move, resize or rescale the
--- window out from under the user.
+-- Scale, size and position of the settings window are machine state, not settings --
+-- ExportCategories declares them local-only. Holding that state account-wide rather than
+-- in db.party enforces the declared intent: switching or creating a profile cannot move,
+-- resize or rescale the window out from under the user.
 --
--- Fields: scale, width, height, point, relPoint, x, y. All optional; every
--- reader supplies its own fallback.
+-- Fields: scale, width, height, point, relPoint, x, y. All optional; every reader supplies
+-- its own fallback.
 function DF:GetWindowState()
     if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
     local ws = DandersFramesDB_v2.windowState
@@ -79,22 +78,6 @@ end
 -- ============================================================
 -- PROFILE MANAGEMENT
 -- ============================================================
-
--- Resets Party or Raid settings within the CURRENT profile
-function DF:ResetProfile(mode)
-    local L = DF.L
-    if not DF.db or not DF.db[mode] then return end
-    local defaults = (mode == "party" and DF.PartyDefaults or DF.RaidDefaults)
-    -- ☠ THE UNDO STACK IS FENCED HERE. DF.db[mode] is about to be REPLACED, so
-    -- every entry holding a reference to the outgoing table would undo into a
-    -- table nothing reads any more -- silently, since the write itself succeeds.
-    local SU = DF.SettingsUndo
-    if SU then SU:Clear() end
-    DF.db[mode] = DF:DeepCopy(defaults)
-    DF:FullProfileRefresh()
-    local modeLabel = mode == "party" and "Party" or "Raid"
-    DF:Say(format(L["%s settings reset to defaults."], modeLabel))
-end
 
 -- Full profile reset: the current profile becomes exactly what a NEW profile
 -- is, under the same name. Used by the GUI "Reset Profile to Defaults" button
@@ -806,12 +789,12 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
     end
 end
 
--- ☠ PROFILE-ROOT SCALARS -- the same blind spot as the colour tables, one level up.
--- These are per-profile and user-visible, but they live at the DB ROOT rather than inside
+-- ☠ PROFILE-ROOT SCALARS -- the same blind spot as the colour tables, one level up. These
+-- are per-profile and user-visible, but they live at the DB ROOT rather than inside
 -- party/raid, so ExtractCategorySettings never sees them and DF:AuditExportCategories is
--- structurally blind to them (it walks PartyDefaults/RaidDefaults only). Before this list
--- they travelled in NEITHER direction: a shared profile arrived carrying the sender's
--- layout but the RECIPIENT's module toggles and settings font.
+-- structurally blind to them (it walks PartyDefaults/RaidDefaults only). Without this list
+-- a shared profile would arrive with the sender's layout but the RECIPIENT's module
+-- toggles and settings font.
 --
 -- ⚠ COPY AND APPLY BY PRESENCE, NEVER BY TRUTHINESS. partyEnabled/raidEnabled are booleans
 -- where FALSE is the meaningful value and ABSENT means enabled (see DF.db.partyEnabled
@@ -1019,7 +1002,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     -- (No exportData.frameTypes: it was written as exactly "party if exportData.party,
     -- raid if exportData.raid", which is what hasParty/hasRaid already derive on import.)
 
-    -- Serialize -> Compress -> Encode (same as WeakAuras, Cell, etc.)
+    -- Serialize -> Compress -> Encode (the common addon export-string shape)
     local serialized = LibSerialize:Serialize(exportData)
     local compressed = LibDeflate:CompressDeflate(serialized)
     local encoded = LibDeflate:EncodeForPrint(compressed)
@@ -1027,21 +1010,18 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     return "!DFP1!" .. encoded  -- DFP1 = DandersFrames Profile v1
 end
 
--- ☠ SHAPE-CHECK THE PAYLOAD, NOT JUST ITS PRESENCE.
---
--- Validation used to be `type(data) == "table" and (data.party or data.raid)` -- a
--- TRUTHINESS test. `party = "x"` passed, merged nothing, and still reported "Profile
--- imported successfully!"; `party = 5` passed and threw halfway through the apply,
--- AFTER the profile had been created and switched to. An import string is untrusted
--- input from Discord or a whisper, and DF:ApplyImportedProfile assigns these straight
--- into the saved variables.
+-- ☠ SHAPE-CHECK THE PAYLOAD, NOT JUST ITS PRESENCE. An import string is untrusted input
+-- from Discord or a whisper, and DF:ApplyImportedProfile assigns these straight into the
+-- saved variables: a truthiness test would let `party = "x"` import nothing while
+-- reporting success, and `party = 5` throw halfway through the apply, AFTER the profile
+-- had been created and switched to.
 --
 -- Every key below is assigned to DF.db.<key> by the apply, so each must be a table if
 -- present. Absent is always fine -- a selective export legitimately carries only some.
 --
--- R:DecodeFilterString (FilterRegistry/Registry.lua) is the model this follows: check
--- the type, then interpret. Deliberately shallow -- deep validation of every setting
--- would reject payloads from a NEWER build, which must stay forward-compatible.
+-- R:DecodeFilterString (FilterRegistry/Registry.lua) is the model this follows: check the
+-- type, then interpret. Deliberately shallow -- deep validation of every setting would
+-- reject payloads from a NEWER build, which must stay forward-compatible.
 local PAYLOAD_TABLE_KEYS = {
     "party", "raid", "raidAutoProfiles", "auraBlacklist", "linkedSections",
     "classColors", "powerColors", "roleColors", "dispelColors",
@@ -1353,6 +1333,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- One deep copy per import is nothing -- this is a deliberate user action, not a
     -- hot path.
     importData = DF:DeepCopy(importData)
+    if DF.ConvertPreV5FrameLevels then DF:ConvertPreV5FrameLevels(importData) end
 
     -- A SELECTIVE payload (importData.categories set) merges through the
     -- category tables in the companion. Import is a deliberate user action --
@@ -1781,31 +1762,16 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
         -- Module toggles and settings font: same category as the flags above.
         if importCategorySet.other then ApplyProfileRootScalars(importData) end
-        -- ☠ THE COLOURS CATEGORY WAS EXPORT-ONLY. The export block above packs all four
-        -- palettes when `colors` is ticked, but nothing here consumed them and the only
-        -- code that applies classColors/powerColors/roleColors sits in the FULL-import
-        -- branch -- which selecting any category skips. So ticking Colors, exporting,
-        -- and importing with Colors ticked silently discarded three of the four tables:
-        -- data loss on the one feature whose entire purpose is moving colours between
-        -- accounts. These are profile-root keys, so they need naming here by hand;
-        -- MergeCategorySettings only ever walks the MODE tables.
-        --
-        -- ☠ AND THAT FIX WAS ITSELF INERT UNTIL 2026-08-10. It gated on
-        -- `importCategorySet.colors`, a condition that can NEVER be true: `colors` has no
-        -- entry in DF.ExportCategories (deliberately -- see the note at the top of that
-        -- file), and the import GUI derives every checkbox from `pairs(DF.ExportCategories)`.
-        -- So the category could not be offered, could not be ticked, and this block never
-        -- ran. The bug it was written to fix survived the fix.
-        --
-        -- Gate on PRESENCE instead, which is sound because of an asymmetry in the exporter:
-        -- the FULL export packs all four palettes unconditionally, while the SELECTIVE
-        -- export packs them only `if categorySet.colors` -- equally unreachable. So a
-        -- payload carrying these keys is necessarily a full export, i.e. the user asked
-        -- for everything. Presence therefore IS the authorisation, and no reachable path
-        -- can deliver these keys without that intent.
-        --
-        -- ⚠ If `colors` is ever given a real category entry, revisit BOTH ends together --
-        -- at that point presence stops implying a full export.
+        -- ☠ PROFILE-ROOT PALETTES, GATED ON PRESENCE. MergeCategorySettings only walks the MODE
+        -- tables, so classColors/powerColors/roleColors need naming here by hand, and `colors`
+        -- has no entry in DF.ExportCategories (deliberately -- see the note at the top of that
+        -- file), so the import GUI never offers it as a category.
+        -- Presence is sound because of an asymmetry in the exporter: the FULL export packs all
+        -- four palettes unconditionally, while the SELECTIVE export packs them only
+        -- `if categorySet.colors`, which is equally unreachable. A payload carrying these keys is
+        -- therefore a full export -- the user asked for everything.
+        -- ⚠ If `colors` is ever given a real category entry, revisit BOTH ends together: presence
+        -- would stop implying a full export.
         if importData.classColors then DF.db.classColors = importData.classColors end
         if importData.powerColors then DF.db.powerColors = importData.powerColors end
         if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
@@ -2004,19 +1970,15 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- ☠ CLEAR THE GATE FLAGS FIRST, or the passes below are no-ops on imported data.
     --
     -- The new-profile branch copies every `_`-prefixed flag off the SOURCE profile by
-    -- convention, so a migration flag describing the user's own already-migrated data
-    -- rides across and then vetoes the migration of the payload that just REPLACED that
-    -- data. `_personalTsImportantBorderV1` is the proven case: a v4 payload carrying
-    -- personalTargetedSpellHighlight* arrived with the flag pre-set, the pass skipped it
-    -- here and at every future login, and the customisation was silently lost.
+    -- convention, so a flag describing the user's own already-migrated data rides across and
+    -- vetoes the migration of the payload that just REPLACED that data -- a v4 payload's
+    -- personalTargetedSpellHighlight* customisation would be lost to
+    -- `_personalTsImportantBorderV1`. A flag asserts "this PROFILE's data has been folded";
+    -- the payload's has not, so for these the flags are false by definition at this moment.
     --
-    -- A flag asserts "this PROFILE's data has been folded". The payload's data has not, so
-    -- for these the flags are false by definition at this moment.
-    --
-    -- ⚠ THREE, not five. _oorTextAlphaV1 used to be cleared here as a fourth and was
-    -- never a gate -- MigrateOORTextAlpha is presence-gated on m.oorNameTextAlpha, so
-    -- clearing the flag did nothing. And MigrateDesignerPresets, called just below,
-    -- has no flag at all: if you give it one, add it here in the same change.
+    -- ⚠ Only flag-GATED passes belong here: MigrateOORTextAlpha is presence-gated on
+    -- m.oorNameTextAlpha, and MigrateDesignerPresets has no flag at all -- if you give it one,
+    -- add it here in the same change.
     local p = DF.db
     if type(p) == "table" then
         p._personalTsImportantBorderV1 = nil

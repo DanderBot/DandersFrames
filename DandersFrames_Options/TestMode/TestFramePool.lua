@@ -108,7 +108,7 @@ local function CreateTestFrame(index, isRaid)
     -- Hover Highlight on frame.dfIsHovered, and test frames DO run the live
     -- DF:UpdateHighlights (through UpdateAllTestHighlights) -- so the entire render
     -- path already existed and only the flag was missing. Nothing secure is involved:
-    -- it is a Lua field and a Lua call. (Audit, 2026-08-07.)
+    -- it is a Lua field and a Lua call.
     frame:SetScript("OnEnter", function(self)
         self.dfIsHovered = true
         if DF.UpdateHighlights then DF:UpdateHighlights(self) end
@@ -163,18 +163,11 @@ function DF:PositionTestPartyContainer()
     DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
 end
 
--- ☠ DELEGATES TO THE LIVE POSITIONER -- do not re-derive the anchor here.
---
--- This used to anchor the test container at the raw raidAnchorX/Y, which is a SECOND
--- accounting model. DF:UpdateRaidContainerPosition already positions DF.testRaidContainer
--- itself, at the same cx/cy as the live container and the mover, and that cx/cy carries
--- ComputeRaidMainGroupAnchorOffset. Entering test mode ran THIS function instead, so
--- Center Mode = Fixed was ignored on entry and the preview sat where Default would put
--- it. The tell was that changing any setting -- toggling the dropdown to Default and back
--- -- appeared to "fix" it: those handlers call the live path, which corrected it.
---
--- Anything that shifts the container must therefore be added in UpdateRaidContainerPosition
--- and nowhere else, or the preview forks from live again.
+-- ☠ DELEGATES TO THE LIVE POSITIONER -- do not re-derive the anchor here. The raw
+-- raidAnchorX/Y is a second accounting model: DF:UpdateRaidContainerPosition positions
+-- DF.testRaidContainer at the same cx/cy as the live container and the mover, including
+-- ComputeRaidMainGroupAnchorOffset (Center Mode). Anything that shifts the container
+-- belongs in UpdateRaidContainerPosition and nowhere else, or the preview forks from live.
 function DF:PositionTestRaidContainer()
     if not DF.testRaidContainer then return end
 

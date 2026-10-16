@@ -2,18 +2,15 @@ local addonName, DF = ...
 
 -- ============================================================
 -- FILTER REGISTRY — SHIPPED SPELL DATABASE
--- Curated spell records for the buff filter presets. Source:
--- WCL harvest v5.5, 2026-09-09 (lab discussion
--- ee16e59f-d4c9-4680-b2ca-17a754a3e102), 15 categories /
--- 609 ids in 430 records.
--- One record per SPELL; alts carry every other known
--- spellID for the same spell — but IDs are merged into one record
--- ONLY when they share the identical category set (per-ID category
--- divergences ship as separate records). `n` is an English
--- fallback name — display prefers C_Spell at runtime.
--- `off = true` ships the spell disabled-by-default (still listed
--- in the Filter Designer). Regenerate per patch from the WCL
--- pipeline; bump DBStamp when you do.
+-- Curated spell records for the buff filter presets, from the WCL harvest v5.5 (lab
+-- discussion ee16e59f-d4c9-4680-b2ca-17a754a3e102): 15 categories, 609 ids in 430
+-- records.
+-- One record per SPELL; alts carry every other known spellID for the same spell, but
+-- IDs are merged into one record ONLY when they share the identical category set (per-ID
+-- category divergences ship as separate records). `n` is an English fallback name --
+-- display prefers C_Spell at runtime. `off = true` ships the spell disabled by default
+-- (still listed in the Filter Designer). Regenerate per patch from the WCL pipeline and
+-- bump DBStamp when you do.
 -- ============================================================
 
 local pairs, ipairs = pairs, ipairs
@@ -37,11 +34,11 @@ R.DBStamp = DF.IS_FOREVER and (R.ForeverStamp or { flavor = "forever" })
 -- absence as intentional, so they stay gone across re-harvests. Remove an entry
 -- to let the next regeneration re-add the spell.
 R.Excluded = DF.IS_FOREVER and {} or {
-    -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
-    -- Halo: a real aura, but HIDDEN - the server applies it (WCL logs 19-47M ms
-    -- of uptime per id) and the client never draws it on the buff bar. 100% self,
-    -- Priest-only. Its visible children (Echo of Light, Resonant Energy, Power
-    -- Surge) are carried as their own records instead.
+    -- Maintainer curation (kept in sync via the lab discussion).
+    -- Halo: a real aura, but HIDDEN - the server applies it (WCL logs 19-47M ms of uptime
+    -- per id) and the client never draws it on the buff bar. 100% self, Priest-only. Its
+    -- visible children (Echo of Light, Resonant Energy, Power Surge) are carried as their
+    -- own records instead.
     [120517]  = "Halo - hidden self-only aura, never on allies; track its visible children instead",
     [120644]  = "Halo (variant) - hidden self-only aura; see 120517",
     [453094]  = "Halo (variant) - hidden self-only aura; see 120517",
@@ -56,21 +53,21 @@ R.Excluded = DF.IS_FOREVER and {} or {
     [59752]   = "Will to Survive — 100ms stun-immunity blip; nothing to display",
     [422382]  = "Wild Growth log-side id — no client-side spell data (audit INVALID)",
     [1308649] = "Vampiric Insight — no client-side spell data (audit INVALID); re-add with the corrected id from the harvest",
-    -- (Removed 2026-08-15) 443113/443112 Strength of the Black Ox — un-excluded on
+    -- 443113/443112 Strength of the Black Ox — un-excluded on
     -- Krathe's ruling after user demand (lab thread dfc19c2f): "add it, default off".
     -- Both ids already live upstream, so the next regen lands the record; the lab
     -- side flags it as an off-by-default candidate so the flag arrives with it.
 }
 
--- Maintainer category overrides — the FINAL category set for these ids, replacing
--- the harvest's placement (one home per spell; picked by Danders 2026-07-15 to kill
--- cross-filter duplicates). Regeneration applies these AFTER building records and
--- re-runs the merge step (ids whose patched sets now match collapse into one
--- record); the diff tool compares against the PATCHED expectation. List EVERY id
--- of the spell. Remove an entry to return to the harvest's placement.
+-- Maintainer category overrides -- the FINAL category set for these ids, replacing the
+-- harvest's placement (one home per spell, to kill cross-filter duplicates).
+-- Regeneration applies these AFTER building records and re-runs the merge step (ids
+-- whose patched sets now match collapse into one record); the diff tool compares against
+-- the PATCHED expectation. List EVERY id of the spell. Remove an entry to return to the
+-- harvest's placement.
 R.CategoryPatch = DF.IS_FOREVER and {} or {
-    -- Maintainer curation 2026-07-19 (Krathe filter pass; kept in sync via lab discussion)
-    -- kept in the DB/picker but in no preset (empty final category set):
+    -- Maintainer curation: kept in the DB/picker but in no preset (empty final category
+    -- set):
     [1278914] = {},  -- Dream Guide (out of Healing)
     [388513]  = {},  -- Overflowing Mists (out of Healing)
     -- Dream Flight: all three same-named ids under Raid Cooldowns (ally HoT 363502 + self-buff 359816/362361), never split into Healing
@@ -82,7 +79,7 @@ R.CategoryPatch = DF.IS_FOREVER and {} or {
     [453112]  = { healing = true },
     -- Moved into Healing (Holy Paladin healing-adjacent auras):
     [1241717] = { healing = true },  -- Seraphic Barrier
-    [378412]  = { healing = true, tankCooldowns = true },  -- Light of the Titans (tank pass 2026-08-06)
+    [378412]  = { healing = true, tankCooldowns = true },  -- Light of the Titans
     [157128]  = { healing = true },  -- Saved by the Light
     [370889]  = { utility = true, movement = true },  -- Twin Guardian (moved off External Defensives)
     [370888]  = { utility = true, movement = true },
@@ -411,8 +408,7 @@ R.Spells = DF.IS_FOREVER and (R.ForeverSpells or {}) or {
 
     -- ------------------------------------------------------------
     -- Tank Cooldowns
-    -- Tank pass 2026-08-06 (curation by Krathe). Real cooldowns are
-    -- multi-homed here and in Defensives; rotational mitigation lives
+    -- Real cooldowns are multi-homed here and in Defensives; rotational mitigation lives
     -- here only and ships disabled by default.
     -- ------------------------------------------------------------
     { id = 195181, n = "Bone Shield", class = "DEATHKNIGHT", off = true, cats = { tankCooldowns = true } },

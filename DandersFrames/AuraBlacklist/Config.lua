@@ -17,7 +17,7 @@ local addonName, DF = ...
 --
 -- 12.1: a debuff is only hideable via excludeSpellIDs on friendly frames when
 -- Blizzard flags it NeverSecret. Every ID below was live-confirmed NeverSecret via
--- DF_AuraLab `/al secretscan` / `/al secretcensus` on build 68824 (2026-07-22). Secret /
+-- DF_AuraLab `/al secretscan` / `/al secretcensus` on build 68824. Secret /
 -- ContextuallySecret debuffs (encounter "move now!" debuffs, etc.) CANNOT be hidden —
 -- that is the point of the lockdown — and are deliberately absent. (The census found
 -- only 62 NeverSecret spells in 1..500000 — a small, deliberate Blizzard whitelist.)

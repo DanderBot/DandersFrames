@@ -80,11 +80,9 @@ local function RefreshLocaleStrings()
         { key = "background", label = L["Background Color"],  placed = false },
         { key = "nametext",   label = L["Name Text Color"],  placed = false },
         { key = "healthtext", label = L["Health Text Color"], placed = false },
-        -- (framealpha removed 2026-07-25 — 12.1 casualty, see the Factory's CASUALTIES note.
-        --  Whole-frame alpha needs frame:SetAlpha gated on SECRET aura presence, and it also
-        --  fights the range / out-of-range alpha owners for the same property. It never had a
-        --  render path on the container engine — only the editor canvas applied it — so the
-        --  effect showed in the preview and did nothing in game.)
+        -- (No framealpha effect: whole-frame alpha would need frame:SetAlpha gated on SECRET aura
+        -- presence, and it fights the range / out-of-range alpha owners for the same property --
+        -- see the Factory's CASUALTIES note.)
         { key = "sound",      label = L["Sound Alert"],      placed = false },
     }
 
@@ -205,17 +203,12 @@ P.ApplyBackdrop = ApplyBackdrop
 -- migration that only touches priest records is worth running.
 -- ⚠ Deliberately NOT gated on the helper EXISTING. A tab that appears only once you have
 -- already added the helper is a tab you cannot use to add it.
--- ☠☠ IT LIVED IN AuraDesigner/UI/PIHelperPage.lua AND WENT WITH IT, which broke the
--- feature silently. Every caller reads `DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()`
--- -- the nil-guard that makes it safe across the LoD split also makes a MISSING definition
--- indistinguishable from "not a priest". So deleting the page did not error, it just
--- answered false forever: no pool tab, no sweep, the helper gone from the addon entirely
--- (field report, 2026-09-17: "no tab in AD, no tab anywhere"). The file's own removal note
--- named the three symbols it exported for OTHER files and not this one, which is why a grep
--- of that list came back clean.
--- ⇒ Here, because this is the Aura Designer UI's base file and the helper is one of its
--- pool tabs. Every caller resolves it at CALL time, inside a builder, so nothing depends on
--- where this sits in the TOC.
+-- ☠☠ EVERY CALLER NIL-GUARDS THIS (`DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()`)
+-- to stay safe across the LoD split, which makes a MISSING definition indistinguishable
+-- from "not a priest": move or delete it and the helper silently vanishes from the addon
+-- -- no pool tab, no sweep, no error. It lives here, the Aura Designer UI's base file,
+-- because the helper is one of its pool tabs; every caller resolves it at CALL time, so
+-- nothing depends on where this sits in the TOC.
 function DF.IsPIHelperAvailable()
     local _, class = UnitClass("player")
     return class == "PRIEST"
@@ -223,20 +216,18 @@ end
 
 -- ============================================================
 -- COLLAPSIBLE CARD SHELL
--- The effects list, the groups list and the debuff-category list each build the
--- same thing: a card pinned to the parent's width, a header button on top, and a
--- chevron at its left edge that flips with the expanded state. Past that point
--- the three diverge completely -- a spell icon and type badge, a group name and
--- link count, a list of categories -- so this owns only the shell.
+-- The effects list, the groups list and the debuff-category list each build the same
+-- thing: a card pinned to the parent's width, a header button on top, and a chevron at
+-- its left edge that flips with the expanded state. Past that point the three diverge
+-- completely -- a spell icon and type badge, a group name and link count, a list of
+-- categories -- so this owns only the shell.
 --
--- ★ THE SETTINGS PANEL'S CARD LOOK (GUI:CreateCardChrome): one rounded card per
--- entry, the GUI.SectionCard header height, an accent chevron, a TEXT-coloured
--- title, a dim right-aligned summary while folded, a hairline over the body and a
--- hover wash on the header. The chrome draws the title and summary; the caller
--- places them with chrome:LayoutText once its own furniture is in the header.
--- ⚠ NO PER-TAB TINT. The amber the Layout Groups / Debuffs cards used to wear on
--- their chevron and border is gone: colour is for state, and every settings card
--- takes the accent chevron.
+-- ★ THE SETTINGS PANEL'S CARD LOOK (GUI:CreateCardChrome): one rounded card per entry, the
+-- GUI.SectionCard header height, an accent chevron, a TEXT-coloured title, a dim
+-- right-aligned summary while folded, a hairline over the body and a hover wash on the
+-- header. The chrome draws the title and summary; the caller places them with
+-- chrome:LayoutText once its own furniture is in the header.
+-- ⚠ NO PER-TAB TINT: colour is for state, and every settings card takes the accent chevron.
 --
 -- opts = { yPos, expanded }
 -- Returns card, header, chevron, chrome.
@@ -277,21 +268,20 @@ P.CreateCardBody = CreateCardBody
 
 -- ============================================================
 -- CARD STACK (in-place reflow of a card list)
--- The groups list and the debuff-category list both stack their cards by hand:
--- each card is pinned at a running y offset, sized once its body is built, and
--- the accumulator carries the next card's offset. That is fine at build time and
--- useless afterwards -- a card whose body changes height (a collapsible section
--- swapping its widget set) leaves every card BELOW it anchored where the old
--- height put them, which is why those edits used to rebuild the whole tab via
--- S.SwitchTab. This owns the re-anchor pass so they don't have to.
+-- The groups list and the debuff-category list both stack their cards by hand: each card
+-- is pinned at a running y offset, sized once its body is built, and the accumulator
+-- carries the next card's offset. A card whose body changes height (a collapsible section
+-- swapping its widget set) would leave every card BELOW it anchored where the old height
+-- put them, short of rebuilding the whole tab via S.SwitchTab. This owns the re-anchor
+-- pass so they don't have to.
 --
 --   local stack = CreateCardStack(parent, yPos)   -- yPos = the FIRST card's offset
 --   stack:Add(card)                               -- once per card, in visual order
 --   stack:Reflow()                                -- after any card's height changes
 --
--- Reflow reads each card's CURRENT height, so the caller only has to keep the
--- card itself correctly sized. Card gap (P.CardGap, the settings cards' 8) and the
--- parent's bottom padding (20) mirror the build-time loop exactly.
+-- Reflow reads each card's CURRENT height, so the caller only has to keep the card itself
+-- correctly sized. Card gap (P.CardGap, the settings cards' 8) and the parent's bottom
+-- padding (20) mirror the build-time loop exactly.
 -- ============================================================
 
 local function CreateCardStack(parent, topY)
@@ -399,7 +389,7 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
     -- CREATION -- so it kept the accent of whichever mode tab happened to open it first
     -- and wore party orange in raid for the rest of the session: "the text box inherits
     -- the color of the tab it was first enabled at the start of the session or after a
-    -- reload" (Aphoex, 2026-08-14). The mode tabs recolour their own widgets through
+    -- reload". The mode tabs recolour their own widgets through
     -- ThemeListeners; a UIParent-parented singleton has no such parent to listen to, so
     -- it has to re-read the theme itself.
     -- ⚠ Through ApplyBackdrop, not a raw SetBackdropBorderColor: it caches the last
@@ -532,25 +522,24 @@ local function GetDebuffGroups()
     return groups
 end
 
--- Default DISPLAY NAME for a new group: one above the HIGHEST number currently in
--- use for this prefix.
+-- Default DISPLAY NAME for a new group: one above the HIGHEST number currently in use for
+-- this prefix.
 --
--- The id counters (nextLayoutGroupID / nextOtherLayoutGroupID / nextDebuffGroupID)
--- stay strictly monotonic on purpose — ids are stable references (indicator ->
--- group links), so reusing one would rebind stale links to the wrong group. The
--- visible LABEL has no such constraint, and deriving it from the raw id made it
--- climb forever ("Group 7" on an empty designer after six create/deletes).
+-- The id counters (nextLayoutGroupID / nextOtherLayoutGroupID / nextDebuffGroupID) stay
+-- strictly monotonic on purpose -- ids are stable references (indicator -> group links), so
+-- reusing one would rebind stale links to the wrong group. The visible LABEL has no such
+-- constraint, and deriving it from the raw id would make it climb forever ("Group 7" on an
+-- empty designer after six create/deletes).
 --
--- Why highest+1 and NOT the lowest free number: the list renders in CREATION order
--- (every site iterates ipairs(groups); nothing sorts them) and new groups are
--- tinsert-APPENDED. Filling a gap would therefore drop a low number at the BOTTOM
--- of the list — "Group 2" above "Group 1" — which reads worse than a gap. A gap is
--- also honest: it says something was deleted. Because this scans the CURRENT set
--- rather than a persisted counter, an emptied designer still restarts at 1.
+-- Why highest+1 and NOT the lowest free number: the list renders in CREATION order (every
+-- site iterates ipairs(groups); nothing sorts them) and new groups are tinsert-APPENDED, so
+-- filling a gap would drop a low number at the BOTTOM of the list -- "Group 2" above
+-- "Group 1". A gap is also honest: it says something was deleted. Because this scans the
+-- CURRENT set rather than a persisted counter, an emptied designer restarts at 1.
 --
--- Prefixes are distinct and anchored, so "Group" won't match "Filter Group 3" (or
--- vice versa); none contain Lua pattern magic characters. A user-renamed group drops
--- out of the numbering pool.
+-- Prefixes are distinct and anchored, so "Group" won't match "Filter Group 3" (or vice
+-- versa); none contain Lua pattern magic characters. A user-renamed group drops out of the
+-- numbering pool.
 local function NextGroupName(groups, prefix)
     local highest = 0
     for _, g in ipairs(groups or {}) do
@@ -617,7 +606,7 @@ P.GetSpecLayoutGroups = GetSpecLayoutGroups
 
 S.activeBuffTab = "my"   -- "my" | "debuffs" | "other" | "pihelper"
 
--- ★★★ THE POWER INFUSION HELPER IS A POOL TAB (2026-09-08), NOT A PAGE OF ITS OWN.
+-- ★★★ THE POWER INFUSION HELPER IS A POOL TAB, NOT A PAGE OF ITS OWN.
 -- ☠ IT WAS A SEPARATE PAGE FOR A DAY AND EVERY VERSION OF IT WAS A WORSE AURA DESIGNER.
 -- I rebuilt the add flow, then the effect list, then both again -- each time a lookalike of
 -- something that already existed twenty lines away. Krathe: "This should function EXACTLY as
@@ -642,20 +631,14 @@ local function IsOtherTab()
 end
 P.IsOtherTab = IsOtherTab
 
--- ☠ ...AND THE ONE PLACE THE TWO POOLS PART COMPANY: DOES THE USER GET TO DECIDE THE CASTER
--- RULE? On Any Buff, yes -- that pool means "any caster including you", so Others Only is the
--- switch that narrows it and the choice is the whole point.
--- On the Power Infusion Helper it is not a choice at all. Krathe, 2026-09-09: "we don't need
--- the others only setting or even note that on the Active indicators either, we only care
--- about using it on others anyway, it's a pointless option." He is right, and the recipe
--- already agreed with him: pihCreateSignal STAMPS othersOnly on every effect it builds,
--- because a helper watching your own cooldowns would be telling you to infuse yourself.
--- ⇒ The STORED VALUE is unchanged -- it is what makes the effect correct, and the engine
--- still reads it. What goes is the control that pretends it is up for discussion, and the
--- suffix on the row that reports a constant as though it were a setting.
--- ⚠ THE SUFFIX MATTERS AS MUCH AS THE TICK. "PI Helper - Center - Others Only" spends the
--- row's summary on something true of every helper effect ever created -- the same
--- constant-on-every-line fault the "Big cooldown" label had.
+-- ☠ THE ONE PLACE THE TWO POOLS PART COMPANY: DOES THE USER DECIDE THE CASTER RULE? On Any
+-- Buff, yes -- that pool means "any caster including you", so Others Only is the switch that
+-- narrows it. On the Power Infusion Helper it is not a choice: pihCreateSignal STAMPS
+-- othersOnly on every effect it builds, because a helper watching your own cooldowns would
+-- tell you to infuse yourself.
+-- ⇒ The STORED VALUE stays -- it makes the effect correct, and the engine reads it. What
+-- goes is the control that pretends it is up for discussion, and the row suffix that would
+-- report a constant ("PI Helper - Center - Others Only") as though it were a setting.
 local function ShowsOthersOnly()
     return IsOtherTab() and not IsPIHelperTab()
 end
@@ -702,7 +685,7 @@ local function CurrentAuraPool(spec)
 end
 P.CurrentAuraPool = CurrentAuraPool
 
--- ☠ A MY BUFFS WRITE WITH NO SPEC IS REFUSED, OUT LOUD (2026-09-22). With no spec
+-- ☠ A MY BUFFS WRITE WITH NO SPEC IS REFUSED, OUT LOUD. With no spec
 -- resolved (a non-healer, or a character with no spec yet) GetSpecAuras and
 -- GetSpecLayoutGroups hand back a FRESH EMPTY TABLE on every call. That is right
 -- for a read -- there is nothing to show -- and silently wrong for a write: the
@@ -895,19 +878,14 @@ local function PoolTrackedIDs(adDB, which)
             for id in pairs(map) do out[id] = true end
         end
     end
-    -- ☠ RECORDS THAT RENDER NOTHING DO NOT COUNT. This accepted every table in the
-    -- pool, so an aura whose effects had all been deleted still blocked the spell in
-    -- the opposite pool -- permanently, since the record it was reading is one nothing
-    -- prunes. Field: "I added effects for Feather and Apotheosis to My Buffs, deleted
-    -- them, and Any Buffs still says they are In My Buffs" (Vindagor, 2026-08-19), with
-    -- the My Buffs pane visibly empty beside it. The question here is whether adding
-    -- the spell to the other pool would DOUBLE-RENDER it; an aura with no effects left
-    -- cannot render at all, so the honest answer is no.
-    -- ★ Fixed at the read, not by pruning on delete: pruning would change what a
-    -- curated record's linger means (S.CleanupAdHocAura's comment keeps it on purpose,
-    -- and a user who deletes an icon still owns that aura's priority and its type
-    -- configs), and it would leave every profile already carrying an emptied record
-    -- blocked until it was deleted again. This heals those on read.
+    -- ☠ RECORDS THAT RENDER NOTHING DO NOT COUNT. An aura whose effects have all been deleted
+    -- would otherwise block the spell in the opposite pool permanently, since nothing prunes
+    -- the record it reads. The question here is whether adding the spell to the other pool
+    -- would DOUBLE-RENDER it; an aura with no effects left cannot render at all.
+    -- ★ Answered at the read, not by pruning on delete: pruning would change what a curated
+    -- record's linger means (S.CleanupAdHocAura's comment keeps it on purpose -- a user who
+    -- deletes an icon still owns that aura's priority and type configs), and reading this way
+    -- heals profiles already carrying an emptied record.
     if which == "my" then
         if type(adDB.auras) == "table" then
             for specKey, specAuras in pairs(adDB.auras) do
@@ -1025,7 +1003,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 matchFrameWidth = true, matchFrameHeight = false,
                 matchInset = 0,   -- extra per-side trim on the matched axes (see resolveBarSize)
                 -- Texture & colors
-                -- DF Minimalist (Krathe, 2026-08-08; was Blizzard UI-StatusBar) — every
+                -- DF Minimalist — every
                 -- other DF bar default is DF_Minimalist, this one was the odd one out.
                 -- ⚠ Keep in sync with TYPE_DEFAULTS.bar.texture below.
                 texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
@@ -1364,7 +1342,7 @@ local TYPE_DEFAULTS = {
         -- `true` here, so a never-toggled bar showed a TICKED checkbox while rendering
         -- no text — and durationFmtKey's early-return ("") meant Duration Format
         -- changes never moved the struct sig, reading as "stale until I toggle
-        -- Show Duration" (Krathe, 2026-07-24). Instances are created SPARSE
+        -- Show Duration". Instances are created SPARSE
         -- (CreateIndicatorInstance), so this fallback IS the checkbox for new bars.
         showDuration = false, durationFormat = "NUMBER", durationFont = "DF Roboto SemiBold",
         durationScale = 1.2, durationOutline = "SHADOW;OUTLINE",

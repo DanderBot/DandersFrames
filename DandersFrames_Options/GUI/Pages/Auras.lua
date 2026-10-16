@@ -609,7 +609,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { key = "Bleed",   name = L["Bleed / Enrage"] },
         }
         -- Commit: bump the curve generation, rebuild the container rows (fresh
-        -- SetAuraBorder binds pick up the new curve) and restyle the overlay
+        -- AddDispelTypeTexture binds pick up the new curve) and restyle the overlay
         -- (its binds re-run via the generation gate).
         local function DispelColorChanged()
             if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
@@ -1535,16 +1535,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function GradStops()
             local s = db[listKey]
             if type(s) ~= "table" or #s < 2 then
-                -- ☠ CONVERT, DO NOT INVENT. This used to seed Config's new three-stop
-                -- default here, and that was a real bug rather than a tidy fallback:
-                -- opening this page on a profile the migration had not reached wrote
-                -- three stops and SAVED them, and because the migration is
-                -- presence-gated it then skipped that profile permanently. The user
-                -- ended up with a flat 0/50/100 ramp and no way back -- for a default
-                -- profile the honest answer is FIVE stops, from Low 2 / Medium 2 / High 1.
-                --
-                -- DF:LegacyStopsFor is the migration's own conversion, so the editor and
-                -- the migration cannot disagree about what a profile's ramp is.
+                -- ☠ CONVERT, DO NOT INVENT. Seeding Config's three-stop default here would SAVE it on a
+                -- profile the migration has not reached, and because the migration is presence-gated it
+                -- would then skip that profile permanently (a default profile's honest answer is FIVE
+                -- stops, from Low 2 / Medium 2 / High 1). DF:LegacyStopsFor is the migration's own
+                -- conversion, so the editor and the migration cannot disagree about a profile's ramp.
                 s = DF.LegacyStopsFor and DF:LegacyStopsFor(db, prefix)
                 db[listKey] = s or GradDefaults()
                 s = db[listKey]
@@ -2058,18 +2053,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function ResourceOffRow(d) return not (d or db).resourceBarEnabled end
 
         -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
-        -- These three tables and the class list used to sit inside the box that
-        -- offered them. The cards print the chosen value as their SUMMARY, and a
-        -- summary is written OUTSIDE the group's builder -- so the word has to come
-        -- out of the same table the dropdown offers, or a card could say one thing
-        -- while the control behind it says another. (The Health Bar page hoisted
-        -- its six dropdown tables for exactly this reason.)
+        -- The cards print the chosen value as their SUMMARY, written OUTSIDE the group's builder,
+        -- so the word has to come from the same table the dropdown offers, or a card could say one
+        -- thing while the control behind it says another.
         --
-        -- ⚠ THE CLASS LIST MOVES BUT THE SEED DOES NOT. The list is only data; the
-        -- `db.resourceBarClassFilter` seeding block that reads it stays inside the
-        -- builder, where it runs at page-build time -- a card is built with the
-        -- page. Moving it would move WHEN a profile changes shape, which is what the
-        -- export byte-identity gate measures.
+        -- ⚠ THE CLASS LIST LIVES HERE BUT THE SEED DOES NOT. The `db.resourceBarClassFilter`
+        -- seeding block that reads it stays inside the builder, where it runs at page-build time;
+        -- moving it would move WHEN a profile changes shape, which the export byte-identity gate
+        -- measures.
         local RB_CLASS_LIST = {
             { token = "WARRIOR",      name = L["Warrior"] },
             { token = "PALADIN",      name = L["Paladin"] },
@@ -2192,32 +2183,23 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== SIZE (the first card under "Layout") =====
-        -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION (Aphoex 5/5.1, redesigned as
-        -- UX by Krathe 2026-08-22: "it auto matches the health bar depending on the
-        -- orientation set but you still control how thick the bar looks").
+        -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION. resourceBarWidth and resourceBarHeight
+        -- are ORIENTATION-RELATIVE keys: Width is the bar's LENGTH along its fill axis, Height its
+        -- THICKNESS across it, and Bars.lua swaps them onto screen axes for a vertical bar. Match
+        -- always pins the LENGTH, so the checkbox and the slider it greys must carry the same
+        -- word in each orientation ("Match Health Bar Height" greys "Height"), and the free slider
+        -- is always "Thickness".
         --
-        -- ☠ THE MECHANICS WERE NEVER WRONG — ONLY THE NAMES LIED. resourceBarWidth and
-        -- resourceBarHeight are ORIENTATION-RELATIVE keys: Width is the bar's LENGTH
-        -- along its fill axis, Height its THICKNESS across it, and Bars.lua swaps them
-        -- onto screen axes for a vertical bar. Match always pins the LENGTH, so greying
-        -- the length slider in both orientations was correct behaviour wearing a label
-        -- ("Width / Length") that read as a bug on a vertical bar: match visibly fixes
-        -- the bar's on-screen HEIGHT there, yet "Height / Thickness" never greyed
-        -- (Aphoex 5.1). Renaming per orientation puts the same word on the checkbox and
-        -- the slider it greys — "Match Health Bar Height" greys "Height" — and the free
-        -- slider is always "Thickness", the one promise the design makes.
+        -- ⚠ The rename rides refreshContent (RefreshStates' dynamic-content hook), so it follows
+        -- the Orientation dropdown, a profile import and a copy-from-other-mode alike -- anything
+        -- that ends in RefreshStates; the Orientation dropdown's callback calls RefreshStates for
+        -- that reason.
         --
-        -- ⚠ The rename rides refreshContent (RefreshStates' dynamic-content hook), so it
-        -- follows the Orientation dropdown, a profile import and a copy-from-other-mode
-        -- alike — anything that ends in RefreshStates. The Orientation dropdown's own
-        -- callback gained the RefreshStates call for exactly that.
-        --
-        -- ⚠ AND THE HOOK STILL FIRES IN A PINNED PANEL. refreshContent is run by
-        -- DandersUI Sections' RefreshChildStates, which is exactly what ReflowPane
-        -- calls on the group it re-flows -- so tools2.refreshStates renames these
-        -- two controls in a panel as self:RefreshStates does on the page. What
-        -- does NOT reach a panel is a refresh driven from the page, which is why
-        -- the Orientation dropdown has its own note.
+        -- ⚠ THE HOOK ALSO FIRES IN A PINNED PANEL: refreshContent is run by DandersUI Sections'
+        -- RefreshChildStates, which ReflowPane calls on the group it re-flows, so
+        -- tools2.refreshStates renames these two controls in a panel as self:RefreshStates does on
+        -- the page. A refresh driven from the page does NOT reach a panel, which is why the
+        -- Orientation dropdown has its own note.
         local function BuildResourceSizeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
@@ -2248,7 +2230,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- stable 5.2.0 renders; see the key's note in Config.lua) = tuck inside the
             -- frame border band, off = full health-bar length. The first cut gated
             -- an alpha-based auto rule instead and read as doing nothing with an opaque
-            -- border (Krathe, 2026-08-22) -- an option whose two states can render the
+            -- border -- an option whose two states can render the
             -- same pixels is broken as a control, whatever the tooltip says. "Frame
             -- Border" in the name because the resource bar has a border of its OWN on
             -- this page, and a bare "Border" could be either.
@@ -3322,39 +3304,28 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- only hold for one build.
     if pageFilterDesigner then pageFilterDesigner.singleModeBuild = true end
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- ☠ THE HELPER'S SWEEP RUNS HERE TOO, AND THIS PAGE IS WHY IT HAD TO. The sweep marks
-        -- the Power Infusion Helper's seeded lists as CURATED (dfDefaults), which is what gives
-        -- their rows the on/off tick instead of the destructive ✕ and puts Reset on screen. It
-        -- ran only on the Aura Designer's page build -- so opening the Filter Designer FIRST,
-        -- which is exactly what someone inspecting that list does, showed the unmarked version.
-        -- Krathe, 2026-09-09, one round after the mark shipped.
-        -- ⚠ A MIGRATION HOOK, not a dependency: schema-stamped, so it is one comparison after
-        -- the first run, and priest-gated so it costs nothing for anyone else.
+        -- ☠ THE HELPER'S SWEEP RUNS HERE TOO. It marks the Power Infusion Helper's seeded lists as
+        -- CURATED (dfDefaults), which gives their rows the on/off tick instead of the destructive ✕
+        -- and puts Reset on screen; someone inspecting that list may open the Filter Designer
+        -- before the Aura Designer ever builds.
+        -- ⚠ A MIGRATION HOOK, not a dependency: schema-stamped, so it is one comparison after the
+        -- first run, and priest-gated so it costs nothing for anyone else.
         if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()
             and DF.AuraDesigner and DF.AuraDesigner._priv
             and DF.AuraDesigner._priv.PIH_Sweep then
             DF.AuraDesigner._priv.PIH_Sweep()
         end
-        -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) — change both.
-        -- ☠ THIS PAGE OWNS NO PER-MODE KEYS ANY MORE, and its Copy/Sync/Reset list is
-        -- deliberately EMPTY. It used to carry buffFilterSelection, debuffFilter*,
-        -- debuffBlacklist and the directBuff*/directDebuff* switches; every one of
-        -- those moved to the page whose controls now show it — buffFilterSelection
-        -- and directBuff* to Buff Bar, the rest to Debuff Bar.
-        --
-        -- A page's Sync/Reset must own EXACTLY the keys it displays. Leaving these
-        -- here would mean Reset Page on the filter library silently rewriting two
-        -- other pages' settings, which is the bug class this addon has already been
-        -- bitten by.
-        --
-        -- What this page edits instead is not per-mode at all: preset overrides are
-        -- per PROFILE and custom filters are per ACCOUNT, so neither is something
-        -- Copy to Raid or Sync with Raid can act on.
-        -- ⚠ Still CALLED with an empty list, because the call is what registers this
-        -- page in DF.SectionRegistry -- and it has to be registered as owning nothing,
-        -- or SectionOwnsKey would fall through to another page's prefix and hand these
-        -- keys back. The helper returns a zero-height placeholder for an empty list,
-        -- so no dead Copy/Sync/Reset row is drawn.
+        -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) -- change both.
+        -- ☠ THIS PAGE OWNS NO PER-MODE KEYS, and its Copy/Sync/Reset list is deliberately EMPTY:
+        -- buffFilterSelection and directBuff* belong to Buff Bar, the debuff filters and blacklist
+        -- to Debuff Bar. A page's Sync/Reset must own EXACTLY the keys it displays, or Reset Page
+        -- on the filter library would rewrite two other pages' settings.
+        -- What this page edits is not per-mode at all: preset overrides are per PROFILE and custom
+        -- filters per ACCOUNT, so neither is something Copy to Raid or Sync with Raid can act on.
+        -- ⚠ Still CALLED with an empty list, because the call registers this page in
+        -- DF.SectionRegistry -- as owning nothing, or SectionOwnsKey would fall through to another
+        -- page's prefix and hand these keys back. The helper returns a zero-height placeholder for
+        -- an empty list, so no dead Copy/Sync/Reset row is drawn.
         Add(CreateCopyButton(self.child, {}, L["Filter Designer"], "auras_filterdesigner"), 0, 2)
         -- ☠ Add IS THE TELL, the same one DF.BuildAuraDesignerPage takes below: a
         -- caller holding the harness's own Add can be served bands, one that does
@@ -3403,21 +3374,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
     end)
 
-    -- Auras > Power Infusion Helper: NO NAV ROW, and that is the decision rather than an
-    -- omission. The helper is a POOL TAB of the Aura Designer, beside My Buffs / Debuffs /
-    -- Any Buff, because its records must live in the Any Buff pool -- the pool decides a
-    -- record's caster filter and the helper watches OTHER people's cooldowns. It cannot be
-    -- lifted out of the designer, so a second home for it could only ever be a signpost.
-    -- ☠ AND A SIGNPOST IS WHAT IT WAS. The row built no page of its own: it replaced its
-    -- own OnClick to jump into the designer, then called SetNavHighlight to force the
-    -- sidebar to keep lighting a row the user was no longer on. Two entries for one
-    -- feature, one of them lying about where you were. The tab is priest-gated, so for
-    -- anyone the feature applies to it is already in front of them.
-    -- ⚠ WHAT WENT WITH IT: AuraDesigner/UI/PIHelperPage.lua (the stub page and the jump),
-    -- DF.BuildPIHelperPage, DF.OpenPIHelperInDesigner, and GUI.SetNavHighlight, whose only
-    -- caller was that jump.
-    -- ⚠ THE ONE THING LOST is a settings-SEARCH landing target: the stub page was indexed,
-    -- and the designer is not. Searching the helper by name no longer lands anywhere.
+    -- Auras > Power Infusion Helper: NO NAV ROW, by decision. The helper is a POOL TAB of the
+    -- Aura Designer, beside My Buffs / Debuffs / Any Buff, because its records must live in the
+    -- Any Buff pool (the pool decides a record's caster filter, and the helper watches OTHER
+    -- people's cooldowns). The tab is priest-gated, so for anyone the feature applies to it is
+    -- already in front of them; a second nav entry could only be a signpost. The cost: the
+    -- settings search has no landing target for the helper by name.
 
     -- Auras > Aura Blacklist: RETIRED as a standalone page. The debuff blacklist
     -- now lives inside the Filter Designer (Debuffs > Blacklist) — one home for

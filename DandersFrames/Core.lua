@@ -133,29 +133,17 @@ end
 -- The command's NAME is derived by stripping "/df" from its first alias, so
 -- "/dfauraexp" becomes "auraexp" and is typed as "/df debug auraexp".
 --
--- ☠ THE STANDALONE /dfXXX BINDS ARE NO LONGER REGISTERED. They used to be, and
--- the /df debug listing carried them in grey as a second form. That put ~25 DF
--- commands into the GLOBAL slash namespace — where they collide with other
--- addons and clutter every slash autocomplete — to document a spelling nobody
--- needed twice. One documented form now: "/df debug <command>".
+-- ☠ NO STANDALONE /dfXXX BINDS. Registering them would put ~25 DF commands into the
+-- GLOBAL slash namespace, where they collide with other addons and clutter every slash
+-- autocomplete. One documented form: "/df debug <command>".
 --
--- ⚠ THERE IS NO EXCEPTION, AND /rl IS NOT ONE. This used to say the rule below still
--- registers a real bind for any alias that is not /df-prefixed, and offered "/rl" as
--- the worked example. /rl does not go through RegisterDebugSlash at all -- it sets
--- SLASH_DFRL1 directly, further down this file -- so the example was the one command
--- that bypasses the mechanism it was illustrating.
+-- Every registration passes a single /df-prefixed alias, so the branch that would create
+-- a SLASH_* global for a non-/df alias never runs; do not assume it is exercised. /rl does
+-- not go through here at all (it sets SLASH_DFRL1 directly, further down this file).
 --
--- In practice every registration passes a single /df-prefixed alias, so the branch
--- that would create a SLASH_* global has never run. Add a genuinely non-/df alias and
--- it would, but nothing does today; do not assume it is exercised.
---
--- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics. This comment used to
--- claim it did, "unlisted, so macros and muscle memory survive" — that was the intent
--- at the time, and THE GATE further down (search: "☠ THE GATE") was written later and
--- deliberately closed it: anything that is not an everyday command and did not arrive
--- via "/df debug" opens the settings window instead. The gate is the behaviour that
--- ships; this note is kept as a warning because the changelog and CLAUDE.md both
--- inherited the old claim and had to be corrected. A diagnostic is "/df debug <name>".
+-- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics: THE GATE further down
+-- (search: "☠ THE GATE") opens the settings window for anything that is not an everyday
+-- command and did not arrive via "/df debug". A diagnostic is "/df debug <name>".
 --
 -- A derived name that collides with a hand-written branch in the /df debug dispatcher
 -- loses: the dispatcher is checked first and the registry is the fallback. The
@@ -225,14 +213,11 @@ end
 -- half. Order is preserved for display — grouped, not alphabetical.
 DF.DebugSubCommands = {}
 
--- ☠ `dev` USED TO MEAN "hidden from the list" AND NOTHING ELSE.
--- The slash half really does block: RegisterDebugSlash sets entry.active and
--- skips both the /df route and the SLASH_* globals, so a dev command has no
--- reachable token on release. The sub() half only bucketed the row into a "dev"
--- section of the printed listing — every branch stayed fully runnable via
--- "/df debug <word>", including ones that force debug art onto LIVE frames
--- (raidbg, ppbadge) and one that switches on locale warning spam (localewarn).
--- This lookup is what the dispatcher gate consults so the two halves now match.
+-- Dev-only debug words. The slash half blocks on its own (RegisterDebugSlash sets
+-- entry.active and skips both the /df route and the SLASH_* globals); this lookup is what
+-- the dispatcher gate consults so a dev branch is not runnable via "/df debug <word>" on
+-- release either -- several force debug art onto LIVE frames (raidbg, ppbadge) or switch
+-- on locale warning spam (localewarn).
 DF.DEBUG_SUB_DEV = {}
 
 -- ☠ EVERY sub() NAME, dev or not. This is what stops "/df debug <word>" loading
@@ -296,13 +281,10 @@ DF.OUT = {
 local O = DF.OUT
 -- ☠ CASE-INSENSITIVE ON PURPOSE. DF.OUT is keyed in caps, but roughly fifty call
 -- sites across Core, Bars, Headers, ColorPicker, AutoProfiles and TextDesigner pass
--- "good"/"bad"/"warn" in lower case — several files mix both spellings within
--- themselves, so it is a typo class rather than a second convention. A miss used to
--- resolve to "", and because `status` was still truthy the Out writers appended a
--- bare "|r" anyway: the line rendered with no colour and nothing looked broken. That
--- silently killed the colour coding in the very commands that were rewritten to add
--- it. Normalising here fixes every site at once; fixing them individually would only
--- last until the next one is written.
+-- "good"/"bad"/"warn" in lower case — a typo class rather than a second convention. A
+-- miss would resolve to "" and the Out writers would still append a bare "|r", so the
+-- line renders uncoloured and nothing looks broken. Normalising here fixes every site at
+-- once.
 local function tone(t) return O[t] or (t and O[t:upper()]) or "" end
 
 local Out = {}
@@ -549,7 +531,7 @@ function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
     table.insert(DF.DebugSubCommands, { cmd = cmd, desc = desc, dev = devOnly, args = args, hidden = hidden })
     -- Registering IS the gate. Populated here rather than at the branch so a
     -- command cannot be marked dev in the listing while staying runnable on
-    -- release — the two can no longer drift apart.
+    -- release.
     if devOnly then DF.DEBUG_SUB_DEV[cmd] = true end
     -- Registering IS the gate here too: a branch added later is covered on the
     -- day it is written, with no second list to keep in step.
@@ -688,15 +670,12 @@ function DF:OnSliderDragStop()
     DF.sliderLightweightFunc = nil
     DF.sliderLightweightName = nil
 
-    -- ⚠ RAID TEST MODE ONLY. The generic full sweep is no longer requested from
-    -- here: the widget kit's release path calls the `refreshNow` hook, which
-    -- asks for exactly the same "all" and coalesces with whatever the setting's
-    -- own callback scheduled. The old `else DF:UpdateAll()` arm was therefore a
-    -- duplicate request and is gone.
+    -- ⚠ RAID TEST MODE ONLY. The generic full sweep is not requested from here: the widget
+    -- kit's release path calls the `refreshNow` hook, which asks for the same "all" and
+    -- coalesces with whatever the setting's own callback scheduled.
     --
-    -- This branch is NOT a duplicate and must stay: "all" does not cover
-    -- UpdateAllRaidPetFrames, so removing it would leave the raid test preview's
-    -- pet frames stale for the rest of the drag.
+    -- This branch must stay: "all" does not cover UpdateAllRaidPetFrames, so removing it
+    -- would leave the raid test preview's pet frames stale for the rest of the drag.
     local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
     if isRaidMode and DF.raidTestMode then
         if DF.UpdateRaidTestFrames then
@@ -767,8 +746,8 @@ end
 -- CREATION and the reduced-max-health restore). Nothing in the full-update path does it,
 -- so a padding change that does not come from a slider DRAG left the health bar at the
 -- old inset while the resource bar moved — ApplyResourceBarLayout re-reads padding every
--- pass, so the two disagreed. Typing a value and pressing Enter was the reported case
--- (Krathe, 2026-08-09); the throttle would also have swallowed a single un-forced call
+-- pass, so the two disagreed. Typing a value and pressing Enter was the reported case;
+-- the throttle would also have swallowed a single un-forced call
 -- landing inside the drag window.
 function DF:LightweightUpdateFrameSize(force)
     -- Frame-skip throttle
@@ -961,19 +940,15 @@ end
 -- SAFE TEXTURE SETTERS — graceful missing-texture fallback
 -- A configured texture can be missing when a profile imported from another user
 -- references a 3rd-party/SharedMedia texture this client doesn't have (or the
--- providing addon was removed) — leaving a black/blank bar. C_UIFileAsset
--- (NEW in WoW 12.0.7) — IsKnownFile(asset) reports whether a path is known to
--- the client (shipped OR a known loose addon file); when it says the asset is
--- unknown we substitute a guaranteed-present stock texture. (Note: the API
--- doesn't verify a known loose file still exists on disk, but an uninstalled
+-- providing addon was removed) — leaving a black/blank bar. C_UIFileAsset.IsKnownFile
+-- reports whether a path is known to the client (shipped OR a known loose addon file);
+-- when it says the asset is unknown we substitute a guaranteed-present stock texture.
+-- (The API doesn't verify a known loose file still exists on disk, but an uninstalled
 -- addon's path is simply not "known", which is exactly the import case we want.)
 --   The SetTexture/SetStatusBarTexture `success` bool does NOT work for this —
 --   it returns true for any well-formed path even when the file is absent.
---   Feature-detected: on clients without C_UIFileAsset this is INERT (behaves
---   exactly as before), so it's safe to ship now and self-activates on 12.0.7.
+--   Feature-detected: on clients without C_UIFileAsset this is INERT.
 -- ============================================================
--- DF's own bundled default bar texture — ships with the addon, so it's always
--- present when our code runs. This is the "fall back to our default" target.
 DF.STOCK_BAR_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
 local _df_warnedMissingTexture = {}
 
@@ -997,9 +972,9 @@ DF.GetOurMediaKey = ourMediaKey
 --                 first frame and never stale mid-session.
 --   3rd-party  -> C_UIFileAsset.IsKnownFile. The ONLY signal available, but it
 --                 answers from an index built at client launch, so it reports a
---                 renamed/deleted file as KNOWN until that index catches up.
---                 Proven in game 2026-08-09 — see the manifest comment. That is
---                 why our own files must never go through it.
+--                 renamed/deleted file as KNOWN until that index catches up
+--                 (proven in game -- see the manifest comment). That is why our own
+--                 files must never go through it.
 local function textureKnown(asset)
     if asset == nil then return nil end
     local key = ourMediaKey(asset)
@@ -1109,14 +1084,13 @@ function DF:SafeSetStatusBarTexture(bar, path, stock)
         recordBarTexture(bar, fallback, fallback)
         return false
     end
-    -- ☠ DOES NOT RESOLVE THE VERTICAL COMPANION, DELIBERATELY. It used to, against
-    -- the orientation the BAR already carried — but a caller that had just resolved
-    -- from the db (the authoritative source on the pass where orientation changes)
-    -- would then have its correct choice overridden by this one's stale reading.
-    -- Two resolution points that can disagree is worse than one that is occasionally
-    -- late, so there is now exactly one per bar: the db-driven call at the texture
-    -- site for bars that have their own orientation key, and DF:ApplyBarFillOrientation
-    -- for the rest. Both are idempotent, so calling either twice is harmless.
+    -- ☠ DOES NOT RESOLVE THE VERTICAL COMPANION, DELIBERATELY. A caller that has just
+    -- resolved from the db (the authoritative source on the pass where orientation changes)
+    -- would have its correct choice overridden by a stale reading of the bar here. Two
+    -- resolution points that can disagree is worse than one that is occasionally late, so
+    -- there is exactly one per bar: the db-driven call at the texture site for bars that have
+    -- their own orientation key, and DF:ApplyBarFillOrientation for the rest. Both are
+    -- idempotent, so calling either twice is harmless.
     bar:SetStatusBarTexture(path)
     recordBarTexture(bar, path, path)
     return true
@@ -1124,15 +1098,11 @@ end
 
 -- Plain Texture region with stock fallback (same semantics).
 --
--- ☠ ONE SetTexture, with the wrap resolved UP FRONT. This used to set the file
--- plain and then let ApplyTextureTiling re-set it with wrap args -- two sets on
--- the same region in the same frame. On a FRESH session (file not yet in the
--- texture cache) that pair misbehaved: the settings preview swatch could keep
--- showing the previously-selected texture after picking a tiled one, until a
--- panel reopen re-issued the set against a now-cached file (#1071, absorb /
--- heal-absorb dropdowns, aphoex 5.2.0-alpha.2). Whether the second set restarted
--- the pending load or the client deduped it, the cure is the same: never issue
--- two. Resolve the tiling mode first, set once with its wrap, then let
+-- ☠ ONE SetTexture, with the wrap resolved UP FRONT. Setting the file plain and then
+-- letting ApplyTextureTiling re-set it with wrap args is two sets on the same region in
+-- the same frame, and on a FRESH session (file not yet in the texture cache) that pair
+-- can leave the settings preview swatch showing the previously-selected texture until a
+-- panel reopen. Resolve the tiling mode first, set once with its wrap, then let
 -- ApplyTextureTiling apply the flags only.
 function DF:SafeSetTexture(region, path, stock)
     if not region then return end
@@ -1207,7 +1177,7 @@ local ABSORB_TILES = { "DF_Absorb_V1", "DF_Absorb_V1_Medium", "DF_Absorb_V1_Wide
 --                 becomes a pipe on a vertical frame stops reading as "minus",
 --                 which is the entire point of the glyph. ☠ This is the ONE
 --                 texture in DF that does not follow the rotate-with-a-vertical-
---                 bar convention. Intentional (Krathe, 2026-08-09) — not a bug,
+--                 bar convention. Intentional — not a bug,
 --                 do not "fix" it in a sweep.
 --   Both fall out of the existing code with no special-casing: with no companion
 -- entry, DF:ResolveBarTexture returns the path unchanged, and
@@ -1344,11 +1314,9 @@ function DF:ApplyBarTextureTiling(bar, path)
     -- a repeating region can smear the border pixels at the tile seams ("lines"
     -- at the fill's edge), and whether it shows varies with texture cache state:
     -- it surfaced only on a fresh session with a tile already selected, and any
-    -- reapply cleared it. The two implementations that tile statusbar fills both
-    -- set wrap WITH the file and only then the flags -- Blizzard
+    -- reapply cleared it. Blizzard sets wrap WITH the file and only then the flags
     -- (SetTextureWithAddressModeOptions, TextureUtil.lua; horizTile= on the XML
-    -- node is the declarative form) and Grid2 (IndicatorMultiBar.lua re-sets the
-    -- fill's file with wrap args after SetStatusBarTexture). This is that method.
+    -- node is the declarative form). This is that method.
     --   Stamped on the fill because the ATTACHED modes re-assert tiling on every
     -- absorb update: the stamp spares them a per-pass SetTexture, and every site
     -- that re-sets the file clears it (recordBarTexture for the safe setters,
@@ -1422,10 +1390,9 @@ end
 
 -- Update only font shadows on all text elements
 function DF:LightweightUpdateFontShadows()
-    -- 12.0.7: fontstring-level SetShadowOffset/SetShadowColor no longer render —
-    -- a font's drop shadow now lives on its font-family per-alphabet font objects.
-    -- The old per-frame fontstring poke was a silent no-op, so update the already
-    -- built font families in place instead (live preview, no full font rebuild).
+    -- Fontstring-level SetShadowOffset/SetShadowColor do not render: a font's drop shadow
+    -- lives on its font-family per-alphabet font objects. So update the already built font
+    -- families in place (live preview, no full font rebuild).
     if DF.RefreshFontFamilyShadows then DF:RefreshFontFamilyShadows() end
     -- A font-object shadow change doesn't repaint already-rendered fontstrings —
     -- only continuously-ticked test frames pick it up on their own. Re-apply fonts
@@ -1731,7 +1698,7 @@ function DF:LightweightUpdateHighlight(highlightType)
             -- first real update after it (a mouseover, a target change) redrew the
             -- snapped one. That is the whole of "pressing enter on the field that sets
             -- the thickness visually fixes it, but it grows by 1 pixel again as soon as
-            -- you mouseover or target someone" (Renegade, 2026-08-22): the preview and
+            -- you mouseover or target someone": the preview and
             -- the render disagreed, and only the preview was wrong.
             -- ★ Through the SHARED helpers, not a copy: a preview that snaps ALMOST
             -- like the renderer is the same bug again, one rounding rule later. If the
@@ -1784,8 +1751,8 @@ function DF:LightweightUpdateHighlight(highlightType)
 end
 
 -- Drag callback for Anchor / Offset X / Offset Y. See RelayoutResourceBars above for why
--- this no longer places the bar itself — the single-SetPoint fork is what made the bar
--- disappear for the whole drag.
+-- this does not place the bar itself — a single-SetPoint fork makes the bar disappear
+-- for the whole drag.
 function DF:LightweightUpdatePowerBarPosition()
     RelayoutResourceBars()
 end
@@ -1851,17 +1818,10 @@ function DF:LightweightUpdateDispelOverlay()
         return
     end
 
-    -- ☠ A THIRD COPY OF THE DISPEL STYLING USED TO LIVE HERE (~145 lines: border
-    -- strips, EDGE strips, gradient, darken, icons) and it had DRIFTED -- it still
-    -- multiplied Gradient Intensity into RGB, which the real paths stopped doing when
-    -- intensity moved onto alpha. It was also unreachable: the only writer of
-    -- frame.dfDispelOverlay is CreateDispelOverlay, whose one caller is the TEST branch
-    -- of UpdateDispelOverlay -- and the test bounce above returns before this. So the
-    -- loop repainted hidden widgets on live frames that never had one.
-    --
-    -- Now the same one-liner as LightweightUpdateDefensiveIcons and
-    -- LightweightUpdateMissingBuff: bump the layout version and let the container rows
-    -- re-drive (sig-gated, cheap when nothing changed). (Audit, 2026-08-07.)
+    -- Same one-liner as LightweightUpdateDefensiveIcons and LightweightUpdateMissingBuff:
+    -- bump the layout version and let the container rows re-drive (sig-gated, cheap when
+    -- nothing changed). Do not restyle dispel widgets by hand here -- the container rows own
+    -- them, and frame.dfDispelOverlay only exists on test frames.
     DF:InvalidateAuraLayout()
 end
 
@@ -2148,19 +2108,17 @@ end
 --   CLASS      → the unit's class colour
 --   CUSTOM     → the user's resourceBarCustomColor
 -- Honours the legacy resourceBarClassColor boolean when resourceBarColorMode
--- isn't set yet (pre-migration profiles). Uses the same UnitClass/UnitPowerType
--- calls the old inline logic did, so it carries no new secret-value risk.
+-- isn't set yet (pre-migration profiles). UnitClass/UnitPowerType carry no
+-- secret-value risk.
 -- ★ classOverride / powerTokenOverride exist so the PREVIEW can drive this without a
--- real unit -- the same shape DF:ShouldShowResourceBar already uses for its role and
--- class overrides. A test path that is a PARAMETER of the live function, not a copy.
+-- real unit -- the same shape DF:ShouldShowResourceBar uses for its role and class
+-- overrides. A test path that is a PARAMETER of the live function, not a copy.
 --
--- ☠ Do not reinstate a local copy of this in TestMode. The one that used to live there
--- had drifted three ways: it called DF:GetPowerColor with ONE argument (dropping the
--- powerType fallback tier), it lost the altR/altG/altB and terminal 0,0,1 fallbacks
--- entirely, and it fabricated the power token from ROLE -- HEALER=MANA, TANK=RAGE,
--- everything else ENERGY -- so only three of the configurable power colours could be
--- previewed. FOCUS, RUNIC_POWER, LUNAR_POWER, MAELSTROM, FURY and INSANITY are all
--- editable on the Colors page and none of them could be seen.
+-- ☠ Do not add a local copy of this in TestMode: a copy is easily written with one
+-- argument to DF:GetPowerColor (dropping the powerType tier), without the
+-- altR/altG/altB and terminal 0,0,1 fallbacks, or with a power token guessed from ROLE
+-- -- which would make FOCUS, RUNIC_POWER, LUNAR_POWER, MAELSTROM, FURY and INSANITY
+-- unpreviewable.
 --
 -- ⚠ With powerTokenOverride there is no numeric powerType to pass on, so the preview
 -- gets the TOKEN tiers only. That is not a gap worth closing: the token tiers are the
@@ -2214,10 +2172,9 @@ function DF:MigrateResourceBarColorMode(modeDb)
     end
 end
 
--- Pinned frames decouple (2026-06-07): pinned settings are no longer saved as
--- per-raid-layout overrides — only the per-set `enabled` flag is. Strip any
--- stale "pinned.N.<setting>" override keys (setting != enabled) left in saved
--- auto-layout profiles by the old behaviour. Idempotent: once clean, re-running
+-- Pinned settings are not saved as per-raid-layout overrides — only the per-set
+-- `enabled` flag is. Strip any stale "pinned.N.<setting>" override keys (setting !=
+-- enabled) left in saved auto-layout profiles. Idempotent: once clean, re-running
 -- is a no-op, so it is safe to call on every load. Walks ALL DandersFrames
 -- profiles (not just the active one), since each carries its own raidAutoProfiles.
 function DF:MigratePinnedLayoutOverrides()
@@ -2249,7 +2206,7 @@ function DF:MigratePinnedLayoutOverrides()
     end
 end
 
--- Pinned frames "Match" baseline (2026-06-07): each pinned set inherits its
+-- Pinned frames "Match" baseline: each pinned set inherits its
 -- baseline look (size, later border/background) from a mode chosen by
 -- set.matchMode ("party"/"raid"). It defaults to the set's OWN mode (a party set
 -- mirrors party frames, a raid set mirrors raid frames); the other value lets a
@@ -2700,11 +2657,6 @@ function DF:LightweightUpdateSelectionHighlightColor()
     -- Just call the generic highlight update for selection
     DF:LightweightUpdateHighlight("selection")
 end
-
--- (LightweightUpdateExpiringBorderColor / ...TintColor removed 2026-07-25 with the
--- pre-12.1 Expiring system: both had already degenerated to empty stubs because
--- remaining time is secret on the container rows. The 12.1-safe reveal is the
--- DF.Expiration engine, which re-specs through the normal drive.)
 
 -- Update missing buff icon border color
 function DF:LightweightUpdateMissingBuffBorderColor()
@@ -3239,7 +3191,7 @@ function DF:GetCurrentMode()
     return "party"
 end
 
--- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
+-- Note: DeepCopy and CopyProfile are defined in Profile.lua
 
 -- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
 -- raidFramesDispelIndicatorType CVar from _blizzDispelIndicator, a key no
@@ -3427,13 +3379,11 @@ function DF:MigrateFrameBorderKeys(modeDb)
         end
     end
 
-    -- Gradient was previously an independent boolean (`<prefix>BorderGradientEnabled`)
-    -- that overlaid on top of Style; Stage 2.3 folded it into Style as a
-    -- third option so the user can't get conflicting "Solid + Class Color +
-    -- Gradient" combinations. Adopt: if the old boolean is true and the
-    -- style isn't already explicitly set to TEXTURE (which would be a
-    -- deliberate other-mode choice), promote to "GRADIENT". Old boolean is
-    -- left in place for rollback safety.
+    -- Gradient was once an independent boolean (`<prefix>BorderGradientEnabled`) layered on
+    -- top of Style; it is now a third Style option, so the user can't get conflicting
+    -- "Solid + Class Color + Gradient" combinations. Adopt: if the old boolean is true and
+    -- the style isn't already explicitly set to TEXTURE (a deliberate other-mode choice),
+    -- promote to "GRADIENT". The old boolean is left in place for rollback safety.
     local function adoptGradientStyle(prefix)
         local styleKey   = prefix .. "BorderStyle"
         local enabledKey = prefix .. "BorderGradientEnabled"
@@ -3473,20 +3423,18 @@ function DF:MigrateColorPickerToGlobal()
     end
 end
 
--- One-time repair for a DandersFrames texture that the addon USED TO SHIP and no longer
--- does. Reported from live: a long-standing profile upgraded across several versions came
--- back with green health bars, and picking a colour did nothing -- because a StatusBar
--- with no usable texture has nothing to tint, so it renders the default green whatever
--- colour you set. Toggling the texture dropdown to anything else and back fixed it
--- permanently, which is the tell that the stored VALUE was stale rather than the renderer.
+-- Repair for a DandersFrames texture that the addon USED TO SHIP and no longer does. A
+-- profile still naming it renders green health bars, and picking a colour does nothing --
+-- a StatusBar with no usable texture has nothing to tint, so it renders the default green
+-- whatever colour you set.
 --
--- ☠ WHY DF:SafeSetStatusBarTexture DID NOT COVER THIS. That guard asks
--- C_UIFileAsset.IsKnownFile, and its own note says the API "doesn't verify a known loose
--- file still exists on disk" -- it was built for the IMPORT case, where a profile names a
--- texture belonging to an addon you do not have, and that path is simply not known. Our
--- own deleted file is a different shape: DandersFrames IS installed, so the path can still
--- read as known, and the render-time fallback never engages. It also only ever fixes the
--- FRAME, never the saved value, so it would have to win again on every login.
+-- ☠ WHY DF:SafeSetStatusBarTexture DOES NOT COVER THIS. That guard asks
+-- C_UIFileAsset.IsKnownFile, which "doesn't verify a known loose file still exists on
+-- disk" -- it is built for the IMPORT case, where a profile names a texture belonging to
+-- an addon you do not have, and that path is simply not known. Our own deleted file is a
+-- different shape: DandersFrames IS installed, so the path can still read as known, and
+-- the render-time fallback never engages. It also only ever fixes the FRAME, never the
+-- saved value, so it would have to win again on every login.
 --
 -- ⚠ THE NARROWEST RULE THAT FIXES IT, deliberately. A value is repaired ONLY when it is
 -- BOTH ours AND unrecognised:
@@ -3524,12 +3472,10 @@ local TEXTURE_KEY_LABELS = {
     buffPandemicBorderTexture = "Buff Pandemic Border",
 }
 
--- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. It used to stamp
--- `_staleTexturePathV1` and never run again, which is right for a MIGRATION and
--- wrong for HEALING: the profile was repaired once and every later rename — every
--- future addon update — went unfixed forever. Healing has to re-check whenever the
--- world may have changed, and the world changes on every update. The pass is a
--- table walk over 14 keys across 2 modes; the cost is nothing.
+-- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. This is HEALING, not a migration: a one-shot
+-- flag would repair the profile once and leave every later rename -- every future addon
+-- update -- unfixed forever. The pass is a table walk over 14 keys across 2 modes; the
+-- cost is nothing.
 --
 -- ☠ AND IT ONLY EVER TOUCHES OUR OWN MEDIA. A third-party path is left alone even
 -- when it looks missing, because that judgement comes from an API whose answer is
@@ -3537,10 +3483,9 @@ local TEXTURE_KEY_LABELS = {
 -- for the evening. Rewriting it would destroy a valid choice permanently.
 --
 -- ⚠ IT RESETS BOTH KINDS OF MISSING, retired-from-the-manifest AND absent-from-disk.
--- An earlier version kept the setting for the second kind, reasoning that a reinstall
--- would restore it — but that left the dropdown proudly displaying a texture the bars
--- were not using, which is a worse lie than losing the choice. The two cases still
--- get DIFFERENT ADVICE in the report, because the user's fix differs.
+-- Keeping the setting for the second kind would leave the dropdown displaying a texture
+-- the bars are not using, which is a worse lie than losing the choice. The two cases
+-- still get DIFFERENT ADVICE in the report, because the user's fix differs.
 function DF:MigrateStaleTexturePaths()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     -- The manifest is the authority here, NOT LSM's live registry: a texture we
@@ -3620,8 +3565,8 @@ function DF:MigrateStaleTexturePaths()
         end
     end
 
-    -- One line per distinct setting+file, naming BOTH — "we fixed something" with
-    -- no subject is what the old message did, and it left users unable to act.
+    -- One line per distinct setting+file, naming BOTH — "we fixed something" with no
+    -- subject leaves users unable to act.
     local list = {}
     for k in pairs(repaired) do list[#list + 1] = k end
     if #list == 0 then return end
@@ -3665,17 +3610,13 @@ function DF:MigrateRoleBorderColors(profile)
 
     -- Adopt from whichever mode-level set was customised first, WITHIN THIS PROFILE.
     --
-    -- ☠ THIS READ USED TO BE `DF.db.party` / `DF.db.raid` — the ACTIVE profile — while the
-    -- write went to the profile passed in. The caller loops every profile in the DB, so
-    -- every one of them adopted whichever profile you happened to log in on, and their own
-    -- legacy colours were skipped (Krathe, 2026-08-08).
+    -- ☠ READ FROM `profile`, never `DF.db` (the ACTIVE profile): the caller loops every
+    -- profile in the DB, and reading the active one would make every profile adopt whichever
+    -- profile you happened to log in on.
     --
-    -- ⚠ AND IT COULD NOT SELF-CORRECT. adopt() always ends by writing DEFAULTS when no
-    -- source matches, so roleColors is fully populated after one pass, and the `if rc[role]
-    -- then return end` gate then makes every later run a no-op. Fixing the source only
-    -- helps profiles that have not been migrated yet; already-migrated ones keep the wrong
-    -- colours (their legacy keys are still in party/raid, just unreachable). Krathe's call:
-    -- fix forward, no V2 recovery pass — the affected population is alpha testers.
+    -- ⚠ adopt() always ends by writing DEFAULTS when no source matches, so roleColors is
+    -- fully populated after one pass, and the `if rc[role] then return end` gate makes every
+    -- later run a no-op -- this cannot self-correct a profile it got wrong.
     --
     -- ⚠ `profile = profile or DF.db` above still works: DF.db is itself profile-shaped
     -- (.party/.raid), so the no-argument call reads the active profile, as intended.
@@ -3911,37 +3852,25 @@ function DF:MigrateHealthColorStops()
 end
 
 -- Drop the heal prediction under the absorb on profiles that stored the old default.
--- ⚠ The five lines that used to open this block described MigrateOORTextAlpha (the OOR
--- name-text fold), which lives BELOW this function — the doc was orphaned onto its new
--- neighbour when this one was inserted above it. That function carries its own, fuller
--- comment; this is not a deletion of documentation, it is the removal of a duplicate
--- pointing at the wrong body.
 --
--- ☠ VALUE-GATED, NOT PRESENCE-GATED, AND THAT IS THE WHOLE POINT. Config.lua seeds
--- healPredictionFrameLevel for every profile, so the key is ALWAYS present and a
--- presence test can never fire — changing the default alone reaches new profiles only.
--- Every one of the dev's ten profiles had 12 stored, which is exactly how "the fix
--- changes nothing" happens. See [[feedback-migration-before-defaults-backfill]].
+-- ☠ VALUE-GATED, NOT PRESENCE-GATED. Config.lua seeds healPredictionFrameLevel for every
+-- profile, so the key is ALWAYS present and a presence test can never fire — changing the
+-- default alone reaches new profiles only. See
+-- [[feedback-migration-before-defaults-backfill]].
 --
--- ☠☠ AND ONE-SHOT, PER PROFILE — value-gating ALONE is a trap here, which is exactly what
--- shipped for review. The control is a 0-100 SLIDER (Pages/Auras.lua), so 12 is a value a
--- user can deliberately pick: someone who wants the heal drawn OVER the shield sets 12,
--- and an unflagged value-gated fold reverts it on the next reload, profile switch or
--- import. 11 sticks, 13 sticks, 12 silently snaps back — the one number the user is most
--- likely to choose for that effect is the one they cannot keep. The old comment here said
--- "a level the user chose deliberately is left alone", which was true of every value
--- except the only one this function touches.
+-- ☠☠ AND ONE-SHOT, PER PROFILE — value-gating ALONE is a trap here. The control is a 0-100
+-- SLIDER (Pages/Auras.lua), so 12 is a value a user can deliberately pick: someone who
+-- wants the heal drawn OVER the shield sets 12, and an unflagged value-gated fold would
+-- revert it on the next reload, profile switch or import.
 -- ⇒ The value gate says WHICH profiles the default moved under; the flag says the move
 -- has happened. Both are needed, and neither substitutes for the other.
 --
--- ☠ IT HAS TO REACH RAID AUTO-LAYOUT OVERRIDES, and every other value migration in this
--- file does not. OVERRIDE_TAB_MAP (Core/AutoProfiles.lua) matches by PREFIX, and
--- "healPrediction" is one of its rows -- so healPredictionFrameLevel is a legal per-layout
--- override, and v5.1.3 shipped the very slider that mints one. A profile whose raid layout
--- carried 12 kept it, and the incoming heal drew back over the shield the moment that
--- layout activated: the exact bug this migration exists to end, surviving inside the one
--- place the migration could not see. The walk is the published one
--- (DF.ForEachRaidLayoutOverride, Designer/Presets.lua) rather than a second copy of it.
+-- ☠ IT HAS TO REACH RAID AUTO-LAYOUT OVERRIDES, unlike every other value migration in this
+-- file. OVERRIDE_TAB_MAP (Core/AutoProfiles.lua) matches by PREFIX, and "healPrediction"
+-- is one of its rows -- so healPredictionFrameLevel is a legal per-layout override. A
+-- layout carrying 12 would redraw the incoming heal over the shield the moment it
+-- activated. The walk is the published one (DF.ForEachRaidLayoutOverride,
+-- Designer/Presets.lua) rather than a second copy of it.
 function DF:MigrateHealPredictionBelowAbsorb()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     local function fold(t)
@@ -4264,18 +4193,16 @@ end
 -- Step existing centred-and-wrapping raid layouts onto Center Mode = Fixed, so their
 -- frames stay where they have always been instead of picking up the corrected Default.
 --
--- ☠ FLAG-GATED, NOT PRESENCE-GATED, and that is the whole point.
--- raidGroupCenterMode HAS a defaults entry ("ALL"), so the backfill seeds it before this
--- ever runs and `if raid.raidGroupCenterMode == nil` would be false on every profile,
--- forever. That exact mistake has been made three times in this codebase. The flag lives
--- on the profile and is deliberately NOT in the defaults, so it cannot be seeded.
+-- ☠ FLAG-GATED, NOT PRESENCE-GATED. raidGroupCenterMode HAS a defaults entry ("ALL"), so
+-- the backfill seeds it before this ever runs and `if raid.raidGroupCenterMode == nil`
+-- would be false on every profile, forever. The flag lives on the profile and is
+-- deliberately NOT in the defaults, so it cannot be seeded.
 --
 -- WHO IS TOUCHED: grouped raid, Groups Anchor on CENTER, Groups Before Wrap below 8, AND
 -- Players Grow From opposite to Groups Grow From. At 8 the grid never wraps and the old
 -- compensation was always (0,0), so those profiles already match Default.
 --
--- ☠ THE LAST CLAUSE IS THE ONE THAT IS EASY TO GET WRONG, AND I DID GET IT WRONG.
--- The predicate is the PAIR, not Players Grow From on its own. It is the same XOR that
+-- ☠ THE LAST CLAUSE IS THE PAIR, not Players Grow From on its own. It is the same XOR that
 -- ComputeRaidMainGroupAnchorOffset uses for its sign -- there as
 -- `mainAtNear = (playersEnd == wrapEnd)`, here as the two being different:
 --
@@ -4285,11 +4212,7 @@ end
 --                               drifted with the roster AND jumped at the wrap point.
 --                               No mode reproduces that, so there is nothing to preserve
 --                               and they are LEFT ON DEFAULT to choose for themselves.
---
--- An earlier version of this header claimed the rule was "exact only for Players Grow
--- From = End", from a measurement that varied only that axis with Groups Grow From held
--- at its default. It named the wrong variable and was outright wrong for end/end.
--- Corrected against in-game PTR testing of all four pairs (Krathe, 2026-08-18).
+-- (Verified in game for all four pairs.)
 --
 -- VALUE-IDEMPOTENT: no. It writes a mode the user may later change on purpose, so the
 -- flag is stamped for every profile it inspects, changed or not, and this must NOT be
@@ -4321,12 +4244,10 @@ end
 -- One-shot per-profile, two independently-guarded steps so a profile already
 -- through step 1 still receives step 2.
 --
--- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
--- import path trusted it -- clearing BOTH guards on every import so the payload got
--- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
+-- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT (FoldAuraDesignerConfig early-returns on inset == 0).
 -- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
--- legacy inset from a value the user set after migrating, so re-running it destroyed
--- those settings profile-wide. Re-arming step 2's guard is now conditional on the
+-- legacy inset from a value the user set after migrating, so re-running it would destroy
+-- those settings profile-wide. Re-arming step 2's guard on import is conditional on the
 -- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
 --
 -- Anything added here must state which of the two shapes it is.
@@ -4363,7 +4284,7 @@ function DF:MigrateBorderInsetFold()
 end
 
 -- One-time: turn the Important Debuffs highlight ON for profiles that predate the
--- baseline flip. Krathe's call (2026-08-08) -- the treatment is good enough now to be
+-- baseline flip. Krathe's call -- the treatment is good enough now to be
 -- the out-of-box look, but the flip alone could never reach anyone.
 --
 -- ☠ WHY A MIGRATION IS NEEDED AT ALL, given the default is ALREADY true. The feature
@@ -4377,7 +4298,7 @@ end
 -- ⚠ UNCONDITIONAL WRITE, unlike the …BaselineV2/V3 migrations, which only correct one
 -- exact legacy number. There is no legacy value to key off here -- false is both "never
 -- touched it" and "turned it off on purpose", and the two are indistinguishable in the
--- saved variables. Krathe's ruling (2026-08-08): the feature only ever existed on the
+-- saved variables. Krathe's ruling: the feature only ever existed on the
 -- PTR lane, so the "turned it off on purpose" population is a handful of testers and
 -- overwriting them once is acceptable. Do NOT reuse this shape for a setting with live
 -- users without asking -- the reasoning is about the audience, not the mechanism. The
@@ -4579,6 +4500,27 @@ function DF:MigrateAbsoluteFrameLevels()
     end
 end
 
+-- An import never reaches the pass above: the receiving profile already carries its
+-- flags, so a payload exported before v5 would keep the 0 sentinel and draw these icons
+-- at the bottom of the frame. Convert the PAYLOAD instead, before it is applied, so a
+-- selective import cannot touch the receiver's own values. The Aura Designer default is
+-- left alone: 4.x read it as a raw level, not as an offset added to 40. A payload with no
+-- parseable version predates the version field and is treated as pre-v5.
+function DF:ConvertPreV5FrameLevels(payload)
+    if type(payload) ~= "table" then return end
+    local major = tonumber(tostring(payload.version or ""):match("^v?(%d+)%."))
+    if major and major >= 5 then return end
+    for _, mode in ipairs({ "party", "raid" }) do
+        local modeDb = payload[mode]
+        if type(modeDb) == "table" then
+            for key, builtin in pairs(ABS_LEVEL_SENTINEL_DEFAULT) do
+                if modeDb[key] == 0 then modeDb[key] = builtin end
+            end
+            if modeDb.missingBuffIconFrameLevel == 35 then modeDb.missingBuffIconFrameLevel = 60 end
+        end
+    end
+end
+
 -- A profile created from Config defaults is ALREADY in the current shape, so every
 -- one-time migration has to treat it as done. Most migrations here derive from a
 -- legacy value and are naturally no-ops on a fresh profile (the rule stated in the
@@ -4643,41 +4585,6 @@ function DF:StampFreshProfileMigrations(profile)
     if type(profile.party) == "table" then
         for k, v in pairs(FRESH_PROFILE_PARTY_MIGRATION_FLAGS) do
             profile.party[k] = v
-        end
-    end
-end
-
--- Transition shim (unreleased-only): an earlier iteration of the priority flip
--- converted values to the new higher-wins scale and then stamped a COARSE flag —
--- profile-level for Aura Designer, store-level for Click Casting. The replacement
--- lazy migrations (DF.MigrateAuraDesignerPrioritiesLazy / CC:MigratePrioritiesLazy)
--- key off a FINER flag (per resolved adDB table / per CC profile). Forward the
--- coarse flags to the fine ones WITHOUT touching any value, so data already
--- converted by the old pass is never double-flipped. Purely additive + idempotent
--- (only sets flags); a no-op for anyone who never ran the old pass. Auto-layout
--- overlays are intentionally left unstamped — the old pass never converted them,
--- so the lazy migration must still flip those on first resolve.
-function DF:ForwardPriorityMigrationFlags()
-    local function stamp(adDB) if type(adDB) == "table" then adDB._priorityHigherWinsV1 = true end end
-    if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
-        for _, profile in pairs(DandersFramesDB_v2.profiles) do
-            if type(profile) == "table" and profile._priorityHigherWinsV1 then
-                if type(profile.party) == "table" then stamp(profile.party.auraDesigner) end
-                if type(profile.raid) == "table" then stamp(profile.raid.auraDesigner) end
-                if type(profile.auraDesignerPresets) == "table" then
-                    for _, presetCfg in pairs(profile.auraDesignerPresets) do stamp(presetCfg) end
-                end
-            end
-        end
-    end
-    local ccdb = DandersFramesClickCastingDB
-    if ccdb and ccdb._priorityHigherWinsV1 and type(ccdb.classes) == "table" then
-        for _, classData in pairs(ccdb.classes) do
-            if type(classData) == "table" and type(classData.profiles) == "table" then
-                for _, profile in pairs(classData.profiles) do
-                    if type(profile) == "table" then profile._priorityHigherWinsV1 = true end
-                end
-            end
         end
     end
 end
@@ -5054,15 +4961,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
         -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
         --
-        -- All of these adopt legacy -> canonical keys and are guarded on "only if the
-        -- new key is nil". They used to run on DF.db (the ACTIVE profile) alone, while
-        -- the defaults backfill further down walks EVERY profile and seeds the new keys
-        -- from PartyDefaults/RaidDefaults. So on the first login after the rename, every
-        -- non-active profile got the new key stamped to the shipped default before it
-        -- had ever been migrated -- and the nil-guard can then never pass again. A user
-        -- with two profiles kept their frame borders, resource-bar border + colour mode,
-        -- buff/debuff borders and role colours on whichever profile happened to be
-        -- active, and silently lost them on all the others, permanently.
+        -- All of these adopt legacy -> canonical keys and are guarded on "only if the new key is
+        -- nil". The defaults backfill further down walks EVERY profile and seeds the new keys
+        -- from PartyDefaults/RaidDefaults, so a profile reached by the backfill first gets the new
+        -- key stamped to the shipped default and the nil-guard can never pass again -- silently
+        -- losing frame borders, resource-bar border + colour mode, buff/debuff borders and role
+        -- colours on every non-active profile.
         --
         -- DF.db is itself one of these profiles; the passes are nil-guarded and
         -- therefore idempotent, so visiting it twice is harmless.
@@ -5100,15 +5004,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:MigrateContainerPositionRecords()
         end
 
-        -- ☠ MUST RUN HERE, BEFORE FRAMES ARE BUILT. This used to sit in the
-        -- C_Timer.After(0.5) block far below, which is half a second AFTER the
-        -- frames are created — so every bar rendered with the dead path first,
-        -- each printed its own "texture is missing" line, and the repair then
-        -- printed a second report about the same textures. Two sets of messages
-        -- for one problem. Healing the db before anything reads it means the
-        -- frames never see the dead path and only the (better) repair report is
-        -- printed. Needs only DandersFramesDB_v2 and the Config.lua tables, all
-        -- of which exist by now.
+        -- ☠ MUST RUN HERE, BEFORE FRAMES ARE BUILT. Run later (e.g. in the C_Timer.After(0.5)
+        -- block below), every bar would render with the dead path first and print its own
+        -- "texture is missing" line, and the repair would then print a second report about the
+        -- same textures. Healing the db before anything reads it means the frames never see the
+        -- dead path and only the repair report is printed. Needs only DandersFramesDB_v2 and the
+        -- Config.lua tables, all of which exist by now.
         if DF.MigrateStaleTexturePaths then DF:MigrateStaleTexturePaths() end
         -- Pinned frames decouple: strip stale pinned.N.<setting> auto-layout
         -- overrides (everything except the per-set `enabled` flag).
@@ -5208,28 +5109,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
-                -- Dispel colours are account-wide (per profile, mode-independent —
-                -- edited on the Colors page; sibling of classColors). Seed ONCE from
-                -- the profile's v4 colours so any customisation carries over; otherwise
-                -- the game palette. No None key — the None/Physical border is hidden on
-                -- no-dispel-type auras. The legacy per-mode keys are left in place here;
-                -- DropDispelCustomMode below clears the overlay half AFTER this has read
-                -- it (see the ordering note there).
+                -- Dispel colours are account-wide (per profile, mode-independent — edited on the Colors
+                -- page; sibling of classColors). Seed ONCE from the profile's v4 colours so any
+                -- customisation carries over; otherwise the game palette. No None key — the
+                -- None/Physical border is hidden on no-dispel-type auras. The legacy per-mode keys are
+                -- left in place here; DropDispelCustomMode below clears the overlay half AFTER this has
+                -- read it (see the ordering note there).
                 --
-                -- ☠ This used to read ONLY debuffBorderColor* (the icon-border family),
-                -- from party alone. v4 also shipped a SECOND, separately-edited family
-                -- for the dispel overlay (dispel<Type>Color) which nothing here looked
-                -- at and DropDispelCustomMode then deleted — so anyone who had customised
-                -- the overlay lost those colours silently, on upgrade AND on import.
-                -- DF:BuildDispelColorsFromLegacy owns the resolution now (Border.lua):
-                -- per type, overlay-if-customised -> border-if-customised -> game
-                -- palette, with "customised" meaning "differs from the v4 default"
-                -- rather than "exists", because v4 seeded both families into every
-                -- profile. Shared with the import path so both behave identically.
-                -- Guarded: the builder lives in Frames/Border.lua, which loads AFTER
-                -- this file. Both callers of this migration are runtime (login, profile
-                -- switch) so it is always there by then -- but guard the function we
-                -- actually call, not a neighbour of it.
+                -- ☠ v4 shipped TWO separately-edited families: the icon border (debuffBorderColor*) and
+                -- the dispel overlay (dispel<Type>Color). DF:BuildDispelColorsFromLegacy (Border.lua)
+                -- owns the resolution: per type, overlay-if-customised -> border-if-customised -> game
+                -- palette, with "customised" meaning "differs from the v4 default" rather than "exists",
+                -- because v4 seeded both families into every profile. Shared with the import path so
+                -- both behave identically.
+                -- Guarded: the builder lives in Frames/Border.lua, which loads AFTER this file. Both
+                -- callers of this migration are runtime (login, profile switch) so it is always there by
+                -- then -- but guard the function we actually call, not a neighbour of it.
                 if type(profile.dispelColors) ~= "table" and DF.BuildDispelColorsFromLegacy then
                     profile.dispelColors = DF:BuildDispelColorsFromLegacy(profile.party, profile.raid)
                 end
@@ -5299,17 +5194,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- are stripped by the v5 legacy-aura cleanup below.
 
 
-        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to live
-        -- here and below. Unlike every other migration they were not no-ops on fresh
-        -- defaults: a profile reset wipes the migration flags, so both stamps re-fired
-        -- and overwrote the freshly reset filters. Migrations added here MUST be
-        -- no-ops on a fresh default profile (derive from legacy values; never
-        -- unconditional writes behind a profile-stored flag).
+        -- Migrations added here MUST be no-ops on a fresh default profile (derive from legacy
+        -- values; never unconditional writes behind a profile-stored flag): a profile reset wipes
+        -- the migration flags, so a forced stamp would re-fire and overwrite freshly reset
+        -- settings.
 
-        -- Migrate the single border dropdown to the Style + Texture split.
-        -- Previously borderTexture held either "SOLID" (the built-in border) or an
-        -- LSM key. A non-SOLID key means the user had a texture selected, so flip
-        -- borderStyle to TEXTURE. One-time so picking Solid later isn't reverted.
+        -- Migrate the single border dropdown to the Style + Texture split. borderTexture once
+        -- held either "SOLID" (the built-in border) or an LSM key. A non-SOLID key means the user
+        -- had a texture selected, so flip borderStyle to TEXTURE. One-time so picking Solid later
+        -- isn't reverted.
         local function migrateBorderStyle(modeDb)
             if modeDb and not modeDb._borderStyleMigrated then
                 local tex = modeDb.borderTexture
@@ -5384,7 +5277,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Defensive icon stack count restyle (Krathe, 2026-08-22): the shipped default
+        -- Defensive icon stack count restyle: the shipped default
         -- moved from scale 1 / no font to scale 0.7 / "DF Roboto SemiBold". The FONT
         -- half needs no migration -- the key never had a Config default, so it is
         -- absent on every untouched profile and the defaults backfill seeds the new
@@ -5416,10 +5309,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Migrate the legacy `groupLabelShadow` (duplicate-fontstring shadow) into
-        -- the new composite outline encoding from PR #115. If the user previously
-        -- had the legacy shadow on, prepend "SHADOW;" to groupLabelOutline so they
-        -- keep a shadow (now via SetShadowOffset on the primary fontstring).
+        -- Migrate the legacy `groupLabelShadow` (duplicate-fontstring shadow) into the composite
+        -- outline encoding. If the user had the legacy shadow on, prepend "SHADOW;" to
+        -- groupLabelOutline so they keep a shadow (via SetShadowOffset on the primary
+        -- fontstring).
         local function migrateGroupLabelShadow(modeDb)
             if modeDb and modeDb.groupLabelShadow ~= nil then
                 if modeDb.groupLabelShadow == true then
@@ -5786,21 +5679,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 for _, key in ipairs(recovery.snapshotKeys) do
                     local overrideVal = profile.overrides[key]
                     if overrideVal ~= nil and DeepEquals(DF.db.raid[key], overrideVal) then
-                        -- The live value still matches the layout's override, i.e. the
-                        -- preview was baked in by a /reload or crash mid-edit.
+                        -- The live value still matches the layout's override, i.e. the preview was baked in by a
+                        -- /reload or crash mid-edit.
                         --
-                        -- ☠ RESTORE THE USER'S OWN VALUE WHEN WE HAVE IT. This used to
-                        -- only ever write DF.RaidDefaults[key] -- so someone whose raid
-                        -- frameWidth was 150, editing a layout that overrides it to 110,
-                        -- was handed the FACTORY 125 and told their settings had been
-                        -- recovered. EnterEditing now persists the true pre-edit values
-                        -- alongside the key names, so the restore is exact.
+                        -- ☠ RESTORE THE USER'S OWN VALUE WHEN WE HAVE IT. EnterEditing persists the true pre-edit
+                        -- values alongside the key names, so the restore is exact -- a DF.RaidDefaults[key]
+                        -- restore would hand someone whose raid frameWidth was 150 the FACTORY 125.
                         --
-                        -- The defaults path stays as the fallback for a recovery record
-                        -- written by a build before snapshotValues existed, and for a key
-                        -- whose true value was nil (absent from the value map, since Lua
-                        -- cannot store nil) -- resetting that to default is still the
-                        -- closest available answer.
+                        -- The defaults path stays as the fallback for a recovery record written without
+                        -- snapshotValues, and for a key whose true value was nil (absent from the value map,
+                        -- since Lua cannot store nil) -- resetting that to default is still the closest
+                        -- available answer.
                         local snapVal = snapshotValues and snapshotValues[key]
                         if snapVal ~= nil then
                             if type(snapVal) == "table" then
@@ -5908,10 +5797,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- AFK text colour: the AFK text was previously hardcoded orange and
-        -- afkIconTextColor (its colour picker) was ignored. The picker is now
-        -- live; convert profiles still on the old peachy default to the orange
-        -- the text actually showed, so there's no visible change.
+        -- AFK text colour: the AFK text was once hardcoded orange and afkIconTextColor (its
+        -- colour picker) ignored. The picker is live; convert profiles still on the old peachy
+        -- default to the orange the text actually showed, so there's no visible change.
         local function MigrateAFKTextColor(modeDb)
             local c = modeDb and modeDb.afkIconTextColor
             if type(c) == "table"
@@ -5931,12 +5819,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- AFK timer font: an earlier build force-stamped the monospace timer font
-        -- onto every profile to stop the countdown wobble. The wobble is actually
-        -- fixed by LEFT-justifying the timer (see ApplyTimerTextSettings) — the
-        -- mono font is no longer needed or defaulted. Clear that stamp ONCE so the
-        -- timer goes back to inheriting the global font; guard with a flag so a
-        -- deliberate mono choice made later is not wiped on the next reload.
+        -- AFK timer font: a monospace timer font was once force-stamped onto every profile to stop
+        -- the countdown wobble. The wobble is fixed by LEFT-justifying the timer (see
+        -- ApplyTimerTextSettings), so the mono font is not needed or defaulted. Clear that stamp
+        -- ONCE so the timer inherits the global font; guard with a flag so a deliberate mono
+        -- choice made later is not wiped on the next reload.
         if DandersFramesDB_v2 and not DandersFramesDB_v2.afkTimerMonoUnstamped then
             local function UnstampAFKTimerFont(modeDb)
                 if modeDb and modeDb.afkIconTimerFont == "DF Roboto Mono SemiBold" then
@@ -6099,13 +5986,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- v5.0 (12.1): remap any retired border-animation-type value to a live one.
-        --   * The LibCustomGlow-backed glows (Pulsate / Chase / Flash / Proc) were
-        --     replaced by DF-owned equivalents (the library was removed), so map
-        --     each to its DF counterpart to keep an existing selection animating.
-        --   * Comet, Sides Only, Wipe, Ripple and Segment Reveal were removed
-        --     outright, so map them to NONE. (Corners Only is kept in the engine —
-        --     just hidden from the picker — so it is deliberately NOT remapped.)
+        -- Remap any retired border-animation-type value to a live one.
+        --   * The old glow-library types (Pulsate / Chase / Flash / Proc) have DF-owned
+        --     equivalents, so map each to its DF counterpart to keep an existing selection
+        --     animating.
+        --   * Comet, Sides Only, Wipe, Ripple and Segment Reveal no longer exist, so map them to
+        --     NONE. (Corners Only is kept in the engine — just hidden from the picker — so it is
+        --     deliberately NOT remapped.)
         -- Recursive so it catches mode tables, pinned sets, AD indicators and the
         -- expiring-border keys alike. Idempotent (a live value is left untouched).
         local RETIRED_ANIM_REMAP = { PULSATE = "DF_PIXEL", CHASE = "DF_ORBIT",
@@ -6133,18 +6020,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- v5.0 (12.1): the dispel overlay's Custom Colors mode is gone — its colours
-        -- now come from the one shared account palette on the Colors page. Drop the
-        -- mode selector, the per-type pickers and the intensity multiplier. No-op on
-        -- fresh defaults (none of these keys exist there any more).
+        -- The dispel overlay's Custom Colors mode is gone — its colours come from the one shared
+        -- account palette on the Colors page. Drop the mode selector, the per-type pickers and
+        -- the intensity multiplier. No-op on fresh defaults (none of these keys exist there).
         --
-        -- ☠ MUST RUN AFTER THE dispelColors SEED ABOVE, and that ordering is the whole
-        -- fix for a real data-loss bug. dispel<Type>Color is NOT an alpha-only key --
-        -- it shipped in v4's Config with live pickers and its own Reset, and rides v4's
-        -- `dispel` export category. The comment here used to claim it was "never in any
-        -- distributed build", and on the strength of that this deleted a shipped,
-        -- user-editable setting that nothing had migrated. A comment is not evidence:
-        -- the keys were in v4's Config.lua the whole time.
+        -- ☠ MUST RUN AFTER THE dispelColors SEED ABOVE. dispel<Type>Color is a shipped,
+        -- user-editable v4 setting (live pickers, its own Reset, the `dispel` export category),
+        -- and the seed is what carries it into dispelColors before this deletes it.
         local function DropDispelCustomMode(modeDb)
             -- ☠ FOLD THE INTENSITY FORWARD BEFORE NILLING IT, and do it OUTSIDE the
             -- _dispelCustomRemovedV5 early return below.
@@ -6152,35 +6034,19 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- v4 rendered the overlay at min(dispelGradientAlpha * dispelGradientIntensity, 1)
             -- with intensity DEFAULTING TO 2.6, so the slider was effectively a 0..1 scale
             -- with a 2.6x boost baked in. v5 keeps only the alpha and renders it raw.
-            -- Default users are unaffected (min(1 * 2.6, 1) == 1 == min(1, 1)), which is
-            -- why this hid -- but anyone who had TURNED THE SLIDER DOWN loses their boost:
-            -- 0.4 rendered as min(1.04, 1) = 1.0 in v4 and renders as 0.4 now. Their
-            -- overlay visibly fades on upgrade, with no setting left to put it back.
+            -- Default users are unaffected (min(1 * 2.6, 1) == 1 == min(1, 1)) -- but anyone who had
+            -- TURNED THE SLIDER DOWN would lose their boost: 0.4 rendered as min(1.04, 1) = 1.0 in v4
+            -- and would render as 0.4, a visible fade with no setting left to put it back.
             --
-            -- ⚠ SEPARATE FLAG, deliberately. The key deletion shipped in an earlier v5
-            -- alpha, so every existing alpha tester already has _dispelCustomRemovedV5 =
-            -- true AND dispelGradientIntensity = nil. Gating the fold on that flag would
-            -- skip exactly the profiles it exists to repair; gating it on its own flag
-            -- keeps it idempotent while still reaching a v4 profile that arrives later
-            -- (fresh install, import, or a profile that has never been loaded on v5).
-            -- ☠☠ THE NIL BELONGS HERE, WITH THE FOLD. It used to sit below the
-            -- _dispelCustomRemovedV5 early return, and the comment above explains exactly
-            -- why that could not work: every existing v5 alpha tester ALREADY has
-            -- _dispelCustomRemovedV5 = true. So the fold ran, set its own flag, and then
-            -- returned before the nil — leaving dispelGradientIntensity in the profile
-            -- with its value ALREADY multiplied into dispelGradientAlpha.
-            --
-            -- ResolveDispelGradientAlpha then computed min(alpha * intensity, 1) a SECOND
-            -- time on every render. With v4's 2.6 default that clamps to 1.0 for any alpha
-            -- at or above ~0.385 — so the Gradient Opacity slider (0.1..1.0 in 0.1 steps)
-            -- rendered IDENTICALLY at full brightness from 0.4 upward, and a user who set
-            -- 0.25 got 0.65. Reported as "adjusting the gradient opacity doesn't change
-            -- anything" plus "it's so incredibly bright", by someone who needs the glare
-            -- down for an accessibility reason (Jaidy, 2026-08-13).
-            --
-            -- Whether a profile was affected depended purely on migration history — which
-            -- is why it reproduced for one person and not another, and why test mode
-            -- looked fine on a profile whose key had already been cleared.
+            -- ⚠ SEPARATE FLAG, deliberately. Profiles that already passed _dispelCustomRemovedV5
+            -- must still be reachable, and a v4 profile can arrive later (fresh install, import, or a
+            -- profile never loaded on v5); its own flag keeps the fold idempotent.
+            -- ☠☠ THE NIL BELONGS HERE, WITH THE FOLD, not below the _dispelCustomRemovedV5 early
+            -- return: a profile that already has that flag would fold, set its own flag, and return
+            -- before the nil -- leaving dispelGradientIntensity in the profile with its value ALREADY
+            -- multiplied into dispelGradientAlpha. ResolveDispelGradientAlpha would then apply it a
+            -- SECOND time on every render, clamping every Gradient Opacity from ~0.4 upward to full
+            -- brightness (an accessibility problem for anyone turning the glare down).
             if not modeDb._dispelGradientIntensityFoldedV5 then
                 if type(modeDb.dispelGradientIntensity) == "number" then
                     modeDb.dispelGradientAlpha = math.min(
@@ -6241,11 +6107,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- Migrate personal targeted spells container centre to icon-block midpoint (bug 880).
-        -- Previously the saved (x, y) was the position of icon 1 (container centre).
-        -- Now (x, y) is the visual centre of the icon block; the container is offset so
-        -- the block is centred there.  Shift existing positions by halfBlock in the growth
-        -- direction so icon 1 stays at its old screen location for existing users.
+        -- Migrate personal targeted spells container centre to icon-block midpoint. The saved
+        -- (x, y) was once the position of icon 1 (container centre); it is now the visual centre
+        -- of the icon block, with the container offset so the block is centred there. Shift
+        -- existing positions by halfBlock in the growth direction so icon 1 stays at its old
+        -- screen location for existing users.
         local function MigratePersonalContainerPosition(partyDb)
             if not partyDb or partyDb._personalContainerCenterMigrated then return end
             local iconSize = partyDb.personalTargetedSpellSize or 40
@@ -6514,11 +6380,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
 
             -- ☠ SECOND HALF OF THE GATE: dev-only diagnostics.
-            -- The check above only decides whether a word arrived by a legitimate
-            -- route; it says nothing about whether this BUILD should have the word
-            -- at all. sub()'s devOnly flag used to gate the printed listing alone,
-            -- so every dev branch below stayed runnable on a release build through
-            -- "/df debug <word>" — see the DEBUG_SUB_DEV note at the registry.
+            -- The check above only decides whether a word arrived by a legitimate route; it says
+            -- nothing about whether this BUILD should have the word at all -- see the DEBUG_SUB_DEV
+            -- note at the registry.
             -- Falls through to the settings window, exactly like an unknown word:
             -- a hidden command must not announce itself by refusing.
             if lw and DF.DEBUG_SUB_DEV[lw] and not DF:IsDevBuild() then
@@ -6594,7 +6458,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- half of the ladder that never appears in a report about a covered
                 -- absorb, a tinted reduced-max region or a buried resource bar. Six
                 -- rounds of exactly that got diagnosed from source instead, because the
-                -- numbers were not in this dump (Krathe, 2026-08-13).
+                -- numbers were not in this dump.
                 -- ☠ Each row is checked against THE SAME RESOLVER THE LAYOUT CALLS, not
                 -- against a hardcoded number -- a dump carrying its own copy of the
                 -- ladder can agree with itself while disagreeing with the frame. What
@@ -6606,7 +6470,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- containers carry 12.1 forbidden aspects, and reading one from tainted
                 -- code THROWS -- which aborted the whole dump partway through its first
                 -- in-combat run, before the Alpha and Aura Designer sections that a fade
-                -- report actually needs (Krathe, 2026-08-13). A diagnostic that dies in
+                -- report actually needs. A diagnostic that dies in
                 -- combat is no diagnostic: combat is when the interesting states happen.
                 local function zLvl(w)
                     if not w or not w.GetFrameLevel then return "-" end
@@ -6645,17 +6509,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     { "dispelOverlay",   ov,                         nil },
                     { "dispel gradient", ov and ov.gradient,
                         DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
-                    -- ☠ THE FRAME BORDER BELONGS IN THIS TABLE, and its absence is why a
-                    -- real regression passed a clean dump. On 2026-08-13 this section
-                    -- printed "zero <- EXPECTED mismatches" and was taken as proof the
-                    -- ladder was sound — while absorb (+11) and heal prediction (+12) were
-                    -- quietly drawing over a frame border still pinned at +10, because the
-                    -- border was never one of the rows. Reported in game the next day.
+                    -- ☠ THE FRAME BORDER BELONGS IN THIS TABLE. A ladder check that leaves the border out can
+                    -- print "zero <- EXPECTED mismatches" while absorb (+11) and heal prediction (+12) draw
+                    -- over a border pinned at +10.
                     -- ⇒ Anything the band can BURY has to be printed beside the band.
-                    -- The overshield glow's HOST. The glow itself is a texture, so it has
-                    -- no level of its own -- printing the host is what makes "is it above
-                    -- the heal prediction?" answerable at all. It was a texture on
-                    -- healthBar (+3) until 2026-08-14 and could never win.
+                    -- The overshield glow's HOST. The glow itself is a texture, so it has no level of its own
+                    -- -- printing the host is what makes "is it above the heal prediction?" answerable at
+                    -- all.
                     { "overshieldHost", frame.dfOvershieldHost,      13 },
                     { "frame.border",    frame.border,               14 },
                     { "dfPowerBar",      frame.dfPowerBar,
@@ -6864,12 +6724,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
 
-                -- MISSING BUFF. Absent from this dump until 2026-08-07, which is exactly
-                -- why "missing buff draws over the defensive icon" could not be settled
-                -- from it — the badges were rendering 40 levels above their setting and
-                -- nothing here would have shown that. The strip is DF's own frame and the
-                -- cells are containers parented to it, so BOTH lines matter: a cell whose
-                -- anchor is not equal to the strip's level means an offset is leaking in.
+                -- MISSING BUFF. The strip is DF's own frame and the cells are containers parented to it,
+                -- so BOTH lines matter: a cell whose anchor is not equal to the strip's level means an
+                -- offset is leaking in (e.g. badges rendering 40 levels above their setting).
                 o:Section("Missing Buff")
                 local mStrip = frame.missingBuffStrip
                 if not mStrip then
@@ -6962,7 +6819,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     -- (no host to write at all -- in which case a visible fade has to be
                     -- coming from a PARENT's alpha, not this indicator's own).
                     -- "NONE WALKED" alone cannot separate them, which is how a fade report
-                    -- reached this line twice without being settled (Krathe, 2026-08-13).
+                    -- reached this line twice without being settled.
                     local adStore = frame.dfADFactory
                     if adStore then
                         local ver = DF.auraLayoutVersion or 0
@@ -7088,12 +6945,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "resetgui" then
                 -- Reset GUI scale, size, and position to defaults.
                 --
-                -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. This used to say 760x520
-                -- twice, in a file on the OTHER side of the load-on-demand split
-                -- from the window builder that also said it -- so the two were
-                -- free to drift, and "reset to default" would then restore a size
-                -- the addon no longer ships. GUI.WindowDefaults is resident
-                -- precisely so both readers can have it.
+                -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. The window builder lives on the OTHER side of the
+                -- load-on-demand split; GUI.WindowDefaults is resident precisely so both readers share
+                -- one value and "reset to default" cannot restore a size the addon no longer ships.
                 local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 640, height = 600 }
                 local ws = DF:GetWindowState()
                 ws.scale = 1.0
@@ -7215,19 +7069,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.OUT.CMD .. "/df debug on|r / " .. DF.OUT.CMD .. "/df debug off|r")
                 o:Field(L["console page"], DF.OUT.CMD .. "/df console|r")
 
-                -- Flatten both registries into one row shape: {name, desc}.
-                -- ONE form per row now. The old listing carried a second grey
-                -- "/dfXXX" column; those binds are gone, so a column showing them
-                -- would be documenting commands the client no longer answers.
-                -- ⚠ /rl IS NOT IN THIS LISTING and never reaches this code: it is not
-                -- registered through RegisterDebugSlash (it sets SLASH_DFRL1 directly)
-                -- and is deliberately left off /df debug -- see the note at its
-                -- registration. The claim that a non-/df-prefixed entry "prints that
-                -- alias verbatim" had no entry it could apply to.
+                -- Flatten both registries into one row shape: {name, desc}. ONE form per row:
+                -- "/df debug <name>".
+                -- ⚠ /rl IS NOT IN THIS LISTING and never reaches this code: it is not registered through
+                -- RegisterDebugSlash (it sets SLASH_DFRL1 directly) and is deliberately left off
+                -- /df debug -- see the note at its registration.
                 --
-                -- Every registration carries a non-nil `sub`, so the `or` fallbacks
-                -- below -- the pattern match here and the table.concat further down --
-                -- have no input that reaches them either.
+                -- Every registration carries a non-nil `sub`, so the `or` fallbacks below -- the pattern
+                -- match here and the table.concat further down -- have no input that reaches them.
                 local byGroup = {}
                 local function bucket(isDev, key, name, desc)
                     local g = DF.DEBUG_GROUP_OF[key or ""] or "other"
@@ -7254,19 +7103,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     for _, g in ipairs(DF.DEBUG_GROUP_ORDER) do
                         local rows = groups[g]
                         if rows then
-                            -- ☠ RAW, NOT L[...]. Both of these used to route through
-                            -- AceLocale, which put ~50 developer-only strings into the
-                            -- locale table — "container identity-gate dump", "audit
-                            -- test-pool spell IDs against this client" and the like.
-                            -- CLAUDE.md's never-localize list names exactly this class,
-                            -- and the Debug page's category descriptions on the same
-                            -- screen were already raw, so the two disagreed.
+                            -- ☠ RAW, NOT L[...]. Developer-only strings ("container identity-gate dump", "audit
+                            -- test-pool spell IDs against this client" and the like) belong to CLAUDE.md's
+                            -- never-localize list, and the Debug page's category descriptions on the same screen
+                            -- are raw too.
                             --
-                            -- ⚠ Time-sensitive, which is why it is not a style nit: CurseForge
-                            -- discovers English source strings server-side from the uploaded
-                            -- package, so developer text reaches the portal on the next build.
-                            -- Once it is in front of translators for ten languages, removing it
-                            -- is a portal cleanup rather than a git revert.
+                            -- ⚠ Not a style nit: CurseForge discovers English source strings server-side from the
+                            -- uploaded package, so developer text reaches the portal on the next build. Once it is
+                            -- in front of translators for ten languages, removing it is a portal cleanup rather than
+                            -- a git revert.
                             o:Line(DF.DEBUG_GROUP_NAMES[g], "NEUTRAL")
                             for _, r in ipairs(rows) do
                                 -- One typeable form per row, in O.CMD.
@@ -7378,7 +7223,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
                 -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the
                 -- Magic/Curse/Disease/Poison shape; this probe shows what it found,
-                -- the SetAuraBorder style enums (Color vs Atlas resolution), and
+                -- the AddDispelTypeTexture style enums (Color vs Atlas resolution), and
                 -- whether the shared curve builds.
                 local o = DF:Out("Dispel IDs", "colour probe")
                 DF._dispelTypeEnum = nil   -- force a fresh scan
@@ -7413,7 +7258,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local hasDTC = C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil
                 o:Field("GetAuraDispelTypeColor", hasDTC and "present" or "absent",
                     hasDTC and "good" or "warn")
-                -- Overlay ground truth: each SetAuraBorder bind site's last attempt
+                -- Overlay ground truth: each AddDispelTypeTexture bind site's last attempt
                 -- ("ok" / the pcall error / never attempted). Keyed by slot key
                 -- (main / gameborder / edgeTOP / …).
                 local be = DF._dispelBindErr
@@ -7462,10 +7307,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF:Err("Click-casting module not loaded")
                 end
             elseif msg == "dispel" or msg:match("^dispel ") then
-                -- Every dispel probe answers here. The arg routing (unit dump /
-                -- "ids" / "render") lives ONCE, in Features/Dispel.lua's DFDISPEL
-                -- handler, so this branch is a pure forward — the two used to
-                -- carry near-identical copies of the same if-chain.
+                -- Every dispel probe answers here. The arg routing (unit dump / "ids" / "render") lives
+                -- ONCE, in Features/Dispel.lua's DFDISPEL handler, so this branch is a pure forward.
                 local arg = msg:match("^dispel (.+)")
                 if SlashCmdList["DFDISPEL"] then
                     SlashCmdList["DFDISPEL"](arg or "")
@@ -7614,14 +7457,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if type(v) == "number" then return string.format("%.1f", v) end
                     return tostring(v)
                 end
-                -- ☠ ONE GUARD PER READ, not one guard per BLOCK. While auras are secret even
-                -- READS on the slot widget hierarchy are forbidden to addon code, and the
-                -- slot section below used to wrap a dozen of them in a single
-                -- pcall(function() … end): the FIRST forbidden call aborted the closure and
-                -- took every later line with it, including the carrier anchor target — the
-                -- one field that says whether the style pass ever ran. So the dump reported
-                -- least when it was needed most, and testers reported it as "doesn't work in
-                -- combat" (field-reported 2026-08-19).
+                -- ☠ ONE GUARD PER READ, not one guard per BLOCK. While auras are secret even READS on the
+                -- slot widget hierarchy are forbidden to addon code, and one pcall around a dozen reads
+                -- aborts at the FIRST refusal and takes every later line with it -- including the carrier
+                -- anchor target, the one field that says whether the style pass ever ran. The dump must
+                -- report most when it is needed most (in combat).
                 -- Returns nil on refusal, which num() renders as "nil" rather than killing
                 -- the line. Two return values because GetPoint's relativeTo is the second.
                 local function tryv(fn, ...)
@@ -7630,14 +7470,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if ok then return a, b end
                     return nil
                 end
-                -- ☠ AN ABSENT OBJECT PRINTS "ABSENT". IT DOES NOT PRINT NOTHING.
-                -- Both helpers used to `return` on nil, so a missing region rendered as
-                -- SILENCE -- indistinguishable from a region this style never builds, and
-                -- from a line the reader skimmed past. That cost a diagnosis: five frames
-                -- whose gradient carrier did not exist produced a dump whose every printed
-                -- field looked healthy, because the one that mattered was not printed at
-                -- all (2026-08-20). This dump's whole subject is whether the art exists,
-                -- so absence is the most important thing it can report.
+                -- ☠ AN ABSENT OBJECT PRINTS "ABSENT". IT DOES NOT PRINT NOTHING. A silent nil is
+                -- indistinguishable from a region this style never builds, and from a line the reader
+                -- skimmed past. This dump's whole subject is whether the art exists, so absence is the
+                -- most important thing it can report.
                 local function dumpBar(tag, bar, hostFrame)
                     if not bar then o:Line(("%s: ABSENT"):format(tag), "bad") return end
                     local mn, mx, val, w, h, pw, lvl, blend, alpha, shown, orient, rev
@@ -7670,7 +7506,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     -- aspect-marked textures return SECRETS; tostring() of a secret makes
                     -- the WHOLE formatted line secret, and the output layer silently drops
                     -- it — which is how this dump's most important lines simply vanished
-                    -- from a paste (2026-08-13) while their neighbours printed. num()
+                    -- from a paste while their neighbours printed. num
                     -- checks issecretvalue first and substitutes the literal "SECRET".
                     o:Line(("%s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
                         tag, num(shown), num(w), num(h), num(blend), num(alpha), num(layer), num(sub)))
@@ -7694,8 +7530,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     local hnd = frame.dispelFactory
                     local slots = hnd and hnd.GetOverlaySlots and hnd:GetOverlaySlots()
                     if slots then
-                        -- ★ THE THREE FACTS THAT DECIDE A STUCK-ALPHA REPORT (2026-08-13,
-                        -- "Full Frame ignores Gradient Opacity while Top/Left Edge obey it"):
+                        -- ★ THE THREE FACTS THAT DECIDE A STUCK-ALPHA REPORT (e.g. "Full Frame ignores Gradient
+                        -- Opacity while Top/Left Edge obey it"):
                         --   1. ver/gen latch — has the style pass RUN on these buttons at all?
                         --      (Buttons are born mid-combat; the pass is OOC-only.)
                         --   2. styleErr — did the last StyleOneSlot THROW? The per-button
@@ -7774,19 +7610,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                     dumpBar("slot.gradient", wdg.gradient, frame)
                                     dumpTex("slot.nativeGradient", wdg.nativeGradient)
                                     local ng = wdg.nativeGradient
-                                    -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR, AND IT NOW
-                                    -- PRINTS EVEN WHEN THE CARRIER IS GONE. It used to sit
-                                    -- inside `if ng then`, so the one state it most needed
-                                    -- to report -- no carrier at all -- was the one state
-                                    -- that silently skipped it (2026-08-20). rel= says
-                                    -- whether the style pass ever re-anchored the carrier
-                                    -- ("btn" = still on the secure init's SetAllPoints, i.e.
-                                    -- it never ran). The DIM HOSTS are plain DF frames whose
-                                    -- alpha is always readable, and they are worth printing
-                                    -- whether or not the carrier survived -- a live dim host
-                                    -- with no carrier localises the failure to the texture
-                                    -- create, one line below the frame create. Every read is
-                                    -- individually guarded so a refusal costs one FIELD.
+                                    -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR, printed EVEN WHEN THE CARRIER IS GONE -- no
+                                    -- carrier at all is the state it most needs to report. rel= says whether the style pass
+                                    -- ever re-anchored the carrier ("btn" = still on the secure init's SetAllPoints, i.e. it
+                                    -- never ran). The DIM HOSTS are plain DF frames whose alpha is always readable, and they
+                                    -- are worth printing whether or not the carrier survived -- a live dim host with no
+                                    -- carrier localises the failure to the texture create, one line below the frame create.
+                                    -- Every read is individually guarded so a refusal costs one FIELD.
                                     do
                                         local nPts = ng and tryv(ng.GetNumPoints, ng)
                                         local _, relTo
@@ -7894,10 +7724,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF:Err("Profiler not loaded")
                 end
             else
-                -- ☠ NO BARE-NAME FALLBACK. "/df <name>" used to run any diagnostic,
-                -- which meant two spellings for one command and neither of them said
-                -- "this is a debug tool". Diagnostics are intercepted above; anything
-                -- else unrecognised opens the settings window.
+                -- ☠ NO BARE-NAME FALLBACK: "/df <name>" would be a second spelling for every diagnostic,
+                -- and neither would say "this is a debug tool". Diagnostics are intercepted above;
+                -- anything else unrecognised opens the settings window.
                 if DF.ToggleGUI then
                     DF:ToggleGUI()
                 else
@@ -8000,19 +7829,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
             if DF.MigrateImportantDebuffOn then
                 DF:MigrateImportantDebuffOn()
-            end
-
-            -- (Texture-path repair moved to ADDON_LOADED, before frames are built —
-            -- running it here meant the bars had already rendered the dead path and
-            -- warned about it. See the call site there.)
-
-            -- Priority higher-wins flip is now lazy/at-point-of-use — see
-            -- DF.MigrateAuraDesignerPrioritiesLazy and CC:MigratePrioritiesLazy.
-            -- Only forward the old coarse migration flags to the new fine-grained
-            -- ones here (never flips a value), so data an earlier pass already
-            -- converted is not double-flipped.
-            if DF.ForwardPriorityMigrationFlags then
-                DF:ForwardPriorityMigrationFlags()
             end
 
             -- CRITICAL: Update power bars now that unit data is available
@@ -8236,9 +8052,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- and stop as soon as a pass finds units, so a genuinely empty zone costs a
         -- fixed handful of ticks rather than a live ticker.
         --
-        -- Runs on the way OUT of an arena too: UpdateAllRaidPetFrames hides the arena
-        -- set when it sees we are no longer in one. Nothing else did that, so in
-        -- GROUPED mode the arena pets followed you out as frozen bars.
+        -- Runs on the way OUT of an arena too: UpdateAllRaidPetFrames hides the arena set when
+        -- it sees we are no longer in one, or in GROUPED mode the arena pets would follow you
+        -- out as frozen bars.
         -- ☠ GATED ON ACTUALLY BEING IN AN ARENA. Without this the chain is unsatisfiable
         -- outside one: sawUnit comes from IterateArenaFrames, which yields nothing when
         -- there is no arena header, so the early exit can never fire and all five tries
@@ -8248,8 +8064,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- not just at entry, so leaving mid-chain stops it.
         --
         -- ⚠ The single unconditional pass stays: leaving an arena is exactly when the
-        -- arena pet set needs hiding, and UpdateAllRaidPetFrames does that when it sees
-        -- we are no longer in one. Only the RETRY is arena-gated.
+        -- arena pet set needs hiding. Only the RETRY is arena-gated.
         if DF.UpdateAllRaidPetFrames then
             local inArena = DF.IsInArena and DF:IsInArena()
             local tries = 0
@@ -8477,12 +8292,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
             end
             
-            -- Both mode flags are down now, so hand the shared engine state back:
-            -- the aura data provider and the pinned preview. This path clears the
-            -- flags inline rather than going through HideTestFrames, and skipping
-            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
-            -- the rest of the session -- and the state driver below shows the LIVE
-            -- frames in combat, so they rendered fake auras.
+            -- Both mode flags are down now, so hand the shared engine state back: the aura data
+            -- provider and the pinned preview. This path clears the flags inline rather than going
+            -- through HideTestFrames, and skipping the handback would strand C_UnitAuras on the
+            -- SAMPLE provider for the rest of the session -- and the state driver below shows the
+            -- LIVE frames in combat, so they would render fake auras.
             DF:TeardownTestModeEngines()
             -- ...and the FRAME-side teardown, for the same reason. The loops above
             -- hide the frames and their absorb textures, but the Aura Designer's
@@ -8795,13 +8609,11 @@ function DF:FullProfileRefresh()
     
     -- === REFRESH PINNED FRAMES IF ACTIVE ===
     if DF.PinnedFrames and DF.PinnedFrames.initialized then
-        -- Reap sets the NEW profile no longer defines. Profile switching does
-        -- NOT rebuild pinned frames (this function refreshes headers in place),
-        -- so switching from a profile with more sets to one with fewer leaves
-        -- the extra containers/movers live but untracked, and every hide path
-        -- gates on the current profile's GetSetDB — so nothing removes them
-        -- (the "stuck pinned box that survives everything" reports). Prune them
-        -- before refreshing the survivors.
+        -- Reap sets the NEW profile does not define. Profile switching does NOT rebuild pinned
+        -- frames (this function refreshes headers in place), so switching from a profile with
+        -- more sets to one with fewer would leave the extra containers/movers live but
+        -- untracked, and every hide path gates on the current profile's GetSetDB — so nothing
+        -- would remove them. Prune them before refreshing the survivors.
         if DF.PinnedFrames.PruneOrphanedSets then
             DF.PinnedFrames:PruneOrphanedSets()
         end

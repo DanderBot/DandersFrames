@@ -25,22 +25,16 @@ local EDGE_GRADIENT_TEXTURES = {
     RIGHT = "Interface\\AddOns\\DandersFrames\\Media\\DF_Gradient_H_Rev",  -- Solid right, fades left
 }
 
--- ☠☠ SEED THE GENERATION AT LOAD. It used to be created only by the first
--- InvalidateDispelColorCurve call, whose ONLY callers are options-page callbacks and a
--- debug command -- so on any session where nobody edited a dispel colour it stayed nil
--- for the whole session.
+-- ☠☠ SEED THE GENERATION AT LOAD. BindDispelCarriers stamps btn._dfDispelCurveGen only
+-- on SUCCESS, so a failed bind leaves it nil, and the retry gate in StyleDispelSlots reads
+-- `btn._dfDispelCurveGen ~= DF.dispelCurveGen`. With the counter unseeded that is
+-- `nil ~= nil` -- FALSE -- and a carrier that failed to bind is never retried while its
+-- texture shows default white on every dispellable debuff. Seeding 0 makes the nil stamp
+-- genuinely unequal.
 --
--- That silently disabled the re-bind retry. BindDispelCarriers stamps
--- btn._dfDispelCurveGen only on SUCCESS, so a failed bind leaves it nil, and the retry
--- gate in StyleDispelSlots reads `btn._dfDispelCurveGen ~= DF.dispelCurveGen` --
--- `nil ~= nil` -- which is FALSE. A carrier that failed to bind was therefore never
--- retried, for the rest of the session, while its texture kept the default white vertex
--- colour and was shown on every dispellable debuff. Seeding 0 makes the nil stamp
--- genuinely unequal, so the existing gate does its job with no other change.
---
--- ☠ The tell that this was live: `/df debug dispelids` calls the invalidator, which
--- bumps the counter -- so RUNNING THE DIAGNOSTIC HEALED THE BUG on the next
--- out-of-combat style pass. Anyone who dumped first and looked second saw a clean frame.
+-- ☠ `/df debug dispelids` calls the invalidator, which bumps the counter, so the
+-- diagnostic itself heals this class of bug on the next out-of-combat style pass. Look
+-- before you dump.
 DF.dispelCurveGen = 0
 
 -- Invalidate the shared debuff-type colour curve when dispel colour settings
@@ -52,11 +46,11 @@ function DF:InvalidateDispelColorCurve()
     -- edit only lands once each carrier is re-bound. The counter is what marks carriers
     -- stale; InvalidateAuraLayout breaks DriveDispelOverlayFactory's fast-path latch so
     -- the drive re-runs and reaches the style pass.
-    -- ★ 68914: this NO LONGER rebuilds the container. The generation is deliberately out
-    -- of the overlay's plan signature — StyleDispelSlots re-binds each stale carrier IN
-    -- PLACE (a tainted re-bind is legal now), so a colour tweak costs one re-bind instead
-    -- of a full teardown+rebuild flicker. The debuff icon's ring re-binds off the same
-    -- counter in its own style pass (Frames/AuraContainer.lua).
+    -- ★ This does NOT rebuild the container. The generation is deliberately out of the
+    -- overlay's plan signature — StyleDispelSlots re-binds each stale carrier IN PLACE (a
+    -- tainted re-bind is legal), so a colour tweak costs one re-bind instead of a
+    -- teardown+rebuild flicker. The debuff icon's ring re-binds off the same counter in
+    -- its own style pass (Frames/AuraContainer.lua).
     DF.dispelCurveGen = (DF.dispelCurveGen or 0) + 1
     if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
 end
@@ -85,12 +79,11 @@ local function DispelBorderStyle()
 end
 
 -- Options for the type-badge carrier. Style is fixed to Icon -- the clean
--- RaidFrame-Icon-Debuff* symbol Blizzard picks from the aura. The other two the API
--- offers (BorderWithIcon / Border) were tried and REMOVED on 2026-08-03: they are
--- ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit frame they draw
--- as a square box around the symbol. Wrong tool -- they exist to border an icon, not
--- a frame. A customDispelAssetMap (dispel name -> our own texture per type) is the
--- route if DF ever ships badge art of its own -- it takes a full set, one per type.
+-- RaidFrame-Icon-Debuff* symbol Blizzard picks from the aura. The other two styles
+-- (BorderWithIcon / Border) are ui-debuff-border-* art meant to frame an aura BUTTON, so
+-- on a unit frame they draw as a square box around the symbol. A customDispelAssetMap
+-- (dispel name -> our own texture per type) is the route if DF ever ships badge art of
+-- its own -- it takes a full set, one per type.
 local function BadgeCarrierOptions()
     return {
         style = DF:ResolveDispelTextureStyle("Icon"),
@@ -105,8 +98,8 @@ end
 -- ☠☠ NOT SECRET-SAFE, despite what this comment said for a month. The private-side index
 -- is a raw Lua table lookup, and a SECRET dispelName matches no key — the colour apply
 -- then no-ops and the carrier keeps the style step's paint (white, for the base-coating
--- styles). That was the "dispel overlay goes white in dungeons" field report
--- (2026-08-19). The map is kept as the pre-curve fallback and the OOC/test-mode path;
+-- styles). That was the "dispel overlay goes white in dungeons" field report.
+-- The map is kept as the pre-curve fallback and the OOC/test-mode path;
 -- the SECRET-SAFE tint is customDispelColorCurve — see tintOpts in BindDispelCarriers.
 -- The palette's defaults ARE the game colours, so this matches the game look until edited;
 -- there is no game-vs-custom mode — the Colors page + its "Reset to game defaults" is the
@@ -270,7 +263,7 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- this at +6 would have the preview render two bands below what live does — the exact
     -- divergence the test-vs-live audit exists to prevent. The list above also replaces a
     -- comment that was stale in three places (gradient at healthBar+2, frame border at
-    -- +10, auras at +50). (Z-order review, 2026-08-07.)
+    -- +10, auras at +50).
     overlay:SetFrameLevel(host:GetFrameLevel() + 16)
     
     -- ☠ THE BORDER WAS TWO DIFFERENT SHAPES. This widget drew FOUR StatusBar
@@ -280,7 +273,6 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- preview and what they got in a group. Same art now, same geometry helper
     -- (ApplyDispelRingGeometry). The ring hangs off its own holder frame so the
     -- widget still has a probe-able child at the border's draw level.
-    -- (Audit, 2026-08-07.)
     overlay.borderRingHost = CreateFrame("Frame", nil, overlay)
     overlay.borderRingHost:SetAllPoints(overlay)
     overlay.borderRingHost:SetFrameLevel(overlay:GetFrameLevel() + 1)  -- just above gradient
@@ -319,7 +311,6 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- absorb bar is re-levelled to frame + absorbBarFrameLevel (11) and heal prediction
     -- sits at frame + healPredictionFrameLevel (12), both ABOVE where the wash was. +14
     -- puts it at frame+17, one above the overlay, clearing the real band.
-    -- (Z-order review, 2026-08-07.)
     overlay.gradient = CreateFrame("StatusBar", nil, gradientParent)
     overlay.gradient:SetFrameLevel(gradientParent:GetFrameLevel() + 14)
     overlay.gradient:SetMinMaxValues(0, 1)
@@ -552,7 +543,6 @@ end
 -- ☠ THE INSET WAS PIXEL-SNAPPED ON ONE SIDE ONLY. ApplyOverlayLayout snapped it,
 -- StyleGameBorderSlot did not -- so with Pixel Perfect on, a fractional Border Inset
 -- sat on the grid in the preview and off it in a group. Snapped in both now.
--- (Audit, 2026-08-07.)
 local RING_ART_BAND = 0.25   -- 32px of the 128px file
 local function ApplyDispelRingGeometry(ring, anchorTo, db, rectW, rectH)
     if not ring then return end
@@ -639,7 +629,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- aura button (12.1 slot path — itself SetAllPoints(frame)), so the rect is
         -- byte-identical to the padded frame either way. The difference that matters
         -- is the anchor CHAIN: on the slot path it now terminates at the aura button.
-        -- 68824's SetAuraBorder runs GetValidatedForbiddenObjectTable, which rejects
+        -- AddDispelTypeTexture runs GetValidatedForbiddenObjectTable, which rejects
         -- any bound carrier whose anchor chain doesn't reach the button ("must inherit
         -- all forbidden layout aspects from owner"); the game-mode gradient/tint
         -- carriers pin onto this proxy, so it has to lead back to the button — not the
@@ -830,22 +820,16 @@ local function ApplyOverlayLayout(overlay, db, frame)
         end
     end
 
-    -- ★★ THE LEVEL RE-APPLY RUNS FOR EVERY STYLE. It used to live inside the FULL
-    -- branch of the style chain above — reasonable-looking, because that is where the
-    -- onCurrentHealth mode split happens — so EDGE / TOP / BOTTOM / LEFT / RIGHT never
-    -- re-applied ANY level and kept whatever creation assigned. Creation pins the pulse
-    -- box (whose REGIONS are the four edge strips and the darken) at the gradient
-    -- host's own level, i.e. the healthBar band — which is how EDGE mode rendered
-    -- under the heal prediction (+10) and absorb bar (+11) on the test widget while
-    -- TOP, which draws through the resolver-levelled gradient StatusBar, cleared them.
-    -- Field-caught in two rounds: "edge mode is not showing over the absorb... top edge
-    -- works now but not edge glow" (Krathe, 2026-08-13), with the z-order dump showing
-    -- gradient at +17 over absorb +11 while the strips stayed at the healthBar's +3.
+    -- ★★ THE LEVEL RE-APPLY RUNS FOR EVERY STYLE, not just inside the FULL branch where
+    -- the onCurrentHealth split happens. Creation pins the pulse box (whose REGIONS are the
+    -- four edge strips and the darken) at the gradient host's own level -- the healthBar
+    -- band -- so without a re-apply EDGE / TOP / BOTTOM / LEFT / RIGHT would render under
+    -- the heal prediction (+10) and absorb bar (+11).
     --
     -- ☠ Base the host level on the FRAME, not on overlay.gradient's parent -- that
     -- parent is whichever host existed at build time. `overlay`'s own parent is the
     -- correct fallback when no frame was passed in.
-    -- The ruling (Krathe, 2026-08-13): ONLY Full Frame + Show On Current Health Only
+    -- The ruling: ONLY Full Frame + Show On Current Health Only
     -- sits low (ResolveDispelGradientLevel's +4 pin, which reads the mode from db
     -- itself); every other overlay shape clears the health-content band. The box takes
     -- the GRADIENT level so the strips ride exactly where the wash would.
@@ -923,14 +907,14 @@ function DF:UpdateDispelGradientHealth(frame)
         legacy.gradient:SetMinMaxValues(0, maxHealth)
         DF.SetBarValueSmoothed(legacy.gradient, currentHealth, smoothEnabled)
     end
-    -- ★ NO SLOT LOOP. The 12.1 native slot gradient is no longer fed from here at all:
-    -- its carrier is a plain texture ANCHORED to the real health bar's fill texture, so
-    -- it inherits a rect the bar's own value already sizes to current health. Zero
-    -- per-tick work, nothing read, nothing written to a button-owned object.
-    --   ☠ Do NOT reinstate a SetMinMaxValues/SetValue feed here. Aura frames carry
+    -- ★ NO SLOT LOOP. The native slot gradient is not fed from here at all: its carrier
+    -- is a plain texture ANCHORED to the real health bar's fill texture, so it inherits a
+    -- rect the bar's own value already sizes to current health. Zero per-tick work,
+    -- nothing read, nothing written to a button-owned object.
+    --   ☠ Do NOT add a SetMinMaxValues/SetValue feed here. Aura frames carry
     -- DenyTaintedAccessWhenAurasAreSecret, so every such write is refused, the bar keeps
     -- its (0,1)/value=1 defaults, and the wash renders over the WHOLE FRAME while the
-    -- error repeats on every health event (4412x in the first live report).
+    -- error repeats on every health event.
     -- See DispelSlotSecureInit and HEALTH FILL COVER in Frames/AuraContainer.lua.
 end
 
@@ -946,20 +930,10 @@ end
 -- (StyleGameMainSlot's own header says so). Alpha stays ours on both lanes, so it is
 -- the only channel where preview and live can agree.
 --
--- ☠ dispelGradientIntensity USED TO BE PREVIEW-ONLY. The test path multiplied RGB by
--- it in three places; StyleGameMainSlot and StyleGameEdgeSlot had no intensity term
--- whatsoever. Dragging the slider visibly brightened every preview frame and did
--- nothing in game — a setting that only existed in the mirror. ElementAppearance.lua
--- had already worked this out and folded it into alpha; this hoists that one line so
--- all four sites share it. (Audit, 2026-08-07.)
---
 -- Clamped: alpha above 1 is meaningless and would silently cap on one lane only.
 --
--- ☠ EXPORTED, because "this hoists that one line so all four sites share it" was not
--- true as written: a file LOCAL cannot be shared across files, and ElementAppearance.lua
--- kept its own inline copy of this expression with a DIFFERENT fallback (0.5, against
--- Core/Config.lua's actual default of 1). Hoisting within one file only looks like
--- consolidation. Fallback corrected to 1 to match Config.
+-- EXPORTED so ElementAppearance.lua shares it rather than keeping an inline copy that
+-- can drift (its fallback must match Core/Config.lua's default of 1).
 --
 -- ⚠ NO intensity term here: Core's migration folds dispelGradientIntensity into the
 -- alpha and nils the key in the same pass, so applying it again would double-apply.
@@ -1352,7 +1326,7 @@ end
 -- ONE overlay system driven by native aura slots: Blizzard owns presence (the slot
 -- button's SetShown) and the carrier's vertex colour (tinted from DF's shared account
 -- palette, securecopy'd at bind time); DF owns the art. There is no game-vs-custom
--- colour mode any more (Custom Colors was removed 2026-07-11).
+-- colour mode any more.
 -- ONE any-dispellable slot carries the whole overlay: AddDispelTypeTexture APPENDS, so
 -- the gradient (+darken/pulse) or the four EDGE strips, the border ring and Blizzard's
 -- dispel-type badge all ride one button (see dispelSlotPlan's `roles` and
@@ -1366,11 +1340,6 @@ end
 -- comment in dispelSlotPlan.
 -- ============================================================
 
--- (Removed) DISPEL_ICON_TYPES and GAME_ICON_ATLAS. The badge no longer picks its own
--- art per type: it is one bound carrier and Blizzard supplies the atlas from the aura,
--- which is the same RaidFrame-Icon-Debuff* set this table listed by hand. Blizzard's
--- own copy lives in AuraUtil (dispelIconAtlas), so ours was a duplicate that could
--- drift. See BadgeCarrierOptions and the badge block in DispelSlotSecureInit.
 local warnedTintBind = false
 -- ☠ TWO LATCHES, TWO FAULTS. These shared one flag: the recovery path's re-init throw and
 -- the steady-state StyleOneSlot throw. Different causes, different fixes -- and because
@@ -1464,24 +1433,19 @@ local function dispelSlotPlan(db, selfOnly)
 
     -- ☠ "All Dispellable" must NOT depend on what the player can dispel.
     --
-    -- It used to ask for ProcessAura's Dispel classification via
-    -- candidateFilters.processedAuraType. That is player-relative BY DEFINITION:
-    -- AuraUtil.ProcessAura only reaches its Dispel branch under
-    -- `aura.isHarmful and aura.isRaid`, and isRaid is the RAID flag, which for a
-    -- debuff means "curable by YOU". So All rendered identically to By Me --
-    -- a Death Knight saw nothing at all on any spec, and an Evoker saw exactly
-    -- its own spec's types (Preservation 5, Aug/Dev 4, no Magic). Reported on
-    -- alpha 15; the dropdown had no observable effect.
+    -- ProcessAura's Dispel classification (candidateFilters.processedAuraType) is
+    -- player-relative BY DEFINITION: AuraUtil.ProcessAura only reaches its Dispel branch
+    -- under `aura.isHarmful and aura.isRaid`, and isRaid on a debuff means "curable by
+    -- YOU". Riding it would make All identical to By Me -- a Death Knight would see
+    -- nothing, an Evoker only its own spec's types.
     --
-    -- ★ ALL mode rides the DISPELLABLE token, with the map as FALLBACK ONLY --
-    -- one canonical filter component instead of a local copy of Blizzard's own
-    -- five-entry type list, matching the debuff row (Features/Auras.lua, the
-    -- dispelTypeToken note). ☠ NOT a secrecy fix: the commit that made this
-    -- change claimed includeDispelTypes went dark in combat, and that is false
-    -- -- Blizzard's matcher runs under `## UseSecureEnvironment: 1` and reads
-    -- real values (evidence chain on DF:GetEngineDispelFlagGaps). This mode
-    -- was working before and works now. Read LIVE, not captured at file load
-    -- (the AuraFilters-latch lesson at the top of Features/Auras.lua).
+    -- ★ ALL mode rides the DISPELLABLE token, with the map as FALLBACK ONLY -- one
+    -- canonical filter component instead of a local copy of Blizzard's own five-entry
+    -- type list, matching the debuff row (Features/Auras.lua, the dispelTypeToken note).
+    -- ☠ NOT a secrecy workaround: includeDispelTypes does not go dark in combat --
+    -- Blizzard's matcher runs under `## UseSecureEnvironment: 1` and reads real values
+    -- (evidence chain on DF:GetEngineDispelFlagGaps). Read LIVE, not captured at file
+    -- load (the AuraFilters-latch lesson at the top of Features/Auras.lua).
     local allToken = not byMe and AuraUtil and AuraUtil.AuraFilters
         and AuraUtil.AuraFilters.Dispellable or nil
     local dispelTypes = DF.DispelTypeMap
@@ -1507,7 +1471,7 @@ local function dispelSlotPlan(db, selfOnly)
         -- We adopted the raid-scoped token on the strength of "observed player-scoped in
         -- practice" — an observation made solo and in tiny test groups, where the two
         -- sets are IDENTICAL. In a real raid they diverge exactly per the docs.
-        -- Field-caught (Krathe, 2026-08-27): a priest with By Me on saw the POISON
+        -- Field-caught: a priest with By Me on saw the POISON
         -- overlay lit raid-wide — because the raid had poison-dispellers. Nothing to do
         -- with race, range, or the shaman gap; DISPEL-channel log showed e=none (empty
         -- exclude, correct for a priest) and racialSelf=false on every build.
@@ -1537,18 +1501,12 @@ local function dispelSlotPlan(db, selfOnly)
         baseCF = { includeDispelTypes = dispelTypes }
     end
 
-    -- One overlay, the game's colours, engine-driven (the Custom Colors mode was
-    -- removed 2026-07-11 — per-type slots with the pickers; the irreducible cost
-    -- was one overlay PER type on multi-type units, judged not worth the
-    -- confusion once game mode gained the border and edge glow).
-    -- ★ ONE slot carries the whole any-dispellable overlay (68914). Every tinted piece
-    -- — gradient/tint, the border ring, and the four EDGE strips — used to need its OWN
-    -- slot, because the old bind API replaced the button's single tintable region and
-    -- "one tintable region per slot" was the hard limit. Up to SIX same-filter slots
-    -- existed purely to smuggle six textures onto one visual overlay, and they stayed in
-    -- sync only because identical filters happen to fill with the same aura.
-    -- AddDispelTypeTexture appends, so one button now carries them all: the sync is
-    -- structural rather than incidental, and a frame declares one slot instead of six.
+    -- One overlay, the game's colours, engine-driven. Per-type slots with their own
+    -- pickers would cost one overlay PER type on multi-type units.
+    -- ★ ONE slot carries the whole any-dispellable overlay. AddDispelTypeTexture APPENDS,
+    -- so one button carries every tinted piece — gradient/tint, the border ring and the
+    -- four EDGE strips — and they stay in sync structurally, rather than relying on six
+    -- same-filter slots happening to fill with the same aura.
     -- `roles` says which carriers this slot builds (see DispelSlotSecureInit) and is
     -- serialized into the plan signature, so flipping any of them still rebuilds.
     local gradientOn = db.dispelShowGradient ~= false
@@ -1600,11 +1558,6 @@ local function dispelSlotPlan(db, selfOnly)
                                   candidateFilters = { includeDispelTypes = gap }, roles = roles }
         end
     end
-    -- (Removed) the five per-type icon slots. The 2026-07-10 rejection they existed to
-    -- work around was of the DEFAULT bind style, BorderWithIcon -- a button border with
-    -- a badge baked in. `Icon` gives the same clean RaidFrame-Icon-Debuff* atlas those
-    -- slots drew by hand, on ONE carrier, with Blizzard choosing the type. See the
-    -- badge block in DispelSlotSecureInit.
     return applyOverlayHides(slots, overlayHiddenTypes(db))
 end
 
@@ -1615,20 +1568,14 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
     local slots = dispelSlotPlan(db, selfOnly)
     if not slots then return nil end
     -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
-    -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
-    -- when All rode a container-level ProcessAura policy.)
-    -- ☠ SPLIT SIGNATURE. This was ONE signature driving Destroy+Create, so the
-    -- All <-> By-Me dropdown -- a pure filter-string + candidate-filter change -- tore
-    -- down and rebuilt a container PER FRAME. AddAuraSlot is add-only with no remove, so
-    -- every teardown strands its button permanently: one flip in a 40-man raid stranded
-    -- 40, and a user trying the two modes back and forth leaked until /reload.
-    --
-    -- AuraContainer's tuning path has handled exactly this since 2026-08-04, and its own
-    -- comment names this case: SetAuraSlotFilterString / SetAuraSlotCandidateFilters are
-    -- live mutators, applyGroupTuning routes overlay mode through the slot-side setters,
-    -- and it was proven in game (DF_AuraLab /alfilter -- 10 swaps cost 0 stranded frames
-    -- on the tuned path vs 100 on the rebuild control). The engine was already ready;
-    -- this consumer just never stopped bundling the mode into its rebuild key.
+    -- inside dispelSlotPlan is reflected here too.
+    -- ☠ SPLIT SIGNATURE. The All <-> By-Me dropdown is a pure filter-string +
+    -- candidate-filter change, and AddAuraSlot is add-only with no remove, so folding it
+    -- into the rebuild key would tear down and rebuild a container PER FRAME and strand a
+    -- button each time (40 per flip in a 40-man raid, leaking until /reload).
+    -- SetAuraSlotFilterString / SetAuraSlotCandidateFilters are live mutators, and
+    -- AuraContainer's tuning path routes overlay mode through them (proven in game: 10
+    -- swaps cost 0 stranded frames on the tuned path vs 100 on a rebuild).
     --
     -- STRUCTURAL (st) -> Destroy+Create. The slot KEY SET, because AddAuraSlot cannot
     -- remove; plus everything the secure initializeFrame bakes in, because a tuning swap
@@ -1688,9 +1635,8 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
         if scf and scf.maxDuration then tu[#tu + 1] = slots[i].key .. ":md=" .. tostring(scf.maxDuration) end
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
         -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
-        -- They used to be separate slot keys (and so rode the loop above); now that one
-        -- slot carries them all they have to be serialized explicitly or the flip would
-        -- silently no-op until the next unrelated rebuild.
+        -- One slot carries them all, so they have to be serialized explicitly or the flip
+        -- would silently no-op until the next unrelated rebuild.
         local r = slots[i].roles
         if r then
             st[#st + 1] = "r:g=" .. tostring(r.gradient)
@@ -1740,7 +1686,7 @@ local function EnsureSlotWidget(btn, frame)
         -- level-TIED with the absorb bar, and the ring holder below tied with heal
         -- prediction. Ties draw in creation order, i.e. arbitrarily.
         -- +13/+14 clears both (frame+16/+17) and still sits under the resource bar at 20
-        -- and the content overlay at 25. (Z-order review, 2026-08-07.)
+        -- and the content overlay at 25.
         -- ★ Resolver, not hbLvl + 13: the widget band is user-settable now
         -- (dispelOverlayFrameLevel, default 16) and both paths must honour it or the
         -- slider works on one render path and silently not the other.
@@ -1772,42 +1718,31 @@ end
 -- ============================================================
 -- SECURE CARRIER INIT (runs INSIDE the container's initializeFrame)
 -- ------------------------------------------------------------
--- SetAuraBorder validates the texture with GetValidatedForbiddenObjectTable
--- (Blizzard_CustomAuraButton.lua): a texture that is a child of the secret aura
--- button and was created in the TAINTED style pass is access-constrained and is
--- rejected at cab.lua:15 ("must not be an access-constrained object") — which is why
--- the old overlay (carriers built in Style*Slot) rendered white in game AND custom
--- modes. Blizzard invokes initializeFrame via securecallfunction, so a texture
--- created HERE is created in secure context and is NOT access-constrained. This is
--- the same pattern the debuff-row icon border, MSUF and oUF all use: create + bind
--- inside initializeFrame; only geometry/alpha happen later in the tainted style pass
--- (legal post-bind). WHICH carrier a slot binds (plain texture vs the tracking
--- StatusBar fill) and its texture are in the container SIGNATURE
--- (dispelFactoryPlanAndSig), so a change rebuilds and re-runs this with the right
--- carrier. The colour map is NOT: a palette edit re-binds in place (StyleOneSlot).
--- ★ 68914: SetAuraBorder is a DEPRECATED alias (Blizzard_CustomAuraButton.lua: "will be
--- removed after 12.1") that does ClearDispelTypeTextures() + AddDispelTypeTexture() —
--- i.e. it REPLACES the button's texture list, which is the whole reason a slot could only
--- ever carry one tintable region. Bind through the real API when present: AddDispelTypeTexture
--- APPENDS, so one button can carry several tinted carriers. Behaviour is identical for a
--- single carrier (the alias just clears an empty list first), so this is a drop-in swap.
--- Bind EVERY carrier this button owns, in one pass. Clears once, then appends each —
--- the ordering the appending API requires (a per-carrier clear would leave only the
--- last). This is what lets a single slot carry the gradient, the ring and the four EDGE
--- strips; the list is remembered so a palette edit can re-bind them all in place.
--- Pre-68914 fallback: the deprecated alias can only hold ONE region, so the first
--- carrier wins there (matching the old one-slot-per-carrier behaviour as closely as a
--- single slot can).
+-- AddDispelTypeTexture validates the texture with GetValidatedForbiddenObjectTable
+-- (Blizzard_CustomAuraButton.lua): a texture that is a child of the secret aura button and
+-- was created in the TAINTED style pass is access-constrained and is rejected ("must not
+-- be an access-constrained object"), leaving the carrier white. Blizzard invokes
+-- initializeFrame via securecallfunction, so a texture created HERE is created in secure
+-- context and is NOT access-constrained. Create + bind inside initializeFrame; only
+-- geometry/alpha happen later in the tainted style pass (legal post-bind). WHICH carrier
+-- a slot binds and its texture are in the container SIGNATURE (dispelFactoryPlanAndSig),
+-- so a change rebuilds and re-runs this with the right carrier. The colour map is NOT: a
+-- palette edit re-binds in place (StyleOneSlot).
+--
+-- BindDispelCarriers binds EVERY carrier a button owns in one pass: it clears once, then
+-- appends each (a per-carrier clear would leave only the last). That is what lets a
+-- single slot carry the gradient, the ring and the four EDGE strips; the list is
+-- remembered so a palette edit can re-bind them all in place.
+--
 -- ★ THE REVEAL. Every dispel carrier is born at alpha 0 on its DF-owned dim host and
 -- stays there until AddDispelTypeTexture has accepted it; this is what turns it back on.
 --
 -- ☠ WHY IT IS A SEPARATE STEP RATHER THAN A BIRTH VALUE. These carriers are OUR textures
 -- with the ENGINE'S colour. Between creating one and binding it, nothing colours it, so it
--- renders at the default vertex colour -- WHITE -- across whatever it covers. For the
--- gradient that is the whole frame. Birth used to hand each host the user's configured
--- alpha immediately ("born with the user's value", because birth is usually mid-combat and
--- the style pass is out-of-combat only), which is correct for cosmetics and exactly wrong
--- for visibility: it made an unbound carrier maximally visible.
+-- renders at the default vertex colour -- WHITE -- across whatever it covers (for the
+-- gradient, the whole frame). Handing the host the user's alpha at birth is right for
+-- cosmetics and exactly wrong for visibility: it makes an unbound carrier maximally
+-- visible.
 --
 -- ☠ THE ALPHA MUST LIVE ON THE DIM HOST, NOT THE TEXTURE. AddDispelTypeTexture takes
 -- SecretAspect.Alpha and .Shown on the texture at bind time, after which neither is ours to
@@ -1839,7 +1774,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
     -- keyed by SLOT KEY alone, so every frame's "main" slot overwrites every other
     -- frame's -- last writer wins across the whole roster. A dump reading it reports one
     -- frame's success against another frame's button, which is exactly how five frames
-    -- with no carriers at all printed "bind=ok x3" (2026-08-20). The global stays for the
+    -- with no carriers at all printed "bind=ok x3". The global stays for the
     -- site summary in /df debug dispelids, where cross-frame aggregation is the point.
     --
     -- Stamped BEFORE the early return, so "we got here and had nothing to bind" is a
@@ -1863,24 +1798,22 @@ local function BindDispelCarriers(btn, carriers, db, key)
     local tintOpts = {
         style = DispelBorderStyle(),
         customDispelColorMap = DispelBorderMapFor(),
-        -- ☠☠ THE CURVE IS THE ONLY SECRET-SAFE TINT — the map is NOT, despite what this
-        -- file's header claimed for a month. Read from the LIVE client source
-        -- (Blizzard_CustomAuraButton.lua @ Gethe 9f2b839d, build 69382):
+        -- ☠☠ THE CURVE IS THE ONLY SECRET-SAFE TINT — the map is NOT
+        -- (Blizzard_CustomAuraButton.lua):
         --   * the map is a RAW LUA TABLE INDEX: colorMap[auraData.dispelName or "None"].
         --     A SECRET dispelName is truthy (the `or "None"` never fires) and matches no
         --     stored key, so the lookup returns nil — and the colour apply is
         --     `if color then SetVertexColor(...)` with NO else, leaving whatever the
         --     style step painted. For the styles that base-coat white, that IS the
-        --     "whole frame goes white" field report (Choco/Ortemis, 2026-08-19).
+        --     "whole frame goes white" field report.
         --   * the curve resolves C-SIDE: GetAuraDispelTypeColor(unit, auraInstanceID,
         --     curve) — no table index, no name read, works while auras are secret. It is
         --     applied AFTER the style step and overrides it, for every style.
         -- The debuff-row icon ring (Frames/AuraContainer.lua, the slot dispel bind) passes
         -- the same curve alongside its map for the "Color" style; its Atlas style passes
-        -- no map at all and keeps the engine palette, which is why the reporters' row
-        -- borders were coloured next to a white overlay.
+        -- no map at all and keeps the engine palette.
         -- nil when C_CurveUtil / the dispel-type enum is absent: the engine then falls
-        -- back to the map, i.e. exactly the previous behaviour. Cache is invalidated
+        -- back to the map. Cache is invalidated
         -- with the map (DF:InvalidateDispelColorCurve), and the palette-edit re-bind
         -- (dispelCurveGen) re-reads it here.
         customDispelColorCurve = DF.GetDispelColorCurve and DF:GetDispelColorCurve() or nil,
@@ -1888,21 +1821,16 @@ local function BindDispelCarriers(btn, carriers, db, key)
         showWhenHelpful = false,
         showIcon = false,
     }
-    -- nBound is what was ACTUALLY bound, and it is what the stamp reports. The
-    -- pre-68914 alias binds ONE carrier, and stamping "ok x" .. #carriers there lied
-    -- about the rest -- the reveal then lifted dims whose textures nothing owned.
+    -- nBound is what was ACTUALLY bound, and it is what the stamp reports: an add that
+    -- throws part-way leaves the later carriers unowned, and the reveal must not lift
+    -- their dims.
     local nBound = 0
     local ok, err = pcall(function()
-        if btn.AddDispelTypeTexture then
-            if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
-            for i = 1, #carriers do
-                local c = carriers[i]
-                btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
-                nBound = i
-            end
-        else
-            btn:SetAuraBorder(carriers[1].tex, carriers[1].opts or tintOpts)
-            nBound = 1
+        btn:ClearDispelTypeTextures()
+        for i = 1, #carriers do
+            local c = carriers[i]
+            btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
+            nBound = i
         end
     end)
     -- The whole set or nothing: a partial bind (one strip of four) is not a revealable
@@ -1940,7 +1868,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
 end
 
 
--- Create the SetAuraBorder carrier(s) for one overlay slot and bind them, per the
+-- Create the AddDispelTypeTexture carrier(s) for one overlay slot and bind them, per the
 -- slot's role (from its key / edgeSide). Each carrier is anchored to the button here
 -- (SetAllPoints(btn)) so it inherits the button's forbidden aspects at bind time; the
 -- tainted style pass re-positions it afterwards (validation already passed). Icon
@@ -1954,9 +1882,7 @@ end
 -- touch live buttons in combat (BUILD-ONCE-LEAVE-IT). Moving create+bind there would
 -- delay the overlay's debut to regen. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
-    -- Either bind API is enough (AddDispelTypeTexture is current; SetAuraBorder is the
-    -- deprecated alias kept for pre-68914 clients) — see BindDispelCarriers.
-    if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
+    if not (btn and btn.CreateTexture and btn.AddDispelTypeTexture) then return end
     local key = slotInfo.key
     local roles = slotInfo.roles
     if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
@@ -1990,18 +1916,16 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local style = roles.gradient
         -- ☠ ALWAYS A PLAIN TEXTURE — never a StatusBar fill, in either mode.
         --
-        -- "Show On Current Health Only" used to bind w.gradient's FILL here and clip it
-        -- by feeding the bar's value from the health hook. That could never work: aura
-        -- frames carry Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
+        -- Clipping a bound StatusBar fill by feeding its value cannot work: aura frames
+        -- carry Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
         -- (Blizzard_AuraContainerShared.lua), which denies ALL tainted writes while auras
-        -- are secret — so SetMinMaxValues/SetValue was refused, the bar kept its
-        -- (0,1)/value=1 defaults, and the gradient rendered at FULL EXTENT over the whole
-        -- frame, hiding the health bar (live report: 4412 errors + "I can't see health").
+        -- are secret — so SetMinMaxValues/SetValue is refused, the bar keeps its
+        -- (0,1)/value=1 defaults, and the gradient renders at FULL EXTENT over the whole
+        -- frame, hiding the health bar.
         --
-        -- ★ This is the SAME mistake the AD "filled health mirror" made and the SAME fix:
-        -- see HEALTH FILL COVER in Frames/AuraContainer.lua. A plain texture ANCHORED to
-        -- the real health bar's fill texture inherits that texture's rect, and that rect
-        -- is already driven by the bar's own value — so it tracks health exactly, with
+        -- ★ Same fix as HEALTH FILL COVER in Frames/AuraContainer.lua: a plain texture
+        -- ANCHORED to the real health bar's fill texture inherits that texture's rect,
+        -- which the bar's own value already drives -- so it tracks health exactly, with
         -- zero per-tick writes and nothing read. Anchor-derived geometry is the one
         -- geometry route that stays legal on these buttons.
         --   The anchor is seeded at birth below (so a combat-born carrier clips to
@@ -2012,20 +1936,16 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         -- The bind below (AddDispelTypeTexture) adds SecretAspect.Alpha to the carrier —
         -- from then on the alpha channel is the ENGINE'S, and the documented options
         -- struct offers no substitute: no alpha field, and customDispelColorMap is
-        -- typed colorRGB (no alpha channel to bake into). Proven live 2026-08-13: a
-        -- COMPLETED style pass (styledVer latched, styleErr=nil, bind ok) that executed
-        -- carrier:SetAlpha(0.3) still rendered the wash at 1.0.
+        -- typed colorRGB (no alpha channel to bake into). A completed, error-free style
+        -- pass that wrote carrier:SetAlpha(0.3) still rendered the wash at 1.0.
         -- So the carrier is created on a plain DF frame whose FRAME alpha multiplies
         -- into the render regardless of what the aspect does to the texture's own
         -- property — the same alpha-host pattern the AD out-of-range fade runs live in
-        -- combat every day. The ring / badge / edge strips already sit on DF holders;
-        -- the gradient was the ONE carrier drawn hostless, which is why it was the one
-        -- element whose opacity could not be controlled.
-        -- Born with the user's value because birth is usually MID-COMBAT (Blizzard
-        -- creates these buttons lazily on the first dispellable debuff) and the style
-        -- pass is OOC-only. The dim host is ours, so later slider edits can write it
-        -- at any time. Show Gradient off = alpha 0 (the carrier exists regardless;
-        -- show/hide via alpha is the standing design).
+        -- combat. The ring / badge / edge strips sit on DF holders for the same reason.
+        -- The host is born dark (see RevealDispelCarriers); the reveal and the style
+        -- pass write the user's value, and later slider edits can write it at any time
+        -- because the host is ours. Show Gradient off = alpha 0 (the carrier exists
+        -- regardless; show/hide via alpha is the standing design).
         if not w.nativeGradientDim then
             w.nativeGradientDim = CreateFrame("Frame", nil, w)
             w.nativeGradientDim:SetAllPoints(btn)
@@ -2073,8 +1993,8 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         btn._dfDispelGradientCarrier = carriers[#carriers].tex
     end
 
-    -- EDGE strips: one carrier per side, keyed BY SIDE (they used to be one field each
-    -- on four separate buttons; on a shared button they must not overwrite each other).
+    -- EDGE strips: one carrier per side, keyed BY SIDE -- on a shared button they must
+    -- not overwrite each other.
     if roles.edges then
         btn.dfDispelEdgeTex = btn.dfDispelEdgeTex or {}
         btn.dfDispelEdgeHolder = btn.dfDispelEdgeHolder or {}
@@ -2168,7 +2088,7 @@ local function StyleGameMainSlot(btn, frame, db)
 
     -- Dress the carrier that DispelSlotSecureInit created + bound. This tainted pass
     -- ONLY does geometry/alpha/blend (legal post-bind); it must NEVER CreateTexture,
-    -- SetAuraBorder, or SetStatusBarTexture (that recreates the bound fill) here —
+    -- AddDispelTypeTexture, or SetStatusBarTexture (that recreates the bound fill) here —
     -- Blizzard owns the carrier's colour + Shown after the bind.
     if style == "EDGE" then
         -- EDGE renders through the four edge slots; keep the main widget's gradient
@@ -2199,10 +2119,9 @@ local function StyleGameMainSlot(btn, frame, db)
             end
             carrier:SetBlendMode(db.dispelGradientBlendMode or "ADD")
             -- ☠ OPACITY ON THE DIM HOST, NOT THE CARRIER. The bind added
-            -- SecretAspect.Alpha to this texture, and a completed, error-free pass that
-            -- wrote carrier:SetAlpha(0.3) still rendered at 1.0 (field-proven
-            -- 2026-08-13) — the alpha channel is the engine's once bound. The dim host
-            -- is a plain DF frame, so this write is ours at any time, combat included.
+            -- SecretAspect.Alpha to this texture, so the alpha channel is the engine's
+            -- once bound. The dim host is a plain DF frame, so this write is ours at any
+            -- time, combat included.
             if w.nativeGradientDim then
                 -- Gated: an unbound carrier is an UNCOLOURED one, and this host is
                 -- frame-sized. See DispelCarriersBound.
@@ -2246,7 +2165,7 @@ end
 -- per matching aura (per-type slots cannot do this: an aura has one dispelName, so they
 -- cannot be made mutually exclusive, and slot visibility is secret, so they cannot be
 -- packed). At 1, each overlay slot becomes a slot stacked on the same corner, which
--- renders exactly like the badge the overlay's slots used to carry.
+-- renders exactly like a single badge.
 -- Each button draws nothing itself (the style hides icon and cooldown); the carrier is
 -- bound with BadgeCarrierOptions, so the engine picks the art for the aura's type.
 -- The fields use the badge names (dfDispelBadge / -Dim / -Holder) so
@@ -2255,7 +2174,7 @@ end
 -- Born dark: the dim host stays at alpha 0 until BindDispelCarriers confirms the bind.
 -- ============================================================
 local function DispelIconRowSecureInit(btn, db)
-    if not (btn and btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
+    if not (btn and btn.CreateTexture and btn.AddDispelTypeTexture) then return end
     local holder = CreateFrame("Frame", nil, btn)
     holder:SetAllPoints(btn)
     local badgeDim = CreateFrame("Frame", nil, holder)
@@ -2294,7 +2213,7 @@ local function StyleGameBorderSlot(btn, frame, db)
     if not ring then return end
     -- Anchor to `btn`, not `frame`: the button is SetAllPoints(frame) so the rect is
     -- identical, but the chain must terminate at the aura button for 68824's
-    -- SetAuraBorder validation. The frame rect is OURS (readable); style re-runs on
+    -- AddDispelTypeTexture validation. The frame rect is OURS (readable); style re-runs on
     -- layout-version bumps, so a resize catches up on the next dispel pass.
     ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
     -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
@@ -2341,7 +2260,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- holders) — no SetHeight/SetWidth on regions inside the button subtree.
     -- Anchor to `btn`, NOT `frame`: the button is SetAllPoints(frame) so the rect is
     -- identical, but the anchor chain must terminate at the aura button for 68824's
-    -- SetAuraBorder validation ("must inherit all forbidden layout aspects from
+    -- AddDispelTypeTexture validation ("must inherit all forbidden layout aspects from
     -- owner") — anchoring to the unit frame leaves this bound carrier orphaned (white).
     tex:ClearAllPoints()
     if edge == "TOP" then
@@ -2367,7 +2286,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- ☠ RE-LEVEL EVERY PASS — the init's edgeLvl goes stale when the Frame Level
     -- slider moves the band. Holder AND dim: the strip is the dim's region, so the
     -- art draws at the dim's level. Same resolver as the init (the wash's level:
-    -- band+1, clearing the absorb and heal prediction — the 2026-08-13 ruling).
+    -- band+1, clearing the absorb and heal prediction).
     local lvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(), db)
     local holder = btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge]
     if holder then holder:SetFrameLevel(lvl) end
@@ -2491,7 +2410,7 @@ local function StyleDispelSlots(frame, db, h, slots)
         -- DriveDispelOverlayFactory returns before reaching here at all. The overlay stayed
         -- dead until a reload, and every field a dump could read looked healthy --
         -- styleErr=nil, style latched, widget present. Field-reported as whole frames
-        -- washing white in a key (Krathe, 2026-08-20): with no DF carrier the engine's own
+        -- washing white in a key: with no DF carrier the engine's own
         -- dispel texture renders at its white base coat, unopposed.
         --
         -- next(info.roles) guards the all-disabled config (EDGE style with gradient, border
@@ -2628,7 +2547,7 @@ local function dispelFilterRecords(slots, db, frame)
         local si = slots[i]   -- fresh per-iteration capture for the onInit closure
         recs[i] = { filter = si.filter, key = si.key,
                     candidateFilters = si.candidateFilters,
-                    -- SECURE carrier create + SetAuraBorder bind, run inside the
+                    -- SECURE carrier create + AddDispelTypeTexture bind, run inside the
                     -- container's initializeFrame (the only context where a texture child
                     -- of the secret button isn't access-constrained). Geometry/alpha stay
                     -- in StyleGame*Slot.
@@ -2637,7 +2556,7 @@ local function dispelFilterRecords(slots, db, frame)
                     -- refusal here is SWALLOWED: the slot is left half built, nothing
                     -- records it, and the container's own warning rides AURACONTAINER.
                     -- That is how a refused init produced a dump in which every printed
-                    -- field looked healthy (2026-08-20). Birth is normally MID-COMBAT --
+                    -- field looked healthy. Birth is normally MID-COMBAT --
                     -- the client creates these buttons lazily on the first dispellable
                     -- debuff -- so the button subtree carries
                     -- DenyTaintedAccessWhenAurasAreSecret and creating the gradient's dim
@@ -2883,10 +2802,8 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- rebuild happened by. Costs nothing for anyone who is not a dwarf: RacialGapPossible
     -- short-circuits before the UnitIsUnit call, and this is the per-UNIT_AURA path.
     -- ⚠ NOT "is this the player's frame". It is "does the RACIAL gap apply here" — that AND
-    -- being a dwarf — which is why it logs as racialSelf. The first cut printed it as
-    -- `self`, and a line reading `unit=player self=false` looks like the unit test is
-    -- broken rather than a non-dwarf short-circuiting before it ever runs (field log,
-    -- 2026-08-26 16:56). A diagnostic that reads as a fault is worse than no diagnostic.
+    -- being a dwarf — which is why it logs as racialSelf: `unit=player self=false` would
+    -- read as a broken unit test rather than a non-dwarf short-circuiting before it runs.
     local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
     -- The icon row has its own version/generation. A switched-off row counts as current,
     -- or every UNIT_AURA would fall through to the full plan.
@@ -2916,16 +2833,14 @@ function DF:DriveDispelOverlayFactory(frame, db)
     if h and frame.dispelFactorySig == sig and frame.dispelFactoryTuneSig ~= tuneSig then
         -- ☠ TUNE, DO NOT REBUILD. The structural half is identical, so only the filter
         -- string and the dispel-type candidate filter moved — the All <-> By-Me dropdown.
-        -- This used to fall into the branch below and Destroy+Create per frame, stranding
-        -- one button each time (AddAuraSlot is add-only). ApplyTuning routes overlay mode
-        -- through the live slot-side setters, carries its own combat deferral, and rebuilds
-        -- itself under test mode. Records carry onInit — see dispelFilterRecords.
-        -- "I changed a setting and nothing happened" is always answered by WHICH SIG MOVED,
-        -- and this row had no such line at all. It is the proof for the dispel-type map fix:
-        -- on a frame whose self-ness flips (own frame <-> someone else's) the map differs
-        -- while key set and filter strings do not, so before that fix NEITHER sig moved and
-        -- this branch was never reached. Seeing a TUNE here on that transition IS the fix
-        -- working; seeing none means the plan and the signature have drifted apart again.
+        -- A Destroy+Create here would strand one button per frame (AddAuraSlot is
+        -- add-only). ApplyTuning routes overlay mode through the live slot-side setters,
+        -- carries its own combat deferral, and rebuilds itself under test mode. Records
+        -- carry onInit — see dispelFilterRecords.
+        -- "I changed a setting and nothing happened" is always answered by WHICH SIG MOVED.
+        -- On a frame whose self-ness flips (own frame <-> someone else's) the dispel-type
+        -- map differs while key set and filter strings do not, so a TUNE line on that
+        -- transition is expected; none means the plan and the signature have drifted apart.
         DF:Debug("DISPEL", "overlay: TUNE unit=%s racialSelf=%s  %s -> %s",
             tostring(frame.unit), tostring(isSelf),
             tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
@@ -2948,9 +2863,9 @@ function DF:DriveDispelOverlayFactory(frame, db)
             unit = frame.unit,
             mode = "overlay",
             filter = filterRecords,
-            -- No processingPolicy: the overlay no longer uses ProcessAura's Dispel
-            -- classification for its "All" mode (it was player-relative -- see
-            -- dispelSlotPlan). Filtering is filterString + includeDispelTypes now.
+            -- No processingPolicy: ProcessAura's Dispel classification is
+            -- player-relative (see dispelSlotPlan). Filtering is filterString +
+            -- includeDispelTypes.
             frameLevelOffset = 0,   -- widget levels are set absolutely (legacy layering)
             enabled = true,
         })
@@ -3073,7 +2988,7 @@ function DF:UpdateDispelOverlay(frame)
             -- do it, meaning the preview applied the fade twice. And the fallback was
             -- 0.55 against ElementAppearance's 0.2, so a profile missing the key
             -- disagreed by nearly 3x. Now gated on oorEnabled like live, with live's
-            -- fallback. (Audit, 2026-08-07.)
+            -- fallback.
             local oorMultiplier = 1.0
             if db.oorEnabled and db.testShowOutOfRange
                 and testData.outOfRange and not testData.status then
@@ -3142,7 +3057,7 @@ function DF:UpdateAllDispelOverlays()
     DF:IterateAllFrames(updateFrame)
     -- ☠ AND PINNED — DF:IterateAllFrames is arena OR party+raid and has no pinned arm, so
     -- the dispel settings toggle, PLAYER_ENTERING_WORLD and both test-mode exits all left
-    -- pinned frames on whatever overlay state they last happened to render. (Audit 2026-08-17.)
+    -- pinned frames on whatever overlay state they last happened to render.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(updateFrame)
     end
@@ -3284,12 +3199,7 @@ function DF:DebugDispel(unit)
 end
 
 -- Dispel diagnostics. One command, one job: report what OUR overlay sees and
--- did for a unit.
--- (Removed) The Blizzard dispel-indicator probes that used to live here --
--- dump/dump2/dump3/dump4, cvar/cvar1/cvar0, indicator, setindicator, profile and
--- test. DF has not read the game's dispel indicator setting since the dispel-source
--- rework (see the notes in Core.lua and Features/Auras.lua), and two of them
--- (cvar1/cvar0) WROTE a live game CVar, which a diagnostic must never do.
+-- did for a unit. Diagnostics here never write a game CVar.
 DF:RegisterDebugSlash("DFDISPEL", "Dispel overlay state: [unit], or ids | render", false, "/dfdispel")
 SlashCmdList["DFDISPEL"] = function(msg)
     local arg = msg and msg:match("^%s*(%S+)") or nil

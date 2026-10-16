@@ -1042,22 +1042,12 @@ function CC:CreateClickCastUI(parent)
     itemsHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
 
     -- ☠ MACRO CONTROLS GROW RIGHTWARDS FROM THE LEFT EDGE, not leftwards from the hint.
-    --
-    -- This row carries four more controls than the Spells/Items rows, and it used to
-    -- chain dropdown <- New <- Import <- Quick Macro <- hint <- view buttons. Every
-    -- width in that chain therefore positioned the DROPDOWN: the leftmost control landed
-    -- wherever the arithmetic put it, lined up with nothing above it, and any button
-    -- getting wider walked the entire row further left -- past this panel's own edge and
-    -- over the bindings list beside it. A longer translated label does the same thing.
-    --
-    -- The dropdown now pins to LEFT 4, the inset the tab strip above already uses
-    -- (spellsTab is BOTTOMLEFT 4), so the two rows line up and stay lined up whatever
-    -- the labels measure. The rest chain rightwards into the middle of the row, which is
-    -- where the slack actually is: ~280px of controls in a ~900px row, with the hint
-    -- still right-anchored to the view buttons and a wide gap between the two groups.
-    --
-    -- ⚠ The declaration site already claimed these were "anchored from LEFT to avoid
-    -- overlap". That is true again rather than aspirational.
+    -- This row carries four more controls than the Spells/Items rows; chained leftwards,
+    -- every width positioned the DROPDOWN, so a wider button or a longer translation walked
+    -- the whole row past this panel's edge and over the bindings list. The dropdown pins
+    -- to LEFT 4, the inset the tab strip above uses (spellsTab is BOTTOMLEFT 4), so the two
+    -- rows line up whatever the labels measure; the rest chain rightwards into the slack in
+    -- the middle of the row, with the hint right-anchored to the view buttons.
     macroSourceDropdown:SetPoint("LEFT", 4, 0)
     newMacroBtn:SetPoint("LEFT", macroSourceDropdown, "RIGHT", 8, 0)
     importMacroBtn:SetPoint("LEFT", newMacroBtn, "RIGHT", 4, 0)

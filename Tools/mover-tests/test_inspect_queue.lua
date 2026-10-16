@@ -39,6 +39,7 @@ local function IsInRaid() return true end
 local function NotifyInspect(u) W.log[#W.log + 1] = "NI " .. u end
 local function ClearInspectPlayer() W.log[#W.log + 1] = "CIP" end
 local function GetInspectSpecialization(u) return W.spec[u] or 0 end
+local C_SpecializationInfo = {}
 local C_Timer = { After = function(t, fn) W.timers[#W.timers + 1] = { t = t, fn = fn } end }
 local InspectFrame = W.inspectFrame
 local PlayerSpellsFrame = W.spellsFrame

@@ -817,8 +817,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- off has to rebuild the container, and UpdateAllFrames alone only redoes
                 -- layout. Without the invalidation the rows kept their old border until
                 -- something else happened to bump the aura layout version — which is why
-                -- it appeared to work on one frame and not the rest
-                -- (Aphoex, 2026-08-12).
+                -- it appeared to work on one frame and not the rest.
                 fullUpdate    = function()
                     if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
                     if DF.UpdateAllFrames then DF:UpdateAllFrames() end
@@ -1099,11 +1098,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CloseSection(band)
         end)
 
-        -- (No Expiring Indicator group: the pre-12.1 expiring border/tint was driven by a
-        -- ~3 Hz ticker reading remaining time, which is SECRET on 12.1. Removed 2026-07-25
-        -- rather than left frosted. The 12.1-safe replacement is the DF.Expiration engine
-        -- (Features/Expiration.lua) + GUI:CreateExpirationControls, currently adopted by the
-        -- Aura Designer only -- rolling it out to these rows is a separate, unscheduled job.)
+        -- (No Expiring Indicator group: remaining time is SECRET on 12.1. The 12.1-safe reveal
+        -- is DF.Expiration (Features/Expiration.lua) + GUI:CreateExpirationControls, adopted by
+        -- the Aura Designer only so far.)
 
         -- ===== DURATION BAR (an Appearance card) =====
         local function BuildBuffDurationBarGroup(tools2)
@@ -1378,7 +1375,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local badgePoints = { TOPRIGHT = L["Top Right"], TOPLEFT = L["Top Left"],
                               BOTTOMRIGHT = L["Bottom Right"], BOTTOMLEFT = L["Bottom Left"] }
         -- ★ TWO ENTRIES, NOT THREE. "Any Dispel Type" (ANY) was collapsed into
-        -- "All Dispellable" (2026-08-22): the two were one query wearing two rows
+        -- "All Dispellable": the two were one query wearing two rows
         -- -- ANY was added when the PTR-5 DISPELLABLE token appeared, beside the
         -- old map-based ALL instead of underneath it, and once ALL moved onto the
         -- token (the secrecy fix in Features/Auras.lua) they were byte-identical.
@@ -4010,10 +4007,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ============================================================
     -- Indicators > Targeted List
     -- ============================================================
-    -- Stacked cast-bar display showing enemy casts targeting party
-    -- members. Replaces the group-frame Targeted Spells icons that
-    -- Blizzard's 2026-04-07 UnitIsUnit hotfix permanently broke.
-    -- Party-only feature; raid mode shows a redirect message.
+    -- Stacked cast-bar display showing enemy casts targeting party members. It stands in
+    -- for group-frame Targeted Spells icons, which Blizzard's UnitIsUnit change made
+    -- impossible. Party-only feature; raid mode shows a redirect message.
     local pageTargetedList = CreateSubTab("indicators", "indicators_targetedlist", L["Targeted List"])
     BuildPage(pageTargetedList, function(self, db, Add, AddSpace, AddSyncPoint)
             -- ===== THE PAGE'S CARDS ===========================================

@@ -117,39 +117,30 @@ end)
 -- ============================================================
 -- ONUPDATE REGISTRY + SETSCRIPT HOOK
 -- ----------------------------------------------------------
--- Tracking OnUpdate handlers requires a different mechanism than
--- function or event wrapping. OnUpdate scripts are bound directly to
--- frames via SetScript, so there's no DF-owned function we can swap.
+-- OnUpdate scripts are bound directly to frames via SetScript, so there is no DF-owned
+-- function to swap; tracking them needs a different mechanism than function or event
+-- wrapping.
 --
--- Strategy: hook Frame:SetScript at addon load. Whenever a *DF-owned*
--- frame installs/removes an OnUpdate handler, we record the latest
--- handler in a registry. The registry alone has effectively zero
--- overhead — just one table assignment per SetScript call. No wrapping,
--- no instrumentation.
+-- Strategy: hook Frame:SetScript at addon load. Whenever a *DF-owned* frame installs or
+-- removes an OnUpdate handler, record the latest handler in a registry -- one table
+-- assignment per SetScript call, no wrapping. On Profiler:Start, walk the registry and
+-- replace each recorded handler with a wrapped version that records timing + memory;
+-- handlers installed *after* Start are wrapped on the spot by the same hook. On Stop, all
+-- originals are restored.
 --
--- On Profiler:Start, we walk the registry and replace each recorded
--- handler with a wrapped version that records timing + memory. New
--- OnUpdate handlers installed *after* Start are wrapped on the spot
--- by the same hook. On Stop, all originals are restored.
+-- The `installingOnUpdate` guard stops the hook re-wrapping our own wrapper as we install
+-- it (otherwise infinite recursion).
 --
--- The `installingOnUpdate` guard prevents the hook from re-wrapping
--- our own wrapper as we install it (otherwise infinite recursion).
+-- CRITICAL: filter to DF-owned frames only. Wrapping a non-DF frame's OnUpdate (above all
+-- Blizzard's CompactRaidFrame secure frames) runs our closure inside that frame's update
+-- cascade and marks the execution "tainted by DandersFrames"; the taint propagates to
+-- every UnitIsConnected / UnitHealthMax / etc. secret-value return and every protected
+-- Show()/Hide() downstream, breaking secure Blizzard code with ADDON_ACTION_BLOCKED.
 --
--- CRITICAL: we must filter to DF-owned frames only. If we wrap a
--- non-DF frame's OnUpdate (especially Blizzard's CompactRaidFrame
--- secure frames), our wrapper closure runs inside that frame's
--- update cascade and the execution context gets marked as
--- "tainted by DandersFrames". That taint propagates to every
--- UnitIsConnected / UnitHealthMax / etc. secret-value return and
--- every protected Show()/Hide() call downstream — breaking secure
--- Blizzard code and producing ADDON_ACTION_BLOCKED errors. This was
--- the cause of a raid-session bug report on 2026-04-08.
---
--- The filter walks the frame's parent chain looking for any ancestor
--- whose name starts with "Danders" or "DF" — DF's named containers
--- and headers all use these prefixes (DandersPartyHeader,
--- DandersArenaHeader, DandersRaidGroupN, DFTestHeader, etc.). If no
--- ancestor has a DF name, the frame is foreign and must be skipped.
+-- The filter walks the frame's parent chain for any ancestor whose name starts with
+-- "Danders" or "DF" -- DF's named containers and headers all use these prefixes
+-- (DandersPartyHeader, DandersArenaHeader, DandersRaidGroupN, DFTestHeader, etc.). No DF
+-- ancestor means the frame is foreign and must be skipped.
 -- ============================================================
 
 local onUpdateRegistry = {}      -- [frame] = handler ref currently bound (or nil)
@@ -224,31 +215,20 @@ local WrapFrameOnUpdate
 -- ============================================================
 -- ONUPDATE TRACKING HOOK
 -- ============================================================
--- ☠ SAVEDVARIABLES ARE NOT LOADED WHEN THIS FILE EXECUTES.
--- This used to read DandersFramesDB_v2.profilerOnUpdateHook right here, at file
--- scope, and install the hook only if it was true. The global does not exist
--- yet at that point — it is populated before ADDON_LOADED, which is AFTER every
--- addon file has run — so the read was always nil and the hook was NEVER
--- installed, no matter what the saved file said. Ticking the box, reloading,
--- and finding it still off was that, exactly: the value saved correctly and was
--- then read a frame too early, forever.
--- Every other consumer of this table in the addon reads it inside a function
--- (DF:GetGlobalDB and friends) and so never hit this.
+-- ☠ SAVEDVARIABLES ARE NOT LOADED WHEN THIS FILE EXECUTES. DandersFramesDB_v2 is populated
+-- before ADDON_LOADED, which is AFTER every addon file has run, so a file-scope read of
+-- profilerOnUpdateHook would always be nil and the setting could never take effect.
 --
--- ⚠ The install CANNOT simply move to ADDON_LOADED either: this file sits early
--- in the TOC deliberately (see the "Profiler.lua is loaded earlier" note in
--- the TOC) so the hook is in place before the files that install an OnUpdate at
--- THEIR file scope — five ticker/throttle singletons across Headers, StatusIcons
--- and AutoProfiles, all of which load later. (A sixth lived in Performance.lua,
--- since deleted.) Installing at
--- ADDON_LOADED would miss every one of them.
+-- ⚠ The install cannot simply move to ADDON_LOADED either: this file sits early in the
+-- TOC deliberately (see the "Profiler.lua is loaded earlier" note in the TOC) so the hook
+-- is in place before the files that install an OnUpdate at THEIR file scope -- the
+-- ticker/throttle singletons in Headers, StatusIcons and AutoProfiles, which load later.
 --
--- So: install unconditionally and record from the first moment, then resolve the
--- user's setting at ADDON_LOADED and drop everything if they had it off. The
--- cost of being wrong for that one window is a table of a few dozen entries;
--- the cost of the hook itself when latched off is the two comparisons below,
--- since scriptType ~= "OnUpdate" rejects almost every SetScript call in the game
--- before anything else happens.
+-- So: install unconditionally and record from the first moment, then resolve the user's
+-- setting at ADDON_LOADED and drop everything if it is off. The cost of being wrong for
+-- that window is a table of a few dozen entries; the cost of the hook when latched off is
+-- the two comparisons below, since scriptType ~= "OnUpdate" rejects almost every
+-- SetScript call in the game first.
 local onUpdateHookEnabled = nil   -- nil = undecided (still loading); resolved below
 Profiler.onUpdateHookEnabled = onUpdateHookEnabled
 
@@ -804,13 +784,10 @@ local function Corrected(totalMs, selfMs, ownCalls, deepCalls)
     return t, s
 end
 
--- (Removed) SumCorrected. It walked the raw buckets and corrected each one, while
--- GetSortedResults aggregates a function's per-frame-type buckets FIRST and corrects
--- the total once. Those are not the same number: Corrected clamps at zero, so
--- correcting five buckets independently and adding them loses the negative headroom
--- that a single combined correction keeps. The status line and the % denominator
--- could therefore disagree. GetGrandTotalMs now asks GetSortedResults instead, so
--- there is one aggregation and they cannot drift apart.
+-- Grand totals come from GetSortedResults, which aggregates a function's per-frame-type
+-- buckets FIRST and corrects the total once. Correcting buckets independently and adding
+-- them is a different number (Corrected clamps at zero), so one aggregation keeps the
+-- status line and the % denominator in agreement.
 
 -- ============================================================
 -- CORE PROFILING
@@ -918,11 +895,9 @@ function Profiler:Start()
     callDepth = 0
 
     local wrapped = 0
-    -- ☠ An unresolved target used to vanish without a trace: the branch below
-    -- just skips it, and the "N functions instrumented" line gives no clue that
-    -- N is short. Rename or delete a profiled function and it silently stops
-    -- being measured — you read a clean profile and conclude the system is
-    -- cheap. Collect the misses and name them.
+    -- ☠ Name every unresolved target: the branch below skips it, and the "N functions
+    -- instrumented" line gives no clue that N is short. A renamed or deleted profiled
+    -- function would silently stop being measured and the profile would read as cheap.
     local missing = {}
     local typeCheck = type  -- cache as upvalue
 

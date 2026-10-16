@@ -135,44 +135,31 @@ function DF:UpdateReducedMaxHealth(frame)
     bar:Show()
 
     if db.reducedMaxHealthClipHealthBar and frame.healthBar and tex then
-        -- Clip the health bar to the portion NOT covered by the reduced-max
-        -- overlay: pin the three frame-side edges and anchor the full-health
-        -- edge to the reduced texture's inner edge. Mirrors the orientation above.
+        -- Clip the health bar to the portion NOT covered by the reduced-max overlay: pin the
+        -- three frame-side edges and anchor the full-health edge to the reduced texture's inner
+        -- edge. Mirrors the orientation above.
         --
-        -- ☠☠ THIS USED TO BE SKIPPED ON THE SECRET PATH, WHICH IS THE ONLY PATH THAT
-        -- MATTERS. The note above says it plainly: in restricted content -- M+ and raid,
-        -- "exactly where max-HP reductions live" -- the percent comes back secret. So the
-        -- clip ran in test mode and nowhere else, and every consumer that reasons about
-        -- "the usable bar" was reasoning about a rect that is only correct in a preview:
-        --   * the dispel wash's "Show On Current Health Only" anchors to this bar
-        --     precisely so the reduced region is excluded (Features/Dispel.lua's
-        --     healthAnchor block, and the slot carrier's birth anchor). Unclipped, the
-        --     wash spans the taken-away max and reads as though the option were off --
-        --     "in game it looks like it does in test mode if you untick it" (Renegade,
-        --     2026-08-19).
-        --   * UpdateAbsorb's ATTACHED maths says "the bar physically ends there".
-        --     In a key it did not.
-        -- The original reason was caution, stated as caution: "we don't clip against
-        -- secret-derived geometry unless it's proven taint-safe in-game." It is the
-        -- established route -- ANCHORING derives geometry engine-side and reads nothing
-        -- in Lua, which is the same doctrine DispelSlotSecureInit relies on and the same
-        -- thing UpdateAbsorb already does to this very texture (Bars.lua's
-        -- healthFillTexture anchors, ungated and shipping). Anchoring is not a read.
-        -- ⚠ SELF-CORRECTING WHEN THE SECRET RESOLVES TO ZERO: an unmodified unit renders
-        -- an empty reverse-fill, so `tex` collapses onto the full-health edge and these
-        -- anchors give back the whole bar. That is why the numeric hide-test being
-        -- unavailable here does not strand a clipped bar.
-        -- ☠ GUARDED, AND THE FALLBACK RESTORES RATHER THAN LEAVES IT UNANCHORED. If the
-        -- client ever does refuse one of these, a half-applied ClearAllPoints would leave
-        -- the health bar with no points at all -- a worse outcome than the bug.
-        -- ☠☠ TRANSITION-GATED. This sits on UpdateHealthFast -- per UNIT_HEALTH, per frame --
-        -- and on the secret path it is reached for EVERY frame in restricted content.
-        -- Unconditional, it cost a closure, ClearAllPoints + four SetPoints, and a dropped
-        -- absorb layout cache (forcing UpdateAbsorb's full rebuild) on every health tick of
-        -- every raid frame. The anchors only need re-stating when what they point at
-        -- changes: orientation, padding, or the fill texture object itself (a texture swap
-        -- replaces it). RestoreHealthBarFromReducedMax clears the clipping flag, so a bar
-        -- that was un-clipped re-clips on the next pass through here.
+        -- ☠☠ THE SECRET PATH IS THE ONE THAT MATTERS. In restricted content (M+ and raid,
+        -- exactly where max-HP reductions live) the percent is secret, and every consumer that
+        -- reasons about "the usable bar" depends on this clip: the dispel wash's "Show On
+        -- Current Health Only" anchors to this bar so the reduced region is excluded
+        -- (Features/Dispel.lua's healthAnchor block, and the slot carrier's birth anchor), and
+        -- UpdateAbsorb's ATTACHED maths assumes the bar physically ends here.
+        -- ANCHORING is not a read: it derives geometry engine-side, the same doctrine
+        -- DispelSlotSecureInit relies on and what UpdateAbsorb already does to this texture
+        -- (Bars.lua's healthFillTexture anchors).
+        -- ⚠ SELF-CORRECTING WHEN THE SECRET RESOLVES TO ZERO: an unmodified unit renders an empty
+        -- reverse-fill, so `tex` collapses onto the full-health edge and these anchors give back
+        -- the whole bar. That is why the missing numeric hide-test does not strand a clipped bar.
+        -- ☠ GUARDED, AND THE FALLBACK RESTORES RATHER THAN LEAVES IT UNANCHORED: a half-applied
+        -- ClearAllPoints would leave the health bar with no points at all.
+        -- ☠☠ TRANSITION-GATED. This sits on UpdateHealthFast -- per UNIT_HEALTH, per frame -- and
+        -- in restricted content it is reached for EVERY frame. Unconditional, it would cost a
+        -- closure, ClearAllPoints + four SetPoints and a dropped absorb layout cache (forcing
+        -- UpdateAbsorb's full rebuild) on every health tick. The anchors only need re-stating when
+        -- what they point at changes: orientation, padding, or the fill texture object itself.
+        -- RestoreHealthBarFromReducedMax clears the clipping flag, so an un-clipped bar re-clips
+        -- on the next pass through here.
         local needClip = not (frame.dfReducedMaxHealthClipping
             and frame.dfRMClipOrient == orientation
             and frame.dfRMClipPad == padding

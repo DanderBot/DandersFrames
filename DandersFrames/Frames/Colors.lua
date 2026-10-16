@@ -39,18 +39,10 @@ end
 function DF:ApplyDeadFade(frame, statusType, forceApply)
     if not frame then return end
     
-    -- ☠ THIS BAIL WAS CIRCULAR. It skipped test frames "because they handle their own
-    -- dead fade in TestMode.lua" -- and TestMode's only dead-fade code is the call INTO
-    -- this function (with forceApply set, at UpdateTestFrame). Its own handler moved to
-    -- ElementAppearance in the 2026-08-07 audit and this comment was not updated, so each
-    -- side deferred to the other and the work happened nowhere: a preview frame never got
-    -- the fade, dfDeadFadeApplied never became true on one, and every later branch reading
-    -- that flag for a test frame was dead.
-    --
-    -- Gated on forceApply rather than removed, so the AUTOMATIC path -- driven by real
-    -- unit state, which a test frame does not have -- still skips previews as intended.
-    -- The body below delegates to UpdateAllElementAppearances, which is what the preview
-    -- already runs, so the two now agree instead of cancelling.
+    -- Gated on forceApply: the AUTOMATIC path is driven by real unit state, which a test
+    -- frame does not have, so it skips previews. The preview calls in with forceApply (from
+    -- UpdateTestFrame) and gets the same fade as live; TestMode has no dead-fade code of its
+    -- own to fall back on.
     if frame.dfIsTestFrame and not forceApply then return end
     
     -- Use raid DB for raid frames, party DB for party frames
@@ -127,13 +119,9 @@ end
 
 -- ★ THE ONE PLACE THE GRADIENT'S SHAPE IS DECIDED. Returns an ordered list of
 -- { pos = 0..1, r, g, b, a }, low health first, for both consumers below: the live
--- C_CurveUtil curve and the by-hand interpolation the previews use.
---
--- ☠ IT USED TO BE TWO COPIES. GetCurveForUnit and GetHealthGradientColor each had
--- their own GetStageColor and their own weighted point-array build -- the second
--- literally commented "same logic as GetCurveForUnit" -- and they had ALREADY drifted:
--- one nil-guard returned an alpha and the other did not, so a profile missing a colour
--- key rendered opaque grey live and alpha-nil grey in the preview.
+-- C_CurveUtil curve and the by-hand interpolation the previews use. One builder, so live
+-- and preview cannot drift (a missing colour key once rendered opaque live and
+-- alpha-nil in the preview).
 --
 -- TWO SHAPES ARE READ, deliberately:
 --   * <prefix>Stops -- the list. Each entry { threshold = 0..100, color, useClass }.
@@ -142,8 +130,7 @@ end
 --     A weight of N repeats that stage N times in the array, and the array is spaced
 --     evenly -- which is exactly a stop list with evenly spaced thresholds, and is how
 --     the migration converts one to the other without changing a pixel.
--- The fallback is not dead code for old profiles only: it is what makes a profile
--- readable BEFORE the lazy migration has run on it.
+-- The fallback is what makes a profile readable BEFORE the lazy migration has run on it.
 local function BuildColorStops(db, prefix, class)
     local function stageColor(c, useClass)
         if useClass and class and class ~= "DEFAULT" then
@@ -213,6 +200,7 @@ function DF:GetCurveForUnit(unit, db, prefix, cache)
 
     local class = "DEFAULT"
     if useClass then
+        local _
         _, class = UnitClass(unit)
         -- ☠ Secret class (boss units): it may not key the curve cache (read OR
         -- write below), and BuildColorStops compares it. DEFAULT is exactly the

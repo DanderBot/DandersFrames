@@ -44,33 +44,28 @@ end
 -- ============================================================
 -- SPELL IDENTITY  (the ONE place a curated aura's ID set is decided)
 -- ============================================================
--- Returns { byName = { [auraName] = { id, ... } }, byID = { [id] = auraName } }
--- for one spec's curated pool. Both directions come from the same build, so
--- the renderer (DF:BuildADIdentityFilters) and the editor's add-by-ID snap can
--- never disagree about which IDs belong to a spell -- they used to, and that
--- mismatch is what let add-by-ID mint config keys no UI surface could name.
+-- Returns { byName = { [auraName] = { id, ... } }, byID = { [id] = auraName } } for
+-- one spec's curated pool. Both directions come from the same build, so the renderer
+-- (DF:BuildADIdentityFilters) and the editor's add-by-ID snap can never disagree about
+-- which IDs belong to a spell (a disagreement lets add-by-ID mint config keys no UI
+-- surface can name).
 --
--- ☠ INHERITANCE RULE (lab 029736dd, option C). A curated entry that declares
--- NO alternates of its own INHERITS the SpellDB record's `alts`. An entry that
--- DOES declare alternates is left byte-identical -- EarthShield,
--- EarthlivingWeapon and HolyArmaments are hand-curated shapes the database
--- genuinely disagrees with (HolyArmaments deliberately fuses Sacred Weapon and
--- Holy Bulwark, which the DB models as two records), so hand curation wins
--- wherever it has spoken. Before this, path 1 returned early and the SpellDB
--- was never consulted for a curated name at all: 17 of 58 curated entries
--- tracked a narrower ID set than the same spell used as a FILTER, e.g. Ebon
--- Might resolved {395152} and so never lit on the caster's own frame, because
--- the self-buff 395296 lives only in the database.
+-- ☠ INHERITANCE RULE (lab 029736dd, option C). A curated entry that declares NO
+-- alternates of its own INHERITS the SpellDB record's `alts`, so it tracks the same ID
+-- set the spell has as a FILTER (Ebon Might's self-buff 395296 lives only in the
+-- database). An entry that DOES declare alternates is left byte-identical --
+-- EarthShield, EarthlivingWeapon and HolyArmaments are hand-curated shapes the database
+-- genuinely disagrees with (HolyArmaments deliberately fuses Sacred Weapon and Holy
+-- Bulwark, which the DB models as two records), so hand curation wins wherever it has
+-- spoken.
 --
--- ☠ JOIN BY ID, NEVER BY NAME. Curated keys are internal ("EbonMight");
--- `rec.n` is the real spell name ("Ebon Might"). They are different strings for
--- most entries, and matching on them silently resolves nothing.
+-- ☠ JOIN BY ID, NEVER BY NAME. Curated keys are internal ("EbonMight"); `rec.n` is the
+-- real spell name ("Ebon Might"). They differ for most entries, and matching on them
+-- silently resolves nothing.
 --
--- ☠ RESOLVE THE REGISTRY LIVE. FilterRegistry\SpellDB.lua is .toc line 153;
--- this file is line 130. A file-scope capture of DF.FilterRegistry would bind
--- nil forever -- the same load-order trap that made the defensive row show
--- every buff. Built lazily on first call (render time, long after load) and
--- wiped by InvalidateSpecCache.
+-- ☠ RESOLVE THE REGISTRY LIVE. FilterRegistry\SpellDB.lua loads after this file (.toc),
+-- so a file-scope capture of DF.FilterRegistry would bind nil forever. Built lazily on
+-- first call (render time, long after load) and wiped by InvalidateSpecCache.
 function AuraAdapter:GetSpecIdentity(spec)
     if not spec then return nil end
     local cached = identityCache[spec]
@@ -336,18 +331,15 @@ end
 
 -- Check if Aura Designer is enabled for a frame.
 --
--- ☠ THE ENABLE IS A MODE PROPERTY (see DF:IsAuraDesignerEnabledForMode). This used to
--- read `enabled` off the RESOLVED PRESET -- shared between any modes pointing at the same
--- template -- so Party and Raid had one on/off switch between them.
+-- ☠ THE ENABLE IS A MODE PROPERTY (see DF:IsAuraDesignerEnabledForMode), not a property
+-- of the resolved preset, which modes can share.
 --
--- ⚠ ONE EXCEPTION, PRESERVED ON PURPOSE: a frame carrying an explicit preset override.
--- Pinned sets stamp dfAuraPresetOverride with their own chosen template (so does the
--- editor preview), and for those the template IS the answer to "which designer is this
--- frame running" -- there is no mode tab behind them to own a switch. Routing them through
--- the mode would silently hand every pinned set the Party toggle, which is a different
--- feature decision from the bug being fixed here and not one to make in passing. If pinned
--- sets should own their enable, that is a deliberate change with its own storage; until
--- then they behave exactly as they do today.
+-- ⚠ ONE EXCEPTION, ON PURPOSE: a frame carrying an explicit preset override. Pinned sets
+-- stamp dfAuraPresetOverride with their own chosen template (so does the editor
+-- preview), and for those the template IS the answer to "which designer is this frame
+-- running" -- there is no mode tab behind them to own a switch. Routing them through the
+-- mode would hand every pinned set the Party toggle. Giving pinned sets their own enable
+-- would be a deliberate change with its own storage.
 function DF:IsAuraDesignerEnabled(frame)
     if not frame then return false end
     if frame.dfAuraPresetOverride then

@@ -7,21 +7,11 @@ local addonName, DF = ...
 
 -- Animation settings.
 --
--- ANIMATION_SPEED paired with UPDATE_INTERVAL determines the visual
--- smoothness. The per-sample pixel delta is ANIMATION_SPEED / Hz.
--- When that delta exceeds ~1 pixel the eye perceives discrete stepping
--- rather than continuous motion — the LCD persistence/blur trick that
--- sells sub-pixel motion as smooth flow breaks down.
---
--- The original code ran at 60 Hz with speed 40 → 0.67 px/sample.
--- That's sub-pixel and looks smooth. When the throttle dropped redraw
--- to 30 Hz it became 1.33 px/sample (super-pixel) which looks choppy.
---
--- Solution: halve the speed. 30 Hz × 20 px/sec = 0.67 px/sample, the
--- same per-sample delta as the original. Visually identical smoothness
--- to pre-throttle. The only behavioral change is the full pattern
--- cycle now takes 0.6s instead of 0.3s — ants march at half speed,
--- which a lot of users actually prefer over the more frenetic original.
+-- ANIMATION_SPEED paired with UPDATE_INTERVAL decides the visual smoothness: the
+-- per-sample pixel delta is ANIMATION_SPEED / Hz. Above ~1 pixel per sample the eye sees
+-- discrete stepping instead of continuous motion. At the 30 Hz redraw, 20 px/sec gives
+-- 0.67 px/sample -- sub-pixel, so the ants march smoothly; one full pattern cycle takes
+-- 0.6s.
 local ANIMATION_SPEED = 20
 local DASH_LENGTH = 6
 local GAP_LENGTH = 6
@@ -120,23 +110,16 @@ function DF:InitAnimatedBorder(ch)
     return ch.animBorder
 end
 
--- PERFORMANCE FIX: These functions are defined at module level to avoid creating
--- new closures every frame when UpdateAnimatedBorder runs.
---
--- Additional per-dash optimization (2026-04-08):
---   * Only hide the *trailing* dashes past numDashes. The leading ones
---     will be Show()'d again immediately, so hiding them was wasted work.
---   * Cache r/g/b/a on each dash and skip SetColorTexture when the color
---     hasn't changed. Highlight colors only change on state transition
---     (selection / aggro / hover), not per animation tick.
---   * Cache width/height on each dash and skip SetSize when unchanged.
---     Sizes only change when an edge length changes or a dash rolls past
---     an edge boundary — most ticks they stay constant.
---
--- ClearAllPoints + SetPoint still run every tick because that IS the
--- marching animation (dashes shift position each frame). Show() also
--- still runs because previously-hidden dashes can become visible as the
--- ants march across the edge.
+-- These are module-level functions so no closures are created per frame when
+-- UpdateAnimatedBorder runs. Per-dash work is kept minimal:
+--   * Only the *trailing* dashes past numDashes are hidden; the leading ones are shown
+--     again immediately, so hiding them would be wasted work.
+--   * r/g/b/a are cached on each dash and SetColorTexture is skipped when unchanged:
+--     highlight colours change only on state transitions (selection / aggro / hover).
+--   * width/height are cached and SetSize is skipped when unchanged: sizes change only
+--     when an edge length changes or a dash rolls past an edge boundary.
+-- ClearAllPoints + SetPoint run every tick because that IS the marching animation, and
+-- Show() runs because a hidden dash can become visible as the ants march across the edge.
 
 local function DrawHorizontalEdge(ch, border, dashes, isTop, edgeOffset, width, thick, inset, r, g, b, a)
     local numDashes = math.ceil(width / PATTERN_LENGTH) + 2
@@ -254,7 +237,7 @@ end
 --
 -- Relative order among the three is preserved: aggro < hover < selection.
 --
--- ☠ 82/83/84 -> 75/76/77 (2026-08-08). RE-DERIVED, because the number they were
+-- ☠ 82/83/84 -> 75/76/77. RE-DERIVED, because the number they were
 -- built on stopped being true: this comment said "a row is 13 levels thick" and
 -- that was the PRE-SQUASH ladder. The per-button ladder is now
 -- DF.AuraButtonLevels (Frames/AuraContainer.lua) and a row is 9 thick, so the
@@ -388,7 +371,7 @@ end
 -- so the preview drew an unsnapped border and the first real update after it
 -- (mouseover, target change) redrew the snapped one. "The border grows by 1 pixel as
 -- soon as you mouseover or target any frame. Pressing enter on the field that sets
--- the thickness visually fixes it" (Renegade, 2026-08-22) is exactly that: two
+-- the thickness visually fixes it" is exactly that: two
 -- renderers of one number, one of them snapping.
 --
 -- ☠ SNAP AGAINST THE FRAME'S OWN EFFECTIVE SCALE -- ch:GetEffectiveScale() -- and
@@ -450,18 +433,15 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     local scale = ch:GetEffectiveScale()
     local w, h = ch:GetWidth(), ch:GetHeight()
     local pp = (db and db.pixelPerfect) and 1 or 0
-    -- ☠ SHOW FIRST, AHEAD OF THE EARLY-OUT. Showing the highlight is an OUTPUT of
-    -- this function (it used to be the last statement), not part of the styling the
-    -- signature guards -- and several paths hide `ch` WITHOUT touching the signature:
-    -- the owner frame's own OnHide hook (installed in GetOrCreateHighlight), the
-    -- party-frames-while-in-raid branch, and the not-visible branch. With the Show
-    -- below the early-out, a frame that hid and re-showed while every style input
-    -- stayed identical never got shown again -- target a party member, open Test
-    -- Mode, close it, and the selection border was gone until you changed target.
-    -- Hoisting it fixes every such path at once, including any added later, which
-    -- invalidating at the three hide sites would not.
-    -- No flash risk: the styling below runs synchronously in this same call, so
-    -- nothing is drawn between the Show and the restyle.
+    -- ☠ SHOW FIRST, AHEAD OF THE EARLY-OUT. Showing the highlight is an OUTPUT of this
+    -- function, not part of the styling the signature guards, and several paths hide `ch`
+    -- WITHOUT touching the signature: the owner frame's own OnHide hook (installed in
+    -- GetOrCreateHighlight), the party-frames-while-in-raid branch, and the not-visible
+    -- branch. Below the early-out, a frame that hid and re-showed with identical style inputs
+    -- would never be shown again (target a party member, open and close Test Mode, and the
+    -- selection border would be gone until the target changed). Here it covers every hide
+    -- path, including any added later.
+    -- No flash risk: the styling below runs synchronously in this same call.
     ch:Show()
     -- Numeric fields compared individually: building a string key here would
     -- allocate exactly what the early-out exists to avoid.
@@ -564,7 +544,7 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         --   * It was a hardcoded 2, which only equals the ring width at thickness 2. At
         --     thickness 1 the rings covered radius 0-1, 2-3, 4-5, 6-7 — a 1px TRANSPARENT
         --     GAP between each — so it read as four hairlines, the DF Double silhouette
-        --     rather than a glow (Krathe, 2026-08-08).
+        --     rather than a glow.
         --   * Making it plain `thickness` fixed that and immediately broke the other end:
         --     the spread becomes 4x thickness, so a thick glow blew far outside the frame
         --     (24px at thickness 6, against ~12 before). Reported the same day.
@@ -660,27 +640,14 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     -- (ch:Show() moved ABOVE the early-out -- see the note there.)
 end
 
--- ☠ (Removed) the DF.ApplyHighlightStyle export, and its claim to be "exposed for
--- reuse by the Aura Designer border indicator". The Aura Designer does not call it,
--- and nothing else does either -- every use of ApplyHighlightStyle is a direct call
--- to the file-local, in this file.
---
--- ⚠ The reason is the one the note directly below already gives for its SIBLING
--- export: the pre-12.1 Aura Designer EXPIRING ticker was that consumer, and it was
--- retired this cycle. UpdateHighlightStyleColor was removed then; this export was
--- missed, and kept a comment naming a caller that had just gone away.
-
--- (Removed) UpdateHighlightStyleColor and its DF export, a colour-only fast path that
--- skipped ApplyHighlightStyle's full tear-down. Its only consumer, the pre-12.1 Aura
--- Designer EXPIRING ticker, was retired this cycle, leaving it with zero callers.
---
--- ⚠ KEEP THE REASON IT EXISTED. ApplyHighlightStyle is a full rebuild: it hides every edge
--- texture, hides every dash in the animated border (~80 Hide ops), drops the frame from the
--- shared animator, then re-creates whichever style was asked for — even when only the COLOUR
--- changed. If anything is ever wired to recolour a highlight on a timer again, it must not
--- call ApplyHighlightStyle per tick; SOLID/CORNERS need only SetColorTexture on the existing
--- textures, GLOW only SetBackdropBorderColor per layer, and ANIMATED/DASHED only need
--- ch.animR/G/B/A mutated (the animator's per-dash colour cache picks it up on its next tick).
+-- ⚠ THERE IS NO COLOUR-ONLY FAST PATH, AND A TIMER MUST NOT CALL ApplyHighlightStyle.
+-- ApplyHighlightStyle is a full rebuild: it hides every edge texture, hides every dash in
+-- the animated border (~80 Hide ops), drops the frame from the shared animator, then
+-- re-creates whichever style was asked for -- even when only the COLOUR changed. Anything
+-- recolouring a highlight on a timer should touch only what changes: SOLID/CORNERS need
+-- SetColorTexture on the existing textures, GLOW only SetBackdropBorderColor per layer,
+-- and ANIMATED/DASHED only ch.animR/G/B/A (the animator's per-dash colour cache picks it
+-- up on its next tick).
 
 -- ============================================================
 -- UPDATE HIGHLIGHTS FOR A FRAME
@@ -794,7 +761,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 -- to a hardcoded 3, so High Threat and Highest Threat could never
                 -- appear in the preview and aggroOnlyTanking / aggroHideOnTanks were
                 -- skipped entirely. Supplying the number instead lets live's own code
-                -- cover all three colours and both toggles. (Audit, 2026-08-07.)
+                -- cover all three colours and both toggles.
                 -- ☠ 4, NOT 3 — index 3 is the DEAD scenario ("Alexandrosthegreat",
                 -- status = "Dead" in DF.TestData). Live suppresses the aggro glow on a
                 -- corpse, so the preview must not demonstrate a threat colour there; with
@@ -853,30 +820,22 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 isAggro = false
             end
         end
-        -- ☠ A CORPSE HOLDS NO THREAT, but UnitThreatSituation keeps reporting one, so the
-        -- glow used to sit on a dead player until the next target change / hover / combat
-        -- end. Blizzard hit the same thing and shipped the same guard in PTR build 69189
-        -- (UnitFrame_UpdateThreatIndicator gained `and not UnitIsDead(indicator.unit)`).
-        -- ⚠ Their COMPACT-frame aggro path -- the one this mirrors -- still has no such
-        -- check at 69189, so this is ours to carry.
-        -- DeadOrGhost rather than Blizzard's plain Dead: a ghost is even further off the
-        -- threat table, and it matches how the rest of DF asks the question (IsDeadOrOffline).
-        -- Suppresses the HIGHLIGHT only; `status` stays intact for the Text Designer stash
-        -- just below, which is a separate display with its own rules.
+        -- ☠ A CORPSE HOLDS NO THREAT, but UnitThreatSituation keeps reporting one, so the glow
+        -- would sit on a dead player until the next target change / hover / combat end.
+        -- Blizzard's own UnitFrame_UpdateThreatIndicator carries the same `not UnitIsDead` guard;
+        -- their compact-frame aggro path (the one this mirrors) does not, so this is ours to carry.
+        -- DeadOrGhost rather than plain Dead: a ghost is even further off the threat table, and it
+        -- matches how the rest of DF asks the question (IsDeadOrOffline). Suppresses the
+        -- HIGHLIGHT only; `status` stays intact for the Text Designer stash just below.
         --
-        -- ☠ THE STAMP FIRST, THE UNIT SECOND. A preview frame carries a REAL unit token,
-        -- so `UnitIsDeadOrGhost` answers about a live player standing next to you rather
-        -- than about the scenario — the preview went on showing the aggro glow on its
-        -- "Dead" frame while live correctly hid it (Krathe, 2026-08-08). That divergence
-        -- was introduced by the first version of this guard, which read the unit only.
-        -- `dfIsDead` is how the rest of the appearance code resolves exactly this question
-        -- (Features/ElementAppearance.lua, Frames/Core.lua) and it covers OFFLINE too,
-        -- which holds no threat either. Stamp when present, live read otherwise — the
-        -- same shape as those two, so the preview runs live's logic with a different
-        -- input rather than getting a fork of its own.
-        -- ⚠ Deliberately NOT `DF:IsTestFrameDead`: that lives in the load-on-demand
-        -- companion and this file is resident, so calling it would be an unguarded
-        -- cross-boundary call. A plain field read is always safe.
+        -- ☠ THE STAMP FIRST, THE UNIT SECOND. A preview frame carries a REAL unit token, so
+        -- `UnitIsDeadOrGhost` would answer about a live player standing next to you rather than
+        -- about the scenario, and the preview's "Dead" frame would keep its aggro glow while live
+        -- hid it. `dfIsDead` is how the rest of the appearance code resolves this question
+        -- (Features/ElementAppearance.lua, Frames/Core.lua) and it covers OFFLINE too: stamp when
+        -- present, live read otherwise, so the preview runs live's logic with a different input.
+        -- ⚠ Deliberately NOT `DF:IsTestFrameDead`: that lives in the load-on-demand companion and
+        -- this file is resident, so calling it would be an unguarded cross-boundary call.
         local isDeadOrOffline
         if frame.dfIsDead ~= nil then
             isDeadOrOffline = frame.dfIsDead
@@ -1158,7 +1117,7 @@ local function UpdateAllHighlights()
     -- because PLAYER_TARGET_CHANGED lands here. DF.IteratePinnedFrames covers both pools.
     -- ⚠ It also retires a second bug this loop carried: `IsInRaid() and 40 or 5` capped a
     -- party-mode sweep at five children, so a pinned set holding more than five units —
-    -- which the set editor allows — left the rest unhighlighted. (Audit 2026-08-17.)
+    -- which the set editor allows — left the rest unhighlighted.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(function(child)
             if child and child:IsShown() and child.unit then
