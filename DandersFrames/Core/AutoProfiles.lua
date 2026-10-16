@@ -1354,8 +1354,10 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     -- Clear override stars (they'll refresh after EvaluateAndApply if a runtime profile re-applies)
     self:RefreshTabOverrideStars()
 
-    -- Skip UI updates when GUI is closing (UI will reset on next open anyway)
-    if skipUIUpdates then return end
+    -- ☠ skipUIUpdates (the window is closing) skips only the GUI page work at the end.
+    -- The frame half below must still run: EnterEditing cleared the active layout's
+    -- overlay, so without EvaluateAndApply the layout stays off -- the frames show the
+    -- base settings, and anything changed from then on lands on the base profile.
 
     -- Re-evaluate auto-profiles BEFORE UpdateAll so any re-applied overlay is in
     -- place when frames read settings — otherwise UpdateAll would read globals,
@@ -1403,7 +1405,10 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     
     -- Refresh UI to hide banner and re-enable Auto Profiles tab
     self:RefreshEditingUI()
-    
+
+    -- The closing window invalidates its own pages and must not be steered to a tab.
+    if skipUIUpdates then return end
+
     -- Switch back to Auto Profiles tab
     local GUI = DF.GUI
     -- Active layout reverted to global — invalidate page caches so tabs (and their

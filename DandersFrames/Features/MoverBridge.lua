@@ -692,7 +692,13 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     if DF.GUIFrame and DF.GUIFrame:IsShown() then
         Bridge.closedGUIPage = DF.GUI and DF.GUI.CurrentPageName or nil
         Bridge.closedGUIMode = DF.GUI and DF.GUI.SelectedMode or nil
+        -- ☠ A SESSION HIDE IS NOT A CLOSE. The window's OnHide ends an auto-layout
+        -- edit, and a layout's own Unlock opens this session FROM an edit -- ending it
+        -- here would send every drag to the base profile. The edit outlives the
+        -- session; Locked below finishes it.
+        DF._guiHiddenForMoverSession = true
         DF.GUIFrame:Hide()
+        DF._guiHiddenForMoverSession = nil
     end
     -- Test frames live in the load-on-demand companion. `/mover` can open a session
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
@@ -777,6 +783,15 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     -- PLAYER_REGEN handler re-evaluates the handle after combat anyway.
     if DF.UpdatePermanentMoverVisibility and not InCombatLockdown() then
         DF:UpdatePermanentMoverVisibility()
+    end
+    -- A layout's own Unlock started this session inside an edit of that layout: lock
+    -- finishes the edit, so the drag is captured into the layout and the layout
+    -- re-applies (DF:LockRaidFrames does the same for its path). Before the reopen
+    -- below, so the window comes back on a page with no editing chrome.
+    if DF.raidLayoutEditUnlock then
+        DF.raidLayoutEditUnlock = nil
+        local apu = DF.AutoProfilesUI
+        if apu and apu.IsEditing and apu:IsEditing() then apu:ExitEditing() end
     end
     -- Put the options window back the way the session found it -- same page,
     -- same mode -- on EVERY finish, save or discard alike. Unlocked stores the

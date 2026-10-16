@@ -765,7 +765,9 @@ function DF:CreateGUI()
     -- Exit profile editing when GUI is closed
     frame:SetScript("OnHide", function()
         local AutoProfilesUI = DF.AutoProfilesUI
-        if AutoProfilesUI and AutoProfilesUI:IsEditing() then
+        -- Not when a DandersMover session hid us: the edit outlives the session
+        -- (see the Unlocked callback in Features/MoverBridge.lua).
+        if AutoProfilesUI and AutoProfilesUI:IsEditing() and not DF._guiHiddenForMoverSession then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
             -- ...which also skips its InvalidateAllPages. The builds made while
             -- editing show the LAYOUT's values (frame previews at its size), and
