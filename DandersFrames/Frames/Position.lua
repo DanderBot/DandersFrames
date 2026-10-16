@@ -1140,12 +1140,27 @@ function DF:GetPositionRecord(mode)
     return rec
 end
 
+-- DandersMover onChanged reasons that are the LIB re-solving or re-applying a record, not
+-- the user moving anything: a re-apply (login, profile/layout switch), a parent moving
+-- under an anchored child, and Discard putting a snapshot back.
+local LIB_REASONS = { reapply = true, parent = true, discard = true }
+
+-- Does the active auto layout own this record's position (a stored override for it)?
+local function layoutOwnsPosition(spec)
+    local ov = DF.raidOverrides
+    if type(ov) ~= "table" then return false end
+    if ov[spec.xKey] ~= nil or ov[spec.yKey] ~= nil then return true end
+    local rec = ov[spec.key]
+    return spec == RECORD_SPECS.raid and type(rec) == "table" and not followsProfile[rec]
+end
+
 -- The ONE funnel. Writes the record and its scalar mirror together.
 -- `pos` may be the live record itself (DandersMover mutates in place and then calls
 -- onChanged) or a fresh table from a legacy drag handler; both are handled.
 -- `reason` is the DF:LogRaidAnchorWrite label -- pass the call site's name so the RAIDPOS
 -- debug channel keeps reading the way it does today.
-function DF:SetPositionRecord(mode, pos, reason)
+-- `libReason` is DandersMover's onChanged reason, when the write comes from the lib.
+function DF:SetPositionRecord(mode, pos, reason, libReason)
     if type(pos) ~= "table" then return end
     local spec = recordSpec(mode)
     local db = spec.db()
@@ -1158,48 +1173,74 @@ function DF:SetPositionRecord(mode, pos, reason)
     -- personal only in a raid / raid test (its db() then IS the raid overlay).
     if spec.route and db == DF:GetRaidDB() then
         if spec == RECORD_SPECS.raid and DF.LogRaidAnchorWrite then
-            DF:LogRaidAnchorWrite(reason or "SetPositionRecord", x, y)
+            DF:LogRaidAnchorWrite(reason or libReason or "SetPositionRecord", x, y)
         end
-        -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
-        -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
-        -- position; writing the base anchors underneath it does not move anything and
-        -- quietly corrupts the user's base position instead. Falls through when the
-        -- routing declines (no active layout, or mid-edit where the preview path
-        -- captures it). Keep all three call sites in step.
-        local apu = DF.AutoProfilesUI
-        local routed = false
-        if apu then
+        -- ☠ A LIB RE-SOLVE IS NOT A USER MOVE. DandersMover re-applies every record when a
+        -- layout turns on and re-solves an anchored one whenever its target moves; routing
+        -- those to the active layout stamped the profile's position into every layout that
+        -- had none of its own, the first time it activated. While the layout leaves the
+        -- position to the profile, a lib write updates the PROFILE's position -- exactly
+        -- what it would do with no layout active.
+        if LIB_REASONS[libReason] and DF.raidOverrides and not layoutOwnsPosition(spec) then
             if spec == RECORD_SPECS.raid then
-                -- Refreshes the raid container itself (unchanged Phase A behaviour).
-                routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
-            else
-                -- The caller applies afterwards (mode.apply / onChanged).
-                routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
-            end
-        end
-        if routed then
-            -- The layout took it (override + live overlay). The base scalars are NOT
-            -- written -- that is the whole point of routing.
-            if spec == RECORD_SPECS.raid then
-                -- ...and the layout owns the WHOLE record from here: point, X/Y and
-                -- anchor, stored with the layout so the next activation restores it.
+                local real = DF._realRaidDB
+                local base = real and real[spec.key]
+                if type(base) == "table" then
+                    base.x, base.y = x, y
+                    noteRecord(base, x, y)
+                end
+                if real then real[spec.xKey], real[spec.yKey] = x, y end
                 local live = layoutRaidRecord(spec, db)
                 if live then
-                    writeRecord(live, pos, x, y)
-                    followsProfile[live] = nil
-                    noteRecord(live, x, y)
-                    if apu.SetActiveLayoutRaidRecord then apu:SetActiveLayoutRaidRecord(live) end
-                end
-            else
-                -- Keep the record on the same value and note it, so the next read sees
-                -- record and effective scalar agree rather than a phantom mutation.
-                local live = db[spec.key]
-                if type(live) == "table" then
                     live.x, live.y = x, y
                     noteRecord(live, x, y)
                 end
+                return
             end
-            return
+            -- Personal: the record is the profile's own (no layout copy); fall through to
+            -- the plain write below.
+        else
+            -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
+            -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
+            -- position; writing the base anchors underneath it does not move anything and
+            -- quietly corrupts the user's base position instead. Falls through when the
+            -- routing declines (no active layout, or mid-edit where the preview path
+            -- captures it). Keep all three call sites in step.
+            local apu = DF.AutoProfilesUI
+            local routed = false
+            if apu then
+                if spec == RECORD_SPECS.raid then
+                    -- Refreshes the raid container itself (unchanged Phase A behaviour).
+                    routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
+                else
+                    -- The caller applies afterwards (mode.apply / onChanged).
+                    routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
+                end
+            end
+            if routed then
+                -- The layout took it (override + live overlay). The base scalars are NOT
+                -- written -- that is the whole point of routing.
+                if spec == RECORD_SPECS.raid then
+                    -- ...and the layout owns the WHOLE record from here: point, X/Y and
+                    -- anchor, stored with the layout so the next activation restores it.
+                    local live = layoutRaidRecord(spec, db)
+                    if live then
+                        writeRecord(live, pos, x, y)
+                        followsProfile[live] = nil
+                        noteRecord(live, x, y)
+                        if apu.SetActiveLayoutRaidRecord then apu:SetActiveLayoutRaidRecord(live) end
+                    end
+                else
+                    -- Keep the record on the same value and note it, so the next read sees
+                    -- record and effective scalar agree rather than a phantom mutation.
+                    local live = db[spec.key]
+                    if type(live) == "table" then
+                        live.x, live.y = x, y
+                        noteRecord(live, x, y)
+                    end
+                end
+                return
+            end
         end
     end
 
@@ -1236,6 +1277,44 @@ function DF:UpdateContainerPosition()
         DF.testPartyContainer:ClearAllPoints()
         DF.testPartyContainer:SetPoint(point, UIParent, "CENTER", x / scale, y / scale)
     end
+end
+
+-- ★ RAID CONTAINER PING-PONG DETECTOR, in the debug log rather than behind a command.
+-- A wiggle is the container being placed back and forth between two spots; a drag or a
+-- slider moves it one way. So it counts BOUNCES -- a move that returns to where the
+-- container was two moves ago -- and warns once (per 30s) when several land within a
+-- few seconds, with what was driving the position at the time and the recent callers.
+local abs, GetTime = math.abs, GetTime
+local PING_EPS, PING_WINDOW, PING_BOUNCES, PING_QUIET = 0.5, 3, 3, 30
+local ping = { trail = {} }
+
+function DF:NoteRaidContainerMove(cx, cy, rec)
+    if ping.x1 and abs(cx - ping.x1) <= PING_EPS and abs(cy - ping.y1) <= PING_EPS then return end
+    local now = GetTime()
+    local trail = ping.trail
+    if DF:DebugActive("RAIDPOS") then
+        trail[#trail + 1] = string.format("(%.1f,%.1f)@%s", cx, cy, ShortCaller(4))
+        if #trail > 6 then table.remove(trail, 1) end
+    end
+    if ping.x2 and abs(cx - ping.x2) <= PING_EPS and abs(cy - ping.y2) <= PING_EPS then
+        if not ping.t0 or now - ping.t0 > PING_WINDOW then ping.t0, ping.n = now, 0 end
+        ping.n = ping.n + 1
+        if ping.n >= PING_BOUNCES and now - (ping.warned or -PING_QUIET) >= PING_QUIET then
+            ping.warned = now
+            local apu = DF.AutoProfilesUI
+            local layout = apu and apu.activeRuntimeProfile
+            DF:DebugWarn("RAIDPOS",
+                "raid container bounced %d times in %.1fs between (%.1f,%.1f) and (%.1f,%.1f) -- layout=%s editing=%s anchored=%s moverSession=%s trail=%s",
+                ping.n, now - ping.t0, cx, cy, ping.x1, ping.y1,
+                tostring(layout and layout.name or "none"),
+                tostring(apu and apu.IsEditing and apu:IsEditing() or false),
+                tostring(rec and rec.anchor and rec.anchor.target or false),
+                tostring(Mover and Mover:IsUnlocked() or false),
+                #trail > 0 and table.concat(trail, " ") or "(turn on RAIDPOS for callers)")
+        end
+    end
+    ping.x2, ping.y2 = ping.x1, ping.y1
+    ping.x1, ping.y1 = cx, cy
 end
 
 function DF:UpdateRaidContainerPosition()
@@ -1281,6 +1360,8 @@ function DF:UpdateRaidContainerPosition()
                 ShortCaller(3), x, y, scale, tostring(InCombatLockdown()))
         end
     end
+
+    if DF.NoteRaidContainerMove then DF:NoteRaidContainerMove(cx, cy, rec) end
 
     DF.raidContainer:SetScale(scale)
     DF.raidContainer:ClearAllPoints()

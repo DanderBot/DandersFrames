@@ -417,8 +417,11 @@ local function registerElements()
         title     = L["Raid Frames"],
         getFrame  = function() return DF.raidContainer end,
         getPos    = function() return DF:GetPositionRecord("raid") end,
-        onChanged = function(pos)
-            DF:SetPositionRecord("raid", pos)
+        -- `reason` tells DF whether the user moved the frames or the lib re-solved them
+        -- (see LIB_REASONS in Frames/Position.lua): only a user move may give the active
+        -- auto layout a position of its own.
+        onChanged = function(pos, reason)
+            DF:SetPositionRecord("raid", pos, nil, reason)
             DF:UpdateRaidContainerPosition()
         end,
         default   = { point = "CENTER", x = -6.666610717773438, y = -25 },
@@ -452,8 +455,8 @@ local function registerElements()
         group     = L["Targeted Spells"],
         getFrame  = function() return _G.DandersFramesPersonalTargetedSpells end,
         getPos    = function() return DF:GetPositionRecord("personal") end,
-        onChanged = function(pos)
-            DF:SetPositionRecord("personal", pos, "DandersMover")
+        onChanged = function(pos, reason)
+            DF:SetPositionRecord("personal", pos, "DandersMover", reason)
             if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
         end,
         default   = { point = "CENTER", x = 0, y = -150 },
@@ -679,8 +682,61 @@ local function syncLockButtons()
     if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
 end
 
+-- ============================================================
+-- DISCARD AND THE ACTIVE AUTO LAYOUT
+-- ============================================================
+-- While an auto layout is active (and not being edited) every move is written into that
+-- layout as it happens (DF:SetPositionRecord routes it). Discard puts the records back
+-- by re-notifying the snapshots, which re-writes the layout with the OLD values -- but a
+-- layout that had no position of its own before the session would keep one afterwards.
+-- So the session remembers the layout's own position fields and Discard restores them
+-- exactly, including "none".
+local LAYOUT_POSITION_KEYS = {
+    "raidAnchorX", "raidAnchorY", "position",
+    "personalTargetedSpellX", "personalTargetedSpellY",
+}
+
+local function copyValue(v)
+    if type(v) == "table" then return DF:DeepCopy(v) end
+    return v
+end
+
+local function captureLayoutPosition()
+    Bridge.layoutPosSnap = nil
+    local apu = DF.AutoProfilesUI
+    local p = apu and apu.activeRuntimeProfile
+    if not p or (apu.IsEditing and apu:IsEditing()) then return end
+    local o = p.overrides or {}
+    local snap = { profile = p, values = {} }
+    for _, key in ipairs(LAYOUT_POSITION_KEYS) do snap.values[key] = copyValue(o[key]) end
+    Bridge.layoutPosSnap = snap
+end
+
+local function restoreLayoutPosition()
+    local snap = Bridge.layoutPosSnap
+    Bridge.layoutPosSnap = nil
+    local apu = DF.AutoProfilesUI
+    if not (snap and apu and apu.activeRuntimeProfile == snap.profile) then return end
+    local p = snap.profile
+    p.overrides = p.overrides or {}
+    local ov = DF.raidOverrides
+    for _, key in ipairs(LAYOUT_POSITION_KEYS) do
+        local v = snap.values[key]
+        p.overrides[key] = copyValue(v)
+        -- The live overlay takes its own copy, as ApplyRuntimeProfile builds it; a nil
+        -- position lets DF:GetPositionRecord rebuild the layout's record from the scalars.
+        if ov then ov[key] = copyValue(v) end
+    end
+    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+    if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
+end
+
+Mover.RegisterCallback(Bridge, "Discarded", function() guarded(restoreLayoutPosition)() end)
+Mover.RegisterCallback(Bridge, "Saved", function() Bridge.layoutPosSnap = nil end)
+
 Mover.RegisterCallback(Bridge, "Unlocked", function()
     local tTotal = perfStart()
+    captureLayoutPosition()
     -- An open DF options window would sit over the session. Remember which
     -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
     -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same

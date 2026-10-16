@@ -140,3 +140,29 @@ do
     eq(real.position.x, 10, "layout position: the profile's record keeps its X")
     check(real.position.anchor ~= nil, "layout position: ...and its anchor (a layout detach is the layout's)")
 end
+
+-- 7. A LIB re-apply (layout switch / login) while a profile-following layout is active
+--    stamps nothing into the layout, and keeps the profile's own record in step.
+do
+    local base = { point = "CENTER", x = 10, y = 20, anchor = deepcopy(ANCHOR) }
+    local DF, real, layout = world(base, { frameWidth = 90 })
+    local rec = DF:GetPositionRecord("raid")
+    rec.x, rec.y = 12, 22                              -- the anchor re-solved after its target moved
+    DF:SetPositionRecord("raid", rec, nil, "parent")
+    check(layout.overrides.raidAnchorX == nil, "layout position: a lib re-solve does not stamp the layout's X/Y")
+    check(layout.overrides.position == nil, "layout position: ...nor a record")
+    eq(real.position.x, 12, "layout position: ...it updates the profile's record instead")
+    eq(real.raidAnchorX, 12, "layout position: ...and the profile's scalars")
+    check(real.position.anchor ~= nil, "layout position: ...keeping the profile's anchor")
+    DF:SetPositionRecord("raid", DF:GetPositionRecord("raid"), nil, "reapply")
+    check(layout.overrides.raidAnchorX == nil, "layout position: a plain re-apply stamps nothing either")
+end
+
+-- 8. A lib re-apply on a layout that OWNS its position goes to the layout, as before.
+do
+    local base = { point = "CENTER", x = 10, y = 20 }
+    local DF, real, layout = world(base, { raidAnchorX = 300, raidAnchorY = -150 })
+    DF:SetPositionRecord("raid", DF:GetPositionRecord("raid"), nil, "reapply")
+    eq(layout.overrides.raidAnchorX, 300, "layout position: an owning layout keeps its X through a re-apply")
+    eq(real.raidAnchorX, 10, "layout position: ...and the profile's X is untouched")
+end
