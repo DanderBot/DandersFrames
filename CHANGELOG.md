@@ -15,6 +15,7 @@
 - (Profiles) Importing a 4.x profile string no longer puts status icons, missing buff and defensive icons underneath the health bar. (by Krathe)
 - (Auto Layouts) The Personal Targeted Spells block follows its layout's position in raids, and moving or anchoring it during a layout no longer changes your main profile.
 - (Permanent Mover) Dragging the handle moves your frames directly again instead of opening DandersMover. It still opens DandersMover when the frames are anchored to something.
+- (Auras) Buff, debuff and Aura Designer duration text now sits where its anchor says. Corner and side anchors such as Bottom Right no longer push the text off the icon.
 
 ## [5.4.0]
 
