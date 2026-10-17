@@ -172,7 +172,7 @@ end
 --    stored only the scalar that changed (the vertical-move case: Y only).
 do
     local asrc = df_file_source("Core/AutoProfiles.lua"):gsub("\r\n", "\n")
-    local h = "local function NormalizeLayoutPositionRecord(overrides, base)"
+    local h = "local function NormalizeLayoutPositionRecord(overrides, base, key, xKey, yKey)"
     local s2 = asrc:find(h, 1, true)
     local e2 = s2 and asrc:find("\nend\n", s2)
     check(s2 and e2, "normalize: can be cut out of AutoProfiles.lua")

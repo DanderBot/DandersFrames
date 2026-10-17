@@ -165,11 +165,14 @@ local PINNED_OVERRIDABLE = {
 local NON_OVERRIDABLE_KEYS = {
     raidLocked = true,
     locked = true,
-    -- A table-valued record cannot be a layout override (the overlay proxy's __newindex
-    -- only fires for top-level scalar writes, so it would read stale and lose writes).
-    -- personalTargetedSpellX/Y -- the scalars -- are what a layout overrides; the record
-    -- folds the effective scalar in on read (DF:GetPositionRecord).
-    personalTargetedPosition = true,
+}
+
+-- The position records a layout can own, with the scalars each one mirrors. Both are
+-- table-valued overrides: DF:GetPositionRecord reads and writes them in the live overlay
+-- directly, never through the overlay proxy's __newindex.
+local LAYOUT_POSITION_RECORDS = {
+    { key = "position", xKey = "raidAnchorX", yKey = "raidAnchorY" },
+    { key = "personalTargetedPosition", xKey = "personalTargetedSpellX", yKey = "personalTargetedSpellY" },
 }
 
 -- ☠ GLOBAL SETTINGS ARE NOT A LAYOUT'S TO CHANGE. These are written to both modes at once
@@ -204,7 +207,7 @@ local function IsKeyOverridable(key)
     return true
 end
 
--- A stored raid position record that says nothing raidAnchorX/raidAnchorY do not --
+-- A stored position record that says nothing its X/Y scalars do not --
 -- CENTER, no anchor, at the layout's effective X/Y -- is dropped, keeping the layout in
 -- the shape it had before the record existed (DF:GetPositionRecord builds exactly that
 -- record from the scalars). So a layout only gains a record when it really carries an
@@ -214,16 +217,18 @@ end
 -- what DF:GetPositionRecord reads for it. At least one scalar must be the layout's own:
 -- without one, the layout leaves the position to the profile and the record is what
 -- says "no anchor here", so it stays.
-local function NormalizeLayoutPositionRecord(overrides, base)
-    local rec = overrides and overrides.position
+-- `key`/`xKey`/`yKey` default to the raid record; LAYOUT_POSITION_RECORDS has the others.
+local function NormalizeLayoutPositionRecord(overrides, base, key, xKey, yKey)
+    key, xKey, yKey = key or "position", xKey or "raidAnchorX", yKey or "raidAnchorY"
+    local rec = overrides and overrides[key]
     if type(rec) ~= "table" or rec.anchor ~= nil or (rec.point or "CENTER") ~= "CENTER" then return end
-    local ox, oy = overrides.raidAnchorX, overrides.raidAnchorY
+    local ox, oy = overrides[xKey], overrides[yKey]
     if ox == nil and oy == nil then return end
-    local ex = tonumber(ox) or tonumber(base and base.raidAnchorX)
-    local ey = tonumber(oy) or tonumber(base and base.raidAnchorY)
+    local ex = tonumber(ox) or tonumber(base and base[xKey])
+    local ey = tonumber(oy) or tonumber(base and base[yKey])
     local rx, ry = tonumber(rec.x), tonumber(rec.y)
     if ex and ey and rx and ry and math.abs(rx - ex) < 0.001 and math.abs(ry - ey) < 0.001 then
-        overrides.position = nil
+        overrides[key] = nil
     end
 end
 
@@ -1132,17 +1137,19 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     end
     DF:Debug("AUTOPROFILE", "EnterEditing: applied %d overrides for live preview", overrideCount)
 
-    -- A layout that stores raidAnchorX/Y but no position record owns its X/Y and NO
+    -- A layout that stores X/Y scalars but no position record owns its X/Y and NO
     -- anchor (DF:GetPositionRecord) -- preview it the same way, or the profile's
     -- DandersMover anchor would pull the frames off the layout's position mid-edit.
     do
         local ov = self.editingProfile.overrides
-        if ov and ov.position == nil and (ov.raidAnchorX ~= nil or ov.raidAnchorY ~= nil) then
-            SetRaidValue("position", {
-                point = "CENTER",
-                x = tonumber(GetRaidValue("raidAnchorX")) or 0,
-                y = tonumber(GetRaidValue("raidAnchorY")) or 0,
-            })
+        for _, r in ipairs(LAYOUT_POSITION_RECORDS) do
+            if ov and ov[r.key] == nil and (ov[r.xKey] ~= nil or ov[r.yKey] ~= nil) then
+                SetRaidValue(r.key, {
+                    point = "CENTER",
+                    x = tonumber(GetRaidValue(r.xKey)) or 0,
+                    y = tonumber(GetRaidValue(r.yKey)) or 0,
+                })
+            end
         end
     end
 
@@ -1350,7 +1357,9 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
             end
         end
 
-        NormalizeLayoutPositionRecord(overrides, self.globalSnapshot)
+        for _, r in ipairs(LAYOUT_POSITION_RECORDS) do
+            NormalizeLayoutPositionRecord(overrides, self.globalSnapshot, r.key, r.xKey, r.yKey)
+        end
 
         -- Remove orphan keys created during editing that aren't tracked overrides
         local orphansRemoved = 0
@@ -1953,16 +1962,18 @@ function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)
     return true
 end
 
--- Store the active layout's whole raid position record (point, X/Y, DandersMover anchor)
--- with the layout. The live overlay already holds `rec` itself -- DF:GetPositionRecord
--- hands DandersMover that table -- so only the stored copy is written here.
-function AutoProfilesUI:SetActiveLayoutRaidRecord(rec)
+-- Store a whole position record (point, X/Y, DandersMover anchor) with the active layout:
+-- the raid frames' by default, or the personal targeted block's (`key`/`xKey`/`yKey`).
+-- The live overlay already holds `rec` itself -- DF:GetPositionRecord hands DandersMover
+-- that table -- so only the stored copy is written here.
+function AutoProfilesUI:SetActiveLayoutRaidRecord(rec, key, xKey, yKey)
     if self:IsEditing() then return false end
     local p = self.activeRuntimeProfile
     if not p or type(rec) ~= "table" then return false end
+    key = key or "position"
     p.overrides = p.overrides or {}
-    p.overrides.position = DeepCopyValue(rec)
-    NormalizeLayoutPositionRecord(p.overrides, DF._realRaidDB)
+    p.overrides[key] = DeepCopyValue(rec)
+    NormalizeLayoutPositionRecord(p.overrides, DF._realRaidDB, key, xKey, yKey)
     return true
 end
 

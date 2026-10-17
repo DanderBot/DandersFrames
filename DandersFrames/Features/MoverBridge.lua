@@ -693,7 +693,7 @@ end
 -- exactly, including "none".
 local LAYOUT_POSITION_KEYS = {
     "raidAnchorX", "raidAnchorY", "position",
-    "personalTargetedSpellX", "personalTargetedSpellY",
+    "personalTargetedSpellX", "personalTargetedSpellY", "personalTargetedPosition",
 }
 
 local function copyValue(v)

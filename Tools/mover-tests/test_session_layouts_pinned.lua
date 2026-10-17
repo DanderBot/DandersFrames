@@ -206,9 +206,9 @@ do
     end
     local code = "local AutoProfilesUI, DF = ...\n"
         .. body("local function DeepCopyValue(value)")
-        .. body("local function NormalizeLayoutPositionRecord(overrides, base)")
+        .. body("local function NormalizeLayoutPositionRecord(overrides, base, key, xKey, yKey)")
         .. body("function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)")
-        .. body("function AutoProfilesUI:SetActiveLayoutRaidRecord(rec)")
+        .. body("function AutoProfilesUI:SetActiveLayoutRaidRecord(rec, key, xKey, yKey)")
         .. body("function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)")
     local chunk = assert(loadstring(code, "@AutoProfiles.lua(cut)"))
     local env = setmetatable({ DF = DFt }, { __index = _G })

@@ -436,8 +436,14 @@ function DF:CreatePermanentMover(container, mode)
         local sw, sh = GetScreenWidth(), GetScreenHeight()
         local anchorX = isRaid and (dragDb.raidAnchorX or 0) or (dragDb.anchorX or 0)
         local anchorY = isRaid and (dragDb.raidAnchorY or 0) or (dragDb.anchorY or 0)
-        local frameCX = sw / 2 + anchorX
-        local frameCY = sh / 2 + anchorY
+        -- The raid container sits at the record PLUS the Anchor To: Main Group shift
+        -- (DF:UpdateRaidContainerPosition). The drag moves the container itself, so it
+        -- starts from where that puts it, and the drop takes the shift back off.
+        local offX, offY = 0, 0
+        if isRaid then offX, offY = DF:GetRaidContainerOffset() end
+        handle._offX, handle._offY = offX, offY
+        local frameCX = sw / 2 + anchorX + offX
+        local frameCY = sh / 2 + anchorY + offY
         -- DandersMover can pin the record to a non-CENTER point, where x/y are not
         -- the container's centre. Read the real centre instead (converted to
         -- UIParent units); the drop below writes CENTER, as the lib's own drag does.
@@ -502,8 +508,8 @@ function DF:CreatePermanentMover(container, mode)
         finalCursorX = finalCursorX / ps
         finalCursorY = finalCursorY / ps
         local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        local x = (finalCursorX + self._cursorOffX) - screenWidth / 2
-        local y = (finalCursorY + self._cursorOffY) - screenHeight / 2
+        local x = (finalCursorX + self._cursorOffX) - screenWidth / 2 - (self._offX or 0)
+        local y = (finalCursorY + self._cursorOffY) - screenHeight / 2 - (self._offY or 0)
 
         if isRaid then
             -- The auto-layout routing (and the RAIDPOS log line) now lives in
@@ -1040,8 +1046,10 @@ end
 -- move is routed into the layout, which then owns the record (see SetPositionRecord).
 local followsProfile = setmetatable({}, { __mode = "k" })
 
+-- Every record the raid db drives gets this: the raid frames, and the personal targeted
+-- block while in a raid (its db() is then the raid overlay).
 local function layoutRaidRecord(spec, db)
-    if spec ~= RECORD_SPECS.raid then return nil end
+    if not spec.route or db ~= DF:GetRaidDB() then return nil end
     local ov = DF.raidOverrides
     if type(ov) ~= "table" then return nil end
     local rec = ov[spec.key]
@@ -1170,7 +1178,7 @@ local function layoutOwnsPosition(spec)
     if type(ov) ~= "table" then return false end
     if ov[spec.xKey] ~= nil or ov[spec.yKey] ~= nil then return true end
     local rec = ov[spec.key]
-    return spec == RECORD_SPECS.raid and type(rec) == "table" and not followsProfile[rec]
+    return type(rec) == "table" and not followsProfile[rec]
 end
 
 -- The ONE funnel. Writes the record and its scalar mirror together.
@@ -1201,23 +1209,19 @@ function DF:SetPositionRecord(mode, pos, reason, libReason)
         -- position to the profile, a lib write updates the PROFILE's position -- exactly
         -- what it would do with no layout active.
         if LIB_REASONS[libReason] and DF.raidOverrides and not layoutOwnsPosition(spec) then
-            if spec == RECORD_SPECS.raid then
-                local real = DF._realRaidDB
-                local base = real and real[spec.key]
-                if type(base) == "table" then
-                    base.x, base.y = x, y
-                    noteRecord(base, x, y)
-                end
-                if real then real[spec.xKey], real[spec.yKey] = x, y end
-                local live = layoutRaidRecord(spec, db)
-                if live then
-                    live.x, live.y = x, y
-                    noteRecord(live, x, y)
-                end
-                return
+            local real = DF._realRaidDB
+            local base = real and real[spec.key]
+            if type(base) == "table" then
+                base.x, base.y = x, y
+                noteRecord(base, x, y)
             end
-            -- Personal: the record is the profile's own (no layout copy); fall through to
-            -- the plain write below.
+            if real then real[spec.xKey], real[spec.yKey] = x, y end
+            local live = layoutRaidRecord(spec, db)
+            if live then
+                live.x, live.y = x, y
+                noteRecord(live, x, y)
+            end
+            return
         else
             -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
             -- DF:ResolvePositionTarget do. While a layout drives the frames it OWNS the
@@ -1238,24 +1242,16 @@ function DF:SetPositionRecord(mode, pos, reason, libReason)
             end
             if routed then
                 -- The layout took it (override + live overlay). The base scalars are NOT
-                -- written -- that is the whole point of routing.
-                if spec == RECORD_SPECS.raid then
-                    -- ...and the layout owns the WHOLE record from here: point, X/Y and
-                    -- anchor, stored with the layout so the next activation restores it.
-                    local live = layoutRaidRecord(spec, db)
-                    if live then
-                        writeRecord(live, pos, x, y)
-                        followsProfile[live] = nil
-                        noteRecord(live, x, y)
-                        if apu.SetActiveLayoutRaidRecord then apu:SetActiveLayoutRaidRecord(live) end
-                    end
-                else
-                    -- Keep the record on the same value and note it, so the next read sees
-                    -- record and effective scalar agree rather than a phantom mutation.
-                    local live = db[spec.key]
-                    if type(live) == "table" then
-                        live.x, live.y = x, y
-                        noteRecord(live, x, y)
+                -- written -- that is the whole point of routing. The layout owns the WHOLE
+                -- record from here: point, X/Y and anchor, stored with the layout so the
+                -- next activation restores it.
+                local live = layoutRaidRecord(spec, db)
+                if live then
+                    writeRecord(live, pos, x, y)
+                    followsProfile[live] = nil
+                    noteRecord(live, x, y)
+                    if apu.SetActiveLayoutRaidRecord then
+                        apu:SetActiveLayoutRaidRecord(live, spec.key, spec.xKey, spec.yKey)
                     end
                 end
                 return
@@ -1336,6 +1332,24 @@ function DF:NoteRaidContainerMove(cx, cy, rec)
     ping.x1, ping.y1 = cx, cy
 end
 
+-- How far the raid container sits from its record. The permanent mover's raw drag reads
+-- this too, so a drag starts and drops where the container actually is.
+-- Anchor To: Main Group -- a CONSTANT anchor-reference shift (settings only, never
+-- roster). NOT the retired compensation: see ComputeRaidMainGroupAnchorOffset in
+-- Headers.lua for the distinction and the sign rules. Container, mover and test
+-- container all take it, so the drag box always frames what it claims to.
+function DF:GetRaidContainerOffset()
+    local dx, dy = 0, 0
+    if DF.ComputeRaidContainerCompensation then
+        dx, dy = DF:ComputeRaidContainerCompensation()
+    end
+    if DF.ComputeRaidMainGroupAnchorOffset then
+        local ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
+        dx, dy = dx + ax, dy + ay
+    end
+    return dx, dy
+end
+
 function DF:UpdateRaidContainerPosition()
     if not DF.raidContainer then return end
     if InCombatLockdown() then return end
@@ -1354,18 +1368,7 @@ function DF:UpdateRaidContainerPosition()
     -- dragging the container and mover 316px left (Wrap 7 / Center Right / 8 groups).
     -- The call stays so the reasoning has one home: read ComputeRaidContainerCompensation in
     -- Headers.lua before reinstating anything here.
-    local dx, dy = 0, 0
-    if DF.ComputeRaidContainerCompensation then
-        dx, dy = DF:ComputeRaidContainerCompensation()
-    end
-    -- Anchor To: Main Group — a CONSTANT anchor-reference shift (settings only, never
-    -- roster). NOT the retired compensation above: see ComputeRaidMainGroupAnchorOffset
-    -- in Headers.lua for the distinction and the sign rules. Container, mover and test
-    -- container all take it below, so the drag box always frames what it claims to.
-    if DF.ComputeRaidMainGroupAnchorOffset then
-        local ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
-        dx, dy = dx + ax, dy + ay
-    end
+    local dx, dy = DF:GetRaidContainerOffset()
     local cx, cy = x + dx, y + dy
 
     -- ☠ DebugActive, not `DF.Debug`: ShortCaller runs debugstack(), and this

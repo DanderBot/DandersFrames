@@ -12,6 +12,7 @@
 - (Frames) With Pixel Perfect on, raid and party frames no longer shift back and forth by a pixel when people join, leave or go out of range. (by Krathe)
 - (Blizzard Frames) The Edit Mode party side panel now follows the party side-menu setting instead of always hiding. (by Krathe)
 - (Profiles) Importing a 4.x profile string no longer puts status icons, missing buff and defensive icons underneath the health bar. (by Krathe)
+- (Auto Layouts) The Personal Targeted Spells block follows its layout's position in raids, and moving or anchoring it during a layout no longer changes your main profile.
 - (Permanent Mover) Dragging the handle moves your frames directly again instead of opening DandersMover. It still opens DandersMover when the frames are anchored to something.
 
 ## [5.4.0]
