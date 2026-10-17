@@ -82,6 +82,10 @@ function CC:InitializeSavedVariables()
     -- Clearing is a one-time, explicitly confirmed action now.
     self.db.clearBlizzardOnEnable = nil
 
+    -- Bindings from the other game version (retail <-> WoW Forever) are parked and this
+    -- version's own come back, before anything below reads the class data.
+    if DF.FlavorCorrection then DF.FlavorCorrection.CrossClickCast(self.db) end
+
     -- Ensure classes table exists
     if not self.db.classes then
         self.db.classes = {}

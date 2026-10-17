@@ -489,6 +489,10 @@ function CC:ImportProfile(importString, newProfileName)
     if data.profile.bindings ~= nil and type(data.profile.bindings) ~= "table" then
         return false, L["Invalid profile data"]
     end
+    -- A string from the other game version (retail <-> WoW Forever) carries spells this
+    -- client does not have.
+    local refusal = DF.FlavorCorrection and DF.FlavorCorrection.ClickCastImportRefusal(data)
+    if refusal then return false, refusal end
     
     -- Analyze bindings for compatibility
     local sourceClass = data.class

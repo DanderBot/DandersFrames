@@ -5,6 +5,7 @@
 ### Improvements
 
 - (Fading) Unhealable Fading is now called **Spirit of Redemption Fading**, which is what it covers. Your settings are unchanged. (by Krathe)
+- (Click-Casting) Click-casting now keeps separate bindings for retail and WoW Forever, like the Aura Designer does. If your saved files move between the two, the other version's bindings are put aside and come back when you return, and click-casting strings from the other version can no longer be imported. (WoW Forever)
 
 ### Bug Fixes
 

@@ -187,6 +187,7 @@ function DandersFrames_ClickCast_Export(profileKey)
             profile = CopyTable(profile),
             exportedAt = date("%Y-%m-%d %H:%M"),
             class = select(2, UnitClass("player")),
+            sourceFlavor = DF.CLIENT_FLAVOR,
         }
         
         -- Serialize
@@ -268,6 +269,10 @@ function DandersFrames_ClickCast_Import(str, profileKey, importAll)
     if data.profileName ~= nil and type(data.profileName) ~= "string" then
         data.profileName = nil
     end
+    -- A string from the other game version (retail <-> WoW Forever) carries spells this
+    -- client does not have.
+    local refusal = DF.FlavorCorrection and DF.FlavorCorrection.ClickCastImportRefusal(data)
+    if refusal then return false, refusal end
 
     -- Analyze bindings for compatibility
     local bindingsToImport = {}

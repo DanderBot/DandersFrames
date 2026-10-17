@@ -138,3 +138,90 @@ do  -- string import from the other version: reset, not parked (the string is th
     local s = retailProfile()
     eq(FCr.AfterImport(s, { sourceFlavor = "forever" }, true), true, "a Forever string on retail: reset")
 end
+
+-- ============================================================
+-- CLICK-CASTING: per-class bindings park/restore in their own SavedVariables
+-- ============================================================
+local function ccDB(flavor)
+    return {
+        _flavor = flavor,
+        dbVersion = 2,
+        global = { disableWhileMounted = true },
+        classes = { PRIEST = { activeProfile = "Priest", profiles = { Priest = { bindings = { { spellName = "Flash Heal" } } } } } },
+    }
+end
+
+do  -- unstamped data is the current client's: stamped, nothing parked, no notice
+    local scheduled = 0
+    FCf.ScheduleCrossedNotice = function() scheduled = scheduled + 1 end
+    FCf.pendingClickCast = nil
+    local db = ccDB(nil)
+    local orig = deepcopy(db.classes)
+    eq(FCf.CrossClickCast(db), false, "click-cast: unstamped data does not cross")
+    eq(db._flavor, "forever", "click-cast: ...it is stamped as this version's")
+    check(same(db.classes, orig) and db._parked == nil, "click-cast: ...and its bindings stay live")
+    eq(scheduled, 0, "click-cast: ...with no notice")
+end
+
+do  -- retail data on Forever: parked, Forever starts empty, notice asked for
+    local scheduled = 0
+    FCf.ScheduleCrossedNotice = function() scheduled = scheduled + 1 end
+    FCr.ScheduleCrossedNotice = function() end
+    FCf.pendingClickCast = nil
+    local db = ccDB("retail")
+    local orig = deepcopy(db.classes)
+    eq(FCf.CrossClickCast(db), true, "click-cast: retail data crosses on Forever")
+    check(type(db.classes) == "table" and next(db.classes) == nil, "click-cast: Forever starts with no bindings")
+    check(db._parked and same(db._parked.retail, orig), "click-cast: retail bindings are parked intact")
+    eq(db.global.disableWhileMounted, true, "click-cast: shared options are left alone")
+    eq(db._flavor, "forever", "click-cast: stamped with the new version")
+    eq(scheduled, 1, "click-cast: the notice is asked for")
+    eq(FCf.pendingClickCast, true, "click-cast: ...and flagged")
+    eq(FCf.CrossClickCast(db), false, "click-cast: a second run is a no-op")
+
+    -- Forever makes its own bindings, then the file goes back to retail.
+    db.classes.PRIEST = { activeProfile = "F", profiles = { F = { bindings = { { spellName = "Lesser Heal" } } } } }
+    local forever = deepcopy(db.classes)
+    eq(FCr.CrossClickCast(db), true, "click-cast: back on retail it crosses again")
+    check(same(db.classes, orig), "click-cast: retail gets its own bindings back exactly")
+    check(db._parked and same(db._parked.forever, forever), "click-cast: Forever's are parked")
+    check(db._parked.retail == nil, "click-cast: retail's slot is emptied on restore")
+    eq(FCf.CrossClickCast(db), true, "click-cast: and to Forever once more")
+    check(same(db.classes, forever) and db._parked.forever == nil, "click-cast: Forever's come back too")
+end
+
+do  -- crossing with no bindings at all: swapped, but no notice
+    local scheduled = 0
+    FCf.ScheduleCrossedNotice = function() scheduled = scheduled + 1 end
+    FCf.pendingClickCast = nil
+    local db = ccDB("retail")
+    db.classes = {}
+    FCf.CrossClickCast(db)
+    eq(scheduled, 0, "click-cast: an empty crossing shows no notice")
+    check(FCf.pendingClickCast == nil, "click-cast: ...and flags nothing")
+end
+
+do  -- string imports: the other version's are refused, untagged and own are let through
+    local _, nsF = loadFC("forever")
+    local _, nsR = loadFC("retail")
+    local L = setmetatable({}, { __index = function(_, k) return k end })
+    nsF.L, nsR.L = L, L
+    local FCfl, FCrl = nsF.FlavorCorrection, nsR.FlavorCorrection
+    check(FCfl.ClickCastImportRefusal({ sourceFlavor = "retail" }) ~= nil, "click-cast import: a retail string is refused on Forever")
+    check(FCrl.ClickCastImportRefusal({ sourceFlavor = "forever" }) ~= nil, "click-cast import: a Forever string is refused on retail")
+    check(FCfl.ClickCastImportRefusal({ sourceFlavor = "forever" }) == nil, "click-cast import: a Forever string imports on Forever")
+    check(FCfl.ClickCastImportRefusal({ version = 2 }) == nil, "click-cast import: an untagged string is let through")
+    check(FCfl.ClickCastImportRefusal(nil) == nil, "click-cast import: no data -> no refusal (the caller's own checks run)")
+end
+
+do  -- every importer and exporter is wired
+    local api = df_file_source("Core/API.lua")
+    local prof = df_file_source("ClickCasting/Profiles.lua")
+    local dlg = options_file_source("ClickCasting/UI/Dialogs.lua")
+    local frames = df_file_source("ClickCasting/Frames.lua")
+    check(select(2, api:gsub("sourceFlavor = DF.CLIENT_FLAVOR", "")) == 1, "click-cast wiring: the API exporter stamps the version")
+    check(prof:find("sourceFlavor = DF.CLIENT_FLAVOR", 1, true) ~= nil, "click-cast wiring: the panel exporter stamps the version")
+    check(api:find("ClickCastImportRefusal(data)", 1, true) ~= nil, "click-cast wiring: the API importer refuses")
+    check(dlg:find("ClickCastImportRefusal(data)", 1, true) ~= nil, "click-cast wiring: the panel importer refuses")
+    check(frames:find("DF.FlavorCorrection.CrossClickCast(self.db)", 1, true) ~= nil, "click-cast wiring: login crosses the bindings")
+end

@@ -1854,6 +1854,8 @@ L["Thick"] = true
 L["Thick Outline"] = true
 L["Thickness"] = true
 L["Thin"] = true
+L["This click-casting string was made on WoW Forever. Spells differ on retail, so it can't be imported here."] = true
+L["This click-casting string was made on retail. Spells and ranks differ on WoW Forever, so it can't be imported here."] = true
 L["This filter is empty."] = true
 L["This filter was exported by a newer version of DandersFrames."] = true
 L["This spell has %d spell IDs. Click to choose which ones to track."] = true
@@ -2315,6 +2317,8 @@ L["This Battle.net friend could not be matched after an update. Remove this rule
 L["This only changes who controls names on DandersFrames frames - you can change it later in Nicknames settings."] = true
 L["Use %s nicknames"] = true
 L["You are not in a guild."] = true
+L["Your click-casting bindings came from WoW Forever. They have been put aside because spells differ on retail, and come back if you use them on WoW Forever again."] = true
+L["Your click-casting bindings came from retail. They have been put aside because spells and ranks differ on WoW Forever, and come back if you use them on retail again."] = true
 L["Your nickname (broadcast)"] = true
 
 -- Localization gap fixes (community zhTW pass): strings previously hardcoded in English

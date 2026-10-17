@@ -604,7 +604,7 @@ end
 
 -- Get number of specs for current class
 function CC:GetNumSpecs()
-    return GetNumSpecializations() or 4
+    return GetNumSpecializations and GetNumSpecializations() or 4
 end
 
 -- ============================================================
@@ -744,6 +744,8 @@ function CC:ExportProfile()
         profile = CopyTable(profile),
         exportedAt = date("%Y-%m-%d %H:%M"),
         class = GetPlayerClass(),
+        -- Which game version's spells these are (FlavorCorrection.ClickCastImportRefusal).
+        sourceFlavor = DF.CLIENT_FLAVOR,
     }
     
     local encoded, err = SerializeTable(exportData)
@@ -841,7 +843,7 @@ function CC:GetSpellValidityStatus(spellName)
         -- fails and the spell is reported "valid_class" rather than being falsely
         -- claimed as spec 1's.
         local currentSpec = C_SpecializationInfo.GetSpecialization()
-        local numSpecs = GetNumSpecializations() or 4
+        local numSpecs = GetNumSpecializations and GetNumSpecializations() or 4
         
         for specIndex = 1, numSpecs do
             local specID = C_SpecializationInfo.GetSpecializationInfo(specIndex)
