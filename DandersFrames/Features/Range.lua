@@ -41,6 +41,7 @@ local CheckInteractDistance = CheckInteractDistance
 local C_Spell = C_Spell
 local C_Spell_IsSpellInRange = C_Spell.IsSpellInRange
 local C_Spell_GetSpellName = C_Spell.GetSpellName
+local C_Spell_GetOverrideSpell = C_Spell.GetOverrideSpell
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local UnitInRange = UnitInRange
@@ -68,17 +69,17 @@ local specSpells = {
     -- Range falls back to CheckInteractDistance (OOC) or UnitInRange (combat).
     [250] = { -- Blood
         friendly = nil,
-        hostile = 47541,    -- Death Coil
+        hostile = { 47541, 49576 },  -- Death Coil, Death Grip
         range = "40yd"
     },
     [251] = { -- Frost
         friendly = nil,
-        hostile = 47541,
+        hostile = { 47541, 49576 },
         range = "40yd"
     },
     [252] = { -- Unholy
         friendly = nil,
-        hostile = 47541,
+        hostile = { 47541, 49576 },
         range = "40yd"
     },
     
@@ -124,37 +125,38 @@ local specSpells = {
     -- ==================== EVOKER ====================
     -- ☠ Living Flame FIRST, not Emerald Blossom. Blossom lands at a location, and its
     -- IsSpellInRange on a raid member can come back nil, which in combat handed the unit
-    -- to UnitInRange: frames faded at ~40yd while the setting read 30yd.
+    -- to UnitInRange: frames faded at ~40yd while the setting read 30yd. Chrono Flame is
+    -- Living Flame under the Chronowarden hero talent, listed in case the base ID goes quiet.
     [1467] = { -- Devastation
-        friendly = { 361469, 355913 },  -- Living Flame, Emerald Blossom
-        hostile = 361469,   -- Living Flame
+        friendly = { 361469, 431442, 355913 },  -- Living Flame, Chrono Flame, Emerald Blossom
+        hostile = { 361469, 431442, 362969 },  -- Living Flame, Chrono Flame, Azure Strike
         range = "25yd"
     },
     [1468] = { -- Preservation
-        friendly = { 361469, 355913 },
-        hostile = 361469,
+        friendly = { 361469, 431442, 355913 },
+        hostile = { 361469, 431442, 362969 },
         range = "25yd"      -- Note: Evoker has shorter range!
     },
     [1473] = { -- Augmentation
-        friendly = { 361469, 355913 },
-        hostile = 361469,
+        friendly = { 361469, 431442, 355913 },
+        hostile = { 361469, 431442, 362969 },
         range = "25yd"
     },
     
     -- ==================== HUNTER ====================
     [253] = { -- Beast Mastery
         friendly = nil,
-        hostile = 193455,   -- Cobra Shot
+        hostile = { 193455, 75 },  -- Cobra Shot, Auto Shot
         range = "40yd"
     },
     [254] = { -- Marksmanship
         friendly = nil,
-        hostile = 19434,    -- Aimed Shot
+        hostile = { 19434, 75 },   -- Aimed Shot, Auto Shot
         range = "40yd"
     },
     [255] = { -- Survival
         friendly = nil,
-        hostile = 259491,   -- Kill Command (ranged version)
+        hostile = { 259491, 75 },  -- Kill Command (ranged version), Auto Shot
         range = "40yd"
     },
     
@@ -212,17 +214,17 @@ local specSpells = {
     -- ==================== PRIEST ====================
     [256] = { -- Discipline
         friendly = { 17, 2061, 21562, 527 },  -- Power Word: Shield, Flash Heal, Fortitude, Purify
-        hostile = 585,      -- Smite
+        hostile = { 585, 589 },    -- Smite, Shadow Word: Pain
         range = "40yd"
     },
     [257] = { -- Holy
         friendly = { 2061, 17, 21562, 527 },
-        hostile = 585,
+        hostile = { 585, 589 },
         range = "40yd"
     },
     [258] = { -- Shadow
         friendly = { 17, 2061, 21562, 213634 },  -- Power Word: Shield, Flash Heal, Fortitude, Purify Disease
-        hostile = 585,
+        hostile = { 585, 589 },
         range = "40yd"
     },
     
@@ -246,17 +248,17 @@ local specSpells = {
     -- ==================== SHAMAN ====================
     [262] = { -- Elemental
         friendly = { 8004, 188070 },  -- Healing Surge (two IDs: Enhancement has its own)
-        hostile = 188196,   -- Lightning Bolt
+        hostile = { 188196, 188389 },  -- Lightning Bolt, Flame Shock
         range = "40yd"
     },
     [263] = { -- Enhancement
         friendly = { 8004, 188070 },
-        hostile = 188196,
+        hostile = { 188196, 188389 },
         range = "40yd"
     },
     [264] = { -- Restoration
         friendly = { 8004, 188070 },
-        hostile = 188196,
+        hostile = { 188196, 188389 },
         range = "40yd"
     },
     
@@ -297,17 +299,17 @@ local specSpells = {
 
 -- Class fallbacks (used if spec not detected or not in table)
 local classFallbacks = {
-    DEATHKNIGHT = { friendly = nil, hostile = 47541 },
+    DEATHKNIGHT = { friendly = nil, hostile = { 47541, 49576 } },
     DEMONHUNTER = { friendly = nil, hostile = 185123 },
     DRUID       = { friendly = { 8936, 774, 88423, 2782 }, hostile = 8921 },
-    EVOKER      = { friendly = { 361469, 355913 }, hostile = 361469 },
+    EVOKER      = { friendly = { 361469, 431442, 355913 }, hostile = { 361469, 431442, 362969 } },
     HUNTER      = { friendly = nil, hostile = 75 },  -- Auto Shot
     MAGE        = { friendly = { 1459, 475 }, hostile = 116 },
     MONK        = { friendly = { 116670, 115450, 218164 }, hostile = 115546 },
     PALADIN     = { friendly = { 19750, 85673, 4987, 213644 }, hostile = 62124 },
-    PRIEST      = { friendly = { 2061, 17, 21562, 527, 213634 }, hostile = 585 },
+    PRIEST      = { friendly = { 2061, 17, 21562, 527, 213634 }, hostile = { 585, 589 } },
     ROGUE       = { friendly = nil, hostile = 36554 },
-    SHAMAN      = { friendly = { 8004, 188070 }, hostile = 188196 },
+    SHAMAN      = { friendly = { 8004, 188070 }, hostile = { 188196, 188389 } },
     WARLOCK     = { friendly = 20707, hostile = 686 },
     WARRIOR     = { friendly = nil, hostile = 355 },
 }
@@ -367,7 +369,7 @@ end
 local rezSpellByClass = {
     DRUID       = 20484,   -- Rebirth (combat rez - IsSpellInRange works regardless of cooldown)
     PRIEST      = 2006,    -- Resurrection
-    PALADIN     = 7328,    -- Redemption
+    PALADIN     = { 7328, 391054 },  -- Redemption, Intercession
     SHAMAN      = 2008,    -- Ancestral Spirit
     MONK        = 115178,  -- Resuscitate
     DEATHKNIGHT = 61999,   -- Raise Ally
@@ -376,7 +378,8 @@ local rezSpellByClass = {
 }
 
 -- Resolved once at load time / spec change
-local currentRezSpell = rezSpellByClass[playerClass] or nil
+local rezSpells = {}
+local currentRezSpell = nil
 
 -- Known range spells, in the order a unit is checked against them (rebuilt on spec,
 -- talent and setting changes). currentFriendlySpell/currentHostileSpell are the first
@@ -455,6 +458,9 @@ local function UpdateRangeSpell()
     AddKnownSpells(hostileSpells, autoHostile)
     currentFriendlySpell = friendlySpells[1]
     currentHostileSpell = hostileSpells[1]
+    wipe(rezSpells)
+    AddKnownSpells(rezSpells, rezSpellByClass[playerClass])
+    currentRezSpell = rezSpells[1]
 
     if currentFriendlySpell or currentHostileSpell then
         DF:Debug("RANGE", "range spells (%s, spec %s): friendly=%s hostile=%s", source,
@@ -512,6 +518,21 @@ end
 --   Falls back to CheckInteractDistance when spells return nil.
 -- ============================================================
 
+-- ★ A HERO TALENT CAN REPLACE A RANGE SPELL (Living Flame -> Chrono Flame, Lightning Bolt
+-- -> Tempest), and the base ID can then answer nil while the replacement answers. So a nil
+-- is retried once as the spell's live override before the list moves on. Only on nil:
+-- a spell that answers costs nothing extra.
+local function SpellRangeAnswer(id, unit)
+    local inRange = C_Spell_IsSpellInRange(id, unit)
+    if inRange == nil and C_Spell_GetOverrideSpell then
+        local override = C_Spell_GetOverrideSpell(id)
+        if override and override ~= id then
+            inRange = C_Spell_IsSpellInRange(override, unit)
+        end
+    end
+    return inRange
+end
+
 -- ☠ THE "RANGE WENT TO 40 YARDS" LINE. Every known friendly spell answered nil on this
 -- living unit, so UnitInRange (~40yd) is about to decide its fade instead of the spell.
 -- Logged rather than surfaced: it is the detector for that report. One line per unit per 30s.
@@ -548,7 +569,7 @@ local function CheckUnitRange(unit)
     if UnitCanAttack("player", unit) then
         -- HOSTILE UNITS: IsSpellInRange returns clean booleans, trust directly
         for i = 1, #hostileSpells do
-            local inRange = C_Spell_IsSpellInRange(hostileSpells[i], unit)
+            local inRange = SpellRangeAnswer(hostileSpells[i], unit)
             if inRange ~= nil then
                 return inRange
             end
@@ -564,7 +585,7 @@ local function CheckUnitRange(unit)
     -- this unit (dead, offline, a location-placed spell), so the next one gets a turn.
     local nFriendly = #friendlySpells
     for i = 1, nFriendly do
-        local inRange = C_Spell_IsSpellInRange(friendlySpells[i], unit)
+        local inRange = SpellRangeAnswer(friendlySpells[i], unit)
         if inRange == true then
             return true
         elseif inRange == false then
@@ -579,10 +600,12 @@ local function CheckUnitRange(unit)
     end
 
     -- Dead target: try rez spell for accurate range on corpses
-    if currentRezSpell and UnitIsDeadOrGhost(unit) then
-        local inRange = C_Spell_IsSpellInRange(currentRezSpell, unit)
-        if inRange ~= nil then
-            return inRange
+    if UnitIsDeadOrGhost(unit) then
+        for i = 1, #rezSpells do
+            local inRange = SpellRangeAnswer(rezSpells[i], unit)
+            if inRange ~= nil then
+                return inRange
+            end
         end
     end
 
@@ -1335,7 +1358,7 @@ SlashCmdList["DFRANGE"] = function(msg)
         end
         if UnitExists("party1") then
             for _, id in ipairs(friendlySpells) do
-                local testResult = C_Spell_IsSpellInRange(id, "party1")
+                local testResult = SpellRangeAnswer(id, "party1")
                 o:Field("live test on party1: " .. id, tostring(testResult), testResult ~= nil and "GOOD" or "BAD")
             end
         end

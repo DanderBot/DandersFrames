@@ -13,6 +13,7 @@ local function resetWorld(class)
         specIndex = 1, specID = nil,
         known = {},          -- [spellID] = true
         inRange = {},        -- [spellID] = true / false / nil (nil = "can't check this unit")
+        override = {},       -- [spellID] = the spell a hero talent replaced it with
         combat = false,
         interact = false,    -- CheckInteractDistance(unit, 4)
         unitInRange = true,  -- UnitInRange answer
@@ -35,6 +36,7 @@ local STUBS = {
         IsSpellInRange = function(id) return S.inRange[id] end,
         GetSpellName = function(id) return "spell" .. id end,
         GetSpellInfo = function() return { maxRange = 30 } end,
+        GetOverrideSpell = function(id) return S.override[id] or id end,
     },
     IsPlayerSpell = function(id) return S.known[id] == true end,
     InCombatLockdown = function() return S.combat end,
@@ -227,5 +229,77 @@ do  -- classes without a friendly spell still take UnitInRange in combat, silent
     S.combat, S.unitInRange = true, false
     eq(rangeOf(DF), false, "warrior in combat uses UnitInRange")
     eq(#S.warns, 0, "no fallback line for a class that has no friendly spell")
+    unload()
+end
+
+do  -- a hero-talent replacement answers when the base spell goes quiet
+    local DF = loadRange("EVOKER", function()
+        S.specID = 1468
+        S.known[361469], S.known[355913] = true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.combat, S.unitInRange = true, true
+    S.override[361469] = 431442
+    S.inRange[361469], S.inRange[431442], S.inRange[355913] = nil, false, nil
+    eq(rangeOf(DF), false, "Living Flame's nil is retried as Chrono Flame, ahead of the 40yd fallback")
+    eq(#S.warns, 0, "no fallback line when the replacement answered")
+    S.inRange[431442] = true
+    eq(rangeOf(DF), true, "the replacement's in-range answer stands")
+    unload()
+end
+
+do  -- Chrono Flame known by its own ID is in the evoker list
+    local DF = loadRange("EVOKER", function()
+        S.specID = 1468
+        S.known[431442], S.known[355913] = true, true
+    end)
+    DF:RefreshRangeSpell()
+    eq(DF:GetCurrentRangeSpellInfo().spellID, 431442, "Chrono Flame leads when Living Flame is not known")
+    unload()
+end
+
+do  -- hostile backups
+    local DF = loadRange("PRIEST", function()
+        S.specID = 256
+        S.known[17], S.known[585], S.known[589] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[585], S.inRange[589] = nil, false
+    eq(rangeOf(DF), false, "Smite's nil hands the enemy to Shadow Word: Pain")
+    unload()
+
+    DF = loadRange("DEATHKNIGHT", function()
+        S.specID = 250
+        S.known[49576] = true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[49576] = false
+    eq(rangeOf(DF), false, "a Blood DK without Death Coil checks enemies with Death Grip")
+    unload()
+
+    DF = loadRange("SHAMAN", function()
+        S.specID = 262
+        S.known[8004], S.known[188196], S.known[188389] = true, true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.hostile = true
+    S.inRange[188196], S.inRange[188389] = nil, true
+    eq(rangeOf(DF), true, "Lightning Bolt's nil hands the enemy to Flame Shock")
+    unload()
+end
+
+do  -- paladin rez: Intercession behind Redemption
+    local DF = loadRange("PALADIN", function()
+        S.specID = 65
+        S.known[19750], S.known[391054] = true, true
+    end)
+    DF:RefreshRangeSpell()
+    S.dead, S.combat = true, true
+    S.inRange[19750], S.inRange[391054] = nil, false
+    eq(rangeOf(DF), false, "a dead unit is checked with Intercession when Redemption is not known")
+    S.inRange[391054] = true
+    eq(rangeOf(DF), true, "and its in-range answer stands")
     unload()
 end
