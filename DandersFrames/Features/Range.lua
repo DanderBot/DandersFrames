@@ -9,7 +9,7 @@ local addonName, DF = ...
 -- 2. Phased units → always out of range (UnitPhaseReason)
 -- 3. Hostile → IsSpellInRange(hostileSpell)
 -- 4. Dead friendly → IsSpellInRange(rezSpell)
--- 5. Friendly with spell → IsSpellInRange(friendlySpell)
+-- 5. Friendly with spells → IsSpellInRange over the known list, first answer wins
 --    OR CheckInteractDistance out of combat
 -- 6. No friendly spell → CheckInteractDistance out of combat,
 --    UnitInRange() in combat, default in-range as last resort
@@ -44,6 +44,7 @@ local C_Spell_GetSpellName = C_Spell.GetSpellName
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local UnitInRange = UnitInRange
+local GetTime = GetTime
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 local UnitPhaseReason = UnitPhaseReason
 
@@ -53,7 +54,11 @@ local _, playerClass = UnitClass("player")
 -- ============================================================
 -- SPEC-BASED RANGE SPELLS
 -- Indexed by specID - validated with IsPlayerSpell() before use
--- Format: { friendly = spellID, hostile = spellID, range = "description" }
+-- Format: { friendly = spellID or list, hostile = spellID or list, range = "description" }
+-- ★ A friendly LIST is tried in order per unit and the first spell that answers decides.
+-- IsSpellInRange answers nil whenever a spell cannot be checked against that unit, and a
+-- nil on every spell drops a unit to the ~40yd UnitInRange answer in combat. So every
+-- spell after the first must share its range, or a fallback would move the fade edge.
 -- ============================================================
 
 local specSpells = {
@@ -98,39 +103,42 @@ local specSpells = {
     
     -- ==================== DRUID ====================
     [102] = { -- Balance
-        friendly = 8936,    -- Regrowth (all druids have it in class tree)
+        friendly = { 8936, 774 },  -- Regrowth, Rejuvenation
         hostile = 8921,     -- Moonfire
         range = "40yd"
     },
     [103] = { -- Feral
-        friendly = 8936,    -- Regrowth
+        friendly = { 8936, 774 },
         hostile = 8921,
         range = "40yd"
     },
     [104] = { -- Guardian
-        friendly = 8936,    -- Regrowth
+        friendly = { 8936, 774 },
         hostile = 8921,
         range = "40yd"
     },
     [105] = { -- Restoration
-        friendly = 774,     -- Rejuvenation (instant cast, better for healers)
+        friendly = { 774, 8936, 88423 },  -- Rejuvenation, Regrowth, Nature's Cure
         hostile = 8921,
         range = "40yd"
     },
     
     -- ==================== EVOKER ====================
+    -- ☠ Living Flame FIRST, not Emerald Blossom. Blossom lands at a location, and its
+    -- IsSpellInRange on a raid member can come back nil, which in combat handed the unit
+    -- to UnitInRange: frames faded at ~40yd while the setting read 30yd.
     [1467] = { -- Devastation
-        friendly = 355913,  -- Emerald Blossom (all evokers have this)
+        friendly = { 361469, 355913 },  -- Living Flame, Emerald Blossom
         hostile = 361469,   -- Living Flame
         range = "25yd"
     },
     [1468] = { -- Preservation
-        friendly = 355913,  -- Emerald Blossom
+        friendly = { 361469, 355913 },
         hostile = 361469,
         range = "25yd"      -- Note: Evoker has shorter range!
     },
     [1473] = { -- Augmentation
-        friendly = 355913,  -- Emerald Blossom
+        friendly = { 361469, 355913 },
         hostile = 361469,
         range = "25yd"
     },
@@ -154,68 +162,68 @@ local specSpells = {
     
     -- ==================== MAGE ====================
     [62] = { -- Arcane
-        friendly = 1459,    -- Arcane Intellect
+        friendly = { 1459, 475 },  -- Arcane Intellect, Remove Curse
         hostile = 30451,    -- Arcane Blast
         range = "40yd"
     },
     [63] = { -- Fire
-        friendly = 1459,
+        friendly = { 1459, 475 },
         hostile = 133,      -- Fireball
         range = "40yd"
     },
     [64] = { -- Frost
-        friendly = 1459,
+        friendly = { 1459, 475 },
         hostile = 116,      -- Frostbolt
         range = "40yd"
     },
     
     -- ==================== MONK ====================
     [268] = { -- Brewmaster
-        friendly = 116670,  -- Vivify (all monks)
+        friendly = { 116670, 218164 },  -- Vivify, Detox (Brewmaster/Windwalker)
         hostile = 115546,   -- Provoke
         range = "40yd"
     },
     [269] = { -- Windwalker
-        friendly = 116670,
+        friendly = { 116670, 218164 },
         hostile = 115546,
         range = "40yd"
     },
     [270] = { -- Mistweaver
-        friendly = 116670,  -- Vivify
+        friendly = { 116670, 115450 },  -- Vivify, Detox (Mistweaver)
         hostile = 115546,
         range = "40yd"
     },
     
     -- ==================== PALADIN ====================
     [65] = { -- Holy
-        friendly = 19750,   -- Flash of Light
+        friendly = { 19750, 85673, 4987 },  -- Flash of Light, Word of Glory, Cleanse
         hostile = 62124,    -- Hand of Reckoning
         range = "40yd"
     },
     [66] = { -- Protection
-        friendly = 19750,
+        friendly = { 19750, 85673, 213644 },  -- Flash of Light, Word of Glory, Cleanse Toxins
         hostile = 62124,
         range = "40yd"
     },
     [70] = { -- Retribution
-        friendly = 19750,
+        friendly = { 19750, 85673, 213644 },  -- Flash of Light, Word of Glory, Cleanse Toxins
         hostile = 62124,
         range = "40yd"
     },
     
     -- ==================== PRIEST ====================
     [256] = { -- Discipline
-        friendly = 17,      -- Power Word: Shield
+        friendly = { 17, 2061, 21562, 527 },  -- Power Word: Shield, Flash Heal, Fortitude, Purify
         hostile = 585,      -- Smite
         range = "40yd"
     },
     [257] = { -- Holy
-        friendly = 2061,    -- Flash Heal
+        friendly = { 2061, 17, 21562, 527 },
         hostile = 585,
         range = "40yd"
     },
     [258] = { -- Shadow
-        friendly = 17,      -- Power Word: Shield
+        friendly = { 17, 2061, 21562, 213634 },  -- Power Word: Shield, Flash Heal, Fortitude, Purify Disease
         hostile = 585,
         range = "40yd"
     },
@@ -239,17 +247,17 @@ local specSpells = {
     
     -- ==================== SHAMAN ====================
     [262] = { -- Elemental
-        friendly = 8004,    -- Healing Surge (all shaman)
+        friendly = { 8004, 188070 },  -- Healing Surge (two IDs: Enhancement has its own)
         hostile = 188196,   -- Lightning Bolt
         range = "40yd"
     },
     [263] = { -- Enhancement
-        friendly = 8004,
+        friendly = { 8004, 188070 },
         hostile = 188196,
         range = "40yd"
     },
     [264] = { -- Restoration
-        friendly = 8004,    -- Healing Surge
+        friendly = { 8004, 188070 },
         hostile = 188196,
         range = "40yd"
     },
@@ -293,15 +301,15 @@ local specSpells = {
 local classFallbacks = {
     DEATHKNIGHT = { friendly = nil, hostile = 47541 },
     DEMONHUNTER = { friendly = nil, hostile = 185123 },
-    DRUID       = { friendly = 8936, hostile = 8921 },  -- Regrowth (all druids have it)
-    EVOKER      = { friendly = 355913, hostile = 361469 },  -- Emerald Blossom
+    DRUID       = { friendly = { 8936, 774, 88423, 2782 }, hostile = 8921 },
+    EVOKER      = { friendly = { 361469, 355913 }, hostile = 361469 },
     HUNTER      = { friendly = nil, hostile = 75 },  -- Auto Shot
-    MAGE        = { friendly = 1459, hostile = 116 },
-    MONK        = { friendly = 116670, hostile = 115546 },
-    PALADIN     = { friendly = 19750, hostile = 62124 },
-    PRIEST      = { friendly = 2061, hostile = 585 },
+    MAGE        = { friendly = { 1459, 475 }, hostile = 116 },
+    MONK        = { friendly = { 116670, 115450, 218164 }, hostile = 115546 },
+    PALADIN     = { friendly = { 19750, 85673, 4987, 213644 }, hostile = 62124 },
+    PRIEST      = { friendly = { 2061, 17, 21562, 527, 213634 }, hostile = 585 },
     ROGUE       = { friendly = nil, hostile = 36554 },
-    SHAMAN      = { friendly = 8004, hostile = 188196 },
+    SHAMAN      = { friendly = { 8004, 188070 }, hostile = 188196 },
     WARLOCK     = { friendly = 20707, hostile = 686 },
     WARRIOR     = { friendly = nil, hostile = 355 },
 }
@@ -324,7 +332,7 @@ if DF.IS_FOREVER then
     }
 end
 
--- A fallback entry is one spell ID or a list of them; returns the first the player knows.
+-- A table entry is one spell ID or a list of them; returns the first the player knows.
 local function FirstKnownSpell(entry)
     if type(entry) == "table" then
         for _, id in ipairs(entry) do
@@ -333,6 +341,20 @@ local function FirstKnownSpell(entry)
         return nil
     end
     return entry and IsPlayerSpell(entry) and entry or nil
+end
+
+-- Appends each spell in `entry` (one ID or a list) that the player knows, skipping repeats.
+local function AddKnownSpells(list, entry)
+    if type(entry) ~= "table" then entry = { entry } end
+    for _, id in ipairs(entry) do
+        if id and IsPlayerSpell(id) then
+            local seen = false
+            for i = 1, #list do
+                if list[i] == id then seen = true break end
+            end
+            if not seen then list[#list + 1] = id end
+        end
+    end
 end
 
 -- ============================================================
@@ -358,10 +380,27 @@ local rezSpellByClass = {
 -- Resolved once at load time / spec change
 local currentRezSpell = rezSpellByClass[playerClass] or nil
 
--- Current active spell (updated on spec change)
+-- Known range spells, in the order a unit is checked against them (rebuilt on spec,
+-- talent and setting changes). currentFriendlySpell/currentHostileSpell are the first
+-- of each: the spell the options page names.
+local friendlySpells = {}
+local hostileSpells = {}
 local currentFriendlySpell = nil
 local currentHostileSpell = nil
 local currentSpecID = nil
+
+-- "361469 (30yd), 355913 (30yd)" -- the live range, so a log line shows whether a
+-- fallback spell shares the first one's edge.
+local function DescribeSpells(list)
+    if #list == 0 then return "none" end
+    local parts = {}
+    for i, id in ipairs(list) do
+        local info = C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+        local range = info and info.maxRange
+        parts[i] = id .. " (" .. (range and range > 0 and (math.floor(range) .. "yd") or "?yd") .. ")"
+    end
+    return table.concat(parts, ", ")
+end
 
 -- ============================================================
 -- SPELL DETECTION & UPDATES
@@ -371,7 +410,9 @@ local function UpdateRangeSpell()
     local specIndex = GetSpecialization()
     local specID = specIndex and GetSpecializationInfo(specIndex) or nil
     currentSpecID = specID
-    
+    wipe(friendlySpells)
+    wipe(hostileSpells)
+
     -- Check for user override in DB (check party first, then raid)
     local userSpellID = nil
     if DF.db then
@@ -384,56 +425,49 @@ local function UpdateRangeSpell()
             userSpellID = raidDB.rangeCheckSpellID
         end
     end
-    
+
+    -- A chosen spell goes first; the automatic list stays behind it, so a unit that spell
+    -- cannot be checked against gets a spell answer rather than the ~40yd fallback.
+    local source = "auto"
     if userSpellID and userSpellID > 0 then
-        -- User has set a custom spell - validate it with IsPlayerSpell
         if IsPlayerSpell(userSpellID) then
-            currentFriendlySpell = userSpellID
-            currentHostileSpell = userSpellID
-            DF:Debug("RANGE", "spell from user override: %d", userSpellID)
+            AddKnownSpells(friendlySpells, userSpellID)
+            AddKnownSpells(hostileSpells, userSpellID)
+            source = "user override"
         else
-            -- User spell not known (maybe changed spec/talents) - clear so auto-detect runs next call
-            currentFriendlySpell = nil
-            currentHostileSpell = nil
             -- Worth a WARN: the user picked this deliberately and it is silently not being
             -- used, which reads to them as the setting being ignored.
             DF:DebugWarn("RANGE", "user range spell %d is not known to this character - auto-detect will run instead", userSpellID)
         end
+    end
+
+    local autoFriendly, autoHostile = {}, {}
+    local spells = specID and specSpells[specID]
+    if spells then
+        AddKnownSpells(autoFriendly, spells.friendly)
+        AddKnownSpells(autoHostile, spells.hostile)
+    end
+    -- The class list covers an unknown spec and a spec whose spells are not learned yet.
+    if #autoFriendly == 0 and #autoHostile == 0 and classFallbacks[playerClass] then
+        spells = classFallbacks[playerClass]
+        AddKnownSpells(autoFriendly, spells.friendly)
+        AddKnownSpells(autoHostile, spells.hostile)
+    end
+    AddKnownSpells(friendlySpells, autoFriendly)
+    AddKnownSpells(hostileSpells, autoHostile)
+    currentFriendlySpell = friendlySpells[1]
+    currentHostileSpell = hostileSpells[1]
+
+    if currentFriendlySpell or currentHostileSpell then
+        DF:Debug("RANGE", "range spells (%s, spec %s): friendly=%s hostile=%s", source,
+            tostring(specID), DescribeSpells(friendlySpells), DescribeSpells(hostileSpells))
         return
     end
 
-    -- Try spec-specific spells (validated with IsPlayerSpell)
-    if specID and specSpells[specID] then
-        local spells = specSpells[specID]
-        currentFriendlySpell = spells.friendly and IsPlayerSpell(spells.friendly) and spells.friendly or nil
-        currentHostileSpell = spells.hostile and IsPlayerSpell(spells.hostile) and spells.hostile or nil
-        if currentFriendlySpell or currentHostileSpell then
-            DF:Debug("RANGE", "spell from spec %s: friendly=%s hostile=%s",
-                tostring(specID), tostring(currentFriendlySpell), tostring(currentHostileSpell))
-            return
-        end
-    end
-    
-    -- Fallback to class defaults (validated with IsPlayerSpell)
-    if classFallbacks[playerClass] then
-        local spells = classFallbacks[playerClass]
-        currentFriendlySpell = FirstKnownSpell(spells.friendly)
-        currentHostileSpell = FirstKnownSpell(spells.hostile)
-        DF:Debug("RANGE", "spell from class fallback: friendly=%s hostile=%s",
-            tostring(currentFriendlySpell), tostring(currentHostileSpell))
-        return
-    end
-
-    -- ☠ THE SILENT DEGRADE, AND IT WAS THE WHOLE CATEGORY'S BLIND SPOT. With no spell on
-    -- either side, range checking drops to CheckInteractDistance / always-in-range for the
-    -- rest of the session: fading either stops working or sticks on, which is the most
-    -- common real complaint about this module. It resolved to nil and said nothing, so the
-    -- log was indistinguishable from a healthy session that simply had no range
-    -- transitions -- RANGE only ever logged transitions, so empty meant both "fine" and
-    -- "dead". Every outcome above reports now, so the first line after enabling the
-    -- category answers "which spell did it pick", instead of leaving it to be inferred.
-    currentFriendlySpell = nil
-    currentHostileSpell = nil
+    -- ☠ THE SILENT DEGRADE. With no spell on either side, range checking drops to
+    -- CheckInteractDistance / always-in-range for the rest of the session: fading either
+    -- stops working or sticks on. RANGE otherwise logs only transitions, so an empty log
+    -- would read the same as a healthy session with nobody moving.
     DF:DebugWarn("RANGE", "no range spell for class %s (spec %s) - falling back to interact distance",
         tostring(playerClass), tostring(specID))
 end
@@ -480,6 +514,20 @@ end
 --   Falls back to CheckInteractDistance when spells return nil.
 -- ============================================================
 
+-- ☠ THE "RANGE WENT TO 40 YARDS" LINE. Every known friendly spell answered nil on this
+-- living unit, so UnitInRange (~40yd) is about to decide its fade instead of the spell.
+-- Logged rather than surfaced: it is the detector for that report. One line per unit per 30s.
+local lastFallbackNote = {}
+local function NoteSpellFallback(unit)
+    if not (DF.DebugActive and DF:DebugActive("RANGE")) then return end
+    if UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit) then return end
+    local now = GetTime()
+    if (lastFallbackNote[unit] or 0) + 30 > now then return end
+    lastFallbackNote[unit] = now
+    DF:DebugWarn("RANGE", "%s: no range spell answered (%s) - in combat the ~40yd UnitInRange fallback decides",
+        unit, DescribeSpells(friendlySpells))
+end
+
 local function CheckUnitRange(unit)
     if UnitIsUnit(unit, "player") then
         return true
@@ -501,21 +549,24 @@ local function CheckUnitRange(unit)
     -- ensures they fall through to the friendly path.
     if UnitCanAttack("player", unit) then
         -- HOSTILE UNITS: IsSpellInRange returns clean booleans, trust directly
-        if currentHostileSpell then
-            local inRange = C_Spell_IsSpellInRange(currentHostileSpell, unit)
+        for i = 1, #hostileSpells do
+            local inRange = C_Spell_IsSpellInRange(hostileSpells[i], unit)
             if inRange ~= nil then
                 return inRange
             end
         end
-        -- No hostile spell or returned nil - assume in range
+        -- No hostile spell or none answered - assume in range
         return true
     end
 
     -- FRIENDLY UNITS (party/raid members)
     -- IsSpellInRange returns clean booleans - NOT secret values.
     -- We trust the result directly (== true/false).
-    if currentFriendlySpell then
-        local inRange = C_Spell_IsSpellInRange(currentFriendlySpell, unit)
+    -- First spell that answers decides; nil means that spell can't be checked against
+    -- this unit (dead, offline, a location-placed spell), so the next one gets a turn.
+    local nFriendly = #friendlySpells
+    for i = 1, nFriendly do
+        local inRange = C_Spell_IsSpellInRange(friendlySpells[i], unit)
         if inRange == true then
             return true
         elseif inRange == false then
@@ -527,7 +578,6 @@ local function CheckUnitRange(unit)
             end
             return false
         end
-        -- inRange == nil: spell can't target this unit (dead, offline, etc.)
     end
 
     -- Dead target: try rez spell for accurate range on corpses
@@ -546,6 +596,9 @@ local function CheckUnitRange(unit)
     end
 
     -- IN COMBAT FALLBACKS:
+    if nFriendly > 0 then
+        NoteSpellFallback(unit)
+    end
 
     -- UnitInRange as primary combat fallback (returns secret booleans in Midnight+)
     -- Secret booleans propagate through the pipeline:
@@ -565,7 +618,7 @@ local function CheckUnitRange(unit)
     -- If UnitInRange also failed (non-grouped unit, or API unavailable),
     -- and we had a friendly spell that returned nil on a living connected
     -- target, they're likely extremely far away — treat as out of range.
-    if currentFriendlySpell and UnitIsConnected(unit) and not UnitIsDeadOrGhost(unit) then
+    if nFriendly > 0 and UnitIsConnected(unit) and not UnitIsDeadOrGhost(unit) then
         DebugPrint("OOR-NIL", unit, "spell AND UnitInRange both failed on alive/connected target in combat")
         return false
     end
@@ -1107,9 +1160,11 @@ function DF:GetRangeSpellOptions()
     if currentSpecID and specSpells[currentSpecID] then
         local spells = specSpells[currentSpecID]
         if spells.friendly then
-            local name = C_Spell_GetSpellName(spells.friendly)
+            local autoID = FirstKnownSpell(spells.friendly)
+                or (type(spells.friendly) == "table" and spells.friendly[1] or spells.friendly)
+            local name = C_Spell_GetSpellName(autoID)
             if name then
-                options[1].label = "Auto: " .. name .. " (" .. GetSpellRange(spells.friendly, spells.range) .. ")"
+                options[1].label = "Auto: " .. name .. " (" .. GetSpellRange(autoID, spells.range) .. ")"
             end
         else
             -- Classes without friendly spells (DK, DH, Hunter, Warrior)
@@ -1128,6 +1183,7 @@ function DF:GetRangeSpellOptions()
         { id = 8004,   name = "Healing Surge",       class = "SHAMAN" },
         { id = 19750,  name = "Flash of Light",      class = "PALADIN" },
         { id = 116670, name = "Vivify",              class = "MONK" },
+        { id = 361469, name = "Living Flame",        class = "EVOKER" },
         { id = 355913, name = "Emerald Blossom",     class = "EVOKER" },
         -- Utility spells
         { id = 1459,   name = "Arcane Intellect",    class = "MAGE" },
@@ -1264,6 +1320,9 @@ SlashCmdList["DFRANGE"] = function(msg)
 
         o:Section("Resolved spells")
         o:Field("friendly", spellLine(currentFriendlySpell))
+        if #friendlySpells > 1 then
+            o:Field("then tried", DescribeSpells({ select(2, unpack(friendlySpells)) }), "NEUTRAL")
+        end
         o:Field("hostile", spellLine(currentHostileSpell))
         o:Field("rez", spellLine(currentRezSpell))
 
@@ -1277,8 +1336,10 @@ SlashCmdList["DFRANGE"] = function(msg)
                 .. ", raid " .. tostring(DF.db.raid and DF.db.raid.rangeCheckSpellID or "none"), "NEUTRAL")
         end
         if UnitExists("party1") then
-            local testResult = currentFriendlySpell and C_Spell_IsSpellInRange(currentFriendlySpell, "party1")
-            o:Field("live test on party1", tostring(testResult), testResult ~= nil and "GOOD" or "BAD")
+            for _, id in ipairs(friendlySpells) do
+                local testResult = C_Spell_IsSpellInRange(id, "party1")
+                o:Field("live test on party1: " .. id, tostring(testResult), testResult ~= nil and "GOOD" or "BAD")
+            end
         end
         o:Siblings("range")
 
