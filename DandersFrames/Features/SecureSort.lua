@@ -108,6 +108,7 @@ local SPEC_ROLE = {
     [267]  = 4, -- Warlock Destruction
     [1467] = 4, -- Evoker Devastation
     [1473] = 4, -- Evoker Augmentation
+    [1480] = 4, -- Demon Hunter Devourer
 }
 
 -- Cache for spec data by player name (persists across sorts)

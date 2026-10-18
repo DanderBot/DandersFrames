@@ -93,12 +93,10 @@ local specSpells = {
         hostile = 185123,
         range = "30yd"
     },
-    -- Devourer (new Midnight spec - ranged DPS, 25yd, Intellect-based)
-    -- specID TBD - using placeholder, will need update when known
-    [1456] = { -- Devourer (specID placeholder - update when known)
+    [1480] = { -- Devourer
         friendly = nil,
-        hostile = 452416,   -- Consume (25yd Void spell) - spellID may need update
-        range = "25yd"
+        hostile = { 185123, 473728 },  -- Throw Glaive, Void Ray
+        range = "30yd"
     },
     
     -- ==================== DRUID ====================
