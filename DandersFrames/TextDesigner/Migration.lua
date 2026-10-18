@@ -203,19 +203,14 @@ local function buildElements(db, tdDB)
 end
 
 -- ============================================================
--- BASELINE DEFAULT (fresh / reset profiles — NOT a legacy migration)
+-- BASELINE DEFAULT (fresh / reset profiles -- NOT a legacy migration)
 -- ============================================================
--- The default Text Designer config a fresh or reset profile starts with:
--- name + health (current / max — matching the pre-Text-Designer default) +
--- status elements, built from the mode's Config defaults. This makes the
--- default a real BASELINE the factory carries directly, so fresh and reset
--- profiles no longer depend on MigrateTextDesignerFromLegacy running to build
--- their text — that migration is now only for genuinely-migrating pre-TD
--- profiles. Marked migratedFromLegacy/enabled/hideLegacyText to match exactly
--- what the migration produced, so it's a drop-in default (and the legacy
--- migration's guard treats it as already handled). Party and raid share the
--- same text defaults (RaidDefaults deep-copies PartyDefaults without overriding
--- them), so the mode arg only future-proofs a later divergence.
+-- The Text Designer config a fresh or reset profile starts with: name + health
+-- (current / max) + status elements, built from the mode's Config defaults, so a fresh
+-- profile never depends on MigrateTextDesignerFromLegacy (which is only for pre-TD
+-- profiles). Marked migratedFromLegacy/enabled/hideLegacyText exactly as the migration
+-- would, so the migration's guard treats it as handled. Party and raid share the same
+-- text defaults; the mode arg only allows them to diverge later.
 function DF:BuildDefaultTextDesignerConfig(mode)
     local defaults = (mode == "raid") and DF.RaidDefaults or DF.PartyDefaults
     local tdDB = DF.TextDesigner:EnsureDB({})

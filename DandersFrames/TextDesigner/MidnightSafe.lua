@@ -19,7 +19,7 @@ local type, tostring = type, tostring
 local format = string.format
 -- AbbreviateNumbers preferred (no space: "287k", "1.2m"); falls back to
 -- AbbreviateLargeNumbers (space-padded: "287 K") on older clients. Both
--- are secret-safe in Midnight per Cell's reference implementation.
+-- are secret-safe in Midnight.
 local AbbreviateNumbers = _G.AbbreviateNumbers or _G.AbbreviateLargeNumbers or tostring
 local AbbreviateLargeNumbers = _G.AbbreviateLargeNumbers or tostring
 local TruncateWhenZero = (_G.C_StringUtil and _G.C_StringUtil.TruncateWhenZero) or AbbreviateNumbers

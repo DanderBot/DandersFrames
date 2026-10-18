@@ -76,7 +76,7 @@ DF.GetSafeHealthPercent = GetSafeHealthPercent
 --   This branch had been hand-written at five sites and the preview's ANIMATION ticker
 -- was the one that never got it: an animated test frame wrote a bare SetValue while its
 -- own missing-health companion smoothed, so the two halves of one bar moved on different
--- rules and Smooth Bar Animation read as doing nothing in test mode (Aphoex, 2026-08-14).
+-- rules and Smooth Bar Animation read as doing nothing in test mode.
 -- `value` is passed straight through and never read, so a SECRET is safe here.
 -- ============================================================
 local function SetBarValueSmoothed(bar, value, smoothEnabled)
@@ -128,7 +128,7 @@ DF.SetHealthBarValue = SetHealthBarValue
 -- health-threshold fading (UpdateHealthFade). Smoothing mirrors the real bar's per-mode
 -- smoothBars setting so the mirror's fill motion tracks the real bar. Used by the Aura
 -- Designer filled health-mirror overlay (AuraDesigner/Factory.lua). A nil bar is a no-op.
--- (Removed 2026-08-04) MirrorHealthValue + its export. It fed a StatusBar parented
+-- MirrorHealthValue + its export. It fed a StatusBar parented
 -- under an aura slot, which DenyTaintedAccessWhenAurasAreSecret forbids outright --
 -- every call was refused in game. The AD health-bar indicator now anchors a texture
 -- to the real bar's fill texture instead, which needs no feed at all. See the HEALTH
@@ -776,8 +776,7 @@ end
 
 -- Sets a texture region from EITHER a Blizzard atlas name or a texture file
 -- path, preferring the atlas (sharper, modern) when the name resolves and
--- falling back to the file path otherwise. Mirrors oUF's approach so status
--- icons render crisply on current clients but never break on older ones.
+-- falling back to the file path otherwise, so status icons render crisply on current clients but never break on older ones.
 --   value   : atlas name OR texture path
 --   l,r,t,b : optional tex coords, applied only on the texture-file path
 function DF:SetIconTextureOrAtlas(region, value, l, r, t, b)

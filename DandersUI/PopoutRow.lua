@@ -78,7 +78,7 @@ local ICON_PATH = UI.MEDIA .. "Icons\\"
 -- reason the row heights do: a widget whose numbers are file-locals can only be
 -- retuned by editing the widget, and a look retuned that way drifts from the one
 -- everything else was tuned against. See that table for what each value is and
--- why -- including why the row no longer takes a checkbox's slot.
+-- why.
 local M = UI.PopoutRow
 
 -- The slot, and the visible PLATE inside it. M.gap of the slot is the gap BELOW
@@ -87,12 +87,7 @@ local M = UI.PopoutRow
 local ROW_H   = M.slot
 local PLATE_H = M.plate
 
--- ☠ NOTHING IN A BOX IS INDENTED. This file used to have ONE constant here,
--- LABEL_X = padX + check + labelGap, and every row laid its label, its control
--- lines and its inline pane at it whether or not a tick was drawn -- a reserved
--- tick column, so ticked and unticked rows lined their names up. The author
--- asked for the opposite (2026-09-19): "everything in a box should always be
--- fully left aligned without indenting". So:
+-- ☠ NOTHING IN A BOX IS INDENTED -- everything in a box is fully left aligned:
 --
 --   * the row's NAME sits at the plate's own padding, or just past the tick on
 --     a row that has one (row._labelX, resolved once at build);
@@ -214,15 +209,12 @@ end
 -- ☠ THE PANE CACHE IS WHERE THE SESSION PILES UP. A pane is built once per
 -- (instance, row) and then KEPT -- an unpinned panel is pooled rather than
 -- destroyed on close, so the cache holds every group the user has opened on
--- every page since login. The shell's accent cascade used to walk that whole
--- pile on every open, twice: measured at 226 ApplyThemeColor calls and 292 frame
--- nodes for one open on a 14-row page, growing with every row ever visited. That
--- is the open-and-close stutter.
+-- every page since login. A shell accent cascade that walked that whole pile on
+-- every open would cost hundreds of ApplyThemeColor calls per open, growing with
+-- every row ever visited -- an open-and-close stutter.
 --
--- ⚠ THE PILE IS NO LONGER UNDER THE MOUNT. That was the OTHER half of the same
--- stutter and it took a second pass to find, because it costs nothing a Lua
--- counter can see -- see THE PANE DOCK below. The cache still holds every pane;
--- the MOUNT holds only the one on screen.
+-- ⚠ AND THE PILE IS NOT UNDER THE MOUNT -- see THE PANE DOCK below. The cache holds
+-- every pane; the MOUNT holds only the one on screen.
 --
 -- Only ONE of those panes is on screen. So the mount takes the cascade over
 -- (Popout.lua's dfCascadeInto) and paints the ACTIVE one, remembering the colour
@@ -253,27 +245,13 @@ end
 -- ============================================================
 -- THE PANE DOCK -- where a pane lives while it is NOT the one on screen.
 -- ------------------------------------------------------------
--- ☠ THE SECOND ACCUMULATOR, and it is not Lua. The accent cascade was the first
--- (see the block above) and stopping it made a re-open flat IN CALL COUNTS --
--- measured here: walk, tint and frame-creation per re-open are identical after
--- one page and after eight. Danders still had the stutter, still growing: "it
--- gets worse the more popups I open, even when opening, switching tabs and
--- opening more."
---
--- What was still growing is the MOUNT'S CHILD LIST. A pane is built once per
--- (instance, row) and then KEPT, and every one of them stayed parented under
--- `_rowMount` -- inside `content`, inside the popout frame. That frame is
--- Show()n on every open and Hide()n on every close, and the ENGINE walks the
--- whole subtree for visibility on each. So an open cost one pane's worth of
--- engine work on the first row of the session and N panes' worth after N rows
--- had been visited, with nothing in Lua to show for it.
---
--- This is the SAME disease the settings window itself had, and it is worth
--- quoting the fix that cured it (DandersFrames_Options/GUI/Panel.lua, THE PAGE
--- DOCK): every built page used to stay parented to `content`, shown or not, and
--- that made opening the window take EIGHT SECONDS -- "the cost is the ENGINE
--- walking that hidden subtree for visibility, not Lua we run". Reparenting the
--- non-current pages away dropped the same Show from 7774ms to 90ms.
+-- ☠ THE SECOND ACCUMULATOR, and it is not Lua. A pane is built once per (instance,
+-- row) and then KEPT; parented under `_rowMount` -- inside `content`, inside the popout
+-- frame -- every kept pane would be in the subtree the ENGINE walks for visibility on
+-- every Show()/Hide() of the popout. An open would then cost one pane's worth of engine
+-- work on the first row of the session and N panes' worth after N rows, with nothing in
+-- Lua to show for it. (The settings window's PAGE DOCK in
+-- DandersFrames_Options/GUI/Panel.lua is the same fix for the same cost: 7774ms -> 90ms.)
 --
 -- So a pane that is not the active one lives HERE instead: a detached,
 -- permanently hidden frame with NO PARENT AT ALL, outside the popout's tree
@@ -295,9 +273,9 @@ end
 --
 -- ⚠ A PARKED PANE KEEPS ITS ANCHORS to the mount (Panel.lua's dock relies on
 -- exactly this for the same reason): it still measures at its real size, so
--- swapTo's re-measure and syncRowPaneHeight read the same numbers they always
--- did. The anchors are re-asserted on adopt anyway rather than trusted to have
--- survived the round trip -- again as AdoptPage does.
+-- swapTo's re-measure and syncRowPaneHeight read the same numbers. The anchors are
+-- re-asserted on adopt anyway rather than trusted to have survived the round trip --
+-- again as AdoptPage does.
 --
 -- ⚠ WHAT MOVES IS rec.mounted, NOT rec.pane. Normally that is exactly one frame
 -- and it is rec.host. The scroll-wrapped case is why it is a LIST: SetScrollChild
@@ -1074,13 +1052,12 @@ function UI:CreatePopoutRow(parent, opts)
                    or (row._strip and M.plateStrip or PLATE_H)
 
     -- ---- chrome ---------------------------------------------------
-    -- A FRAME, not the texture this used to be, and everything the row draws is
-    -- parented to IT rather than to the row. Two reasons, and the second is the
-    -- one that forces it:
+    -- A FRAME, not a texture, and everything the row draws is parented to IT rather
+    -- than to the row. Two reasons, and the second is the one that forces it:
     --
-    --   * the plate carries a real element backdrop now -- fill AND a 1px border
-    --     -- and the border is the kit's own pixel border, which is four textures
-    --     on a frame. A texture cannot own one.
+    --   * the plate carries a real element backdrop -- fill AND a 1px border -- and
+    --     the border is the kit's own pixel border, which is four textures on a
+    --     frame. A texture cannot own one.
     --   * a child frame draws ABOVE its parent's own layers. With the glyphs left
     --     on the row, the plate's fill would cover them.
     --
@@ -1182,12 +1159,10 @@ function UI:CreatePopoutRow(parent, opts)
 
     -- ---- the right-hand columns -----------------------------------
     -- ☠ FIXED COLUMNS, every one of them, and NOT ONE anchored off a self-sizing
-    -- thing. The badge used to take whatever width its text wanted, and the gear
-    -- and the summary hung off its left edge -- so a row reading "3" and a row
-    -- reading "14" put their gears 6px apart and their summaries with them, and a
-    -- column of these read as a ragged list instead of a table. Every offset
-    -- below is a constant, so the four columns land at the same x on every row of
-    -- a parent whatever any of them happens to say.
+    -- thing. A badge taking whatever width its text wants would put the gears of a row
+    -- reading "3" and a row reading "14" 6px apart, and a column of these would read as
+    -- a ragged list instead of a table. Every offset below is a constant, so the four
+    -- columns land at the same x on every row of a parent whatever any of them says.
     local chevron = plate:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(M.chevron, M.chevron)
     chevron:SetPoint("RIGHT", plate, "RIGHT", -PAD_X, 0)
@@ -1281,36 +1256,23 @@ function UI:CreatePopoutRow(parent, opts)
     -- ☠ OPT-IN, ROW BY ROW, AND EVERY LINE BELOW IS DEAD ON A ROW THAT DID NOT
     -- ASK. `opts.footerStrip` is what a page passes; a row without it never
     -- builds a strip, never re-anchors one of the six title-line regions above,
-    -- and draws exactly what it drew before this block existed.
+    -- and draws the no-strip shape.
     --
-    -- ⚠ EVERY SETTINGS ROW IN THE ADDON NOW ASKS. This said "the Frame page is
-    -- the only one converted in this pass" through two releases, and it stayed
-    -- there one sweep too long: the pane-on-the-plate change went out across
-    -- every page reading only the OTHER opt-in (`inline`), so for one commit
-    -- rows mounted their settings inline while still wearing the old top-right
-    -- chevron and count. THE STRIP AND THE INLINE PANE ARE SEPARATE SWITCHES
-    -- and a page needs both -- test_frame_page_builders.lua fails now if any
-    -- popout row on any page is missing this one.
+    -- ⚠ THE STRIP AND THE INLINE PANE ARE SEPARATE SWITCHES and a DF page needs both --
+    -- test_frame_page_builders.lua fails if any popout row on any page is missing this
+    -- one. The opt-in stays for a host embedding the kit that wants the no-strip tether
+    -- (a rounded source RING instead of this band).
     --
-    -- The opt-in itself stays: a host embedding the kit may still want the
-    -- no-strip tether (a rounded source RING instead of this band).
+    -- WHAT THE STRIP IS FOR. Every setting sits behind a row, so every setting is
+    -- invisible until a panel opens; the answer is to put a feature's most-reached-for
+    -- controls back ON the plate, named, and move the way IN to a strip along the bottom
+    -- so it is in the same place on every row whether or not anything was hoisted. The
+    -- cog, the count and the chevron all move down onto it; the title line keeps its
+    -- tick, its name and its summary and is otherwise untouched.
     --
-    -- WHAT THE STRIP IS FOR. Every setting went behind a row in the popout sweep,
-    -- so every setting is invisible until a panel opens; the answer is to put a
-    -- feature's most-reached-for controls back ON the plate, named, and move the
-    -- way IN to a strip along the bottom so it is in the same place on every row
-    -- whether or not anything was hoisted. The cog, the count and the chevron all
-    -- move down onto it; the title line keeps its tick, its name and its summary
-    -- and is otherwise untouched.
-    --
-    -- ☠ THE STRIP IS THE ONLY WAY IN, AND IT TAKES THE MOUSE FOR IT. This is
-    -- the reverse of what the first try shipped ("the strip takes no mouse -- the
-    -- whole row is already the click target"), and the reversal was asked for
-    -- after living with it: "the popout should only be triggered from the bottom
-    -- bar, same with the on hover highlight instead of the whole row being
-    -- clickable". A plate whose every square inch opens a panel is a plate the
-    -- cursor cannot rest on, and a whole row lighting up wherever the cursor
-    -- lands says nothing about where to press.
+    -- ☠ THE STRIP IS THE ONLY WAY IN, AND IT TAKES THE MOUSE FOR IT. A plate whose every
+    -- square inch opens a panel is a plate the cursor cannot rest on, and a whole row
+    -- lighting up wherever the cursor lands says nothing about where to press.
     --
     -- So the strip is a BUTTON: the only part of the plate that opens the panel
     -- and the only part that lights on hover. The row's own OnClick returns early
@@ -1318,11 +1280,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- PLATE. The tick and the hoisted controls keep the mouse they always had --
     -- they sit on the title line and the control lines, not on this band.
     --
-    -- ⚠ THE OLD OBJECTION STILL STANDS FOR WHAT LIES OVER THE STRIP: a frame
-    -- drawn over a control eats that control's clicks (it has shipped twice in
-    -- this rework), so the clip and the rounded shape stacked on this band still
-    -- say EnableMouse(false) out loud -- and now they would be eating the one
-    -- click the row answers rather than a click the row could catch anyway.
+    -- ⚠ A frame drawn over a control eats that control's clicks, so the clip and the
+    -- rounded shape stacked on this band say EnableMouse(false) out loud -- otherwise
+    -- they would eat the one click the row answers.
     --
     -- ⚠ NO RegisterForClicks. A Button answers LeftButtonUp out of the box on
     -- the client, which is what the ROW itself has always run on -- so stating it
@@ -1664,16 +1624,10 @@ function UI:CreatePopoutRow(parent, opts)
     end
 
     -- ---- the summary ------------------------------------------------
-    -- ☠ THE SUMMARY IS NOT TOLD WHAT THE PLATE IS SHOWING, AND NO LONGER NEEDS
-    -- TO BE. It was, for one pass: a Frame Size row that hoists width and height
-    -- was printing "125x64 · Spacing 2" on the title line while 125 and 64 sat in
-    -- the controls directly beneath it, so the function took a second argument
-    -- naming the keys on the plate and left them out. Then a strip row stopped
-    -- painting a summary at all while it is ON (see below), which made every one
-    -- of those subtractions unreachable -- and the shown set found a better
-    -- consumer: it is what hides the PANE's copy of a control the plate is
-    -- already drawing (row:SetOnShownKeysChanged). One setting, one widget, one
-    -- count. The summary is back to its one argument, the db.
+    -- The summary takes one argument, the db, and is not told what the plate is
+    -- showing: a strip row does not paint a summary at all while it is ON (see below),
+    -- and the shown set is what hides the PANE's copy of a control the plate is already
+    -- drawing (row:SetOnShownKeysChanged). One setting, one widget, one count.
     --
     -- ⚠ RE-PAINTED FROM THE LAYOUT, not only from the refresh, because the row's
     -- off text and its summary swap on a state the layout can be the first to
@@ -1750,7 +1704,7 @@ function UI:CreatePopoutRow(parent, opts)
     end
 
     -- ---- A STRIP ROW WITH NOTHING ON ITS PLATE IS A BUTTON ROW -------
-    -- ☠ The author (2026-09-19): every settings row that has no hoisted controls
+    -- ☠ The author: every settings row that has no hoisted controls
     -- and no inline box draws as a compact BUTTON ROW -- one short line, the
     -- whole row the click target, the count in its corner -- instead of a title
     -- line with a strip under it and nothing between them.
@@ -2049,8 +2003,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- i.e. by their VERTICAL MIDDLE -- to the plate, and the plate's middle
         -- is no longer the title line's once anything is drawn under it. One
         -- offset, applied to all of them, keeps the constraints consistent by
-        -- construction (see section 24 of the rework log for what two vertical
-        -- constraints that disagree actually do to a frame).
+        -- construction (two vertical constraints that disagree stretch the frame).
         -- ⚠ ...AND WHENEVER THE SHAPE MOVED, whether or not the offset did: a
         -- button row and a strip row can both sit at headDY 0 with the chevron
         -- in two different places.
@@ -2235,10 +2188,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- OnValueChanged, the dropdown menu button's OnClick, the align grid's
     -- WriteKey), because a consumer may be running a RUNTIME OVERLAY -- where the
     -- write belongs to a baseline table rather than the live one -- or EDITING a
-    -- layout, where the write also has to be recorded as an override. This row's
-    -- tick used to write the key bare, so a tick and an ordinary checkbox bound to
-    -- the SAME key disagreed: half the consumer's own panel honoured its overlay
-    -- and half of it wrote straight through. One key, one write path.
+    -- layout, where the write also has to be recorded as an override. A bare write
+    -- here would make a tick and an ordinary checkbox bound to the SAME key disagree.
+    -- One key, one write path.
     --
     -- A {get, set} toggle is NOT the kit's db to gate -- set() IS the consumer's
     -- write path, and it is left entirely alone.
@@ -2714,32 +2666,25 @@ function UI:CreatePopoutRow(parent, opts)
 
     -- ---- the popout -----------------------------------------------
 
-    -- ☠ THE STRIP'S CLICK IS A TOGGLE. With the strip the only way in (section
-    -- 21), pressing it while its own panel is up used to RAISE that panel -- a
-    -- click that visibly did nothing, because the panel was already in front. In
-    -- game the ask was direct: "clicking the bottom bar of the row should close
-    -- the popout instead of just reopening it". So: anything up about this row
-    -- goes down; nothing up, and it opens.
+    -- ☠ THE STRIP'S CLICK IS A TOGGLE. With the strip the only way in, pressing it while
+    -- its own panel is up would otherwise RAISE an already-front panel -- a click that
+    -- visibly does nothing. So: anything up about this row goes down; nothing up, and it
+    -- opens.
     --
-    -- ⚠ PINNED PANELS GO DOWN TOO. The first cut spared them -- pinning read as
-    -- "keep this up whatever I do next", and the panel's cross was the way to
-    -- take one down -- and in game that was wrong the first time it was tried:
-    -- a "Pin settings in popout" row opens its panel PINNED (section 18.4), so
-    -- sparing pinned panels made that strip the one strip that could never
-    -- close what it opened ("it should close the pinned one if clicked again").
-    -- A click on the row's own strip is a deliberate act on THIS row, and the
-    -- pin was about surviving a page change, not about surviving that click.
+    -- ⚠ PINNED PANELS GO DOWN TOO. A "Pin settings in popout" row opens its panel
+    -- PINNED, so sparing pinned panels would make that strip the one strip that could
+    -- never close what it opened. A click on the row's own strip is a deliberate act on
+    -- THIS row; the pin is about surviving a page change, not about surviving that click.
     --
     -- EVERY panel about the row, not livePanel's favourite. The row's own verbs
     -- never bind a pinned and a loose panel at once (a re-open RAISES the pinned
-    -- one, section 17.3), so today this loop finds one panel -- but a toggle that
-    -- closed only the preferred one would leave any other up with the strip
-    -- still lit, and stating "all of them" costs nothing. Collected before
-    -- anything is closed, for the reason closeLoosePanels gives: Close reaches
-    -- back into `_bound`, and mutating it mid-pairs is how one of two survives.
+    -- one), so normally this loop finds one panel -- but a toggle that closed only the
+    -- preferred one would leave any other up with the strip still lit. Collected before
+    -- anything is closed, for the reason closeLoosePanels gives: Close reaches back into
+    -- `_bound`, and mutating it mid-pairs is how one of two survives.
     --
-    -- The ROW's own OpenPopout keeps raise semantics: every unconverted page's
-    -- whole-plate click is unchanged, and a consumer verb that says "open" opens.
+    -- The ROW's own OpenPopout keeps raise semantics: a consumer verb that says "open"
+    -- opens.
     function row:TogglePopout()
         local up
         for po in pairs(row._bound) do

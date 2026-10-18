@@ -45,17 +45,11 @@ local POPUP_COLORS = {
     orange     = {r = 1.0, g = 0.6, b = 0.1},
 }
 
--- ☠ PASS `text` THROUGH StyleButton -- do not build the label by hand.
---
--- This used to create its own FontString as btn.label. StyleButton's grow-only
--- auto-width (Widgets.lua) lives INSIDE `if opts.text ~= nil then` and measures
--- btn.Text, so for these buttons it did not merely miss -- it never ran at all, and
--- Import All / Compatible Only / Cancel stayed pinned to a width measured against
--- their ENGLISH labels. That is exactly the clipping the auto-width default was added
--- to end. The sibling helpers in this same file (CreateChoiceButton, CreateButton)
--- always passed text through and never had the problem.
---
--- btn.label is kept as an alias so existing callers that relabel through it still work.
+-- ☠ PASS `text` THROUGH StyleButton -- do not build the label by hand. StyleButton's
+-- grow-only auto-width (Widgets.lua) runs only when opts.text is given and measures
+-- btn.Text, so a hand-built label would leave the button pinned to a width measured
+-- against its English label and clip translations.
+-- btn.label is kept as an alias for callers that relabel through it.
 local function CreateStyledButton(parent, text, width, height)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     -- Shared button look; ClickCasting green accent on hover (matches its checkboxes).
@@ -495,6 +489,10 @@ function CC:ImportProfile(importString, newProfileName)
     if data.profile.bindings ~= nil and type(data.profile.bindings) ~= "table" then
         return false, L["Invalid profile data"]
     end
+    -- A string from the other game version (retail <-> WoW Forever) carries spells this
+    -- client does not have.
+    local refusal = DF.FlavorCorrection and DF.FlavorCorrection.ClickCastImportRefusal(data)
+    if refusal then return false, refusal end
     
     -- Analyze bindings for compatibility
     local sourceClass = data.class

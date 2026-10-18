@@ -350,61 +350,41 @@ end
 -- ============================================================
 -- THE BUILD, IN SLICES
 -- ------------------------------------------------------------
--- Building the registry means RE-RUNNING EVERY PAGE'S BUILDER -- ~34 of them,
--- 700-odd widgets -- and doing all of that inside ONE execution is what the
--- ledger's first open was paying for ("lags like crazy" in game). The work is
--- not removable: the index is built from the real builders precisely so it
--- cannot drift from what the pages show. What IS removable is the single frame.
+-- Building the registry means RE-RUNNING EVERY PAGE'S BUILDER -- ~34 of them, 700-odd
+-- widgets. The work is not removable (the index is built from the real builders so it
+-- cannot drift from what the pages show); what IS removable is doing it in one frame.
 --
--- So a build is decomposed into STEPS -- one page each -- and there are two
--- drivers over the same list:
---   * BuildFullRegistry          runs every step NOW. The unchanged contract,
---                                for any caller that needs an answer inside its
---                                own execution (Find, and every existing site).
---   * BuildFullRegistryBudgeted  spends at most REGISTRY_BUILD_BUDGET_MS per
---                                execution and re-queues the rest on the next
---                                frame, so no single frame carries more than a
---                                slice. The ledger and the search box use this.
+-- So a build is decomposed into STEPS -- one page each -- with two drivers over the list:
+--   * BuildFullRegistry          runs every step NOW, for any caller that needs an answer
+--                                inside its own execution (Find, and every existing site).
+--   * BuildFullRegistryBudgeted  spends at most REGISTRY_BUILD_BUDGET_MS per execution and
+--                                re-queues the rest on the next frame. The ledger and the
+--                                search box use this.
 --
--- ★ THE PATTERN IS ELLESMERE'S RunBudgeted (EllesmereUI.lua), and so are its
--- rules: nothing runs in the caller's own execution (the first slice is deferred
--- too, so a caller that already spent real budget never gets this stacked on
--- top); every step runs under pcall with the error routed to the standard
--- handler and the chain CONTINUING, because a build that died mid-way would
--- strand every later page AND the completion callback, which is worse than one
--- page's failure; and every continuation gets a fresh watchdog budget.
+-- Its rules: nothing runs in the caller's own execution (the first slice is deferred too,
+-- so a caller that already spent real budget never gets this stacked on top); every step
+-- runs under pcall with the error routed to the standard handler and the chain CONTINUING,
+-- because a build that died mid-way would strand every later page AND the completion
+-- callback; and every continuation gets a fresh watchdog budget.
 --
--- ☠ WHAT IT DOES NOT DO: cache a registry per mode. That was considered and it
--- is not safe here, because a registry entry is not pure data -- `entry.callback`
--- and `entry.values` are captured from the PAGE BUILDER at the moment it ran, in
--- the mode it ran in. The Pet Frames anchor dropdown is the standing proof: its
--- option labels are "Below Party" / "Below Raid" by mode and its callback is
--- `isRaidMode and <raid updater> or <party updater>` (GUI/Pages/Options.lua).
--- Handing a raid search result the party entry would show the wrong words and
--- run the wrong updater. `entry.sourceWidget` has the same problem from the
--- other end: it points at a widget the NEXT build retires. So a mode switch
--- still re-pays a full build -- it just no longer pays for it in one frame.
+-- ☠ NO REGISTRY CACHE PER MODE: an entry is not pure data. `entry.callback` and
+-- `entry.values` are captured from the PAGE BUILDER in the mode it ran in -- the Pet Frames
+-- anchor dropdown's labels ("Below Party" / "Below Raid") and its callback
+-- (`isRaidMode and <raid updater> or <party updater>`) both differ by mode -- and
+-- `entry.sourceWidget` points at a widget the NEXT build retires.
 --
--- ★ ...EXCEPT THAT "A FULL BUILD" NO LONGER MEANS "EVERY BUILDER RUNS". Each
--- page keeps one retained build PER MODE (GUI/Panel.lua), and each build keeps
--- the entries its own builder registered (Register's capture, above). Those are
--- per-mode by construction -- captured in the mode the build is for, callbacks,
--- dropdown values, mode filtering and all -- which is precisely the property the
--- per-mode cache above lacked. So a step whose page still holds a VALID build
--- for the mode being indexed takes that build's entries and runs nothing; only a
--- page with no valid build for this mode is built, and that build is then kept.
--- Every index build used to trash ~34 pages (~800 KB each); now it builds a page
--- only the first time that page is needed in a mode, or after its data changed.
--- sourceWidget stays right too: it points into the build the entries came from,
--- which is alive for as long as that build is valid.
--- ⚠ A page answers for itself (page:GetIndexEntries): it says no unless the
--- build would be served by RefreshCached as it stands -- same mode, same live
--- mode table, same disabled state -- and a page with a content cache key
--- (GUI.PageCacheKeys) always says no.
+-- ★ WHAT IS REUSED INSTEAD: each page keeps one retained build PER MODE (GUI/Panel.lua),
+-- and each build keeps the entries its own builder registered (Register's capture, above).
+-- Those are per-mode by construction, so a step whose page holds a VALID build for the
+-- mode being indexed takes that build's entries and runs nothing; only a page with no
+-- valid build for this mode is built, and that build is then kept. sourceWidget stays
+-- right too: it points into the build the entries came from, alive while that build is.
+-- ⚠ A page answers for itself (page:GetIndexEntries): it says no unless the build would be
+-- served by RefreshCached as it stands -- same mode, same live mode table, same disabled
+-- state -- and a page with a content cache key (GUI.PageCacheKeys) always says no.
 -- ============================================================
 
--- Milliseconds of CPU one slice may spend. Ellesmere's default, and for the same
--- reason: small enough that no single execution can approach the 12.1 script
+-- Milliseconds of CPU one slice may spend: small enough that no single execution can approach the 12.1 script
 -- watchdog on any machine at any page count.
 local REGISTRY_BUILD_BUDGET_MS = 8
 
@@ -1086,14 +1066,10 @@ function Search:CreateResultWidget(parent, entry, index)
         inlineWidget = self:CreateInlineDropdown(widget, entry)
     end
 
-    -- ☠ Take the slot height from the WIDGET, never from a number typed here.
-    -- Every shared builder stamps container.preferredHeight from GUI.RowHeight,
-    -- which owns the slot for its type (see GUI.RowHeight). The four literals
-    -- that used to live here -- 30 checkbox, 50 slider, 30 colourpicker, 55
-    -- dropdown -- disagreed with that table on all four counts (35/46/38/54),
-    -- which is why the rows read as too tall and unevenly spaced against the
-    -- real settings pages. Reading preferredHeight means a future change to
-    -- GUI.RowHeight reaches the search results for free.
+    -- ☠ Take the slot height from the WIDGET, never from a number typed here. Every shared
+    -- builder stamps container.preferredHeight from GUI.RowHeight, which owns the slot for its
+    -- type, so search results space exactly like the real settings pages and follow any
+    -- change to GUI.RowHeight for free.
     local widgetHeight = (inlineWidget and inlineWidget.preferredHeight)
         or DF.GUI.RowHeight.checkbox
     
@@ -1218,7 +1194,7 @@ end
 -- NAVIGATION
 -- ============================================================
 -- settingKey is still accepted so callers need not change, but nothing reads it
--- since the popout-row jump went (2026-09-26).
+-- since the popout-row jump went.
 function Search:NavigateToTab(tabName, sectionName, settingKey)
     if not tabName then return end
 
@@ -1230,18 +1206,14 @@ function Search:NavigateToTab(tabName, sectionName, settingKey)
     end
     self:HideResults()
 
-    -- ☠ DELEGATE TO THE SHARED LINK ACTION, do not hand-roll the jump. This used to do
-    -- its own Tabs[name]:Click() plus a timed ScrollToSection -- which scrolled correctly
-    -- and then never flashed, so a search result landed you on the right page with no
-    -- indication of WHICH setting you had come for, while every other cross-link in the
-    -- GUI pulses its target. GUI:LinkToSetting is that behaviour, and it already calls
-    -- this file's own ScrollToSection to do the scrolling half; it also owns the two
-    -- timings (0.12 for the tab to build, 0.05 for the scroll to settle) that the
-    -- hand-rolled copy had guessed at differently.
+    -- ☠ DELEGATE TO THE SHARED LINK ACTION, do not hand-roll the jump. GUI:LinkToSetting
+    -- switches the tab, calls this file's own ScrollToSection, and pulses the target like
+    -- every other cross-link in the GUI; it also owns the two timings (0.12 for the tab to
+    -- build, 0.05 for the scroll to settle).
     --
     -- ⚠ Guard the function, not the table: LinkToSetting lives in GUI/Sections.lua and a
-    -- load-order slip would otherwise be a silent dead breadcrumb. Warn rather than fall
-    -- back to a worse copy of the same thing.
+    -- load-order slip would otherwise be a silent dead breadcrumb. Warn rather than fall back
+    -- to a worse copy of the same thing.
     if DF.GUI and DF.GUI.LinkToSetting then
         DF.GUI:LinkToSetting({
             page    = tabName,
@@ -1250,7 +1222,7 @@ function Search:NavigateToTab(tabName, sectionName, settingKey)
             -- (`opts.fill ~= false`), so passing border alone would outline AND wash it.
             -- A search lands you on a whole section, which is a large target; the filled
             -- pulse over that much area is heavy, and the outline reads better at that
-            -- size (Krathe, 2026-08-07).
+            -- size.
             flash   = { fill = false, border = true },
         })
     else
@@ -1344,20 +1316,13 @@ function Search:CreateSearchBar(parent)
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
     
-    -- ☠ THE SHARED INPUT CHROME, not a private copy of it. The two literals that used to
-    -- be here were `0, 0, 0, 0.7` fill and `0.3, 0.3, 0.3, 1` border -- and that border is
-    -- byte-identical to Widgets.lua's INPUT_EDGE, i.e. this was the shared look, retyped.
-    -- INPUT_FILL/INPUT_EDGE are file-locals over there, so GUI:StyleEditBox IS the
-    -- supported way to reach them; there is no palette entry to reference instead.
+    -- ☠ THE SHARED INPUT CHROME, not a private copy of it. INPUT_FILL/INPUT_EDGE are
+    -- file-locals in Widgets.lua, so GUI:StyleEditBox IS the supported way to reach them;
+    -- there is no palette entry to reference instead.
     --
-    -- skipFont because the FRAME is the well here, not the editbox: the editbox is inset
-    -- inside it to clear the leading icon, so it is this frame that needs the backdrop and
-    -- the editbox that needs the font (set below).
-    --
-    -- ⚠ ONE DELIBERATE VISUAL CHANGE: the fill goes 0.7 -> 0.5 alpha, because that is what
-    -- INPUT_FILL is. The search box stops being very slightly darker than every other
-    -- input in the addon. Say the word if you want the old value back -- it would mean
-    -- re-introducing a literal, so it should be a decision rather than a drift.
+    -- skipFont because the FRAME is the well here, not the editbox: the editbox is inset inside
+    -- it to clear the leading icon, so this frame needs the backdrop and the editbox needs the
+    -- font (set below).
     DF.GUI:StyleEditBox(frame, { skipFont = true })
 
     local icon = frame:CreateTexture(nil, "OVERLAY")
@@ -1377,8 +1342,7 @@ function Search:CreateSearchBar(parent)
     local placeholder = frame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
     placeholder:SetPoint("LEFT", 26, 0)
     placeholder:SetText(L["Search..."])
-    -- textDim (0.6) rather than the 0.5 literal that was here. A hair lighter; the point
-    -- is that placeholder text now moves with the palette instead of being pinned.
+    -- textDim from the palette, so placeholder text moves with it instead of being pinned.
     local cDim = DF.GUI.Colors.textDim
     placeholder:SetTextColor(cDim.r, cDim.g, cDim.b)
     
@@ -1525,23 +1489,18 @@ function Search:CreateResultsPanel(parent)
     return panel
 end
 
--- ☠☠ THE RESULTS PANEL IS PARKED WHEN IT IS HIDDEN, and this is the whole of a
--- 1.2s open / 3.2s close. Every result the user has ever seen keeps its card in
--- `panel.cardCache` -- each one a live inline widget -- and cards are only ever
--- HIDDEN, never released (see the note at AcquireResultWidget). Hidden is not
--- enough: the engine's Show/Hide walk costs by PARENTAGE, not by visibility, so
--- a session's worth of cards sitting inside the window made every open and close
--- of the settings window drag the whole cache with it.
+-- ☠☠ THE RESULTS PANEL IS PARKED WHEN IT IS HIDDEN. Every result the user has ever seen
+-- keeps its card in `panel.cardCache` -- each a live inline widget -- and cards are only
+-- ever HIDDEN, never released (see the note at AcquireResultWidget). Hidden is not enough:
+-- the engine's Show/Hide walk costs by PARENTAGE, not by visibility, so a session's worth
+-- of cards inside the window would make every open and close of the settings window drag
+-- the whole cache (measured 1201ms open / 3201ms close in the window, 4.4ms / 24.5ms
+-- reparented to the dock). Same trick, same reason, as the page dock itself -- "never leave
+-- a mass-built hidden tree parented under a frame that shows and hides".
 --
--- Measured in game on 2026-09-15: open 1201ms / close 3201ms with the panel in
--- the window; 4.4ms / 24.5ms with it reparented to the dock. Same trick, and the
--- same reason, as the page dock itself -- "never leave a mass-built hidden tree
--- parented under a frame that shows and hides".
---
--- ⚠ NOT a fix for the cache growing. The cards still accumulate for the life of
--- the session; parking only takes them out of the window's walk, which is what
--- the user feels. Capping the cache is a separate change and a behaviour one
--- (a cap that evicts is a cap that can drop a result the user is looking at).
+-- ⚠ NOT a fix for the cache growing: the cards still accumulate for the session; parking
+-- only takes them out of the window's walk. Capping the cache is a behaviour change (a cap
+-- that evicts can drop a result the user is looking at).
 function Search:_ParkResultsPanel()
     local panel = self.ResultsPanel
     if not panel or panel._parked then return end
@@ -1678,17 +1637,14 @@ function Search:ShowResults(query)
     -- Back into the window before anything measures or lays out against it.
     self:_AdoptResultsPanel()
 
-    -- ☠ THE FIRST SEARCH OF A SESSION IS A FULL INDEX BUILD, and it used to run
-    -- inside this call -- one frame, ~34 page builders, the same hitch the
-    -- changed-settings ledger was reported for. It is budgeted now, so the panel
-    -- SAYS it is indexing and the query is re-run when the registry lands.
+    -- ☠ THE FIRST SEARCH OF A SESSION IS A FULL INDEX BUILD (~34 page builders), so it is
+    -- budgeted: the panel SAYS it is indexing and the query is re-run when the registry lands.
     --
-    -- ⚠ THE QUERY IS RE-READ FROM THE BOX on the way back, not replayed from
-    -- this closure: a build takes several frames and the user goes on typing
-    -- through them, so answering the query they had when they started would put
-    -- stale results under a box that says something else.
-    -- (An index that can be assembled from the pages' retained builds is, first:
-    -- no builder runs and nothing waits -- see TryReuseRegistry.)
+    -- ⚠ THE QUERY IS RE-READ FROM THE BOX on the way back, not replayed from this closure: a
+    -- build takes several frames and the user goes on typing, so the query they started with
+    -- would put stale results under a box that says something else.
+    -- (An index that can be assembled from the pages' retained builds comes first: no builder
+    -- runs and nothing waits -- see TryReuseRegistry.)
     self:TryReuseRegistry()
     if self:RegistryIsStale() or self.RegistryBuilding then
         self:ShowBuildingMessage()
@@ -1763,12 +1719,9 @@ function Search:HideResults()
     self:CancelQueuedSearch()
     if self.ResultsPanel then
         self.ResultsPanel:Hide()
-        -- Reset the no-results text in case it was changed to the combat message.
-        -- ☠ Must restore the SAME string the panel was built with. This used to
-        -- put back a different, terser one, and it runs on every hide rather than
-        -- only after a combat message -- so the helpful two-line prompt was only
-        -- ever seen until the first time search was closed, then gone for the
-        -- session. EmptyMessage() is the single source for both.
+        -- Reset the no-results text in case it was changed to the combat message. EmptyMessage()
+        -- is the single source for both, and this runs on every hide, so it must restore the SAME
+        -- string the panel was built with.
         if self.ResultsPanel.noResults then
             self.ResultsPanel.noResults:SetText(EmptyMessage())
         end

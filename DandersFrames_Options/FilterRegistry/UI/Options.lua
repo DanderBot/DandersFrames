@@ -114,30 +114,17 @@ end
 -- list. A clean import (nothing clashes) stays a single paste with no extra step;
 -- a clashing one gets Duplicate's treatment -- you see the name, pre-filled with a
 -- suggestion that does not collide, and can change it before anything is saved.
---
--- Without this, import was the one path that committed a name you never saw: two
--- rows reading the same thing, and no way to tell from the Buffs page which one you
--- had ticked. Worst through "Import as Copy", which promises a distinguishable copy
--- and produced a row identical in both name AND spells.
+-- Otherwise "Import as Copy" would produce a row identical in both name AND spells.
 --
 -- ⚠ The prompt is CHAINED. Popups are a singleton here, so opening one from inside
 -- another's handler needs the next frame; the "Import as Copy" route reaches this
 -- from a popup button.
--- ☠ THIS FUNCTION IS AT FILE SCOPE, so it can see NEITHER of the two things it needs.
--- `R` (local R = DF.FilterRegistry) and `SelectFilter` are both declared INSIDE
--- DF:BuildFilterDesignerPage, hundreds of lines below -- a local declared later, in an
--- inner block, is not an upvalue of a function defined earlier at file scope. Both
--- therefore compiled as nil globals and every route through single-filter import died on
--- "attempt to index a nil value (global 'R')": a clean import, and "Import as Copy".
---
--- The regression came from hoisting the body OUT of BuildFilterDesignerPage to chain the
--- rename prompt; the references came with it and the scope did not. This file already
--- warns about the identical hazard for `GUI` a hundred lines above -- same trap, second
--- name.
---
--- Fixed by resolving R at call time (DF.FilterRegistry is the main addon's, resident
--- before this companion file ever runs) and by promoting SelectFilter to a file-scope
--- forward declaration that BuildFilterDesignerPage assigns into.
+-- ☠ THIS FUNCTION IS AT FILE SCOPE, so it cannot see locals declared inside
+-- DF:BuildFilterDesignerPage (a local declared later, in an inner block, is not an
+-- upvalue of a function defined earlier) -- they would compile as nil globals. So R is
+-- resolved at call time (DF.FilterRegistry is the main addon's, resident before this
+-- companion file runs) and SelectFilter is a file-scope forward declaration that
+-- BuildFilterDesignerPage assigns into. Same trap as `GUI`, noted further up.
 local SelectFilter   -- forward declaration; assigned in DF:BuildFilterDesignerPage
 
 local function ImportNamed(def)
@@ -218,14 +205,12 @@ local function ScrubDeletedFilter(cfId)
             end
         end
     end
-    -- ☠ A @custom:<id> LIVES IN FOUR PLACES, not one. Beyond a group's filterSelection
-    -- this function used to scrub, the id appears as a plain STRING in three more:
+    -- ☠ A @custom:<id> LIVES IN FOUR PLACES, not one. Beyond a group's filterSelection,
+    -- the id appears as a plain STRING in three more:
     --   (a) the aura KEY of a filter-owned effect  -- cfg.auras[spec][key] / cfg.otherAuras
     --   (b) an effect's trigger list               -- auraCfg[typeKey].triggers[i]
     --   (c) a condition group's trigger list       -- .conditions.groups[j].triggers[k]
-    -- Core/Profile.lua's export and import walks already handle (a) and (b) and say
-    -- outright that "collectSel never sees them" -- so the shapes were known here and the
-    -- scrub simply never caught up.
+    -- Core/Profile.lua's export and import walks handle the same shapes.
     --
     -- Leaving them dangling is not cosmetic: ResolveADFilterRef memoises `false`, the
     -- effect renders nothing with no warning, and -- because nextFilterID lives in the
@@ -418,34 +403,24 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local CHIP_H = 22
     local CHIP_ROW_H = CHIP_H + 10
 
-    -- ☠ TOP_INSET IS NOW 0, and it must stay in the arithmetic rather than being
-    -- deleted. It reserved vertical room for the Copy/Sync/Reset row the page host
-    -- Add()s above this content -- 25 for the buttons plus the standard gap. This
-    -- page owns no per-mode keys since filter selection moved to the consumers, so
-    -- CreateCopyButton returns a zero-height placeholder and there is no row to
-    -- clear: the reservation was pure empty space at the top of the page.
+    -- ☠ TOP_INSET IS 0, and it must stay in the arithmetic rather than being deleted. It
+    -- is the room reserved for a Copy/Sync/Reset row above this content; this page owns no
+    -- per-mode keys, so CreateCopyButton returns a zero-height placeholder.
     --
     -- ⚠ It is declared HERE, beside PANEL_CHROME_H, and CHROME is written in terms
     -- of it. Those two numbers have to move together -- the inset positions the
     -- banner, CHROME tells the panel sizer and the page-height spacer how much room
-    -- the banner and everything around it take -- and this file has already been
-    -- bitten twice by exactly that class of paired constant drifting apart (see the
-    -- ROW2_Y / HEADER_H note in the right-hand header). Written as a sum, a change
-    -- to the inset cannot silently leave the sizer behind.
+    -- the banner and everything around it take (see the ROW2_Y / HEADER_H note in the
+    -- right-hand header for the same paired-constant hazard). Written as a sum, a
+    -- change to the inset cannot silently leave the sizer behind.
     --
-    -- ☠ ABOVE THE PANELS ONLY -- BELOW_PANELS_H is the other end. This was ONE
-    -- number (66) covering both, and splitting it is fine; what was NOT fine was
-    -- the first attempt at the bottom half, which measured dbFreshLabel:GetHeight()
-    -- and called that "measured, not guessed". It was neither: GUI:CreateLabel
-    -- opens at a placeholder SetSize(w, 40) and only converges to the real wrapped
-    -- height in a deferred pass that is gated on `frame.settingsGroup` -- and this
-    -- label is anchored straight to leftPanel, so it is in no group, the converge
-    -- never runs, and GetHeight() returns the placeholder 40 for the life of the
-    -- page. A hard-coded 40 wearing a measurement's clothes.
+    -- ☠ ABOVE THE PANELS ONLY -- BELOW_PANELS_H is the other end, and it is a constant,
+    -- not dbFreshLabel:GetHeight(): GUI:CreateLabel opens at a placeholder
+    -- SetSize(w, 40) and only converges to the real wrapped height in a deferred pass
+    -- gated on `frame.settingsGroup`. This label is anchored straight to leftPanel, in no
+    -- group, so GetHeight() returns the placeholder 40 for the life of the page.
     --
-    -- 44 is HEAD's own allowance, arrived at before this session and correct: the
-    -- 2px gap under the panel, the note, and a little air. Restored rather than
-    -- re-derived.
+    -- 44 = the 2px gap under the panel, the note, and a little air.
     --
     -- 22 = 10 top pad + 12 banner-to-panel gap. The banner's own height is added by
     -- the caller, since it re-wraps independently of the viewport.
@@ -671,17 +646,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     --
     -- ☠ GUI:LinkToSetting, not a hand-rolled SelectTab + timer. It owns both timings
     -- (0.12 for the tab to build, 0.05 for the scroll to settle) and it calls
-    -- Search:ScrollToSection itself. The search breadcrumb learned this the hard way
-    -- -- see the note in Search:NavigateToTab.
+    -- Search:ScrollToSection itself -- see the note in Search:NavigateToTab.
     --
     -- ⚠ BORDER ONLY, and both flags are required: FlashWidget's fill is opt-OUT
     -- (`opts.fill ~= false`), so passing border alone outlines AND washes the target.
     -- "Defensive Filters" resolves to a whole settings group, which is a large area
-    -- for a filled pulse (same call as the search breadcrumb, Krathe 2026-08-07).
+    -- for a filled pulse (same call as the search breadcrumb).
     --
-    -- Each page listed below now has a named section to land on, because each now
-    -- picks its own filters. Before the move only the Defensive Icon did, which is
-    -- why it was the only entry here.
+    -- Each page listed below has a named section to land on, because each picks its own
+    -- filters.
     --
     -- ⚠ The Aura Designer has no entry ON PURPOSE. Its filter selection is not a page
     -- section -- it lives per filter GROUP, inside a card the user may never have
@@ -714,26 +687,23 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     end
     --
     -- Three beats, in the order a newcomer needs them: what a filter IS, what you may
-    -- do to one, and what selecting it does. The first predecessor opened on the
-    -- freedom ("You have full control over buff filters"), which answers a question the
-    -- reader has not reached -- they do not yet know what the thing is.
+    -- do to one, and what selecting it does. Opening on the freedom ("you have full
+    -- control") would answer a question the reader has not reached.
     --
     -- ⚠ Beat one is the em-dash appositive ("lists of the buffs you want to see"),
     -- and it has to stay a DEFINITION: naming the activity ("This page designs BUFF
     -- filters") still assumes the reader knows the noun.
     --
-    -- ⚠ This banner now carries the ENTIRE model, because the section headers no
-    -- longer help: they read "Built-In Filters" / "Custom Buff Filters", which name
-    -- the groups but say nothing about the checkbox. "Then pick the ones you want"
-    -- is therefore the ONLY statement of what a tick does -- do not trim that clause
-    -- as redundant. It is not redundant any more.
-    --
+    -- ⚠ This banner carries the ENTIRE model: the section headers ("Built-In Filters" /
+    -- "Custom Buff Filters") name the groups but say nothing about the checkbox. "Then
+    -- pick the ones you want" is the ONLY statement of what a tick does -- do not trim
+    -- that clause as redundant.
     --
     -- It does NOT say "editing a filter changes it everywhere it is used". That
-    -- warning is not dropped, it is placed where it can be accurate: the STATUS LINE
-    -- under each filter's name lists that filter's actual consumers, live, which a
-    -- fixed sentence cannot do -- whether the Aura Designer uses a given filter
-    -- depends on whether you have built a filter group and linked it.
+    -- warning lives where it can be accurate: the STATUS LINE under each filter's name
+    -- lists that filter's actual consumers, live, which a fixed sentence cannot do --
+    -- whether the Aura Designer uses a given filter depends on whether you have built a
+    -- filter group and linked it.
     --
     -- ⚠ SIX %s, and they are NOT all the same kind. In reading order:
     --   1  Buff Filters      -- coloured emphasis (green)
@@ -745,24 +715,21 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- The four links must stay bare destination names -- an article glued on in
     -- translation lands inside the underline.
     --
-    -- ⚠ #2 reads "Buff Bar" because that is now the PAGE's name -- the Buffs page was
-    -- renamed to Buff Bar in the same change, precisely so that the thing this sentence
-    -- names and the thing the link lands on are the same words. One string,
-    -- L["Buff Bar"], shared by the nav row, every See Also and this link.
+    -- ⚠ #2 is L["Buff Bar"], the PAGE's name, shared by the nav row, every See Also and
+    -- this link, so the thing this sentence names and the thing the link lands on are the
+    -- same words.
     --
     -- ⚠ #1 and #5 reuse L["Buff Filters"] / L["Debuff Filters"] -- the SAME strings
     -- BANNER_LINK_SECTION above scrolls to and pulses. So the coloured phrase here is
     -- literally the name of the group the reader lands on, not a paraphrase of it.
     -- That is why they are Title Case mid-sentence; do not "fix" the capitals.
     --
-    -- ⚠ Colour, not caps, and not bold. The draft this replaced shouted BUFF to say
-    -- buffs-only; Krathe's call 2026-08-10 was to emphasise instead. Bold is not
-    -- available -- a FontString has no weight axis, "bold" in WoW means either a
-    -- different font FILE (we ship Roboto-Bold, but SetSettingsFont resolves the
-    -- USER's chosen settings font, so hard-coding one face makes the emphasised words
-    -- the only text on the page ignoring that setting) or the OUTLINE flag, which at
-    -- 11px reads as smeared rather than heavy. Colour has neither problem and is what
-    -- WoW itself uses for inline emphasis.
+    -- ⚠ Colour, not caps, and not bold. Bold is not available -- a FontString has no
+    -- weight axis, "bold" in WoW means either a different font FILE (SetSettingsFont
+    -- resolves the USER's chosen settings font, so hard-coding one face makes the
+    -- emphasised words the only text on the page ignoring that setting) or the OUTLINE
+    -- flag, which at 11px reads as smeared rather than heavy. Colour has neither problem
+    -- and is what WoW itself uses for inline emphasis.
     --
     -- ⚠ Deliberately NOT GUI:ToneHex("success"/"danger"), which is the sanctioned
     -- helper for inline emphasis and is WRONG here: those hexes carry the banner tone
@@ -774,18 +741,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- redundant reinforcement rather than the only thing distinguishing them -- which
     -- is what keeps a red/green pair legible to a red-green colourblind reader.
     -- ⚠ The red's blue channel sits BELOW its green (47 < 62) and that is the whole
-    -- point of the value. The first pass used ffe07a7a, which has G and B identical --
-    -- equal G/B is what makes a red read as rose, and it did: "almost pink" (Krathe,
-    -- 2026-08-10). Brightening it does not help, it just turns the pink up. Tipping
-    -- blue under green is what makes it read as red at this lightness, so if these
-    -- are ever retuned, keep B < G rather than raising luminance.
+    -- point of the value: equal G/B makes a red read as rose, and brightening it only
+    -- turns the pink up. If these are ever retuned, keep B < G rather than raising
+    -- luminance.
     local EMPH_BUFF   = "ff7be08c"
     local EMPH_DEBUFF = "ffff6247"
     -- ☠ PER WORD, not once around the phrase. The banner renders through SetHTML,
     -- which splits plain text on SPACES and gives every word its own FontString -- so
     -- a |c…|r spanning two words dies at the split: the opener lands on "Buff", the
     -- |r lands on "Filters", and word two falls back to the body grey. That is not a
-    -- theory, it is what shipped for one revision (Krathe, 2026-08-10): the banner
+    -- theory, it is what shipped for one revision: the banner
     -- drew a green "Buff" beside a grey "Filters", where a single FontString -- no
     -- splitting -- draws the whole phrase green off the identical string.
     --
@@ -1067,17 +1032,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- keep the labels from colliding.
     -- ⚠ Works from the SHOWN chips, not the pool size: sizing for a hidden one would
     -- leave a chip's width of dead space before the help button.
-    -- ☠ AND THEY WRAP, BECAUSE ONE ROW HAS A FLOOR THIS PAGE CAN NO LONGER PAY.
-    -- The help glyph is pinned to the row's right edge and CHIP_MIN_W is the point
-    -- past which a label like "Defensive Icon  2 filters" stops being readable, so
-    -- three chips need 3*92 + 2*6 + 6 + 22 = 316px. That fitted only because this
-    -- page forced the window to 850; at the 520px minimum the band is ~280 and the
-    -- third chip ran underneath the help button. Below the floor they take as many
-    -- rows as they need instead of overlapping.
+    -- ☠ AND THEY WRAP, BECAUSE ONE ROW HAS A FLOOR. The help glyph is pinned to the row's
+    -- right edge and CHIP_MIN_W is the point past which a label like "Defensive Icon  2
+    -- filters" stops being readable, so three chips need 3*92 + 2*6 + 6 + 22 = 316px; at
+    -- the 520px window minimum the band is ~280. Below the floor they take as many rows
+    -- as they need instead of running under the help button.
     --
-    -- ⚠ THE CHIPS ARE ANCHORED HERE, NOT AT BUILD. They used to chain LEFT off each
-    -- other, which cannot express a second row; this owns both axes so the wrap has
-    -- one writer.
+    -- ⚠ THE CHIPS ARE ANCHORED HERE, NOT AT BUILD. Chaining them LEFT off each other
+    -- cannot express a second row; this owns both axes so the wrap has one writer.
     local function LayoutChips()
         local rowW = chipRow:GetWidth() or 0
         if rowW < 60 then return end   -- not laid out yet; OnSizeChanged re-runs us
@@ -1159,20 +1121,17 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         return fs
     end
     -- Built-In / Custom: the two headers name WHERE A FILTER CAME FROM, which is the
-    -- one distinction the list actually draws. The bare "Filters" they replaced was
-    -- the header on BOTH tabs and repeated the tab strip four rows above it.
+    -- one distinction the list actually draws.
     --
-    -- ⚠ The header no longer says what selecting a row does. That statement lives in
-    -- the page banner and nowhere else, so the banner is load-bearing now -- see the
-    -- note on BUFF_BANNER. A header should name a group, so do not put the sentence
-    -- back here.
+    -- ⚠ The header does not say what selecting a row does. That statement lives in
+    -- the page banner and nowhere else -- see the note on BUFF_BANNER. A header should
+    -- name a group, so do not put the sentence here.
     --
-    -- ⚠ Sentence case, and no letter-spacing -- the design mock showed a letter-spaced
-    -- uppercase header and neither survives the port: WoW FontStrings have no
-    -- letter-spacing, and upper-casing a localised header is a translator's decision.
+    -- ⚠ Sentence case, and no letter-spacing: WoW FontStrings have no letter-spacing,
+    -- and upper-casing a localised header is a translator's decision.
     --
-    -- Two sections, both buff: what we ship, and what you made. There is no third --
-    -- the debuff header went to the Debuff Bar page with the categories it labelled.
+    -- Two sections, both buff: what we ship, and what you made. Debuff categories live
+    -- on the Debuff Bar page.
     local presetLabel = CreateSectionLabel(L["Built-In Filters"])
     local customLabel = CreateSectionLabel(L["Custom Buff Filters"])
 
@@ -1330,13 +1289,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- editing a filter here changes it everywhere it is used, and that is exactly
     -- what someone about to edit a shared filter needs to know.
     --
-    -- ☠ BOTH MODES, ALWAYS. This used to answer for GUI.SelectedMode only, which was
-    -- right when the page owned the switches and was therefore itself a party-or-raid
-    -- page. It is neither now: preset overrides are per PROFILE and custom filters
-    -- are per ACCOUNT, so nothing on this page belongs to a mode. Reporting one mode
-    -- meant a filter switched on in BOTH read as "Buff Bar (Party)" in party and
-    -- "Buff Bar (Raid)" in raid -- each answer quietly denying the other half
-    -- (Krathe, 2026-08-10).
+    -- ☠ BOTH MODES, ALWAYS. Preset overrides are per PROFILE and custom filters are per
+    -- ACCOUNT, so nothing on this page belongs to a mode. Reporting GUI.SelectedMode only
+    -- would make a filter switched on in BOTH read as "Buff Bar (Party)" in party and
+    -- "Buff Bar (Raid)" in raid -- each answer quietly denying the other half.
     --
     -- Returns { { label, modes = { "party", "raid" } }, ... } in a FIXED consumer
     -- order, so the line does not reshuffle as usage changes.
@@ -1618,22 +1574,18 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- db-backed values — this box has no db binding)
     addBox.EditBox:HookScript("OnEnterPressed", DoAddSpell)
 
-    -- The echo takes what is left of row 3 between the Add button and the picker.
-    -- Anchored to dbBtn rather than the panel edge, which is what it used to use --
-    -- with the picker on this row now, a panel-edge anchor would run the message
-    -- straight under it.
+    -- The echo takes what is left of row 3 between the Add button and the picker,
+    -- anchored to dbBtn rather than the panel edge so it never runs under the picker.
     -- ☠ ROW 3 IS A ROW OF FIXED-WIDTH CHILDREN, AND ITS SUM IS WIDER THAN THE
     -- NARROWEST BAND. The Spell ID box (90), the Add button (50) and the
     -- Add-from-Database button (130) are all fixed, so even with the echo squeezed
-    -- to nothing the row costs 10 + 90 + 6 + 50 + 8 + 130 + 10 = 304px. At the
-    -- window's 520px minimum the band is ~280 and the picker drew straight over the
-    -- Add button -- the same Class-2 failure the designer preset bar had, a row that
-    -- only ever fitted because the page forced the window to 850.
+    -- to nothing the row costs 10 + 90 + 6 + 50 + 8 + 130 + 10 = 304px, and at the
+    -- window's 520px minimum the band is ~280.
     --
     -- ☠ SO THE PICKER DROPS TO A ROW OF ITS OWN, and the header grows by that row.
-    -- Shrinking the three instead was the alternative and it is worse: the echo is
-    -- the ONLY feedback an add-by-ID gives, and taking it to zero width fails
-    -- silently -- you type an id, nothing happens, and nothing says why.
+    -- Shrinking the three instead is worse: the echo is the ONLY feedback an add-by-ID
+    -- gives, and taking it to zero width fails silently -- you type an id, nothing
+    -- happens, and nothing says why.
     --
     -- ⚠ RE-TAKEN ON RESIZE, not decided once. The band is whatever the window is,
     -- and the threshold is DERIVED from the parts above rather than being a second
@@ -1881,12 +1833,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- 127px buttons plus the 6px margins and the 4px gutter need 266px, which is
     -- exactly what the island's 270px panel has and 6px MORE than the 260 a popout
     -- pane gives. Anchored from opposite corners at a fixed width they do not
-    -- shrink -- they overlap in the middle -- which is the same Class-2 failure the
-    -- designer preset bar had, a row of fixed-width children sized against the one
-    -- width the page used to be guaranteed.
+    -- shrink -- they overlap in the middle.
     --
-    -- ⚠ Re-taken on resize rather than computed once, for the reason every other
-    -- repair in this pass is: the panel is whatever its host is.
+    -- ⚠ Re-taken on resize rather than computed once: the panel is whatever its host
+    -- is.
     local function LayoutActionStrip()
         local w = leftPanel:GetWidth() or 0
         if w < 40 then return end
@@ -2087,9 +2037,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- 3px wide at x=2, so its right edge is x=5, and the box has to clear it by
         -- enough to read as a separate object -- they are both small, hard-edged and
         -- theme-coloured when active, so at a 1px gap the checked box and the
-        -- selection bar merge into one blob. The box also used to be inset inside a
-        -- larger hit frame, which hid this; it is now the shared checkbox, whose
-        -- frame IS its box.
+        -- selection bar merge into one blob. The shared checkbox's frame IS its box.
         row.toggle = GUI:CreateRowToggle(row, {
             onClick = function(checked)
                 if row._onToggle then row._onToggle(checked) end
@@ -2145,12 +2093,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row.count:SetText(countStr)
         row.dot:SetShown(modified)
 
-        -- ☠ NO TOGGLE ARM. The `toggle` parameter was never passed -- both call sites
-        -- stop at `selected` -- so row._onToggle was always nil, the
-        -- Show/SetChecked/greyed branch could not run, CreateRowToggle's onClick could
-        -- never fire, and `dim` was always nil, which made both dimmed-text paths
-        -- dead too. The page's own note already said this outright: every row is
-        -- passed a nil toggle, because this list no longer selects anything for a bar.
+        -- ☠ NO TOGGLE ARM: every row is passed a nil toggle, because this list does not
+        -- select anything for a bar.
         --
         -- ⚠ row.toggle itself is KEPT deliberately. It is hidden here on every bind
         -- and never shown, but row.name's CREATION-time anchor is expressed against
@@ -2185,8 +2129,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     --
     -- ⚠ DECLARED HERE, not beside _fdFocusNewFilter, because `leftRows` is declared
     -- ~270 lines below that point -- a closure created up there would read it as a
-    -- nil GLOBAL, parse clean, and fail at runtime. That trap has already cost this
-    -- file two bugs this cycle (CollectADFilters, leftTab).
+    -- nil GLOBAL, parse clean, and fail at runtime.
     --
     -- ⚠ SelectFilter FIRST: it runs RefreshAll, which re-binds the pooled rows. Read
     -- the pool before that and you get the row a different filter used to occupy.
@@ -2607,7 +2550,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         --
         -- ⚠ THIS LIST MUST HOLD EVERY SUCH BUTTON. It said "the add row" and held only
         -- addRow, so Import Filter — built the same way, two lines below it, with the
-        -- same parent — stayed blue in raid (Krathe, 2026-08-10). A singular comment
+        -- same parent — stayed blue in raid. A singular comment
         -- describing a general rule is how the second one got missed.
         --
         -- The rule: any button in this file whose PARENT is not the page child needs
@@ -2643,14 +2586,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- status line still names the mode, because that claim IS mode-specific.
         HideStandingRegions()
 
-        -- ☠ THIS LIST NO LONGER SELECTS ANYTHING FOR A BAR. Every row is passed a nil
-        -- toggle, which hides the switch and moves the name into its place -- the
-        -- shape the Optional Debuffs row used to have. The page is a LIBRARY: you
-        -- come here to build and edit filters, and each consumer picks the ones it
-        -- wants on its own page.
-        --
-        -- Gone from here, so nobody restores half of it:
-        --   * the Buffs/Debuffs tab strip -- there is nothing debuff on this page
+        -- ☠ THIS LIST DOES NOT SELECT ANYTHING FOR A BAR. Every row is passed a nil
+        -- toggle, which hides the switch and moves the name into its place. The page is
+        -- a LIBRARY: you come here to build and edit filters, and each consumer picks the
+        -- ones it wants on its own page. Where the selections live:
         --   * All Buffs / Only My Buffs      -> Buff Bar page
         --   * the per-filter on/off switch   -> Buff Bar page
         --   * Uncategorised Buffs            -> Buff Bar page (a selection, not a
@@ -2659,8 +2598,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         --     Debuffs                        -> Debuff Bar page
         --
         -- Rows still SELECT FOR EDITING, which is a different verb: clicking one
-        -- opens it in the right-hand pane. That is now a row's only action, which is
-        -- why the switch could go without leaving the row inert.
+        -- opens it in the right-hand pane. That is a row's only action.
         local y, used = 4, 0
 
         y = PlaceSectionLabel(presetLabel, y)
@@ -2805,15 +2743,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- whole story and a truncated sentence ending in "the..." is worse than no
         -- sentence. The state goes on the line; the scoping rules -- which are three
         -- levels deep and genuinely surprising -- go in the hover tooltip.
-        -- ☠ THIS IS A USED-BY READOUT, NOT A SWITCH READOUT. It used to open with the
-        -- filter's own on/off state, because the switch was on this page; the switch
-        -- is now on each consumer's page, so there is no single "on" to report and
-        -- the honest question is which consumers are currently using this filter.
-        --
-        -- All three are equals in the list. The buff bar is no longer special-cased
-        -- as the state, with the others trailing behind as "also" -- that phrasing is
-        -- what made the old line read as self-contradictory, and it stopped being
-        -- true the moment the buff bar became one consumer among three.
+        -- ☠ THIS IS A USED-BY READOUT, NOT A SWITCH READOUT. The switch is on each
+        -- consumer's page, so there is no single "on" to report; the honest question is
+        -- which consumers are currently using this filter. All three are equals in the
+        -- list -- the buff bar is one consumer among three, not "the state" with the
+        -- others trailing behind as "also".
         statusDot:Show()
         -- ⚠ The buff bar is inside FilterConsumers, not bolted on here: this page has
         -- no mode, so it must not be read separately and labelled with the current one.
@@ -3110,19 +3044,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         end
     end
     pageRef._fdRefreshAll = RefreshAll
-    -- ☠ _fdSelectBlacklist IS GONE, not stubbed. It landed this page on the Optional
-    -- Debuffs entry, and there is no such entry here -- that list is on the Debuff
-    -- Bar page. Anything wanting it should SelectTab("auras_debuffs"). A stub that
-    -- navigated somewhere plausible-but-wrong would be worse than the nil call.
-    -- (The `pageRef._fdSelectBlacklist = nil` statement that used to sit here went
-    -- too: assigning nil to a field nothing sets or reads is a no-op, and the
-    -- paragraph above is what actually carries the decision.)
-    --
-    -- ☠ _fdSelectBuffs went with it. It was the buff-side "Customise" entry point,
-    -- and its whole job was to move you off the Blacklist if you were parked there --
-    -- a view this page no longer has. Nothing in either addon called it; contrast
-    -- _fdFocusFilter and _fdFocusNewFilter just above, which the Aura Designer does
-    -- call and which stay.
+    -- There is no Optional Debuffs entry on this page (that list is on the Debuff Bar
+    -- page): anything wanting it should SelectTab("auras_debuffs"). The Aura Designer's
+    -- entry points are _fdFocusFilter and _fdFocusNewFilter above.
 
     -- ========== SEARCH WIRING ==========
     -- HookScript (not SetScript): CreateEditBox already hooks OnTextChanged

@@ -283,7 +283,7 @@ do
     local order = {}
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "),
-       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading | Unhealable Fading",
+       "Out of Range | Element-Specific Alpha | Dead/Offline Fading | Health Threshold Fading | Spirit of Redemption Fading",
        "order: the five cards open in reading order")
     local hoists = 0
     for _ in PAGE:gmatch("hoistToggle = true,") do hoists = hoists + 1 end

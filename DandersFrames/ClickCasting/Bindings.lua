@@ -39,7 +39,7 @@ end
 -- NOT gated, so we route those actions through a hidden SecureActionButton
 -- child via the secure "click" action: the unit button delegates with
 -- :Click(button), the proxy's ungated handler runs target/togglemenu, and
--- the action fires. Credit: Ellesmere (EllesmereUI). Version-agnostic — the
+-- the action fires. Version-agnostic — the
 -- "click" action and an ungated SecureActionButton work on pre-12.0.7 too.
 
 -- Lazily create the per-frame proxy button (out of combat only). useparent-unit
@@ -323,21 +323,18 @@ local MODIFIER_COMBOS = {
     "alt-ctrl-shift-meta-",
 }
 
--- Clear all click-cast bindings from a frame
--- preserveSnippet: keep the frame's existing dfBindingSnippet instead of
--- wiping it. Batched applies (ApplyBindings) pass their skipKeyboardUpdate
--- through here: the batch rebuilds every snippet in one RefreshKeyboardBindings
--- at the end, so wiping per-frame up front only created a window where combat
--- could interrupt the batch and strand EVERY processed frame with an empty
--- snippet — keyboard binds dead for the whole fight (field case 2026-07-20,
--- LFR: a roster-driven reapply was cut off by a pull; ~40 raid frames sat
--- snippet-less until combat end). Keeping the previous snippet is safe: it is
--- either identical (rescan/roster reapply, the common case) or one refresh
--- behind (profile switch), and the batch-end rebuild — deferred to combat end
--- if interrupted — overwrites it either way.
--- `quiet` suppresses only the per-frame INFO line, never the hovered-frame WARN.
--- Set by the ApplyBindings sweep, which walks every registered frame: see the
--- volume note on ApplyBindings' summary line.
+-- Clear all click-cast bindings from a frame.
+-- preserveSnippet: keep the frame's existing dfBindingSnippet instead of wiping it.
+-- Batched applies (ApplyBindings) pass their skipKeyboardUpdate through here: the batch
+-- rebuilds every snippet in one RefreshKeyboardBindings at the end, so wiping per frame up
+-- front would open a window where combat interrupts the batch and strands EVERY processed
+-- frame with an empty snippet -- keyboard binds dead for the whole fight. Keeping the
+-- previous snippet is safe: it is either identical (rescan/roster reapply, the common case)
+-- or one refresh behind (profile switch), and the batch-end rebuild -- deferred to combat
+-- end if interrupted -- overwrites it either way.
+-- `quiet` suppresses only the per-frame INFO line, never the hovered-frame WARN. Set by the
+-- ApplyBindings sweep, which walks every registered frame: see the volume note on
+-- ApplyBindings' summary line.
 function CC:ClearBindingsFromFrame(frame, preserveSnippet, quiet)
     if not frame then return end
     -- Combat-safe by contract: only reached from ApplyBindingsToFrameUnified,
@@ -719,37 +716,22 @@ function CC:ApplyBindings()
                 local endIdx = math.min(startIdx + BATCH_SIZE - 1, #allFrames)
 
                 for i = startIdx, endIdx do
-                    -- skipKeyboardUpdate=FALSE deliberately. Deferring the snippet
-                    -- rebuild to the batch tail left every already-processed frame
-                    -- holding the OUTGOING snippet while its outgoing
-                    -- type-<virtualBtn> attributes had already been erased -- so
-                    -- the keys that snippet binds pointed at cleared attributes:
-                    -- dead AND stolen from the action bar, for the rest of the
-                    -- sweep, or for the whole fight if combat interrupted it. The
-                    -- hovered-frame hoist above repairs exactly one frame.
-                    --
-                    -- Rebuilding inline costs nothing: RefreshKeyboardBindings at
-                    -- the tail already calls UpdateFrameBindingAttributes once per
-                    -- registered frame, so this is the same N calls moved earlier.
-                    -- It also closes the window the old comment worried about --
-                    -- clear and rebuild now happen inside one call with no yield
-                    -- between them, so combat can no longer land in the gap.
-                    -- quiet=true keeps it to one summary line per sweep.
-                    -- ☠ PCALL PER FRAME. This is the highest-volume per-frame loop in the
-                    -- subsystem (a raid with a third-party grid reaches ~500 frames) and it
-                    -- ran unprotected inside a C_Timer callback. One frame throwing killed
-                    -- the callback outright: every remaining frame in that batch AND every
-                    -- later batch was skipped, the ReassertHoverBinds / IterateAllFrames
-                    -- tail never ran, and no bindingRefresh was queued -- that only happens
-                    -- on the combat-interrupt branch. The failing frame is left half-cleared
-                    -- (ClearBindingsFromFrame has already run, so its attributes are dead
-                    -- clicks) and everything behind it silently keeps the PREVIOUS profile's
-                    -- macros for the rest of the session.
-                    --
-                    -- The sibling set-job runner in Events.lua (forEachFrameSafe) was
-                    -- hardened for exactly this -- "One frame erroring is survivable. Losing
-                    -- the rest of the roster because of it is not." -- and DrainDeferred
-                    -- pcalls each job. This loop never got the same treatment.
+                    -- skipKeyboardUpdate=FALSE deliberately. Deferring the snippet rebuild to the batch tail
+                    -- would leave every processed frame holding the OUTGOING snippet while its outgoing
+                    -- type-<virtualBtn> attributes were already erased -- keys bound to cleared attributes:
+                    -- dead AND stolen from the action bar for the rest of the sweep, or the whole fight if
+                    -- combat interrupted it.
+                    -- Rebuilding inline costs nothing: RefreshKeyboardBindings at the tail already calls
+                    -- UpdateFrameBindingAttributes once per registered frame, so this is the same N calls
+                    -- moved earlier, and clear and rebuild happen inside one call with no yield between them,
+                    -- so combat cannot land in the gap. quiet=true keeps it to one summary line per sweep.
+                    -- ☠ PCALL PER FRAME. This is the highest-volume per-frame loop in the subsystem (a raid
+                    -- with a third-party grid reaches ~500 frames) and it runs inside a C_Timer callback. One
+                    -- frame throwing would kill the callback: every remaining frame in that batch AND every
+                    -- later batch skipped, the ReassertHoverBinds / IterateAllFrames tail never run, and the
+                    -- frames behind it left on the PREVIOUS profile's macros for the session. Same rule as the
+                    -- set-job runner in Events.lua (forEachFrameSafe) and DrainDeferred: one frame erroring is
+                    -- survivable, losing the rest of the roster is not.
                     local ok, err = pcall(CC.ApplyBindingsToFrameUnified, CC, allFrames[i], false, true)
                     if ok then
                         applied = applied + 1
@@ -784,24 +766,17 @@ function CC:ApplyBindings()
                 else
                     -- All frames processed.
                     CC.batchBindingTimer = nil
-                    -- No full RefreshKeyboardBindings here: the batch already rebuilt
-                    -- each registered frame's snippet inline (skipKeyboardUpdate is
-                    -- false above), so calling it would build every snippet twice.
+                    -- No full RefreshKeyboardBindings here: the batch already rebuilt each registered frame's
+                    -- snippet inline (skipKeyboardUpdate is false above), so calling it would build every
+                    -- snippet twice.
                     --
-                    -- ☠ BUT IT HAS A SECOND LOOP, and dropping the call dropped that
-                    -- too. The claim that used to sit here -- "the function's whole
-                    -- body is that one loop" -- was simply false: after the
-                    -- registeredFrames pass it also walks DF:IterateAllFrames, and the
-                    -- comment on that loop (ClickCasting/Frames.lua, unchanged since
-                    -- before this branch) records WHY: RegisterAllFrames has no
-                    -- arena-header walk while IterateAllFrames special-cases arena.
-                    --
-                    -- The gap it leaves is narrow but real: a frame that still carries
-                    -- dfKeyboardHandlersSetup but is no longer in registeredFrames.
-                    -- That set is reachable -- UnregisterFrame clears the registry entry
-                    -- and dfClickCastRegistered but NOT dfKeyboardHandlersSetup. Run
-                    -- just the second loop, skipping anything the batch already did, so
-                    -- the coverage comes back without the double build.
+                    -- ☠ BUT IT HAS A SECOND LOOP that must still run: after the registeredFrames pass it walks
+                    -- DF:IterateAllFrames, because RegisterAllFrames has no arena-header walk while
+                    -- IterateAllFrames special-cases arena (see that loop's comment in ClickCasting/Frames.lua).
+                    -- The gap it covers is narrow but real: a frame that still carries
+                    -- dfKeyboardHandlersSetup but is no longer in registeredFrames (UnregisterFrame clears the
+                    -- registry entry and dfClickCastRegistered but NOT dfKeyboardHandlersSetup). Run just the
+                    -- second loop, skipping anything the batch already did.
                     if DF and DF.IterateAllFrames then
                         DF:IterateAllFrames(function(f)
                             if f and f.dfKeyboardHandlersSetup
@@ -1145,8 +1120,8 @@ end
 -- non-US keyboard layouts (æ, ø, å, ñ, ü, ...) arrive from OnKeyDown as
 -- multibyte UTF-8; embedding those raw bytes in attribute names is the one
 -- structural difference between this pipeline and the systems that handle
--- such keys correctly (Blizzard's own bindings, Dominos, EllesmereUI — none
--- of which put key characters into derived names). The BINDING key itself is
+-- such keys correctly (Blizzard's own bindings, for one, never puts key
+-- characters into derived names). The BINDING key itself is
 -- always passed byte-exact as captured; only derived names go through this.
 -- a-z / 0-9 pass through and A-Z lowercases, so alphanumeric keys (the vast
 -- majority) produce the identical name the old :lower() did. Every other
@@ -1611,17 +1586,13 @@ function CC:GetAllPlayerSpells()
             -- Display data only (stored on the spell record) — never compared.
             local tabName = skillLineInfo.name or ""
 
-            -- ☠ CLASSIFY STRUCTURALLY, NEVER BY LOCALIZED NAME (#990). This used
-            -- to compare the tab's localized name against the localized spec
-            -- name, the localized class name and the ENGLISH literals "Racial"/
-            -- "General" — so non-English clients scattered spells across the
-            -- wrong sections, varying by spec AND character gender (gendered
-            -- class names need not match the tab string). The struct carries
-            -- identity directly:
+            -- ☠ CLASSIFY STRUCTURALLY, NEVER BY LOCALIZED NAME. A localized tab name cannot be matched
+            -- reliably against localized spec or class names (class names are gendered on some
+            -- clients), so non-English clients would scatter spells across the wrong sections. The
+            -- struct carries identity directly:
             --   * specID set     -> a spec tab; == current spec -> "spec"
             --   * isGuildPerkTab -> guild
-            --   * tab 1          -> General (fixed spellbook layout; racials
-            --                       live here — a "Racial" tab no longer exists)
+            --   * tab 1          -> General (fixed spellbook layout; racials live here)
             --   * tab 2          -> the class tab (fixed layout)
             local categoryPriority = 4 -- Default: other
             local category = "other"
@@ -1902,12 +1873,11 @@ end
 
 -- ============================================================
 -- SPELL RANKS (WoW Forever)
--- Classic-style clients list every rank of a spell separately, all under the
--- same name, and a bare "/cast Name" always casts the HIGHEST rank. So a
--- lower-rank binding is stored with lowRank (+ its rank text as a fallback) and
--- casts "Name(Rank N)"; a top-rank binding stays a bare name so it moves up to
--- each new rank as it is learned. Bindings made before this have no lowRank
--- and keep behaving as top-rank. Retail never sets any of these fields.
+-- Classic-style clients list every rank of a spell separately, all under the same name,
+-- and a bare "/cast Name" always casts the HIGHEST rank. So a lower-rank binding is stored
+-- with lowRank (+ its rank text as a fallback) and casts "Name(Rank N)"; a top-rank binding
+-- stays a bare name so it moves up to each new rank as it is learned. A binding without
+-- lowRank behaves as top-rank. Retail never sets any of these fields.
 -- ============================================================
 
 -- Copy the rank fields from a spell-list entry onto a new binding
@@ -3216,13 +3186,12 @@ function CC:GetWoWCharacterMacros()
     local numGlobal, numPerChar = GetNumMacros()
 
     -- Character macros start after the account block.
-    -- ☠ THE COUNT IS `Constants.MacroConsts.MAX_ACCOUNT_MACROS`, NOT A GLOBAL. The bare
-    -- global was removed; reading it here threw "attempt to perform arithmetic on global
-    -- 'MAX_ACCOUNT_MACROS' (a nil value)" and broke per-character macro import outright
-    -- (field-reported). Blizzard's own MacroUI reads the same constant table.
-    -- The literal is the LAST resort only: a hardcoded 120 silently reads the wrong slots
-    -- the day Blizzard changes the account allowance, so prefer the live constant and let
-    -- the fallback cover a client that lacks the table entirely.
+    -- ☠ THE COUNT IS `Constants.MacroConsts.MAX_ACCOUNT_MACROS`, NOT A GLOBAL: the bare global
+    -- does not exist, and arithmetic on it would throw and break per-character macro import.
+    -- Blizzard's own MacroUI reads the same constant table. The literal is the LAST resort: a
+    -- hardcoded 120 silently reads the wrong slots the day Blizzard changes the account
+    -- allowance, so prefer the live constant and let the fallback cover a client that lacks
+    -- the table entirely.
     local MC = _G.Constants and _G.Constants.MacroConsts
     local accountMax = (MC and tonumber(MC.MAX_ACCOUNT_MACROS)) or 120
     local startIndex = accountMax + 1
@@ -3538,10 +3507,10 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
                 print("|cffff0000WARNING: Snippet ran but dfClickCastEnabled was false!|r")
             end
             
-            -- Show the binding snippet stored on the frame (Cell approach)
+            -- Show the binding snippet stored on the frame
             local bindingSnippet = focus:GetAttribute("dfBindingSnippet")
             if bindingSnippet and bindingSnippet ~= "" then
-                print("  " .. DF.OUT.SECTION .. "Frame Binding Snippet (Cell-style)|r")
+                print("  " .. DF.OUT.SECTION .. "Frame Binding Snippet|r")
                 local bindCount = 0
                 for _ in bindingSnippet:gmatch("SetBindingClick") do
                     bindCount = bindCount + 1
@@ -4089,12 +4058,10 @@ SlashCmdList["DFCC"] = function(msg)
 
     if word ~= "" then
         for _, e in ipairs(CC_SUBCOMMANDS) do
-            -- ☠ The dev flag (e[3]) has to gate EXECUTION, not just the listing
-            -- below. It used to filter only the printed rows, so on a release
-            -- build "/df debug cc clicks" still armed per-click tracing until
-            -- reload — real overhead in the click hot path, from a command the
-            -- user was never shown. Fall through to "unknown" rather than
-            -- reporting "dev only": a hidden command must not advertise itself.
+            -- ☠ The dev flag (e[3]) gates EXECUTION, not just the listing below, so a release build
+            -- cannot arm per-click tracing through "/df debug cc clicks" (real overhead in the click
+            -- hot path). Fall through to "unknown" rather than reporting "dev only": a hidden command
+            -- must not advertise itself.
             if e[1] == word and (not e[3] or dev) then
                 -- The handlers register when the companion loads. A deliberate
                 -- command -> load it, then retry the lookup.

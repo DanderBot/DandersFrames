@@ -91,31 +91,21 @@ CreateFontObjects()
 -- and force visible settings FontStrings to re-render.
 -- ============================================================
 
--- Apply the user's chosen settings font + outline to every DF
--- font object. Called once at load (after DB is ready) and on
--- any subsequent change via GUI:RefreshSettingsFont().
+-- Apply the user's chosen settings font + outline to every DF font object. Called once
+-- at load (after the DB is ready) and on any later change via GUI:RefreshSettingsFont().
 --
--- Implementation: for each DFFont object, read its current size
--- (from the Blizzard copy), build the multi-alphabet FAMILY for the
--- chosen font at that size through Config.lua's family builder, and
--- make the DFFont inherit it — the same relationship Blizzard's own
--- GameFont* objects have with their SystemFont_* families. Every
--- FontString inheriting the DFFont then gets the fallback per alphabet.
+-- For each DFFont object: read its current size (from the Blizzard copy), build the
+-- multi-alphabet FAMILY for the chosen font at that size through Config.lua's family
+-- builder, and make the DFFont inherit it -- the relationship Blizzard's GameFont*
+-- objects have with their SystemFont_* families. Every FontString inheriting the DFFont
+-- then gets a fallback per alphabet. ☠ A direct dfFont:SetFont(path) has no family: on a
+-- zhTW / zhCN / koKR client any settings font without CJK glyphs (the default "DF Roboto
+-- SemiBold" included) would render those widgets as boxes.
 --
--- ☠ THIS USED TO CALL dfFont:SetFont(fontPath, ...) DIRECTLY — one file, no
--- family — while the header comment above described the family path. So the
--- fallback the header promised never existed for DFFont inheritors: on a
--- zhTW / zhCN / koKR client, any Settings Font without CJK glyphs rendered
--- those widgets as boxes (#1054, Click Casting tab labels), and the DEFAULT
--- font ("DF Roboto SemiBold") is exactly such a font — so every CJK user hit
--- it out of the box. Widgets routed through GUI:SetSettingsFont were fine
--- because SafeSetFont already builds the family; only direct inheritors broke.
---
--- Colour is re-applied after the inherit: SetFontObject takes everything
--- from the parent, and the family is white, but the templates carry their
--- own colours (yellow headers, grey disabled). Falls back to the old direct
--- SetFont if the family cannot be built or the inherit is refused, so this
--- can only ever be an improvement over what shipped.
+-- Colour is re-applied after the inherit: SetFontObject takes everything from the
+-- parent, and the family is white, but the templates carry their own colours (yellow
+-- headers, grey disabled). Falls back to a direct SetFont if the family cannot be built
+-- or the inherit is refused.
 function UI:ApplySettingsFont()
     local getSetting = self:Hook("getFontSetting")
     local fontName, outline

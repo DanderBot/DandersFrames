@@ -547,30 +547,13 @@ function CC:CreateEditBindingPanel()
     framesSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.framesSubtitle = framesSubtitle
     
-    -- ☠ THE SetScript / GetChecked / SetChecked OVERRIDES ARE GONE.
-    --
-    -- This used to monkey-patch three methods onto a native CheckButton so it could
-    -- carry its own `isChecked` alongside a manually shown texture -- and the SetScript
-    -- override existed only so call sites could keep writing
-    -- cb:SetScript("OnClick", fn) while the factory kept its own internal handler.
-    -- Patching a frame's own methods to work around owning its state is a lot of
-    -- machinery to hold two booleans in step, and it hid a real hazard: any caller that
-    -- reached for a NON-OnClick script got the real SetScript, so which calls were
-    -- intercepted depended on the string you passed.
-    --
-    -- GUI:CreateCheckRow keeps the native checked state and the manual texture in step
-    -- in one place (:Apply) and exposes an assignable `cb.onClick`, so nothing needs
-    -- patching. Same styler, same accent, same 8px label gap, same tooltip shape --
-    -- identical on screen.
-    --
-    -- ⚠ Call sites assign `cb.onClick = fn`. Using SetScript("OnClick") again would
-    -- REPLACE the row's handler and lose the texture update and the set() call.
-    -- ⚠ No `cb.desc` / `cb.text` fields. Both were carried over from the hand-rolled
-    -- widget and neither survived the conversion as a read: the old OnEnter read
-    -- `self.desc` to build its tooltip, which the row now captures at construction,
-    -- and `cb.text` was a shim for call sites that read the FontString directly --
-    -- all of which were converted in the same change, so it never had a reader.
-    -- (`btn.text` in ProfilesPanel.lua is a DIFFERENT shim, on buttons, and IS read.)
+    -- GUI:CreateCheckRow keeps the native checked state and the manual check texture in step
+    -- in one place (:Apply) and exposes an assignable `cb.onClick`, so nothing patches the
+    -- CheckButton's own methods.
+    -- ⚠ Call sites assign `cb.onClick = fn`. SetScript("OnClick") would REPLACE the row's
+    -- handler and lose the texture update and the set() call.
+    -- ⚠ The row captures its tooltip text at construction; there is no `cb.desc` / `cb.text`.
+    -- (`btn.text` in ProfilesPanel.lua is a different shim, on buttons, and IS read.)
     local function CreateCheckbox(parent, text, desc)
         return DF.GUI:CreateCheckRow(parent, {
             label   = text,
@@ -2038,23 +2021,16 @@ function CC:RefreshSpellGrid(skipScrollReset)
     -- Add special actions first - only if not text filtering and showing all spell types
     local spellTypeFilter = self.selectedSpellType or "all"
     if (not searchFilter or searchFilter == "") and spellTypeFilter == "all" then
-        -- ☠ ONE LIST, TWO RENDERERS. The two view layouts each used to spell the special
-        -- actions out by hand, so they were two parallel lists that had to be kept in
-        -- step by hand -- and were not: Set Focus and Assist were added to the LIST
-        -- branch only, so the Grid view has been silently missing two bindable actions
-        -- ever since (Neosaro, 2026-08-18). Nothing failed and nothing logged; the grid
-        -- simply had two fewer cells than the list of the same thing.
-        -- The layouts now differ only in HOW a row is drawn and where it is placed,
-        -- which is the only thing a view layout is entitled to differ in. Adding a
-        -- fifth action means adding one line here and it appears in both.
-        -- ⚠ Names are localised at USE, not stored localised: this table is built once
-        -- at file scope-ish here and a cached L[] string would survive a locale change
-        -- (the same rule the debuff category tables follow).
-        -- ⚠ The icons are duplicated in two actionType dispatches in this file (the
-        -- binding-icon resolver and the picker's existing-binding branch). Those two are
-        -- complete -- all four actions -- and are keyed off a SAVED binding rather than
-        -- off this palette, so they are a different question from "what can be picked".
-        -- Kept separate deliberately; if a fifth action is added, they need it too.
+        -- ☠ ONE LIST, TWO RENDERERS. The list and grid view layouts differ only in HOW a row is
+        -- drawn and where it is placed, so the special actions live in this one table: two
+        -- hand-kept copies drift silently (one once lacked Set Focus and Assist with nothing
+        -- failing). A new action is one line here and appears in both.
+        -- ⚠ Names are localised at USE, not stored localised: a cached L[] string would survive
+        -- a locale change (the rule the debuff category tables follow too).
+        -- ⚠ The icons are also resolved in two actionType dispatches in this file (the
+        -- binding-icon resolver and the picker's existing-binding branch). Those are keyed off a
+        -- SAVED binding rather than this palette, so they are a different question from "what
+        -- can be picked" -- but a new action needs adding there too.
         local SPECIAL_ACTIONS = {
             { key = "target", name = "Target Unit", icon = "Interface\\CURSOR\\Crosshairs" },
             { key = "menu",   name = "Open Menu",   icon = "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up" },
@@ -3707,10 +3683,9 @@ function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
     return cell
 end
 
--- The click-casting bootstrap used to live here. It cannot: this file is in the
--- load-on-demand companion, and its trigger only fires on the login/reload
--- PLAYER_ENTERING_WORLD, which is long gone by the time anything loads us. It
--- now lives in the resident ClickCasting/Events.lua.
+-- The click-casting bootstrap lives in the resident ClickCasting/Events.lua: this file
+-- is in the load-on-demand companion, and the bootstrap's trigger (the login/reload
+-- PLAYER_ENTERING_WORLD) is long gone by the time anything loads it.
 
 -- Debug slash command to list all detected spells
 -- Non-dev: DUMP. Spell detection is a common source of "my bind does nothing"

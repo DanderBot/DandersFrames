@@ -30,12 +30,10 @@ end
 DF.Sort = {}
 local Sort = DF.Sort
 
--- Spec to role mapping (melee vs ranged DPS)
--- This maps DPS spec IDs to whether they're melee
--- Tank/healer specs are excluded - they're filtered by role before this check
--- ★ ONE SHARED TABLE (Core/Config.lua). This was a local copy; the header there
--- records the three-way disagreement between this file, Headers.lua and
--- FlatRaidFrames.lua that it caused.
+-- Spec to role mapping (melee vs ranged DPS). Tank/healer specs are excluded -- they are
+-- filtered by role before this check.
+-- ★ ONE SHARED TABLE (Core/Config.lua), so this file, Headers.lua and FlatRaidFrames.lua
+-- cannot disagree.
 local MELEE_SPECS = DF.MELEE_SPECS
 
 -- Cache for unit info (cleared on group changes)
@@ -46,17 +44,15 @@ Sort.UnitCache = {}
 -- ============================================================
 
 -- Get the role for a unit (TANK, HEALER, MELEE, RANGED, or DAMAGER)
--- ⚠ PREVIEW-ONLY COMPARATOR PATH. Live party/raid ordering is decided by the
--- SECURE SNIPPET's roleFilter (Features/SecureSort.lua), not by this file: every
--- caller of SortFrameList passes isTestMode = true. So this Lua comparator exists
--- to make the preview show the order the snippet WOULD produce, and the two have to
--- be kept in step by hand -- there is no way to run a secure snippet against the
--- non-secure test frames. Treat any change to the snippet's ordering as a change
--- here as well. (Audit, 2026-08-07.)
+-- ⚠ PREVIEW-ONLY COMPARATOR PATH. Live party/raid ordering is decided by the SECURE
+-- SNIPPET's roleFilter (Features/SecureSort.lua), not by this file: every caller of
+-- SortFrameList passes isTestMode = true. This Lua comparator makes the preview show the
+-- order the snippet WOULD produce, and the two must be kept in step by hand -- a secure
+-- snippet cannot run against the non-secure test frames. Treat any change to the
+-- snippet's ordering as a change here as well.
 --
--- `db` is the mode's DB. ☠ It used to be resolved here as DF:GetDB(), which is
--- ALWAYS the party table -- so Separate Melee/Ranged set on the Raid page was
--- ignored when sorting raid frames, and the party setting silently drove them.
+-- `db` is the mode's DB -- not DF:GetDB(), which is always the party table and would let
+-- the party setting drive raid sorting.
 function Sort:GetUnitRole(unit, db)
     if not unit or not UnitExists(unit) then return "DAMAGER" end
     
@@ -399,14 +395,8 @@ end
 function Sort:TriggerResort()
     self:ClearCache()
 
-    -- ☠ A SecureSort push/trigger block used to sit here, gated on
-    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set --
-    -- SecureSort.initialized is only ever assigned false and Features/SecureSort.lua
-    -- has no Initialize function -- so the block was dead and its comment ("SecureSort
-    -- is now the only system that positions party frames") had it backwards. Party
-    -- frames are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
-    --
-    -- Clearing the unit cache is the real work this function does, and it is live.
+    -- Party frames are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua;
+    -- clearing the unit cache is the real work this function does.
 end
 
 -- ============================================================

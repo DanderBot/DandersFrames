@@ -19,8 +19,10 @@ local addonName, DF = ...
 --     so AD data from the other version is simply reset, not parked. The payload says
 --     where it came from in `sourceFlavor` (older strings have none: retail).
 --
--- Everything else spell-bearing needs no correction here: custom filters live in a
--- per-version store (FilterRegistry), and the other fields are validated at runtime.
+-- Click-cast bindings get the same park/restore in their own SavedVariables (see
+-- CLICK-CASTING below). Everything else spell-bearing needs no correction here: custom
+-- filters live in a per-version store (FilterRegistry), and the other fields are
+-- validated at runtime.
 -- ============================================================
 
 local pairs, ipairs, type, next = pairs, ipairs, type, next
@@ -120,6 +122,54 @@ function FC.RunLoginPass(sv)
     return crossed
 end
 
+-- ------------------------------------------------------------
+-- CLICK-CASTING
+-- ------------------------------------------------------------
+-- Click-cast bindings live in their own SavedVariables (DandersFramesClickCastingDB), keyed
+-- by class, not by profile. Retail and WoW Forever do not share them usefully: Forever has
+-- spell ranks, different names, and most retail spells do not exist there. So the per-class
+-- data is parked in db._parked[<fromFlavor>] when the file arrives from the other version,
+-- and that version's own parked data comes back. Shared options (db.global) stay put: they
+-- hold no spells.
+-- ⚠ UNSTAMPED DATA IS THE CURRENT CLIENT'S. Each install keeps its own WTF folder, so
+-- untagged click-cast data on Forever is almost always bindings made there. Treating it as
+-- retail's (as Aura Designer does) would park every Forever user's working setup.
+-- Returns true if the data crossed.
+function FC.CrossClickCast(db, current)
+    if type(db) ~= "table" then return false end
+    current = current or DF.CLIENT_FLAVOR
+    local from = db._flavor
+    db._flavor = current
+    if from == nil or from == current then return false end
+    local parked = type(db._parked) == "table" and db._parked or {}
+    local had = type(db.classes) == "table" and next(db.classes) ~= nil
+    parked[from] = db.classes
+    local back = parked[current]
+    parked[current] = nil
+    db.classes = type(back) == "table" and back or {}
+    db._parked = next(parked) and parked or nil
+    if had then
+        FC.pendingClickCast = true
+        if FC.ScheduleCrossedNotice then FC.ScheduleCrossedNotice() end
+    end
+    return true
+end
+
+-- Click-cast strings say which version made them (`sourceFlavor`). Their spells do not
+-- carry over, so one from the other version is refused. An untagged string predates the
+-- field and is let through: it may well be Forever's own, and per-binding validity still
+-- flags what this client does not know.
+-- Returns nil when the string may be imported, else the message to show.
+function FC.ClickCastImportRefusal(data)
+    local source = type(data) == "table" and data.sourceFlavor
+    if type(source) ~= "string" or source == DF.CLIENT_FLAVOR then return nil end
+    local L = DF.L
+    if DF.IS_FOREVER then
+        return L["This click-casting string was made on retail. Spells and ranks differ on WoW Forever, so it can't be imported here."]
+    end
+    return L["This click-casting string was made on WoW Forever. Spells differ on retail, so it can't be imported here."]
+end
+
 -- Profiles created during the session (new, copy, duplicate) are stamped at logout, so
 -- the next login doesn't mistake a Forever-made profile for a retail one.
 function FC.StampUnstamped(sv)
@@ -151,7 +201,9 @@ end
 -- The popup frame is a singleton: showing ours while another is up would replace it
 -- (the changelog, a wizard). Wait for it to close, then show; give up after a minute.
 local function ShowCrossedNotice(tries)
-    if not (FC.pendingCrossed and FC.pendingCrossed > 0) then return end
+    local profiles = FC.pendingCrossed and FC.pendingCrossed > 0
+    local clickCast = FC.pendingClickCast
+    if not (profiles or clickCast) then return end
     if not DF.ShowPopupAlert then return end
     if DF.IsPopupShown and DF:IsPopupShown() then
         if (tries or 0) < 30 then
@@ -160,14 +212,31 @@ local function ShowCrossedNotice(tries)
         return
     end
     FC.pendingCrossed = 0
+    FC.pendingClickCast = nil
     local L = DF.L
+    local parts = {}
+    if profiles then
+        parts[#parts + 1] = DF.IS_FOREVER
+            and L["Some of your profiles came from retail. Their Aura Designer setup has been put aside because spell IDs differ on WoW Forever, and comes back if you use them on retail again.\n\nWoW Forever has no built-in spell list yet: create a custom filter in the Filter Designer and add spells by ID."]
+            or L["Some of your profiles came from WoW Forever. Their Aura Designer setup has been put aside because spell IDs differ on retail, and comes back if you use them on WoW Forever again."]
+    end
+    if clickCast then
+        parts[#parts + 1] = DF.IS_FOREVER
+            and L["Your click-casting bindings came from retail. They have been put aside because spells and ranks differ on WoW Forever, and come back if you use them on retail again."]
+            or L["Your click-casting bindings came from WoW Forever. They have been put aside because spells differ on retail, and come back if you use them on WoW Forever again."]
+    end
     DF:ShowPopupAlert({
         title = L["Profiles From Another Game Version"],
-        message = DF.IS_FOREVER
-            and L["Some of your profiles came from retail. Their Aura Designer setup has been put aside because spell IDs differ on WoW Forever, and comes back if you use them on retail again.\n\nWoW Forever has no built-in spell list yet: create a custom filter in the Filter Designer and add spells by ID."]
-            or L["Some of your profiles came from WoW Forever. Their Aura Designer setup has been put aside because spell IDs differ on retail, and comes back if you use them on WoW Forever again."],
+        message = table.concat(parts, "\n\n"),
         buttons = { { label = L["OK"], onClick = nil } },
     })
+end
+
+-- Click-casting crosses later than the profile pass (it initialises on the first
+-- PLAYER_ENTERING_WORLD), so it asks for the notice itself. A notice that already ran
+-- cleared its own flags, so a second call only shows what is still pending.
+function FC.ScheduleCrossedNotice()
+    C_Timer.After(1, function() ShowCrossedNotice(0) end)
 end
 
 local eventFrame = CreateFrame("Frame")

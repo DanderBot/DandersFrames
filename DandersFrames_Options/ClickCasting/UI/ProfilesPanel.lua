@@ -395,11 +395,7 @@ function CC:RefreshProfilesPanel()
     end
     
     -- Repaint the option checkboxes from the db. Each row owns its own `get`, so the
-    -- default-on rule for autoCreateProfiles lives in ONE place now instead of being
-    -- restated here -- the two copies were free to disagree.
-    --
-    -- ⚠ targetCb is included; it was missing from this block, so the "Target unit when
-    -- click-casting" box did not repaint on a panel refresh.
+    -- default-on rule for autoCreateProfiles lives in one place.
     for _, cb in ipairs({ self.autoCreateCb, self.mountCb, self.flyingCb, self.targetCb }) do
         if cb and cb.Refresh then cb:Refresh() end
     end

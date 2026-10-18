@@ -1,5 +1,22 @@
 # DandersFrames Changelog
 
+## [5.5.0]
+
+### Improvements
+
+- (Fading) Unhealable Fading is now called **Spirit of Redemption Fading**, which is what it covers. Your settings are unchanged. (by Krathe)
+- (Click-Casting) Click-casting now keeps separate bindings for retail and WoW Forever, like the Aura Designer does. If your saved files move between the two, the other version's bindings are put aside and come back when you return, and click-casting strings from the other version can no longer be imported. (WoW Forever)
+
+### Bug Fixes
+
+- (Auto Layouts) Moving frames while editing an auto layout saves the move into the layout again, and settings changed afterwards no longer end up in your main profile. A layout can also keep its own DandersMover anchor. Existing layouts stay where they are. (by Krathe)
+- (Frames) With Pixel Perfect on, raid and party frames no longer shift back and forth by a pixel when people join, leave or go out of range. (by Krathe)
+- (Blizzard Frames) The Edit Mode party side panel now follows the party side-menu setting instead of always hiding. (by Krathe)
+- (Profiles) Importing a 4.x profile string no longer puts status icons, missing buff and defensive icons underneath the health bar. (by Krathe)
+- (Auto Layouts) The Personal Targeted Spells block follows its layout's position in raids, and moving or anchoring it during a layout no longer changes your main profile.
+- (Permanent Mover) Dragging the handle moves your frames directly again instead of opening DandersMover. It still opens DandersMover when the frames are anchored to something.
+- (Auras) Buff, debuff and Aura Designer duration text now sits where its anchor says. Corner and side anchors such as Bottom Right no longer push the text off the icon.
+
 ## [5.4.0]
 
 ### New Features

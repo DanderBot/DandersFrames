@@ -8,45 +8,39 @@ local addonName, DF = ...
 -- ☠ WHY THIS HAS TO BE A TABLE AND CANNOT BE AN API CALL. There is no per-spell query. The
 -- window is computed per live aura INSTANCE:
 --     carriedOverToNewCast = GetRefreshExtendedDuration(unit, id) - GetAuraBaseDuration(unit, id)
--- and C_UnitAuras.GetRefreshExtendedDuration is flagged `RequiresValidUnitAuraInstance`, so
--- it needs a unit and an auraInstanceID. Nothing in C_Spell answers it either (checked on
--- 12.1.5: only GetSpellChargeDuration / GetSpellCooldownDuration / GetSpellLossOfControl-
--- CooldownDuration exist). The editor is configuring a spell that is not on anyone right
--- now, so the only way to know is to have watched it happen and remembered.
+-- and C_UnitAuras.GetRefreshExtendedDuration is flagged `RequiresValidUnitAuraInstance`,
+-- so it needs a unit and an auraInstanceID. Nothing in C_Spell answers it either (on
+-- 12.1.5 only GetSpellChargeDuration / GetSpellCooldownDuration /
+-- GetSpellLossOfControlCooldownDuration exist). The editor configures a spell that is not
+-- on anyone right now, so the only way to know is to have watched it and remembered.
 --
--- ★ THE RULE THIS DATA SERVES — and it is what makes an incomplete table safe:
+-- ★ THE RULE THIS DATA SERVES -- and it is what makes an incomplete table safe:
 --   * every id behind an aura measured NO  -> grey the Pandemic section, say why
 --   * any id YES, or any id NEVER MEASURED -> change nothing
 -- So a missing spell can never remove a working feature, and nothing is inferred from not
--- having seen something. Silence is not evidence — the same trap that nearly had Icy Veins
--- proposed as a live spell because its name row still resolved in the build dump.
+-- having seen something: silence is not evidence.
 --
--- ⚠ WHAT THIS SAMPLE IS, STATED PLAINLY. 179 spells across six healer specs plus whatever
--- potions, trinkets, forms and world buffs were up at the time. It is a proof that the
--- method works, collected on the characters available — NOT a survey. 74 entries were taken
--- on both PTR and retail on different builds with zero conflicts, so the measurements
--- themselves are solid; the COVERAGE is not. Do not read the NO list as "the game's
--- non-pandemic auras".
---   ⇒ The gate is near-silent for a DPS tracking their own DoTs, and that is expected
---     rather than broken. Pandemic-worth-tracking auras are heal-over-time effects, so a
---     healer-shaped sample is aimed at the right target; the unmeasured rest matter only if
---     someone goes looking.
+-- ⚠ WHAT THIS SAMPLE IS. 179 spells across six healer specs plus whatever potions,
+-- trinkets, forms and world buffs were up at the time: proof that the method works, NOT a
+-- survey. 74 entries were taken on two builds with zero conflicts, so the measurements are
+-- solid; the COVERAGE is not. Do not read the NO list as "the game's non-pandemic auras".
+--   ⇒ The gate is near-silent for a DPS tracking their own DoTs, which is expected:
+--     pandemic-worth-tracking auras are heal-over-time effects, so a healer-shaped sample
+--     is aimed at the right target.
 --
 -- ☠ THE ONE FAILURE DIRECTION THIS OPENS, accepted knowingly: a shipped NO that Blizzard
--- later makes wrong greys a feature that would work, and the user cannot tell that from
--- intended behaviour. That is the argument for eventually letting a LOCALLY measured YES
--- override a shipped NO — never the reverse, or a spell nobody happened to cast this week
--- starts greying itself. Local learning now exists (Pandemic.lua's sampler, riding the
--- container's out-of-combat sweep, stored per game build in DandersFramesDB_v2.pandemicWindows);
--- this table is its seed.
+-- later makes wrong greys a feature that would work. A LOCALLY measured YES should
+-- override a shipped NO, never the reverse. Local learning (Pandemic.lua's sampler,
+-- riding the container's out-of-combat sweep, stored per game build in
+-- DandersFramesDB_v2.pandemicWindows) uses this table as its seed.
 --
 -- ⚠ MEASUREMENTS, NOT OPINIONS. Several NOs are counter-intuitive and were re-checked:
 -- Prayer of Mending, Earth Shield, Echo of Light, Atonement and Dawnlight all read no.
 -- Divine Hymn 64843 has a window and 64844 does not; Mana Tea 115294 has one and 115867
 -- does not. Ebon Might has one despite not being a HoT. Do not "correct" a row from memory.
 --
--- Source: Maelareth's probe, lab discussion 98ceb448 (2026-08-20/21), design agreed there.
--- Replace this file wholesale when a wider harvest lands; nothing else needs to change.
+-- Source: Maelareth's probe, lab discussion 98ceb448. Replace this file wholesale when a
+-- wider harvest lands; nothing else needs to change.
 
 DF.PandemicWindows = {
     -- ── HAS a refresh window ────────────────────────────────────────────────

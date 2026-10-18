@@ -79,6 +79,12 @@ function TextStyle:Apply(fs, spec, anchorFrame)
 
     local anchor = spec.anchor or "CENTER"
     local offX, offY = spec.offsetX or 0, spec.offsetY or 0
+    -- The edge the anchor names, per axis. A stableCenter box is far wider than the icon,
+    -- so text centred in it lands half the box away from a corner anchor -- BOTTOMRIGHT
+    -- drew left of the icon. The box aligns its text to that edge instead; only an axis
+    -- the anchor leaves centred is centred.
+    local edgeH = anchor:find("LEFT", 1, true) and "LEFT" or anchor:find("RIGHT", 1, true) and "RIGHT" or "CENTER"
+    local edgeV = anchor:find("TOP", 1, true) and "TOP" or anchor:find("BOTTOM", 1, true) and "BOTTOM" or "MIDDLE"
 
     -- stableCenter centring compensation. WoW centres the INK bounding box (glyphs +
     -- drop shadow), so a shadow offset of s pushes the GLYPHS the other way by exactly
@@ -101,8 +107,13 @@ function TextStyle:Apply(fs, spec, anchorFrame)
             or (DF.db and DF.db[(DF.GUI and DF.GUI.SelectedMode) or "party"])
         local halfX = ((db and db.fontShadowOffsetX) or 1) / 2
         local halfY = ((db and db.fontShadowOffsetY) or -1) / 2
-        offX = offX + (halfX >= 0 and math.floor(halfX + 0.5) or math.ceil(halfX - 0.5))
-        offY = offY + (halfY >= 0 and math.floor(halfY + 0.5) or math.ceil(halfY - 0.5))
+        -- Centred axes only: edge-aligned text is not centred on its ink box.
+        if edgeH == "CENTER" then
+            offX = offX + (halfX >= 0 and math.floor(halfX + 0.5) or math.ceil(halfX - 0.5))
+        end
+        if edgeV == "MIDDLE" then
+            offY = offY + (halfY >= 0 and math.floor(halfY + 0.5) or math.ceil(halfY - 0.5))
+        end
     end
 
     fs:ClearAllPoints()
@@ -127,8 +138,8 @@ function TextStyle:Apply(fs, spec, anchorFrame)
         if w < minW then w = minW end
         fs:SetSize(w, spec.boxH or 0)
         fs:SetWordWrap(false)
-        fs:SetJustifyH("CENTER")
-        fs:SetJustifyV("MIDDLE")
+        fs:SetJustifyH(edgeH)
+        fs:SetJustifyV(edgeV)
     elseif userJustify then
         fs:SetSize(spec.boxW or 0, spec.boxH or 0)
         fs:SetWordWrap(true)

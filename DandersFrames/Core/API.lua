@@ -28,20 +28,14 @@ function DandersFrames_Export(profileKey)
             return nil  -- Profile doesn't exist
         end
         
-        -- ☠ THE RESTORE MUST BE UNCONDITIONAL. This borrows DF.db to export a profile
-        -- the user is not on. The restore used to be the next plain statement, so any
-        -- throw inside ExportProfile skipped it and left DF.db pointing at the OTHER
-        -- profile's raw table -- unproxied, while DF._realProfile and DF._realRaidDB
-        -- still referenced the original. The two then disagree: every later settings
-        -- write lands in the wrong profile's saved variables, silently, and at logout
-        -- that is what gets written to disk.
-        --
-        -- Reachable throws inside the window: next() on a non-table colour/linkedSections
-        -- table (legacy or import-corrupted profiles) and LibSerialize on an
-        -- unserializable value.
-        --
-        -- pcall, then restore, then re-raise nothing -- a failed export returns nil, which
-        -- is this function's documented failure value.
+        -- ☠ THE RESTORE MUST BE UNCONDITIONAL. This borrows DF.db to export a profile the user
+        -- is not on. If a throw inside ExportProfile skipped the restore, DF.db would be left
+        -- pointing at the OTHER profile's raw table -- unproxied, while DF._realProfile and
+        -- DF._realRaidDB still referenced the original -- and every later settings write would
+        -- land in the wrong profile's saved variables, silently, and be written to disk.
+        -- Reachable throws: next() on a non-table colour/linkedSections table (legacy or
+        -- import-corrupted profiles) and LibSerialize on an unserializable value.
+        -- pcall, restore, then return nil on failure -- the documented failure value.
         local originalDB = DF.db
 
         DF.db = DandersFramesDB_v2.profiles[profileKey]
@@ -193,6 +187,7 @@ function DandersFrames_ClickCast_Export(profileKey)
             profile = CopyTable(profile),
             exportedAt = date("%Y-%m-%d %H:%M"),
             class = select(2, UnitClass("player")),
+            sourceFlavor = DF.CLIENT_FLAVOR,
         }
         
         -- Serialize
@@ -274,6 +269,10 @@ function DandersFrames_ClickCast_Import(str, profileKey, importAll)
     if data.profileName ~= nil and type(data.profileName) ~= "string" then
         data.profileName = nil
     end
+    -- A string from the other game version (retail <-> WoW Forever) carries spells this
+    -- client does not have.
+    local refusal = DF.FlavorCorrection and DF.FlavorCorrection.ClickCastImportRefusal(data)
+    if refusal then return false, refusal end
 
     -- Analyze bindings for compatibility
     local bindingsToImport = {}
@@ -980,7 +979,7 @@ end
 -- ============================================================
 -- FRAME POSITIONS (Party + Raid + Pinned sets)
 -- ============================================================
--- Added for MSUF's Edit Mode (Mapko, 2026-08-06): lets another addon list DF's movable
+-- Added for MSUF's Edit Mode: lets another addon list DF's movable
 -- frames and reposition them from its own editor, without reading or writing
 -- DandersFramesDB_v2 directly.
 --

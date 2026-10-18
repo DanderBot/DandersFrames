@@ -8,7 +8,7 @@ local addonName, DF = ...
 -- for the pre-12.1 "Expiring" system (the ~3 Hz border/tint ticker in Frames/Border.lua
 -- + Features/Highlights.lua + Core.lua's LightweightUpdate*): remaining time is SECRET
 -- on 12.1, so nothing here reads it — the reveal is a native SetDurationText band
--- formatter evaluated C-side (proved live 2026-07-20; see patch_12_1_aura_lockdown.md).
+-- formatter evaluated C-side.
 --
 -- WHY A SEPARATE ENGINE: the AD placed icon/square build this inline in the factory, and
 -- the frame-level indicators (health-bar wash, frame border) will want the SAME reveal

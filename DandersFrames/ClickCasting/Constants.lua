@@ -305,9 +305,8 @@ local DEFAULT_BINDING = {
         stopSpellTarget = false,
         alwaysCast = false,
     },
-    -- Load conditions
-    -- (loadSpec, the per-binding spec gate, was retired: no UI ever wrote it
-    --  and per-spec click casting is done via loadout-assigned profiles)
+    -- Load conditions. Per-spec click casting is done with loadout-assigned profiles, so
+    -- there is no per-binding spec gate.
     loadCombat = nil, -- nil = always, "combat" = in combat only, "nocombat" = out of combat only
 }
 CC.DEFAULT_BINDING = DEFAULT_BINDING

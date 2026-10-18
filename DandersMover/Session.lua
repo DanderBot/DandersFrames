@@ -249,6 +249,7 @@ function Sess:Suspend()
     -- OnUpdate) hides, and a stale `linking` flag would keep the ClickSelect
     -- guard and the glyph dead after Resume.
     if self.linking then self:CancelLink() end
+    if Proxy.EndActiveDrag then Proxy:EndActiveDrag() end
     self.suspended = true
     Proxy:GetUnlockFrame():Hide()
     Grid:Hide()
@@ -646,12 +647,11 @@ function Sess:DragTo(el, cx, cy)
         end
         if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
     end
-    -- ☠ A ZONE PREVIEWS WHERE THE DROP WILL SEAT IT. The drop solves the anchor,
-    -- and an anchored solve only pulls back an element with nothing on screen
-    -- (NS.KeepOnScreen) -- a seat that overhangs an edge keeps its overhang. The
-    -- preview used to clamp the zone fully on screen instead, so a zone near an
-    -- edge showed the frames in one place and the release put them in another.
-    -- Tall elements hit it first (a Column of party frames at a scale above 1).
+    -- ☠ A ZONE PREVIEWS WHERE THE DROP WILL SEAT IT. The drop solves the anchor, and an
+    -- anchored solve only pulls back an element with nothing on screen (NS.KeepOnScreen):
+    -- a seat that overhangs an edge keeps its overhang. Clamping the preview fully on screen
+    -- would show the frames in one place and release them in another; tall elements (a
+    -- Column of party frames above scale 1) hit it first.
     if zone then
         cx, cy = NS.KeepOnScreen(cx, cy, w, h)
     else
@@ -726,14 +726,13 @@ end
 
 -- ============================================================
 -- KEYBOARD
--- Esc backs out one layer at a time: a live link gesture, then the selection,
--- then the session. Arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y =
--- undo/redo.
+-- Esc backs out one layer at a time: a live link gesture, then the selection, then the
+-- session. Arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y = undo/redo.
 -- Only ever enabled while the unlock frame is shown, which never happens in combat.
 --
--- Esc IS the deselect now: the unlock overlay no longer takes clicks (it covered
--- the whole screen, so owning the mouse made the world unclickable for the whole
--- session), and a click on empty space therefore goes to the game.
+-- Esc IS the deselect: the unlock overlay takes no clicks (it covers the whole screen,
+-- so owning the mouse would make the world unclickable for the session), so a click on
+-- empty space goes to the game.
 -- ============================================================
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
 
@@ -744,13 +743,11 @@ function Sess:EnableKeyboard(on)
     f:SetScript("OnKeyDown", function(frame, key)
         local handled = false
         if key == "ESCAPE" then
-            -- Innermost thing first, one layer per press: the link gesture, then
-            -- the selection (the following panel closes on the Refresh that
-            -- follows), then the session itself. Ending the whole session out
-            -- from under an open gesture or a selected mover would be a
-            -- surprise -- and with the overlay no longer taking clicks, this is
-            -- the only way to deselect. The exit prompt, when it is up, is the
-            -- innermost of all: Escape closes it as Cancel would.
+            -- Innermost thing first, one layer per press: the link gesture, then the selection
+            -- (the following panel closes on the Refresh that follows), then the session itself.
+            -- Ending the session out from under an open gesture or a selected mover would be a
+            -- surprise, and this is the only way to deselect. The exit prompt, when it is up, is
+            -- the innermost of all: Escape closes it as Cancel would.
             if NS.UI:DismissPopup() then -- closed the prompt (or any dialog on top)
                 if Sess.promptOpen then Sess:CancelLock() end
                 Sess.promptOpen = nil

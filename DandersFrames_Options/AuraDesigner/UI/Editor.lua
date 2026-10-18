@@ -124,12 +124,11 @@ local function CardPlace(body, bodyWidth, state)
     end
 end
 
--- Run a collected section list down a card body, captions and gaps included.
--- Returns the cursor, so the caller carries on where the last section stopped.
--- ⚠ `tabKey` IS WHICH TAB A REBUILD REDRAWS, and it is a parameter because a group's card is
--- no longer only ever on the Layout Groups tab -- the helper's cooldown-icon group is a card
--- in ACTIVE INDICATORS now (S.CreateLayoutGroupCard). It defaults to "layout", which is what
--- every existing caller means.
+-- Run a collected section list down a card body, captions and gaps included. Returns the
+-- cursor, so the caller carries on where the last section stopped.
+-- ⚠ `tabKey` IS WHICH TAB A REBUILD REDRAWS: a group's card is not always on the Layout
+-- Groups tab -- the helper's cooldown-icon group is a card in ACTIVE INDICATORS
+-- (S.CreateLayoutGroupCard). Defaults to "layout".
 local function RunCardSections(body, bodyWidth, by, sections, tabKey)
     tabKey = tabKey or "layout"
     for _, sec in ipairs(sections) do
@@ -711,19 +710,16 @@ P.CollectLayoutGroupSections = CollectLayoutGroupSections
 -- ============================================================
 -- THE TWO KINDS OF LAYOUT GROUP -- ONE DECLARATION
 -- ------------------------------------------------------------
--- Both thumbnails are a row of icons because both PRODUCE a row of icons; that
--- they differ only in what fills the row is the whole lesson. The colours carry
--- that difference -- a set picked by hand reads as mixed, one drawn from a single
--- filter reads as uniform.
+-- Both thumbnails are a row of icons because both PRODUCE a row of icons; they differ only
+-- in what fills the row, and the colours carry that difference -- a set picked by hand
+-- reads as mixed, one drawn from a single filter reads as uniform.
 --
--- ☠ A VERB, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup and a table
--- built at load freezes on whatever locale was live then -- the trap
--- DF:RegisterLocaleRefresh exists for.
+-- ☠ A VERB, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup, and a table built at
+-- load freezes on whatever locale was live then -- the trap DF:RegisterLocaleRefresh exists
+-- for.
 --
--- ⚠ ONE DECLARATION, READ BY ONE PANEL: S.BuildAddLayoutGroupPane below, which
--- both designers run -- the rows page from its "+ Add Layout Group" row, the
--- split panel mounted on its Layout Groups tab, where a tile click adds (2026-09-22;
--- its choice-card block is gone).
+-- ⚠ ONE DECLARATION, READ BY ONE PANEL: S.BuildAddLayoutGroupPane below, mounted on the
+-- Layout Groups tab, where a tile click adds.
 -- ============================================================
 -- ⚠ A nil group is a refused create -- My Buffs with no spec, already said by
 -- CreateLayoutGroup (P.RefuseNoSpecWrite) -- so nothing is expanded or rebuilt.
@@ -892,7 +888,7 @@ P.GroupTileMetrics = { picH = GROUP_TILE_PIC_H, gap = GROUP_TILE_GAP }
 
 -- ── opts.onPage: THE DESIGNER MOUNTS THESE PANES ON ITS TAB ──
 -- The split panel's Layout Groups / Debuffs tabs draw these tiles straight onto
--- the page, above the list, and a click ADDS (2026-09-22). So there is no numbered
+-- the page, above the list, and a click ADDS. So there is no numbered
 -- question over them -- the tab heading already says what the tiles are -- and the
 -- tiles are always half the column, one or two of them, so both tabs match.
 --   opts.onPage   no heading; half-column tiles
@@ -968,7 +964,7 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local hasGroups = #VisibleLayoutGroups() > 0
 
     -- ── SPELL GROUP / FILTER GROUP ──
-    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH (2026-09-22). The
+    -- ☠ THE TWO PICTURE TILES, ON THE PAGE, ONE CLICK EACH. The
     -- pane (S.BuildAddLayoutGroupPane, opts.onPage) mounted straight onto this tab:
     -- a tile click creates the group, and the Create / Manage Filters pair sits
     -- under the tiles -- see Cards.lua's THE DESIGNER'S INLINE ADD FLOWS.
@@ -1033,8 +1029,8 @@ end
 -- ============================================================
 -- ONE LAYOUT GROUP, AS A CARD
 -- ------------------------------------------------------------
--- ★★ EXTRACTED SO A GROUP CAN BE LISTED SOMEWHERE OTHER THAN THE LAYOUT GROUPS TAB
--- (2026-09-10). Krathe, on the helper's cooldown-icon group: "It's confusing when you add
+-- ★★ EXTRACTED SO A GROUP CAN BE LISTED SOMEWHERE OTHER THAN THE LAYOUT GROUPS TAB.
+-- Krathe, on the helper's cooldown-icon group: "It's confusing when you add
 -- Cooldown Icons from effects and it appears as a layout group, it should just show as a
 -- normal effect for PI helper." He is right, and the only thing that made it a tab of its own
 -- was this card: every structural edit in it named "layout" by hand, so the card could only
@@ -1066,9 +1062,8 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     -- later would be whichever tab the user had moved to by then.
     local refreshTab = opts.refreshTab or "layout"
     local function Redraw() S.SwitchTab(refreshTab) end
-    -- ⚠ ONE CHROME NOW. The effect card and the group card used to differ here -- plain
-    -- border versus the Layout Groups amber -- and both now wear the settings card look
-    -- (P.CreateCardShell), which has no per-tab tint. opts.asEffect is kept for callers.
+    -- Both the effect card and the group card wear the settings card look
+    -- (P.CreateCardShell), which has no per-tab tint; opts.asEffect is accepted for callers.
 
     -- Expansion keys are pool-scoped — raw id on My Buffs, "othergroup:<id>" on
     -- Other; the id counters overlap.
@@ -1476,17 +1471,13 @@ local function BuildDebuffCategories(env, group)
             row.tooltip = r.tooltip
             place(row, 26, { indent = 8, width = rowWidth })
             if r.show == "dispellable" then
-                -- Mode dropdown, indented under Dispellable Debuffs (the Aura Filters
-                -- column's control, group-scoped; back to TWO entries 2026-08-22 --
-                -- the PTR-5-era third mode "Any Dispel Type" was collapsed into All
-                -- Dispellable once both rode the DISPELLABLE token and became one
-                -- query wearing two rows).
+                -- Mode dropdown, indented under Dispellable Debuffs (the Aura Filters column's control,
+                -- group-scoped): By Me or All.
                 --
-                -- ★ Self-heal for a stored "ANY": AD groups have no startup migration
-                -- walk, and a shared template can re-introduce the value at any time.
-                -- This is the one surface where it would show (as a blank dropdown);
-                -- the engine already treats ANY as ALL, so this write changes
-                -- presentation only, never behaviour.
+                -- ★ Self-heal for a stored "ANY" (an older third mode that is the same query as All): AD
+                -- groups have no startup migration walk, and a shared template can re-introduce the value
+                -- at any time. This is the one surface where it would show (as a blank dropdown); the
+                -- engine already treats ANY as ALL, so this write changes presentation only.
                 if sel.dispellableMode == "ANY" then
                     sel.dispellableMode = "ALL"
                 end
@@ -1717,7 +1708,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
         dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         yPos = yPos - 30
 
-        -- ── CROSS-GROUP DEDUP TOGGLE (2026-08-29) ──
+        -- ── CROSS-GROUP DEDUP TOGGLE ──
         -- Its OWN switch, deliberately independent of the row's Hide Duplicate
         -- Debuffs (Krathe: "you might want to dedupe one and not the other").
         -- Preset-level (adDB.debuffGroupDedup) because the groups it governs are;
@@ -2055,16 +2046,13 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() and P.PIH_Sweep then P.PIH_Sweep() end
 
     S.activeTab = "effects"
-    -- ☠☠ A FULL BUILD USED TO CLOBBER THE POOL UNCONDITIONALLY, AND THAT BROKE THE ONE
-    -- CALLER THAT ASKS FOR A SPECIFIC ONE. The Power Infusion Helper's nav entry sets the
-    -- pool and then builds this page; the line below then reset it to My Buffs, so the
-    -- helper's own entry landed on somebody else's pool with none of its controls on screen
-    -- -- and only on a FULL build, so it behaved differently on a revisit (which takes the
-    -- reuse path above and leaves the pool alone). Krathe, 2026-09-08: "selecting the PI
-    -- helper in the menu is totally fucked up and the trigger/effects are not showing."
-    -- ⚠ CONSUMED, NOT READ. A standing preference would pin the designer to that pool
-    -- forever; this is a one-shot request from whoever navigated here, and clearing it means
-    -- the next plain visit to the designer opens on My Buffs exactly as it always has.
+    -- ☠☠ A FULL BUILD HONOURS A REQUESTED POOL. The Power Infusion Helper's nav entry sets the
+    -- pool and then builds this page; resetting to My Buffs here would land the helper's own
+    -- entry on somebody else's pool with none of its controls on screen -- and only on a FULL
+    -- build, since a revisit takes the reuse path above and leaves the pool alone.
+    -- ⚠ CONSUMED, NOT READ. A standing preference would pin the designer to that pool forever;
+    -- this is a one-shot request from whoever navigated here, and clearing it means the next
+    -- plain visit opens on My Buffs.
     S.activeBuffTab = S.pendingBuffTab or "my"
     S.pendingBuffTab = nil
     S.activeFilter = "all"
@@ -2522,15 +2510,12 @@ function DF:AuraDesigner_RefreshPage()
         end
     end
 
-    -- ☠☠ THE POOL CAN HAVE MOVED WITHOUT THE PANEL BEING REBUILT, and both strips were left
-    -- describing the pool the panel was BUILT for. The Power Infusion Helper's nav row asks
-    -- for its pool and reopens this page, which takes the island's REUSE path -- so the pool
-    -- tab stayed lit on Any Buff and the sub-tab strip still read Effects / Layout Groups /
-    -- Global while the content below it was the helper's. Krathe, 2026-09-09: "it shows
-    -- global/layout group and is not highlighting Power Infusion Helper tab up top."
-    -- ⚠ BEFORE SwitchTab, because ApplySubTabStrip decides which sub-tab buttons EXIST for
-    -- this pool and SwitchTab decides which of them is active. The other order lights a button
-    -- that is about to be hidden.
+    -- ☠☠ THE POOL CAN MOVE WITHOUT THE PANEL BEING REBUILT. The Power Infusion Helper's nav row
+    -- asks for its pool and reopens this page, which takes the island's REUSE path, so both
+    -- strips must be re-synced here or they keep describing the pool the panel was BUILT for.
+    -- ⚠ BEFORE SwitchTab: ApplySubTabStrip decides which sub-tab buttons EXIST for this pool
+    -- and SwitchTab decides which is active. The other order lights a button that is about to
+    -- be hidden.
     if P.SyncPoolTabs then P.SyncPoolTabs() end
     if P.UpdateLayoutTabState then P.UpdateLayoutTabState() end
 

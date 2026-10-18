@@ -94,11 +94,10 @@ end
 
 -- Does this member take a slot in the group's PACKED flow?
 --
--- ☠ THE FACTORY'S predicate, not a copy of it. This used to restate memberRenderable
--- with a comment on each telling the reader they must stay identical — which is a wish,
--- not a mechanism. The group container draws exactly the members this accepts and flows
--- them; everything else (a bar, a show-when-missing badge) takes a grid cell at its full
--- member index, which is why bars do not move when a neighbour is hidden.
+-- ☠ THE FACTORY'S predicate, not a copy of it: two copies kept identical by a comment drift.
+-- The group container draws exactly the members this accepts and flows them; everything
+-- else (a bar, a show-when-missing badge) takes a grid cell at its full member index, which
+-- is why bars do not move when a neighbour is hidden.
 local function MemberPacksInFlow(ind)
     local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
     if Factory and Factory.MemberRenderable then return Factory:MemberRenderable(ind) end
@@ -1143,19 +1142,14 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- (GetUngroupedIndicators removed — uncalled since the group picker moved to
 -- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
 
--- ★★ WHAT A NEW LAYOUT GROUP *IS*, IN ONE PLACE (2026-09-10).
+-- ★★ WHAT A NEW LAYOUT GROUP *IS*, IN ONE PLACE.
 --
--- ☠ EXTRACTED BECAUSE A SECOND CREATOR DRIFTED FROM IT AND SHIPPED. The Power Infusion
--- Helper's cooldown-icon group is built directly into adDB.otherLayoutGroups rather than
--- through CreateLayoutGroup below -- deliberately, and for a good reason: that function picks
--- its store from the OPEN TAB, which is the one line that put eight stray groups in Krathe's
--- spec store and took three attempts to clean up. What it also did was hand-write the record,
--- and a hand-written record omitted `iconSize` and `maxIcons`. Krathe: "Max icons should
--- default to 4 it's showing blank but seems to look like 8? Icon size is also showing blank on
--- the slider." Both sliders bind the field directly, so nil draws blank -- and the factory
--- falls back to 8 for a filter group's max, which is exactly what he was seeing.
--- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
--- is how they drifted; there is no longer a field list to copy.
+-- ☠ ONE RECORD, TWO CREATORS. The Power Infusion Helper's cooldown-icon group is built
+-- directly into adDB.otherLayoutGroups rather than through CreateLayoutGroup below --
+-- deliberately, because that function picks its store from the OPEN TAB, which would put
+-- the helper's groups in the spec store. The two callers share the RECORD and differ only
+-- in the STORE; a hand-written record misses fields (iconSize / maxIcons nil draws blank
+-- sliders, and the factory falls back to 8 for a filter group's max).
 --
 -- kind: nil/"members" = member arranger (legacy records carry no kind); "filter" = a
 -- container-backed group linked to registry filters (stable preset keys / custom ids in
@@ -1432,7 +1426,7 @@ P.BADGE_COLORS = BADGE_COLORS
 
 -- Collect all configured effects into a flat, sorted list
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
--- ☠ HELPER-OWNED RECORDS ARE EXCLUDED BY DEFAULT (2026-09-08). A record carrying a
+-- ☠ HELPER-OWNED RECORDS ARE EXCLUDED BY DEFAULT. A record carrying a
 -- `pihSignal` mark belongs to the Power Infusion Helper, which now has its own page
 -- (Auras > Power Infusion Helper). Krathe's requirement when it moved: "Anything added
 -- should show just on the PI helper page and not in AD itself." Left in this list they
@@ -1445,7 +1439,7 @@ P.BADGE_COLORS = BADGE_COLORS
 -- becoming unreachable code that looks maintained.
 -- ⚠ Callers that want the designer's behaviour pass nothing: every existing call site
 -- (Cards.lua's Active Indicators list, Rows.lua's) is a designer list and wants them gone.
--- ☠☠ THE SAME RULE, FOR THE SURFACE THAT NEVER LEARNED IT (2026-09-10).
+-- ☠☠ THE SAME RULE, FOR THE SURFACE THAT NEVER LEARNED IT.
 -- CollectAllEffects hides helper-owned records from every pool but the helper's; the PREVIEW
 -- CANVAS was written before that rule existed and kept painting them. Krathe: "any buff tab on
 -- AD is showing our PI helper indicators, it should not."
@@ -1529,17 +1523,13 @@ local function CollectAllEffects(opts)
             if not displayName and adHocID then
                 displayName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(adHocID) or auraName
             end
-            -- ☠ LAST RESORT — NEVER LEAVE A RECORD UNNAMED. The gate below drops
-            -- anything without a display name, so a key that falls through here
-            -- is an effect that still RENDERS on the frame (the factory resolves
-            -- identity separately) but has no card, no delete button and no way
-            -- out short of a new profile. Add-by-ID used to mint exactly such
-            -- keys. Name it from its own spell, then from the raw key, so it is
-            -- always visible and always removable. Same doctrine as
-            -- MigrateToSpecScoped's "NEVER drop it" parking.
-            -- Safe against leaking another spec's auras: this pool is already
-            -- spec-scoped storage (adDB.auras[spec]), not a flat table filtered
-            -- by name — the nameability test never did the spec scoping.
+            -- ☠ LAST RESORT -- NEVER LEAVE A RECORD UNNAMED. The gate below drops anything without a
+            -- display name, so a key that falls through here is an effect that still RENDERS on the
+            -- frame (the factory resolves identity separately) but has no card, no delete button and
+            -- no way out short of a new profile. Name it from its own spell, then from the raw key, so
+            -- it is always visible and always removable -- the same doctrine as MigrateToSpecScoped's
+            -- "NEVER drop it" parking. Safe against leaking another spec's auras: this pool is already
+            -- spec-scoped storage (adDB.auras[spec]), not a flat table filtered by name.
             if not displayName then
                 local ids = Adapter and Adapter.GetAuraSpellIDs
                     and Adapter:GetAuraSpellIDs(spec, auraName)
@@ -1628,7 +1618,7 @@ P.IsAuraTypePlaced = IsAuraTypePlaced
 
 -- ============================================================
 -- DRAG AND DROP SYSTEM
--- Modeled after DandersCDM's ghost-based drag pattern:
+-- A ghost-based drag pattern:
 --   Ghost frame (TOOLTIP strata, EnableMouse false) follows cursor
 --   Anchor dots act as drop targets via OnEnter/OnLeave
 --   OnUpdate frame polls IsMouseButtonDown for drop detection
@@ -2022,13 +2012,10 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         local s = lay.size or 24
         slot:SetSize(s, s)
     end
-    -- ☠ Scale + anchor + offsets + the pixel-perfect nudge, from LIVE's pin resolver.
-    -- This used to be SetScale + a bare anchor-to-anchor SetPoint, which dropped the pp
-    -- nudge entirely. That nudge is computed from the host's EFFECTIVE SCALE, so the
-    -- canvas drifted from the frame by an amount that changed with the UI scale — which
-    -- is exactly how it was reported ("AD preview does not match live frames... UI scale
-    -- might be partly to blame"). Fixing the number here would have been the third
-    -- version of this maths; asking live is the only thing that cannot drift again.
+    -- ☠ Scale + anchor + offsets + the pixel-perfect nudge, from LIVE's pin resolver. The
+    -- nudge is computed from the host's EFFECTIVE SCALE, so a bare SetScale + anchor here
+    -- would drift from the frame by an amount that changes with the UI scale. Asking live is
+    -- the only answer that cannot drift.
     if flowParent then
         -- Member of a group the live container PACKS. Its position is the group flow's to
         -- give (AuraContainer.FlowSlots, run by the caller once the whole set exists), so
@@ -2039,10 +2026,9 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         slot:SetFrameLevel(flowParent:GetFrameLevel() + 1)
     else
         if slot:GetParent() ~= mockFrame then slot:SetParent(mockFrame) end
-        -- ⚠ CLEAR THE FLOW STAMP. Slots are pooled, so one that used to be a packed group
-        -- member and is now pinned would carry the old record cell into whatever reads it
-        -- next. The flow pass stamps it on the way in; the pinned branch is the only other
-        -- way out, so it clears it here.
+        -- ⚠ CLEAR THE FLOW STAMP. Slots are pooled, so one that was a packed group member and is
+        -- now pinned would carry the old record cell into whatever reads it next. The flow pass
+        -- stamps it on the way in; this pinned branch is the only other way out.
         slot.dfImpRecStyle = nil
         AC.PinLayoutBox(slot, mockFrame, lay, PreviewPixelPerfect(mockFrame))
         slot:SetFrameStrata(mockFrame:GetFrameStrata())
@@ -2266,16 +2252,11 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     local spacing = tonumber(group.spacing) or 2
     local cols = min(maxIcons, wrap)
     local rows = floor((maxIcons - 1) / wrap) + 1
-    -- FOOTPRINT = scaffolding, and the only geometry this function still owns. It is the
-    -- block the group COULD fill (maxIcons cells), which live has no equivalent of — a
-    -- live container self-sizes to the auras actually present. The cell stride is live's:
-    -- a filter/debuff group's layout carries no scale (buildFilterGroupLayout sets none),
-    -- so the container runs at scale 1 and its stride is size + spacing.
-    -- ☠ A ☠-marked comment here used to claim this block "ignores icon SCALE entirely...
-    -- so any group at a scale other than 1.0 draws its placeholder at the wrong stride".
-    -- That was wrong on its own terms: iconScale is an AD DEFAULTS / per-indicator field,
-    -- and a group record has no scale at all. It described a divergence that could not
-    -- happen, and left the real ones (the pin, below) unnamed.
+    -- FOOTPRINT = scaffolding, and the only geometry this function owns: the block the group
+    -- COULD fill (maxIcons cells), which live has no equivalent of -- a live container
+    -- self-sizes to the auras actually present. The cell stride is live's: a filter/debuff
+    -- group's layout carries no scale (buildFilterGroupLayout sets none, and a group record has
+    -- no scale field), so the container runs at scale 1 and its stride is size + spacing.
     slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
                  max(rows * iconSize + (rows - 1) * spacing, 10))
     ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
@@ -2284,13 +2265,10 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     slot.label:SetTextColor(GUI.Colors.notice.r, GUI.Colors.notice.g, GUI.Colors.notice.b)
     slot.label:SetWidth(slot:GetWidth() - 4)
     slot.label:SetMaxLines(2)
-    -- ☠ PIN FROM LIVE. This used to re-derive a corner from the growth string ("grow
-    -- RIGHT_DOWN so pin my TOPLEFT") and SetPoint it at the group's anchor. That is a
-    -- second answer to a question applyContainerLayout already answers, and it differed
-    -- on both of the cases that matter: CENTER growth (live pins a centre-of-edge with a
-    -- half-icon fold; the derivation pinned a corner with none) and pixel-perfect (live
-    -- nudges the pin onto the physical grid; the derivation never did, so the block drifted
-    -- by an amount that changed with the UI scale). Live's pin, or nothing.
+    -- ☠ PIN FROM LIVE, not a corner re-derived from the growth string: applyContainerLayout
+    -- already answers the question, and a re-derivation differs on the two cases that matter --
+    -- CENTER growth (live pins a centre-of-edge with a half-icon fold) and pixel-perfect (live
+    -- nudges the pin onto the physical grid). Live's pin, or nothing.
     local pp = PreviewPixelPerfect(mockFrame)
     local gLayout = Factory and Factory.BuildGroupLayout
         and Factory:BuildGroupLayout(group, wrapDefault) or nil
@@ -2353,22 +2331,16 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         end
         cfg.testEntries = entries
     end
-    -- ☠ THE SAMPLES ARE PLACED BY LIVE'S FLOW, NOT BY THIS FILE.
-    -- What was here: a stride, a pair of sign flips derived from the growth string, a
-    -- corner, and a hand-written CENTER branch — a fourth restatement of a layout the
-    -- container already performs. It drifted from live in the ways a restatement always
-    -- does (no pin fold, no pixel snap, its own idea of which corner fills first), and
-    -- every previous round of this bug was "correct the restatement".
-    -- Now: a box pinned exactly where the live container pins itself, and
-    -- AuraContainer.FlowSlots running the SAME AnchorUtil flow over the sample frames.
-    -- The samples are a child box rather than `slot` itself because `slot` is the
-    -- FOOTPRINT outline (scaffolding: the block the group could fill), while the flow
-    -- sizes its own box to the content — live has no footprint concept to borrow.
-    -- ☠ PARENTED TO `slot`, NOT to the canvas. ClearPlacedIndicators tears the canvas down
-    -- by hiding the placeholder slots; a box parented to mockFrame would survive that with
-    -- its sample icons still on screen, floating over a placeholder that is no longer
-    -- there. Parenting costs nothing here (FlowSlots still PINS it to mockFrame — anchoring
-    -- and parentage are independent, and slot inherits the canvas scale either way).
+    -- ☠ THE SAMPLES ARE PLACED BY LIVE'S FLOW, NOT BY THIS FILE. A box is pinned exactly where
+    -- the live container pins itself, and AuraContainer.FlowSlots runs the SAME AnchorUtil flow
+    -- over the sample frames; a hand-written restatement here would drift (pin fold, pixel
+    -- snap, which corner fills first). The samples are a child box rather than `slot` itself
+    -- because `slot` is the FOOTPRINT outline, while the flow sizes its own box to the content.
+    -- ☠ PARENTED TO `slot`, NOT to the canvas. ClearPlacedIndicators tears the canvas down by
+    -- hiding the placeholder slots; a box parented to mockFrame would survive that with its
+    -- sample icons floating over a placeholder that is gone. Parenting costs nothing (FlowSlots
+    -- still PINS it to mockFrame -- anchoring and parentage are independent, and slot inherits
+    -- the canvas scale either way).
     local flowBox = slot.flowBox
     if not flowBox then
         flowBox = CreateFrame("Frame", nil, slot)

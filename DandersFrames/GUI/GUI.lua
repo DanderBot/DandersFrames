@@ -219,16 +219,14 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     end,
 
     -- ---- live refresh + drag bookkeeping ------------------------
-    -- BOTH refresh hooks land on the same coalescing sink now, one frame apart
-    -- from nothing: ThrottledUpdateAll is a deprecated alias for UpdateAll, and
-    -- UpdateAll is an arm-stub (Core\ApplyScheduler.lua), so however many times
-    -- a page fires either of these inside one rendered frame, one pass runs.
+    -- BOTH refresh hooks land on the same coalescing sink: ThrottledUpdateAll is an alias for
+    -- UpdateAll, and UpdateAll is an arm-stub (Core\ApplyScheduler.lua), so however many
+    -- times a page fires either inside one rendered frame, one pass runs.
     --
-    -- The drag pair is REFCOUNTED host-side (Core.lua): the widget kit is not the
-    -- only surface that holds a drag open -- the colour picker's bars do too --
-    -- and every start must be matched by exactly one stop. onDragStop no longer
-    -- performs the general full update; the kit's release path asks for that
-    -- through refreshNow.
+    -- The drag pair is REFCOUNTED host-side (Core.lua): the widget kit is not the only
+    -- surface that holds a drag open -- the colour picker's bars do too -- and every start
+    -- must be matched by exactly one stop. onDragStop does not perform the general full
+    -- update; the kit's release path asks for that through refreshNow.
     refresh    = function() DF:ThrottledUpdateAll() end,
     refreshNow = function() DF:UpdateAll() end,
     --
@@ -403,28 +401,17 @@ end
 -- ☠ THE REGISTRY MUST BE COMPLETE BEFORE ANYTHING READS IT.
 --
 -- DF:SectionOwnsKey (Core/Profile.lua) resolves prefix collisions by LONGEST MATCHING
--- PREFIX ACROSS THE WHOLE REGISTRY. That is only correct if every page is present.
--- Registration used to happen inside CreateCopyButton, inside a page's builderFunc,
--- which GUI Panel's DoBuild calls only on the FIRST VISIT to that page -- and skips
--- entirely for a page disabled in the current mode.
+-- PREFIX ACROSS THE WHOLE REGISTRY, which is only correct if every page is present. Pages
+-- build lazily (DoBuild runs on a page's first visit, and never for a page disabled in
+-- the current mode), so a registry filled by CreateCopyButton alone would depend on which
+-- tabs had been opened: Reset Page on Debuffs could then wipe the debuff blacklist and
+-- every filter toggle because the longer prefixes that out-rank "debuff" were not there.
+-- DF:SyncLinkedSections also runs from DF:UpdateAll() in the MAIN addon, possibly with
+-- the options companion never loaded.
 --
--- So the answer depended on which tabs you had opened this session. Fresh login →
--- Auras → Debuffs, without ever opening Aura Filters: auras_filterdesigner is absent,
--- its debuffFilter* / debuffBlacklist prefixes are not there to out-rank the Debuffs
--- page's plain "debuff", and Reset Page wipes the user's entire debuff blacklist and
--- all six filter toggles. Open Aura Filters first and the identical click is safe.
--- Same shape on Copy to Raid and on DF:SyncLinkedSections.
---
--- Seeding it here fixes a second, quieter case too: DF:SyncLinkedSections runs from
--- DF:UpdateAll() in the MAIN addon, which can run with the options companion never
--- loaded -- in which case the registry was simply empty and linked sections silently
--- did not sync at all.
---
--- ⚠ THIS TABLE MUST STAY IN STEP WITH THE CreateCopyButton CALL SITES. It was
--- transcribed from them via the AST rather than by hand, and CreateCopyButton still
--- writes its own entry on build, so a page that drifts self-heals once visited -- but
--- a drifted entry re-opens exactly the bug above until then. If you add or change a
--- section, change it here too.
+-- ⚠ THIS TABLE MUST STAY IN STEP WITH THE CreateCopyButton CALL SITES. CreateCopyButton
+-- still writes its own entry on build, so a drifted page self-heals once visited -- but a
+-- drifted entry re-opens exactly the bug above until then. Change it here too.
 DF.SECTION_PREFIXES = {
     -- ⚠ buffFilterSelection is listed EXPLICITLY here rather than left to "buff":
     -- it does not share a prefix with the rest, and the page that shows the control
@@ -433,22 +420,14 @@ DF.SECTION_PREFIXES = {
     auras_debuffs                = { "debuff", "showDebuffs", "directDebuff", "debuffBlacklist" },
     auras_defensiveicon          = { "defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar" },
     auras_dispel                 = { "dispel" },
-    -- ☠ auras_filterdesigner OWNS NOTHING, and the empty table is the statement.
-    -- It used to claim buffFilterSelection, debuffFilter*, debuffBlacklist and the
-    -- directBuff*/directDebuff* switches, because it displayed all of them. It no
-    -- longer displays ANY of them -- filter selection moved to the consumer pages --
-    -- so every key went back to the page whose controls now show it.
-    --
-    -- A control must write where it reads: leaving a claim here would let Reset Page
-    -- on the filter library silently rewrite the Buff Bar's and Debuff Bar's
-    -- settings, and SectionOwnsKey resolves by LONGEST matching prefix across the
-    -- WHOLE registry, so a stale long entry here would outrank the real owner's
-    -- shorter one and win keys back invisibly.
-    --
-    -- What this page does edit is not per-mode at all: preset overrides are per
-    -- PROFILE, custom filters are per ACCOUNT. Neither is reachable by Copy to Raid
-    -- or Sync with Raid, which is why owning nothing here is correct rather than a
-    -- gap to be filled in later.
+    -- ☠ auras_filterdesigner OWNS NOTHING, and the empty table is the statement. Filter
+    -- selection lives on the consumer pages, so every key belongs to the page whose controls
+    -- show it. A control must write where it reads: a claim here would let Reset Page on the
+    -- filter library rewrite the Buff Bar's and Debuff Bar's settings, and since
+    -- SectionOwnsKey resolves by LONGEST matching prefix, a long entry here would outrank the
+    -- real owner's shorter one invisibly.
+    -- What this page does edit is not per-mode at all: preset overrides are per PROFILE,
+    -- custom filters per ACCOUNT, and neither is reachable by Copy to Raid or Sync with Raid.
     auras_filterdesigner         = {},
     auras_missingbuffs           = { "missingBuff" },
     bars_absorb                  = { "absorbBar", "healAbsorb" },
@@ -484,16 +463,14 @@ end
 -- ============================================================
 -- THE SETTINGS WINDOW'S DEFAULT SIZE
 -- ------------------------------------------------------------
--- ☠ RESIDENT, because it has TWO readers on opposite sides of the load-on-demand
--- split: GUI/Panel.lua builds the window with it (companion), and `/df resetgui`
--- writes it back into the window state (Core.lua, resident -- and reachable
--- before the panel has ever been opened). It was a literal in both, and they
--- were free to disagree: a reset would then "restore the default" to a size the
--- addon no longer ships.
+-- ☠ RESIDENT, because it has TWO readers on opposite sides of the load-on-demand split:
+-- GUI/Panel.lua builds the window with it (companion), and `/df resetgui` writes it back
+-- into the window state (Core.lua, resident -- reachable before the panel has ever been
+-- opened). One value, so a reset restores the size the addon actually ships.
 --
--- ⚠ THE DEFAULT, NOT A MINIMUM. A stored guiDb.width/height wins over it
--- everywhere, and the resize floor (Panel.lua's minWidth/minHeight) is lower on
--- purpose -- a user who wants the window smaller than it opens can drag it there.
+-- ⚠ THE DEFAULT, NOT A MINIMUM. A stored guiDb.width/height wins over it everywhere, and
+-- the resize floor (Panel.lua's minWidth/minHeight) is lower on purpose -- a user who
+-- wants the window smaller than it opens can drag it there.
 GUI.WindowDefaults = { width = 640, height = 600 }
 
 -- ============================================================

@@ -122,8 +122,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Synced/Sync state were painted once at build and then frozen. That was invisible
         -- while the only way to change link state was clicking this very button (which
         -- repaints itself), but a profile Reset clears linkedSections wholesale and the
-        -- button went on claiming "Synced with Raid" until the page was rebuilt
-        -- (Krathe, 2026-08-08). Kept the old field rather than deleting it unasked.
+        -- button went on claiming "Synced with Raid" until the page was rebuilt.
+        -- Kept the old field rather than deleting it unasked.
         -- ⚠ Called as widget:refreshContent(db) — colon, so it arrives (self, db).
         -- UpdateAppearance reads upvalues and ignores both, which is why it can be reused
         -- verbatim; do not give it parameters without checking these two call shapes.
@@ -573,10 +573,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ★ ONE VOCABULARY, ASKED TWICE -- once for out of combat, once for in
         -- combat. "Alt out of combat, never in combat" is then two picks that cannot
         -- contradict each other, which a Disable-In-Combat checkbox plus a separate
-        -- hold-to-show dropdown genuinely could. Same shape ElvUI uses (its
-        -- visibility.unitFrames + visibility.combatOverride take these five values);
-        -- Ellesmere reaches the same place with a single always/outOfCombat/never
-        -- mode. Only the two DF-drawn boxes get it -- see the config comment for why
+        -- hold-to-show dropdown genuinely could. Only the two DF-drawn boxes get it -- see the config comment for why
         -- the aura rows cannot.
         local VIS_VALUES = {
             SHOW  = L["Always"],
@@ -1104,8 +1101,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --   column 1   Out of Range (no on/off), Element-Specific Alpha (tick:
         --              oorEnabled)
         --   column 2   Dead/Offline Fading (tick: fadeDeadFrames), Health
-        --              Threshold Fading (tick: healthFadeEnabled), Unhealable
-        --              Fading
+        --              Threshold Fading (tick: healthFadeEnabled), Spirit of
+        --              Redemption Fading
         --
         -- Every feature that has an enable carries it as its header tick (one
         -- checkbox per setting, the builder's own skipped through hoistToggle).
@@ -1605,17 +1602,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function apply() DF:RefreshUnhealableFade() end
 
             if not tools2.hoistToggle then
-                local ufEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Fade Unhealable Units"], db, "fadeUnhealableEnabled", function()
+                local ufEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Fade Spirit of Redemption"], db, "fadeUnhealableEnabled", function()
                     tools2.refreshStates()
                     apply()
                 end), 30)
                 ufEnable.keepEnabled = true
-                ufEnable.tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."]
+                ufEnable.tooltip = L["Dims a priest's frame while they are in Spirit of Redemption, since heals cannot land on them."]
             end
             group.disableChildrenOn = function(d) return not d.fadeUnhealableEnabled end
 
-            local ufAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Unhealable)"], 0.1, 1.0, 0.05, db, "fadeUnhealableAlpha", apply, apply, true), 55)
-            ufAlpha.tooltip = L["How visible the frame stays while its unit cannot be healed."]
+            local ufAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Spirit of Redemption)"], 0.1, 1.0, 0.05, db, "fadeUnhealableAlpha", apply, apply, true), 55)
+            ufAlpha.tooltip = L["How visible the frame stays while the priest is in Spirit of Redemption."]
             group:AddWidget(GUI:CreateColorPicker(parent, L["Fade Color"], db, "fadeUnhealableColor", false, apply, apply, true), 35)
         end
 
@@ -1625,10 +1622,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return a and format("%s %.2f", L["Alpha"], a) or ""
         end
 
-        local band = OpenSection(L["Unhealable Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
+        local band = OpenSection(L["Spirit of Redemption Fading"], "fading_unhealable", 2, UnhealableFadeSummary, nil, nil,
             BuildUnhealableFadeGroup, {
-                db = db, key = "fadeUnhealableEnabled", label = L["Fade Unhealable Units"],
-                tooltip = L["Dims a frame while its unit cannot be healed, such as a priest in Spirit of Redemption."],
+                db = db, key = "fadeUnhealableEnabled", label = L["Fade Spirit of Redemption"],
+                tooltip = L["Dims a priest's frame while they are in Spirit of Redemption, since heals cannot land on them."],
                 onChanged = function()
                     self:RefreshStates()
                     DF:RefreshUnhealableFade()
@@ -1725,13 +1722,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
 
-        -- ☠ SIX VALUE TABLES AND ONE APPLY MOVED UP TO PAGE SCOPE, ABOVE EVERY
-        -- BUILDER. They used to sit in the straight-line code beside the controls
-        -- that read them, which was fine while the page WAS straight-line code.
-        -- The builders are CLOSURES now, and a closure captures the upvalue that
-        -- exists when it is CREATED -- so a builder declared above one of these
-        -- would see nil rather than the table. The cards need them from outside
-        -- the builders as well: a summary prints the dropdown's own words.
+        -- ☠ SIX VALUE TABLES AND ONE APPLY LIVE AT PAGE SCOPE, ABOVE EVERY BUILDER. The builders
+        -- are CLOSURES, and a closure captures the upvalue that exists when it is CREATED, so a
+        -- builder declared above one of these would see nil. The cards need them from outside the
+        -- builders too: a summary prints the dropdown's own words.
         local textAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
@@ -2462,7 +2456,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
         end
 
-        -- The Blizzard-frame disable is applied ONCE at load (a hard, ElvUI-style
+        -- The Blizzard-frame disable is applied ONCE at load (a hard
         -- UnregisterAllEvents + reparent of the CompactRaidFrameManager that can't
         -- be cleanly undone live), so changing any of these toggles needs a UI
         -- reload to take full effect. The setter still hides/shows the frames
@@ -3055,7 +3049,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- and HEIGHT through the secure header, which is why those two looked fine
             -- while padding did not. `true` skips the drag throttle — an un-forced call
             -- landing inside the drag window would silently do nothing, which is the
-            -- failure this is here to prevent (Krathe, 2026-08-09).
+            -- failure this is here to prevent.
             if DF.LightweightUpdateFrameSize then
                 DF:LightweightUpdateFrameSize(true)
             end
@@ -3596,27 +3590,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ⚠ This is the convention the rest of the game uses, verified in source, not
         -- assumed: Blizzard's own raid option is "Horizontal Groups", and with it on
         -- CompactRaidGroup_UpdateLayout anchors each member LEFT->RIGHT off the previous
-        -- one, i.e. horizontal describes the GROUP, not the arrangement of groups. Grid2
-        -- says "Horizontal groups" for the same thing and its SetOrientation(horizontal)
-        -- sets the header's xOffset, so again the group is the row. (ElvUI sidesteps the
-        -- word entirely with "Down and then Right" style pairs.)
+        -- one, i.e. horizontal describes the GROUP, not the arrangement of groups.
         -- ⇒ DandersFrames' internal HORIZONTAL/VERTICAL are the INVERSE of that
         -- convention for grouped raid. The labels have to absorb that; the keys cannot
         -- be renamed without a migration.
         --
         -- The history, so nobody re-derives it: three dropdowns originally, the
-        -- raid+groups one inverted as above and correct. Aphoex (2026-08-14) reported
+        -- raid+groups one inverted as above and correct. Aphoex reported
         -- "choosing columns enables rows configuration, and viceversa" -- real, but it
         -- was a COLLISION, not an inversion: "Columns" names the group's shape while
         -- "Groups Per Row" names the arrangement of groups, and both are true at once.
         -- Collapsing the dropdowns onto the party reading "fixed" that by making the
         -- grouped dropdown disagree with the frames instead, so "Growth Direction = Rows"
-        -- drew columns (Krathe, 2026-08-17). The tooltips below carry the disambiguation
+        -- drew columns. The tooltips below carry the disambiguation
         -- that report actually needed.
         -- ☠ _order OR IT SORTS ALPHABETICALLY BY DISPLAY TEXT. Every directional dropdown
         -- on this page needs it: without _order, CreateDropdown falls back to sorting on
         -- the visible string, so a Top/Bottom pair lists as "Bottom, Top" and reads as
-        -- inverted before you have even opened it (Krathe, 2026-08-17). It survived this
+        -- inverted before you have even opened it. It survived this
         -- long only because "Start (Left/Top)" / "End (Right/Bottom)" sorted E-then-S,
         -- which was equally arbitrary but nobody expects an order from those.
 
@@ -3699,35 +3690,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
             groupGrowDrop.tooltip = GrowDirectionTooltip(true)
 
-            -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns
-            -- share ONE key with OPPOSITE label maps, so the word for a given stored value
-            -- depends on raidUseGroups -- and an auto layout can override raidUseGroups. An
-            -- auto layout with groups OFF, against a global with groups ON, therefore printed
-            -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
-            -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
-            -- being wrong about a setting the user can see for themselves.
-            -- ⚠ 2026-08-26: this used to describe a RESOLVER that "picks the map from the
-            -- GLOBAL raidUseGroups". No such thing ships. That was one of three widget-level
-            -- attempts, all reverted -- two of which silently never fired -- and the sentence
-            -- outlived the code it described. What actually happens: the PROFILE LAYER hands
-            -- back a growDirection already expressed in this profile's mode
-            -- (AutoProfilesUI:GetGlobalValue / GetRuntimeGlobalValue), so by the time a label
-            -- map is applied here there is only one dialect left and no map-picking to do.
-            -- ☠ Do not re-add a widget-side translation: with the source translating, a second
-            -- pass here inverts it straight back.
-            -- ⚠ Nothing in the profile layer changes what is STORED or drawn -- only the
-            -- the global. The label flip when you toggle the checkbox is not this bug and is
-            -- deliberate: the same value genuinely renders as rows in one mode and columns in
-            -- the other, so the word has to change with it (see the convention note above).
-            -- ⚠ NO OVERRIDE HOOKS HERE, DELIBERATELY. growDirection is mode-relative and a
-            -- layout can override the key that sets its mode, so a flat layout matching a
-            -- grouped global stores the OPPOSITE raw value -- which made the override row
-            -- report a difference the user does not have. Three widget-level attempts to
-            -- describe or suppress that did not hold; the answer lives in the profile layer
-            -- instead (AutoProfilesUI:GetGlobalValue / IsSettingOverridden translate
-            -- growDirection into the editing profile's mode), so the dot, the reset, the
-            -- readout and the tab stars all get one consistent answer with no widget
-            -- plumbing. Do not re-add a per-dropdown hook: it would translate twice.
+            -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns share ONE key
+            -- with OPPOSITE label maps, so the word for a stored value depends on raidUseGroups -- and an
+            -- auto layout can override raidUseGroups.
+            -- The PROFILE LAYER answers that: AutoProfilesUI:GetGlobalValue / GetRuntimeGlobalValue /
+            -- IsSettingOverridden translate growDirection into the editing profile's mode, so by the
+            -- time a label map is applied here there is one dialect, and the dot, the reset, the
+            -- readout and the tab stars all get one consistent answer.
+            -- ☠ Do NOT add a widget-side translation or a per-dropdown override hook: with the source
+            -- translating, a second pass here would invert it straight back.
+            -- ⚠ The label flip when you toggle the checkbox is deliberate: the same value genuinely
+            -- renders as rows in one mode and columns in the other, so the word changes with it (see
+            -- the convention note above).
 
             -- Growth anchor (party only)
             local anchorOptions = GrowthAnchorOptions()
@@ -3797,7 +3771,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- SILENTLY RE-ORIENTED THE RAID: sitting on "Rows" in grouped mode and turning
             -- groups off left the stored VERTICAL intact, which flat renders as columns,
             -- and the dropdown honestly relabelled itself "Columns". The user then had to
-            -- set it back to "Rows" to get what they already had (Krathe, 2026-08-25).
+            -- set it back to "Rows" to get what they already had.
             --
             -- The maps are exact inverses, so preserving the LABEL is inverting the VALUE.
             -- Rows stay rows, columns stay columns, and the box goes back to meaning only
@@ -3898,13 +3872,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
                 or L["Gap between one group and the next along the same row."]
 
-            -- ⚠ "Row Spacing" and "Groups Per Row" are gone, and not for tidiness. With the
-            -- Growth Direction dropdown above reading "Columns" in horizontal mode, a box that
-            -- then said Row three times was the exact collision Aphoex reported -- "Columns"
-            -- names the group's shape, "Row" named the arrangement of groups, both true at
-            -- once. These two are the last places the word appeared in the second sense, so
-            -- they now describe the WRAP instead, and Row/Column means one thing on this page.
-            -- They also stop swapping with the orientation, because wrapping is wrapping.
+            -- ⚠ "Wrap Spacing" / wrap count, not "Row ...". With Growth Direction reading "Columns" in
+            -- horizontal mode, "Row" in a second sense (the arrangement of groups) would collide with
+            -- it, so Row/Column means one thing on this page. They also do not swap with the
+            -- orientation, because wrapping is wrapping.
             rowColSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Wrap Spacing"], -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
             rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
                 or L["Gap between one row of groups and the row below it."]
@@ -3930,7 +3901,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- ☠ ONE CORNER PICKER, REPLACING "Groups Grow From" + "Row Order". Do not split
             -- them back apart. They were two axes of one question -- which corner of the
             -- reserved area does the block sit in -- asked in two vocabularies, three controls
-            -- apart, and nobody read them as one thing (Aphoex 2026-08-14, Krathe 2026-08-17).
+            -- apart, and nobody read them as one thing.
             --
             -- raidGroupAnchor is the horizontal half (START/CENTER/END), raidGroupRowGrowth the
             -- vertical (START/END). Both keys, values and defaults are UNCHANGED -- this is a
@@ -3956,20 +3927,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     -- exact transpose of Columns growth. Without this the grid draws a corner
                     -- that is 90 degrees from where the frames land.
                     transposedFn = function(d) return d.growDirection == "VERTICAL" end,
-                    -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the
-                    -- far corner and the wrap offset is measured back from it), so the grid has
-                    -- to translate or it names the wrong side. Decoupling them in the
-                    -- positioners would move existing users' frames, which is not on the table.
+                    -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the far corner and
+                    -- the wrap offset is measured back from it), so the grid has to translate or it names the
+                    -- wrong side. Decoupling them in the positioners would move existing users' frames.
                     --
-                    -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main
-                    -- group is nailed to the anchor, so the only directional thing a user can
-                    -- see is which side the OVERFLOW extends — the cell must name that side or
-                    -- it reads as wrong (Krathe, 2026-08-18: "Center Left" with overflow going
-                    -- right). Overflow sits opposite the main unit, and the main unit's screen
-                    -- side is (playersEnd == wrapEnd), so displayed-side == overflow-side works
-                    -- out to mirroring exactly when players is START — the inverse of the
-                    -- unpinned rule. Derived against WrapKey's involution in Widgets.lua, not
-                    -- assumed; the geometry itself never changes, only the translation.
+                    -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main group is nailed
+                    -- to the anchor, so the only directional thing a user can see is which side the OVERFLOW
+                    -- extends, and the cell must name that side. Overflow sits opposite the main unit, and the
+                    -- main unit's screen side is (playersEnd == wrapEnd), so displayed-side == overflow-side
+                    -- works out to mirroring exactly when players is START -- the inverse of the unpinned rule.
+                    -- Derived against WrapKey's involution in Widgets.lua; the geometry never changes, only
+                    -- the translation.
                     wrapMirroredFn = function(d)
                         local playersEnd = (d.raidPlayerAnchor or "START") == "END"
                         if (d.raidGroupCenterMode or "ALL") == "MAIN" and (d.raidGroupAnchor or "START") == "CENTER" then
@@ -3985,25 +3953,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- anything.
             groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
 
-            -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Four arrangements have been tried and
-            -- this is the one that survives: flush row, indented row, a schematic, and finally
-            -- inline inside the picker beside the cells. The inline version broke on the
-            -- TRANSPOSE -- Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so the
-            -- space the toggle sat in changes shape and it no longer lines up with anything
-            -- (Krathe, 2026-08-18).
+            -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Inline inside the picker beside the cells
+            -- breaks on the TRANSPOSE: Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so
+            -- the space the toggle would sit in changes shape.
             --
-            -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
-            -- vanishes when it does not apply cannot be discovered, and it made the rows below
-            -- jump as the anchor or the wrap slider changed. (The anchor grid is the one
-            -- exception: it HIDES its inert wrap cells, because at 8 before wrap there really
-            -- is only one row of slots and an empty dim cell read as selectable -- see
-            -- GUI:CreateAnchorGrid. That is a picker of positions, not a control that can be
-            -- discovered by its label, so the rule here does not apply to it.)
+            -- ⚠ disableOn covers BOTH conditions and there is no hideOn: a control that vanishes when it
+            -- does not apply cannot be discovered, and it would make the rows below jump as the anchor
+            -- or the wrap slider changed. (The anchor grid itself HIDES its inert wrap cells, because at
+            -- 8 before wrap there really is one row of slots and an empty dim cell reads as selectable
+            -- -- see GUI:CreateAnchorGrid. That is a picker of positions, not a control found by its
+            -- label.)
             --
-            -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
-            -- this setting is a container anchor-reference shift, consumed only in
-            -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of
-            -- its wrap cell flips with this toggle (see wrapMirroredFn above).
+            -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of this
+            -- setting is a container anchor-reference shift, consumed only in
+            -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of its wrap
+            -- cell flips with this toggle (see wrapMirroredFn above).
             local function UpdatePinMainGroup()
                 UpdateFrames()
                 if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end

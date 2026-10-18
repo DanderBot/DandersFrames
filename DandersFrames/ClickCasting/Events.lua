@@ -147,11 +147,8 @@ end
 -- loading screens reuse one pending pass rather than stacking several.
 function CC:ScheduleZoneSettle()
     CC:DeferAfter("zoneSettle", 0.5, function()
-                -- NOTE (12.1 lane): the retail original also called
-                -- CC:MigrateBindingsToRootSpells() here. That one-time rewrite was REMOVED
-                -- on this lane (see the "(Removed)" note in ClickCasting/Bindings.lua), so
-                -- the call is deliberately dropped rather than ported -- it would be a nil
-                -- call on every zone-in.
+                -- There is no one-time root-spell rewrite to run here (see the note in
+                -- ClickCasting/Bindings.lua); registering the frames is all a zone-in needs.
                 CC:RegisterAllFrames()
                 -- Register Blizzard frames if any binding needs them
                 if CC:AnyBindingNeedsBlizzardFrames() then
@@ -546,13 +543,10 @@ end
 -- ============================================================
 -- BOOTSTRAP
 -- ============================================================
--- ☠ This must stay resident. It used to live in ClickCasting/UI/BindingEditor,
--- which is now in the load-on-demand companion -- and the trigger below only
--- fires on the login/reload PLAYER_ENTERING_WORLD. A companion loaded on demand
--- has already missed it, and the zone-change firings are filtered out by the
--- flags, so click-casting would never have initialised at all.
---
--- CC:Initialize itself is in ClickCasting/Frames.lua and is resident too.
+-- ☠ This must stay resident. The trigger below only fires on the login/reload
+-- PLAYER_ENTERING_WORLD; a load-on-demand companion would already have missed it, and
+-- the zone-change firings are filtered out by the flags, so click-casting would never
+-- initialise. CC:Initialize itself is in ClickCasting/Frames.lua and is resident too.
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloadingUi)

@@ -939,21 +939,18 @@ local function ResolveGlueTarget(target)
     return (m == "raid") and DF.raidContainer or DF.container
 end
 
--- Post-migration (PinnedFrames.MigrateProfileRecords), pos is in DandersMover
--- semantics: `point` of the container sits at (x, y) from UIParent CENTER, so the
--- screen branch is one SetPoint. The ÷scale stays: record coordinates are UIParent
--- units and `s` is exactly the container's effective-scale ratio (parented to
--- UIParent) -- identical to DandersMover's Lib.ApplyPosition. The size-invariant
--- growth corner survives because `point` IS the growth corner (derived, see
--- CommitSetPosition); the old half-frame correction was folded into x/y once.
+-- pos is in DandersMover semantics: `point` of the container sits at (x, y) from UIParent
+-- CENTER, so the screen branch is one SetPoint. The ÷scale stays: record coordinates are
+-- UIParent units and `s` is exactly the container's effective-scale ratio (parented to
+-- UIParent) -- identical to DandersMover's Lib.ApplyPosition. The size-invariant growth
+-- corner holds because `point` IS the growth corner (derived, see CommitSetPosition).
 --
 -- A frames-glue `anchor` (point mode onto DandersFrames:party/raid/group) is applied
--- NATIVELY: SetPoint(anchor.point, container, anchor.relPoint, offset/s) -- static, so
--- it tracks the frames in combat and needs no lib. The legacy `anchorTo` is read only
--- when no `anchor` exists (a record the lib-absent legacy dropdown wrote pre-upgrade).
--- Any other anchor was solved by the lib into point/x/y: the screen branch applies it.
--- frameW/frameH are kept in the signature for the callers; the screen branch no longer
--- needs them.
+-- NATIVELY: SetPoint(anchor.point, container, anchor.relPoint, offset/s) -- static, so it
+-- tracks the frames in combat and needs no lib. The legacy `anchorTo` is read only when no
+-- `anchor` exists. Any other anchor was solved by the lib into point/x/y: the screen branch
+-- applies it. frameW/frameH stay in the signature for the callers; the screen branch does
+-- not need them.
 local function PositionPinnedContainer(container, set, pos, frameW, frameH)
     if not container then return end
     local growth = GetContainerAnchorPoint(set)
@@ -1197,10 +1194,9 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
         end
     ]])
 
-    -- GUID-swap poll. Midnight 12.0 can silently reassign bossN to a new NPC
-    -- without firing UNIT_TARGETABLE_CHANGED / UNIT_FACTION (especially for
-    -- boss6-8). Poll every 0.25s and refresh any shown frame whose unit GUID
-    -- no longer matches what we cached at OnShow time. Matches Cell's pattern.
+    -- GUID-swap poll. Boss tokens can be silently reassigned to a new NPC without
+    -- UNIT_TARGETABLE_CHANGED / UNIT_FACTION (especially boss6-8), so poll every 0.25s and
+    -- refresh any shown frame whose unit GUID differs from the one cached at OnShow.
     handler.dfBossGuidElapsed = 0
     handler:SetScript("OnUpdate", function(self, elapsed)
         self.dfBossGuidElapsed = (self.dfBossGuidElapsed or 0) + elapsed
@@ -1212,11 +1208,9 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
         for i = 1, 8 do
             local f = frames[i]
             if f and f:IsShown() and f.unit then
-                -- ☠ UnitGUID is secret while tainted. The `~=` below is the hazard:
-                -- comparing a secret throws. Guard the fresh read AND the stored
-                -- value -- the OnShow stamp could have been written before this guard
-                -- existed, so a stale secret can still be sitting on the frame.
-                -- Skipping the refresh is safe: the boss unit event fires again.
+                -- ☠ UnitGUID is secret while tainted, and comparing a secret throws. Guard the fresh read
+                -- AND the stored value (the OnShow stamp can hold a secret). Skipping the refresh is safe:
+                -- the boss unit event fires again.
                 local guid = UnitGUID(f.unit)
                 if not issecretvalue(guid) and not issecretvalue(f.dfLastBossGUID)
                    and guid and guid ~= f.dfLastBossGUID then
@@ -1266,18 +1260,15 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
             if f then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
-                -- ☠ `dfPinnedEffDB` IS the Hide Auras / Hide Icons mechanism — BuildPinnedEffDB
-                -- forces showBuffs/showDebuffs/defensiveIconEnabled/missingBuffIconEnabled
-                -- false on it and every updater reads it through DF:GetFrameDB. A
-                -- `dfPinnedHideAuras` stamp used to sit beside this on all four sites and was
-                -- READ NOWHERE — dead state that reads exactly like the implementation, so the
-                -- next person to "fix Hide Auras" would have edited it and changed nothing.
+                -- ☠ `dfPinnedEffDB` IS the Hide Auras / Hide Icons mechanism: BuildPinnedEffDB forces
+                -- showBuffs/showDebuffs/defensiveIconEnabled/missingBuffIconEnabled false on it and every
+                -- updater reads it through DF:GetFrameDB. There is no separate hide flag to change.
                 f.dfPinnedEffDB = effDB
                 -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset;
                 -- the resolver falls back to FrameMode when the stamp is nil).
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
-                f:SetSize(frameWidth, frameHeight)
+                DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
                 f.isRaidFrame = IsInRaid()
             end
         end
@@ -1345,7 +1336,7 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
         -- onBossShow/onBossHide snippets whenever this flips.
         RegisterStateDriver(frame, "visibility", "[@boss" .. i .. ",help]show;hide")
 
-        -- Self-sufficient event system (ElvUI/oUF-style).
+        -- Self-sufficient event system.
         -- Register all unit-specific events directly on the frame with
         -- `RegisterUnitEvent` so they're filtered at the C level — the handler
         -- only fires when the event is for this frame's boss unit. No dispatcher
@@ -1860,7 +1851,7 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset).
             child.dfAuraPresetOverride = set.auraDesignerPreset
             child.dfTextPresetOverride = set.textDesignerPreset
-            child:SetSize(frameWidth, frameHeight)
+            DF:SetPixelPerfectSize(child, frameWidth, frameHeight, effDB or db)
             -- Also update the isRaidFrame flag for proper DB selection in other functions
             child.isRaidFrame = IsInRaid()
             -- Re-render the border now so border edits apply live (the per-frame
@@ -2210,14 +2201,11 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
 
     if not container or (not isBoss and not header) then
         if visible then
-            -- ☠ COMBAT GUARD. This on-demand build used to be the rare path — Initialize
-            -- pre-created every defined set, so by the time anyone toggled a set the
-            -- frames already existed and this branch was near-dead. Initialize now
-            -- builds only enabled sets, which makes THIS the normal way a set gets its
-            -- frames, and creating a secure header child under lockdown is blocked.
-            -- CreateSetFrames does check combat itself, but it only warns and returns —
-            -- nothing retried, so the set would silently never appear. Defer instead:
-            -- the PLAYER_REGEN_ENABLED drain re-runs SetEnabled and takes this path again.
+            -- ☠ COMBAT GUARD. Initialize builds only enabled sets, so this on-demand build is the
+            -- normal way a set gets its frames, and creating a secure header child under lockdown is
+            -- blocked. CreateSetFrames checks combat itself but only warns and returns, so nothing
+            -- would retry and the set would silently never appear. Defer instead: the
+            -- PLAYER_REGEN_ENABLED drain re-runs SetEnabled and takes this path again.
             if InCombatLockdown() then
                 DF:DebugWarn("PINNED", "SetEnabled: in combat, deferring build of set %d", setIndex)
                 self.pendingVisibilityUpdate = self.pendingVisibilityUpdate or {}
@@ -2473,28 +2461,6 @@ function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos, reason)
     self:ApplySetPositionForMode(setIndex, isRaid)
 end
 
--- The legacy position panel's "Anchor To" dropdown. Writes BOTH shapes (the `anchor`
--- DF glues from and the `anchorTo` mirror) and zeroes the offset so the set lands AT
--- the chosen corner (or, for SCREEN, at screen centre) -- the rule the dropdown has
--- always applied. nil anchorTo = SCREEN.
-function PinnedFrames:SetFramesAnchor(set, mode, anchorTo)
-    if not set then return end
-    local pos = set.position
-    if type(pos) ~= "table" then pos = {}; set.position = pos end
-    local growth = GetContainerAnchorPoint(set)
-    local current = MirrorAnchorTo(pos.anchor) or (pos.anchor == nil and pos.anchorTo) or nil
-    if anchorTo and FRAMES_ANCHOR_POINTS[anchorTo] then
-        if current ~= anchorTo or not FramesGlue(pos.anchor) then
-            pos.anchor = { target = "DandersFrames:" .. ((mode == "raid") and "raid" or "party"), mode = "point",
-                           point = growth, relPoint = FRAMES_ANCHOR_POINTS[anchorTo], offsetX = 0, offsetY = 0 }
-        end
-        pos.anchorTo = anchorTo
-    else
-        if current ~= nil then pos.point, pos.x, pos.y = growth, 0, 0 end
-        pos.anchor, pos.anchorTo = nil, nil
-    end
-end
-
 -- Toggle label visibility
 function PinnedFrames:SetShowLabel(setIndex, show)
     local set = GetSetDB(setIndex)
@@ -2561,18 +2527,14 @@ function PinnedFrames:Initialize()
 
     DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
 
-    -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to
-    -- 40 secure header children per set via the startingIndex trick, and building them
-    -- for sets that are switched off is pure cost — measured on the retail lane at
-    -- 270ms in a single frame for two sets that were empty AND disabled (80 children).
-    -- Arena entry IS a party<->raid transition (IsInRaid() is true there), so every
-    -- arena start paid it; with another addon sorting in the same frame it tipped over
-    -- the "script ran too long" watchdog, which is why it reproduced for some players
-    -- and not others on identical builds.
-    --
-    -- Nothing is lost by deferring: SetEnabled already builds on demand when it finds
-    -- no container/header, it simply was never the normal way in before. Enabling a set
-    -- now goes through that path instead.
+    -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to 40 secure
+    -- header children per set via the startingIndex trick, and building them for sets that are
+    -- switched off is pure cost -- measured at 270ms in a single frame for two empty, disabled
+    -- sets (80 children). Arena entry IS a party<->raid transition (IsInRaid() is true there),
+    -- so every arena start would pay it, and with another addon sorting in the same frame it
+    -- can trip the "script ran too long" watchdog.
+    -- Nothing is lost by deferring: SetEnabled builds on demand when it finds no
+    -- container/header, and enabling a set goes through that path.
     for i = 1, PinnedFrames.MAX_SETS do
         local set = GetSetDB(i)
         if set and set.enabled then
@@ -2972,16 +2934,12 @@ function PinnedFrames:RemoveSet(setIndex, mode)
         return true
     end
     if InCombatLockdown() then
-        -- ☠ THE CONTAINER AND HEADER ARE PROTECTED -- this used to :Hide() them directly.
-        -- hideContainerSafe exists precisely for this: the containers are implicitly
-        -- protected because the SecureGroupHeaderTemplate is a child, so container and
-        -- header hides must be deferred to PLAYER_REGEN_ENABLED. Clicking the x on a
-        -- pinned set tab mid-pull (the settings window is usable in combat, and DoRemoveSet
-        -- in Pages/Frames.lua has no combat guard of its own) raised a blocked-action error.
-        --
-        -- The label is a plain frame parented to UIParent, so that hide was always fine
-        -- and stays direct. pendingReinitialize already covers the recovery
-        -- at combat end -- the defect was the error, not stuck state.
+        -- ☠ THE CONTAINER AND HEADER ARE PROTECTED. The containers are implicitly protected
+        -- because the SecureGroupHeaderTemplate is a child, so their hides go through
+        -- hideContainerSafe and defer to PLAYER_REGEN_ENABLED: the settings window is usable in
+        -- combat, and DoRemoveSet in Pages/Frames.lua has no combat guard of its own.
+        -- The label is a plain frame parented to UIParent, so its hide stays direct.
+        -- pendingReinitialize covers the recovery at combat end.
         local c = self.containers[setIndex]
         if c then
             hideContainerSafe(self, c)
@@ -3747,7 +3705,7 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
                 f.dfPinnedEffDB = effDB
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
-                f:SetSize(frameWidth, frameHeight)
+                DF:SetPixelPerfectSize(f, frameWidth, frameHeight, effDB or db)
                 f.isRaidFrame = isRaidMode
 
                 local slotIndex = i - 1
@@ -3881,7 +3839,7 @@ function PinnedFrames:EnterTestMode()
                         -- reload. ApplyFrameLayout, NOT ApplyTestFrameLayout: the
                         -- latter reads db.frameWidth where live reads
                         -- frame.dfPinnedWidth or db.frameWidth, which is exactly the
-                        -- override a pinned frame carries. (Audit, 2026-08-07.)
+                        -- override a pinned frame carries.
                         if DF.ApplyFrameLayout then DF:ApplyFrameLayout(pool[i]) end
                         DF:UpdateTestFrame(pool[i], i, true)
                     end
@@ -3907,7 +3865,7 @@ function PinnedFrames:RefreshTestMode(withLayout)
     -- the main party/raid pools in combat with no guard at all. Nothing in the regen drain
     -- replayed it either, so a settings edit made with test mode up in combat froze the
     -- pinned previews while the main ones tracked it, and they stayed frozen until test
-    -- mode was toggled out of combat. (Audit, 2026-08-17.)
+    -- mode was toggled out of combat.
 
     local isRaidMode
     if DF.raidTestMode then
@@ -3987,15 +3945,12 @@ end
 -- manipulation needed — Test Mode never touched them.
 function PinnedFrames:ExitTestMode()
     if InCombatLockdown() then
-        -- ☠☠ HIDE THE PREVIEW *NOW*; ONLY THE SECURE HALF MAY BE DEFERRED. This used to
-        -- return outright, and the one thing in this function that actually needs lockdown
-        -- protection is `self.headers[setIndex]:Show()` on a secure group header. The test
-        -- frames and their containers are plain CreateFrame Buttons/Frames under UIParent
-        -- (see CreatePlayerTestFrame / EnsureTestContainer) — hiding them in combat is
-        -- legal, and the main party/raid pools are hidden inline on this very path.
-        -- The consequence of the blanket return: combat ends test mode, the main preview
-        -- vanishes, and the FAKE PINNED FRAMES STAY ON SCREEN OVER THE LIVE UI for the
-        -- whole fight. (Audit, 2026-08-17.)
+        -- ☠☠ HIDE THE PREVIEW *NOW*; ONLY THE SECURE HALF MAY BE DEFERRED. The one thing here that
+        -- needs lockdown protection is `self.headers[setIndex]:Show()` on a secure group header.
+        -- The test frames and their containers are plain CreateFrame Buttons/Frames under UIParent
+        -- (see CreatePlayerTestFrame / EnsureTestContainer), so hiding them in combat is legal --
+        -- and returning early would leave FAKE PINNED FRAMES on screen over the live UI for the
+        -- whole fight after combat ends test mode.
         for setIndex = 1, PinnedFrames.MAX_SETS do
             self:HidePlayerTestFrames(setIndex)
         end
