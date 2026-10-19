@@ -1756,7 +1756,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             C_Timer.After(0, function()
                 if DF.RefreshMainFrameSorting then DF:RefreshMainFrameSorting() end
             end)
-        end, L["Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."]), 28)
+        end, L["Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved. Players who join during combat appear on the main frames when combat ends."]), 28)
         hideMainCheck.hideOn = function() return IsCurrentBossMode() end
 
         -- Disable in PvP (GLOBAL across both modes, not per-set): keep pinned frames

@@ -62,35 +62,62 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== COMBAT STATUS BANNER (full width) =====
         local combatBanner = GUI:CreateInfoBanner(self.child, { dismissKey = "combat_lockout", notice = true, fontTemplate = "DFFontNormal" })
 
+        -- A pinned "Hide from Main Frames" set puts the main frames on a name list even with
+        -- sorting off (the only way a secure header can leave a member out).
+        local function HidesPinnedMembers(d)
+            local sets = d.pinnedFrames and d.pinnedFrames.sets
+            if type(sets) ~= "table" then return false end
+            for _, set in pairs(sets) do
+                if type(set) == "table" and set.enabled and set.hideFromMainFrames
+                   and set.frameType ~= "friendlyBoss" then
+                    return true
+                end
+            end
+            return false
+        end
+
+        -- ★ THE BANNER STATES WHICH SETTINGS USE A NAME LIST. A name-list header shows only
+        -- the names on it and the list cannot change in combat, so a mid-fight joiner appears
+        -- when combat ends. Self First/Last lists only the player's own group in a GROUPED
+        -- raid; a flat raid and the party header put everyone on one list.
         local function UpdateCombatBanner()
-            if not db.sortEnabled then
+            local hidesPinned = HidesPinnedMembers(db)
+            if not db.sortEnabled and not hidesPinned then
                 combatBanner:Hide()
                 return
             end
             combatBanner:Show()
 
             local selfPos = db.sortSelfPosition or "SORTED"
-            local hasAdvancedOptions = db.sortSeparateMeleeRanged or db.sortByClass or db.sortAlphabetical
+            local sorting = db.sortEnabled
+            local hasAdvancedOptions = sorting
+                and (db.sortSeparateMeleeRanged or db.sortByClass or db.sortAlphabetical)
+            local selfListed = sorting and (selfPos == "FIRST" or selfPos == "LAST")
+            local selfListsOwnGroupOnly = GUI.SelectedMode == "raid" and db.raidUseGroups
 
-            if hasAdvancedOptions then
+            if hasAdvancedOptions or (selfListed and not selfListsOwnGroupOnly) then
                 combatBanner:SetTone("danger")
-                combatBanner:SetText(L["Combat Limitation: All groups will not update with new players that join mid-combat."])
-            elseif selfPos == "FIRST" or selfPos == "LAST" then
+                combatBanner:SetText(L["Combat Limitation: Players who join during combat appear when combat ends."])
+            elseif hidesPinned then
+                combatBanner:SetTone("danger")
+                combatBanner:SetText(L["Combat Limitation: With Hide from Main Frames on, players who join during combat appear when combat ends."])
+            elseif selfListed then
                 combatBanner:SetTone("caution")
                 -- Override default warning icon with info icon for this softer state.
                 combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info.png")
-                combatBanner:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
+                combatBanner:SetText(L["Combat Limitation: Players who join your group during combat appear when combat ends."])
             else
                 combatBanner:SetTone("success")
                 combatBanner:SetText(L["Fully Combat Safe: Frames will update normally during combat."])
             end
         end
 
-        -- Hide when an external FrameSort addon owns sorting OR our sorting is off
-        -- (the combat banner is only meaningful while our sorting is enabled).
-        -- Without the sortEnabled check, the page's RefreshStates re-showed the
-        -- banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
-        combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end
+        -- Hidden when an external FrameSort addon owns sorting, or when nothing here puts
+        -- the frames on a name list. Without the second check, the page's RefreshStates
+        -- re-showed the banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
+        combatBanner.hideOn = function(d)
+            return HideSortOptions(d) or not (d.sortEnabled or HidesPinnedMembers(d))
+        end
         -- Reapply tone + text on every page refresh. RefreshStates calls
         -- refreshContent, so the banner never shows without a tone (the backdrop
         -- defaults to white until toned).
