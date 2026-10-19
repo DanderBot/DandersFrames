@@ -405,6 +405,11 @@ local function HasRosterMembershipChanged()
     return false
 end
 
+-- Forget the saved roster so the next HasRosterMembershipChanged reports a change.
+local function InvalidateRosterSnapshot()
+    lastRosterCount = -1
+end
+
 
 -- Clear GUID cache for a unit (when unit is removed)
 local function ClearUnitCache(unit)
@@ -5599,18 +5604,18 @@ headerCombatFrame:SetScript("OnEvent", function()
     -- Process pending flat layout refresh (queued during combat roster changes)
     if DF.pendingFlatLayoutRefresh then
         DF.pendingFlatLayoutRefresh = false
-        -- Clear FlatRaidFrames pending flags - SetEnabled(true) handles everything
-        -- This prevents a duplicate UpdateNameList from FlatRaidFrames' own REGEN handler
+        -- The sort below replaces FlatRaidFrames' own queued name-list rebuild.
         if DF.FlatRaidFrames then
             DF.FlatRaidFrames.pendingNameListUpdate = false
             DF.FlatRaidFrames.pendingLayoutUpdate = false
         end
+        DF:UpdateHeaderVisibility()
+        -- ☠ THE SORT, NOT JUST VISIBILITY. A name-list header shows only the names on its
+        -- list, so a member who joined in combat stays hidden until the list is rebuilt.
+        -- UpdateHeaderVisibility does not rebuild it: on an already-visible header,
+        -- SetEnabled(true) takes its "refresh child sizes only" path.
         if isFlatRaid then
-            -- UpdateHeaderVisibility → SetEnabled(true) handles layout + nameList rebuild
-            DF:UpdateHeaderVisibility()
-        else
-            -- Mode changed during combat (was flat raid, now not) - update visibility
-            DF:UpdateHeaderVisibility()
+            DF:ApplyRaidFlatSorting()
         end
     end
     
@@ -7887,6 +7892,10 @@ function DF:ProcessRosterUpdate()
     -- Queue for after combat if in combat lockdown
     if InCombatLockdown() then
         DF.pendingSortingUpdate = true
+        -- ☠ The check above already SAVED this roster as seen, so the post-combat re-run
+        -- would find it "unchanged" and skip the sort -- leaving a mid-combat joiner off a
+        -- name-list header for good. Forget it so that re-run sorts.
+        InvalidateRosterSnapshot()
         headerDebug("Sorting update queued (combat lockdown)")
         return
     end
