@@ -7005,8 +7005,8 @@ function DF:FinalizeHeaderInit()
     -- ============================================================
     DF.initialized = true
 
-    -- Do an immediate missing buff check
-    if not InCombatLockdown() and DF.UpdateAllMissingBuffIcons then
+    -- Do an immediate missing buff check (a container drive: legal in combat)
+    if DF.UpdateAllMissingBuffIcons then
         DF:UpdateAllMissingBuffIcons()
     end
     

@@ -623,10 +623,6 @@ function AE:Rebuild()
         DF:Err("Aura Explorer needs the 12.1 container API.")
         return
     end
-    if InCombatLockdown() then
-        DF:Say("Aura Explorer", "deferred — container work is out-of-combat only", "WARN")
-        return
-    end
     self:EnsureRows()
 
     local leftmost, leftX
@@ -1209,7 +1205,7 @@ end
 -- switched on. The `AE.active` test below is kept as belt-and-braces for an event
 -- already in flight when the tool is turned off.
 ev:SetScript("OnEvent", function()
-    if AE.active and not InCombatLockdown() then AE:Rebuild() end
+    if AE.active then AE:Rebuild() end
 end)
 
 -- ============================================================

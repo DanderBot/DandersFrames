@@ -2137,12 +2137,8 @@ function DF:HideTestFrames(silent)
     end
     
     -- Update missing buff icons immediately when leaving test mode
-    if not InCombatLockdown() and DF.UpdateAllMissingBuffIcons then
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                DF:UpdateAllMissingBuffIcons()
-            end
-        end)
+    if DF.UpdateAllMissingBuffIcons then
+        C_Timer.After(0.1, function() DF:UpdateAllMissingBuffIcons() end)
     end
     
     -- Update pet frames based on real unit data

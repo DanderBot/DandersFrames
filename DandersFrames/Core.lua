@@ -7930,14 +7930,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:UpdateDefaultPlayerFrame()
             end
             
-            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat reload)
+            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat
+            -- reload). SetFont on our own font strings is not protected: in combat too.
             if DF.RefreshAllFonts then
-                if InCombatLockdown() then
-                    -- Queue font refresh for after combat
-                    DF.pendingFontRefresh = true
-                else
-                    DF:RefreshAllFonts()
-                end
+                DF:RefreshAllFonts()
             end
             
             -- Flat layout refresh to ensure correct positioning on load
@@ -7987,11 +7983,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- the roster settles. The 0.1s throttle inside UpdateAllMissingBuffIcons
         -- prevents spam from rapid GRU bursts on group transitions.
         if DF.UpdateAllMissingBuffIcons then
-            C_Timer.After(0.3, function()
-                if not InCombatLockdown() then
-                    DF:UpdateAllMissingBuffIcons()
-                end
-            end)
+            C_Timer.After(0.3, function() DF:UpdateAllMissingBuffIcons() end)
         end
         return
         
@@ -8197,11 +8189,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end)
             end
             if DF.UpdateAllMissingBuffIcons then
-                C_Timer.After(0.1, function()
-                    if not InCombatLockdown() then
-                        DF:UpdateAllMissingBuffIcons()
-                    end
-                end)
+                C_Timer.After(0.1, function() DF:UpdateAllMissingBuffIcons() end)
             end
             if DF.UpdateAllPetFrames then
                 C_Timer.After(0.1, function()
@@ -8234,13 +8222,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:UpdateAll()
         end
         
-        -- Process pending font refresh (queued during combat reload)
-        if DF.pendingFontRefresh then
-            DF.pendingFontRefresh = false
-            if DF.RefreshAllFonts then
-                DF:RefreshAllFonts()
-            end
-        end
         
         -- Update missing buff icons now that we're out of combat
         if DF.UpdateAllMissingBuffIcons then
