@@ -45,8 +45,8 @@ local addonName, DF = ...
 --
 -- COMBAT: the drain re-checks InCombatLockdown() AT FIRE TIME. Every kind writes secure
 -- frame size / attributes, so an in-combat drain runs nothing, keeps the kinds queued and
--- replays them on PLAYER_REGEN_ENABLED (the re-queue-don't-drop idiom RefreshFactoryRows
--- uses in Features/Auras.lua). The `_Now` bodies keep their own combat guards
+-- replays them on PLAYER_REGEN_ENABLED (re-queue, don't drop). The `_Now` bodies keep
+-- their own combat guards
 -- (UpdateAll_Now sets DF.needsUpdate, UpdateRaidLayout_Now sets
 -- pendingFlatLayoutRefresh / needsUpdate); the scheduler's regen replay is the prompt one.
 --

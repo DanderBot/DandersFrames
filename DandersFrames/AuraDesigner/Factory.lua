@@ -2501,10 +2501,8 @@ end
 -- container, and returning to a previous structure re-adopts the parked slot by key.
 --
 -- ⚠ FALLS BACK ON PURPOSE. AcquireSlot declines test frames (the preview declares its own
--- topology) and declines in combat whenever satisfying the request would need a secure op
--- (no owner yet, or a NEW slot — AddAuraSlot is combat-illegal; re-adoption still works).
--- Those keep a per-indicator container, so behaviour is unchanged wherever the shared
--- path says no.
+-- topology), and those keep a per-indicator container, so behaviour is unchanged wherever
+-- the shared path says no.
 -- Both handle kinds answer GetFrame/Destroy/ApplyStyle, so the OOR fade and teardownExcept
 -- need no knowledge of which one they hold.
 local function isSlotHandle(h) return h ~= nil and h.GetButton ~= nil end
@@ -2965,12 +2963,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
             live[akey] = true
         end
     elseif entry.structSig ~= structSig then
-        -- ☠ Slot + combat: skip WITHOUT stamping, so the sig delta retries after combat
-        -- (see the icon/square branch for why). `live` is still marked — the entry must
-        -- not be swept for having deferred.
-        if isSlotHandle(entry.handle) and InCombatLockdown() then
-            live[akey] = true
-        else
+        do
             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
             -- Slot: park the old key, take a new one (a slot's regions are frozen at
             -- creation). Container fallback: Rebuild, with structSig as its own parking key --
@@ -4565,9 +4558,9 @@ local function ensureSoundRegen()
     end)
 end
 
--- Public entry — reconcile a frame's applied-sound registrations. Registration legality in
--- combat is unverified, so in lockdown we DEFER to PLAYER_REGEN_ENABLED (mirrors the container
--- OOC discipline); OOC we reconcile immediately.
+-- Public entry — reconcile a frame's applied-sound registrations. C_UnitAuras.AddAuraSound is
+-- flagged HasRestrictions in the API docs, so in lockdown we DEFER to PLAYER_REGEN_ENABLED;
+-- OOC we reconcile immediately.
 function Factory:SyncSound(frame)
     if not frame or not frame.unit then return end
     if not soundAPIAvailable() then return end
@@ -4696,11 +4689,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                                 tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
-                            -- ☠ Slot + combat: skip WITHOUT stamping, so the sig delta
-                            -- retries after combat (see the icon/square branch for why).
-                            if isSlotHandle(entry.handle) and InCombatLockdown() then
-                                -- deliberately empty — retried by sig delta after combat
-                            else
+                            do
                                 local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                                 placedRestructure(entry, frame, key, structSig,
@@ -4853,17 +4842,10 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                                 tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
-                            -- ☠ SLOT + COMBAT: DO NOTHING, INCLUDING THE SIG STAMP. A slot
-                            -- restructure is park + AddAuraSlot, and both halves are
-                            -- combat-illegal on the secure container (a refused park used
-                            -- to latch anyway and render the old visual forever — bug
-                            -- #1024). Leaving the sigs UNSTAMPED is the whole retry
-                            -- mechanism: the next out-of-combat SyncFrame pass sees the
-                            -- same sig delta and restructures naturally. Containers keep
-                            -- the un-gated path — Handle:Rebuild self-defers to regen.
-                            if isSlotHandle(entry.handle) and InCombatLockdown() then
-                                -- deliberately empty — retried by sig delta after combat
-                            else
+                            -- A slot restructure is park + AddAuraSlot, both legal in combat
+                            -- (see AuraContainer.AurasRestricted). A park the engine refuses
+                            -- queues its own replay instead of latching (bug #1024).
+                            do
                                 local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon, nil, defs) or nil
                                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                                 -- Slot: park the old key and take a new one (a slot's regions

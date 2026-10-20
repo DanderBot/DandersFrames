@@ -160,7 +160,7 @@ do
           and r[1].candidateFilters.excludeDispelTypes.Bleed,
           "dwarf: Hide By Me also hides own bleeds")
     local drive = src:sub(src:find("function DF:DriveDebuffFactory", 1, true) or 1)
-    check(drive:find("(frame.dfDebuffFactoryVersion ~= ver or selfMoved)", 1, true) ~= nil,
+    check(drive:find("frame.dfDebuffFactoryVersion ~= ver or selfMoved then", 1, true) ~= nil,
           "dwarf: a frame reassigned to or from the player re-plans without a layout bump")
     local fac = df_file_source("AuraDesigner/Factory.lua"):gsub("\r\n", "\n")
     check(fac:find("resolveDebuffGroup(group, dedupOn and claimedSoFar or nil, racialSelf)", 1, true) ~= nil
