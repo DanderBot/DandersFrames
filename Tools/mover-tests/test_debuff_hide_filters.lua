@@ -243,25 +243,35 @@ do
     end
 end
 
--- ---- the Max Debuffs ceiling counts the records a claim adds -----------------------------
+-- ---- the Max Debuffs note counts the records the REAL claims build ----------------------
 do
     local a4 = src:find("local GROUP_COUNT_CLAIMS", 1, true)
     local b4 = a4 and src:find("\nend\n", a4, true)
-    local groupCount = a4 and b4 and assert(loadstring("local DF = {}\nlocal BuildDirectDebuffFilters = ...\n"
-        .. src:sub(a4, b4 + 4) .. "\nreturn function(d) return DF:GetDebuffRowGroupCount(d) end"))(build)
-    check(groupCount ~= nil, "group count: lifted")
-    if groupCount then
-        local d = db({ directDebuffShowAll = true })
-        local most = 1
-        for _, c in ipairs({ false, { dispellable = true } }) do
-            for _, so in ipairs({ false, true }) do
-                local r = build(d, c or nil, so)
-                if r and #r > most then most = #r end
-            end
+    -- DF is a parameter so each case can hand it a live frame (or none) and real claims.
+    local lift = a4 and b4 and assert(loadstring("local BuildDirectDebuffFilters, DF = ...\n"
+        .. src:sub(a4, b4 + 4) .. "\nreturn function(d) return DF:GetDebuffRowGroupCount(d) end"))
+    check(lift ~= nil, "group count: lifted")
+    if lift then
+        local function count(d, frames, claims)
+            local DF = {
+                GetRaidDB = function() return "raid-db" end,
+                IteratePartyFrames = function(_, cb) for _, f in ipairs(frames or {}) do if cb(f) then return true end end end,
+                GetClaimedDebuffCategories = function() return claims end,
+            }
+            return lift(build, DF)(d)
         end
+        -- All Debuffs + the default highlight + Hide Crowd Control: the field report's setup.
+        local d = db({ directDebuffShowAll = true, debuffImportantHighlight = true, debuffHideCrowdControl = true })
         local plain = build(d, nil) or {}
-        check(groupCount(d) == most, "group count: the ceiling is the largest build, claims included")
-        check(groupCount(d) >= #plain, "group count: never below the unclaimed build")
+        local byMe = build(d, { dispellable = true }) or {}
+        check(#byMe > #plain, "group count: setup check, a By Me claim really adds records")
+        eq(count(d, { { unit = "player" } }, nil), #plain,
+           "group count: no Aura Designer claim, the note counts what is really built")
+        eq(count(d, { { unit = "player" } }, { dispellable = true }), #byMe,
+           "group count: a real By Me claim is counted")
+        eq(count(d, {}, nil), #byMe,
+           "group count: no frame to ask, the ceiling (claims included) -- never an under-count")
+        eq(count(d, { {} }, nil), #byMe, "group count: a unitless frame is not asked")
     end
 end
 

@@ -1822,14 +1822,31 @@ end
 -- functionality — SAY SO INSTEAD.
 --
 -- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
--- those gets an uncleansable twin. So the ceiling is the larger of the unclaimed and
--- By Me-claimed builds, each with and without the racial self gap. Nil records mean
--- the show-all fallback, which is a single group.
+-- those gets an uncleansable twin. So the count uses the claims the Aura Designer REALLY
+-- makes, asked of a live frame of the same mode -- claims are per mode and spec, the same
+-- on every frame. With no frame to ask (raid mode while not in a raid) it falls back to the
+-- larger of the unclaimed and By Me-claimed builds: a ceiling, never an under-count. Each
+-- build is taken with and without the racial self gap (a Dwarf's own frame). Nil records
+-- mean the show-all fallback, which is a single group.
 local GROUP_COUNT_CLAIMS = { false, { dispellable = true } }
 function DF:GetDebuffRowGroupCount(dbLike)
     if not dbLike then return 1 end
+    local claimSets = GROUP_COUNT_CLAIMS
+    if DF.GetClaimedDebuffCategories then
+        local frame
+        local function pick(f)
+            if f and f.unit then frame = f return true end
+        end
+        local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
+        local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
+        if iterate then iterate(DF, pick) end
+        if frame then
+            local okC, claimed = pcall(DF.GetClaimedDebuffCategories, DF, frame, dbLike)
+            if okC then claimSets = { claimed or false } end
+        end
+    end
     local most = 1
-    for _, claimed in ipairs(GROUP_COUNT_CLAIMS) do
+    for _, claimed in ipairs(claimSets) do
         for _, selfOnly in ipairs({ false, true }) do
             local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, claimed or nil, selfOnly)
             if ok and type(recs) == "table" and #recs > most then most = #recs end
