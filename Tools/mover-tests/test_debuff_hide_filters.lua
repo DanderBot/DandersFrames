@@ -68,16 +68,49 @@ end
 
 -- ---- who cast it -------------------------------------------------------------------------
 do
-    local r = build(db({ debuffFilterNonPlayer = true, debuffFilterPlayer = true, debuffFilterMagic = true }))
-    local by = {}
-    for _, rec in ipairs(r or {}) do by[rec.key] = rec end
+    local function keyed(r)
+        local by = {}
+        for _, rec in ipairs(r or {}) do by[rec.key] = rec end
+        return by
+    end
+    local by = keyed(build(db({ debuffFilterNonPlayer = true, debuffFilterMagic = true })))
     check(by.nonplayer and by.nonplayer.candidateFilters.isFromPlayerOrPlayerPet == false,
           "who: Non-Player shows what no player cast")
+    by = keyed(build(db({ debuffFilterPlayer = true, debuffFilterMagic = true })))
     check(by.anyplayer and by.anyplayer.candidateFilters.isFromPlayerOrPlayerPet == true,
           "who: From Any Player shows what a player cast")
     check(by.anyplayer and by.anyplayer.candidateFilters.excludeDispelTypes
           and by.anyplayer.candidateFilters.excludeDispelTypes.Magic,
           "who: ...leaving a picked dispel type to its own record")
+
+    -- Both shown is every debuff: built as All Debuffs, one record under one cap.
+    local everything = { debuffFilterBoss = true, debuffFilterRole = true, debuffFilterPriority = true,
+        debuffFilterCrowdControl = true, debuffFilterDispellable = true, debuffFilterNonPlayer = true,
+        debuffFilterPlayer = true, debuffFilterMagic = true, debuffFilterCurse = true,
+        debuffFilterPoison = true, debuffFilterDisease = true, debuffFilterBleed = true }
+    check(build(db(everything)) == nil, "who: both shown with every other tick is plain All Debuffs")
+    local adGroup = build(db({ debuffEmptyShowsNothing = true, debuffFilterNonPlayer = true, debuffFilterPlayer = true }))
+    check(adGroup and #adGroup == 1 and adGroup[1].filter == "HARMFUL",
+          "who: an Aura Designer group gets the record spelled out (nil there means nothing)")
+    local t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffHideBoss = true
+    t.debuffFilterBoss = nil
+    local r = build(db(t))
+    check(r and #r == 1 and r[1].key == "all" and r[1].candidateFilters.isBossAura == false,
+          "who: ...a Hide still applies, in the one record")
+    t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffImportantHighlight = true
+    r = build(db(t))
+    check(r and #r == 3 and r[1].key == "allboss" and r[1].style ~= nil,
+          "who: ...and the highlight splits it the way All Debuffs does")
+    t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffMaxDurationEnabled, t.debuffMaxDurationKeepImportant = true, true
+    by = keyed(build(db(t)))
+    check(by.bossrole and by.nonplayer and by.anyplayer,
+          "who: Keep Important on shown important debuffs keeps the categories (All cannot exempt them)")
     r = build(db({ debuffFilterMine = true, debuffFilterCrowdControl = true }))
     by = {}
     for _, rec in ipairs(r or {}) do by[rec.key] = rec end

@@ -1196,7 +1196,17 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
         or db.debuffFilterNonPlayer or db.debuffFilterPlayer
     for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
     for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
-    if db.directDebuffShowAll or (not anyShown and not db.debuffEmptyShowsNothing) then
+    -- ★ NON-PLAYER + FROM ANY PLAYER IS EVERY DEBUFF. The two are exact complements, so
+    -- with both shown every other Show tick only splits the same debuffs into more
+    -- records -- and the engine caps each record separately, so Max Debuffs 6 meant 6 PER
+    -- CATEGORY (17 of them, up to 102 on an arena frame). Built as All Debuffs instead:
+    -- the same debuffs, hides, claims and highlight, under one cap.
+    -- ⚠ Not while Keep Important exempts shown important debuffs from the length cap:
+    -- All Debuffs cannot express that exemption (see the note in the branch below).
+    local coversAll = db.debuffFilterNonPlayer and db.debuffFilterPlayer
+        and not (DebuffMaxDuration(db) and db.debuffMaxDurationKeepImportant
+            and (db.debuffFilterBoss or db.debuffFilterRole or db.debuffFilterPriority))
+    if db.directDebuffShowAll or coversAll or (not anyShown and not db.debuffEmptyShowsNothing) then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
         -- exempting boss/role/priority needs a second un-capped record, and the
@@ -1294,7 +1304,9 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
             return addUncleansableTwins(applyDebuffHides(applyDebuffHides(out, extraClaims), hide), uncleansable)
         end
 
-        if cf or filterStr ~= "HARMFUL" or hide or extraClaims then
+        -- nil is show-all on the row only: an Aura Designer group reads nil as nothing,
+        -- so one that covers everything gets the record spelled out.
+        if cf or filterStr ~= "HARMFUL" or hide or extraClaims or db.debuffEmptyShowsNothing then
             return addUncleansableTwins(applyDebuffHides(applyDebuffHides(
                 { { filter = filterStr, key = "all", candidateFilters = cf } }, extraClaims), hide), uncleansable)
         end
