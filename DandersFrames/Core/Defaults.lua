@@ -70,6 +70,13 @@ local addonName, DF = ...
 -- default onto the instance, so presence is no evidence of an edit, but the copy
 -- compares equal to what it was copied from and reports unmodified.
 --
+-- A KEY MAY MEASURE AGAINST SOMETHING OTHER THAN ITS SHIPPED DEFAULT
+-- ------------------------------------------------------------------
+-- DF.DEFAULT_BASELINES[key] = function(stored) -> value. When registered, it names
+-- what the key compares against for that stored table -- a texture layer setting
+-- measures against the Quick Start look its bar picked (Core/Config.lua). nil
+-- means nothing to compare against: never modified, nothing to reset to.
+--
 -- GetStored MUST READ RAW. A designer proxy's __index answers with the FALLBACK
 -- when the record holds no value of its own, so an adapter that read back
 -- through its own proxy would find every key set and light the whole panel up.
@@ -172,6 +179,8 @@ local function KeyValues(stored, defaults, adapter, key)
         local def = getDefault and getDefault(key)
         return cur, def
     end
+    local baseline = DF.DEFAULT_BASELINES and DF.DEFAULT_BASELINES[key]
+    if baseline then return stored[key], baseline(stored) end
     return stored[key], defaults[key]
 end
 

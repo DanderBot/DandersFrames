@@ -150,6 +150,10 @@ function DF:LayoutResourceBar(frame, db)
     -- Suppresses rotation for a tiled texture and swaps in its rotated companion.
     -- Safe to call unconditionally — a stretched texture just rotates as before.
     DF:ApplyBarFillOrientation(bar, resourceOrient == "VERTICAL")
+    -- No baseColor, as for the health bar: the power colour changes with the unit.
+    if DF:BarTextureLayersWanted(bar, db, "resourceBar") then
+        DF:ApplyBarTextureLayers(bar, "resourceBar", db, { span = bar, isVertical = resourceOrient == "VERTICAL" })
+    end
 
     local isVertical = (db.resourceBarOrientation == "VERTICAL")
     local length = db.resourceBarWidth or 50
@@ -476,6 +480,9 @@ local function AbsorbLayoutStateChanged(frame, db)
     local osc = db.absorbBarOvershieldColor or db.absorbBarColor or DEFAULT_ABSORB_COLOR
     if s.overshieldR ~= osc.r or s.overshieldG ~= osc.g or s.overshieldB ~= osc.b then return true end
 
+    -- Texture layers are painted only on the full path.
+    if DF:BarTextureLayersChanged(s.textureLayers, db, "absorbBar") then return true end
+
     return false
 end
 
@@ -490,6 +497,8 @@ local function CacheAbsorbLayoutState(frame, db)
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
     s.testSession     = DF.testSessionId or 0   -- not a db setting; see the note above
+    s.textureLayers   = s.textureLayers or {}
+    DF:CacheBarTextureLayers(s.textureLayers, db, "absorbBar")
     -- Frame state, re-derived from the same reads the comparisons use.
     s.healthFillTex   = frame.healthBar and frame.healthBar:GetStatusBarTexture()
     s.chainEnd        = DF.ChainEndKey(frame, db)
@@ -946,10 +955,25 @@ function DF:UpdateAbsorb(frame, testIndex)
     end
     
     -- Always apply color (fast operation, doesn't cause flicker)
+    local absorbBaseColor
     if tex == "Interface\\RaidFrame\\Shield-Overlay" and blendMode == "ADD" then
         customBar:SetStatusBarColor(col.r * 2, col.g * 2, col.b * 2, 1)
+        absorbBaseColor = { r = col.r * 2, g = col.g * 2, b = col.b * 2, a = 1 }
     else
         customBar:SetStatusBarColor(col.r, col.g, col.b, col.a or 0.7)
+        absorbBaseColor = col
+    end
+
+    -- Texture layers (and the Tile override the mode branches below re-assert).
+    -- A custom tile size measures the health bar, or the bar itself when FLOATING.
+    if DF:BarTextureLayersWanted(customBar, db, "absorbBar") then
+        DF:ApplyBarTextureLayers(customBar, "absorbBar", db, {
+            span = (mode == "FLOATING") and customBar or frame.healthBar,
+            isVertical = isVerticalFill,
+            baseColor = absorbBaseColor,
+            baseBlend = blendMode,
+            baseDesaturated = (tex == "Interface\\RaidFrame\\Shield-Overlay"),
+        })
     end
     
     customBar:Show()
@@ -1571,6 +1595,12 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- The overflow bar must match the main absorb bar or the pattern breaks
         -- across the seam where one hands over to the other.
         DF:ApplyBarTextureTiling(overflowBar, overflowApplied == false and DF.STOCK_BAR_TEXTURE or texture)
+        if DF:BarTextureLayersWanted(overflowBar, db, "absorbBar") then
+            DF:ApplyBarTextureLayers(overflowBar, "absorbBar", db, {
+                span = frame.healthBar, isVertical = isVerticalFill,
+                baseColor = color, baseBlend = db.absorbBarBlendMode or "BLEND",
+            })
+        end
         
         -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
         local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
@@ -1857,7 +1887,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     bar:SetFrameLevel(healAbsorbLevel)
     
     -- Texture and color
-    local tex = ResolveBarTextureForFill(db, db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE,
+    local tex, healAbsorbVertical = ResolveBarTextureForFill(db, db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE,
         mode, "healAbsorbBarOrientation")
     local col = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
     local blendMode = db.healAbsorbBarBlendMode or "BLEND"
@@ -1882,6 +1912,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     end
     
     bar:SetStatusBarColor(col.r, col.g, col.b, col.a or 0.7)
+    if DF:BarTextureLayersWanted(bar, db, "healAbsorbBar") then
+        DF:ApplyBarTextureLayers(bar, "healAbsorbBar", db, {
+            span = (mode == "FLOATING") and bar or frame.healthBar, isVertical = healAbsorbVertical,
+            baseColor = col, baseBlend = blendMode,
+        })
+    end
     
     bar:ClearAllPoints()
     
@@ -2149,7 +2185,7 @@ local function GetOrCreateHealPredSegment2(frame)
 end
 
 -- Style a segment to match the primary bar (texture, blend, draw layer, colour).
-local function StyleHealPredSegment(seg, tex, blendMode, color)
+local function StyleHealPredSegment(seg, tex, blendMode, color, db, layerOpts)
     if seg.currentTexture ~= tex then
         seg.currentTexture = tex
         DF:SafeSetStatusBarTexture(seg, tex)   -- also sets tiling + texcoords
@@ -2159,6 +2195,12 @@ local function StyleHealPredSegment(seg, tex, blendMode, color)
     local t = seg:GetStatusBarTexture()
     if t then t:SetBlendMode(blendMode) end
     seg:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    if db and layerOpts and DF:BarTextureLayersWanted(seg, db, "healPrediction") then
+        DF:ApplyBarTextureLayers(seg, "healPrediction", db, {
+            span = layerOpts.span, isVertical = layerOpts.isVertical,
+            baseColor = color, baseBlend = blendMode,
+        })
+    end
 end
 
 function DF:UpdateHealPrediction(frame, testIndex)
@@ -2416,7 +2458,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     local predictionLevel = DF:ResolveHealPredictionBarLevel(frame, db) or (healthLevel + 1)
 
     -- Texture and color
-    local tex = ResolveBarTextureForFill(db, db.healPredictionTexture or DF.STOCK_BAR_TEXTURE,
+    local tex, healPredVertical = ResolveBarTextureForFill(db, db.healPredictionTexture or DF.STOCK_BAR_TEXTURE,
         mode, "healPredictionOrientation")
     local blendMode = db.healPredictionBlendMode or "BLEND"
     
@@ -2436,6 +2478,14 @@ function DF:UpdateHealPrediction(frame, testIndex)
     end
     
     bar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    -- Kept as one table: the split mode's second segment reuses its span and axis.
+    local healPredLayerOpts = {
+        span = (mode == "FLOATING") and bar or frame.healthBar, isVertical = healPredVertical,
+        baseColor = color, baseBlend = blendMode,
+    }
+    if DF:BarTextureLayersWanted(bar, db, "healPrediction") then
+        DF:ApplyBarTextureLayers(bar, "healPrediction", db, healPredLayerOpts)
+    end
     bar:ClearAllPoints()
     
     -- ============================================================
@@ -2491,7 +2541,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- SPLIT: others' segment, chained after the primary within the floating bar.
         if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
-            StyleHealPredSegment(seg2, tex, blendMode, othersColor)
+            StyleHealPredSegment(seg2, tex, blendMode, othersColor, db, healPredLayerOpts)
             seg2:SetParent(frame)
             seg2:SetFrameStrata(bar:GetFrameStrata())
             seg2:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -2592,7 +2642,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- (no calculator), there's no breakdown to draw a second segment from.
         if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
-            StyleHealPredSegment(seg2, tex, blendMode, othersColor)
+            StyleHealPredSegment(seg2, tex, blendMode, othersColor, db, healPredLayerOpts)
             seg2:SetParent(frame)
             seg2:SetFrameStrata(frame:GetFrameStrata())
             seg2:SetFrameLevel(predictionLevel)

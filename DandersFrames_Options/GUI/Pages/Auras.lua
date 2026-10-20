@@ -1484,6 +1484,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
             group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "health",
+                { baseSize = false, refreshStates = tools2.refreshStates })
         end
 
         -- The texture's name, and the fill direction only when it is NOT the
@@ -1990,6 +1993,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
             group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The overlay's texture, and the blend only when it is NOT the plain
@@ -2366,6 +2372,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Fill Direction"], db, "resourceBarReverseFill", function() DF:UpdateAllFrames() end), 30)
 
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "resourceBar",
+                { baseSize = false, refreshStates = tools2.refreshStates })
         end
 
         -- The texture's name, and the orientation only when it is NOT the plain
@@ -2864,6 +2873,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local levelSlider = add(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "absorbBarFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("absorb") end, true)), 55, 1)
             levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "absorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The display mode in the dropdown's own words, then the texture's name
@@ -2960,6 +2972,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local healBgColorPicker = add(GUI:CreateColorPicker(parent, L["Background Color"], db, "healAbsorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 2)
             healBgColorPicker.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healAbsorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The same two words the shield's card prints, out of this bar's own mode
@@ -3120,6 +3135,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
             local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
             blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The display mode and then the source, both in their own dropdown's

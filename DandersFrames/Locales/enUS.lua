@@ -3271,4 +3271,33 @@ L["Player"] = true
 L["Shown"] = true
 L["Side Menu"] = true
 L["Updates"] = true
+
+-- Texture layers (DandersFrames_Options/GUI/TextureLayerControls.lua)
+L["Preset: %s"] = true
+L["Changed from preset"] = true
+L["Click and hold to reset to the preset"] = true
+L["Presets"] = true
+L["Preview"] = true
+L["Bevel"] = true
+L["Diagonal Pattern"] = true
+L["Diagonal Pattern + Gloss"] = true
+L["Dots Pattern"] = true
+L["Fills in the layers below with a ready-made look, which you can then adjust. It does not change the bar's own texture or colour."] = true
+L["Gloss"] = true
+L["Grid Pattern"] = true
+L["Layer 2: Pattern"] = true
+L["Layer 3: Shading"] = true
+L["Show All Textures"] = true
+L["Tube"] = true
+L["Auto (texture's own)"] = true
+L["Advanced: tile this bar's texture and stack up to two more textures on it. Unticking restores the plain bar and keeps these settings."] = true
+L["Both Directions"] = true
+L["How the texture repeats. Auto uses the texture's own setting (DandersFrames' patterned textures repeat, everything else stretches); Off stretches it to fit; the others repeat it in those directions."] = true
+L["Layer 1: Bar Texture"] = true
+L["Multiply (MOD)"] = true
+L["Off (Stretch)"] = true
+L["Texture Layers"] = true
+L["The size one repeat is drawn at, in pixels. 0 uses the texture's own size."] = true
+L["Tile"] = true
+L["Tile Size"] = true
 --@end-do-not-package@

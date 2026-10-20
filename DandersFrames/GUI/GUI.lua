@@ -158,6 +158,13 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         return v
     end,
 
+    -- ...and whether that value is a Quick Start look the user picked rather than
+    -- the shipped default (Core/Config.lua, DF.DEFAULT_BASELINES), so the tooltip
+    -- names it as the preset it is.
+    isPresetBaseline = function(db, key)
+        return key ~= nil and DF.DEFAULT_BASELINES ~= nil and DF.DEFAULT_BASELINES[key] ~= nil
+    end,
+
     -- Drops the layout override AND writes the true global back into the live
     -- table, so the widget can redraw from db[key] straight after.
     resetOverride = function(db, key)

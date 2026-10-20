@@ -1246,6 +1246,34 @@ for _, name in ipairs(ABSORB_TILES) do
     DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
 end
 
+-- The texture-layer masks (Media/DF_Layer_*). Patterns tile both ways; the two
+-- diagonals lean, so they carry companions like the stripes above, while dots, grid
+-- and checker read the same either way. Shading is a gradient ACROSS the bar, so it
+-- tiles only ALONG it (HORIZ) -- and its companion runs the gradient across a
+-- vertical bar's thickness, which makes the companion's mode VERT, not BOTH.
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    local patterns = { "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD", "DF_Layer_Dots", "DF_Layer_Grid", "DF_Layer_Checker" }
+    local leaning = { DF_Layer_Diagonal = true, DF_Layer_Diagonal_HD = true }
+    for _, name in ipairs(patterns) do
+        local path = MEDIA .. name .. ".png"
+        DF.TILED_BAR_TEXTURES[path] = "BOTH"
+        if leaning[name] then
+            local vert = MEDIA .. name .. "_Vert.png"
+            DF.TILED_VERTICAL_COMPANION[path] = vert
+            DF.TILED_COMPANION_BASE[vert] = path
+            DF.TILED_BAR_TEXTURES[vert] = "BOTH"
+        end
+    end
+    for _, name in ipairs({ "DF_Layer_Shade_Top", "DF_Layer_Shade_Bottom", "DF_Layer_Shade_Bevel", "DF_Layer_Shade_Tube" }) do
+        local path, vert = MEDIA .. name .. ".png", MEDIA .. name .. "_Vert.png"
+        DF.TILED_BAR_TEXTURES[path] = "HORIZ"
+        DF.TILED_VERTICAL_COMPANION[path] = vert
+        DF.TILED_COMPANION_BASE[vert] = path
+        DF.TILED_BAR_TEXTURES[vert] = "VERT"
+    end
+end
+
 -- Swap a tiled texture for its vertical companion when the bar fills vertically.
 -- Returns the path unchanged for everything else, so it is safe to call on any
 -- texture from any call site.
@@ -1286,6 +1314,15 @@ function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
 end
 
+-- The tiling a bar or layer actually uses. nil / "AUTO" is the texture's own answer
+-- above; anything else is the user's Tile setting, honoured even for art that was
+-- not drawn to tile (seams are then theirs to judge, which is why it is opt-in).
+function DF:ResolveTileMode(path, override)
+    if override == "OFF" then return nil end
+    if override == "BOTH" or override == "HORIZ" or override == "VERT" then return override end
+    return DF:GetBarTextureTiling(path)
+end
+
 -- The SetTexture wrap descriptors a tiling mode asks for, per axis. Same strings
 -- Blizzard's addressModeLookup resolves to (TextureUtil.lua): "REPEAT" / "CLAMP".
 local function tileWrapArgs(mode)
@@ -1306,7 +1343,7 @@ function DF:ApplyBarTextureTiling(bar, path)
     if not bar or not bar.GetStatusBarTexture then return false end
     local fill = bar:GetStatusBarTexture()
     if not fill then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, bar.dfTileOverride)
     -- ☠ THE TILE FLAGS ALONE LEAVE THE SAMPLER CLAMPED. SetHorizTile/SetVertTile
     -- make the REGION repeat, but the wrap (address) mode is a property of the
     -- texture SET -- and SetStatusBarTexture takes no wrap arguments, so the fill
@@ -1323,12 +1360,12 @@ function DF:ApplyBarTextureTiling(bar, path)
     -- DF:ApplyBarFillOrientation for the companion swap), so a fresh set always
     -- arrives here with the stamp gone and re-applies the wrap.
     if mode then
-        if fill.dfWrapPath ~= path then
+        if fill.dfWrapPath ~= path or fill.dfWrapMode ~= mode then
             fill:SetTexture(path, tileWrapArgs(mode))
-            fill.dfWrapPath = path
+            fill.dfWrapPath, fill.dfWrapMode = path, mode
         end
     else
-        fill.dfWrapPath = nil
+        fill.dfWrapPath, fill.dfWrapMode = nil, nil
     end
     fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     fill:SetVertTile(mode == "BOTH" or mode == "VERT")
@@ -1341,9 +1378,9 @@ end
 -- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
 -- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
 -- be cropping on purpose and a StatusBar fill is the only one we fully own.
-function DF:ApplyTextureTiling(region, path, wrapAlreadySet)
+function DF:ApplyTextureTiling(region, path, wrapAlreadySet, override)
     if not (region and region.SetHorizTile) then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, override)
     -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
     -- every caller here runs right after its own SetTexture (which clamps), and
     -- none is a per-update re-assert, so re-issuing the set is always both
@@ -1371,7 +1408,7 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
     if not bar then return end
     isVertical = isVertical and true or false
     local base = bar.dfBaseTexture
-    if base and DF:GetBarTextureTiling(base) then
+    if base and DF:ResolveTileMode(base, bar.dfTileOverride) then
         if bar.SetRotatesTexture then bar:SetRotatesTexture(false) end
         local want = DF:ResolveBarTexture(base, isVertical)
         if want ~= bar.dfAppliedTexture then
@@ -3471,6 +3508,16 @@ local TEXTURE_KEY_LABELS = {
     defensiveDurationBarTexture = "Defensive Duration Bar",
     buffPandemicBorderTexture = "Buff Pandemic Border",
 }
+
+-- Each bar's two texture layers heal the same way, labelled after the bar.
+for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS or {}) do
+    local label = TEXTURE_KEY_LABELS[prefix .. "Texture"] or prefix
+    for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
+        local key = prefix .. "Layer" .. n .. "Texture"
+        TEXTURE_REPAIR_KEYS[#TEXTURE_REPAIR_KEYS + 1] = key
+        TEXTURE_KEY_LABELS[key] = label .. " Layer " .. n
+    end
+end
 
 -- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. This is HEALING, not a migration: a one-shot
 -- flag would repair the profile once and leave every later rename -- every future addon

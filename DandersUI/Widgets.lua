@@ -1385,7 +1385,11 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         end
         local def = host:Call("getDefaultValue", dbTable, dbKey)
         local write = ResetWriter(def)
-        if write then return write, def, L["Click and hold to reset to the default"] end
+        if write then
+            local preset = host:Call("isPresetBaseline", dbTable, dbKey)
+            return write, def, preset and L["Click and hold to reset to the preset"]
+                or L["Click and hold to reset to the default"]
+        end
         return nil
     end
 
@@ -1398,8 +1402,11 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         local ov, globalValue = host:Call("getOverrideState", dbTable, dbKey)
         local inLayout = ov ~= nil and ov ~= "none"
         local def = host:Call("getDefaultValue", dbTable, dbKey)
+        local preset = def ~= nil and host:Call("isPresetBaseline", dbTable, dbKey)
         local lines = {}
-        if def ~= nil then lines[#lines + 1] = format(L["Default: %s"], FormatValue(def)) end
+        if def ~= nil then
+            lines[#lines + 1] = format(preset and L["Preset: %s"] or L["Default: %s"], FormatValue(def))
+        end
         if inLayout then lines[#lines + 1] = format(L["Global: %s"], FormatValue(globalValue)) end
         -- A control with no table of its own (an override key into a sub-table)
         -- reports what it displays.
@@ -1419,6 +1426,7 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey, onOverrideRe
         end
         local title = (kind == "overridden" and L["Set by this auto layout"])
             or (kind == "runtime" and L["Set by the active auto layout"])
+            or (preset and L["Changed from preset"])
             or L["Changed from default"]
         host:ShowTooltip(hit, { title = title, lines = lines })
     end
@@ -3523,6 +3531,7 @@ function UI:CreateDropdown(parent, opts)
                         value = isTable and (v.text or v.label or tostring(k)) or v,
                         color = isTable and v.color or nil,
                         header = isTable and v.header or nil,
+                        separatorAbove = isTable and v.separatorAbove or nil,
                     })
                 end
             end
@@ -3535,6 +3544,7 @@ function UI:CreateDropdown(parent, opts)
                     value = isTable and (v.text or v.label or tostring(k)) or v,
                     color = isTable and v.color or nil,
                     header = isTable and v.header or nil,
+                    separatorAbove = isTable and v.separatorAbove or nil,
                 })
             end
             table.sort(ordered, function(a, b)
@@ -3632,7 +3642,8 @@ function UI:CreateDropdown(parent, opts)
                 menuBtn.Text:SetTextScale(1)
                 menuBtn.Text:ClearAllPoints()
                 menuBtn.Text:SetPoint("LEFT", seenHeader and 16 or 8, 0)
-                menuBtn.Sep:Hide()
+                -- An option may ask for the same line a header draws, without a label.
+                menuBtn.Sep:SetShown(opt.separatorAbove and i > 1 or false)
                 menuBtn:EnableMouse(true)
                 if opt.color then
                     -- per-option colour (e.g. class-coloured spec list) always wins

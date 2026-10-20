@@ -214,6 +214,15 @@ function DF:ApplyFrameLayout(frame)
                 DF:ApplyBarFillOrientation(frame.missingHealthBar, true)
             end
         end
+
+        -- No baseColor: the health colour is set per update by other code (class,
+        -- gradient, dead), so the base keeps its Tile option but not a custom size.
+        if DF:BarTextureLayersWanted(healthBar, db, "health") then
+            DF:ApplyBarTextureLayers(healthBar, "health", db, {
+                span = healthBar,
+                isVertical = (orientation == "VERTICAL" or orientation == "VERTICAL_INV"),
+            })
+        end
     end
     
     -- ========================================
