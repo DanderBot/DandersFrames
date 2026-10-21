@@ -333,7 +333,8 @@ do
           "gate: the builder never calls the PAGE's RefreshStates -- a pinned panel's copy reflows itself")
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
-    eq(routed, 3, "gate: the enable, the display mode and the source pick all route through the tools")
+    -- ...and the Texture dropdown, which the Mirror tick follows.
+    eq(routed, 4, "gate: the enable, the display mode, the source pick and the texture route through the tools")
 
     -- The order, which is also the one-column fold's order.
     local order = {}

@@ -1481,7 +1481,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function BuildHealthTextureGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture",
+                function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "health",
                 { refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
@@ -1992,7 +1993,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
 
             group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
                 { baseSize = true, refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
@@ -2365,7 +2366,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "resourceBar",
                 { refreshStates = tools2.refreshStates })
 
@@ -2802,7 +2803,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     textureOptions[path] = name
                 end
             end
-            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() end, textureOptions), 55, 1)
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, textureOptions), 55, 1)
             GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "absorbBar",
                 { baseSize = true, refreshStates = tools2.refreshStates })
 
@@ -2943,7 +2944,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     healTextureOptions[path] = name
                 end
             end
-            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() end, healTextureOptions), 55, 1)
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, healTextureOptions), 55, 1)
             GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "healAbsorbBar",
                 { baseSize = true, refreshStates = tools2.refreshStates })
 
@@ -3121,7 +3122,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             showModeDropdown.tooltip = L["Which incoming heals the bar shows: all sources, only yours, or only from others."]
 
             local textureOptions = DF:GetTextureList()
-            local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
+            local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, textureOptions), 55)
             texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
             GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
                 { baseSize = true, refreshStates = tools2.refreshStates,

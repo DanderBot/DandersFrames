@@ -67,7 +67,7 @@ do
     -- Every setting goes through the writer it is handed (the options' write bracket).
     local seen, n = {}, 0
     ApplyLook(db, "absorbBar", "DIAGONAL_GLOSS", function(key, value) seen[key] = value n = n + 1 end)
-    eq(n, 13, "look: the pick and all twelve layer settings go through the writer")
+    eq(n, 15, "look: the pick and all fourteen layer settings go through the writer")
     eq(seen.absorbBarLayer2Enabled, true, "look: ...with their values")
     eq(db.absorbBarLayer2Enabled, false, "look: ...and nothing is written around it")
 end

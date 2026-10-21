@@ -59,6 +59,8 @@ end
 local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
 local PATTERN = MEDIA .. "DF_Layer_Diagonal.png"
 local PATTERN_V = MEDIA .. "DF_Layer_Diagonal_Vert.png"
+local PATTERN_M = MEDIA .. "DF_Layer_Diagonal_Mirror.png"
+local PATTERN_MV = MEDIA .. "DF_Layer_Diagonal_Mirror_Vert.png"
 local SHADE = MEDIA .. "DF_Layer_Shade_Top.png"
 local STRETCHED = MEDIA .. "DF_Minimalist"
 
@@ -71,16 +73,20 @@ local function load()
         TEXTURE_LAYER_BARS = { "absorbBar", "health" },
         TEXTURE_LAYER_EXTRA = { 2, 3 },
         TILED_BAR_TEXTURES = { [PATTERN] = "BOTH", [PATTERN_V] = "BOTH", [SHADE] = "HORIZ" },
-        TILED_VERTICAL_COMPANION = { [PATTERN] = PATTERN_V },
+        TILED_VERTICAL_COMPANION = { [PATTERN] = PATTERN_V, [PATTERN_M] = PATTERN_MV },
+        TILED_MIRROR_COMPANION = { [PATTERN] = PATTERN_M },
+        TILED_COMPANION_BASE = { [PATTERN_V] = PATTERN, [PATTERN_M] = PATTERN, [PATTERN_MV] = PATTERN },
         TileWrapArgs = function(mode)
             return (mode == "BOTH" or mode == "HORIZ") and "REPEAT" or "CLAMP",
                    (mode == "BOTH" or mode == "VERT") and "REPEAT" or "CLAMP"
         end,
         PixelPerfect = function(_, v) return v end,
     }
-    function DF:ResolveBarTexture(path, isVertical)
-        if isVertical then return self.TILED_VERTICAL_COMPANION[path] or path end
-        return path
+    function DF:ResolveBarTexture(path, isVertical, mirror)
+        local base = self.TILED_COMPANION_BASE[path] or path
+        if mirror then base = self.TILED_MIRROR_COMPANION[base] or base end
+        if isVertical then return self.TILED_VERTICAL_COMPANION[base] or base end
+        return base
     end
     function DF:ApplyBarTextureTiling(bar, path) calls.tiling = calls.tiling + 1; calls.tilingOverride = bar.dfTileOverride end
     function DF:ApplyBarFillOrientation(bar, isVertical) calls.orientation = calls.orientation + 1 end
@@ -363,6 +369,7 @@ do
         { "absorbBarLayer2Enabled", true }, { "absorbBarLayer3Texture", "other" },
         { "absorbBarLayer2BlendMode", "ADD" }, { "absorbBarLayer3TileMode", "BOTH" },
         { "absorbBarLayer2TileSize", 24 }, { "absorbBarTileMode", "HORIZ" }, { "absorbBarTileSize", 8 },
+        { "absorbBarTileMirror", true }, { "absorbBarLayer3TileMirror", true },
     }
     for _, step in ipairs(steps) do
         db[step[1]] = step[2]
@@ -455,5 +462,61 @@ do  -- Fit to Bar asks a stretched texture to tile; Tile Off refuses
     db.absorbBarLayer2TileMode = "OFF"
     DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(100, 20) })
     eq(layerTex(bar, 2).tc[2], 1, "fit: Tile Off stretches")
+    restore()
+end
+
+-- ------------------------------------------------------------
+-- 10. Mirror: the bar gets the mirrored twin, never a rotation
+-- ------------------------------------------------------------
+do  -- the REAL resolver from Core.lua: every combination lands on the right twin
+    local core = df_file_source("Core.lua")
+    local a = core:find("function DF:ResolveBarTexture(path, isVertical, mirror)", 1, true)
+    local b = core:find("-- Returns the mode string", a or 1, true)
+    check(a and b, "mirror: lifted the real resolvers")
+    local DF = {
+        TILED_COMPANION_BASE = { [PATTERN_V] = PATTERN, [PATTERN_M] = PATTERN, [PATTERN_MV] = PATTERN },
+        TILED_MIRROR_COMPANION = { [PATTERN] = PATTERN_M },
+        TILED_VERTICAL_COMPANION = { [PATTERN] = PATTERN_V, [PATTERN_M] = PATTERN_MV },
+    }
+    assert(loadstring("local DF = ...\n" .. core:sub(a, b - 1), "@resolver"))(DF)
+    eq(DF:ResolveBarTexture(PATTERN, false, true), PATTERN_M, "mirror: horizontal bar gets the twin")
+    eq(DF:ResolveBarTexture(PATTERN, true, true), PATTERN_MV, "mirror: vertical bar gets the twin's companion")
+    eq(DF:ResolveBarTexture(PATTERN_MV, false, false), PATTERN, "mirror: unticked, from any variant, back to the original")
+    eq(DF:ResolveBarTexture(PATTERN_V, false, true), PATTERN_M, "mirror: idempotent whichever variant is on the bar")
+    eq(DF:ResolveBarTexture(STRETCHED, false, true), STRETCHED, "mirror: no twin, no change")
+    local db = { absorbBarTileMirror = true, healthOrientation = "HORIZONTAL" }
+    eq((DF:ResolveBarTextureForFill(db, PATTERN, "OVERLAY", "absorbBarOrientation")), PATTERN_M,
+       "mirror: the absorb's texture site reads its own Mirror tick")
+    db.absorbBarTileMirror = false
+    eq((DF:ResolveBarTextureForFill(db, PATTERN, "OVERLAY", "absorbBarOrientation")), PATTERN,
+       "mirror: ...and leaves it alone unticked")
+end
+
+do  -- a layer draws its twin
+    local DF = load()
+    local db, bar = defaults(), FakeBar(STRETCHED)
+    db.absorbBarLayer2Enabled = true
+    db.absorbBarLayer2TileMirror = true
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(100, 20) })
+    eq(layerTex(bar, 2).path, PATTERN_M, "mirror: a layer draws the mirrored twin")
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(100, 20), isVertical = true })
+    eq(layerTex(bar, 2).path, PATTERN_MV, "mirror: ...and its vertical companion on a vertical bar")
+    restore()
+end
+
+do  -- the bar's own Mirror is stamped on the bar for the orientation pass, switch off or on
+    local DF = load()
+    local db, bar = defaults(true), FakeBar(PATTERN)
+    db.healthTileMirror = true
+    eq(DF:BarTextureLayersActive(db, "health"), true, "mirror: the bar's own tick needs the pass, layers off")
+    DF:ApplyBarTextureLayers(bar, "health", db, { isVertical = false })
+    eq(bar.dfTileMirror, true, "mirror: stamped on the bar")
+    eq(calls.orientation, 1, "mirror: the orientation pass re-picks the file")
+    db.healthTileMirror = false
+    eq(DF:BarTextureLayersWanted(bar, db, "health"), true, "mirror: unticking still calls, to undo it")
+    DF:ApplyBarTextureLayers(bar, "health", db, { isVertical = false })
+    eq(bar.dfTileMirror, nil, "mirror: unticked, the stamp clears")
+    eq(calls.orientation, 2, "mirror: ...and the original is put back")
+    eq(DF:BarTextureLayersWanted(bar, db, "health"), false, "mirror: then callers skip again")
     restore()
 end

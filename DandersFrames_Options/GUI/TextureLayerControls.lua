@@ -50,6 +50,10 @@ local function TileTooltip()
     return L["How the texture repeats. Auto uses the texture's own setting (DandersFrames' patterned textures repeat, everything else stretches); Off stretches it to fit; the others repeat it in those directions."]
 end
 
+local function MirrorTooltip()
+    return L["Leans the texture's stripes the other way."]
+end
+
 local function TileSizeTooltip()
     return L["How big one repeat of the texture is drawn. Auto uses the texture's own preset size; Fit to Bar makes one repeat as thick as the bar; Custom sets it in pixels."]
 end
@@ -318,7 +322,7 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
         local showAll = false
         local list = NewList()
         FillList(list, n, showAll)
-        local tex = add(GUI:CreateTextureDropdown(parent, L["Texture"], db, p .. "Texture", refresh, list), 55)
+        local tex = add(GUI:CreateTextureDropdown(parent, L["Texture"], db, p .. "Texture", refreshAndStates, list), 55)
         tex.hideOn = off
 
         local all = add(GUI:CreateCheckbox(parent, L["Show All Textures"], nil, nil, function()
@@ -336,6 +340,10 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
         local tile = add(GUI:CreateDropdown(parent, L["Tile"], TileOptions(), db, p .. "TileMode", refreshAndStates), 55)
         tile.tooltip = TileTooltip()
         tile.hideOn = off
+
+        local mirror = add(GUI:CreateCheckbox(parent, L["Mirror"], db, p .. "TileMirror", refresh), 25)
+        mirror.tooltip = MirrorTooltip()
+        mirror.hideOn = function(d) return off(d) or not DF:CanMirrorTexture(d[p .. "Texture"]) end
 
         AddTileSize(add, parent, db, p .. "TileSize", function(d) return d[p .. "Texture"] end,
             function(d) return off(d) or d[p .. "TileMode"] == "OFF" end,
@@ -362,6 +370,13 @@ function GUI:AddBarTileControls(addToCard, parent, db, prefix, opts)
         function() refresh(true) end), 55)
     tile.tooltip = TileTooltip()
     tile.disableOn = opts.disableOn
+    -- Offered only for a texture with a mirrored twin; the card's Texture dropdown
+    -- re-runs the state pass, so it appears and goes as the texture changes.
+    local mirror = addToCard(GUI:CreateCheckbox(parent, L["Mirror"], db, prefix .. "TileMirror",
+        function() refresh(false) end), 25)
+    mirror.tooltip = MirrorTooltip()
+    mirror.hideOn = function(d) return not (texKey and DF:CanMirrorTexture(d[texKey])) end
+    mirror.disableOn = opts.disableOn
     if opts.baseSize then
         local choice, size = AddTileSize(addToCard, parent, db, prefix .. "TileSize",
             function(d) return texKey and d[texKey] end,

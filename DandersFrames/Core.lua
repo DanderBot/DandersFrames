@@ -1250,6 +1250,41 @@ for _, name in ipairs(ABSORB_TILES) do
     DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
 end
 
+-- ============================================================
+-- MIRRORED TWINS
+-- ============================================================
+-- The leaning textures each ship a mirrored twin (<name>_Mirror, and _Mirror_Vert for
+-- vertical bars), so a bar can lean its stripes the other way -- the Mirror tick. A
+-- twin is the original flipped pixel for pixel, so it tiles exactly as the original
+-- does, and the bar simply gets a different file: no rotation, no redraw, and it works
+-- on every bar. Its vertical companion is the vertical original flipped top to bottom
+-- (rotating a mirror image is flipping the rotated one).
+--   Symmetric art (plus, minus, dots, grid, checker) has no twin: mirrored it is the
+-- same picture, so the tick is not offered for it.
+DF.TILED_MIRROR_COMPANION = {}
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    for _, name in ipairs({ "DF_Absorb_V1", "DF_Absorb_V1_Medium", "DF_Absorb_V1_Wide", "DF_Absorb_V1_Wider", "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD" }) do
+        local base, mirror = MEDIA .. name .. ".png", MEDIA .. name .. "_Mirror.png"
+        local mirrorVert = MEDIA .. name .. "_Mirror_Vert.png"
+        DF.TILED_MIRROR_COMPANION[base] = mirror
+        DF.TILED_VERTICAL_COMPANION[mirror] = mirrorVert
+        -- Both twins normalise straight to the ORIGINAL, so every resolve starts from
+        -- the same base whichever variant is on the bar now.
+        DF.TILED_COMPANION_BASE[mirror] = base
+        DF.TILED_COMPANION_BASE[mirrorVert] = base
+        DF.TILED_BAR_TEXTURES[mirror] = "BOTH"
+        DF.TILED_BAR_TEXTURES[mirrorVert] = "BOTH"
+    end
+end
+
+-- Whether this texture has a mirrored twin (the Mirror tick is only offered when it does).
+function DF:CanMirrorTexture(path)
+    if not path then return false end
+    local base = DF.TILED_COMPANION_BASE[path] or path
+    return DF.TILED_MIRROR_COMPANION[base] ~= nil
+end
+
 -- The texture-layer masks (Media/DF_Layer_*). Patterns tile both ways; the two
 -- diagonals lean, so they carry companions like the stripes above, while dots, grid
 -- and checker read the same either way. Shading is a gradient ACROSS the bar, so it
@@ -1288,9 +1323,11 @@ end
 -- more than one point (the db-driven one at the texture site, the live-orientation
 -- one in ApplyBarFillOrientation), and they must be able to disagree about direction
 -- without the result depending on which ran last.
-function DF:ResolveBarTexture(path, isVertical)
+function DF:ResolveBarTexture(path, isVertical, mirror)
     if not path then return path end
     local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    -- Mirror first, then the axis: the mirrored twin carries its own vertical companion.
+    if mirror then base = DF.TILED_MIRROR_COMPANION and DF.TILED_MIRROR_COMPANION[base] or base end
     if isVertical then
         return DF.TILED_VERTICAL_COMPANION[base] or base
     end
@@ -1306,11 +1343,14 @@ end
 -- untouched, so it is inert for all of them.
 --   Shared by Frames/Bars.lua and Frames/Update.lua: both set the absorb texture
 -- in the same pass, and if only one resolved, the other would overwrite it.
+--   The bar's Mirror tick is read here too, named off the same key: every caller's
+-- orientation key is "<bar>Orientation", and its mirror is "<bar>TileMirror".
 function DF:ResolveBarTextureForFill(db, tex, mode, floatingOrientKey)
     local orient = (mode == "FLOATING") and (db[floatingOrientKey] or "HORIZONTAL")
         or (db.healthOrientation or "HORIZONTAL")
     local isVertical = (orient == "VERTICAL" or orient == "VERTICAL_INV")
-    return DF:ResolveBarTexture(tex, isVertical), isVertical
+    local mirror = floatingOrientKey and db[(floatingOrientKey:gsub("Orientation$", "TileMirror"))]
+    return DF:ResolveBarTexture(tex, isVertical, mirror), isVertical
 end
 
 -- Returns the mode string, or nil for a normal stretched texture.
@@ -1423,7 +1463,8 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
     local base = bar.dfBaseTexture
     if base and DF:ResolveTileMode(base, bar.dfTileOverride) then
         if bar.SetRotatesTexture then bar:SetRotatesTexture(false) end
-        local want = DF:ResolveBarTexture(base, isVertical)
+        -- bar.dfTileMirror is stamped by DF:ApplyBarTextureLayers from the bar's Mirror tick.
+        local want = DF:ResolveBarTexture(base, isVertical, bar.dfTileMirror)
         if want ~= bar.dfAppliedTexture then
             bar:SetStatusBarTexture(want)
             bar.dfAppliedTexture = want

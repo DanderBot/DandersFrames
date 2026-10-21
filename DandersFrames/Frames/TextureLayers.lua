@@ -34,12 +34,14 @@ local BASE_TEXTURE_KEY = {
 local KEYS = {}
 for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS) do
     local k = { on = prefix .. "TextureLayersEnabled", tex = BASE_TEXTURE_KEY[prefix],
-                tileMode = prefix .. "TileMode", tileSize = prefix .. "TileSize" }
+                tileMode = prefix .. "TileMode", tileSize = prefix .. "TileSize",
+                mirror = prefix .. "TileMirror" }
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local p = prefix .. "Layer" .. n
         k[n] = {
             enabled = p .. "Enabled", texture = p .. "Texture", color = p .. "Color",
             blend = p .. "BlendMode", tileMode = p .. "TileMode", tileSize = p .. "TileSize",
+            mirror = p .. "TileMirror",
         }
     end
     KEYS[prefix] = k
@@ -82,7 +84,9 @@ end
 function DF:BarTextureLayersActive(db, prefix)
     local k = KEYS[prefix]
     if not (db and k) then return false end
-    if Override(db[k.tileMode]) or Sized(TileSize(db[k.tileSize], k.tex and db[k.tex])) then return true end
+    if Override(db[k.tileMode]) or db[k.mirror] or Sized(TileSize(db[k.tileSize], k.tex and db[k.tex])) then
+        return true
+    end
     if not db[k.on] then return false end
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         if db[k[n].enabled] then return true end
@@ -96,7 +100,7 @@ end
 function DF:BarTextureLayersWanted(bar, db, prefix)
     if not bar then return false end
     local state = bar.dfTextureLayers
-    return (state ~= nil and state.active) or bar.dfTileOverride ~= nil
+    return (state ~= nil and state.active) or bar.dfTileOverride ~= nil or bar.dfTileMirror ~= nil
         or DF:BarTextureLayersActive(db, prefix)
 end
 
@@ -111,14 +115,17 @@ end
 function DF:BarTextureLayersChanged(cache, db, prefix)
     local k = KEYS[prefix]
     if not (cache and k) then return true end
-    if cache.tileMode ~= db[k.tileMode] or cache.tileSize ~= db[k.tileSize] then return true end
+    if cache.tileMode ~= db[k.tileMode] or cache.tileSize ~= db[k.tileSize]
+       or cache.mirror ~= db[k.mirror] then
+        return true
+    end
     local on = db[k.on] and true or false
     if cache.on ~= on then return true end
     if not on then return false end
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local kn, c = k[n], cache[n]
         if c.enabled ~= db[kn.enabled] or c.texture ~= db[kn.texture] or c.blend ~= db[kn.blend]
-           or c.tileMode ~= db[kn.tileMode] or c.tileSize ~= db[kn.tileSize] then
+           or c.tileMode ~= db[kn.tileMode] or c.tileSize ~= db[kn.tileSize] or c.mirror ~= db[kn.mirror] then
             return true
         end
         local r, g, b, a = ColorParts(db[kn.color])
@@ -131,13 +138,13 @@ function DF:CacheBarTextureLayers(cache, db, prefix)
     local k = KEYS[prefix]
     if not (cache and k) then return end
     cache.on = db[k.on] and true or false
-    cache.tileMode, cache.tileSize = db[k.tileMode], db[k.tileSize]
+    cache.tileMode, cache.tileSize, cache.mirror = db[k.tileMode], db[k.tileSize], db[k.mirror]
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local kn = k[n]
         local c = cache[n] or {}
         cache[n] = c
         c.enabled, c.texture, c.blend = db[kn.enabled], db[kn.texture], db[kn.blend]
-        c.tileMode, c.tileSize = db[kn.tileMode], db[kn.tileSize]
+        c.tileMode, c.tileSize, c.mirror = db[kn.tileMode], db[kn.tileSize], db[kn.mirror]
         c.r, c.g, c.b, c.a = ColorParts(db[kn.color])
     end
 end
@@ -281,8 +288,12 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
     -- later re-set of the file keeps honouring it.
     local on = db[k.on] and true or false
     local override = Override(db[k.tileMode])
-    if bar.dfTileOverride ~= override then
+    -- The Mirror tick rides the same path: stamped on the bar, the orientation pass
+    -- below picks the mirrored twin (DF:ApplyBarFillOrientation).
+    local mirror = db[k.mirror] and true or nil
+    if bar.dfTileOverride ~= override or bar.dfTileMirror ~= mirror then
         bar.dfTileOverride = override
+        bar.dfTileMirror = mirror
         if bar.dfAppliedTexture then
             DF:ApplyBarTextureTiling(bar, bar.dfAppliedTexture)
         end
@@ -334,7 +345,7 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local kn = k[n]
         if on and db[kn.enabled] and db[kn.texture] then
-            local path = DF:ResolveBarTexture(db[kn.texture], opts.isVertical)
+            local path = DF:ResolveBarTexture(db[kn.texture], opts.isVertical, db[kn.mirror])
             PaintLayer(state, n, path, Override(db[kn.tileMode]), TileSize(db[kn.tileSize], path),
                 AskedSize(db[kn.tileSize]), db[kn.color], db[kn.blend])
         elseif state.textures[n] then

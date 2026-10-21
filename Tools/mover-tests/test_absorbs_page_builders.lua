@@ -243,7 +243,8 @@ do
 
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
-    eq(routed, 2, "gate: exactly two callbacks route their state pass through the tools")
+    -- Two display modes, and the two Texture dropdowns (the Mirror tick follows the texture).
+    eq(routed, 4, "gate: exactly four callbacks route their state pass through the tools")
 end
 
 -- ============================================================

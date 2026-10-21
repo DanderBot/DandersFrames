@@ -1585,7 +1585,7 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         -- Same vertical-companion resolution as the main bar. It has to match, or
         -- the two halves of a single shield would use different art.
-        texture = DF:ResolveBarTexture(texture, isVerticalFill)
+        texture = DF:ResolveBarTexture(texture, isVerticalFill, db.absorbBarTileMirror)
         local overflowApplied = DF:SafeSetStatusBarTexture(overflowBar, texture)
 
         local color = db.absorbBarColor or {r = 1, g = 1, b = 1, a = 0.7}

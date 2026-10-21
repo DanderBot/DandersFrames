@@ -200,11 +200,19 @@ local SHIPPED_MEDIA_FILES = {
     "Classic_Curve.tga",
     "DF_Absorb_V1.png",
     "DF_Absorb_V1_Medium.png",
+    "DF_Absorb_V1_Medium_Mirror.png",
+    "DF_Absorb_V1_Medium_Mirror_Vert.png",
     "DF_Absorb_V1_Medium_Vert.png",
+    "DF_Absorb_V1_Mirror.png",
+    "DF_Absorb_V1_Mirror_Vert.png",
     "DF_Absorb_V1_Vert.png",
     "DF_Absorb_V1_Wide.png",
+    "DF_Absorb_V1_Wide_Mirror.png",
+    "DF_Absorb_V1_Wide_Mirror_Vert.png",
     "DF_Absorb_V1_Wide_Vert.png",
     "DF_Absorb_V1_Wider.png",
+    "DF_Absorb_V1_Wider_Mirror.png",
+    "DF_Absorb_V1_Wider_Mirror_Vert.png",
     "DF_Absorb_V1_Wider_Vert.png",
     "DF_Absorb_V2_Minus_Large.png",
     "DF_Absorb_V2_Minus_Medium.png",
@@ -238,7 +246,11 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Layer_Checker.png",
     "DF_Layer_Diagonal.png",
     "DF_Layer_Diagonal_HD.png",
+    "DF_Layer_Diagonal_HD_Mirror.png",
+    "DF_Layer_Diagonal_HD_Mirror_Vert.png",
     "DF_Layer_Diagonal_HD_Vert.png",
+    "DF_Layer_Diagonal_Mirror.png",
+    "DF_Layer_Diagonal_Mirror_Vert.png",
     "DF_Layer_Diagonal_Vert.png",
     "DF_Layer_Dots.png",
     "DF_Layer_Grid.png",
@@ -3088,6 +3100,7 @@ do
         DF.PartyDefaults[prefix .. "TextureLook"] = "CUSTOM"
         DF.PartyDefaults[prefix .. "TileMode"] = "AUTO"
         DF.PartyDefaults[prefix .. "TileSize"] = 0
+        DF.PartyDefaults[prefix .. "TileMirror"] = false
         for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
             local p, d = prefix .. "Layer" .. n, LAYER_DEFAULTS[n]
             DF.PartyDefaults[p .. "Enabled"] = false
@@ -3096,6 +3109,7 @@ do
             DF.PartyDefaults[p .. "BlendMode"] = "BLEND"
             DF.PartyDefaults[p .. "TileMode"] = "AUTO"
             DF.PartyDefaults[p .. "TileSize"] = 0
+            DF.PartyDefaults[p .. "TileMirror"] = false
         end
     end
 end
@@ -3129,7 +3143,7 @@ do
     }
 
     -- Per bar, the settings a look owns, in write order; and per key, where it sits.
-    local FIELDS = { "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize" }
+    local FIELDS = { "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize", "TileMirror" }
     local where = {}
     DF.TEXTURE_LOOK_KEYS = {}
     DF.DEFAULT_BASELINES = DF.DEFAULT_BASELINES or {}
@@ -3161,6 +3175,7 @@ do
         if w.field == "Color" then return l.color end
         if w.field == "BlendMode" then return "BLEND" end
         if w.field == "TileMode" then return "AUTO" end
+        if w.field == "TileMirror" then return false end
         return 0
     end
 end

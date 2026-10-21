@@ -3298,6 +3298,8 @@ L["Off (Stretch)"] = true
 L["Texture Layers"] = true
 L["How big one repeat of the texture is drawn. Auto uses the texture's own preset size; Fit to Bar makes one repeat as thick as the bar; Custom sets it in pixels."] = true
 L["Fit to Bar"] = true
+L["Mirror"] = true
+L["Leans the texture's stripes the other way."] = true
 L["Tile"] = true
 L["Tile Size"] = true
 --@end-do-not-package@

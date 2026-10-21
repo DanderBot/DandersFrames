@@ -1278,8 +1278,9 @@ do
         bars[#bars + 1] = prefix .. "TextureLook"
         bars[#bars + 1] = prefix .. "TileMode"
         bars[#bars + 1] = prefix .. "TileSize"
+        bars[#bars + 1] = prefix .. "TileMirror"
         for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
-            for _, suffix in ipairs({ "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize" }) do
+            for _, suffix in ipairs({ "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize", "TileMirror" }) do
                 bars[#bars + 1] = prefix .. "Layer" .. n .. suffix
             end
         end
