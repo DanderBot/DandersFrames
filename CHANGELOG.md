@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### New Features
+
+- (Bars) New **Texture Layers** on the Absorb, Heal Absorb, Heal Prediction, Reduced Max Health, Health and Resource bar cards. Tick it to tile the bar's own texture (with a custom tile size) and stack up to two more textures on top: a pattern and a shading layer, each with its own texture, colour, blend and tiling. A live preview shows the result, and a **Presets** dropdown fills the layers with a ready-made look you can then adjust; the changed-dots then show what you changed from that preset. Off by default, so your bars look exactly as before. (by Krathe, original idea by Aphoex)
+
+### Improvements
+
+- (Auras) Buff and debuff rows, the dispel overlay and Aura Designer indicators now set up and update during combat. Settings changed mid-fight apply straight away, and anything that first appears in a fight (a frame that gets its player late, an arena match) shows at once instead of only after combat. (by Krathe)
+- (Debuffs) Ticking both Non-Player and From Any Player covers every debuff, so the bar now treats it as All Debuffs: Max Debuffs is one limit for the row instead of one per ticked category. (by Krathe)
+- (Debuffs) The note under Max Debuffs now counts the categories your bar really uses, including any your Aura Designer debuff groups take over. (by Krathe)
+- (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
+
+### Bug Fixes
+
+- (Range) Out-of-range fading checks a player against every range spell you know before falling back to 40 yards, so classes such as Evoker no longer fade players who are in range. Spells replaced by hero talents are tried under their new form. (by Krathe)
+- (Range) Devourer Demon Hunters get their own range spells. (by Krathe)
+- (Range) The range shown for your range-check spell updates after a talent change, without a reload. (by Krathe)
+- (Raid Frames) With a name-list sort (role, class or custom order), a player who joins mid-combat now appears on your frames as soon as combat ends, and the Sorting page says which settings delay them. (by Krathe)
+- (Reduced Max Health) The reduced max health area no longer draws in the wrong place on some test frames. (by Krathe)
+- (Fonts) Fonts are correct straight away after a reload during combat. (by Krathe)
+
 ## [5.5.0]
 
 ### Improvements
