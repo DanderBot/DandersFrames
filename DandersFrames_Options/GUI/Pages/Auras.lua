@@ -1482,6 +1482,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
 
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "health",
+                { refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
 
@@ -1991,6 +1993,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
+                { baseSize = true, refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
             group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
 
@@ -2362,6 +2366,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
             group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() end), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "resourceBar",
+                { refreshStates = tools2.refreshStates })
 
             group:AddWidget(GUI:CreateDropdown(parent, L["Orientation"], orientOptions, db, "resourceBarOrientation", function()
                 -- RefreshStates so the Size controls rename to the new orientation at once
@@ -2797,6 +2803,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             end
             add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() end, textureOptions), 55, 1)
+            GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "absorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
 
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
 
@@ -2936,6 +2944,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             end
             add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() end, healTextureOptions), 55, 1)
+            GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "healAbsorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
 
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
 
@@ -3113,6 +3123,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local textureOptions = DF:GetTextureList()
             local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
             texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
+                { baseSize = true, refreshStates = tools2.refreshStates,
+                  disableOn = HealPredOffRow })
 
             -- All three, gated by the mode rather than built by it. Split shows
             -- the first two; Mine and Others show one each; All shows the third.

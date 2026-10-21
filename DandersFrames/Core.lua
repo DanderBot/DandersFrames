@@ -1192,6 +1192,10 @@ local SYMBOL_TILES = {
 }
 
 DF.TILED_BAR_TEXTURES = {}
+-- The size one repeat of a tiled texture is meant to be drawn at, in pixels, for art
+-- whose file is bigger than one repeat should look on a bar. Absent = the file's own
+-- size, which is right for every texture DandersFrames draws to tile.
+DF.TILED_BAR_TILE_SIZE = {}
 for _, list in ipairs({ ABSORB_TILES, SYMBOL_TILES }) do
     for _, name in ipairs(list) do
         DF.TILED_BAR_TEXTURES["Interface\\AddOns\\DandersFrames\\Media\\" .. name .. ".png"] = "BOTH"
@@ -1312,6 +1316,15 @@ end
 -- Returns the mode string, or nil for a normal stretched texture.
 function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
+end
+
+-- The texture's preset repeat size (DF.TILED_BAR_TILE_SIZE), or nil for its own size.
+-- A vertical companion answers with its base's size.
+function DF:GetBarTextureTileSize(path)
+    local sizes = DF.TILED_BAR_TILE_SIZE
+    if not (path and sizes) then return nil end
+    local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    return sizes[base] or sizes[path]
 end
 
 -- The tiling a bar or layer actually uses. nil / "AUTO" is the texture's own answer

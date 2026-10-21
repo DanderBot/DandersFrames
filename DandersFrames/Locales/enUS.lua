@@ -3290,14 +3290,14 @@ L["Layer 3: Shading"] = true
 L["Show All Textures"] = true
 L["Tube"] = true
 L["Auto (texture's own)"] = true
-L["Advanced: tile this bar's texture and stack up to two more textures on it. Unticking restores the plain bar and keeps these settings."] = true
+L["Advanced: stack up to two more textures on this bar. Unticking restores the plain bar and keeps these settings."] = true
 L["Both Directions"] = true
 L["How the texture repeats. Auto uses the texture's own setting (DandersFrames' patterned textures repeat, everything else stretches); Off stretches it to fit; the others repeat it in those directions."] = true
-L["Layer 1: Bar Texture"] = true
 L["Multiply (MOD)"] = true
 L["Off (Stretch)"] = true
 L["Texture Layers"] = true
-L["The size one repeat is drawn at, in pixels. 0 uses the texture's own size."] = true
+L["How big one repeat of the texture is drawn. Auto uses the texture's own preset size; Fit to Bar makes one repeat as thick as the bar; Custom sets it in pixels."] = true
+L["Fit to Bar"] = true
 L["Tile"] = true
 L["Tile Size"] = true
 --@end-do-not-package@

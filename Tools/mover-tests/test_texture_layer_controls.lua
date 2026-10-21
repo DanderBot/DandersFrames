@@ -51,8 +51,8 @@ do
     eq(db.absorbBarLayer2Texture, MEDIA .. "DF_Layer_Diagonal.png", "look: ...with the diagonal")
     eq(db.absorbBarLayer3Enabled, true, "look: the shading layer is switched on")
     eq(db.absorbBarLayer3Texture, MEDIA .. "DF_Layer_Shade_Top.png", "look: ...with the gloss")
-    eq(db.absorbBarTileMode, "AUTO", "look: layer 1 back to the texture's own tiling")
-    eq(db.absorbBarTileSize, 0, "look: ...at native size")
+    eq(db.absorbBarTileMode, "BOTH", "look: layer 1's own Tile is not the look's to change")
+    eq(db.absorbBarTileSize, 24, "look: ...nor its Tile Size")
     eq(db.absorbBarTexture, "keep-me", "look: the bar's own texture is untouched")
     eq(db.absorbBarColor, "keep-me-too", "look: the bar's own colour is untouched")
     check(db.absorbBarLayer2Color ~= LOOKS.DIAGONAL_GLOSS[2].color, "look: the colour is a copy, not the shared table")
@@ -67,7 +67,7 @@ do
     -- Every setting goes through the writer it is handed (the options' write bracket).
     local seen, n = {}, 0
     ApplyLook(db, "absorbBar", "DIAGONAL_GLOSS", function(key, value) seen[key] = value n = n + 1 end)
-    eq(n, 15, "look: the pick and all fourteen settings go through the writer")
+    eq(n, 13, "look: the pick and all twelve layer settings go through the writer")
     eq(seen.absorbBarLayer2Enabled, true, "look: ...with their values")
     eq(db.absorbBarLayer2Enabled, false, "look: ...and nothing is written around it")
 end
@@ -133,7 +133,8 @@ do
     eq(against("absorbBarLayer2Texture"), nil, "baseline: and that layer's other settings are not measured")
     eq(against("absorbBarLayer3Texture"), db.absorbBarLayer3Texture, "baseline: settings match right after the pick")
     eq(against("absorbBarLayer3Color").a, 0.3, "baseline: the colour is the look's")
-    eq(against("absorbBarTileMode"), "AUTO", "baseline: layer 1 tiling is part of the look")
+    check(base.absorbBarTileMode == nil and base.absorbBarTileSize == nil,
+          "baseline: layer 1's tiling is not measured against a look")
     db.absorbBarLayer3Color.a = 0.9
     eq(db.absorbBarTextureLook, "BEVEL", "baseline: an edit does not leave the look")
     eq(LOOKS.BEVEL[3].color.a, 0.3, "baseline: ...nor change the look itself")

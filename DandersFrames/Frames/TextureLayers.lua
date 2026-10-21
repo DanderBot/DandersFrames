@@ -5,27 +5,36 @@ local addonName, DF = ...
 -- ============================================================
 -- Every bar keeps the texture it always had (the BASE layer) and may stack up to
 -- two more on top -- fill + pattern, pattern + pattern, or either plus shading --
--- each with its own texture, colour, alpha, blend and tiling. Each bar has one
--- switch (<bar>TextureLayersEnabled, off by default): while it is off the bar
--- ignores every other layer setting, so unticking it restores the plain bar and
--- keeps the configuration underneath for next time.
+-- each with its own texture, colour, alpha, blend and tiling. Layers 2 and 3 sit
+-- behind one switch per bar (<bar>TextureLayersEnabled, off by default): unticking it
+-- restores the plain bar and keeps their settings for next time. The base layer's own
+-- Tile and Tile Size belong to the bar's texture and apply whatever the switch says.
 --
 -- ☠ THE FILL'S SIZE IS NEVER READ. Absorb, heal absorb and reduced max health size
 -- their fill from values that are SECRET in combat, so nothing here may measure it.
 -- A clip frame is ANCHORED to the fill instead; the engine sizes it, and every layer
 -- lives inside it, so a layer covers exactly the filled part in every bar mode.
---   * Native tile size (0): the texture is pinned to the fill and tiles at its own
---     pixel size, as Blizzard's raid frames do.
---   * Custom tile size: the texture spans the bar's FULL rect -- layout, never secret
---     -- with repeating texcoords worked out from that rect, and the clip frame cuts it
---     to the fill. The pattern then holds still while the fill grows and shrinks.
+--   * Native size (Auto, on a texture with no preset size): the texture is pinned to
+--     the fill and tiles at its own pixel size, as Blizzard's raid frames do.
+--   * Any other size -- the texture's preset, Custom, or Fit to Bar: the texture spans
+--     the bar's FULL rect -- layout, never secret -- with repeating texcoords worked out
+--     from that rect, and the clip frame cuts it to the fill. The pattern then holds
+--     still while the fill grows and shrinks.
 -- ============================================================
 
 -- The bar list and layer numbers are defined with the defaults (Core/Config.lua).
 
+-- Each bar's own texture key, so Auto can ask the registry for that texture's preset size.
+local BASE_TEXTURE_KEY = {
+    absorbBar = "absorbBarTexture", healAbsorbBar = "healAbsorbBarTexture",
+    healPrediction = "healPredictionTexture", reducedMaxHealth = "reducedMaxHealthTexture",
+    health = "healthTexture", resourceBar = "resourceBarTexture",
+}
+
 local KEYS = {}
 for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS) do
-    local k = { on = prefix .. "TextureLayersEnabled", tileMode = prefix .. "TileMode", tileSize = prefix .. "TileSize" }
+    local k = { on = prefix .. "TextureLayersEnabled", tex = BASE_TEXTURE_KEY[prefix],
+                tileMode = prefix .. "TileMode", tileSize = prefix .. "TileSize" }
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local p = prefix .. "Layer" .. n
         k[n] = {
@@ -47,17 +56,34 @@ local function Override(v)
     return v
 end
 
-local function TileSize(v)
+-- A stored Tile Size: above 0 is Custom, in pixels; FIT_TO_BAR makes one repeat as thick
+-- as the bar; 0 is Auto -- the texture's preset size from the tiling registry, or its
+-- file's own size (0, native) when it has none. Resolves to a pixel size, 0, or "FIT".
+local FIT_TO_BAR = -1
+DF.TILE_SIZE_FIT = FIT_TO_BAR
+
+local function TileSize(v, path)
     v = tonumber(v)
-    if not v or v <= 0 then return 0 end
-    return v
+    if v == FIT_TO_BAR then return "FIT" end
+    if v and v > 0 then return v end
+    return (path and DF.GetBarTextureTileSize and DF:GetBarTextureTileSize(path)) or 0
 end
 
--- True when any layer setting on this bar is away from its default.
+local function Sized(size) return size == "FIT" or size > 0 end
+
+-- The user's own size (Custom or Fit) -- which asks a stretched texture to tile.
+local function AskedSize(v)
+    v = tonumber(v)
+    return v == FIT_TO_BAR or (v ~= nil and v > 0)
+end
+
+-- True when this bar needs the layer pass: its own Tile or Tile Size does something,
+-- or the switch is on with a layer ticked.
 function DF:BarTextureLayersActive(db, prefix)
     local k = KEYS[prefix]
-    if not (db and k and db[k.on]) then return false end
-    if Override(db[k.tileMode]) or TileSize(db[k.tileSize]) > 0 then return true end
+    if not (db and k) then return false end
+    if Override(db[k.tileMode]) or Sized(TileSize(db[k.tileSize], k.tex and db[k.tex])) then return true end
+    if not db[k.on] then return false end
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         if db[k[n].enabled] then return true end
     end
@@ -85,10 +111,10 @@ end
 function DF:BarTextureLayersChanged(cache, db, prefix)
     local k = KEYS[prefix]
     if not (cache and k) then return true end
+    if cache.tileMode ~= db[k.tileMode] or cache.tileSize ~= db[k.tileSize] then return true end
     local on = db[k.on] and true or false
     if cache.on ~= on then return true end
     if not on then return false end
-    if cache.tileMode ~= db[k.tileMode] or cache.tileSize ~= db[k.tileSize] then return true end
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local kn, c = k[n], cache[n]
         if c.enabled ~= db[kn.enabled] or c.texture ~= db[kn.texture] or c.blend ~= db[kn.blend]
@@ -125,6 +151,8 @@ local function UpdateTexCoords(state)
     for _, tex in pairs(state.textures) do
         local size = tex.dfCustomSize
         if size and tex:IsShown() then
+            -- Fit to Bar: one repeat is the bar's thickness, re-derived on every resize.
+            if size == "FIT" then size = state.isVertical and w or h end
             local unit = (DF.PixelPerfect and DF:PixelPerfect(size)) or size
             if unit <= 0 then unit = size end
             local mode = tex.dfTileModeApplied
@@ -186,13 +214,13 @@ local function GetTexture(state, slot)
 end
 
 -- Put one texture on screen: file + wrap + tiling + geometry, then colour and blend.
-local function PaintLayer(state, slot, path, tileOverride, tileSize, color, blend, desaturate)
+local function PaintLayer(state, slot, path, tileOverride, tileSize, asked, color, blend, desaturate)
     local tex = GetTexture(state, slot)
     local mode = DF:ResolveTileMode(path, tileOverride)
-    -- A tile size asks for tiling: a texture that would otherwise stretch tiles both
-    -- ways, unless Tile is explicitly Off.
-    if not mode and tileSize > 0 and tileOverride ~= "OFF" then mode = "BOTH" end
-    local custom = (mode ~= nil and tileSize > 0) and tileSize or nil
+    -- A size the user picked asks for tiling: a texture that would otherwise stretch
+    -- tiles both ways, unless Tile is explicitly Off.
+    if not mode and asked and tileOverride ~= "OFF" then mode = "BOTH" end
+    local custom = (mode ~= nil and Sized(tileSize)) and tileSize or nil
     local span = custom and state.span or nil
     if tex.dfPath ~= path or tex.dfTileModeApplied ~= mode or tex.dfCustomSize ~= custom
        or tex.dfSpan ~= span then
@@ -235,7 +263,8 @@ local function Teardown(bar, state)
 end
 
 -- Apply a bar's layer settings. Cheap when nothing is set: a few db reads and out.
---   opts.span        the frame a custom tile size measures (default: the bar)
+--   opts.span        the frame a sized repeat measures, Fit to Bar included (default:
+--                    the bar)
 --   opts.isVertical  the bar fills vertically (picks vertical companions; restores
 --                    rotation if the Tile override changes)
 --   opts.baseColor   the bar's own fill colour {r,g,b,a}. Supplying it allows a
@@ -251,7 +280,7 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
     -- The base layer's own Tile override rides the shared tiling path, so every
     -- later re-set of the file keeps honouring it.
     local on = db[k.on] and true or false
-    local override = on and Override(db[k.tileMode]) or nil
+    local override = Override(db[k.tileMode])
     if bar.dfTileOverride ~= override then
         bar.dfTileOverride = override
         if bar.dfAppliedTexture then
@@ -262,8 +291,10 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
         end
     end
 
-    local baseSize = on and opts.baseColor and override ~= "OFF" and TileSize(db[k.tileSize]) or 0
-    local any = baseSize > 0
+    local basePath = bar.dfAppliedTexture
+    local baseSize = (opts.baseColor and override ~= "OFF")
+        and TileSize(db[k.tileSize], bar.dfBaseTexture or basePath) or 0
+    local any = Sized(baseSize)
     if on and not any then
         for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
             if db[k[n].enabled] then any = true break end
@@ -279,14 +310,15 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
     if not fill then return end
     state = EnsureState(bar, fill)
     WatchSpan(state, opts.span or bar)
+    state.isVertical = opts.isVertical and true or false
     state.active = true
     state.clip:Show()
 
     -- Base at a custom size: hide the bar's own fill and redraw it here, so the
     -- engine-sized fill still decides WHERE it shows while we decide how it repeats.
-    local basePath = bar.dfAppliedTexture
-    if baseSize > 0 and basePath then
-        PaintLayer(state, "base", basePath, override, baseSize, opts.baseColor, opts.baseBlend, opts.baseDesaturated)
+    if Sized(baseSize) and basePath then
+        PaintLayer(state, "base", basePath, override, baseSize, AskedSize(db[k.tileSize]),
+            opts.baseColor, opts.baseBlend, opts.baseDesaturated)
         if not state.baseHidden then
             fill:SetAlpha(0)
             state.baseHidden = true
@@ -303,8 +335,8 @@ function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
         local kn = k[n]
         if on and db[kn.enabled] and db[kn.texture] then
             local path = DF:ResolveBarTexture(db[kn.texture], opts.isVertical)
-            PaintLayer(state, n, path, Override(db[kn.tileMode]), TileSize(db[kn.tileSize]),
-                db[kn.color], db[kn.blend])
+            PaintLayer(state, n, path, Override(db[kn.tileMode]), TileSize(db[kn.tileSize], path),
+                AskedSize(db[kn.tileSize]), db[kn.color], db[kn.blend])
         elseif state.textures[n] then
             state.textures[n]:Hide()
         end

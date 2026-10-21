@@ -3072,9 +3072,9 @@ DF.PartyDefaults = {
 -- TEXTURE LAYER DEFAULTS
 -- ============================================================
 -- Two extra layers per bar plus a Tile override and tile size for the bar's own
--- texture (Frames/TextureLayers.lua), all behind one per-bar switch. Every default
--- leaves a bar exactly as it was: the switch is off, and even with it on, Tile "AUTO"
--- is the texture's own tiling, tile size 0 is native and the layers are off.
+-- texture (Frames/TextureLayers.lua); the layers sit behind one per-bar switch. Every
+-- default leaves a bar exactly as it was: Tile "AUTO" is the texture's own tiling, tile
+-- size 0 is Auto (the texture's preset size, else its own), and the switch is off.
 DF.TEXTURE_LAYER_BARS = { "absorbBar", "healAbsorbBar", "healPrediction", "reducedMaxHealth", "health", "resourceBar" }
 DF.TEXTURE_LAYER_EXTRA = { 2, 3 }
 do
@@ -3134,9 +3134,7 @@ do
     DF.TEXTURE_LOOK_KEYS = {}
     DF.DEFAULT_BASELINES = DF.DEFAULT_BASELINES or {}
     for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS) do
-        local keys = { prefix .. "TileMode", prefix .. "TileSize" }
-        where[keys[1]] = { field = "TileMode" }
-        where[keys[2]] = { field = "TileSize" }
+        local keys = {}
         for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
             for _, field in ipairs(FIELDS) do
                 local key = prefix .. "Layer" .. n .. field
@@ -3156,7 +3154,6 @@ do
     function DF:TextureLookValue(id, key)
         local look, w = id and DF.TEXTURE_LAYER_LOOKS[id], where[key]
         if not (look and w) then return nil end
-        if not w.n then return (w.field == "TileMode") and "AUTO" or 0 end
         local l = look[w.n]
         if w.field == "Enabled" then return l ~= nil end
         if not l then return nil end

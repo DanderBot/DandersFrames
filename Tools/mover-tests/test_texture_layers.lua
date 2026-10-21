@@ -311,22 +311,23 @@ end
 -- ------------------------------------------------------------
 -- 7. The per-bar switch
 -- ------------------------------------------------------------
-do  -- unticked, every other setting is ignored
+do  -- unticked: layers 2 and 3 are ignored, the bar's own Tile and Tile Size are not
     local DF = load()
     local db, bar = defaults(true), FakeBar(STRETCHED)
     db.absorbBarLayer2Enabled = true
+    eq(DF:BarTextureLayersActive(db, "absorbBar"), false, "switch off: a ticked layer alone does nothing")
+    eq(DF:BarTextureLayersWanted(bar, db, "absorbBar"), false, "switch off: ...so callers skip the call")
     db.absorbBarTileMode = "BOTH"
     db.absorbBarTileSize = 16
-    eq(DF:BarTextureLayersActive(db, "absorbBar"), false, "switch off: nothing counts as active")
-    eq(DF:BarTextureLayersWanted(bar, db, "absorbBar"), false, "switch off: callers skip the call")
-    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { baseColor = { r = 1, g = 1, b = 1, a = 1 } })
-    eq(bar.dfTextureLayers, nil, "switch off: no layers built")
-    eq(bar.dfTileOverride, nil, "switch off: the Tile override is not applied")
-    eq(bar.fill.alpha, 1, "switch off: the bar's fill stays visible")
+    eq(DF:BarTextureLayersActive(db, "absorbBar"), true, "switch off: layer 1's own Tile and Tile Size still apply")
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(64, 32), baseColor = { r = 1, g = 1, b = 1, a = 1 } })
+    eq(bar.dfTileOverride, "BOTH", "switch off: layer 1's Tile override is applied")
+    eq(bar.fill.alpha, 0, "switch off: layer 1 is redrawn at its size")
+    eq(layerTex(bar, 2), nil, "switch off: layer 2 is not built")
     restore()
 end
 
-do  -- unticking after use restores the plain bar and keeps the settings
+do  -- unticking after use drops the layers and keeps layer 1 as set
     local DF = load()
     local db, bar = defaults(), FakeBar(PATTERN)
     db.absorbBarLayer2Enabled = true
@@ -334,14 +335,18 @@ do  -- unticking after use restores the plain bar and keeps the settings
     db.absorbBarTileSize = 16
     local color = { r = 1, g = 1, b = 1, a = 1 }
     DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(64, 32), baseColor = color, isVertical = false })
-    eq(bar.fill.alpha, 0, "switch on: the base is redrawn at its size")
+    eq(layerTex(bar, 2).shown, true, "switch on: layer 2 shows")
     db.absorbBarTextureLayersEnabled = false
     DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(64, 32), baseColor = color, isVertical = false })
-    eq(bar.fill.alpha, 1, "switch off again: the engine fill is back")
-    eq(bar.dfTileOverride, nil, "switch off again: the Tile override is cleared")
-    eq(bar.dfTextureLayers.clip.shown, false, "switch off again: the layers are gone")
-    eq(DF:BarTextureLayersWanted(bar, db, "absorbBar"), false, "switch off again: callers skip again")
+    eq(layerTex(bar, 2).shown, false, "switch off again: layer 2 is gone")
+    eq(bar.fill.alpha, 0, "switch off again: layer 1 keeps its size")
+    eq(bar.dfTileOverride, "HORIZ", "switch off again: ...and its Tile override")
     eq(db.absorbBarLayer2Enabled, true, "switch off again: the layer settings are kept for next time")
+    db.absorbBarTileMode, db.absorbBarTileSize = "AUTO", 0
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(64, 32), baseColor = color, isVertical = false })
+    eq(bar.fill.alpha, 1, "layer 1 back to Auto: the engine fill is back")
+    eq(bar.dfTileOverride, nil, "layer 1 back to Auto: the override is cleared")
+    eq(DF:BarTextureLayersWanted(bar, db, "absorbBar"), false, "layer 1 back to Auto: callers skip again")
     restore()
 end
 
@@ -372,6 +377,83 @@ do
     DF:CacheBarTextureLayers(cache, db, "absorbBar")
     db.absorbBarLayer2BlendMode = "MOD"
     eq(DF:BarTextureLayersChanged(cache, db, "absorbBar"), false, "cache: with the switch off, layer edits do not")
+    db.absorbBarTileSize = 12
+    eq(DF:BarTextureLayersChanged(cache, db, "absorbBar"), true, "cache: with the switch off, layer 1's Tile Size still counts")
     restore()
 end
 
+-- ------------------------------------------------------------
+-- 9. Tile size: the texture's preset, and Fit to Bar
+-- ------------------------------------------------------------
+local PRESET = MEDIA .. "DF_Test_Preset.png"
+local function withPreset(DF)
+    DF.TILED_BAR_TEXTURES[PRESET] = "BOTH"
+    DF.TILED_BAR_TILE_SIZE = { [PRESET] = 16 }
+end
+
+do  -- Auto on a texture with a preset size draws it at that size, on layer 1 and the layers
+    local DF = load()
+    withPreset(DF)
+    local db, bar = defaults(true), FakeBar(PRESET)
+    db.absorbBarTexture = PRESET
+    eq(DF:BarTextureLayersActive(db, "absorbBar"), true, "preset: Auto with a preset size needs the pass")
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(64, 32), baseColor = { r = 1, g = 1, b = 1, a = 1 } })
+    local base = layerTex(bar, "base")
+    eq(base and base.tc[2], 4, "preset: layer 1 repeats every 16 across (64 / 16)")
+    eq(base and base.tc[4], 2, "preset: ...and down (32 / 16)")
+    eq(bar.fill.alpha, 0, "preset: drawn by the redraw, the fill hidden")
+    restore()
+
+    DF = load()
+    withPreset(DF)
+    db, bar = defaults(), FakeBar(STRETCHED)
+    db.absorbBarLayer2Enabled = true
+    db.absorbBarLayer2Texture = PRESET
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(160, 32) })
+    eq(layerTex(bar, 2).tc[2], 10, "preset: a layer at Auto uses the preset size too (160 / 16)")
+    db.absorbBarLayer2TileSize = 32
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(160, 32) })
+    eq(layerTex(bar, 2).tc[2], 5, "preset: Custom overrides it (160 / 32)")
+    restore()
+end
+
+do  -- Fit to Bar: one repeat is the bar's thickness, following resizes
+    local DF = load()
+    local db, bar, span = defaults(), FakeBar(STRETCHED), FakeFrame(200, 40)
+    db.absorbBarLayer2Enabled = true
+    db.absorbBarLayer2TileSize = DF.TILE_SIZE_FIT
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = span })
+    local t = layerTex(bar, 2)
+    eq(t.tc[2], 5, "fit: 200 wide / 40 thick = 5 repeats across")
+    eq(t.tc[4], 1, "fit: exactly one repeat down")
+    span.h = 20
+    span.hooks.OnSizeChanged(span)
+    eq(t.tc[2], 10, "fit: a thinner bar re-derives the repeats")
+    restore()
+end
+
+do  -- on a vertical bar the thickness is the width
+    local DF = load()
+    local db, bar = defaults(), FakeBar(STRETCHED)
+    db.absorbBarLayer2Enabled = true
+    db.absorbBarLayer2TileSize = DF.TILE_SIZE_FIT
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(40, 200), isVertical = true })
+    local t = layerTex(bar, 2)
+    eq(t.tc[2], 1, "fit vertical: one repeat across the bar's width")
+    eq(t.tc[4], 5, "fit vertical: 200 long / 40 thick = 5 repeats along it")
+    restore()
+end
+
+do  -- Fit to Bar asks a stretched texture to tile; Tile Off refuses
+    local DF = load()
+    local db, bar = defaults(), FakeBar(STRETCHED)
+    db.absorbBarLayer2Enabled = true
+    db.absorbBarLayer2Texture = STRETCHED
+    db.absorbBarLayer2TileSize = DF.TILE_SIZE_FIT
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(100, 20) })
+    eq(layerTex(bar, 2).tc[2], 5, "fit: a stretched texture tiles (100 / 20)")
+    db.absorbBarLayer2TileMode = "OFF"
+    DF:ApplyBarTextureLayers(bar, "absorbBar", db, { span = FakeFrame(100, 20) })
+    eq(layerTex(bar, 2).tc[2], 1, "fit: Tile Off stretches")
+    restore()
+end

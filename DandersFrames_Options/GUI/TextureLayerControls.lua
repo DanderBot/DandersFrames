@@ -14,6 +14,8 @@ local L = DF.L
 --   opts.baseSize         the bar can repeat its own texture at a custom size
 --                         (false for bars whose colour other code sets per update)
 --   opts.refreshStates    the page's state pass, so a layer tick shows its controls
+-- The bar's own Tile and Tile Size are not in the section: GUI:AddBarTileControls puts
+-- them with the bar's texture, since they apply whether or not the layers are on.
 -- ============================================================
 
 -- Each bar's own texture, colour and blend, for the preview strip.
@@ -49,7 +51,53 @@ local function TileTooltip()
 end
 
 local function TileSizeTooltip()
-    return L["The size one repeat is drawn at, in pixels. 0 uses the texture's own size."]
+    return L["How big one repeat of the texture is drawn. Auto uses the texture's own preset size; Fit to Bar makes one repeat as thick as the bar; Custom sets it in pixels."]
+end
+
+-- ============================================================
+-- TILE SIZE: a choice plus a slider over ONE stored number
+-- ============================================================
+-- 0 = Auto, -1 = Fit to Bar, above 0 = Custom (Frames/TextureLayers.lua). The menu's
+-- option keys ARE those numbers and the getter returns the stored one, so the raid
+-- redirect, undo and the changed dot all see the real value; every size above 0 reads
+-- "Custom" through the options' fallback. CUSTOM is the menu row standing for a custom
+-- size: picking it starts from the texture's preset size, or 32, and the slider takes
+-- over from there.
+local FIT = DF.TILE_SIZE_FIT or -1
+local CUSTOM = 32
+
+local function TileSizeOptions()
+    return setmetatable({
+        _order = { 0, FIT, CUSTOM },
+        [0] = L["Auto (texture's own)"],
+        [FIT] = L["Fit to Bar"],
+        [CUSTOM] = L["Custom"],
+    }, { __index = function(_, k) if type(k) == "number" and k > 0 then return L["Custom"] end end })
+end
+
+-- pathOf(db) names the texture whose preset size a fresh Custom starts from; hidden(db)
+-- hides both rows; refresh(statesToo) repaints.
+local function AddTileSize(add, parent, db, key, pathOf, hidden, refresh)
+    local function current() return tonumber(db[key]) or 0 end
+    local function startSize()
+        local path = pathOf and pathOf(db)
+        return (path and DF.GetBarTextureTileSize and DF:GetBarTextureTileSize(path)) or CUSTOM
+    end
+    local choice = add(GUI:CreateDropdown(parent, L["Tile Size"], TileSizeOptions(), db, key,
+        function() refresh(true) end,
+        current,
+        function(id)
+            if id == CUSTOM then
+                if current() <= 0 then db[key] = startSize() end
+            else
+                db[key] = id
+            end
+        end), 55)
+    choice.tooltip = TileSizeTooltip()
+    choice.hideOn = hidden
+    local size = add(GUI:CreateSlider(parent, L["Size"], 4, 128, 1, db, key, function() refresh(false) end), 55)
+    size.hideOn = function(d) return hidden(d) or (tonumber(d[key]) or 0) <= 0 end
+    return choice, size
 end
 
 -- ============================================================
@@ -230,7 +278,7 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
     add(GUI:CreateSeparator(parent), 14)
 
     local master = add(GUI:CreateCheckbox(parent, L["Texture Layers"], db, switch, refreshAndStates), 25)
-    master.tooltip = L["Advanced: tile this bar's texture and stack up to two more textures on it. Unticking restores the plain bar and keeps these settings."]
+    master.tooltip = L["Advanced: stack up to two more textures on this bar. Unticking restores the plain bar and keeps these settings."]
 
     preview = add(CreatePreview(parent, db, prefix, opts.baseSize), 54)
     preview.hideOn = closed
@@ -255,20 +303,6 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
         end), 55)
     look.tooltip = L["Fills in the layers below with a ready-made look, which you can then adjust. It does not change the bar's own texture or colour."]
     look.hideOn = closed
-
-    -- Names the bar's own texture as layer 1, so Tile and Tile Size read as acting on
-    -- the texture picked above, with Layers 2 and 3 stacked on top of it.
-    local layer1 = add(GUI:CreateHeader(parent, L["Layer 1: Bar Texture"]), 25)
-    layer1.hideOn = closed
-
-    local baseTile = add(GUI:CreateDropdown(parent, L["Tile"], TileOptions(), db, prefix .. "TileMode", refreshAndStates), 55)
-    baseTile.tooltip = TileTooltip()
-    baseTile.hideOn = closed
-
-    local baseSize = add(GUI:CreateSlider(parent, L["Tile Size"], 0, 128, 1, db, prefix .. "TileSize", refresh), 55)
-    baseSize.tooltip = TileSizeTooltip()
-    baseSize.hideOn = function(d) return closed(d) or not opts.baseSize end
-    baseSize.disableOn = function(d) return d[prefix .. "TileMode"] == "OFF" end
 
     for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
         local p = prefix .. "Layer" .. n
@@ -303,9 +337,35 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
         tile.tooltip = TileTooltip()
         tile.hideOn = off
 
-        local size = add(GUI:CreateSlider(parent, L["Tile Size"], 0, 128, 1, db, p .. "TileSize", refresh), 55)
-        size.tooltip = TileSizeTooltip()
-        size.hideOn = off
-        size.disableOn = function(d) return d[p .. "TileMode"] == "OFF" end
+        AddTileSize(add, parent, db, p .. "TileSize", function(d) return d[p .. "Texture"] end,
+            function(d) return off(d) or d[p .. "TileMode"] == "OFF" end,
+            function(states) if states then refreshAndStates() else refresh() end end)
+    end
+end
+
+-- ============================================================
+-- THE BAR'S OWN TILE AND TILE SIZE
+-- ============================================================
+-- Placed under the card's Texture, because they act on that texture and apply with
+-- the Texture Layers switch off. Tile Size only where opts.baseSize allows it (see the
+-- section's header for why health and resource cannot).
+--   opts.refreshStates   the page's state pass (Tile Off hides the size rows)
+--   opts.disableOn       greys both with the card's own enable, where it has one
+function GUI:AddBarTileControls(addToCard, parent, db, prefix, opts)
+    opts = opts or {}
+    local texKey = BAR[prefix] and BAR[prefix].texture
+    local function refresh(states)
+        if states and opts.refreshStates then opts.refreshStates() end
+        DF:UpdateAllFrames()
+    end
+    local tile = addToCard(GUI:CreateDropdown(parent, L["Tile"], TileOptions(), db, prefix .. "TileMode",
+        function() refresh(true) end), 55)
+    tile.tooltip = TileTooltip()
+    tile.disableOn = opts.disableOn
+    if opts.baseSize then
+        local choice, size = AddTileSize(addToCard, parent, db, prefix .. "TileSize",
+            function(d) return texKey and d[texKey] end,
+            function(d) return d[prefix .. "TileMode"] == "OFF" end, refresh)
+        choice.disableOn, size.disableOn = opts.disableOn, opts.disableOn
     end
 end
