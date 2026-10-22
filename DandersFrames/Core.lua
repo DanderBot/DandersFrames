@@ -8682,6 +8682,9 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE LAYOUTS ===
+    -- From here to the visible-frame sweep below, a per-child refresh would only be
+    -- redone by that sweep (see FlatRaidFrames:RefreshAllChildFrames).
+    DF._profileSweepPending = true
     -- Update party layout (this handles positioning, visibility, etc.)
     if DF.UpdateAllFrames_Now then
         DF:UpdateAllFrames_Now()
@@ -8808,6 +8811,7 @@ function DF:FullProfileRefresh()
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
     -- _Now: same sync seam as the three above.
+    DF._profileSweepPending = nil
     if DF.RefreshAllVisibleFrames_Now then
         DF:RefreshAllVisibleFrames_Now()
     end

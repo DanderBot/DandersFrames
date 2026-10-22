@@ -736,8 +736,16 @@ function DF:InitializeHeaderChild(frame)
     local function QueueFullFrameRefresh(self)
         if self._dfFullRefreshQueued then return end
         self._dfFullRefreshQueued = true
+        local queuedAt = GetTime()
         C_Timer.After(0, function()
             self._dfFullRefreshQueued = nil
+            -- A full refresh of this same unit since the queue already read the new
+            -- assignment: a layout switch refreshes every child in the frame the header
+            -- hands out units, so this one was the third pass for each.
+            if self._dfFullRefreshAt and self._dfFullRefreshAt >= queuedAt
+                and self._dfFullRefreshUnit == self.unit then
+                return
+            end
             if self:IsVisible() and self.unit then
                 -- Use full frame refresh for complete update
                 if DF.FullFrameRefresh then
@@ -4087,6 +4095,7 @@ end
 function DF:FullFrameRefresh(frame)
     DF:RosterDebugCount("FullFrameRefresh")
     if not frame or not frame.unit then return end
+    frame._dfFullRefreshAt, frame._dfFullRefreshUnit = GetTime(), frame.unit
     
     -- Clear color tracking to force re-evaluation of background colors
     -- (When units swap positions due to sorting, old colors would persist otherwise)
