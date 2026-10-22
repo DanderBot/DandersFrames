@@ -1103,8 +1103,16 @@ function DF:InitializeHeaderChild(frame)
             unitFrameMap[self.unit] = self
         end
 
-        -- Small delay to ensure unit is set
+        -- Small delay to ensure unit is set.
+        -- ONE pending refresh per frame: a flat-raid re-sort bounces the whole header
+        -- (Hide/Show), so in a filling raid every child is re-shown on every sort. Each
+        -- show used to queue its own full refresh -- ~70 per frame in one 30-player join,
+        -- all landing in the same frame (a 4 s freeze). Later shows in the burst add
+        -- nothing: the one refresh reads the frame's state when it runs.
+        if self._dfShowRefreshQueued then return end
+        self._dfShowRefreshQueued = true
         C_Timer.After(0.05, function()
+            self._dfShowRefreshQueued = nil
             if self and self.unit and self:IsVisible() then
                 DF:Debug("LAYOUT", "OnShow refresh: %s (headerChild=%s isRaid=%s)",
                     self.unit or "?", tostring(self.dfIsHeaderChild), tostring(self.isRaidFrame))
