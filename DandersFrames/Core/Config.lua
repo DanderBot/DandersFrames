@@ -487,6 +487,9 @@ end
 
 -- Cache for created font families
 local fontFamilies = {}
+-- Bumped whenever cached families are thrown away, so a caller that skips re-applying an
+-- unchanged font (Text Designer) knows its fontstrings may hold a retired family.
+DF.fontFamilyGen = 0
 
 -- Raw outline string -> { shadow, flags, slug }. See the ☠ note in DF:SafeSetFont:
 -- the parse allocates a capture string per call and that call is per FontString per
@@ -497,6 +500,7 @@ local outlineParseMemo = {}
 function DF:ClearFontCache()
     -- Clear font families when new fonts are registered
     wipe(fontFamilies)
+    DF.fontFamilyGen = DF.fontFamilyGen + 1
 end
 
 -- Alphabets supported by WoW font families
@@ -541,6 +545,7 @@ function DF:RegisterFontAlphabetSupport(fontPath, supportedAlphabets)
     fontAlphabetSupport[normalizedPath] = supportedAlphabets
     -- Clear font cache so new families are created with updated support
     wipe(fontFamilies)
+    DF.fontFamilyGen = DF.fontFamilyGen + 1
 end
 
 -- Check if a font supports a given alphabet
@@ -1005,6 +1010,16 @@ local function setFontObjectPair(fontString, familyObject)
     fontString:SetFontObject(familyObject)
 end
 
+-- Hoisted for the same reason: the closure it replaced was allocated on every call.
+-- See the re-render note in DF:SafeSetFont for the secret-text guard.
+local function rerenderText(fontString)
+    local text = fontString:GetText()
+    if not (issecretvalue and issecretvalue(text)) and text then
+        fontString:SetText("")
+        fontString:SetText(text)
+    end
+end
+
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
 
@@ -1110,6 +1125,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- hand-rolled key here would drift (raw vs quantized size) and strand
             -- the broken entry in the cache forever.
             fontFamilies[FontFamilyKey(fontPath, actualOutline, useShadow, QuantizeFontSize(fontSize))] = nil
+            DF.fontFamilyGen = DF.fontFamilyGen + 1
         else
             -- The family is built at the real point size now (per-size cache), so the
             -- glyphs render natively. Clear any fractional scale a prior SafeSetFont left
@@ -1133,13 +1149,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- font change lands on the next natural SetText. The old `~= ""`
             -- guard is dropped as redundant — GetText() returns nil, never "",
             -- for empty text.
-            pcall(function()
-                local text = fontString:GetText()
-                if not (issecretvalue and issecretvalue(text)) and text then
-                    fontString:SetText("")
-                    fontString:SetText(text)
-                end
-            end)
+            pcall(rerenderText, fontString)
 
             -- IMPORTANT: the drop shadow lives on the font-family's per-alphabet font objects (set in
             -- GetOrCreateFontFamily). Do NOT also set a fontstring-level shadow here: a fontstring that
