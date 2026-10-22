@@ -4444,7 +4444,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         if role ~= "DAMAGER" then return nil end
 
         local specID
-        if UnitIsUnit(unit, "player") then
+        if DF.UnitIsUnit(unit, "player") then
             specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization())
         else
             local cache = DF.SecureSort and DF.SecureSort.specCache
@@ -5328,7 +5328,7 @@ function DF:GetPlayerRaidGroup()
     -- Fallback: try UnitIsUnit comparison
     for i = 1, 40 do
         local name, _, subgroup = GetRaidRosterInfo(i)
-        if name and UnitIsUnit("raid" .. i, "player") then
+        if name and DF.UnitIsUnit("raid" .. i, "player") then
             headerDebug("GetPlayerRaidGroup: Found via UnitIsUnit at raid", i, "subgroup=", subgroup)
             return subgroup
         end
@@ -5826,7 +5826,7 @@ function DF:BuildArenaNameList(selfPosition)
                 table.insert(members, {
                     unit = unit,
                     name = name,
-                    isPlayer = UnitIsUnit(unit, "player")
+                    isPlayer = DF.UnitIsUnit(unit, "player")
                 })
             end
         end

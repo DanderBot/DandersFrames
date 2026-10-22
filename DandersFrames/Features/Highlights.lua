@@ -790,7 +790,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     -- Check if unit is selected (targeted) - can be overridden for test mode
     local isSelected = forceSelection
     if isSelected == nil then
-        isSelected = unit and UnitIsUnit(unit, "target")
+        isSelected = unit and DF.UnitIsUnit(unit, "target")
     end
     
     -- Check aggro status via threat API - the preview supplies the STATUS, not a verdict

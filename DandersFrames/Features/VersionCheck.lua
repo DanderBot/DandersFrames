@@ -174,7 +174,7 @@ function VC:HasPlayerGroupMembers()
         local n = GetNumGroupMembers()
         for i = 1, n do
             local token = "raid" .. i
-            if UnitExists(token) and UnitIsPlayer(token) and not UnitIsUnit(token, "player") then
+            if UnitExists(token) and UnitIsPlayer(token) and not DF.UnitIsUnit(token, "player") then
                 return true
             end
         end

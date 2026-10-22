@@ -84,6 +84,7 @@ local function loadRange(class, setup)
         DebugWarn = function(_, cat, fmt, ...) S.warns[#S.warns + 1] = string.format(fmt, ...) end,
         DebugActive = function() return S.debugOn end,
         MemTestDisabled = function() return false end,
+        UnitIsUnit = function(a, b) return a == b end,
     }
     load_df_file_into("Features/Range.lua", DF)
     return DF

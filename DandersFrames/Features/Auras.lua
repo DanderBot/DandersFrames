@@ -647,7 +647,7 @@ function DF:IsRacialDispelSelf(unit)
         if race == nil then return false end
         racialDispelRace = race == "Dwarf"
     end
-    return racialDispelRace and unit ~= nil and UnitIsUnit(unit, "player") and true or false
+    return racialDispelRace and unit ~= nil and DF.UnitIsUnit(unit, "player") and true or false
 end
 
 -- ☠☠ A TALENT EDIT DOES NOT FIRE A SPEC EVENT, AND THE SPELLBOOK GRANT LANDS LATE.

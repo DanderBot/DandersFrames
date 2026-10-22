@@ -2819,7 +2819,7 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- ⚠ NOT "is this the player's frame". It is "does the RACIAL gap apply here" — that AND
     -- being a dwarf — which is why it logs as racialSelf: `unit=player self=false` would
     -- read as a broken unit test rather than a non-dwarf short-circuiting before it runs.
-    local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
+    local isSelf = RacialGapPossible() and DF.UnitIsUnit(frame.unit, "player") and true or false
     -- The icon row has its own version/generation. A switched-off row counts as current,
     -- or every UNIT_AURA would fall through to the full plan.
     local row = frame.dispelIconRow

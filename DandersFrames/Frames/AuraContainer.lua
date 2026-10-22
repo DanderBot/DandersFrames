@@ -920,7 +920,7 @@ local function checkOutOfRangeAttribution()
     local outN, outAll, outMine = 0, 0, 0
     for i = 1, count do
         local unit = prefix .. i
-        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+        if UnitExists(unit) and not DF.UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
             -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
             -- checked=false means "could not test", not "out of range", and counting
             -- those as distant would poison the out-of-range half with units that are
@@ -1544,7 +1544,7 @@ local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
 -- should be its own change with its own testing.
 local function helperUnitRole(unit)
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
+    if DF.UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         local role = spec and GetSpecializationRole(spec)
         if role and role ~= "NONE" then return role end

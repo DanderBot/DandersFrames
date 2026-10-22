@@ -571,6 +571,22 @@ end
 -- Frames track the version they were last laid out with to avoid redundant work.
 DF.auraLayoutVersion = 1
 
+-- UnitIsUnit that never throws and never hands back a secret. The engine refuses the call
+-- for a token pair it will not compare (C_Secrets.CanCompareUnitTokens false) and answers
+-- with a SECRET boolean when unit comparison is restricted, which errors at the first `if`.
+-- true / false, or nil when the answer is withheld; callers read nil as "not the same".
+do
+    local UnitIsUnit, issecretvalue = UnitIsUnit, issecretvalue
+    local CanCompareUnitTokens = C_Secrets and C_Secrets.CanCompareUnitTokens
+    function DF.UnitIsUnit(unit1, unit2)
+        if not (unit1 and unit2) then return nil end
+        if CanCompareUnitTokens and not CanCompareUnitTokens(unit1, unit2) then return nil end
+        local same = UnitIsUnit(unit1, unit2)
+        if issecretvalue and issecretvalue(same) then return nil end
+        return same
+    end
+end
+
 function DF:InvalidateAuraLayout()
     DF.auraLayoutVersion = (DF.auraLayoutVersion or 0) + 1
     -- 12.1 factory rows: the drives that consume this version run inside the aura
@@ -2099,7 +2115,7 @@ function DF:GetUnitRole(unit)
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
+    if (not role or role == "NONE") and DF.UnitIsUnit(unit, "player")
        and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
