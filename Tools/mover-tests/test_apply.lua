@@ -233,6 +233,22 @@ do
     check(df.Apply:IsPending("frames") == false, "queue empty after the replay")
 end
 
+-- ---- combat: visible is not held -----------------------------------
+do
+    local df, frame = loadScheduler()
+    InCombatLockdown = function() return true end
+    df:RefreshAllVisibleFrames()
+    df:UpdateAllFrames()
+    df.Apply:Flush()
+    eq(df.counts.visible, 1, "in combat: visible runs")
+    eq(df.counts.frames, 0, "in combat: frames still held beside it")
+    check(df.Apply:IsPending("visible") == false, "in combat: visible not left queued")
+    InCombatLockdown = function() return false end
+    frame:GetScript("OnEvent")(frame, "PLAYER_REGEN_ENABLED")
+    eq(df.counts.visible, 1, "regen replay does not run visible again")
+    eq(df.counts.frames, 1, "regen replay runs the held frames")
+end
+
 -- ---- Flush ----------------------------------------------------------
 do
     local df = loadScheduler()
@@ -347,7 +363,7 @@ do
 end
 
 do
-    -- Combat holds every kind, so there is no drain to report -- and the replay
+    -- Combat holds the layout kinds, so there is no drain to report -- and the replay
     -- at PLAYER_REGEN_ENABLED is a real drain, which does.
     local df, frame = loadScheduler()
     df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "post" end)
