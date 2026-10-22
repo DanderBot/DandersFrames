@@ -30,10 +30,10 @@ local function load(inCombat)
     function DF:Debug() end
     function DF:DebugWarn() end
     local chunk = assert(loadstring(
-        "local DF, DBG, CreateFrame, GetTime, debugprofilestop = ...\n" .. block .. "\nreturn pacedBuild",
+        "local DF, DBG, CreateFrame, GetTime, debugprofilestop, AuraContainer = ...\n" .. block .. "\nreturn pacedBuild",
         "@pacedBuild"))
     return chunk(DF, "TEST", FakeFrame, function() return clock.frame end,
-        function() return clock.ms end)
+        function() return clock.ms end, {})
 end
 
 -- A handle whose build costs `cost` ms of wall time and records the order.

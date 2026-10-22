@@ -7004,7 +7004,10 @@ end
 function Handle:_rebuild()
     if self._destroyed then return end
     if not self:_parkContainer() then self:_teardownContainer() end
-    self:_build()
+    -- Paced like a first build (PACED BUILDS, above AuraContainer:Create): a layout switch
+    -- in a formed raid rebuilt every member's Aura Designer groups inside one frame. Both
+    -- teardown paths clear the backend, so a queued rebuild is not mistaken for built.
+    AuraContainer._pacedBuild(self)
 end
 
 -- Register this handle for a one-shot action the moment combat ends. Ops (precedence
@@ -8554,6 +8557,7 @@ local function pacedBuild(h)
     end
     buildDrainer:Show()
 end
+AuraContainer._pacedBuild = pacedBuild   -- Handle:_rebuild sits above this block
 
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
