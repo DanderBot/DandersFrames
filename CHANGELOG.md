@@ -23,6 +23,9 @@
 - (Raid Frames) With a name-list sort (role, class or custom order), a player who joins mid-combat now appears on your frames as soon as combat ends, and the Sorting page says which settings delay them. (by Krathe)
 - (Reduced Max Health) The reduced max health area no longer draws in the wrong place on some test frames. (by Krathe)
 - (Fonts) Fonts are correct straight away after a reload during combat. (by Krathe)
+- (Dispel) The dispel overlay and dispel symbols now show in battlegrounds and arena. Frames that got their player during the match stayed blank all match, while test mode looked fine. (by Krathe)
+- (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
+- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
 
 ## [5.5.0]
 
