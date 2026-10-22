@@ -8798,9 +8798,10 @@ function DF:FullProfileRefresh()
     end
     
     -- === REFRESH AURAS ===
-    if DF.UpdateAllAuras then
-        DF:UpdateAllAuras()
-    end
+    -- Done by the visible-frame sweep below: its FullFrameRefresh re-drives each frame's
+    -- auras over the same party / raid / pinned set (boss sets included). Calling
+    -- UpdateAllAuras here as well re-drove every frame's auras twice per layout switch,
+    -- the second pass trickling over the frames after it in chunks.
     
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then
