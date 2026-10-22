@@ -68,6 +68,28 @@ local function ShouldBeActive()
     return db and not db.raidUseGroups
 end
 
+-- Could flat mode ever be used: now, or through an auto layout that turns groups off.
+local function FlatModeReachable()
+    if ShouldBeActive() then return true end
+    local real = DF._realRaidDB
+    if real and real.raidUseGroups == false then return true end
+    local ap = DF.db and DF.db.raidAutoProfiles
+    if type(ap) ~= "table" then return false end
+    local function flat(p)
+        return type(p) == "table" and type(p.overrides) == "table" and p.overrides.raidUseGroups == false
+    end
+    if type(ap.mythic) == "table" and flat(ap.mythic.profile) then return true end
+    for _, ct in ipairs({ "instanced", "openWorld" }) do
+        local list = type(ap[ct]) == "table" and ap[ct].profiles
+        if type(list) == "table" then
+            for _, p in ipairs(list) do
+                if flat(p) then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- ============================================================
 -- ANCHOR CALCULATION
 -- ============================================================
@@ -1125,6 +1147,11 @@ end
 -- Refresh all child frames (called after enabling for combat reload support)
 function FlatRaidFrames:RefreshAllChildFrames()
     if not self.header then return end
+    -- Inside a profile refresh (a layout switch) the refresh's own visible-frame sweep
+    -- runs every child again at its end, AFTER the new layout's sizes land -- the pass
+    -- that has to run. This one, before them, was a second full refresh per member in
+    -- the same frame.
+    if DF._profileSweepPending then return end
     
     for i = 1, 40 do
         local child = self.header:GetAttribute("child" .. i)
@@ -1383,6 +1410,7 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 -- NOTE: GROUP_ROSTER_UPDATE, ROLE_CHANGED_INFORM, and PLAYER_SPECIALIZATION_CHANGED
 -- are NOT registered here. Roster changes are handled by ProcessRosterUpdate() in Headers.lua
 -- which calls ApplyRaidFlatSorting() -> UpdateNameList(). Handling them here too caused
@@ -1390,6 +1418,23 @@ eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- the throttled ProcessRosterUpdate, making frames visibly jump on every roster change.
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
+    -- ============================================================
+    -- PLAYER_ENTERING_WORLD - pre-create behind the loading screen
+    -- With groups on and an auto layout that turns them off, the header and its 40
+    -- secure children were first created at the layout switch itself -- in the frame
+    -- you join a full raid, ~0.5 s of native work inside the freeze. Created here they
+    -- stay hidden and are reused when flat mode turns on (SetEnabled skips CreateFrames
+    -- once the header exists). Hidden children skip their refreshes, so no containers
+    -- are built early.
+    -- ============================================================
+    if event == "PLAYER_ENTERING_WORLD" then
+        if not FlatRaidFrames.header and not InCombatLockdown() and DF.db and DF.raidContainer
+            and FlatModeReachable() then
+            DebugPrint("PLAYER_ENTERING_WORLD: pre-creating flat raid frames")
+            FlatRaidFrames:CreateFrames()
+        end
+        return
+    end
     -- ============================================================
     -- ADDON_LOADED - Initialize immediately for combat safety
     -- During /reload, this fires BEFORE combat lockdown is re-established
