@@ -2599,6 +2599,19 @@ local function dispelFilterRecords(slots, db, frame)
                             and (not okI or not DispelCarriersBound(btn)) then
                             frame.dfDispelFactoryVersion = nil
                         end
+                        -- ☠ DRESS THE SLOT AT BIRTH TOO. Birth is the one moment the button
+                        -- takes writes whatever the aura secrecy; the style pass after it is
+                        -- held back while auras are secret, and in PvP they are secret all
+                        -- match, combat or not. A raid frame that gets its unit inside a
+                        -- battleground builds its overlay then, so with only the later pass
+                        -- its carriers stayed bound but undressed for the whole match: no
+                        -- overlay in battlegrounds while test mode looked right. The later
+                        -- pass still re-runs it for settings changes.
+                        if okI and btn and frame then
+                            if pcall(StyleOneSlot, btn, frame, db, si) and DF.UpdateDispelGradientHealth then
+                                pcall(DF.UpdateDispelGradientHealth, DF, frame)
+                            end
+                        end
                     end }
     end
     return recs
@@ -2623,6 +2636,9 @@ local function dispelIconRowRecords(slots, db)
         recs[i] = { key = si.key, filter = si.filter, candidateFilters = si.candidateFilters,
                     onInit = function(btn)
                         local okI, errI = pcall(DispelIconRowSecureInit, btn, db)
+                        -- Dressed at birth for the overlay's reason (see dispelFilterRecords):
+                        -- the dim host is born at 0 and only this reveals it.
+                        if okI and btn then pcall(StyleDispelIconRowButton, btn, db) end
                         if not okI and not warnedIconRowInit then
                             warnedIconRowInit = true
                             if DF.DebugWarn then
