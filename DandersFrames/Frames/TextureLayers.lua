@@ -94,11 +94,45 @@ function DF:BarTextureLayersActive(db, prefix)
     return false
 end
 
+-- The span a real frame's bar measures, per profile table and bar. The options preview
+-- borrows its thickness: preset sizes are fixed while Fit to Bar follows the bar, so a
+-- strip of any other height shows the two differently from the frames.
+local liveSpans = setmetatable({}, { __mode = "k" })
+local liveVertical = setmetatable({}, { __mode = "k" })
+
+local function RecordSpan(db, prefix, span, isVertical, exact)
+    local t = liveSpans[db]
+    if not t then
+        t = setmetatable({}, { __mode = "v" })
+        liveSpans[db] = t
+    end
+    if exact or not t[prefix] then
+        t[prefix] = span
+        if isVertical ~= nil then liveVertical[span] = isVertical end
+    end
+end
+
+-- A real bar's thickness and length for this profile, or nil before any frame has
+-- drawn one.
+function DF:GetBarTextureLayerSpan(db, prefix)
+    local t = db and liveSpans[db]
+    local span = t and t[prefix]
+    if not span then return nil end
+    local w, h = span:GetWidth(), span:GetHeight()
+    if issecretvalue(w) or issecretvalue(h) or not w or not h or w <= 0 or h <= 0 then return nil end
+    local vertical = liveVertical[span]
+    if vertical == nil then vertical = h > w end
+    if vertical then return w, h end
+    return h, w
+end
+
 -- Whether a caller needs to call ApplyBarTextureLayers at all: something is set, or
 -- the bar still carries layer state that turning everything off must tear down.
 -- Checked BEFORE building the options table, because some callers run per health tick.
 function DF:BarTextureLayersWanted(bar, db, prefix)
     if not bar then return false end
+    -- Only the bar is known here; ApplyBarTextureLayers replaces it with the real span.
+    if db then RecordSpan(db, prefix, bar) end
     local state = bar.dfTextureLayers
     return (state ~= nil and state.active) or bar.dfTileOverride ~= nil or bar.dfTileMirror ~= nil
         or DF:BarTextureLayersActive(db, prefix)
@@ -279,10 +313,12 @@ end
 --                    redrawn here; bars whose colour other code changes per update
 --                    leave it nil and keep their base at native size.
 --   opts.baseBlend, opts.baseDesaturated   carried over to the redrawn base
+--   opts.preview     the options preview strip, which must not stand in for a real bar
 function DF:ApplyBarTextureLayers(bar, prefix, db, opts)
     local k = KEYS[prefix]
     if not (bar and k and db and bar.GetStatusBarTexture) then return end
     opts = opts or {}
+    if not opts.preview then RecordSpan(db, prefix, opts.span or bar, opts.isVertical, true) end
 
     -- The base layer's own Tile override rides the shared tiling path, so every
     -- later re-set of the file keeps honouring it.

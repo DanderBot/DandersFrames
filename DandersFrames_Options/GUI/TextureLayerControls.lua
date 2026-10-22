@@ -205,7 +205,9 @@ local function PreviewColor(db, prefix)
     return { r = 0.3, g = 0.7, b = 0.3, a = 1 }
 end
 
-local function CreatePreview(parent, db, prefix, baseSize)
+local LABEL_H, BOTTOM_PAD = 16, 14
+
+local function CreatePreview(parent, db, prefix, baseSize, relayout)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 54)
     local label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -214,16 +216,47 @@ local function CreatePreview(parent, db, prefix, baseSize)
     local text = GUI.Colors and GUI.Colors.textDim
     if text then label:SetTextColor(text.r, text.g, text.b) end
     local bg = container:CreateTexture(nil, "BACKGROUND")
-    bg:SetPoint("TOPLEFT", 0, -16)
-    bg:SetPoint("BOTTOMRIGHT", 0, 14)
     bg:SetColorTexture(0.08, 0.08, 0.08, 1)
     local bar = CreateFrame("StatusBar", nil, container)
-    bar:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -1)
-    bar:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -1, 1)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0.6)
 
+    -- Like the designers' frame previews: the bar is a real bar's size at the live
+    -- frames' scale (the window's own scale divided back out), shrunk only to fit the
+    -- card. Preset tile sizes are fixed while Fit to Bar follows the bar, so any other
+    -- size shows the two differently from the frames.
+    local function FitBar()
+        local thick, long = DF:GetBarTextureLayerSpan(db, prefix)
+        if not thick then
+            -- No frame has drawn this bar yet: the profile's frame size stands in.
+            thick = prefix == "resourceBar" and (db.resourceBarHeight or 4) or db.frameHeight or 64
+            long = db.frameWidth or 125
+        end
+        local want = GUI.PreviewUnscale and GUI.PreviewUnscale() or 1
+        local room = container:GetWidth()
+        if not room or room < 2 then room = 260 end
+        local scale = math.max(0.2, math.min(want, (room - 2) / long))
+        bar:SetScale(scale)
+        bar:SetSize(long, thick)
+        bar:ClearAllPoints()
+        bar:SetPoint("TOPLEFT", container, "TOPLEFT", 1 / scale, -(LABEL_H + 1) / scale)
+        bg:ClearAllPoints()
+        bg:SetPoint("TOPLEFT", 0, -LABEL_H)
+        bg:SetSize(long * scale + 2, thick * scale + 2)
+
+        local height = math.floor(LABEL_H + thick * scale + 2 + BOTTOM_PAD + 0.5)
+        if container.layoutHeight ~= height then
+            local had = container.layoutHeight
+            container.layoutHeight = height
+            container:SetHeight(height)
+            if had and relayout then relayout() end
+        end
+    end
+    container:SetScript("OnSizeChanged", function() FitBar() end)
+    if GUI.OnWindowScaleChanged then GUI.OnWindowScaleChanged(container, function() container:Refresh() end) end
+
     function container:Refresh()
+        FitBar()
         local spec = BAR[prefix] or {}
         local path = (spec.texture and db[spec.texture]) or DF.STOCK_BAR_TEXTURE
         DF:SafeSetStatusBarTexture(bar, path)
@@ -233,7 +266,7 @@ local function CreatePreview(parent, db, prefix, baseSize)
         local fill = bar:GetStatusBarTexture()
         if fill then fill:SetBlendMode(blend) end
         DF:ApplyBarTextureLayers(bar, prefix, db, {
-            span = bar, isVertical = false,
+            span = bar, isVertical = false, preview = true,
             baseColor = baseSize and c or nil, baseBlend = blend,
         })
     end
@@ -284,7 +317,8 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
     local master = add(GUI:CreateCheckbox(parent, L["Texture Layers"], db, switch, refreshAndStates), 25)
     master.tooltip = L["Advanced: stack up to two more textures on this bar. Unticking restores the plain bar and keeps these settings."]
 
-    preview = add(CreatePreview(parent, db, prefix, opts.baseSize), 54)
+    preview = CreatePreview(parent, db, prefix, opts.baseSize, opts.refreshStates)
+    preview = add(preview, preview.layoutHeight)
     preview.hideOn = closed
 
     -- ☠ A LOOK WRITES THROUGH THE SAME BRACKET AS EVERY CONTROL. The dropdown has no
