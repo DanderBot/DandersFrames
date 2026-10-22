@@ -8491,6 +8491,70 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     return ok
 end
 
+-- ============================================================
+-- PACED BUILDS
+-- ============================================================
+-- A container build is the costly part of standing up a frame: every AddAuraGroup creates
+-- a batch of ten buttons up front, and a member carries ~7 containers. Joining a full
+-- 40-player group built ~280 of them inside ONE frame -- a 3 s freeze. Builds now spend at
+-- most a budget of wall time per rendered frame and the rest queue for the next frames,
+-- as the peers' build workers do. The handle works without a backend meanwhile (the shape
+-- the old combat deferral used): unit, style and tuning land in config, and the build
+-- reads config when it runs. A build bigger than the budget still runs whole.
+local BUILD_BUDGET_MS_COMBAT, BUILD_BUDGET_MS_IDLE = 8, 30
+local buildQueue, buildHead, buildTail = {}, 1, 0
+local buildFrameStamp, buildSpentMs = nil, 0
+local buildDrainer
+local burstQueued, burstFrames = 0, 0
+
+local function buildBudgetLeft()
+    local now = GetTime()   -- constant within a rendered frame, so it names the frame
+    if buildFrameStamp ~= now then buildFrameStamp, buildSpentMs = now, 0 end
+    return (DF.playerInCombat and BUILD_BUDGET_MS_COMBAT or BUILD_BUDGET_MS_IDLE) - buildSpentMs
+end
+
+local function timedBuild(h)
+    local t0 = debugprofilestop()
+    local ok, err = pcall(h._build, h)
+    buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+    if not ok then DF:DebugWarn(DBG, "paced build failed: %s", tostring(err)) end
+end
+
+local function drainBuilds(self)
+    burstFrames = burstFrames + 1
+    while buildHead <= buildTail and buildBudgetLeft() > 0 do
+        local h = buildQueue[buildHead]
+        buildQueue[buildHead] = nil
+        buildHead = buildHead + 1
+        -- Destroyed while waiting, or built already (a Rebuild runs _build itself).
+        if h and not h._destroyed and not h.backend then timedBuild(h) end
+    end
+    if buildHead > buildTail then
+        buildHead, buildTail = 1, 0
+        self:Hide()
+        DF:Debug(DBG, "paced builds: %d deferred, drained over %d frames", burstQueued, burstFrames)
+        burstQueued, burstFrames = 0, 0
+    end
+end
+
+local function pacedBuild(h)
+    -- Straight through while this frame has budget and nothing is waiting ahead of it.
+    if buildHead > buildTail and buildBudgetLeft() > 0 then
+        local t0 = debugprofilestop()
+        h:_build()
+        buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+        return
+    end
+    buildTail = buildTail + 1
+    buildQueue[buildTail] = h
+    burstQueued = burstQueued + 1
+    if not buildDrainer then
+        buildDrainer = CreateFrame("Frame")
+        buildDrainer:SetScript("OnUpdate", drainBuilds)
+    end
+    buildDrainer:Show()
+end
+
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
     if not parent or type(config) ~= "table" then
@@ -8584,7 +8648,7 @@ function AuraContainer:Create(parent, config)
         end
     end
     h:_applyZOrder()   -- level + strata; also re-runs on every _build (see the method)
-    h:_build()
+    pacedBuild(h)
     -- FALLBACK PATH ONLY (_fakeActive never latches once deafening is confirmed):
     -- born during a foreign fake-data period (e.g. roster change while the user
     -- sits in Edit Mode), start hidden like the rest, restored on the real switch.
