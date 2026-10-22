@@ -1208,7 +1208,9 @@ roleUpdateFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
     
-    -- Handle spec changes (always process - caches spec and triggers FlatRaidFrames re-sort)
+    -- Handle spec changes (always process - caches spec and triggers FlatRaidFrames re-sort).
+    -- Fires for EVERY group member whose spec becomes known, not just the player: joining
+    -- a 40-player raid fired it 40 times, and each one re-sorted the whole raid directly.
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         -- Re-cache player spec
         local playerSpecID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 0)
@@ -1222,7 +1224,7 @@ roleUpdateFrame:SetScript("OnEvent", function(self, event, arg1)
             if DF.FlatRaidFrames and DF.FlatRaidFrames.initialized then
                 local rdb = DF:GetRaidDB()
                 if rdb and not rdb.raidUseGroups then
-                    DF.FlatRaidFrames:UpdateNameList()
+                    DF.FlatRaidFrames:RequestSpecResort()
                 else
                     DF:Debug("FLATRAID", "Skipping UpdateNameList from spec change: grouped mode active")
                 end
