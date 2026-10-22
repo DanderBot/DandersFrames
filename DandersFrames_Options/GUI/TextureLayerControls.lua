@@ -364,6 +364,7 @@ function GUI:AddTextureLayerControls(addToCard, parent, db, prefix, opts)
             if tex.refreshValue then tex.refreshValue() end
         end, function() return showAll end, function(v) showAll = v and true or false end), 25)
         all.hideOn = off
+        all.tooltip = L["The list starts with only the textures made for this layer. Tick to choose from every bar texture you have, including other addons'."]
 
         local color = add(GUI:CreateColorPicker(parent, L["Color"], db, p .. "Color", true, refresh), 35)
         color.hideOn = off

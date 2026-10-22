@@ -3288,6 +3288,7 @@ L["Grid Pattern"] = true
 L["Layer 2: Pattern"] = true
 L["Layer 3: Shading"] = true
 L["Show All Textures"] = true
+L["The list starts with only the textures made for this layer. Tick to choose from every bar texture you have, including other addons'."] = true
 L["Tube"] = true
 L["Auto (texture's own)"] = true
 L["Advanced: stack up to two more textures on this bar. Unticking restores the plain bar and keeps these settings."] = true
