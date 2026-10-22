@@ -1304,6 +1304,11 @@ do
             DF.TILED_BAR_TEXTURES[vert] = "BOTH"
         end
     end
+    -- The pattern masks repeat both ways. Each file holds two repeats per axis.
+    for _, name in ipairs({ "DF_Pattern_Biohazard_V1", "DF_Pattern_Plus_B_V1", "DF_Pattern_Plus_B_V2", "DF_Pattern_Plus_BG_V1", "DF_Pattern_Shield_V1", "DF_Pattern_X_B_V1", "DF_Pattern_X_B_V2" }) do
+        DF.TILED_BAR_TEXTURES[MEDIA .. name .. ".png"] = "BOTH"
+        DF.TILED_BAR_TILE_SIZE[MEDIA .. name .. ".png"] = 64
+    end
     for _, name in ipairs({ "DF_Layer_Shade_Top", "DF_Layer_Shade_Bottom", "DF_Layer_Shade_Bevel", "DF_Layer_Shade_Tube" }) do
         local path, vert = MEDIA .. name .. ".png", MEDIA .. name .. "_Vert.png"
         DF.TILED_BAR_TEXTURES[path] = "HORIZ"

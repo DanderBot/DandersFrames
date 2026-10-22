@@ -122,6 +122,15 @@ local function RegisterCustomMedia()
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Bevel", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Bevel.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Tube", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Tube.png")
 
+    -- Pattern masks for the texture layers (white, tinted by the layer colour).
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Biohazard V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Biohazard_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V2.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus BG V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_BG_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Shield V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Shield_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V2.png")
+
     -- Health bar textures
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Smooth", "Interface\\AddOns\\DandersFrames\\Media\\DF_Smooth")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Glossy", "Interface\\AddOns\\DandersFrames\\Media\\DF_Glossy")
@@ -264,6 +273,13 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Layer_Shade_Tube_Vert.png",
     "DF_Matte.tga",
     "DF_Minimalist.tga",
+    "DF_Pattern_Biohazard_V1.png",
+    "DF_Pattern_Plus_B_V1.png",
+    "DF_Pattern_Plus_B_V2.png",
+    "DF_Pattern_Plus_BG_V1.png",
+    "DF_Pattern_Shield_V1.png",
+    "DF_Pattern_X_B_V1.png",
+    "DF_Pattern_X_B_V2.png",
     "DF_Ring.tga",
     "DF_Smooth.tga",
     "DF_Soft.tga",
