@@ -5719,6 +5719,9 @@ function Factory:SyncFrame(frame)
     -- For the stale-container recorder: tells whether SyncFrame ever ran for this frame.
     -- GetTime, not date(): this is the per-UNIT_AURA path; the recorder formats the age.
     frame.dfADLastSyncAt = GetTime()
+    -- Read by RefreshFactoryRows' re-drive (driveFactoryRowsNow), which exists to apply
+    -- a layout-version bump and can skip a frame already synced at that version.
+    frame.dfADSyncVer, frame.dfADSyncUnit = DF.auraLayoutVersion, frame.unit
 
     -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
     -- transition, then stay quiet. Merely skipping the sync would leave every
