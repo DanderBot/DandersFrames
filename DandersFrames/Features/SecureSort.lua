@@ -351,7 +351,7 @@ function SecureSort:OnInspectReady(guid)
                 if DF.FlatRaidFrames and DF.FlatRaidFrames.initialized then
                     local rdb = DF:GetRaidDB()
                     if rdb and not rdb.raidUseGroups then
-                        DF.FlatRaidFrames:UpdateNameList()
+                        DF.FlatRaidFrames:RequestSpecResort()
                     else
                         DF:Debug("FLATRAID", "Skipping UpdateNameList from inspect: grouped mode active")
                     end

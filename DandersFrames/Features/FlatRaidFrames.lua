@@ -1095,6 +1095,27 @@ function FlatRaidFrames:UpdateNameList()
     self:UpdateSorting()
 end
 
+-- A re-sort asked for by a new inspect result. Joining a raid streams one result per
+-- member, and each full re-sort bounces the header and re-lays out every child (one took
+-- 2.9 s in a 30-player join), so the burst is batched, as the party path already does.
+-- A spec only moves anyone in NAMELIST mode (groupBy / INDEX never read it), and then
+-- only if the rebuilt list differs from the one the header already has.
+function FlatRaidFrames:RequestSpecResort()
+    if self.pendingSpecResortTimer then return end
+    self.pendingSpecResortTimer = C_Timer.NewTimer(0.75, function()
+        self.pendingSpecResortTimer = nil
+        local header = self.header
+        if not header then return end
+        if InCombatLockdown() then
+            self.pendingNameListUpdate = true
+            return
+        end
+        if header:GetAttribute("sortMethod") ~= "NAMELIST" then return end
+        if header:GetAttribute("nameList") == self:BuildSortedNameList() then return end
+        self:UpdateSorting()
+    end)
+end
+
 -- ============================================================
 -- ENABLE / DISABLE
 -- ============================================================
