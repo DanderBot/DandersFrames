@@ -2319,6 +2319,25 @@ end
 -- choose. When the roster ran first it laid the raid out in the BASE settings, then this
 -- switched layouts: a join showed the base arrangement, at the base position, before the
 -- layout's. The roster update now runs a pending evaluation itself before doing anything.
+-- ☠ NO RAID HEADER IS SHOWN IN THE BASE SETTINGS WHILE A LAYOUT IS DUE. The roster path
+-- runs a pending evaluation first (RunPendingEval), but a login or reload inside a raid
+-- reaches the header code from its own startup path, before this file's evaluation is even
+-- queued: the base layout stood on screen for over a second (join scan: groups 1-4 in the
+-- base arrangement, then the flat layout). Called from UpdateHeaderVisibility just before
+-- raid headers are shown. Only while no layout is active, and once per group size and
+-- instance type, so a raid with no matching layout does not re-evaluate on every call.
+local lastPreShowKey
+function AutoProfilesUI:ApplyBeforeRaidShown()
+    if not DF.initialized or self.activeRuntimeProfile or InCombatLockdown() or self:IsEditing() then return end
+    local autoDb = DF.db and DF.db.raidAutoProfiles
+    if not (autoDb and autoDb.enabled) then return end
+    local _, instanceType = IsInInstance()
+    local key = tostring(GetNumGroupMembers()) .. ":" .. tostring(instanceType)
+    if key == lastPreShowKey then return end
+    lastPreShowKey = key
+    self:EvaluateAndApply()
+end
+
 function AutoProfilesUI:RunPendingEval()
     if not autoProfileThrottleFrame:IsShown() then return false end
     autoProfileThrottleFrame:GetScript("OnUpdate")(autoProfileThrottleFrame)

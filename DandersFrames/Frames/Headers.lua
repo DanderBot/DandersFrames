@@ -4962,6 +4962,10 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
     -- RAID: Use raid headers (only when in raid, NOT arena)
     -- ============================================================
     if inRaid then
+        -- A due auto layout applies before any raid header is shown (see the function).
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.ApplyBeforeRaidShown then
+            DF.AutoProfilesUI:ApplyBeforeRaidShown()
+        end
         DF:UpdateRaidHeaderVisibility(skipRaidReposition)
     else
         -- Hide all raid headers (includes arena case)
