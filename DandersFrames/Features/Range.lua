@@ -1008,6 +1008,13 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+-- A talent edit need not fire PLAYER_TALENT_UPDATE, and a newly talented spell is only
+-- known once SPELLS_CHANGED lands after it (see the capability watcher in Auras.lua).
+-- Every list here is filtered by IsPlayerSpell, so without these a talented-in heal or
+-- dispel stayed out of the list until a spec change or reload.
+-- pcall'd: the trait event is retail-only, and an unknown event name errors.
+pcall(eventFrame.RegisterEvent, eventFrame, "TRAIT_CONFIG_UPDATED")
+eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
@@ -1111,8 +1118,30 @@ end
 DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_PHASE", "OnUnitRangeReseed")
 DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_CONNECTION", "OnUnitRangeReseed")
 
+-- ★ FLIP-GATED. SPELLS_CHANGED fires constantly (every login, book open, temporary
+-- grant), so the lists are re-resolved on it but the range cache is only cleared when
+-- they actually changed. Compared against reused copies: no allocation per event.
+local prevFriendly, prevHostile, prevRez = {}, {}, {}
+local function SnapshotDiffers(prev, list)
+    local changed = #prev ~= #list
+    for i = 1, #list do
+        if prev[i] ~= list[i] then changed = true end
+        prev[i] = list[i]
+    end
+    for i = #list + 1, #prev do prev[i] = nil end
+    return changed
+end
+
 eventFrame:SetScript("OnEvent", function(self, event, ...)
-    if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
+    if event == "TRAIT_CONFIG_UPDATED" or event == "SPELLS_CHANGED" then
+        -- Resolved here, synchronously, so the Options label (which refreshes a frame
+        -- later on the same events) reads the new list.
+        UpdateRangeSpell()
+        local a = SnapshotDiffers(prevFriendly, friendlySpells)
+        local b = SnapshotDiffers(prevHostile, hostileSpells)
+        local c = SnapshotDiffers(prevRez, rezSpells)
+        if a or b or c then ClearRangeCache() end
+    elseif event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
         local unit = ...
         -- PLAYER_TALENT_UPDATE fires without a unit arg, so always update
         if event == "PLAYER_TALENT_UPDATE" or unit == "player" then
