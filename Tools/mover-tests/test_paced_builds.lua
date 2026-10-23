@@ -39,7 +39,7 @@ end
 -- A handle whose build costs `cost` ms of wall time and records the order.
 local order = {}
 local function H(name, cost)
-    local h = { name = name }
+    local h = { name = name, config = {} }
     function h:_build()
         clock.ms = clock.ms + cost
         self.backend = true
@@ -111,4 +111,18 @@ do
     rebuilt.backend = "from a Rebuild"
     nextFrame()
     eq(table.concat(order, ","), "big,ok", "skip: a destroyed or already-built handle is not built again")
+end
+
+-- ---- a deferred build calls its owner back; an immediate one does not ----
+do
+    local pacedBuild = load(false)
+    clock.frame, clock.ms, order = 70, 0, {}
+    local calls = {}
+    local now, later = H("now", 40), H("later", 1)
+    now.config.onBuilt = function(h) calls[#calls + 1] = h.name end
+    later.config.onBuilt = now.config.onBuilt
+    pacedBuild(now); pacedBuild(later)
+    eq(#calls, 0, "onBuilt: not called for a build that ran inside Create")
+    nextFrame()
+    eq(table.concat(calls, ","), "later", "onBuilt: called once when the deferred build lands")
 end

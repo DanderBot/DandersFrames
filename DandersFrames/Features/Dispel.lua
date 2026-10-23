@@ -2719,6 +2719,7 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
             style = { icon = { show = false }, cooldown = { show = false } },
             frameLevelOffset = lvlOff,
             enabled = true,
+            onBuilt = function() DF:UpdateDispelOverlay(frame) end,
         })
         frame.dispelIconRow = h
         frame.dispelIconRowSig = h and sig or nil
@@ -2883,6 +2884,9 @@ function DF:DriveDispelOverlayFactory(frame, db)
             -- includeDispelTypes.
             frameLevelOffset = 0,   -- widget levels are set absolutely (legacy layering)
             enabled = true,
+            -- The style pass below runs once, now. A build paced to a later frame has no
+            -- buttons yet, and no aura event drives this function again.
+            onBuilt = function() DF:UpdateDispelOverlay(frame) end,
         })
         frame.dispelFactory = h
         frame.dispelFactorySig = h and sig or nil

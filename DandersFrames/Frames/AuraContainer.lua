@@ -8530,7 +8530,17 @@ local function drainBuilds(self)
         buildQueue[buildHead] = nil
         buildHead = buildHead + 1
         -- Destroyed while waiting, or built already (a Rebuild runs _build itself).
-        if h and not h._destroyed and not h.backend then timedBuild(h) end
+        if h and not h._destroyed and not h.backend then
+            timedBuild(h)
+            -- ☠ A deferred build lands with nobody watching. An owner that styles the
+            -- buttons itself after Create saw none when it looked, and nothing calls it
+            -- again on its own: config.onBuilt is that call.
+            local onBuilt = h.backend and h.config.onBuilt
+            if onBuilt then
+                local ok, err = pcall(onBuilt, h)
+                if not ok then DF:DebugWarn(DBG, "onBuilt failed: %s", tostring(err)) end
+            end
+        end
     end
     if buildHead > buildTail then
         buildHead, buildTail = 1, 0
