@@ -5,12 +5,55 @@ local DF = DandersFrames
 DF.CHANGELOG_TEXT = [===[
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### New Features
+
+- (Bars) The Absorb, Heal Absorb, Heal Prediction, Reduced Max Health, Health and Resource bars get a **Tile** setting under their Texture, and the first four a **Tile Size** too: Auto uses the texture's own size, Fit to Bar repeats the pattern once per bar height, or set your own. New **Texture Layers** stack up to two more textures on top: a pattern and a shading layer, each with its own texture, colour, blend and tiling. A live preview shows the result at your frames' size, and a **Presets** dropdown fills the layers with a ready-made look you can then adjust; the changed-dots then show what you changed from that preset. Off by default, so your bars look exactly as before. (by Krathe, original idea by Aphoex)
+- (Bars) A **Mirror** tick leans striped and diagonal textures the other way, on the bar's own texture and on each layer, so the stripes can match another look. (by Krathe)
+- (Bars) Twelve new pattern textures for Texture Layers: Biohazard, Heart, Minus, Plus, Radioactive, Shield, Star and X designs. (art by Aphoex)
+
+### Improvements
+
+- (Auras) Buff and debuff rows, the dispel overlay and Aura Designer indicators now set up and update during combat. Settings changed mid-fight apply straight away, and anything that first appears in a fight (a frame that gets its player late, an arena match) shows at once instead of only after combat. (by Krathe)
+- (Debuffs) Ticking both Non-Player and From Any Player covers every debuff, so the bar now treats it as All Debuffs: Max Debuffs is one limit for the row instead of one per ticked category. (by Krathe)
+- (Debuffs) The note under Max Debuffs now counts the categories your bar really uses, including any your Aura Designer debuff groups take over. (by Krathe)
+- (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
+
+### Bug Fixes
+
+- (Range) Out-of-range fading checks a player against every range spell you know before falling back to 40 yards, so classes such as Evoker no longer fade players who are in range. Spells replaced by hero talents are tried under their new form. (by Krathe)
+- (Range) Devourer Demon Hunters get their own range spells. (by Krathe)
+- (Range) The range shown for your range-check spell updates after a talent change, without a reload. (by Krathe)
+- (Raid Frames) With a name-list sort (role, class or custom order), a player who joins mid-combat now appears on your frames as soon as combat ends, and the Sorting page says which settings delay them. (by Krathe)
+- (Reduced Max Health) The health bar no longer runs under the reduced max health area after a frame refresh or resize. (by Krathe)
+- (Fonts) Fonts are correct straight away after a reload during combat. (by Krathe)
+- (Dispel) The dispel overlay and dispel symbols now show in battlegrounds and arena. Frames that got their player during the match stayed blank all match, while test mode looked fine. (by Krathe)
+- (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
+- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
+
+## [5.5.0]
+
+### Improvements
+
+- (Fading) Unhealable Fading is now called **Spirit of Redemption Fading**, which is what it covers. Your settings are unchanged. (by Krathe)
+- (Click-Casting) Click-casting now keeps separate bindings for retail and WoW Forever, like the Aura Designer does. If your saved files move between the two, the other version's bindings are put aside and come back when you return, and click-casting strings from the other version can no longer be imported. (WoW Forever)
+
+### Bug Fixes
+
+- (Auto Layouts) Moving frames while editing an auto layout saves the move into the layout again, and settings changed afterwards no longer end up in your main profile. A layout can also keep its own DandersMover anchor. Existing layouts stay where they are. (by Krathe)
+- (Frames) With Pixel Perfect on, raid and party frames no longer shift back and forth by a pixel when people join, leave or go out of range. (by Krathe)
+- (Blizzard Frames) The Edit Mode party side panel now follows the party side-menu setting instead of always hiding. (by Krathe)
+- (Profiles) Importing a 4.x profile string no longer puts status icons, missing buff and defensive icons underneath the health bar. (by Krathe)
+- (Auto Layouts) The Personal Targeted Spells block follows its layout's position in raids, and moving or anchoring it during a layout no longer changes your main profile.
+- (Permanent Mover) Dragging the handle moves your frames directly again instead of opening DandersMover. It still opens DandersMover when the frames are anchored to something.
+- (Auras) Buff, debuff and Aura Designer duration text now sits where its anchor says. Corner and side anchors such as Bottom Right no longer push the text off the icon.
+
 ## [5.4.0]
 
 ### New Features
 
 - (Aura Designer) New **Power Infusion Helper** for priests, on its own tab in the Aura Designer. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Triggers picks what counts — which classes, and whether trinkets, potions and racials join the cooldowns — and Effects picks how each signal looks: a border, the health bar, the background, the name colour, or an icon. Turn on icons to see what they pressed and how hard the burst is landing. Add a sound if you want one; tanks and healers are skipped unless you say otherwise. (by Maelareth and Krathe)
-- (Aura Designer) If you set up the Power Infusion Helper in an earlier 5.4.0 alpha: it has moved onto its own tab in the Aura Designer, labelled PI Helper, and its settings are now split across Triggers and Effects. Your existing setup is carried over the first time you log in — the Square signal has been retired, so anything using it becomes an icon, and a stray "PI Helper" group left behind by an earlier alpha is cleaned up. Nothing needs doing by hand. (by Krathe)
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon, and your party and raid frames, pinned sets, the personal targeted-spells block and the targeted list all move with it. Snap them to each other or onto other addons' elements, anchor one thing to another (including to individual frames and raid groups) and set a backup anchor that takes over when the main one is hidden. The editor has undo/redo, save/discard, nudge keys, a searchable anchor list, adjustable snap ranges, a grid, and a panel that jumps you to whichever element you are editing. It is the foundation for a shared positioning system across Danders addons.
 - (Settings) The settings pages have been rebuilt. Every section is now a card you open and close by clicking its header, with its settings laid out two to a row when there's room and its current value shown in the corner when it's folded. Each page groups its cards under headings. Features switch on and off right from the card's header, Expand All / Collapse All sit at the top of each page, and hovering a setting's name explains it. Sections that change how something looks can be pinned into their own window, named after their page, so you can set two pages to match side by side. Widen the window and the page splits into two columns; narrow it and it folds back to one.
 - (Aura Designer) Adding to the Aura Designer is now a guided flow right inside the designer: choose Add from a Spell or Add from a Filter, pick how it should look from pictures of your own frame, then pick where it goes. Looks the aura already has, or that a filter can't drive, are marked on their tile. Layout groups and debuff groups are added with one click on their picture.
@@ -98,6 +141,7 @@ DF.CHANGELOG_TEXT = [===[
 
 ### Changes
 
+- (General) Updated for patch 12.1.5.
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Debuffs) The Raid debuff category is gone: on debuffs it was the same as Dispellable By Me, so if you had it ticked you'll find Dispellable By Me ticked instead. (by Krathe)
 - (Dispel) The dispel dropdowns now read "Dispellable: By Me / All". (by Krathe)
@@ -108,7 +152,6 @@ DF.CHANGELOG_TEXT = [===[
 - (Settings) Buff Bar, Debuff Bar and Defensive Icon cards start closed. (by Krathe)
 - (Tooltips) Aura tooltips no longer offer Game Default positioning, which the game's aura tooltip can't do. (by Krathe)
 - (Settings) Switching tabs and pages is faster. (by Krathe)
-- (Settings) The classic settings layout has been removed; the card layout is now the only one. (by Krathe)
 - (Aura Designer) An indicator's settings, the Global tab and group settings are now cards, two settings to a row when there's room, and the Power Infusion Helper's sections are cards too. (by Krathe)
 - (Text Designer) An element's Content, Appearance and Position are now cards, two settings to a row when there's room. (by Krathe)
 - (Aura Designer) The Aura and Text Designer previews take only the width they need, giving the settings the rest. (by Krathe)
