@@ -4176,6 +4176,19 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind AddDispelTypeTexture in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
+                -- ☠ ANCHOR THE BUTTON AT BIRTH. initializeFrame runs before the
+                -- button's access restrictions; the SetAllPoints after AddAuraSlot
+                -- returns runs after them and, while auras are secret, is refused and
+                -- swallowed by its pcall. An unanchored button has no rect, so
+                -- everything hung on it draws nothing: the dispel overlay was blank
+                -- after a login into secret content while group rows, which the
+                -- engine lays out itself, were fine. Anchored first, so the consumer's
+                -- onInit measures a placed button.
+                local host, innerInit = handle.frame, slotInit
+                slotInit = function(button)
+                    pcall(button.SetAllPoints, button, host)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4190,6 +4203,13 @@ function NativeBackend:build()
                 local slotInit = (rec.style or rec.onInit)
                     and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     or initFn
+                -- Positioned at birth for the overlay's reason (see above).
+                local fa, padY, innerInit = handle._flowAnchor or "TOPLEFT", handle._flowPadY or 0, slotInit
+                slotInit = function(button)
+                    pcall(button.ClearAllPoints, button)
+                    pcall(button.SetPoint, button, fa, c, fa, 0, padY)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
