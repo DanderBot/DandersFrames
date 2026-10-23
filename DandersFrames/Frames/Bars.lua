@@ -2171,36 +2171,46 @@ end
 -- health bar beyond the health fill, so for those frames it painted a whole frame-sized
 -- box over the next frame along -- the flash of extra frames on a big join or a relog,
 -- where every segment is born at once. So a just-textured fill stays invisible until it is
--- re-anchored. Its texture alpha, not the bar's: the bar's alpha is the out-of-range fade.
+-- re-anchored. Held through the fill COLOUR's alpha: SetStatusBarColor writes the fill's
+-- alpha on every update, so fill:SetAlpha(0) would not survive the next one; and never the
+-- bar's own alpha, which is the out-of-range fade.
 -- ⚠ Capped: a fill that never reports four points is shown anyway after a few frames, so
 -- a change in how the engine anchors fills can only bring the flash back, never hide a bar.
 local FILL_HOLD_MAX_FRAMES = 5
-local heldFills = {}
+local heldBars = {}
 local fillHoldWatcher = CreateFrame("Frame")
 fillHoldWatcher:Hide()
+
+-- Every colour write for a heal-prediction segment goes through here, so a held fill stays
+-- clear whichever update runs while it is held.
+local function SetHealPredColor(seg, color)
+    seg.dfFillColor = color
+    seg:SetStatusBarColor(color.r, color.g, color.b, seg.dfFillHeld and 0 or (color.a or 0.7))
+end
+
 fillHoldWatcher:SetScript("OnUpdate", function(self)
     local any = false
-    for fill, hold in pairs(heldFills) do
+    for seg, frames in pairs(heldBars) do
+        local fill = seg:GetStatusBarTexture()
         local okN, n = pcall(fill.GetNumPoints, fill)
         local placed = okN and not (issecretvalue and issecretvalue(n)) and n ~= 2
-        if placed or hold.frames >= FILL_HOLD_MAX_FRAMES then
-            heldFills[fill] = nil
-            -- Texture layers redrawing the base keep the fill at 0 themselves.
-            local layers = hold.bar.dfTextureLayers
-            if not (layers and layers.baseHidden) then fill:SetAlpha(1) end
+        if placed or frames >= FILL_HOLD_MAX_FRAMES then
+            heldBars[seg] = nil
+            seg.dfFillHeld = nil
+            if seg.dfFillColor then SetHealPredColor(seg, seg.dfFillColor) end
         else
-            hold.frames = hold.frames + 1
+            heldBars[seg] = frames + 1
             any = true
         end
     end
     if not any then self:Hide() end
 end)
 
-local function HoldFillUntilPlaced(bar)
-    local fill = bar and bar:GetStatusBarTexture()
-    if not fill then return end
-    fill:SetAlpha(0)
-    heldFills[fill] = { bar = bar, frames = 0 }
+local function HoldFillUntilPlaced(seg)
+    if not (seg and seg:GetStatusBarTexture()) then return end
+    seg.dfFillHeld = true
+    if seg.dfFillColor then SetHealPredColor(seg, seg.dfFillColor) end
+    heldBars[seg] = 0
     fillHoldWatcher:Show()
 end
 
@@ -2226,7 +2236,7 @@ local function StyleHealPredSegment(seg, tex, blendMode, color, db, layerOpts)
     end
     local t = seg:GetStatusBarTexture()
     if t then t:SetBlendMode(blendMode) end
-    seg:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    SetHealPredColor(seg, color)
     if db and layerOpts and DF:BarTextureLayersWanted(seg, db, "healPrediction") then
         DF:ApplyBarTextureLayers(seg, "healPrediction", db, DF:BarLayerOpts(
             layerOpts.span, layerOpts.isVertical, color, blendMode))
@@ -2527,7 +2537,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         barTex:SetBlendMode(blendMode)
     end
     
-    bar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    SetHealPredColor(bar, color)
     -- Kept as one table: the split mode's second segment reuses its span and axis.
     -- Reused per bar rather than built per call: this runs on every heal-prediction
     -- event, and ApplyBarTextureLayers reads the fields without keeping the table.
