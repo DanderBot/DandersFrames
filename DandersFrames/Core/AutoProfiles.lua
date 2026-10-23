@@ -2186,6 +2186,17 @@ local function MigrateAutoProfileOverrides()
 end
 
 -- Evaluate current content/raid state and apply/remove profiles as needed
+-- ☠ THE GROUP IS NOT SETTLED STRAIGHT AFTER A LOADING SCREEN. The first evaluation after
+-- zoning into an instance can see no raid group, or a member count that matches no range,
+-- while the instance group fills in; the roster update a moment later sees the real one.
+-- Acting on the first meant leaving the active layout and coming straight back -- two full
+-- rebuilds of every frame inside half a second. For SETTLE_SECONDS after a loading screen a
+-- change AWAY from an active layout waits and is re-checked once the window closes. A
+-- layout taking over from none still applies at once.
+local SETTLE_SECONDS = 2
+local settleUntil = 0
+local settleRecheckArmed = false
+
 function AutoProfilesUI:EvaluateAndApply()
     if not DF.initialized then return end
     if self:IsEditing() then
@@ -2213,6 +2224,19 @@ function AutoProfilesUI:EvaluateAndApply()
         return
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
+
+    if self.activeRuntimeProfile and GetTime() < settleUntil then
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: \"%s\" -> \"%s\" held until the group settles after the loading screen",
+            oldName, newName)
+        if not settleRecheckArmed then
+            settleRecheckArmed = true
+            C_Timer.After(settleUntil - GetTime() + 0.05, function()
+                settleRecheckArmed = false
+                AutoProfilesUI:EvaluateAndApply()
+            end)
+        end
+        return
+    end
 
     -- ☠ THE UNDO FENCE, and it belongs BELOW the two no-change guards above --
     -- not at the head of this function. Evaluation runs on every roster change,
@@ -2301,6 +2325,7 @@ autoProfileEventFrame:SetScript("OnEvent", function(self, event)
         return
     end
 
+    if event == "PLAYER_ENTERING_WORLD" then settleUntil = GetTime() + SETTLE_SECONDS end
     DF:Debug("AUTOPROFILE", "Event: %s — queuing evaluation", event)
     QueueAutoProfileEval()
 end)
