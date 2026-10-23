@@ -3580,7 +3580,7 @@ end
 
 -- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. This is HEALING, not a migration: a one-shot
 -- flag would repair the profile once and leave every later rename -- every future addon
--- update -- unfixed forever. The pass is a table walk over 14 keys across 2 modes; the
+-- update -- unfixed forever. The pass is a table walk over 26 keys across 2 modes; the
 -- cost is nothing.
 --
 -- ☠ AND IT ONLY EVER TOUCHES OUR OWN MEDIA. A third-party path is left alone even

@@ -38,7 +38,7 @@ function DF:UpdateMissingBuffIcon(frame, forceUpdate)
 
 end
 
--- Update missing buff icons for all frames (called on a timer, out of combat only)
+-- Update missing buff icons for all frames (a factory drive per frame, so legal in combat)
 function DF:UpdateAllMissingBuffIcons()
     -- Check if in test mode - use test update functions instead
     if DF.testMode or DF.raidTestMode then
