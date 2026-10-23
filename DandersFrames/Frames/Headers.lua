@@ -8500,20 +8500,22 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- READY_CHECK events: Update ready check icons
     if event == "READY_CHECK" or event == "READY_CHECK_CONFIRM" then
         if DF.UpdateReadyCheckIcon then
-            DF:IteratePartyFrames(function(frame)
-                if frame.dfIsHeaderChild then
+            -- A confirm names the one player who answered; only their frames change.
+            local only = event == "READY_CHECK_CONFIRM" and type(arg1) == "string" and arg1 or nil
+            local function update(frame)
+                -- A withheld comparison (nil) updates rather than risk a stale icon.
+                if not only or (frame.unit and DF.UnitIsUnit(frame.unit, only) ~= false) then
                     DF:UpdateReadyCheckIcon(frame)
                 end
+            end
+            DF:IteratePartyFrames(function(frame)
+                if frame.dfIsHeaderChild then update(frame) end
             end)
             DF:IterateRaidFrames(function(frame)
-                if frame.dfIsHeaderChild then
-                    DF:UpdateReadyCheckIcon(frame)
-                end
+                if frame.dfIsHeaderChild then update(frame) end
             end)
             -- Also update pinned frames
-            IteratePinnedFrames(function(frame)
-                DF:UpdateReadyCheckIcon(frame)
-            end)
+            IteratePinnedFrames(update)
         end
         return
     end
