@@ -1044,7 +1044,7 @@ function DF:UpdateLiveRaidFrames()
                     if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
                     if DF.UpdatePingIcon then DF:UpdatePingIcon(frame) end
                     if DF.UpdateCenterStatusIcon then DF:UpdateCenterStatusIcon(frame) end
-                    if DF.UpdateMissingBuffIcon and not InCombatLockdown() then DF:UpdateMissingBuffIcon(frame) end
+                    if DF.UpdateMissingBuffIcon then DF:UpdateMissingBuffIcon(frame) end
                     if DF.UpdateExternalDefIcon then DF:UpdateExternalDefIcon(frame) end
                 end
                 

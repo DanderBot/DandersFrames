@@ -70,6 +70,13 @@ function DF:AnchorHealthBarsToPadding(frame, db)
     frame.healthBar:ClearAllPoints()
     frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
     frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+    -- ☠ THIS UN-CLIPS A REDUCED-MAX-HEALTH CLIP, so it forgets that clip. The clip only
+    -- re-runs when its geometry changes (ReducedMaxHealth.lua's needClip); left set, the
+    -- flag said "still clipped" and the health fill ran under the reduced band until
+    -- orientation, padding or texture next changed. Cleared, the next reduced-max pass
+    -- (right after this in the live and test updates) clips again.
+    frame.dfReducedMaxHealthClipping = nil
+    frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
     -- Keep the missing-health overlay inside the padding too (anchored once
     -- at creation, so it would otherwise sit over the padding after a change).
     if frame.missingHealthBar then
@@ -206,6 +213,15 @@ function DF:ApplyFrameLayout(frame)
                 frame.missingHealthBar:SetReverseFill(false)  -- Opposite of health bar
                 DF:ApplyBarFillOrientation(frame.missingHealthBar, true)
             end
+        end
+
+        -- No baseColor: the health colour is set per update by other code (class,
+        -- gradient, dead), so the base keeps its Tile option but not a custom size.
+        if DF:BarTextureLayersWanted(healthBar, db, "health") then
+            DF:ApplyBarTextureLayers(healthBar, "health", db, {
+                span = healthBar,
+                isVertical = (orientation == "VERTICAL" or orientation == "VERTICAL_INV"),
+            })
         end
     end
     

@@ -43,10 +43,10 @@ local addonName, DF = ...
 -- sizing comes from ApplyHeaderSettings, which the drain runs first. FullProfileRefresh,
 -- which has the same source order and DOES depend on it, calls the `_Now` forms.
 --
--- COMBAT: the drain re-checks InCombatLockdown() AT FIRE TIME. Every kind writes secure
--- frame size / attributes, so an in-combat drain runs nothing, keeps the kinds queued and
--- replays them on PLAYER_REGEN_ENABLED (the re-queue-don't-drop idiom RefreshFactoryRows
--- uses in Features/Auras.lua). The `_Now` bodies keep their own combat guards
+-- COMBAT: the drain re-checks InCombatLockdown() AT FIRE TIME. The layout kinds write
+-- secure frame size / attributes, so an in-combat drain holds them, keeps them queued and
+-- replays them on PLAYER_REGEN_ENABLED (re-queue, don't drop). `visible` runs in combat. The `_Now` bodies keep
+-- their own combat guards
 -- (UpdateAll_Now sets DF.needsUpdate, UpdateRaidLayout_Now sets
 -- pendingFlatLayoutRefresh / needsUpdate); the scheduler's regen replay is the prompt one.
 --
@@ -76,11 +76,14 @@ local TARGET = {
 -- THE DRAIN ORDER. See the block comment above before changing it.
 local ORDER = { "headers", "raidLayout", "frames", "visible", "all" }
 
--- All five write secure frame size/attributes somewhere down their call tree,
--- so none may run in combat. Kept as a table rather than a blanket `if combat
--- then return` so a kind that later becomes combat-safe can say so here.
+-- The layout kinds write secure frame size/attributes somewhere down their call tree,
+-- so they wait for combat to end.
+-- `visible` is FullFrameRefresh on every frame: DF's own regions only, the same refresh a
+-- secure header's mid-fight unit reassignment runs. Holding it held the combat-entry
+-- refresh (PLAYER_REGEN_DISABLED) until combat ENDED, so every Hide In Combat icon and
+-- the combat-aware aura filters only switched once the fight was over.
 local COMBAT_UNSAFE = {
-    headers = true, raidLayout = true, frames = true, visible = true, all = true,
+    headers = true, raidLayout = true, frames = true, all = true,
 }
 
 local pending = {}      -- kind -> true while a request is outstanding

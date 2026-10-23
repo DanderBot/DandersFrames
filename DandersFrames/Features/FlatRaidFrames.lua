@@ -137,6 +137,18 @@ end
 
 -- Build a sorted nameList string based on current settings
 -- This replaces the complex groupBy/groupingOrder/groupFilter juggling
+-- ★ THE LIST ENDS WITH THE PLACEHOLDER NAME. A member the roster still calls UNKNOWNOBJECT
+-- (loading in, or renamed to it by an effect mid-fight, when the list cannot be rewritten)
+-- matches no real name and the header would hide them; the token keeps them visible, sorted
+-- last, until the next rebuild lists their real name. Left off while that would show someone
+-- the list excludes: a placeholder sitting in a hidden group, or any pinned "Hide from Main
+-- Frames" set, whose members a placeholder cannot be told apart from.
+local function WithPlaceholderToken(list, hidden, placeholderOutsideSet)
+    if hidden or placeholderOutsideSet or not UNKNOWNOBJECT then return list end
+    if list == "" then return UNKNOWNOBJECT end
+    return list .. "," .. UNKNOWNOBJECT
+end
+
 function FlatRaidFrames:BuildSortedNameList()
     local db = GetRaidDB()
     if not db then return "" end
@@ -254,6 +266,7 @@ function FlatRaidFrames:BuildSortedNameList()
     -- nil (the common case) is a cheap no-op. Name match mirrors the secure-header
     -- builder: realm-qualified fullName for others, __hidePlayer flag for self.
     local hidden = DF.GetPinnedHiddenNames and DF:GetPinnedHiddenNames()
+    local placeholderOutsideSet = false
 
     for i = 1, numMembers do
         local unit = "raid" .. i
@@ -270,6 +283,10 @@ function FlatRaidFrames:BuildSortedNameList()
         -- filling in fires GROUP_ROSTER_UPDATE, which rebuilds this list.
         -- (issecretvalue first: comparing/testing a secret value crashes.)
         local fullName, _, subgroup = GetRaidRosterInfo(i)
+        if not issecretvalue(fullName) and fullName == UNKNOWNOBJECT
+            and subgroup and db.raidGroupVisible and db.raidGroupVisible[subgroup] == false then
+            placeholderOutsideSet = true
+        end
 
         if not issecretvalue(fullName) and fullName and fullName ~= UNKNOWNOBJECT then
             -- Filter by group visibility
@@ -339,7 +356,7 @@ function FlatRaidFrames:BuildSortedNameList()
         for _, e in ipairs(ordered) do
             idxNames[#idxNames + 1] = e.isPlayer and e.name or e.fullName
         end
-        local idxResult = table.concat(idxNames, ",")
+        local idxResult = WithPlaceholderToken(table.concat(idxNames, ","), hidden, placeholderOutsideSet)
         DebugPrint("BuildSortedNameList (sorting off, index order):", idxResult)
         return idxResult
     end
@@ -426,7 +443,7 @@ function FlatRaidFrames:BuildSortedNameList()
         end
     end
     
-    local result = table.concat(names, ",")
+    local result = WithPlaceholderToken(table.concat(names, ","), hidden, placeholderOutsideSet)
     DebugPrint("BuildSortedNameList result:", result)
     return result
 end

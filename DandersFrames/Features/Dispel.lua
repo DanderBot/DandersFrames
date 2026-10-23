@@ -1876,11 +1876,12 @@ end
 -- ★ 68914: SECURE context is NOT required for the bind's legality — the
 -- access-constrained rejection was replaced by ValidateInboundScriptObject
 -- (forbidden/protected/descendant-of-owner only), and a tainted create+bind passes.
--- This init STAYS in the secure initializeFrame anyway because it is the only hook
--- that fires AT SLOT CREATION — Blizzard creates overlay buttons lazily, including
--- MID-COMBAT when a unit's first dispellable debuff lands, and the style pass can't
--- touch live buttons in combat (BUILD-ONCE-LEAVE-IT). Moving create+bind there would
--- delay the overlay's debut to regen. Timing, not legality, is the reason.
+-- This init STAYS in the secure initializeFrame anyway because it is the one moment the
+-- button is UNRESTRICTED: AddAuraSlot creates the slot's button while the container is
+-- built and runs initializeFrame BEFORE ApplyAccessRestrictions
+-- (Blizzard_AuraContainerFrameProviders.lua, CreateFrame). Every later write is refused
+-- while auras are secret -- in combat, and out of it in M+ and PvP -- which is exactly when
+-- the style pass is held back. Timing, not legality, is the reason.
 local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     if not (btn and btn.CreateTexture and btn.AddDispelTypeTexture) then return end
     local key = slotInfo.key
@@ -1957,10 +1958,10 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
         -- ★ FULL + Show On Current Health Only: anchor to the health FILL at birth — the
         -- same write-free clip StyleGameMainSlot applies, decided on the same condition
-        -- (the legacy path's, in ApplyOverlayLayout). Birth is mid-combat (Blizzard creates
-        -- these buttons lazily on the first dispellable debuff) and the style pass is
-        -- OOC-only, so without this the wash spans the whole button for the entire fight it
-        -- was born into. The fill texture is our OWN healthBar's; its rect already tracks
+        -- (the legacy path's, in ApplyOverlayLayout). Birth is the one unrestricted moment
+        -- (see DispelSlotSecureInit) and the style pass is held back while auras
+        -- are secret, so without this the wash spans the whole button until a pass lands.
+        -- The fill texture is our OWN healthBar's; its rect already tracks
         -- current health, so there is no per-tick feed and nothing here reads the aura. The
         -- style pass still re-anchors on later style edits; this covers the window it cannot
         -- reach.
@@ -2394,13 +2395,13 @@ local function StyleDispelSlots(frame, db, h, slots)
         -- whose art is perfectly reachable and whose carriers do not exist. The probe
         -- passes on such a slot, so the recovery below could never see it.
         --
-        -- HOW IT HAPPENS: the client creates these buttons lazily on the first dispellable
-        -- debuff, i.e. MID-COMBAT, so onInit runs while auras are secret and the button
-        -- subtree carries DenyTaintedAccessWhenAurasAreSecret. Creating the gradient's dim
-        -- host is a child materialization on a denied subtree and is refused exactly like a
-        -- setter. Handle:_makeInitializeFrame pcalls onInit, so the refusal is SWALLOWED --
-        -- no error, no log, and a half-built slot with nothing recording that it is half
-        -- built. BindDispelCarriers only stamps btn._dfDispelCarriers when it has at least
+        -- HOW IT HAPPENS: any init that runs on a button AFTER ApplyAccessRestrictions -- the
+        -- re-init below is one -- meets DenyTaintedAccessWhenAurasAreSecret whenever auras
+        -- are secret, and creating the gradient's dim host is a child materialization on a
+        -- denied subtree, refused exactly like a setter. (A slot's BIRTH runs before the
+        -- restrictions, inside AddAuraSlot, so it is not this path.) The init is pcalled, so
+        -- the refusal is SWALLOWED -- no error, no log, and a half-built slot with nothing
+        -- recording that it is half built. BindDispelCarriers only stamps btn._dfDispelCarriers when it has at least
         -- one carrier, so its absence IS the completeness signal.
         --
         -- WHY IT NEVER HEALED: out of combat the art probes fine, so the branch below was
@@ -2556,11 +2557,9 @@ local function dispelFilterRecords(slots, db, frame)
                     -- refusal here is SWALLOWED: the slot is left half built, nothing
                     -- records it, and the container's own warning rides AURACONTAINER.
                     -- That is how a refused init produced a dump in which every printed
-                    -- field looked healthy. Birth is normally MID-COMBAT --
-                    -- the client creates these buttons lazily on the first dispellable
-                    -- debuff -- so the button subtree carries
-                    -- DenyTaintedAccessWhenAurasAreSecret and creating the gradient's dim
-                    -- host is refused exactly like a setter.
+                    -- field looked healthy. Per Blizzard's source a birth runs before
+                    -- ApplyAccessRestrictions and should not be refused; this stays as the
+                    -- detector that would say otherwise.
                     -- Stamped as well as logged: the stamp is what /df debug dispeldbg
                     -- prints, so one paste names the exact refused call even from a
                     -- client that had the DISPEL category switched off at the time.
@@ -2583,12 +2582,11 @@ local function dispelFilterRecords(slots, db, frame)
                         -- ☠☠ BREAK THE DRIVE LATCH, OR THE RECOVERY NEVER RUNS. The rebuild
                         -- for a half-built slot lives in StyleDispelSlots, and
                         -- DriveDispelOverlayFactory only reaches it while
-                        -- dfDispelFactoryVersion / dfDispelStyledGen are NOT latched. Buttons
-                        -- are born lazily mid-combat WITHOUT bumping the handle generation, so
-                        -- a container styled before the pull keeps its latch through a refused
-                        -- birth and the fast path returns on every drive after it -- the slot
-                        -- stayed dead until an unrelated settings change or rebuild happened to
-                        -- break the latch. Clearing the version here (per frame, no global
+                        -- dfDispelFactoryVersion / dfDispelStyledGen are NOT latched. A refused
+                        -- init does not bump the handle generation, so a container already
+                        -- styled keeps its latch and the fast path returns on every drive
+                        -- after it -- the slot stays dead until something unrelated breaks the
+                        -- latch. Clearing the version here (per frame, no global
                         -- invalidation) makes the first out-of-combat drive re-run the pass.
                         -- Two failures qualify: the init threw, or it returned but the bind
                         -- inside it did not finish (a refused bind is caught INSIDE
@@ -2600,6 +2598,19 @@ local function dispelFilterRecords(slots, db, frame)
                         if si.roles and next(si.roles) ~= nil and frame
                             and (not okI or not DispelCarriersBound(btn)) then
                             frame.dfDispelFactoryVersion = nil
+                        end
+                        -- ☠ DRESS THE SLOT AT BIRTH TOO. Birth is the one moment the button
+                        -- takes writes whatever the aura secrecy; the style pass after it is
+                        -- held back while auras are secret, and in PvP they are secret all
+                        -- match, combat or not. A raid frame that gets its unit inside a
+                        -- battleground builds its overlay then, so with only the later pass
+                        -- its carriers stayed bound but undressed for the whole match: no
+                        -- overlay in battlegrounds while test mode looked right. The later
+                        -- pass still re-runs it for settings changes.
+                        if okI and btn and frame then
+                            if pcall(StyleOneSlot, btn, frame, db, si) and DF.UpdateDispelGradientHealth then
+                                pcall(DF.UpdateDispelGradientHealth, DF, frame)
+                            end
                         end
                     end }
     end
@@ -2625,6 +2636,9 @@ local function dispelIconRowRecords(slots, db)
         recs[i] = { key = si.key, filter = si.filter, candidateFilters = si.candidateFilters,
                     onInit = function(btn)
                         local okI, errI = pcall(DispelIconRowSecureInit, btn, db)
+                        -- Dressed at birth for the overlay's reason (see dispelFilterRecords):
+                        -- the dim host is born at 0 and only this reveals it.
+                        if okI and btn then pcall(StyleDispelIconRowButton, btn, db) end
                         if not okI and not warnedIconRowInit then
                             warnedIconRowInit = true
                             if DF.DebugWarn then
@@ -2731,8 +2745,9 @@ local function DriveDispelIconRow(frame, db, slots, tuneSig, ver)
     if h:GetUnit() ~= frame.unit then h:SetUnit(frame.unit) end
 
     local gen = h._gen or 0
+    -- Button writes: held back only while auras are secret (AurasRestricted).
     if (frame.dfDispelIconRowVersion ~= ver or frame.dfDispelIconRowGen ~= gen)
-        and not InCombatLockdown() then
+        and not DF.AuraContainer.AurasRestricted() then
         local any = false
         for _, btn in ipairs(h.buttons or {}) do
             any = true
@@ -2889,10 +2904,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- AND the handle's build generation — every native rebuild (regen-deferred
     -- build, test-mode round trip) creates FRESH buttons that carry none of our
     -- decorations, so a stale version latch alone would leave them invisible.
-    -- OOC only; not latched until buttons exist.
+    -- Held back only while auras are secret -- the button writes are refused then
+    -- (AurasRestricted); not latched until buttons exist.
     local gen = h._gen or 0
     if (frame.dfDispelFactoryVersion ~= ver or frame.dfDispelStyledGen ~= gen)
-        and not InCombatLockdown() then
+        and not DF.AuraContainer.AurasRestricted() then
         if StyleDispelSlots(frame, db, h, slots) then
             frame.dfDispelFactoryVersion = ver
             frame.dfDispelStyledGen = gen

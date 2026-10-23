@@ -1167,7 +1167,8 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- DF:UpdateAll, which invalidates. Only the entry lacked it.
     -- InvalidateAuraLayout also runs the test-mode passes itself, so the preview picks
     -- the new values up here rather than waiting for RefreshTestFramesWithLayout below;
-    -- it is combat-safe (RefreshFactoryRows re-queues at regen) and cheap when nothing
+    -- it is combat-safe (RefreshFactoryRows drives in combat; restyles wait while auras
+    -- are secret) and cheap when nothing
     -- moved (every drive is signature-gated under the version gate).
     if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
 

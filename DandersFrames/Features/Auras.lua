@@ -1196,7 +1196,17 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
         or db.debuffFilterNonPlayer or db.debuffFilterPlayer
     for _, c in ipairs(EXTRA_TOKEN_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
     for _, c in ipairs(DISPEL_TYPE_CATEGORIES) do anyShown = anyShown or db["debuffFilter" .. c.flag] end
-    if db.directDebuffShowAll or (not anyShown and not db.debuffEmptyShowsNothing) then
+    -- ★ NON-PLAYER + FROM ANY PLAYER IS EVERY DEBUFF. The two are exact complements, so
+    -- with both shown every other Show tick only splits the same debuffs into more
+    -- records -- and the engine caps each record separately, so Max Debuffs 6 meant 6 PER
+    -- CATEGORY (17 of them, up to 102 on an arena frame). Built as All Debuffs instead:
+    -- the same debuffs, hides, claims and highlight, under one cap.
+    -- ⚠ Not while Keep Important exempts shown important debuffs from the length cap:
+    -- All Debuffs cannot express that exemption (see the note in the branch below).
+    local coversAll = db.debuffFilterNonPlayer and db.debuffFilterPlayer
+        and not (DebuffMaxDuration(db) and db.debuffMaxDurationKeepImportant
+            and (db.debuffFilterBoss or db.debuffFilterRole or db.debuffFilterPriority))
+    if db.directDebuffShowAll or coversAll or (not anyShown and not db.debuffEmptyShowsNothing) then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
         -- exempting boss/role/priority needs a second un-capped record, and the
@@ -1294,7 +1304,9 @@ local function BuildDirectDebuffFilters(db, claimed, selfOnly)
             return addUncleansableTwins(applyDebuffHides(applyDebuffHides(out, extraClaims), hide), uncleansable)
         end
 
-        if cf or filterStr ~= "HARMFUL" or hide or extraClaims then
+        -- nil is show-all on the row only: an Aura Designer group reads nil as nothing,
+        -- so one that covers everything gets the record spelled out.
+        if cf or filterStr ~= "HARMFUL" or hide or extraClaims or db.debuffEmptyShowsNothing then
             return addUncleansableTwins(applyDebuffHides(applyDebuffHides(
                 { { filter = filterStr, key = "all", candidateFilters = cf } }, extraClaims), hide), uncleansable)
         end
@@ -1810,14 +1822,31 @@ end
 -- functionality — SAY SO INSTEAD.
 --
 -- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
--- those gets an uncleansable twin. So the ceiling is the larger of the unclaimed and
--- By Me-claimed builds, each with and without the racial self gap. Nil records mean
--- the show-all fallback, which is a single group.
+-- those gets an uncleansable twin. So the count uses the claims the Aura Designer REALLY
+-- makes, asked of a live frame of the same mode -- claims are per mode and spec, the same
+-- on every frame. With no frame to ask (raid mode while not in a raid) it falls back to the
+-- larger of the unclaimed and By Me-claimed builds: a ceiling, never an under-count. Each
+-- build is taken with and without the racial self gap (a Dwarf's own frame). Nil records
+-- mean the show-all fallback, which is a single group.
 local GROUP_COUNT_CLAIMS = { false, { dispellable = true } }
 function DF:GetDebuffRowGroupCount(dbLike)
     if not dbLike then return 1 end
+    local claimSets = GROUP_COUNT_CLAIMS
+    if DF.GetClaimedDebuffCategories then
+        local frame
+        local function pick(f)
+            if f and f.unit then frame = f return true end
+        end
+        local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
+        local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
+        if iterate then iterate(DF, pick) end
+        if frame then
+            local okC, claimed = pcall(DF.GetClaimedDebuffCategories, DF, frame, dbLike)
+            if okC then claimSets = { claimed or false } end
+        end
+    end
     local most = 1
-    for _, claimed in ipairs(GROUP_COUNT_CLAIMS) do
+    for _, claimed in ipairs(claimSets) do
         for _, selfOnly in ipairs({ false, true }) do
             local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, claimed or nil, selfOnly)
             if ok and type(recs) == "table" and #recs > most then most = #recs end
@@ -3836,7 +3865,7 @@ function DF:DriveBuffFactory(frame, db)
             tostring(h:GetUnit()), tostring(frame.unit),
             InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        if not InCombatLockdown() then confirmRetarget(h, "buff", frame.unit) end
+        confirmRetarget(h, "buff", frame.unit)
     end
     -- Shown once, through SetIntentShown so the intent is recorded on the handle (the
     -- identity-gate sweep restores recorded intent); no per-event SetShown churn.
@@ -3845,13 +3874,11 @@ function DF:DriveBuffFactory(frame, db)
         h:SetIntentShown(true)
     end
 
-    -- Apply setting changes only when the layout version actually bumped — and only OUT
-    -- of combat. In combat the standing container is left completely alone (the lab's
-    -- proven pattern: existing containers keep running in combat; every addon-side
-    -- re-touch — restyle, rebuild, SetFrameLevel, formatter churn — is a divergence).
-    -- The version stays stale so the first OOC drive catches up.
+    -- Apply setting changes only when the layout version actually bumped -- in combat too:
+    -- rebuilds and tuning are legal there, and the engine holds a restyle back by itself
+    -- while auras are secret (AuraContainer.AurasRestricted).
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfBuffFactoryVersion ~= ver and not InCombatLockdown() then
+    if frame.dfBuffFactoryVersion ~= ver then
         frame.dfBuffFactoryVersion = ver
         local cfg = DF:BuildAuraRowConfig(db, "buff", {
             unit = frame.unit,
@@ -3972,7 +3999,7 @@ function DF:DriveDebuffFactory(frame, db)
     local racialSelf = DF:IsRacialDispelSelf(frame.unit)
     local selfMoved = (frame.dfDebuffRacialSelf or false) ~= racialSelf
     if frame.dfDebuffFactoryEmptyVer then
-        if (frame.dfDebuffFactoryEmptyVer == ver and not selfMoved) or InCombatLockdown() then return end
+        if frame.dfDebuffFactoryEmptyVer == ver and not selfMoved then return end
         frame.dfDebuffFactoryEmptyVer = nil   -- version or self-ness moved: re-evaluate
     end
 
@@ -4035,14 +4062,14 @@ function DF:DriveDebuffFactory(frame, db)
             tostring(h:GetUnit()), tostring(frame.unit),
             InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        if not InCombatLockdown() then confirmRetarget(h, "debuff", frame.unit) end
+        confirmRetarget(h, "debuff", frame.unit)
     end
     if not frame.dfDebuffFactoryShown then
         frame.dfDebuffFactoryShown = true
         h:SetIntentShown(true)   -- see the buff drive
     end
 
-    if (frame.dfDebuffFactoryVersion ~= ver or selfMoved) and not InCombatLockdown() then
+    if frame.dfDebuffFactoryVersion ~= ver or selfMoved then
         frame.dfDebuffFactoryVersion = ver
         local filterList = BuildDirectDebuffFilters(db,
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db), racialSelf)
@@ -4340,7 +4367,7 @@ function DF:DriveDefensiveFactory(frame, db)
             tostring(h:GetUnit()), tostring(frame.unit),
             InCombatLockdown() and " (in combat)" or "")
         h:SetUnit(frame.unit)
-        if not InCombatLockdown() then confirmRetarget(h, "defensive", frame.unit) end
+        confirmRetarget(h, "defensive", frame.unit)
     end
     if not frame.dfDefFactoryShown then
         frame.dfDefFactoryShown = true
@@ -4348,11 +4375,9 @@ function DF:DriveDefensiveFactory(frame, db)
     end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it
-    -- via UpdateAllDefensiveBars -> InvalidateAuraLayout) — and only OUT of combat: the
-    -- standing container is never re-touched in lockdown (lab parity); the stale version
-    -- catches up on the first OOC drive.
+    -- via UpdateAllDefensiveBars -> InvalidateAuraLayout), in combat too (see the buff drive).
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfDefFactoryVersion ~= ver and not InCombatLockdown() then
+    if frame.dfDefFactoryVersion ~= ver then
         frame.dfDefFactoryVersion = ver
         local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
         -- Re-apply the z-order via the engine (honors runtime defensiveIconFrameLevel changes).
@@ -4784,11 +4809,10 @@ function DF:DriveMissingBuffFactory(frame, db)
         end
     end
 
-    -- Re-apply settings on a layout-version bump only, out of combat (build-once-
-    -- leave-it: the badges/strip are ours, but the cadence mirrors the row drives).
+    -- Re-apply settings on a layout-version bump only, in combat too (see the buff drive).
     -- Size hot-applies per cell (window/badge/cell mutators) + cells re-space.
     local ver = DF.auraLayoutVersion or 0
-    if frame.dfMissingFactoryVersion ~= ver and not InCombatLockdown() then
+    if frame.dfMissingFactoryVersion ~= ver then
         frame.dfMissingFactoryVersion = ver
         layoutMissingStrip(frame, db, strip, #tracked)
         local spill = missingAnimSpill(db, badgeSize)
@@ -4852,31 +4876,16 @@ end
 -- per rendered frame instead of one per callback. The 0-delay timer re-checks
 -- combat when it fires (timers can land after lockdown re-engages).
 local factoryRefreshQueued = false
-local factoryRefreshRegen   -- one-shot regen listener, created on the first combat drop
 function DF:RefreshFactoryRows()
     if factoryRefreshQueued then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) then return end
     factoryRefreshQueued = true
     C_Timer.After(0, function()
         factoryRefreshQueued = false
-        if InCombatLockdown() then
-            -- ⚠ RE-QUEUE AT REGEN, DON'T DROP. The version IS bumped, but the next drive is the next
-            -- UNIT_AURA on that frame, which after combat may be arbitrarily far away on a quiet
-            -- frame -- so a mid-combat GUI change would look half-applied: disabling Defensive Icons
-            -- hides the row at once (UpdateDefensiveBar's combat-safe hide) while the buff row keeps
-            -- CLAIMING the deduplicated defensives until its next drive, leaving auras missing from
-            -- both displays. The restyle itself must stay out of combat (native buttons are
-            -- combat-forbidden); regen is the earliest it can legally run.
-            if not factoryRefreshRegen then
-                factoryRefreshRegen = CreateFrame("Frame")
-                factoryRefreshRegen:SetScript("OnEvent", function(self)
-                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                    DF:RefreshFactoryRows()
-                end)
-            end
-            factoryRefreshRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
-            return
-        end
+        -- Drives every frame NOW, in combat too: waiting for each frame's next UNIT_AURA
+        -- left a quiet frame half-applied (a disabled Defensive Icons row hidden at once
+        -- while the buff row kept claiming its defensives). Restyles that cannot land while
+        -- auras are secret are held back by the engine itself.
         if DF.IteratePartyFrames then DF:IteratePartyFrames(driveFactoryRowsNow) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(driveFactoryRowsNow) end
         -- Pinned frames were skipped here and "caught up on their next aura

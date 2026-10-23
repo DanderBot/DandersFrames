@@ -1192,6 +1192,10 @@ local SYMBOL_TILES = {
 }
 
 DF.TILED_BAR_TEXTURES = {}
+-- The size one repeat of a tiled texture is meant to be drawn at, in pixels, for art
+-- whose file is bigger than one repeat should look on a bar. Absent = the file's own
+-- size, which is right for every texture DandersFrames draws to tile.
+DF.TILED_BAR_TILE_SIZE = {}
 for _, list in ipairs({ ABSORB_TILES, SYMBOL_TILES }) do
     for _, name in ipairs(list) do
         DF.TILED_BAR_TEXTURES["Interface\\AddOns\\DandersFrames\\Media\\" .. name .. ".png"] = "BOTH"
@@ -1246,6 +1250,74 @@ for _, name in ipairs(ABSORB_TILES) do
     DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
 end
 
+-- ============================================================
+-- MIRRORED TWINS
+-- ============================================================
+-- The leaning textures each ship a mirrored twin (<name>_Mirror, and _Mirror_Vert for
+-- vertical bars), so a bar can lean its stripes the other way -- the Mirror tick. A
+-- twin is the original flipped pixel for pixel, so it tiles exactly as the original
+-- does, and the bar simply gets a different file: no rotation, no redraw, and it works
+-- on every bar. Its vertical companion is the vertical original flipped top to bottom
+-- (rotating a mirror image is flipping the rotated one).
+--   Symmetric art (plus, minus, dots, grid, checker) has no twin: mirrored it is the
+-- same picture, so the tick is not offered for it.
+DF.TILED_MIRROR_COMPANION = {}
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    for _, name in ipairs({ "DF_Absorb_V1", "DF_Absorb_V1_Medium", "DF_Absorb_V1_Wide", "DF_Absorb_V1_Wider", "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD" }) do
+        local base, mirror = MEDIA .. name .. ".png", MEDIA .. name .. "_Mirror.png"
+        local mirrorVert = MEDIA .. name .. "_Mirror_Vert.png"
+        DF.TILED_MIRROR_COMPANION[base] = mirror
+        DF.TILED_VERTICAL_COMPANION[mirror] = mirrorVert
+        -- Both twins normalise straight to the ORIGINAL, so every resolve starts from
+        -- the same base whichever variant is on the bar now.
+        DF.TILED_COMPANION_BASE[mirror] = base
+        DF.TILED_COMPANION_BASE[mirrorVert] = base
+        DF.TILED_BAR_TEXTURES[mirror] = "BOTH"
+        DF.TILED_BAR_TEXTURES[mirrorVert] = "BOTH"
+    end
+end
+
+-- Whether this texture has a mirrored twin (the Mirror tick is only offered when it does).
+function DF:CanMirrorTexture(path)
+    if not path then return false end
+    local base = DF.TILED_COMPANION_BASE[path] or path
+    return DF.TILED_MIRROR_COMPANION[base] ~= nil
+end
+
+-- The texture-layer masks (Media/DF_Layer_*). Patterns tile both ways; the two
+-- diagonals lean, so they carry companions like the stripes above, while dots, grid
+-- and checker read the same either way. Shading is a gradient ACROSS the bar, so it
+-- tiles only ALONG it (HORIZ) -- and its companion runs the gradient across a
+-- vertical bar's thickness, which makes the companion's mode VERT, not BOTH.
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    local patterns = { "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD", "DF_Layer_Dots", "DF_Layer_Grid", "DF_Layer_Checker" }
+    local leaning = { DF_Layer_Diagonal = true, DF_Layer_Diagonal_HD = true }
+    for _, name in ipairs(patterns) do
+        local path = MEDIA .. name .. ".png"
+        DF.TILED_BAR_TEXTURES[path] = "BOTH"
+        if leaning[name] then
+            local vert = MEDIA .. name .. "_Vert.png"
+            DF.TILED_VERTICAL_COMPANION[path] = vert
+            DF.TILED_COMPANION_BASE[vert] = path
+            DF.TILED_BAR_TEXTURES[vert] = "BOTH"
+        end
+    end
+    -- The pattern masks repeat both ways. Each file holds two repeats per axis.
+    for _, name in ipairs({ "DF_Pattern_Biohazard_V1", "DF_Pattern_Heart_V1", "DF_Pattern_Heart_V2", "DF_Pattern_Minus_B_V1", "DF_Pattern_Plus_B_V1", "DF_Pattern_Plus_B_V2", "DF_Pattern_Plus_BG_V1", "DF_Pattern_Radioactive_V1", "DF_Pattern_Shield_V1", "DF_Pattern_Star_V1", "DF_Pattern_X_B_V1", "DF_Pattern_X_B_V2" }) do
+        DF.TILED_BAR_TEXTURES[MEDIA .. name .. ".png"] = "BOTH"
+        DF.TILED_BAR_TILE_SIZE[MEDIA .. name .. ".png"] = 64
+    end
+    for _, name in ipairs({ "DF_Layer_Shade_Top", "DF_Layer_Shade_Bottom", "DF_Layer_Shade_Bevel", "DF_Layer_Shade_Tube" }) do
+        local path, vert = MEDIA .. name .. ".png", MEDIA .. name .. "_Vert.png"
+        DF.TILED_BAR_TEXTURES[path] = "HORIZ"
+        DF.TILED_VERTICAL_COMPANION[path] = vert
+        DF.TILED_COMPANION_BASE[vert] = path
+        DF.TILED_BAR_TEXTURES[vert] = "VERT"
+    end
+end
+
 -- Swap a tiled texture for its vertical companion when the bar fills vertically.
 -- Returns the path unchanged for everything else, so it is safe to call on any
 -- texture from any call site.
@@ -1256,9 +1328,11 @@ end
 -- more than one point (the db-driven one at the texture site, the live-orientation
 -- one in ApplyBarFillOrientation), and they must be able to disagree about direction
 -- without the result depending on which ran last.
-function DF:ResolveBarTexture(path, isVertical)
+function DF:ResolveBarTexture(path, isVertical, mirror)
     if not path then return path end
     local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    -- Mirror first, then the axis: the mirrored twin carries its own vertical companion.
+    if mirror then base = DF.TILED_MIRROR_COMPANION and DF.TILED_MIRROR_COMPANION[base] or base end
     if isVertical then
         return DF.TILED_VERTICAL_COMPANION[base] or base
     end
@@ -1274,16 +1348,37 @@ end
 -- untouched, so it is inert for all of them.
 --   Shared by Frames/Bars.lua and Frames/Update.lua: both set the absorb texture
 -- in the same pass, and if only one resolved, the other would overwrite it.
+--   The bar's Mirror tick is read here too, named off the same key: every caller's
+-- orientation key is "<bar>Orientation", and its mirror is "<bar>TileMirror".
 function DF:ResolveBarTextureForFill(db, tex, mode, floatingOrientKey)
     local orient = (mode == "FLOATING") and (db[floatingOrientKey] or "HORIZONTAL")
         or (db.healthOrientation or "HORIZONTAL")
     local isVertical = (orient == "VERTICAL" or orient == "VERTICAL_INV")
-    return DF:ResolveBarTexture(tex, isVertical), isVertical
+    local mirror = floatingOrientKey and db[(floatingOrientKey:gsub("Orientation$", "TileMirror"))]
+    return DF:ResolveBarTexture(tex, isVertical, mirror), isVertical
 end
 
 -- Returns the mode string, or nil for a normal stretched texture.
 function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
+end
+
+-- The texture's preset repeat size (DF.TILED_BAR_TILE_SIZE), or nil for its own size.
+-- A vertical companion answers with its base's size.
+function DF:GetBarTextureTileSize(path)
+    local sizes = DF.TILED_BAR_TILE_SIZE
+    if not (path and sizes) then return nil end
+    local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    return sizes[base] or sizes[path]
+end
+
+-- The tiling a bar or layer actually uses. nil / "AUTO" is the texture's own answer
+-- above; anything else is the user's Tile setting, honoured even for art that was
+-- not drawn to tile (seams are then theirs to judge, which is why it is opt-in).
+function DF:ResolveTileMode(path, override)
+    if override == "OFF" then return nil end
+    if override == "BOTH" or override == "HORIZ" or override == "VERT" then return override end
+    return DF:GetBarTextureTiling(path)
 end
 
 -- The SetTexture wrap descriptors a tiling mode asks for, per axis. Same strings
@@ -1306,7 +1401,7 @@ function DF:ApplyBarTextureTiling(bar, path)
     if not bar or not bar.GetStatusBarTexture then return false end
     local fill = bar:GetStatusBarTexture()
     if not fill then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, bar.dfTileOverride)
     -- ☠ THE TILE FLAGS ALONE LEAVE THE SAMPLER CLAMPED. SetHorizTile/SetVertTile
     -- make the REGION repeat, but the wrap (address) mode is a property of the
     -- texture SET -- and SetStatusBarTexture takes no wrap arguments, so the fill
@@ -1323,12 +1418,12 @@ function DF:ApplyBarTextureTiling(bar, path)
     -- DF:ApplyBarFillOrientation for the companion swap), so a fresh set always
     -- arrives here with the stamp gone and re-applies the wrap.
     if mode then
-        if fill.dfWrapPath ~= path then
+        if fill.dfWrapPath ~= path or fill.dfWrapMode ~= mode then
             fill:SetTexture(path, tileWrapArgs(mode))
-            fill.dfWrapPath = path
+            fill.dfWrapPath, fill.dfWrapMode = path, mode
         end
     else
-        fill.dfWrapPath = nil
+        fill.dfWrapPath, fill.dfWrapMode = nil, nil
     end
     fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     fill:SetVertTile(mode == "BOTH" or mode == "VERT")
@@ -1341,9 +1436,9 @@ end
 -- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
 -- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
 -- be cropping on purpose and a StatusBar fill is the only one we fully own.
-function DF:ApplyTextureTiling(region, path, wrapAlreadySet)
+function DF:ApplyTextureTiling(region, path, wrapAlreadySet, override)
     if not (region and region.SetHorizTile) then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, override)
     -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
     -- every caller here runs right after its own SetTexture (which clamps), and
     -- none is a per-update re-assert, so re-issuing the set is always both
@@ -1371,9 +1466,10 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
     if not bar then return end
     isVertical = isVertical and true or false
     local base = bar.dfBaseTexture
-    if base and DF:GetBarTextureTiling(base) then
+    if base and DF:ResolveTileMode(base, bar.dfTileOverride) then
         if bar.SetRotatesTexture then bar:SetRotatesTexture(false) end
-        local want = DF:ResolveBarTexture(base, isVertical)
+        -- bar.dfTileMirror is stamped by DF:ApplyBarTextureLayers from the bar's Mirror tick.
+        local want = DF:ResolveBarTexture(base, isVertical, bar.dfTileMirror)
         if want ~= bar.dfAppliedTexture then
             bar:SetStatusBarTexture(want)
             bar.dfAppliedTexture = want
@@ -3472,9 +3568,19 @@ local TEXTURE_KEY_LABELS = {
     buffPandemicBorderTexture = "Buff Pandemic Border",
 }
 
+-- Each bar's two texture layers heal the same way, labelled after the bar.
+for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS or {}) do
+    local label = TEXTURE_KEY_LABELS[prefix .. "Texture"] or prefix
+    for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
+        local key = prefix .. "Layer" .. n .. "Texture"
+        TEXTURE_REPAIR_KEYS[#TEXTURE_REPAIR_KEYS + 1] = key
+        TEXTURE_KEY_LABELS[key] = label .. " Layer " .. n
+    end
+end
+
 -- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. This is HEALING, not a migration: a one-shot
 -- flag would repair the profile once and leave every later rename -- every future addon
--- update -- unfixed forever. The pass is a table walk over 14 keys across 2 modes; the
+-- update -- unfixed forever. The pass is a table walk over 26 keys across 2 modes; the
 -- cost is nothing.
 --
 -- ☠ AND IT ONLY EVER TOUCHES OUR OWN MEDIA. A third-party path is left alone even
@@ -7883,14 +7989,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:UpdateDefaultPlayerFrame()
             end
             
-            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat reload)
+            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat
+            -- reload). SetFont on our own font strings is not protected: in combat too.
             if DF.RefreshAllFonts then
-                if InCombatLockdown() then
-                    -- Queue font refresh for after combat
-                    DF.pendingFontRefresh = true
-                else
-                    DF:RefreshAllFonts()
-                end
+                DF:RefreshAllFonts()
             end
             
             -- Flat layout refresh to ensure correct positioning on load
@@ -7940,11 +8042,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- the roster settles. The 0.1s throttle inside UpdateAllMissingBuffIcons
         -- prevents spam from rapid GRU bursts on group transitions.
         if DF.UpdateAllMissingBuffIcons then
-            C_Timer.After(0.3, function()
-                if not InCombatLockdown() then
-                    DF:UpdateAllMissingBuffIcons()
-                end
-            end)
+            C_Timer.After(0.3, function() DF:UpdateAllMissingBuffIcons() end)
         end
         return
         
@@ -8150,11 +8248,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end)
             end
             if DF.UpdateAllMissingBuffIcons then
-                C_Timer.After(0.1, function()
-                    if not InCombatLockdown() then
-                        DF:UpdateAllMissingBuffIcons()
-                    end
-                end)
+                C_Timer.After(0.1, function() DF:UpdateAllMissingBuffIcons() end)
             end
             if DF.UpdateAllPetFrames then
                 C_Timer.After(0.1, function()
@@ -8187,13 +8281,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:UpdateAll()
         end
         
-        -- Process pending font refresh (queued during combat reload)
-        if DF.pendingFontRefresh then
-            DF.pendingFontRefresh = false
-            if DF.RefreshAllFonts then
-                DF:RefreshAllFonts()
-            end
-        end
         
         -- Update missing buff icons now that we're out of combat
         if DF.UpdateAllMissingBuffIcons then

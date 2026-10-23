@@ -62,35 +62,62 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== COMBAT STATUS BANNER (full width) =====
         local combatBanner = GUI:CreateInfoBanner(self.child, { dismissKey = "combat_lockout", notice = true, fontTemplate = "DFFontNormal" })
 
+        -- A pinned "Hide from Main Frames" set puts the main frames on a name list even with
+        -- sorting off (the only way a secure header can leave a member out).
+        local function HidesPinnedMembers(d)
+            local sets = d.pinnedFrames and d.pinnedFrames.sets
+            if type(sets) ~= "table" then return false end
+            for _, set in pairs(sets) do
+                if type(set) == "table" and set.enabled and set.hideFromMainFrames
+                   and set.frameType ~= "friendlyBoss" then
+                    return true
+                end
+            end
+            return false
+        end
+
+        -- ★ THE BANNER STATES WHICH SETTINGS USE A NAME LIST. A name-list header shows only
+        -- the names on it and the list cannot change in combat, so a mid-fight joiner appears
+        -- when combat ends. Self First/Last lists only the player's own group in a GROUPED
+        -- raid; a flat raid and the party header put everyone on one list.
         local function UpdateCombatBanner()
-            if not db.sortEnabled then
+            local hidesPinned = HidesPinnedMembers(db)
+            if not db.sortEnabled and not hidesPinned then
                 combatBanner:Hide()
                 return
             end
             combatBanner:Show()
 
             local selfPos = db.sortSelfPosition or "SORTED"
-            local hasAdvancedOptions = db.sortSeparateMeleeRanged or db.sortByClass or db.sortAlphabetical
+            local sorting = db.sortEnabled
+            local hasAdvancedOptions = sorting
+                and (db.sortSeparateMeleeRanged or db.sortByClass or db.sortAlphabetical)
+            local selfListed = sorting and (selfPos == "FIRST" or selfPos == "LAST")
+            local selfListsOwnGroupOnly = GUI.SelectedMode == "raid" and db.raidUseGroups
 
-            if hasAdvancedOptions then
+            if hasAdvancedOptions or (selfListed and not selfListsOwnGroupOnly) then
                 combatBanner:SetTone("danger")
-                combatBanner:SetText(L["Combat Limitation: All groups will not update with new players that join mid-combat."])
-            elseif selfPos == "FIRST" or selfPos == "LAST" then
+                combatBanner:SetText(L["Combat Limitation: Players who join during combat appear when combat ends."])
+            elseif hidesPinned then
+                combatBanner:SetTone("danger")
+                combatBanner:SetText(L["Combat Limitation: With Hide from Main Frames on, players who join during combat appear when combat ends."])
+            elseif selfListed then
                 combatBanner:SetTone("caution")
                 -- Override default warning icon with info icon for this softer state.
                 combatBanner:SetIconTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\info.png")
-                combatBanner:SetText(L["Combat Limitation: Your group will not update with new players that join mid-combat."])
+                combatBanner:SetText(L["Combat Limitation: Players who join your group during combat appear when combat ends."])
             else
                 combatBanner:SetTone("success")
                 combatBanner:SetText(L["Fully Combat Safe: Frames will update normally during combat."])
             end
         end
 
-        -- Hide when an external FrameSort addon owns sorting OR our sorting is off
-        -- (the combat banner is only meaningful while our sorting is enabled).
-        -- Without the sortEnabled check, the page's RefreshStates re-showed the
-        -- banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
-        combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end
+        -- Hidden when an external FrameSort addon owns sorting, or when nothing here puts
+        -- the frames on a name list. Without the second check, the page's RefreshStates
+        -- re-showed the banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
+        combatBanner.hideOn = function(d)
+            return HideSortOptions(d) or not (d.sortEnabled or HidesPinnedMembers(d))
+        end
         -- Reapply tone + text on every page refresh. RefreshStates calls
         -- refreshContent, so the banner never shows without a tone (the backdrop
         -- defaults to white until toned).
@@ -1454,9 +1481,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function BuildHealthTextureGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture",
+                function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "health",
+                { refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "health",
+                { baseSize = false, refreshStates = tools2.refreshStates })
         end
 
         -- The texture's name, and the fill direction only when it is NOT the
@@ -1960,9 +1993,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
 
             group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
+                { baseSize = true, refreshStates = tools2.refreshStates })
             group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
             group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "reducedMaxHealth",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The overlay's texture, and the blend only when it is NOT the plain
@@ -2328,7 +2366,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
-            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "resourceBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end), 55)
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "resourceBar",
+                { refreshStates = tools2.refreshStates })
 
             group:AddWidget(GUI:CreateDropdown(parent, L["Orientation"], orientOptions, db, "resourceBarOrientation", function()
                 -- RefreshStates so the Size controls rename to the new orientation at once
@@ -2339,6 +2379,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Fill Direction"], db, "resourceBarReverseFill", function() DF:UpdateAllFrames() end), 30)
 
             group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "resourceBar",
+                { baseSize = false, refreshStates = tools2.refreshStates })
         end
 
         -- The texture's name, and the orientation only when it is NOT the plain
@@ -2760,7 +2803,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     textureOptions[path] = name
                 end
             end
-            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() end, textureOptions), 55, 1)
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, textureOptions), 55, 1)
+            GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "absorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
 
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
 
@@ -2837,6 +2882,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local levelSlider = add(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "absorbBarFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("absorb") end, true)), 55, 1)
             levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "absorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The display mode in the dropdown's own words, then the texture's name
@@ -2896,7 +2944,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     healTextureOptions[path] = name
                 end
             end
-            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() end, healTextureOptions), 55, 1)
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, healTextureOptions), 55, 1)
+            GUI:AddBarTileControls(function(w, h) return add(w, h, 1) end, parent, db, "healAbsorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
 
             add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
 
@@ -2933,6 +2983,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local healBgColorPicker = add(GUI:CreateColorPicker(parent, L["Background Color"], db, "healAbsorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 2)
             healBgColorPicker.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healAbsorbBar",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The same two words the shield's card prints, out of this bar's own mode
@@ -3069,8 +3122,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             showModeDropdown.tooltip = L["Which incoming heals the bar shows: all sources, only yours, or only from others."]
 
             local textureOptions = DF:GetTextureList()
-            local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
+            local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() tools2.refreshStates() end, textureOptions), 55)
             texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+            GUI:AddBarTileControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
+                { baseSize = true, refreshStates = tools2.refreshStates,
+                  disableOn = HealPredOffRow })
 
             -- All three, gated by the mode rather than built by it. Split shows
             -- the first two; Mine and Others show one each; All shows the third.
@@ -3093,6 +3149,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
             local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
             blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            GUI:AddTextureLayerControls(function(w, h) return group:AddWidget(w, h) end, parent, db, "healPrediction",
+                { baseSize = true, refreshStates = tools2.refreshStates })
         end
 
         -- The display mode and then the source, both in their own dropdown's

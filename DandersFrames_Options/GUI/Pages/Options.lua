@@ -1217,7 +1217,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
 
             -- Range Check Spell row
-            local rangeSpellDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Range Check Spell"], GetRangeSpellDropdownOptions(), db, "rangeCheckSpellID", SetRangeSpellValue), 55)
+            local rangeSpellDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Range Check Spell"], GetRangeSpellDropdownOptions(), db, "rangeCheckSpellID", SetRangeSpellValue, nil, nil, { optionsFunc = GetRangeSpellDropdownOptions }), 55)
             rangeSpellDropdown.tooltip = L["Select which spell to use for range checking. Auto will use your spec's default healing/friendly spell."]
 
             -- Custom Spell ID Input
@@ -1284,6 +1284,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             local infoLabel = group:AddWidget(GUI:CreateLabel(parent, "|cFFAAAAAA" .. L["Active:"] .. " " .. rangeInfoText .. "|r", 250), 25)
             self.rangeSpellInfoLabel = infoLabel
+
+            -- ★ THE YARDS ARE READ LIVE, SO THE TEXT MUST BE TOO. A talent can lengthen a
+            -- spell's range without changing the spell: the range check follows at once (the
+            -- game answers IsSpellInRange with current talents), but these labels were built
+            -- once and kept the old figure until a reload. Refreshed on every page show and
+            -- after a talent or spell change while the page is open.
+            local function RefreshRangeSpellDisplay()
+                if rangeSpellDropdown.RebuildOptions then
+                    rangeSpellDropdown:RebuildOptions(GetRangeSpellDropdownOptions())
+                end
+                RefreshRangeInfoLabel()
+            end
+            local baseRefresh = rangeSpellDropdown.refreshContent
+            rangeSpellDropdown.refreshContent = function(w, ...)
+                if baseRefresh then baseRefresh(w, ...) end
+                RefreshRangeSpellDisplay()
+            end
+            GUI.rangeSpellDisplays = GUI.rangeSpellDisplays or setmetatable({}, { __mode = "k" })
+            GUI.rangeSpellDisplays[infoLabel] = RefreshRangeSpellDisplay
+            if not GUI.rangeSpellTalentWatch then
+                local watch = CreateFrame("Frame")
+                for _, event in ipairs({ "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED",
+                                          "PLAYER_SPECIALIZATION_CHANGED", "SPELLS_CHANGED" }) do
+                    watch:RegisterEvent(event)
+                end
+                -- One refresh per burst, a frame later so Range.lua has re-resolved its
+                -- spell on the same events first. Hidden copies wait for their page show.
+                local pending = false
+                watch:SetScript("OnEvent", function()
+                    if pending then return end
+                    pending = true
+                    C_Timer.After(0, function()
+                        pending = false
+                        for label, refresh in pairs(GUI.rangeSpellDisplays) do
+                            if label:IsVisible() then refresh() end
+                        end
+                    end)
+                end)
+                GUI.rangeSpellTalentWatch = watch
+            end
 
             -- Range update interval
             if db.rangeUpdateInterval == nil then

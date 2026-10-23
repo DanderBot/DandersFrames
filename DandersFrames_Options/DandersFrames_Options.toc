@@ -75,6 +75,7 @@ GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
+GUI\TextureLayerControls.lua
 # Settings pages -- Options.lua heads the chain, the rest follow in order
 GUI\Pages\Options.lua
 GUI\Pages\Frames.lua

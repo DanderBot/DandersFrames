@@ -250,10 +250,11 @@ do
 
     -- Four gates in all: the health colour mode, the background colour mode,
     -- the background fill and the missing-health colour mode. Plus the enable
-    -- tick's own, which only an unhoisted build (a pinned panel) builds.
+    -- tick's own, which only an unhoisted build (a pinned panel) builds. And the health
+    -- and reduced-max-health Texture dropdowns: the Mirror tick follows the texture.
     local routed = 0
     for _ in PAGE:gmatch("tools2%.refreshStates%(%)") do routed = routed + 1 end
-    eq(routed, 5, "gate: five callbacks route their state pass through the tools")
+    eq(routed, 7, "gate: seven callbacks route their state pass through the tools")
 
 end
 

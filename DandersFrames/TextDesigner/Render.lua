@@ -270,9 +270,10 @@ end
 --      IsForbidden(), so this layer alone is never trusted.
 --   2. pcall backstop with a SUSPEND LATCH — the first failed write flips
 --      reg.suspended, every later mirror write for that registry is skipped,
---      and PLAYER_REGEN_ENABLED clears the latch and forces one category
---      render to resync (same regen-drain idiom as AuraContainer's
---      _registerRegen).
+--      and the drain below clears the latch and forces one category render to
+--      resync once auras stop being secret (AuraContainer's _registerRegen
+--      idiom). Secrecy, not combat: it can outlast combat (M+ between pulls)
+--      and lift with no combat edge (leaving a key or a PvP zone).
 --
 -- ☠ NEVER Hide() as a failure fallback — Hide is itself a denied write on the
 -- same object. Skipping entirely is the only safe response to a denial.
@@ -287,7 +288,7 @@ end
 -- stays correct throughout.
 -- ============================================================
 
--- Lazily-created PLAYER_REGEN_ENABLED drain for suspended registries. Weak
+-- Lazily-created drain for suspended registries. Weak
 -- keys, like AuraContainer._regen._handles: a frame released while suspended
 -- must not be pinned alive by the drain set.
 local function registerMirrorRegen(frame)
@@ -296,7 +297,11 @@ local function registerMirrorRegen(frame)
         drain = CreateFrame("Frame")
         drain._frames = setmetatable({}, { __mode = "k" })
         drain:RegisterEvent("PLAYER_REGEN_ENABLED")
+        drain:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
         drain:SetScript("OnEvent", function(self)
+            -- Still secret: a resync now would only be refused and re-latch.
+            local AC = DF.AuraContainer
+            if AC and AC.AurasRestricted and AC.AurasRestricted() then return end
             -- Removing the CURRENT key during pairs is legal; nothing here can
             -- ADD one mid-loop — UpdateTextDesigner only marks the coalescing
             -- buffer, so no write (hence no re-suspend) runs before next frame.

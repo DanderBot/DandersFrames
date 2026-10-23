@@ -109,6 +109,33 @@ local function RegisterCustomMedia()
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Medium.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Large", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Large.png")
 
+    -- Texture-layer masks: white, so the layer's own colour tints them. Patterns
+    -- tile both ways; shading tiles along the bar and stretches across it (see
+    -- LAYER_PATTERN_TILES / LAYER_SHADE_TILES in Core.lua).
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Diagonal", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Diagonal.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Diagonal HD", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Diagonal_HD.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Dots", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Dots.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Grid", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Grid.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Checker", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Checker.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Top", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Top.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Bottom", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Bottom.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Bevel", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Bevel.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Layer Shade Tube", "Interface\\AddOns\\DandersFrames\\Media\\DF_Layer_Shade_Tube.png")
+
+    -- Pattern masks for the texture layers (white, tinted by the layer colour).
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Biohazard V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Biohazard_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Heart V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Heart_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Heart V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Heart_V2.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Minus B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Minus_B_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V2.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus BG V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_BG_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Radioactive V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Radioactive_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Shield V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Shield_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Star V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Star_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V2.png")
+
     -- Health bar textures
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Smooth", "Interface\\AddOns\\DandersFrames\\Media\\DF_Smooth")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Glossy", "Interface\\AddOns\\DandersFrames\\Media\\DF_Glossy")
@@ -187,11 +214,19 @@ local SHIPPED_MEDIA_FILES = {
     "Classic_Curve.tga",
     "DF_Absorb_V1.png",
     "DF_Absorb_V1_Medium.png",
+    "DF_Absorb_V1_Medium_Mirror.png",
+    "DF_Absorb_V1_Medium_Mirror_Vert.png",
     "DF_Absorb_V1_Medium_Vert.png",
+    "DF_Absorb_V1_Mirror.png",
+    "DF_Absorb_V1_Mirror_Vert.png",
     "DF_Absorb_V1_Vert.png",
     "DF_Absorb_V1_Wide.png",
+    "DF_Absorb_V1_Wide_Mirror.png",
+    "DF_Absorb_V1_Wide_Mirror_Vert.png",
     "DF_Absorb_V1_Wide_Vert.png",
     "DF_Absorb_V1_Wider.png",
+    "DF_Absorb_V1_Wider_Mirror.png",
+    "DF_Absorb_V1_Wider_Mirror_Vert.png",
     "DF_Absorb_V1_Wider_Vert.png",
     "DF_Absorb_V2_Minus_Large.png",
     "DF_Absorb_V2_Minus_Medium.png",
@@ -222,8 +257,39 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Healer.tga",
     "DF_Icon.tga",
     "DF_Inset.tga",
+    "DF_Layer_Checker.png",
+    "DF_Layer_Diagonal.png",
+    "DF_Layer_Diagonal_HD.png",
+    "DF_Layer_Diagonal_HD_Mirror.png",
+    "DF_Layer_Diagonal_HD_Mirror_Vert.png",
+    "DF_Layer_Diagonal_HD_Vert.png",
+    "DF_Layer_Diagonal_Mirror.png",
+    "DF_Layer_Diagonal_Mirror_Vert.png",
+    "DF_Layer_Diagonal_Vert.png",
+    "DF_Layer_Dots.png",
+    "DF_Layer_Grid.png",
+    "DF_Layer_Shade_Bevel.png",
+    "DF_Layer_Shade_Bevel_Vert.png",
+    "DF_Layer_Shade_Bottom.png",
+    "DF_Layer_Shade_Bottom_Vert.png",
+    "DF_Layer_Shade_Top.png",
+    "DF_Layer_Shade_Top_Vert.png",
+    "DF_Layer_Shade_Tube.png",
+    "DF_Layer_Shade_Tube_Vert.png",
     "DF_Matte.tga",
     "DF_Minimalist.tga",
+    "DF_Pattern_Biohazard_V1.png",
+    "DF_Pattern_Heart_V1.png",
+    "DF_Pattern_Heart_V2.png",
+    "DF_Pattern_Minus_B_V1.png",
+    "DF_Pattern_Plus_B_V1.png",
+    "DF_Pattern_Plus_B_V2.png",
+    "DF_Pattern_Plus_BG_V1.png",
+    "DF_Pattern_Radioactive_V1.png",
+    "DF_Pattern_Shield_V1.png",
+    "DF_Pattern_Star_V1.png",
+    "DF_Pattern_X_B_V1.png",
+    "DF_Pattern_X_B_V2.png",
     "DF_Ring.tga",
     "DF_Smooth.tga",
     "DF_Soft.tga",
@@ -3039,6 +3105,106 @@ DF.PartyDefaults = {
     },
 
 }
+
+-- ============================================================
+-- TEXTURE LAYER DEFAULTS
+-- ============================================================
+-- Two extra layers per bar plus a Tile override and tile size for the bar's own
+-- texture (Frames/TextureLayers.lua); the layers sit behind one per-bar switch. Every
+-- default leaves a bar exactly as it was: Tile "AUTO" is the texture's own tiling, tile
+-- size 0 is Auto (the texture's preset size, else its own), and the switch is off.
+DF.TEXTURE_LAYER_BARS = { "absorbBar", "healAbsorbBar", "healPrediction", "reducedMaxHealth", "health", "resourceBar" }
+DF.TEXTURE_LAYER_EXTRA = { 2, 3 }
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    local LAYER_DEFAULTS = {
+        [2] = { texture = MEDIA .. "DF_Layer_Diagonal.png", color = { r = 1, g = 1, b = 1, a = 0.5 } },
+        [3] = { texture = MEDIA .. "DF_Layer_Shade_Top.png", color = { r = 1, g = 1, b = 1, a = 0.35 } },
+    }
+    for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS) do
+        DF.PartyDefaults[prefix .. "TextureLayersEnabled"] = false
+        DF.PartyDefaults[prefix .. "TextureLook"] = "CUSTOM"
+        DF.PartyDefaults[prefix .. "TileMode"] = "AUTO"
+        DF.PartyDefaults[prefix .. "TileSize"] = 0
+        DF.PartyDefaults[prefix .. "TileMirror"] = false
+        for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
+            local p, d = prefix .. "Layer" .. n, LAYER_DEFAULTS[n]
+            DF.PartyDefaults[p .. "Enabled"] = false
+            DF.PartyDefaults[p .. "Texture"] = d.texture
+            DF.PartyDefaults[p .. "Color"] = { r = d.color.r, g = d.color.g, b = d.color.b, a = d.color.a }
+            DF.PartyDefaults[p .. "BlendMode"] = "BLEND"
+            DF.PartyDefaults[p .. "TileMode"] = "AUTO"
+            DF.PartyDefaults[p .. "TileSize"] = 0
+            DF.PartyDefaults[p .. "TileMirror"] = false
+        end
+    end
+end
+
+-- ============================================================
+-- TEXTURE LAYER LOOKS (Quick Start)
+-- ============================================================
+-- One-click starting points. Each sets only the layer settings -- never the bar's own
+-- texture or colour -- so a look sits on whatever the card already shows. A bar
+-- remembers the look picked (<bar>TextureLook), and while it is a look the layer
+-- settings' changed-dots and resets measure against THAT look instead of the shipped
+-- defaults (Core/Defaults.lua, DF.DEFAULT_BASELINES). "CUSTOM" has nothing to measure
+-- against, so it dots nothing. The Texture Layers switch still dots against its default.
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    local function Layer(texture, r, g, b, a)
+        return { texture = MEDIA .. texture .. ".png", color = { r = r, g = g, b = b, a = a } }
+    end
+    DF.TEXTURE_LAYER_LOOKS = {
+        DIAGONAL = { [2] = Layer("DF_Layer_Diagonal", 1, 1, 1, 0.45) },
+        DOTS     = { [2] = Layer("DF_Layer_Dots", 1, 1, 1, 0.45) },
+        GRID     = { [2] = Layer("DF_Layer_Grid", 1, 1, 1, 0.35) },
+        GLOSS    = { [3] = Layer("DF_Layer_Shade_Top", 1, 1, 1, 0.35) },
+        BEVEL    = { [3] = Layer("DF_Layer_Shade_Bevel", 1, 1, 1, 0.3) },
+        TUBE     = { [3] = Layer("DF_Layer_Shade_Tube", 1, 1, 1, 0.3) },
+        SHADOW   = { [3] = Layer("DF_Layer_Shade_Bottom", 0, 0, 0, 0.45) },
+        DIAGONAL_GLOSS = {
+            [2] = Layer("DF_Layer_Diagonal", 1, 1, 1, 0.4),
+            [3] = Layer("DF_Layer_Shade_Top", 1, 1, 1, 0.3),
+        },
+    }
+
+    -- Per bar, the settings a look owns, in write order; and per key, where it sits.
+    local FIELDS = { "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize", "TileMirror" }
+    local where = {}
+    DF.TEXTURE_LOOK_KEYS = {}
+    DF.DEFAULT_BASELINES = DF.DEFAULT_BASELINES or {}
+    for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS) do
+        local keys = {}
+        for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA) do
+            for _, field in ipairs(FIELDS) do
+                local key = prefix .. "Layer" .. n .. field
+                keys[#keys + 1] = key
+                where[key] = { n = n, field = field }
+            end
+        end
+        DF.TEXTURE_LOOK_KEYS[prefix] = keys
+        local lookKey = prefix .. "TextureLook"
+        for _, key in ipairs(keys) do
+            DF.DEFAULT_BASELINES[key] = function(stored) return DF:TextureLookValue(stored[lookKey], key) end
+        end
+    end
+
+    -- What look `id` sets `key` to: nil for Custom, an unknown look, or a setting of a
+    -- layer the look leaves off. ⚠ A colour comes back as the look's own table.
+    function DF:TextureLookValue(id, key)
+        local look, w = id and DF.TEXTURE_LAYER_LOOKS[id], where[key]
+        if not (look and w) then return nil end
+        local l = look[w.n]
+        if w.field == "Enabled" then return l ~= nil end
+        if not l then return nil end
+        if w.field == "Texture" then return l.texture end
+        if w.field == "Color" then return l.color end
+        if w.field == "BlendMode" then return "BLEND" end
+        if w.field == "TileMode" then return "AUTO" end
+        if w.field == "TileMirror" then return false end
+        return 0
+    end
+end
 
 -- ============================================================
 -- RAID DEFAULTS — GENERATED from PartyDefaults

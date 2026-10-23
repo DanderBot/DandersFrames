@@ -110,6 +110,7 @@ Frames\AuraContainer.lua
 Frames\Create.lua
 Frames\Headers.lua
 Frames\Update.lua
+Frames\TextureLayers.lua
 Frames\Bars.lua
 Frames\ReducedMaxHealth.lua
 Frames\Icons.lua
