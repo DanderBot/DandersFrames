@@ -7400,7 +7400,24 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         
         -- Only if headers are fully initialized
         if not DF.headersInitialized then return end
-        
+
+        -- ☠ A PARTY HEADER IN A RAID SHOWS YOUR SUBGROUP. With showParty on, the game's own
+        -- header update treats party1-4 as the raid subgroup the moment a raid forms, and
+        -- draws them in the party layout until the visibility update hides the header -- a
+        -- frame later, behind the auto layout's long build frame (join scan: party shown=5
+        -- for 0.45 s on a big join). Hidden here, in the same event, it never draws. The
+        -- deferred update hides it in a raid anyway; this only does it first. Not in combat:
+        -- a secure header cannot be hidden then, and a mid-fight raid behaves as it did.
+        if event == "GROUP_ROSTER_UPDATE" and IsInRaid() and not InCombatLockdown()
+            and DF.partyHeader and DF.partyHeader:IsShown()
+            and not (DF.testMode or DF.raidTestMode) then
+            local contentType = DF.GetContentType and DF:GetContentType()
+            if contentType ~= "arena" then
+                DF.partyHeader:Hide()
+                DF:Debug("VISIBILITY", "raid formed: party header hidden in the roster event")
+            end
+        end
+
         -- ARENA RELOAD FIX: On UI reload, enable the content type fallback so that
         -- GetContentType() can use the saved arena hint from before the reload.
         -- This must run BEFORE any call to GetContentType() in this handler.
