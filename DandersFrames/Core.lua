@@ -8072,7 +8072,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- join as the client syncs talent/spec data. Doing a full UpdateAllFrames
         -- + Aura Designer refresh on every fire caused a noticeable hitch when
         -- joining a large raid. Coalesce the burst into a single deferred refresh.
-        if not DF._specTalentRefreshScheduled then
+        -- ☠ PLAYER_SPECIALIZATION_CHANGED FIRES FOR EVERY GROUP MEMBER whose spec becomes
+        -- known (arg1 = their unit), not just the player. Everything below is the player's
+        -- own concern (spec profile switch, resource bar colours, the player's dispel
+        -- talents), and in a raid the others' events re-ran it mid-fight: a restyle of every
+        -- frame's rows, plus a second one queued for the end of combat.
+        if (event ~= "PLAYER_SPECIALIZATION_CHANGED" or not arg1 or arg1 == "player")
+            and not DF._specTalentRefreshScheduled then
             DF._specTalentRefreshScheduled = true
             C_Timer.After(0.15, function()
                 DF._specTalentRefreshScheduled = false
