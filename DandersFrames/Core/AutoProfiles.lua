@@ -2186,14 +2186,14 @@ local function MigrateAutoProfileOverrides()
 end
 
 -- Evaluate current content/raid state and apply/remove profiles as needed
--- ☠ THE GROUP IS NOT SETTLED STRAIGHT AFTER A LOADING SCREEN. The first evaluation after
--- zoning into an instance can see no raid group, or a member count that matches no range,
--- while the instance group fills in; the roster update a moment later sees the real one.
--- Acting on the first meant leaving the active layout and coming straight back -- two full
--- rebuilds of every frame inside half a second. For SETTLE_SECONDS after a loading screen a
--- change AWAY from an active layout waits and is re-checked once the window closes. A
--- layout taking over from none still applies at once.
-local SETTLE_SECONDS = 2
+-- ☠ THE GROUP IS NOT SETTLED STRAIGHT AFTER A LOADING SCREEN. For a few seconds after
+-- zoning into an instance the evaluation can find no layout at all, then the real one --
+-- measured at over two seconds into LFR. Acting on the "none" dropped the active layout and
+-- rebuilt every frame on the base settings, only to rebuild them all again moments later.
+-- So for SETTLE_SECONDS after a loading screen a drop to NO layout is held and re-checked
+-- every second; a real layout, a different one included, applies the moment it is found.
+-- A drop that is still the answer when the window closes goes through.
+local SETTLE_SECONDS = 8
 local settleUntil = 0
 local settleRecheckArmed = false
 
@@ -2225,12 +2225,12 @@ function AutoProfilesUI:EvaluateAndApply()
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
 
-    if self.activeRuntimeProfile and GetTime() < settleUntil then
-        DF:Debug("AUTOPROFILE", "EvaluateAndApply: \"%s\" -> \"%s\" held until the group settles after the loading screen",
-            oldName, newName)
+    if newProfile == nil and self.activeRuntimeProfile and GetTime() < settleUntil then
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: \"%s\" -> none held while the group settles after the loading screen",
+            oldName)
         if not settleRecheckArmed then
             settleRecheckArmed = true
-            C_Timer.After(settleUntil - GetTime() + 0.05, function()
+            C_Timer.After(math.min(1, settleUntil - GetTime() + 0.05), function()
                 settleRecheckArmed = false
                 AutoProfilesUI:EvaluateAndApply()
             end)
