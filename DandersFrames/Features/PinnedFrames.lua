@@ -525,7 +525,7 @@ function PinnedFrames:AutoPopulateSet(set, roster)
                 end
 
                 -- Exclude Self: never auto-add the player to this set.
-                if shouldAdd and set.excludeSelf and UnitIsUnit(unit, "player") then
+                if shouldAdd and set.excludeSelf and DF.UnitIsUnit(unit, "player") then
                     shouldAdd = false
                 end
 

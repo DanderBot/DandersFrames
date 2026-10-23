@@ -676,7 +676,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
     -- they count as any-caster there. Inlined: resolvePoolMode is declared below this
     -- function, and calling it from here would compile as a nil global.
     local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
-    local onOwnFrame = frame.unit and UnitIsUnit and UnitIsUnit(frame.unit, "player")
+    local onOwnFrame = frame.unit and DF.UnitIsUnit(frame.unit, "player")
     local union, mineOnly
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
@@ -938,7 +938,7 @@ local function resolvePoolMode(spec, auraName, frame, mine)
         return mine
     end
     local unit = frame and frame.unit
-    if unit and UnitIsUnit and UnitIsUnit(unit, "player") then return SELF_ONLY end
+    if unit and DF.UnitIsUnit(unit, "player") then return SELF_ONLY end
     return mine
 end
 
@@ -4500,7 +4500,7 @@ function Factory:SetHelperSoundsArmed(frame, armed, map, cfg)
     -- registration -- but unitToken is per registration, so we simply never register for
     -- ourselves. This is also the Twins of the Sun Priestess case: that talent copies every
     -- Power Infusion back onto the priest.
-    if UnitIsUnit(frame.unit, "player") then return 0, "own unit (never registered, by design)" end
+    if DF.UnitIsUnit(frame.unit, "player") then return 0, "own unit (never registered, by design)" end
 
     -- ☠ THE PER-UNIT NARROWINGS HOLD HERE TOO -- role, and now the named-player allowlist.
     -- The visual gate applies them at the container funnel, which sound never passes through:

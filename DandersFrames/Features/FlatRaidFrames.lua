@@ -182,7 +182,7 @@ function FlatRaidFrames:BuildSortedNameList()
         -- across once the inspect resolved. The persistent cache is what stops that flip,
         -- which is precisely why the header path consults it first.
         local specID
-        if UnitIsUnit(unit, "player") then
+        if DF.UnitIsUnit(unit, "player") then
             local spec = C_SpecializationInfo.GetSpecialization()
             if spec then
                 specID = C_SpecializationInfo.GetSpecializationInfo(spec)
@@ -310,7 +310,7 @@ function FlatRaidFrames:BuildSortedNameList()
                 sortRole = role
             end
             
-            local isPlayer = UnitIsUnit(unit, "player")
+            local isPlayer = DF.UnitIsUnit(unit, "player")
             
             local entry = {
                 name = name,

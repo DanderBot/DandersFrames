@@ -920,7 +920,7 @@ local function checkOutOfRangeAttribution()
     local outN, outAll, outMine = 0, 0, 0
     for i = 1, count do
         local unit = prefix .. i
-        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+        if UnitExists(unit) and not DF.UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
             -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
             -- checked=false means "could not test", not "out of range", and counting
             -- those as distant would poison the out-of-range half with units that are
@@ -1544,7 +1544,7 @@ local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
 -- should be its own change with its own testing.
 local function helperUnitRole(unit)
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
+    if DF.UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         local role = spec and GetSpecializationRole(spec)
         if role and role ~= "NONE" then return role end
@@ -4176,6 +4176,19 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind AddDispelTypeTexture in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
+                -- ☠ ANCHOR THE BUTTON AT BIRTH. initializeFrame runs before the
+                -- button's access restrictions; the SetAllPoints after AddAuraSlot
+                -- returns runs after them and, while auras are secret, is refused and
+                -- swallowed by its pcall. An unanchored button has no rect, so
+                -- everything hung on it draws nothing: the dispel overlay was blank
+                -- after a login into secret content while group rows, which the
+                -- engine lays out itself, were fine. Anchored first, so the consumer's
+                -- onInit measures a placed button.
+                local host, innerInit = handle.frame, slotInit
+                slotInit = function(button)
+                    pcall(button.SetAllPoints, button, host)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4190,6 +4203,13 @@ function NativeBackend:build()
                 local slotInit = (rec.style or rec.onInit)
                     and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     or initFn
+                -- Positioned at birth for the overlay's reason (see above).
+                local fa, padY, innerInit = handle._flowAnchor or "TOPLEFT", handle._flowPadY or 0, slotInit
+                slotInit = function(button)
+                    pcall(button.ClearAllPoints, button)
+                    pcall(button.SetPoint, button, fa, c, fa, 0, padY)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })

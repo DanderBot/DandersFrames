@@ -91,7 +91,7 @@ local function GetInRange(frame)
     
     if not UnitExists(unit) then
         return true
-    elseif UnitIsUnit(unit, "player") then
+    elseif DF.UnitIsUnit(unit, "player") then
         return true  -- Player is always in range
     end
     

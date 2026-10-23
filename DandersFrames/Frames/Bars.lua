@@ -57,7 +57,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         if frame and frame.isPinnedFrame then
             soloScoped = true
         else
-            local isSelf = unit and UnitIsUnit(unit, "player")
+            local isSelf = unit and DF.UnitIsUnit(unit, "player")
             if issecretvalue(isSelf) then isSelf = false end
             soloScoped = isSelf and true or false
         end
