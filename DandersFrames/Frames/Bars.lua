@@ -2307,7 +2307,19 @@ function DF:UpdateHealPrediction(frame, testIndex)
             if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
             return
         end
-        
+
+        -- ☠ NO PREDICTION ON A BLANKED FRAME. Offline and dead units get a fixed health bar
+        -- from the health code, which hides the absorb and heal absorb on the same branches;
+        -- the prediction was left drawing. Its range comes from UnitHealthMax, which can be 0
+        -- for a unit that is not loaded yet -- and a 0..0 StatusBar draws FULL, one whole bar
+        -- past the fill, into the next frame along. Blizzard's frames guard that state with
+        -- `maxHealth <= 0`; the value is secret here, so the guard is the unit state instead.
+        if (UnitIsPlayer(unit) and not UnitIsConnected(unit)) or UnitIsDead(unit) or UnitIsGhost(unit) then
+            if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+            if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+            return
+        end
+
         -- Get maxHealth - StatusBar API handles secret values internally via SetMinMaxValues
         maxHealth = UnitHealthMax(unit)
         
