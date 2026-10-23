@@ -8248,6 +8248,11 @@ end
 headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- Skip if headers not initialized
     if not DF.headersInitialized then return end
+    -- The UNIT_* events here are registered globally, so every enemy nameplate's health
+    -- and power ticks land here too: two-thirds of all calls in an LFR fight, each still
+    -- paying the pinned lookup and a Text Designer refresh. No DF frame shows a nameplate
+    -- unit. (An anchored find allocates nothing.)
+    if type(arg1) == "string" and arg1:find("^nameplate") then return end
     
     -- ========================================
     -- UNIT-SPECIFIC EVENTS (high frequency, checked first)
