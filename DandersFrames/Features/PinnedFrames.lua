@@ -1302,6 +1302,13 @@ end
 
 -- Create 8 standalone SecureUnitButtonTemplate frames for a boss-mode set
 -- Parented to the container; unit attributes are hardcoded to boss1..boss8
+local BOSS_UNIT_EVENTS = {
+    "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_MAX_HEALTH_MODIFIERS_CHANGED",
+    "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
+    "UNIT_AURA", "UNIT_NAME_UPDATE", "UNIT_FACTION",
+    "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_PREDICTION",
+}
+
 function PinnedFrames:CreateBossFrames(setIndex, container)
     if self.bossFrames[setIndex] then return end
     if InCombatLockdown() then
@@ -1344,18 +1351,19 @@ function PinnedFrames:CreateBossFrames(setIndex, container)
         -- function on `self`. This avoids "dispatcher forgot boss frames"
         -- bugs because each frame listens for what it needs directly.
         local bossUnit = "boss" .. i
-        frame:RegisterUnitEvent("UNIT_HEALTH", bossUnit)
-        frame:RegisterUnitEvent("UNIT_MAXHEALTH", bossUnit)
-        frame:RegisterUnitEvent("UNIT_MAX_HEALTH_MODIFIERS_CHANGED", bossUnit)
-        frame:RegisterUnitEvent("UNIT_POWER_UPDATE", bossUnit)
-        frame:RegisterUnitEvent("UNIT_MAXPOWER", bossUnit)
-        frame:RegisterUnitEvent("UNIT_DISPLAYPOWER", bossUnit)
-        frame:RegisterUnitEvent("UNIT_AURA", bossUnit)
-        frame:RegisterUnitEvent("UNIT_NAME_UPDATE", bossUnit)
-        frame:RegisterUnitEvent("UNIT_FACTION", bossUnit)
-        frame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", bossUnit)
-        frame:RegisterUnitEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED", bossUnit)
-        frame:RegisterUnitEvent("UNIT_HEAL_PREDICTION", bossUnit)
+        -- Registered only while the frame is visible. A HOSTILE boss exists for the whole
+        -- encounter while its friendly-only frame stays hidden, and every event it fires
+        -- still cost a Lua call into a handler that returned at once: tens of thousands per
+        -- fight across five frames. The show refresh InitializeHeaderChild hooks catches the
+        -- frame up when it appears.
+        local function setBossEvents(self, on)
+            for _, ev in ipairs(BOSS_UNIT_EVENTS) do
+                if on then self:RegisterUnitEvent(ev, bossUnit) else self:UnregisterEvent(ev) end
+            end
+        end
+        frame:HookScript("OnShow", function(self) setBossEvents(self, true) end)
+        frame:HookScript("OnHide", function(self) setBossEvents(self, false) end)
+        if frame:IsVisible() then setBossEvents(frame, true) end
 
         frame:SetScript("OnEvent", function(self, event, unit, updateInfo)
             -- Skip work if hidden. IsVisible (not IsShown): a DISABLED boss
