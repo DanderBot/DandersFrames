@@ -6,7 +6,7 @@
 
 - (Bars) The Absorb, Heal Absorb, Heal Prediction, Reduced Max Health, Health and Resource bars get a **Tile** setting under their Texture, and the first four a **Tile Size** too: Auto uses the texture's own size, Fit to Bar repeats the pattern once per bar height, or set your own. New **Texture Layers** stack up to two more textures on top: a pattern and a shading layer, each with its own texture, colour, blend and tiling. A live preview shows the result at your frames' size, and a **Presets** dropdown fills the layers with a ready-made look you can then adjust; the changed-dots then show what you changed from that preset. Off by default, so your bars look exactly as before. (by Krathe, original idea by Aphoex)
 - (Bars) A **Mirror** tick leans striped and diagonal textures the other way, on the bar's own texture and on each layer, so the stripes can match another look. (by Krathe)
-- (Bars) Seven new pattern textures for Texture Layers: Biohazard, Plus, Shield and X designs. (art by Aphoex)
+- (Bars) Twelve new pattern textures for Texture Layers: Biohazard, Heart, Minus, Plus, Radioactive, Shield, Star and X designs. (art by Aphoex)
 
 ### Improvements
 
