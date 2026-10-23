@@ -113,6 +113,19 @@ do
     eq(table.concat(order, ","), "big,ok", "skip: a destroyed or already-built handle is not built again")
 end
 
+-- ---- slot containers build at once, even with the budget spent ----
+do
+    local pacedBuild = load(false)
+    clock.frame, clock.ms, order = 80, 0, {}
+    pacedBuild(H("big", 40))
+    local ov, one, row = H("overlay", 1), H("single", 1), H("row", 1)
+    ov.config.mode, one.config.singleSlot = "overlay", true
+    pacedBuild(ov); pacedBuild(one); pacedBuild(row)
+    check(ov.backend and one.backend, "slots: overlay and single-slot builds are never deferred")
+    check(not row.backend, "slots: a group row still waits for budget")
+    nextFrame()
+end
+
 -- ---- a deferred build calls its owner back; an immediate one does not ----
 do
     local pacedBuild = load(false)

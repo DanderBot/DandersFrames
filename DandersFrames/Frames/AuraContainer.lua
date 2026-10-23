@@ -8551,6 +8551,16 @@ local function drainBuilds(self)
 end
 
 local function pacedBuild(h)
+    -- ☠ SLOT CONTAINERS ARE NEVER DEFERRED. Overlay, missing and single-slot builds that
+    -- landed on a later frame came up blank in game -- the dispel overlay and its symbols
+    -- undressed, the Aura Designer frame border not animating -- while immediate builds of
+    -- the same containers were fine and deferred GROUP rows were fine. The mechanism is not
+    -- pinned; the cost is: one button each, against ten per group, so the groups the budget
+    -- exists for are still paced.
+    local cfg = h.config
+    if cfg and (cfg.mode == "overlay" or cfg.mode == "missing" or cfg.singleSlot) then
+        return h:_build()
+    end
     -- Straight through while this frame has budget and nothing is waiting ahead of it.
     if buildHead > buildTail and buildBudgetLeft() > 0 then
         local t0 = debugprofilestop()
