@@ -32,7 +32,8 @@
 - (Dispel) The dispel overlay and dispel symbols now show in battlegrounds and arena, and after logging in anywhere auras are restricted. They stayed blank until a /reload, while test mode looked fine. (by Krathe)
 - (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
 - (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
-- (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. The heal prediction bar is now hidden on offline and dead players, like the absorb bars already were. (by Krathe)
+- (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. (by Krathe)
+- (Heal Prediction) The heal prediction bar is hidden on offline and dead players, like the absorb bars already were. (by Krathe)
 
 ## [5.5.0]
 

@@ -2165,6 +2165,45 @@ local function AnchorHealPredSegment(seg, prevTex, orient, w, h)
     end
 end
 
+-- ☠ A FRESHLY SET FILL COVERS THE WHOLE BAR UNTIL THE ENGINE PLACES IT. SetStatusBarTexture
+-- pins the fill to the bar's two corners; the engine re-anchors it to the value (four points)
+-- only on a later frame, whatever value is already set. An overlay segment spans a full
+-- health bar beyond the health fill, so for those frames it painted a whole frame-sized
+-- box over the next frame along -- the flash of extra frames on a big join or a relog,
+-- where every segment is born at once. So a just-textured fill stays invisible until it is
+-- re-anchored. Its texture alpha, not the bar's: the bar's alpha is the out-of-range fade.
+-- ⚠ Capped: a fill that never reports four points is shown anyway after a few frames, so
+-- a change in how the engine anchors fills can only bring the flash back, never hide a bar.
+local FILL_HOLD_MAX_FRAMES = 5
+local heldFills = {}
+local fillHoldWatcher = CreateFrame("Frame")
+fillHoldWatcher:Hide()
+fillHoldWatcher:SetScript("OnUpdate", function(self)
+    local any = false
+    for fill, hold in pairs(heldFills) do
+        local okN, n = pcall(fill.GetNumPoints, fill)
+        local placed = okN and not (issecretvalue and issecretvalue(n)) and n ~= 2
+        if placed or hold.frames >= FILL_HOLD_MAX_FRAMES then
+            heldFills[fill] = nil
+            -- Texture layers redrawing the base keep the fill at 0 themselves.
+            local layers = hold.bar.dfTextureLayers
+            if not (layers and layers.baseHidden) then fill:SetAlpha(1) end
+        else
+            hold.frames = hold.frames + 1
+            any = true
+        end
+    end
+    if not any then self:Hide() end
+end)
+
+local function HoldFillUntilPlaced(bar)
+    local fill = bar and bar:GetStatusBarTexture()
+    if not fill then return end
+    fill:SetAlpha(0)
+    heldFills[fill] = { bar = bar, frames = 0 }
+    fillHoldWatcher:Show()
+end
+
 -- Get/create the second heal-prediction segment ("others' heals" in SPLIT mode).
 local function GetOrCreateHealPredSegment2(frame)
     if not frame.dfHealPredictionBar2 then
@@ -2183,6 +2222,7 @@ local function StyleHealPredSegment(seg, tex, blendMode, color, db, layerOpts)
         DF:SafeSetStatusBarTexture(seg, tex)   -- also sets tiling + texcoords
         local t = seg:GetStatusBarTexture()
         if t then t:SetDrawLayer("ARTWORK", 1) end
+        HoldFillUntilPlaced(seg)
     end
     local t = seg:GetStatusBarTexture()
     if t then t:SetBlendMode(blendMode) end
@@ -2479,6 +2519,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         if barTex then
             barTex:SetDrawLayer("ARTWORK", 1)
         end
+        HoldFillUntilPlaced(bar)
     end
     
     local barTex = bar:GetStatusBarTexture()
