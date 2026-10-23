@@ -2479,10 +2479,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
     
     bar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
     -- Kept as one table: the split mode's second segment reuses its span and axis.
-    local healPredLayerOpts = {
-        span = (mode == "FLOATING") and bar or frame.healthBar, isVertical = healPredVertical,
-        baseColor = color, baseBlend = blendMode,
-    }
+    -- Reused per bar rather than built per call: this runs on every heal-prediction
+    -- event, and ApplyBarTextureLayers reads the fields without keeping the table.
+    local healPredLayerOpts = bar.dfLayerOpts
+    if not healPredLayerOpts then
+        healPredLayerOpts = {}
+        bar.dfLayerOpts = healPredLayerOpts
+    end
+    healPredLayerOpts.span = (mode == "FLOATING") and bar or frame.healthBar
+    healPredLayerOpts.isVertical = healPredVertical
+    healPredLayerOpts.baseColor, healPredLayerOpts.baseBlend = color, blendMode
     if DF:BarTextureLayersWanted(bar, db, "healPrediction") then
         DF:ApplyBarTextureLayers(bar, "healPrediction", db, healPredLayerOpts)
     end
