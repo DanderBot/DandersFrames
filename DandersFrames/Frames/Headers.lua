@@ -34,6 +34,10 @@ rosterThrottleFrame:SetScript("OnUpdate", function(self)
     DF:Debug("ROSTER", "Throttle fired: processing %d coalesced GRU events (%d total since PEW)", gruBurstCount, gruEventCount)
     gruBurstCount = 0
     if not InCombatLockdown() then
+        -- A pending auto layout change applies first, so this lays out in the right layout.
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.RunPendingEval then
+            DF.AutoProfilesUI:RunPendingEval()
+        end
         DF:ProcessRosterUpdate()
     else
         -- ARENA FIX: Check for arena first - arena is IsInRaid()=true but needs
@@ -945,6 +949,13 @@ function DF:InitializeHeaderChild(frame)
             
             if actualUnit then
                 QueueFullFrameRefresh(self)
+                -- The full refresh is deferred, and in a big join it queues behind the
+                -- container builds; until it lands the frame shows the PREVIOUS occupant's
+                -- name and health, or none. The visible basics follow the new unit now.
+                pcall(DF.UpdateName, DF, self)
+                pcall(DF.UpdateHealthFast, DF, self)
+                pcall(DF.ApplyHealthColors, DF, self)
+                if DF.RenderTextDesignerNow then pcall(DF.RenderTextDesignerNow, DF, self) end
             end
 
             -- Fire OnFramesSorted for external API subscribers whenever a child's

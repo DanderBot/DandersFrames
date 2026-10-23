@@ -2314,6 +2314,17 @@ local function QueueAutoProfileEval()
     autoProfileThrottleFrame:Show()
 end
 
+-- ☠ THE ROSTER UPDATE ASKS FIRST. Both this evaluation and the roster update are queued
+-- for the next frame by the same GROUP_ROSTER_UPDATE, and which runs first is not ours to
+-- choose. When the roster ran first it laid the raid out in the BASE settings, then this
+-- switched layouts: a join showed the base arrangement, at the base position, before the
+-- layout's. The roster update now runs a pending evaluation itself before doing anything.
+function AutoProfilesUI:RunPendingEval()
+    if not autoProfileThrottleFrame:IsShown() then return false end
+    autoProfileThrottleFrame:GetScript("OnUpdate")(autoProfileThrottleFrame)
+    return true
+end
+
 autoProfileEventFrame:SetScript("OnEvent", function(self, event)
     if not DF.initialized then return end
     if event == "PLAYER_REGEN_ENABLED" then

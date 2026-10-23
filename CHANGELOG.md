@@ -14,6 +14,12 @@
 - (Debuffs) Ticking both Non-Player and From Any Player covers every debuff, so the bar now treats it as All Debuffs: Max Debuffs is one limit for the row instead of one per ticked category. (by Krathe)
 - (Debuffs) The note under Max Debuffs now counts the categories your bar really uses, including any your Aura Designer debuff groups take over. (by Krathe)
 - (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
+- (Performance) Joining a large group or switching auto layouts no longer freezes the game for several seconds: frames build once instead of dozens of times, and aura rows are built over a few frames instead of all in one. (by Krathe)
+- (Performance) Less work in raid combat: nameplate updates are skipped early, Text Designer only re-lays text out when it changes, and heal prediction no longer creates garbage on every update. (by Krathe)
+- (Performance) Other group members finding their spec no longer refreshes every frame mid-fight, which caused short stutters in raids. (by Krathe)
+- (Auto Layouts) After a loading screen the active layout is no longer dropped and re-applied while the group settles, which rebuilt every frame twice. (by Krathe)
+- (Auto Layouts) Joining a raid no longer flashes your base raid layout before the auto layout's, and frames show the right player's name and health straight away when the group reshuffles. (by Krathe)
+- (Performance) Hidden boss frames and ready checks do less work. (by Krathe)
 
 ### Bug Fixes
 
