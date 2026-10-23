@@ -124,10 +124,15 @@ local function RegisterCustomMedia()
 
     -- Pattern masks for the texture layers (white, tinted by the layer colour).
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Biohazard V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Biohazard_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Heart V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Heart_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Heart V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Heart_V2.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Minus B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Minus_B_V1.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V1.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_B_V2.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Plus BG V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Plus_BG_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Radioactive V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Radioactive_V1.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Shield V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Shield_V1.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern Star V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_Star_V1.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V1.png")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Pattern X B V2", "Interface\\AddOns\\DandersFrames\\Media\\DF_Pattern_X_B_V2.png")
 
@@ -274,10 +279,15 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Matte.tga",
     "DF_Minimalist.tga",
     "DF_Pattern_Biohazard_V1.png",
+    "DF_Pattern_Heart_V1.png",
+    "DF_Pattern_Heart_V2.png",
+    "DF_Pattern_Minus_B_V1.png",
     "DF_Pattern_Plus_B_V1.png",
     "DF_Pattern_Plus_B_V2.png",
     "DF_Pattern_Plus_BG_V1.png",
+    "DF_Pattern_Radioactive_V1.png",
     "DF_Pattern_Shield_V1.png",
+    "DF_Pattern_Star_V1.png",
     "DF_Pattern_X_B_V1.png",
     "DF_Pattern_X_B_V2.png",
     "DF_Ring.tga",

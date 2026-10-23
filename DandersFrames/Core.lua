@@ -1305,7 +1305,7 @@ do
         end
     end
     -- The pattern masks repeat both ways. Each file holds two repeats per axis.
-    for _, name in ipairs({ "DF_Pattern_Biohazard_V1", "DF_Pattern_Plus_B_V1", "DF_Pattern_Plus_B_V2", "DF_Pattern_Plus_BG_V1", "DF_Pattern_Shield_V1", "DF_Pattern_X_B_V1", "DF_Pattern_X_B_V2" }) do
+    for _, name in ipairs({ "DF_Pattern_Biohazard_V1", "DF_Pattern_Heart_V1", "DF_Pattern_Heart_V2", "DF_Pattern_Minus_B_V1", "DF_Pattern_Plus_B_V1", "DF_Pattern_Plus_B_V2", "DF_Pattern_Plus_BG_V1", "DF_Pattern_Radioactive_V1", "DF_Pattern_Shield_V1", "DF_Pattern_Star_V1", "DF_Pattern_X_B_V1", "DF_Pattern_X_B_V2" }) do
         DF.TILED_BAR_TEXTURES[MEDIA .. name .. ".png"] = "BOTH"
         DF.TILED_BAR_TILE_SIZE[MEDIA .. name .. ".png"] = 64
     end
