@@ -224,10 +224,18 @@ end
 -- Applies position to the FontString (separate from appearance so we can
 -- update position when anchorTo's target moves).
 local function applyPosition(fs, frame, elem, fontStringsById, enabledById)
-    fs:ClearAllPoints()
     local target = resolveAnchorTarget(elem, frame, fontStringsById, enabledById)
-    fs:SetPoint(elem.anchor or "CENTER", target, elem.anchor or "CENTER",
-        elem.offsetX or 0, elem.offsetY or 0)
+    local point, x, y = elem.anchor or "CENTER", elem.offsetX or 0, elem.offsetY or 0
+    -- Re-anchoring makes the client lay the text out again, and this runs on every update
+    -- (each health tick per unit); the anchor only moves when one of these four does.
+    -- A torn-down frame gets fresh FontStrings (Render:Teardown), so the stamp resets.
+    if fs._tdPosTarget == target and fs._tdPosPoint == point
+        and fs._tdPosX == x and fs._tdPosY == y then
+        return
+    end
+    fs:ClearAllPoints()
+    fs:SetPoint(point, target, point, x, y)
+    fs._tdPosTarget, fs._tdPosPoint, fs._tdPosX, fs._tdPosY = target, point, x, y
 end
 
 -- ============================================================
