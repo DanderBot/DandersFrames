@@ -1181,6 +1181,9 @@ highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_THREAT_SITUATION_UPDATE" then
         -- Threat changed on specific unit - update that frame
         local unit = ...
+        -- No DF frame shows a nameplate unit, and a miss in unitFrameMap falls through to a
+        -- scan of every raid frame plus the pinned walk below.
+        if type(unit) == "string" and unit:find("^nameplate") then return end
         local frame = FindFrameByUnit(unit)
         if frame and frame:IsShown() then
             DF:UpdateHighlights(frame)

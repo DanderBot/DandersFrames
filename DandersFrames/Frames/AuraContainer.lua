@@ -551,11 +551,17 @@ end
 -- that appears in NEITHER _handles nor anywhere rebuildAll can see. Walking handles alone
 -- is the same omission that once left the collapsed AD path with no identity gate at all.
 -- Slots share one container per frame, hence the dedupe.
+-- Called as pcall(bounceContainer, c): the inline closure form allocated one per call, and
+-- refreshes run per aura edge.
+local function bounceContainer(c)
+    c:Hide(); c:Show()
+end
+
 local function reparseContainer(c)
     if not c then return end
     -- The Hide/Show bounce crosses the partition and re-arms a real parse (see
     -- NativeBackend:refresh).
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- ⚠ CHUNKED, deliberately. Running the whole walk synchronously inside
@@ -4408,7 +4414,7 @@ function NativeBackend:setUnit(unit)
         -- Hide/Show bounce runs the intrinsic OnShow secure-side, which re-registers for
         -- the new unit and arms the parse -- in combat too, where a retarget waiting for
         -- the new unit's next UNIT_AURA showed the previous unit's auras until then.
-        pcall(function() c:Hide(); c:Show() end)
+        pcall(bounceContainer, c)
     end
 end
 
@@ -4455,7 +4461,7 @@ function NativeBackend:applyLayout()
     -- UNIT_AURA event ("one event late" slider lag). The intrinsic OnShow runs
     -- SECURE-side and calls UpdateAllAuras from inside the partition -> arms +
     -- processes next frame.
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- Hot-apply TUNING (maxFrameCount / sort / candidateFilters) to the LIVE container's
@@ -4606,7 +4612,7 @@ function NativeBackend:applyGroupTuning()
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
     -- lands one aura event late.
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- Legal in combat (see Handle:_applyEnabled).
@@ -4627,7 +4633,7 @@ end
 function NativeBackend:refresh()
     local c = self.container
     if not c then return false end
-    return pcall(function() c:Hide(); c:Show() end)
+    return pcall(bounceContainer, c)
 end
 
 -- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
@@ -6030,7 +6036,7 @@ function Handle:SetBadgeSize(w, h)
         for _, key in ipairs(backend.groupKeys) do
             pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
         end
-        pcall(function() c:Hide(); c:Show() end)
+        pcall(bounceContainer, c)
     end
 end
 
