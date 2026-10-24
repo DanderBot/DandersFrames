@@ -1911,8 +1911,9 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     if DF.GUI and DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
 end
 
--- Remove the active runtime profile overlay
-function AutoProfilesUI:RemoveRuntimeProfile()
+-- Remove the active runtime profile overlay. `callerRefreshes`: the caller runs its own
+-- FullProfileRefresh straight after, in the same call.
+function AutoProfilesUI:RemoveRuntimeProfile(callerRefreshes)
     if not self.activeRuntimeProfile then return end
     DF:Debug("AUTOPROFILE", "RemoveRuntimeProfile: deactivating \"%s\" (%s)", self.activeRuntimeProfile.name or "?", self.activeRuntimeContentKey or "?")
 
@@ -1923,9 +1924,11 @@ function AutoProfilesUI:RemoveRuntimeProfile()
     self.activeRuntimeProfile = nil
     self.activeRuntimeContentKey = nil
 
-    -- Snap frames to base settings immediately so they are never in a
-    -- partially-configured state between overlay clear and the caller's refresh
-    if not InCombatLockdown() and DF.FullProfileRefresh then
+    -- Snap frames to base settings so they are never left half-configured. Skipped when the
+    -- caller refreshes anyway: FullProfileRefresh rebuilds headers, flat/grouped visibility
+    -- and sorting from any starting state and nothing is drawn in between, so a base pass
+    -- first only doubled the cost of every layout switch.
+    if not callerRefreshes and not InCombatLockdown() and DF.FullProfileRefresh then
         DF:FullProfileRefresh()
     end
 
@@ -2253,9 +2256,10 @@ function AutoProfilesUI:EvaluateAndApply()
     -- Capture whether an old profile was active before clearing state
     local oldWasActive = (self.activeRuntimeProfile ~= nil)
 
-    -- Remove old profile if one was active (clears overlay and state only)
+    -- Remove old profile if one was active (clears overlay and state only). Both branches
+    -- below refresh, except ApplyRuntimeProfile on a profile with no overrides table.
     if self.activeRuntimeProfile then
-        self:RemoveRuntimeProfile()
+        self:RemoveRuntimeProfile(not newProfile or newProfile.overrides ~= nil)
     end
 
     -- Apply new profile if one matches (sets overlay then calls FullProfileRefresh: 1 refresh)
