@@ -8707,7 +8707,9 @@ function DF:FullProfileRefresh()
     -- === UPDATE LAYOUTS ===
     -- From here to the visible-frame sweep below, a per-child refresh would only be
     -- redone by that sweep (see FlatRaidFrames:RefreshAllChildFrames).
-    DF._profileSweepPending = true
+    -- A frame stamp, not a flag: readers compare it to GetTime(), so an error before the
+    -- clear below cannot leave their refreshes skipped past this frame.
+    DF._profileSweepPending = GetTime()
     -- Update party layout (this handles positioning, visibility, etc.)
     if DF.UpdateAllFrames_Now then
         DF:UpdateAllFrames_Now()

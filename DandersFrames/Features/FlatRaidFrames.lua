@@ -1151,7 +1151,7 @@ function FlatRaidFrames:RefreshAllChildFrames()
     -- runs every child again at its end, AFTER the new layout's sizes land -- the pass
     -- that has to run. This one, before them, was a second full refresh per member in
     -- the same frame.
-    if DF._profileSweepPending then return end
+    if DF._profileSweepPending == GetTime() then return end
     
     for i = 1, 40 do
         local child = self.header:GetAttribute("child" .. i)

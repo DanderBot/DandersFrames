@@ -740,7 +740,10 @@ function DF:InitializeHeaderChild(frame)
     local function QueueFullFrameRefresh(self)
         if self._dfFullRefreshQueued then return end
         self._dfFullRefreshQueued = true
-        local queuedAt = GetTime()
+        -- debugprofilestop, not GetTime: GetTime is frozen for the whole render frame, so a
+        -- refresh earlier in the same frame, before the reassignment that queued this one,
+        -- would read as "after" and skip the repaint of the new occupant.
+        local queuedAt = debugprofilestop()
         C_Timer.After(0, function()
             self._dfFullRefreshQueued = nil
             -- A full refresh of this same unit since the queue already read the new
@@ -4107,7 +4110,7 @@ end
 function DF:FullFrameRefresh(frame)
     DF:RosterDebugCount("FullFrameRefresh")
     if not frame or not frame.unit then return end
-    frame._dfFullRefreshAt, frame._dfFullRefreshUnit = GetTime(), frame.unit
+    frame._dfFullRefreshAt, frame._dfFullRefreshUnit = debugprofilestop(), frame.unit
     
     -- Clear color tracking to force re-evaluation of background colors
     -- (When units swap positions due to sorting, old colors would persist otherwise)
@@ -4208,10 +4211,9 @@ function DF:RefreshLiveFrames()
     end
 
     -- ☠ AND PINNED — a pinned frame IS a live frame. None of the three iterators above
-    -- reaches one, so every caller of this function silently skipped them: the combat-ENTRY
-    -- half of the HideInCombat gates (PLAYER_REGEN_DISABLED routes here through
-    -- RefreshAllVisibleFrames) plus every settings callback that refreshes data-driven
-    -- content. Boss sets included — they are unit frames for friendly, healable NPCs.
+    -- reaches one, so every caller of this function silently skipped them, including every
+    -- settings callback that refreshes data-driven content. Boss sets included — they are
+    -- unit frames for friendly, healable NPCs.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(function(frame)
             if frame and frame.unit then
