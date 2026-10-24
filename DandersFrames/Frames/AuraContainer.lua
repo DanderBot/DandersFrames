@@ -6667,9 +6667,17 @@ function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
 local PIH_REGEN_EVENTS = { "PLAYER_REGEN_ENABLED", "PLAYER_ROLES_ASSIGNED",
                            "GROUP_ROSTER_UPDATE", "PLAYER_SPECIALIZATION_CHANGED",
                            "ACTIVE_TALENT_GROUP_CHANGED" }
+-- ⚠ ONE PUSH PER FRAME. Each push re-parses every owned container, and LFR fires these events
+-- in bursts as people come and go; the next frame reads the same roles either way. Direct
+-- callers (the gate edge, the allowed-players list) still push at once.
 local helperGateRegen = CreateFrame("Frame")
+helperGateRegen:Hide()
 local helperGateRegistered = false
-helperGateRegen:SetScript("OnEvent", function()
+helperGateRegen:SetScript("OnEvent", function(self)
+    self:Show()
+end)
+helperGateRegen:SetScript("OnUpdate", function(self)
+    self:Hide()
     AuraContainer.SetHelperGate(helperGateDark)
 end)
 
@@ -6678,6 +6686,7 @@ function AuraContainer.SetHelperGateActive(active)
     active = active and true or false
     if active == helperGateRegistered then return end
     helperGateRegistered = active
+    if not active then helperGateRegen:Hide() end
     for _, ev in ipairs(PIH_REGEN_EVENTS) do
         if active then helperGateRegen:RegisterEvent(ev)
         else helperGateRegen:UnregisterEvent(ev) end

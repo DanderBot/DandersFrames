@@ -20,6 +20,8 @@
 - (Auto Layouts) After a loading screen the active layout is no longer dropped and re-applied while the group settles, which rebuilt every frame twice. (by Krathe)
 - (Auto Layouts) Joining a raid no longer flashes your base raid layout before the auto layout's, and frames show the right player's name and health straight away when the group reshuffles. (by Krathe)
 - (Performance) Hidden boss frames and ready checks do less work. (by Krathe)
+- (Auto Layouts) Switching from one auto layout to another, or back to your base layout, refreshes the frames once instead of twice, halving the pause. (by Krathe)
+- (Performance) With the Power Infusion helper set up, people joining or leaving a raid no longer re-checks your aura rows several times in a row. (by Krathe)
 
 ### Bug Fixes
 
