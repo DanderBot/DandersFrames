@@ -2195,6 +2195,24 @@ function DF:GetFrameBorderColor(frame, db)
     return br, bg, bb, ba
 end
 
+-- Repaint a live frame's border when its colour follows the unit (class / role).
+-- ☠ FullFrameRefresh was the ONLY live path that painted it, so a frame whose last refresh
+-- ran before its unit was readable kept the static fallback colour until some later refresh
+-- happened by. Joins and pulls used to refresh every frame many times over and hid that;
+-- with the repeats gone the roster and unit paths call this themselves.
+-- A static colour does not depend on the unit, so it is left to the refresh.
+function DF:UpdateFrameBorderUnitColor(frame)
+    if not (frame and frame.unit and frame.border and frame.border.SetBorderColor) then return end
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    local source = db.frameBorderColorSource
+    if source == "STATIC" or (not source and not db.frameBorderUseClassColor
+        and not db.frameBorderUseRoleColor) then
+        return
+    end
+    frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, db))
+end
+
 -- Returns custom power color if set, otherwise falls back to
 -- Blizzard's PowerBarColor. Checks token first, then numeric type.
 function DF:GetPowerColor(powerToken, powerType)

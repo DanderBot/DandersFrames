@@ -38,6 +38,7 @@
 - (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
 - (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. (by Krathe)
 - (Heal Prediction) The heal prediction bar is hidden on offline and dead players, like the absorb bars already were. (by Krathe)
+- (Borders) A class or role coloured frame border no longer gets stuck on the plain border colour after people join or the raid reshuffles. (by Krathe)
 
 ## [5.5.0]
 

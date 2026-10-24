@@ -955,6 +955,7 @@ function DF:InitializeHeaderChild(frame)
                 pcall(DF.UpdateName, DF, self)
                 pcall(DF.UpdateHealthFast, DF, self)
                 pcall(DF.ApplyHealthColors, DF, self)
+                pcall(DF.UpdateFrameBorderUnitColor, DF, self)
                 if DF.RenderTextDesignerNow then pcall(DF.RenderTextDesignerNow, DF, self) end
             end
 
@@ -7798,6 +7799,8 @@ function DF:ProcessRosterUpdate()
         local function refreshName(frame)
             if frame.unit then
                 DF:UpdateName(frame)
+                -- Same net for a class / role border: nothing but a full refresh paints it.
+                DF:UpdateFrameBorderUnitColor(frame)
                 -- TD mirrors this legacy safety net: refresh identity text on
                 -- every roster change so TD names don't go stale/duplicate when
                 -- the secure header reshuffles frames (the per-frame path misses some).
@@ -8374,16 +8377,20 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                 end
             end
 
+            -- A name that arrives late means the unit's details did too, so a class
+            -- border painted before now may have fallen back to the static colour.
             if frame and frame.dfEventsEnabled ~= false then
                 if DF.UpdateName then
                     DF:UpdateName(frame)
                 end
+                DF:UpdateFrameBorderUnitColor(frame)
             end
             local pinnedFrame = FindPinnedFrameForUnit(unit)
             if pinnedFrame and pinnedFrame.dfEventsEnabled ~= false then
                 if DF.UpdateName then
                     DF:UpdateName(pinnedFrame)
                 end
+                DF:UpdateFrameBorderUnitColor(pinnedFrame)
             end
             tdRefresh(frame, pinnedFrame, "name")
 
