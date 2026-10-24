@@ -8316,7 +8316,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- ☠ UpdateAllRoleIcons reaches ONLY the role and leader icons; MT/MA, AFK,
         -- phased, vehicle, summon, raid target and ready check have the same option
         -- and were never refreshed here, so they stayed hidden after the fight.
-        -- The entering-combat half is covered by RefreshAllVisibleFrames below.
+        -- PLAYER_REGEN_DISABLED below makes the same call to hide them.
         if DF.UpdateAllCombatGatedIcons then
             DF:UpdateAllCombatGatedIcons()
         elseif DF.UpdateAllRoleIcons then
@@ -8428,16 +8428,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
-        -- line logs "inCombat=true" itself, with more information and from the code that
-        -- actually acts on it.
-        -- Update role icons (in case hideInCombat is enabled)
-        if DF.UpdateAllRoleIcons then
+        -- Hide every "Hide in Combat" icon: the same pass PLAYER_REGEN_ENABLED makes to
+        -- restore them. ⚠ Not a full frame refresh -- nothing else on a frame reads the
+        -- player's combat state (aura filtering runs in the containers, frame fade and the
+        -- Power Infusion helper have their own combat handlers), and a full refresh here
+        -- stalled every pull.
+        if DF.UpdateAllCombatGatedIcons then
+            DF:UpdateAllCombatGatedIcons()
+        elseif DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
-        end
-        -- Refresh auras so combat-aware blacklist filters apply immediately
-        if DF.RefreshAllVisibleFrames then
-            DF:RefreshAllVisibleFrames()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run
         -- after any deferred frame refreshes that might reset backdrop colors

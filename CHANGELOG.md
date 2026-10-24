@@ -22,6 +22,7 @@
 - (Performance) Hidden boss frames and ready checks do less work. (by Krathe)
 - (Auto Layouts) Switching from one auto layout to another, or back to your base layout, refreshes the frames once instead of twice, halving the pause. (by Krathe)
 - (Performance) With the Power Infusion helper set up, people joining or leaving a raid no longer re-checks your aura rows several times in a row. (by Krathe)
+- (Performance) Pulling no longer rebuilds every frame, which caused a short stutter on each pull. Entering combat now only updates the icons set to Hide in Combat. (by Krathe)
 
 ### Bug Fixes
 
