@@ -1175,11 +1175,10 @@ end
 -- COMBAT-GATED ICONS
 -- ============================================================
 -- Every icon carrying a "Hide in Combat" option, refreshed in ONE pass on a combat
--- transition. ☠ A GATE IS ONLY AS GOOD AS THE REFRESH THAT RE-EVALUATES IT. Entering
--- combat is covered by RefreshAllVisibleFrames -> FullFrameRefresh (PLAYER_REGEN_DISABLED),
--- but LEAVING combat only ever refreshed the role and leader icons via UpdateAllRoleIcons
--- -- so MT/MA, AFK, phased, vehicle, summon, raid target and ready check would hide on the
--- way in and stay hidden until some unrelated event happened to repaint the frame.
+-- transition. ☠ A GATE IS ONLY AS GOOD AS THE REFRESH THAT RE-EVALUATES IT. This is the
+-- ONLY combat-edge refresh for these icons, on BOTH edges (PLAYER_REGEN_DISABLED and
+-- _ENABLED in Core.lua) -- no full frame refresh runs on either -- so an updater missing
+-- here leaves its icon wrong for the whole fight, or hidden after it.
 -- ⇒ ADD ANY NEW `<icon>HideInCombat` UPDATER HERE. The option is not finished without it.
 function DF:UpdateAllCombatGatedIcons()
     local function regate(frame)
@@ -1194,12 +1193,8 @@ function DF:UpdateAllCombatGatedIcons()
     end
     if DF.IterateAllFrames then DF:IterateAllFrames(regate) end
     -- ☠☠ AND PINNED — DF:IterateAllFrames IS ARENA *OR* PARTY+RAID AND HAS NO PINNED ARM.
-    -- So the whole HideInCombat family was ONE-WAY on pinned frames: combat entry
-    -- (RefreshAllVisibleFrames -> FullFrameRefresh) hid the icon, and this — the only thing
-    -- that undoes it — could not see the frame. Any pinned frame repainted mid-combat kept
-    -- its icons hidden until something unrelated refreshed it, which for a quiet unit is
-    -- never. A boss frame makes it near-certain: its own UNIT_FACTION handler calls
-    -- FullFrameRefresh. ⇒ the EXIT half is the one that goes missing, every time.
+    -- Without this arm a pinned frame repainted mid-combat (a boss frame's own UNIT_FACTION
+    -- handler calls FullFrameRefresh) hid its icons and nothing ever brought them back.
     -- ⚠ The pinned walker takes a bare callback and is called with a DOT.
     if DF.IteratePinnedFrames then DF.IteratePinnedFrames(regate) end
 end

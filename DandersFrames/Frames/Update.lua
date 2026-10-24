@@ -1150,7 +1150,10 @@ function DF:UpdateHealthFast(frame)
     -- changes as current health changes even with no new heal event. Refresh
     -- only when a bar is actively shown so idle frames (the common case — no
     -- incoming heals) cost just a single IsShown() check, not a full update.
-    if frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown() then
+    -- Coming back online or alive refreshes it too: the offline/dead gate in
+    -- UpdateHealPrediction hid the bar, so IsShown() alone would leave it off
+    -- until the next UNIT_HEAL_PREDICTION.
+    if wasGone or (frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()) then
         DF:UpdateHealPrediction(frame)
     end
 

@@ -647,7 +647,7 @@ function DF:IsRacialDispelSelf(unit)
         if race == nil then return false end
         racialDispelRace = race == "Dwarf"
     end
-    return racialDispelRace and unit ~= nil and UnitIsUnit(unit, "player") and true or false
+    return racialDispelRace and unit ~= nil and DF.UnitIsUnit(unit, "player") and true or false
 end
 
 -- ☠☠ A TALENT EDIT DOES NOT FIRE A SPEC EVENT, AND THE SPELLBOOK GRANT LANDS LATE.
@@ -4863,9 +4863,13 @@ local function driveFactoryRowsNow(frame)
     -- so a Filter Designer edit (which bumps auraLayoutVersion) would leave filter-
     -- group containers one event stale. The sync is cheap when nothing changed
     -- (sig-compare walk) — same gating as UpdateAuras_Enhanced.
+    -- Unlike the drives above, the sync has no version latch of its own: it re-walks its
+    -- signatures every time. Skipped when this frame was already synced at the current
+    -- version for this unit -- a layout switch's own sweep has always done so a frame earlier.
     if DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)
         and DF.AuraDesigner and DF.AuraDesigner.Factory
-        and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db) then
+        and DF.UseFactoryForAD and DF:UseFactoryForAD(frame, db)
+        and not (frame.dfADSyncVer == DF.auraLayoutVersion and frame.dfADSyncUnit == frame.unit) then
         DF.AuraDesigner.Factory:SyncFrame(frame)
     end
 end

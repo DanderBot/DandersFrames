@@ -79,9 +79,8 @@ local ORDER = { "headers", "raidLayout", "frames", "visible", "all" }
 -- The layout kinds write secure frame size/attributes somewhere down their call tree,
 -- so they wait for combat to end.
 -- `visible` is FullFrameRefresh on every frame: DF's own regions only, the same refresh a
--- secure header's mid-fight unit reassignment runs. Holding it held the combat-entry
--- refresh (PLAYER_REGEN_DISABLED) until combat ENDED, so every Hide In Combat icon and
--- the combat-aware aura filters only switched once the fight was over.
+-- secure header's mid-fight unit reassignment runs, so a settings change made in combat
+-- lands at once instead of waiting for the fight to end.
 local COMBAT_UNSAFE = {
     headers = true, raidLayout = true, frames = true, all = true,
 }

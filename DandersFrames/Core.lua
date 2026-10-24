@@ -571,6 +571,22 @@ end
 -- Frames track the version they were last laid out with to avoid redundant work.
 DF.auraLayoutVersion = 1
 
+-- UnitIsUnit that never throws and never hands back a secret. The engine refuses the call
+-- for a token pair it will not compare (C_Secrets.CanCompareUnitTokens false) and answers
+-- with a SECRET boolean when unit comparison is restricted, which errors at the first `if`.
+-- true / false, or nil when the answer is withheld; callers read nil as "not the same".
+do
+    local UnitIsUnit, issecretvalue = UnitIsUnit, issecretvalue
+    local CanCompareUnitTokens = C_Secrets and C_Secrets.CanCompareUnitTokens
+    function DF.UnitIsUnit(unit1, unit2)
+        if not (unit1 and unit2) then return nil end
+        if CanCompareUnitTokens and not CanCompareUnitTokens(unit1, unit2) then return nil end
+        local same = UnitIsUnit(unit1, unit2)
+        if issecretvalue and issecretvalue(same) then return nil end
+        return same
+    end
+end
+
 function DF:InvalidateAuraLayout()
     DF.auraLayoutVersion = (DF.auraLayoutVersion or 0) + 1
     -- 12.1 factory rows: the drives that consume this version run inside the aura
@@ -2099,7 +2115,7 @@ function DF:GetUnitRole(unit)
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
+    if (not role or role == "NONE") and DF.UnitIsUnit(unit, "player")
        and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
@@ -2177,6 +2193,24 @@ function DF:GetFrameBorderColor(frame, db)
     end
 
     return br, bg, bb, ba
+end
+
+-- Repaint a live frame's border when its colour follows the unit (class / role).
+-- ☠ FullFrameRefresh was the ONLY live path that painted it, so a frame whose last refresh
+-- ran before its unit was readable kept the static fallback colour until some later refresh
+-- happened by. Joins and pulls used to refresh every frame many times over and hid that;
+-- with the repeats gone the roster and unit paths call this themselves.
+-- A static colour does not depend on the unit, so it is left to the refresh.
+function DF:UpdateFrameBorderUnitColor(frame)
+    if not (frame and frame.unit and frame.border and frame.border.SetBorderColor) then return end
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    local source = db.frameBorderColorSource
+    if source == "STATIC" or (not source and not db.frameBorderUseClassColor
+        and not db.frameBorderUseRoleColor) then
+        return
+    end
+    frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, db))
 end
 
 -- Returns custom power color if set, otherwise falls back to
@@ -8056,7 +8090,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- join as the client syncs talent/spec data. Doing a full UpdateAllFrames
         -- + Aura Designer refresh on every fire caused a noticeable hitch when
         -- joining a large raid. Coalesce the burst into a single deferred refresh.
-        if not DF._specTalentRefreshScheduled then
+        -- ☠ PLAYER_SPECIALIZATION_CHANGED FIRES FOR EVERY GROUP MEMBER whose spec becomes
+        -- known (arg1 = their unit), not just the player. Everything below is the player's
+        -- own concern (spec profile switch, resource bar colours, the player's dispel
+        -- talents), and in a raid the others' events re-ran it mid-fight: a restyle of every
+        -- frame's rows, plus a second one queued for the end of combat.
+        if (event ~= "PLAYER_SPECIALIZATION_CHANGED" or not arg1 or arg1 == "player")
+            and not DF._specTalentRefreshScheduled then
             DF._specTalentRefreshScheduled = true
             C_Timer.After(0.15, function()
                 DF._specTalentRefreshScheduled = false
@@ -8294,7 +8334,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- ☠ UpdateAllRoleIcons reaches ONLY the role and leader icons; MT/MA, AFK,
         -- phased, vehicle, summon, raid target and ready check have the same option
         -- and were never refreshed here, so they stayed hidden after the fight.
-        -- The entering-combat half is covered by RefreshAllVisibleFrames below.
+        -- PLAYER_REGEN_DISABLED below makes the same call to hide them.
         if DF.UpdateAllCombatGatedIcons then
             DF:UpdateAllCombatGatedIcons()
         elseif DF.UpdateAllRoleIcons then
@@ -8406,16 +8446,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
-        -- line logs "inCombat=true" itself, with more information and from the code that
-        -- actually acts on it.
-        -- Update role icons (in case hideInCombat is enabled)
-        if DF.UpdateAllRoleIcons then
+        -- Hide every "Hide in Combat" icon: the same pass PLAYER_REGEN_ENABLED makes to
+        -- restore them. ⚠ Not a full frame refresh -- nothing else on a frame reads the
+        -- player's combat state (aura filtering runs in the containers, frame fade and the
+        -- Power Infusion helper have their own combat handlers), and a full refresh here
+        -- stalled every pull.
+        if DF.UpdateAllCombatGatedIcons then
+            DF:UpdateAllCombatGatedIcons()
+        elseif DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
-        end
-        -- Refresh auras so combat-aware blacklist filters apply immediately
-        if DF.RefreshAllVisibleFrames then
-            DF:RefreshAllVisibleFrames()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run
         -- after any deferred frame refreshes that might reset backdrop colors
@@ -8666,6 +8705,11 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE LAYOUTS ===
+    -- From here to the visible-frame sweep below, a per-child refresh would only be
+    -- redone by that sweep (see FlatRaidFrames:RefreshAllChildFrames).
+    -- A frame stamp, not a flag: readers compare it to GetTime(), so an error before the
+    -- clear below cannot leave their refreshes skipped past this frame.
+    DF._profileSweepPending = GetTime()
     -- Update party layout (this handles positioning, visibility, etc.)
     if DF.UpdateAllFrames_Now then
         DF:UpdateAllFrames_Now()
@@ -8779,9 +8823,10 @@ function DF:FullProfileRefresh()
     end
     
     -- === REFRESH AURAS ===
-    if DF.UpdateAllAuras then
-        DF:UpdateAllAuras()
-    end
+    -- Done by the visible-frame sweep below: its FullFrameRefresh re-drives each frame's
+    -- auras over the same party / raid / pinned set (boss sets included). Calling
+    -- UpdateAllAuras here as well re-drove every frame's auras twice per layout switch,
+    -- the second pass trickling over the frames after it in chunks.
     
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then
@@ -8792,6 +8837,7 @@ function DF:FullProfileRefresh()
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
     -- _Now: same sync seam as the three above.
+    DF._profileSweepPending = nil
     if DF.RefreshAllVisibleFrames_Now then
         DF:RefreshAllVisibleFrames_Now()
     end
