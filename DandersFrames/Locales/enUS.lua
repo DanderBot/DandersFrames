@@ -1949,7 +1949,7 @@ L["What happens when your groups wrap onto more than one row. Needs Groups Ancho
 L["What to Export"] = true
 L["What to Import"] = true
 L["When auto-detect is OFF, select which raid buffs to monitor manually."] = true
-L["When enabled, shows incoming heals even if they would overheal."] = true
+L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."] = true
 L["When enabled, the group you are in will always be displayed first."] = true
 L["When you enter matching content, the layout's overrides are applied on top of your global settings. If no layout matches, global settings are used as-is."] = true
 L["While editing, each setting shows its override status:"] = true

@@ -24,6 +24,7 @@
 - (Performance) With the Power Infusion helper set up, people joining or leaving a raid no longer re-checks your aura rows several times in a row. (by Krathe)
 - (Performance) Pulling no longer rebuilds every frame, which caused a short stutter on each pull. Entering combat now only updates the icons set to Hide in Combat. (by Krathe)
 - (Performance) Less memory churn from aura refreshes and click-casting setup, and threat changes on enemy nameplates no longer search through your raid frames. (by Krathe)
+- (Heal Prediction) Show Overheal now lights a spark at the end of the health bar when heals would overheal, instead of letting them spill past it. Absorbs, heal absorbs and incoming heals now never draw outside the health bar. (by Krathe)
 
 ### Bug Fixes
 
@@ -37,6 +38,7 @@
 - (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
 - (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
 - (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. (by Krathe)
+- (Absorbs) Joining a large group no longer flashes absorb shields as boxes beside the raid frames, and leaving a group no longer flashes your heal absorb across your own frame. (by Krathe)
 - (Heal Prediction) The heal prediction bar is hidden on offline and dead players, like the absorb bars already were. (by Krathe)
 - (Borders) A class or role coloured frame border no longer gets stuck on the plain border colour after people join or the raid reshuffles. (by Krathe)
 

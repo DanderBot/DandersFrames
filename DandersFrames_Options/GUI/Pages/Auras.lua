@@ -3098,7 +3098,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local overhealCheckbox = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Overheal"], db, "healPredictionShowOverheal", function() DF:UpdateAllFrames() end), 30)
             overhealCheckbox.disableOn = function(d) return not d.healPredictionEnabled end
-            overhealCheckbox.tooltip = L["When enabled, shows incoming heals even if they would overheal."]
+            overhealCheckbox.tooltip = L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."]
 
             -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
             -- FLOATING ROWS' own hideOn, which live on the page rather than in this

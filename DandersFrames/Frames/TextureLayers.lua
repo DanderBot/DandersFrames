@@ -229,7 +229,7 @@ local function EnsureState(bar, fill)
         clip:SetClipsChildren(true)
         local canvas = CreateFrame("Frame", nil, clip)
         canvas:SetAllPoints(clip)
-        state = { clip = clip, canvas = canvas, textures = {} }
+        state = { bar = bar, clip = clip, canvas = canvas, textures = {} }
         bar.dfTextureLayers = state
     end
     if state.fill ~= fill then
@@ -250,6 +250,8 @@ local function GetTexture(state, slot)
     if not tex then
         tex = state.canvas:CreateTexture(nil, "ARTWORK", nil, SUBLEVEL[slot])
         state.textures[slot] = tex
+        -- A bar held inside the health bar (DF:MaskBarToHealthBar) holds its layers there too.
+        if state.bar.dfHealthMask then DF.SetTextureMask(tex, state.bar.dfHealthMask) end
     end
     return tex
 end
