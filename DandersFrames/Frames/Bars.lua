@@ -1239,22 +1239,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
-            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
-            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
-            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
-            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
-            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
-            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- Clamp mode. ☠ DF'S STORED VALUE IS NOT BLIZZARD'S ENUM: DF stores 1 ("Missing Health",
+            -- its only value -- see DF:MigrateAbsorbClampMode), while SetDamageAbsorbClampMode defines
+            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
+            -- 2=MaximumHealth. So 1 ignores heals -- fine while the shield starts at the health fill,
+            -- but chained BEHIND the heal it hands the bar a length that no longer fits and it runs
+            -- off the end. When the chain is active, 1 is promoted to 0: the same intent, but
             -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
-            -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
-            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
-            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
-            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
-            -- bar can never draw past max anyway), so "None" maps there.
-            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
             -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
             -- missing-health clamp measures against the NET heal.
@@ -1555,22 +1548,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
-            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
-            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
-            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
-            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
-            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
-            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- Clamp mode. ☠ DF'S STORED VALUE IS NOT BLIZZARD'S ENUM: DF stores 1 ("Missing Health",
+            -- its only value -- see DF:MigrateAbsorbClampMode), while SetDamageAbsorbClampMode defines
+            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
+            -- 2=MaximumHealth. So 1 ignores heals -- fine while the shield starts at the health fill,
+            -- but chained BEHIND the heal it hands the bar a length that no longer fits and it runs
+            -- off the end. When the chain is active, 1 is promoted to 0: the same intent, but
             -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
-            -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
-            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
-            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
-            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
-            -- bar can never draw past max anyway), so "None" maps there.
-            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
             -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
             -- missing-health clamp measures against the NET heal.

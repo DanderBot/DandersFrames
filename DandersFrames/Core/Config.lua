@@ -1302,7 +1302,7 @@ DF.PartyDefaults = {
 
     -- Absorb Bar
     absorbBarAnchor = "TOPRIGHT",
-    absorbBarAttachedClampMode = 1,
+    absorbBarAttachedClampMode = 1,   -- no control: Missing Health is the only value (DF:MigrateAbsorbClampMode)
     absorbBarBackgroundColor = {r = 0, g = 0, b = 0, a = 1},
     absorbBarBlendMode = "BLEND",
     absorbBarColor = {r = 0, g = 0.83529418706894, b = 1, a = 0.80208319425583},

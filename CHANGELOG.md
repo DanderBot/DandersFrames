@@ -25,6 +25,7 @@
 - (Performance) Pulling no longer rebuilds every frame, which caused a short stutter on each pull. Entering combat now only updates the icons set to Hide in Combat. (by Krathe)
 - (Performance) Less memory churn from aura refreshes and click-casting setup, and threat changes on enemy nameplates no longer search through your raid frames. (by Krathe)
 - (Heal Prediction) Show Overheal now lights a spark at the end of the health bar when heals would overheal, instead of letting them spill past it. Absorbs, heal absorbs and incoming heals now never draw outside the health bar. (by Krathe)
+- (Absorbs) The Attached absorb's Clamp Mode setting is gone. Now that the shield stays inside the health bar, None and Max Health drew the same as Missing Health but without the overshield glow or overflow, so anyone using them moves to Missing Health. (by Krathe)
 
 ### Bug Fixes
 

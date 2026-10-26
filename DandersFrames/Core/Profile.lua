@@ -2000,6 +2000,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- conversion has to run on the import path too -- otherwise the import renders from
     -- the legacy fallback until some later login happens to convert it.
     if DF.MigrateHealthColorStops then DF:MigrateHealthColorStops() end
+    if DF.MigrateAbsorbClampMode then DF:MigrateAbsorbClampMode() end
 
     -- The import has landed, so anything the undo stack still holds describes
     -- values the payload has just overwritten -- or tables it replaced outright.

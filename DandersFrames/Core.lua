@@ -4036,6 +4036,31 @@ function DF:MigrateHealPredictionBelowAbsorb()
     end
 end
 
+-- The absorb clamp lost None (0) and Max Health (2). With the shield masked to the health bar
+-- they drew what Missing Health draws, minus the overshield glow and the overflow wrap, which
+-- only fired once the shield passed the WHOLE max health. Value-gated with no flag: neither
+-- value can be picked any more, so a stored one is always stale and a re-run is a no-op.
+-- Reaches raid layout overrides too -- "absorbBar" is an override prefix (OVERRIDE_TAB_MAP).
+function DF:MigrateAbsorbClampMode()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local function fold(t)
+        if type(t) ~= "table" then return end
+        local v = t.absorbBarAttachedClampMode
+        if v == 0 or v == 2 then t.absorbBarAttachedClampMode = 1 end
+    end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            fold(profile.party)
+            fold(profile.raid)
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    fold(layout.overrides)
+                end)
+            end
+        end
+    end
+end
+
 -- Rewrite ONE position record's pinned anchor strings from the pre-uid key format
 -- ("DandersFrames:party.pinned3" -- no dot before the number) to the uid format
 -- ("DandersFrames:party.pinned.3"). The addon key is the literal MoverBridge registers
@@ -7948,6 +7973,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- A migration is not wired until it is in the SAME battery as its peers.
             if DF.MigrateHealPredictionBelowAbsorb then
                 DF:MigrateHealPredictionBelowAbsorb()
+            end
+
+            -- Absorb clamp None / Max Health -> Missing Health (value-gated).
+            if DF.MigrateAbsorbClampMode then
+                DF:MigrateAbsorbClampMode()
             end
 
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
