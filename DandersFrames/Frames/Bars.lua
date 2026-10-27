@@ -766,8 +766,10 @@ fillHoldWatcher:SetScript("OnUpdate", function(self)
     local any = false
     for bar, frames in pairs(heldBars) do
         local fill = bar:GetStatusBarTexture()
-        local okN, n = pcall(fill.GetNumPoints, fill)
-        local placed = okN and not (issecretvalue and issecretvalue(n)) and n ~= 2
+        -- A fill cleared mid-hold has nothing left to hide: release it.
+        local okN, n = true, nil
+        if fill then okN, n = pcall(fill.GetNumPoints, fill) end
+        local placed = not fill or (okN and not (issecretvalue and issecretvalue(n)) and n ~= 2)
         if placed or frames >= FILL_HOLD_MAX_FRAMES then
             heldBars[bar] = nil
             bar.dfFillHeld = nil
@@ -1211,10 +1213,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
-            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
-            -- (test values never exceed max), so the shield may overrun — exactly what
-            -- those settings mean on live frames.
+            -- Missing Health (1) is the only clamp mode left (see DF:MigrateAbsorbClampMode).
+            -- A profile written outside the import path can still hold 0 or 2 until the
+            -- next login; those skip the preview clamp.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
                 -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
                 -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
@@ -1520,10 +1521,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
-            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
-            -- (test values never exceed max), so the shield may overrun — exactly what
-            -- those settings mean on live frames.
+            -- Missing Health (1) is the only clamp mode left (see DF:MigrateAbsorbClampMode).
+            -- A profile written outside the import path can still hold 0 or 2 until the
+            -- next login; those skip the preview clamp.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
                 -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
                 -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
@@ -2311,9 +2311,11 @@ end
 local OVERHEAL_SPARK_ALPHA = 0.8
 local OVERHEAL_SPARK_SIZE = 5
 local SPARK_MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
-local function UpdateOverhealSpark(frame, db, color, overhealing)
+-- `known` says whether `overhealing` was set at all. It is passed separately because the flag
+-- itself may be secret, and even a nil test on a secret throws.
+local function UpdateOverhealSpark(frame, db, color, overhealing, known)
     local spark = frame.dfOverhealSpark
-    if not (db.healPredictionShowOverheal and overhealing ~= nil) then
+    if not (db.healPredictionShowOverheal and known) then
         if spark then spark:Hide() end
         return
     end
@@ -2436,6 +2438,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     local maxHealth, incomingHeals
     local myHeals, othersHeals          -- Per-source breakdown (SPLIT mode)
     local overhealing                   -- The calculator's clamped flag (may be secret)
+    local haveOverheal = false          -- Plain flag: overhealing was set (never test overhealing itself)
     -- ⚠ There is deliberately NO isTestMode flag any more. It existed only to pick
     -- a different render path, and every one of those forks was a bug waiting to
     -- happen. If you find yourself wanting it back, the answer is almost certainly
@@ -2454,9 +2457,11 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- TestMode render/animation loop passes its per-tick data directly)
         maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
+        haveOverheal = true
     elseif DF.raidTestMode and testIndex ~= nil then
         maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
+        haveOverheal = true
     else
         -- Only process valid units for real data
         if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
@@ -2522,6 +2527,8 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local amount, amountFromHealer, amountFromOthers, clamped = calc:GetIncomingHeals()
             myHeals, othersHeals = amountFromHealer, amountFromOthers
             overhealing = clamped
+            -- issecretvalue first: the nil test is only reached on a plain value.
+            haveOverheal = (issecretvalue and issecretvalue(clamped)) or clamped ~= nil
 
             -- TD stash: expose the heal breakdown so the TextDesigner LiveSource
             -- reads it without a second calculator pass. dfTotalHeals is the
@@ -2793,7 +2800,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         DF.SetBarValue(bar, incomingHeals, frame)
 
         bar:Show()
-        UpdateOverhealSpark(frame, db, color, overhealing)
+        UpdateOverhealSpark(frame, db, color, overhealing, haveOverheal)
 
         -- ============================================================
         -- SPLIT: second segment ("others' heals"), chained after the

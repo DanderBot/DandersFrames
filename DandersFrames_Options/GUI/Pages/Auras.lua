@@ -3090,6 +3090,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local overhealCheckbox = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Overheal"], db, "healPredictionShowOverheal", function() DF:UpdateAllFrames() end), 30)
             overhealCheckbox.disableOn = function(d) return not d.healPredictionEnabled end
+            -- The spark is drawn on the attached display only; Floating has no bar end to mark.
+            overhealCheckbox.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
             overhealCheckbox.tooltip = L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."]
 
             -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
