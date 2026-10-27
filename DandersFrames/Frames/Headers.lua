@@ -4263,8 +4263,7 @@ function DF:BuildRaidGroupNameList(groupIndex, selfPosition)
             end
             table.insert(members, {
                 unit = isPlayer and "player" or ("raid" .. i),
-                -- Use playerName (no realm) for player, full name for others
-                name = isPlayer and playerName or name,
+                name = name,
                 isPlayer = isPlayer
             })
         end
@@ -4278,8 +4277,11 @@ end
 function DF:BuildPartyNameList(selfPosition)
     -- Get members in party (player + party1-4)
     local members = {}
-    local playerName = UnitName("player")
-    
+    local playerName, playerRealm = UnitName("player")
+    if playerName and playerRealm and playerRealm ~= "" then
+        playerName = playerName .. "-" .. playerRealm
+    end
+
     -- Add player
     table.insert(members, {
         unit = "player",
