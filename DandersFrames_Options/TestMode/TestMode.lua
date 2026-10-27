@@ -973,6 +973,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- has to leave the same rendered state the live pathway would.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+        if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
     end
 
     -- Damage absorb LAST — reads the prediction's chain tail and stamps.

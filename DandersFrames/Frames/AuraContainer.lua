@@ -551,11 +551,17 @@ end
 -- that appears in NEITHER _handles nor anywhere rebuildAll can see. Walking handles alone
 -- is the same omission that once left the collapsed AD path with no identity gate at all.
 -- Slots share one container per frame, hence the dedupe.
+-- Called as pcall(bounceContainer, c): the inline closure form allocated one per call, and
+-- refreshes run per aura edge.
+local function bounceContainer(c)
+    c:Hide(); c:Show()
+end
+
 local function reparseContainer(c)
     if not c then return end
     -- The Hide/Show bounce crosses the partition and re-arms a real parse (see
     -- NativeBackend:refresh).
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- ⚠ CHUNKED, deliberately. Running the whole walk synchronously inside
@@ -920,7 +926,7 @@ local function checkOutOfRangeAttribution()
     local outN, outAll, outMine = 0, 0, 0
     for i = 1, count do
         local unit = prefix .. i
-        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+        if UnitExists(unit) and not DF.UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
             -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
             -- checked=false means "could not test", not "out of range", and counting
             -- those as distant would poison the out-of-range half with units that are
@@ -1544,7 +1550,7 @@ local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
 -- should be its own change with its own testing.
 local function helperUnitRole(unit)
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
+    if DF.UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         local role = spec and GetSpecializationRole(spec)
         if role and role ~= "NONE" then return role end
@@ -4176,6 +4182,19 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind AddDispelTypeTexture in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
+                -- ☠ ANCHOR THE BUTTON AT BIRTH. initializeFrame runs before the
+                -- button's access restrictions; the SetAllPoints after AddAuraSlot
+                -- returns runs after them and, while auras are secret, is refused and
+                -- swallowed by its pcall. An unanchored button has no rect, so
+                -- everything hung on it draws nothing: the dispel overlay was blank
+                -- after a login into secret content while group rows, which the
+                -- engine lays out itself, were fine. Anchored first, so the consumer's
+                -- onInit measures a placed button.
+                local host, innerInit = handle.frame, slotInit
+                slotInit = function(button)
+                    pcall(button.SetAllPoints, button, host)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4190,6 +4209,13 @@ function NativeBackend:build()
                 local slotInit = (rec.style or rec.onInit)
                     and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     or initFn
+                -- Positioned at birth for the overlay's reason (see above).
+                local fa, padY, innerInit = handle._flowAnchor or "TOPLEFT", handle._flowPadY or 0, slotInit
+                slotInit = function(button)
+                    pcall(button.ClearAllPoints, button)
+                    pcall(button.SetPoint, button, fa, c, fa, 0, padY)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4388,7 +4414,7 @@ function NativeBackend:setUnit(unit)
         -- Hide/Show bounce runs the intrinsic OnShow secure-side, which re-registers for
         -- the new unit and arms the parse -- in combat too, where a retarget waiting for
         -- the new unit's next UNIT_AURA showed the previous unit's auras until then.
-        pcall(function() c:Hide(); c:Show() end)
+        pcall(bounceContainer, c)
     end
 end
 
@@ -4435,7 +4461,7 @@ function NativeBackend:applyLayout()
     -- UNIT_AURA event ("one event late" slider lag). The intrinsic OnShow runs
     -- SECURE-side and calls UpdateAllAuras from inside the partition -> arms +
     -- processes next frame.
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- Hot-apply TUNING (maxFrameCount / sort / candidateFilters) to the LIVE container's
@@ -4586,7 +4612,7 @@ function NativeBackend:applyGroupTuning()
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
     -- lands one aura event late.
-    pcall(function() c:Hide(); c:Show() end)
+    pcall(bounceContainer, c)
 end
 
 -- Legal in combat (see Handle:_applyEnabled).
@@ -4607,7 +4633,7 @@ end
 function NativeBackend:refresh()
     local c = self.container
     if not c then return false end
-    return pcall(function() c:Hide(); c:Show() end)
+    return pcall(bounceContainer, c)
 end
 
 -- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
@@ -6010,7 +6036,7 @@ function Handle:SetBadgeSize(w, h)
         for _, key in ipairs(backend.groupKeys) do
             pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
         end
-        pcall(function() c:Hide(); c:Show() end)
+        pcall(bounceContainer, c)
     end
 end
 
@@ -6647,9 +6673,17 @@ function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
 local PIH_REGEN_EVENTS = { "PLAYER_REGEN_ENABLED", "PLAYER_ROLES_ASSIGNED",
                            "GROUP_ROSTER_UPDATE", "PLAYER_SPECIALIZATION_CHANGED",
                            "ACTIVE_TALENT_GROUP_CHANGED" }
+-- ⚠ ONE PUSH PER FRAME. Each push re-parses every owned container, and LFR fires these events
+-- in bursts as people come and go; the next frame reads the same roles either way. Direct
+-- callers (the gate edge, the allowed-players list) still push at once.
 local helperGateRegen = CreateFrame("Frame")
+helperGateRegen:Hide()
 local helperGateRegistered = false
-helperGateRegen:SetScript("OnEvent", function()
+helperGateRegen:SetScript("OnEvent", function(self)
+    self:Show()
+end)
+helperGateRegen:SetScript("OnUpdate", function(self)
+    self:Hide()
     AuraContainer.SetHelperGate(helperGateDark)
 end)
 
@@ -6658,6 +6692,7 @@ function AuraContainer.SetHelperGateActive(active)
     active = active and true or false
     if active == helperGateRegistered then return end
     helperGateRegistered = active
+    if not active then helperGateRegen:Hide() end
     for _, ev in ipairs(PIH_REGEN_EVENTS) do
         if active then helperGateRegen:RegisterEvent(ev)
         else helperGateRegen:UnregisterEvent(ev) end
@@ -6984,7 +7019,10 @@ end
 function Handle:_rebuild()
     if self._destroyed then return end
     if not self:_parkContainer() then self:_teardownContainer() end
-    self:_build()
+    -- Paced like a first build (PACED BUILDS, above AuraContainer:Create): a layout switch
+    -- in a formed raid rebuilt every member's Aura Designer groups inside one frame. Both
+    -- teardown paths clear the backend, so a queued rebuild is not mistaken for built.
+    AuraContainer._pacedBuild(self)
 end
 
 -- Register this handle for a one-shot action the moment combat ends. Ops (precedence
@@ -8471,6 +8509,91 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     return ok
 end
 
+-- ============================================================
+-- PACED BUILDS
+-- ============================================================
+-- A container build is the costly part of standing up a frame: every AddAuraGroup creates
+-- a batch of ten buttons up front, and a member carries ~7 containers. Joining a full
+-- 40-player group built ~280 of them inside ONE frame -- a 3 s freeze. Builds now spend at
+-- most a budget of wall time per rendered frame and the rest queue for the next frames,
+-- as the peers' build workers do. The handle works without a backend meanwhile (the shape
+-- the old combat deferral used): unit, style and tuning land in config, and the build
+-- reads config when it runs. A build bigger than the budget still runs whole.
+local BUILD_BUDGET_MS_COMBAT, BUILD_BUDGET_MS_IDLE = 8, 30
+local buildQueue, buildHead, buildTail = {}, 1, 0
+local buildFrameStamp, buildSpentMs = nil, 0
+local buildDrainer
+local burstQueued, burstFrames = 0, 0
+
+local function buildBudgetLeft()
+    local now = GetTime()   -- constant within a rendered frame, so it names the frame
+    if buildFrameStamp ~= now then buildFrameStamp, buildSpentMs = now, 0 end
+    return (DF.playerInCombat and BUILD_BUDGET_MS_COMBAT or BUILD_BUDGET_MS_IDLE) - buildSpentMs
+end
+
+local function timedBuild(h)
+    local t0 = debugprofilestop()
+    local ok, err = pcall(h._build, h)
+    buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+    if not ok then DF:DebugWarn(DBG, "paced build failed: %s", tostring(err)) end
+end
+
+local function drainBuilds(self)
+    burstFrames = burstFrames + 1
+    while buildHead <= buildTail and buildBudgetLeft() > 0 do
+        local h = buildQueue[buildHead]
+        buildQueue[buildHead] = nil
+        buildHead = buildHead + 1
+        -- Destroyed while waiting, or built already (queued twice).
+        if h and not h._destroyed and not h.backend then
+            timedBuild(h)
+            -- ☠ A deferred build lands with nobody watching. An owner that styles the
+            -- buttons itself after Create saw none when it looked, and nothing calls it
+            -- again on its own: config.onBuilt is that call.
+            local onBuilt = h.backend and h.config.onBuilt
+            if onBuilt then
+                local ok, err = pcall(onBuilt, h)
+                if not ok then DF:DebugWarn(DBG, "onBuilt failed: %s", tostring(err)) end
+            end
+        end
+    end
+    if buildHead > buildTail then
+        buildHead, buildTail = 1, 0
+        self:Hide()
+        DF:Debug(DBG, "paced builds: %d deferred, drained over %d frames", burstQueued, burstFrames)
+        burstQueued, burstFrames = 0, 0
+    end
+end
+
+local function pacedBuild(h)
+    -- ☠ SLOT CONTAINERS ARE NEVER DEFERRED. Overlay, missing and single-slot builds that
+    -- landed on a later frame came up blank in game -- the dispel overlay and its symbols
+    -- undressed, the Aura Designer frame border not animating -- while immediate builds of
+    -- the same containers were fine and deferred GROUP rows were fine. The mechanism is not
+    -- pinned; the cost is: one button each, against ten per group, so the groups the budget
+    -- exists for are still paced.
+    local cfg = h.config
+    if cfg and (cfg.mode == "overlay" or cfg.mode == "missing" or cfg.singleSlot) then
+        return h:_build()
+    end
+    -- Straight through while this frame has budget and nothing is waiting ahead of it.
+    if buildHead > buildTail and buildBudgetLeft() > 0 then
+        local t0 = debugprofilestop()
+        h:_build()
+        buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+        return
+    end
+    buildTail = buildTail + 1
+    buildQueue[buildTail] = h
+    burstQueued = burstQueued + 1
+    if not buildDrainer then
+        buildDrainer = CreateFrame("Frame")
+        buildDrainer:SetScript("OnUpdate", drainBuilds)
+    end
+    buildDrainer:Show()
+end
+AuraContainer._pacedBuild = pacedBuild   -- Handle:_rebuild sits above this block
+
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
     if not parent or type(config) ~= "table" then
@@ -8564,7 +8687,7 @@ function AuraContainer:Create(parent, config)
         end
     end
     h:_applyZOrder()   -- level + strata; also re-runs on every _build (see the method)
-    h:_build()
+    pacedBuild(h)
     -- FALLBACK PATH ONLY (_fakeActive never latches once deafening is confirmed):
     -- born during a foreign fake-data period (e.g. roster change while the user
     -- sits in Edit Mode), start hidden like the rest, restored on the real switch.

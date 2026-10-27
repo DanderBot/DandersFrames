@@ -7,7 +7,7 @@ local NS = ...
 -- controls. The builders add into the card's group (a local `add` over
 -- group:AddWidget); the column each call still names is ignored inside a card.
 --
---   column 1   Absorb Shield   (21 widgets, no tick, pinnable)
+--   column 1   Absorb Shield   (20 widgets, no tick, pinnable)
 --   column 2   Heal Absorb     (15 widgets, no tick, pinnable)
 --
 -- ☠ THREE THINGS THIS SUITE IS HERE TO PIN:
@@ -209,11 +209,11 @@ do
     check(PAGE:find("DF:GetTextureNameFromPath(path)", 1, true) ~= nil,
           "vocab: ...and it is the addon's own resolver, not a path split")
 
-    -- ⚠ THE FOUR TABLES THAT DID NOT MOVE. The two blend tables, the clamp modes
-    -- and the overshield styles are read by nothing outside their own builder, so
-    -- they stay where the dropdown that offers them is built.
+    -- ⚠ THE THREE TABLES THAT DID NOT MOVE. The two blend tables and the overshield
+    -- styles are read by nothing outside their own builder, so they stay where the
+    -- dropdown that offers them is built.
     for _, name in ipairs({ "blendOptions", "healBlendOptions",
-                            "absorbClampOptions", "absorbOvershieldStyleOptions" }) do
+                            "absorbOvershieldStyleOptions" }) do
         local at = PAGE:find("local " .. name .. " = {", 1, true)
         local firstBuilder = PAGE:find("local function BuildAbsorbShieldGroup(tools2)", 1, true)
         check(at ~= nil and firstBuilder ~= nil and at > firstBuilder,
@@ -258,7 +258,6 @@ local ABSORB_SHIELD = {
     { "colorpicker",     "Bar Color",            "absorbBarColor",             35, 1 },
     { "dropdown",        "Blend Mode",           "absorbBarBlendMode",         55, 1 },
     { "checkbox",        "Reverse Overlay Fill", "absorbBarOverlayReverse",    25, 1 },
-    { "dropdown",        "Clamp Mode",           "absorbBarAttachedClampMode", 55, 1 },
     { "checkbox",        "Show Overshield Glow", "absorbBarShowOvershield",    25, 1 },
     { "dropdown",        "Glow Style",           "absorbBarOvershieldStyle",   55, 1 },
     { "colorpicker",     "Glow Color",           "absorbBarOvershieldColor",   35, 1 },

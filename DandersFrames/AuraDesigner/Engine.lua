@@ -78,6 +78,10 @@ function Engine:ForceRefreshAllFrames()
         if DF:IsAuraDesignerEnabled(frame) then
             -- Live 12.1 path: re-sync the factory containers immediately so an
             -- editor change applies now, not one aura event late.
+            -- Inside a profile refresh (a layout switch) the refresh's final sweep syncs
+            -- every visible frame with a unit after this, so syncing here as well was a
+            -- second full pass per member. The AD-off teardown below still runs.
+            if DF._profileSweepPending == GetTime() and frame.unit then return end
             if frame:IsVisible() and Factory and DF.UseFactoryForAD
                 and DF:UseFactoryForAD(frame, DF:GetFrameDB(frame)) then
                 Factory:SyncFrame(frame)

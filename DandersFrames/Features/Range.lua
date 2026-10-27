@@ -548,7 +548,7 @@ local function NoteSpellFallback(unit)
 end
 
 local function CheckUnitRange(unit)
-    if UnitIsUnit(unit, "player") then
+    if DF.UnitIsUnit(unit, "player") then
         return true
     end
 
@@ -666,7 +666,7 @@ function DF:UpdateRange(frame)
     -- dfInRange may hold a secret boolean from a previous UnitInRange
     -- fallback (Midnight+), so check issecretvalue before boolean-testing
     -- it — `not <secret>` raises "execution tainted" and spams errors.
-    if UnitIsUnit(unit, "player") then
+    if DF.UnitIsUnit(unit, "player") then
         local dfSecret = issecretvalue and issecretvalue(frame.dfInRange)
         if dfSecret or frame.dfInRange ~= true then
             frame.dfInRange = true
@@ -776,7 +776,7 @@ function DF:UpdatePetRange(frame)
     if not ownerUnit then return end
     
     local inRange = true
-    if UnitExists(ownerUnit) and not UnitIsUnit(ownerUnit, "player") then
+    if UnitExists(ownerUnit) and not DF.UnitIsUnit(ownerUnit, "player") then
         if IsInGroup() or IsInRaid() then
             inRange = CheckUnitRange(ownerUnit)
         end

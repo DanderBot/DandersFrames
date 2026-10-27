@@ -2815,17 +2815,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local overlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "absorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
             overlayRev.hideOn = function(d) return d.absorbBarMode ~= "OVERLAY" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
 
-            local absorbClampOptions = {
-                [0] = L["None (no clamping)"],
-                [1] = L["Missing Health"],
-                [2] = L["Max Health"],
-            }
-            local absorbClampDropdown = add(GUI:CreateDropdown(parent, L["Clamp Mode"], absorbClampOptions, db, "absorbBarAttachedClampMode", function() DF:UpdateAllFrames() end), 55, 1)
-            absorbClampDropdown.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
-
             local absorbShowOvershield = add(GUI:CreateCheckbox(parent, L["Show Overshield Glow"], db, "absorbBarShowOvershield", function() DF:UpdateAllFrames() end), 25, 1)
             absorbShowOvershield.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-            absorbShowOvershield.tooltip = L["Shows a glow at max health when absorb exceeds the clamp limit."]
+            absorbShowOvershield.tooltip = L["Shows a glow at the end of the health bar when the absorb is bigger than the missing health."]
 
             local absorbOvershieldStyleOptions = {
                 SPARK = L["Spark"],
@@ -3098,7 +3090,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local overhealCheckbox = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Overheal"], db, "healPredictionShowOverheal", function() DF:UpdateAllFrames() end), 30)
             overhealCheckbox.disableOn = function(d) return not d.healPredictionEnabled end
-            overhealCheckbox.tooltip = L["When enabled, shows incoming heals even if they would overheal."]
+            -- The spark is drawn on the attached display only; Floating has no bar end to mark.
+            overhealCheckbox.hideOn = function(d) return d.healPredictionMode == "FLOATING" end
+            overhealCheckbox.tooltip = L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."]
 
             -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
             -- FLOATING ROWS' own hideOn, which live on the page rather than in this

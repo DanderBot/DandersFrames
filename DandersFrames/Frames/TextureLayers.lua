@@ -229,7 +229,7 @@ local function EnsureState(bar, fill)
         clip:SetClipsChildren(true)
         local canvas = CreateFrame("Frame", nil, clip)
         canvas:SetAllPoints(clip)
-        state = { clip = clip, canvas = canvas, textures = {} }
+        state = { bar = bar, clip = clip, canvas = canvas, textures = {} }
         bar.dfTextureLayers = state
     end
     if state.fill ~= fill then
@@ -250,6 +250,8 @@ local function GetTexture(state, slot)
     if not tex then
         tex = state.canvas:CreateTexture(nil, "ARTWORK", nil, SUBLEVEL[slot])
         state.textures[slot] = tex
+        -- A bar held inside the health bar (DF:MaskBarToHealthBar) holds its layers there too.
+        if state.bar.dfHealthMask then DF.SetTextureMask(tex, state.bar.dfHealthMask) end
     end
     return tex
 end
@@ -301,6 +303,18 @@ local function Teardown(bar, state)
         state.fill:SetAlpha(1)
         state.baseHidden = nil
     end
+end
+
+-- One options table for the per-event callers: absorb, heal absorb, reduced max health and
+-- the heal prediction segments run per UNIT_* event while layers are on, and a fresh table
+-- each time was garbage on every one. ApplyBarTextureLayers only reads it and calls nothing
+-- that applies another bar's layers, so refilling one table is safe.
+local scratchOpts = {}
+function DF:BarLayerOpts(span, isVertical, baseColor, baseBlend, baseDesaturated)
+    local o = scratchOpts
+    o.span, o.isVertical = span, isVertical
+    o.baseColor, o.baseBlend, o.baseDesaturated = baseColor, baseBlend, baseDesaturated
+    return o
 end
 
 -- Apply a bar's layer settings. Cheap when nothing is set: a few db reads and out.

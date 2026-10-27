@@ -986,6 +986,10 @@ function DF:UpdateHealthFast(frame)
             frame.dfReducedMaxHealthBar:Hide()
             if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
         end
+        -- Heal prediction too, or it hangs on until the next UNIT_HEAL_PREDICTION.
+        if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+        if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+        if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
         -- Same early-return gap as UpdateUnitFrame (see the note there).
@@ -1029,6 +1033,10 @@ function DF:UpdateHealthFast(frame)
             frame.dfReducedMaxHealthBar:Hide()
             if DF.RestoreHealthBarFromReducedMax then DF:RestoreHealthBarFromReducedMax(frame) end
         end
+        -- Heal prediction too, or it hangs on until the next UNIT_HEAL_PREDICTION.
+        if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+        if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+        if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
         DF:ApplyDeadFade(frame, "Dead")
         -- Clear aura icons on the first dead tick only. WoW doesn't fire
         -- UNIT_AURA on death so the cache stays stale; flushing once is enough.
@@ -1137,11 +1145,11 @@ function DF:UpdateHealthFast(frame)
     -- value changes. In ATTACHED/OVERLAY mode, bars anchor to the health fill
     -- texture edge, so position auto-updates when health changes.
     --
-    -- EXCEPTION: ATTACHED mode with clamp (absorbBarAttachedClampMode > 0)
-    -- clamps the displayed absorb to missing health, so health changes affect
-    -- the clamped value even when absorb amount is unchanged.
+    -- EXCEPTION: ATTACHED mode clamps the displayed absorb to missing health,
+    -- so health changes affect the clamped value even when the absorb amount
+    -- is unchanged.
     local absorbMode = db.absorbBarMode or "OVERLAY"
-    if (absorbMode == "ATTACHED" or absorbMode == "ATTACHED_OVERFLOW") and (db.absorbBarAttachedClampMode or 1) > 0 then
+    if absorbMode == "ATTACHED" or absorbMode == "ATTACHED_OVERFLOW" then
         DF:UpdateAbsorb(frame)
     end
 
@@ -1150,7 +1158,10 @@ function DF:UpdateHealthFast(frame)
     -- changes as current health changes even with no new heal event. Refresh
     -- only when a bar is actively shown so idle frames (the common case — no
     -- incoming heals) cost just a single IsShown() check, not a full update.
-    if frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown() then
+    -- Coming back online or alive refreshes it too: the offline/dead gate in
+    -- UpdateHealPrediction hid the bar, so IsShown() alone would leave it off
+    -- until the next UNIT_HEAL_PREDICTION.
+    if wasGone or (frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()) then
         DF:UpdateHealPrediction(frame)
     end
 

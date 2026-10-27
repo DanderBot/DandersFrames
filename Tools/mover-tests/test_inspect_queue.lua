@@ -33,6 +33,7 @@ local function GetCacheableName(unit) return W.names[unit] end
 local function UnitExists(u) return W.guids[u] ~= nil end
 local function UnitIsPlayer(u) return true end
 local function UnitIsUnit(a, b) return a == b end
+DF.UnitIsUnit = UnitIsUnit
 local function UnitGUID(u) return W.guids[u] end
 local function InCombatLockdown() return false end
 local function IsInRaid() return true end

@@ -57,7 +57,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         if frame and frame.isPinnedFrame then
             soloScoped = true
         else
-            local isSelf = unit and UnitIsUnit(unit, "player")
+            local isSelf = unit and DF.UnitIsUnit(unit, "player")
             if issecretvalue(isSelf) then isSelf = false end
             soloScoped = isSelf and true or false
         end
@@ -686,6 +686,110 @@ local function testFrameNeedsData(frame, testIndex)
         and frame and frame.dfIsTestFrame
 end
 
+-- ★ NOTHING TIED TO THE HEALTH BAR DRAWS OUTSIDE IT. Absorb, heal absorb and heal prediction
+-- are masked to the health bar's rect, as other frame addons clip or mask theirs. With
+-- correct values they already end at the bar edge; the mask keeps that true while the values
+-- or the fill's placement are briefly wrong -- a join, where a new member's health starts as
+-- a placeholder and an unmasked attached bar drew a box over the next frame along.
+-- A mask, not a clip frame: it rides the texture, so no bar changes parent or level, and
+-- clip frames stop drawing their children in restricted content when their rect is secret.
+-- The health bar's rect is layout, never secret. One mask per bar, created on the bar itself,
+-- so it reaches the bar's fill and its texture-layer canvas (a descendant). FLOATING is off it.
+local function SetTextureMask(tex, mask)
+    if tex.dfMask == mask then return end
+    if tex.dfMask then tex:RemoveMaskTexture(tex.dfMask) end
+    if mask then tex:AddMaskTexture(mask) end
+    tex.dfMask = mask
+end
+DF.SetTextureMask = SetTextureMask
+
+function DF:MaskBarToHealthBar(frame, bar, on)
+    if not (bar and frame.healthBar) then return end
+    local mask
+    if on then
+        mask = bar.dfHealthMaskTex
+        if not mask then
+            mask = bar:CreateMaskTexture()
+            -- CLAMPTOBLACK makes it a bound (the default wrap smears the edge texels past
+            -- the rect); NEAREST stops an 8x8 stretched over the bar shading its rim.
+            mask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE", "NEAREST")
+            bar.dfHealthMaskTex = mask
+        end
+        if mask.dfAnchor ~= frame.healthBar then
+            mask:ClearAllPoints()
+            mask:SetAllPoints(frame.healthBar)
+            mask.dfAnchor = frame.healthBar
+        end
+    end
+    -- Read by TextureLayers for layer textures it creates after this call.
+    bar.dfHealthMask = mask
+    local fill = bar:GetStatusBarTexture()
+    if fill then SetTextureMask(fill, mask) end
+    local layers = bar.dfTextureLayers
+    if layers then
+        for _, tex in pairs(layers.textures) do SetTextureMask(tex, mask) end
+        -- Layers are built after the fill hold starts on a new bar (see HoldFillUntilPlaced).
+        layers.canvas:SetAlpha(bar.dfFillHeld and 0 or 1)
+    end
+end
+
+-- ☠ A FRESHLY SET FILL COVERS THE WHOLE BAR UNTIL THE ENGINE PLACES IT. SetStatusBarTexture
+-- pins the fill to the bar's two corners; the engine re-anchors it to the value (four points)
+-- only on a later frame, whatever value is already set. An attached bar spans a full health
+-- bar, so for those frames it painted the whole bar -- the boxes over the next frame along on
+-- a big join or a relog, and a heal-absorb wash over a frame born on leaving a group. So a
+-- just-textured fill stays invisible until it is re-anchored, as other frame addons hold their
+-- prediction bars for a frame. Held through the fill COLOUR's alpha: SetStatusBarColor writes the fill's
+-- alpha on every update, so fill:SetAlpha(0) would not survive the next one; and never the
+-- bar's own alpha, which is the out-of-range fade and the overflow visibility switch.
+-- ⚠ Capped: a fill that never reports four points is shown anyway after a few frames, so
+-- a change in how the engine anchors fills can only bring the flash back, never hide a bar.
+local FILL_HOLD_MAX_FRAMES = 5
+local heldBars = {}
+local fillHoldWatcher = CreateFrame("Frame")
+fillHoldWatcher:Hide()
+
+-- Every colour write for a held bar goes through here, so a held fill stays clear whichever
+-- update runs while it is held.
+local function SetFillColor(bar, r, g, b, a)
+    bar.dfFillR, bar.dfFillG, bar.dfFillB, bar.dfFillA = r, g, b, a
+    bar:SetStatusBarColor(r, g, b, bar.dfFillHeld and 0 or a)
+end
+
+-- The texture layers sit in their own canvas anchored to the fill, so they hold with it.
+local function ReapplyFillColor(bar)
+    if bar.dfFillA then SetFillColor(bar, bar.dfFillR, bar.dfFillG, bar.dfFillB, bar.dfFillA) end
+    if bar.dfTextureLayers then bar.dfTextureLayers.canvas:SetAlpha(bar.dfFillHeld and 0 or 1) end
+end
+
+fillHoldWatcher:SetScript("OnUpdate", function(self)
+    local any = false
+    for bar, frames in pairs(heldBars) do
+        local fill = bar:GetStatusBarTexture()
+        -- A fill cleared mid-hold has nothing left to hide: release it.
+        local okN, n = true, nil
+        if fill then okN, n = pcall(fill.GetNumPoints, fill) end
+        local placed = not fill or (okN and not (issecretvalue and issecretvalue(n)) and n ~= 2)
+        if placed or frames >= FILL_HOLD_MAX_FRAMES then
+            heldBars[bar] = nil
+            bar.dfFillHeld = nil
+            ReapplyFillColor(bar)
+        else
+            heldBars[bar] = frames + 1
+            any = true
+        end
+    end
+    if not any then self:Hide() end
+end)
+
+local function HoldFillUntilPlaced(bar)
+    if not (bar and bar:GetStatusBarTexture()) then return end
+    bar.dfFillHeld = true
+    ReapplyFillColor(bar)
+    heldBars[bar] = 0
+    fillHoldWatcher:Show()
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
@@ -802,6 +906,10 @@ function DF:UpdateAbsorb(frame, testIndex)
                 end
             elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
                 UnitGetDetailedHealPrediction(unit, nil, frame.absorbCalculator)
+                -- Range from the same snapshot as the clamped value (see the full path).
+                if frame.absorbCalculator.GetMaximumHealth then
+                    maxHealth = frame.absorbCalculator:GetMaximumHealth()
+                end
                 if frame.absorbCalculator.GetDamageAbsorbs then
                     local r1, r2 = frame.absorbCalculator:GetDamageAbsorbs()
                     if r1 then
@@ -946,6 +1054,7 @@ function DF:UpdateAbsorb(frame, testIndex)
                 barTex:SetDrawLayer("ARTWORK", 1)
             end
         end
+        HoldFillUntilPlaced(customBar)
     end
     
     -- Always apply blend mode (may have changed without texture change)
@@ -957,24 +1066,21 @@ function DF:UpdateAbsorb(frame, testIndex)
     -- Always apply color (fast operation, doesn't cause flicker)
     local absorbBaseColor
     if tex == "Interface\\RaidFrame\\Shield-Overlay" and blendMode == "ADD" then
-        customBar:SetStatusBarColor(col.r * 2, col.g * 2, col.b * 2, 1)
+        SetFillColor(customBar, col.r * 2, col.g * 2, col.b * 2, 1)
         absorbBaseColor = { r = col.r * 2, g = col.g * 2, b = col.b * 2, a = 1 }
     else
-        customBar:SetStatusBarColor(col.r, col.g, col.b, col.a or 0.7)
+        SetFillColor(customBar, col.r, col.g, col.b, col.a or 0.7)
         absorbBaseColor = col
     end
 
     -- Texture layers (and the Tile override the mode branches below re-assert).
     -- A custom tile size measures the health bar, or the bar itself when FLOATING.
     if DF:BarTextureLayersWanted(customBar, db, "absorbBar") then
-        DF:ApplyBarTextureLayers(customBar, "absorbBar", db, {
-            span = (mode == "FLOATING") and customBar or frame.healthBar,
-            isVertical = isVerticalFill,
-            baseColor = absorbBaseColor,
-            baseBlend = blendMode,
-            baseDesaturated = (tex == "Interface\\RaidFrame\\Shield-Overlay"),
-        })
+        DF:ApplyBarTextureLayers(customBar, "absorbBar", db, DF:BarLayerOpts(
+            (mode == "FLOATING") and customBar or frame.healthBar, isVerticalFill,
+            absorbBaseColor, blendMode, tex == "Interface\\RaidFrame\\Shield-Overlay"))
     end
+    DF:MaskBarToHealthBar(frame, customBar, mode ~= "FLOATING")
     
     customBar:Show()
     customBar:ClearAllPoints()
@@ -1107,10 +1213,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
-            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
-            -- (test values never exceed max), so the shield may overrun — exactly what
-            -- those settings mean on live frames.
+            -- Missing Health (1) is the only clamp mode left (see DF:MigrateAbsorbClampMode).
+            -- A profile written outside the import path can still hold 0 or 2 until the
+            -- next login; those skip the preview clamp.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
                 -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
                 -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
@@ -1135,22 +1240,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
-            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
-            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
-            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
-            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
-            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
-            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- Clamp mode. ☠ DF'S STORED VALUE IS NOT BLIZZARD'S ENUM: DF stores 1 ("Missing Health",
+            -- its only value -- see DF:MigrateAbsorbClampMode), while SetDamageAbsorbClampMode defines
+            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
+            -- 2=MaximumHealth. So 1 ignores heals -- fine while the shield starts at the health fill,
+            -- but chained BEHIND the heal it hands the bar a length that no longer fits and it runs
+            -- off the end. When the chain is active, 1 is promoted to 0: the same intent, but
             -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
-            -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
-            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
-            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
-            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
-            -- bar can never draw past max anyway), so "None" maps there.
-            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
             -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
             -- missing-health clamp measures against the NET heal.
@@ -1162,6 +1260,11 @@ function DF:UpdateAbsorb(frame, testIndex)
 
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
+            -- ★ The bar's range comes from the same snapshot as the clamped value.
+            -- UnitHealthMax is a separate read: on a join it can still be
+            -- a placeholder while the calculator's clamp is real, and a real shield over a
+            -- placeholder max fills the whole bar.
+            if calc.GetMaximumHealth then maxHealth = calc:GetMaximumHealth() end
 
             -- Get clamped absorbs and clamped bool
             if calc.GetDamageAbsorbs then
@@ -1418,10 +1521,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
-            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
-            -- (test values never exceed max), so the shield may overrun — exactly what
-            -- those settings mean on live frames.
+            -- Missing Health (1) is the only clamp mode left (see DF:MigrateAbsorbClampMode).
+            -- A profile written outside the import path can still hold 0 or 2 until the
+            -- next login; those skip the preview clamp.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
                 -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. The ruler is whatever the frame DRAWS:
                 -- the reduced share subtracts only when its overlay bar is actually shown and the bar is not
@@ -1446,22 +1548,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             end
             local calc = frame.absorbCalculator
             
-            -- Clamp mode from settings. ☠ DF's DROPDOWN LABELS ARE NOT BLIZZARD'S ENUM: the UI says
-            -- 0=None / 1=Missing Health / 2=Max Health, but the value goes straight to
-            -- SetDamageAbsorbClampMode, where Blizzard defines 0=MissingHealth (incoming heals
-            -- SUBTRACTED), 1=MissingHealthWithoutIncomingHeals, 2=MaximumHealth. So the user's "Missing
-            -- Health" (1) ignores heals -- fine while the shield starts at the health fill, but chained
-            -- BEHIND the heal it hands the bar a length that no longer fits and it runs off the end.
-            -- When the chain is active, 1 is promoted to 0: the same "Missing Health" intent, but
+            -- Clamp mode. ☠ DF'S STORED VALUE IS NOT BLIZZARD'S ENUM: DF stores 1 ("Missing Health",
+            -- its only value -- see DF:MigrateAbsorbClampMode), while SetDamageAbsorbClampMode defines
+            -- 0=MissingHealth (incoming heals SUBTRACTED), 1=MissingHealthWithoutIncomingHeals,
+            -- 2=MaximumHealth. So 1 ignores heals -- fine while the shield starts at the health fill,
+            -- but chained BEHIND the heal it hands the bar a length that no longer fits and it runs
+            -- off the end. When the chain is active, 1 is promoted to 0: the same intent, but
             -- heals-aware. The arithmetic stays inside the calculator, where secret values are legal.
-            -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
-            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
-            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
-            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
-            -- bar can never draw past max anyway), so "None" maps there.
-            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
             -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
             -- missing-health clamp measures against the NET heal.
@@ -1473,6 +1568,11 @@ function DF:UpdateAbsorb(frame, testIndex)
 
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
+            -- ★ The bar's range comes from the same snapshot as the clamped value.
+            -- UnitHealthMax is a separate read: on a join it can still be
+            -- a placeholder while the calculator's clamp is real, and a real shield over a
+            -- placeholder max fills the whole bar.
+            if calc.GetMaximumHealth then maxHealth = calc:GetMaximumHealth() end
 
             -- Get clamped absorbs and clamped bool
             if calc.GetDamageAbsorbs then
@@ -1596,11 +1696,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- across the seam where one hands over to the other.
         DF:ApplyBarTextureTiling(overflowBar, overflowApplied == false and DF.STOCK_BAR_TEXTURE or texture)
         if DF:BarTextureLayersWanted(overflowBar, db, "absorbBar") then
-            DF:ApplyBarTextureLayers(overflowBar, "absorbBar", db, {
-                span = frame.healthBar, isVertical = isVerticalFill,
-                baseColor = color, baseBlend = db.absorbBarBlendMode or "BLEND",
-            })
+            DF:ApplyBarTextureLayers(overflowBar, "absorbBar", db, DF:BarLayerOpts(
+                frame.healthBar, isVerticalFill, color, db.absorbBarBlendMode or "BLEND"))
         end
+        DF:MaskBarToHealthBar(frame, overflowBar, true)
         
         -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
         local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
@@ -1903,6 +2002,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             barTex:SetDesaturated(false)
             barTex:SetDrawLayer("ARTWORK", 1)
         end
+        HoldFillUntilPlaced(bar)
     end
     
     -- Always apply blend mode (may have changed without texture change)
@@ -1911,13 +2011,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         barTex:SetBlendMode(blendMode)
     end
     
-    bar:SetStatusBarColor(col.r, col.g, col.b, col.a or 0.7)
+    SetFillColor(bar, col.r, col.g, col.b, col.a or 0.7)
     if DF:BarTextureLayersWanted(bar, db, "healAbsorbBar") then
-        DF:ApplyBarTextureLayers(bar, "healAbsorbBar", db, {
-            span = (mode == "FLOATING") and bar or frame.healthBar, isVertical = healAbsorbVertical,
-            baseColor = col, baseBlend = blendMode,
-        })
+        DF:ApplyBarTextureLayers(bar, "healAbsorbBar", db, DF:BarLayerOpts(
+            (mode == "FLOATING") and bar or frame.healthBar, healAbsorbVertical, col, blendMode))
     end
+    DF:MaskBarToHealthBar(frame, bar, mode ~= "FLOATING")
     
     bar:ClearAllPoints()
     
@@ -2016,6 +2115,8 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
+            -- Range from the same snapshot as the value (see UpdateAbsorb).
+            if calc.GetMaximumHealth then maxHealth = calc:GetMaximumHealth() end
             
             -- Get clamped heal absorbs
             if calc.GetHealAbsorbs then
@@ -2191,22 +2292,121 @@ local function StyleHealPredSegment(seg, tex, blendMode, color, db, layerOpts)
         DF:SafeSetStatusBarTexture(seg, tex)   -- also sets tiling + texcoords
         local t = seg:GetStatusBarTexture()
         if t then t:SetDrawLayer("ARTWORK", 1) end
+        HoldFillUntilPlaced(seg)
     end
     local t = seg:GetStatusBarTexture()
     if t then t:SetBlendMode(blendMode) end
-    seg:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    SetFillColor(seg, color.r, color.g, color.b, color.a or 0.7)
     if db and layerOpts and DF:BarTextureLayersWanted(seg, db, "healPrediction") then
-        DF:ApplyBarTextureLayers(seg, "healPrediction", db, {
-            span = layerOpts.span, isVertical = layerOpts.isVertical,
-            baseColor = color, baseBlend = blendMode,
-        })
+        DF:ApplyBarTextureLayers(seg, "healPrediction", db, DF:BarLayerOpts(
+            layerOpts.span, layerOpts.isVertical, color, blendMode))
     end
+end
+
+-- ★ OVERHEAL IS A SPARK AT THE BAR'S END, never a tail past it: nothing tied to the health
+-- bar draws outside it (see MaskBarToHealthBar). The calculator's clamped flag says the heals
+-- ran past the missing health; it can be secret, so it only ever drives an alpha
+-- (SetAlphaFromBoolean). Drawn like the overshield SPARK, on its own host above the band for
+-- the same reason (see the overshield glow in UpdateAbsorb).
+local OVERHEAL_SPARK_ALPHA = 0.8
+local OVERHEAL_SPARK_SIZE = 5
+local SPARK_MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+-- `known` says whether `overhealing` was set at all. It is passed separately because the flag
+-- itself may be secret, and even a nil test on a secret throws.
+local function UpdateOverhealSpark(frame, db, color, overhealing, known)
+    local spark = frame.dfOverhealSpark
+    if not (db.healPredictionShowOverheal and known) then
+        if spark then spark:Hide() end
+        return
+    end
+    local host = frame.dfOverhealHost
+    if not host then
+        host = CreateFrame("Frame", nil, frame)
+        host:SetAllPoints(frame.healthBar)
+        frame.dfOverhealHost = host
+    end
+    host:SetFrameLevel(frame:GetFrameLevel() + 13)
+    if not spark then
+        spark = host:CreateTexture(nil, "OVERLAY", nil, 6)
+        spark:SetBlendMode("ADD")
+        frame.dfOverhealSpark = spark
+    end
+    -- At the max-health end, whichever way the bar fills.
+    local orient = db.healthOrientation or "HORIZONTAL"
+    if spark.dfOrient ~= orient then
+        spark.dfOrient = orient
+        local hb = frame.healthBar
+        spark:ClearAllPoints()
+        if orient == "HORIZONTAL_INV" then
+            spark:SetTexture(SPARK_MEDIA .. "DF_Gradient_H")
+            spark:SetPoint("TOPLEFT", hb, "TOPLEFT", 0, 0)
+            spark:SetPoint("BOTTOMLEFT", hb, "BOTTOMLEFT", 0, 0)
+            spark:SetWidth(OVERHEAL_SPARK_SIZE)
+        elseif orient == "VERTICAL" then
+            spark:SetTexture(SPARK_MEDIA .. "DF_Gradient_V_Rev")
+            spark:SetPoint("TOPLEFT", hb, "TOPLEFT", 0, 0)
+            spark:SetPoint("TOPRIGHT", hb, "TOPRIGHT", 0, 0)
+            spark:SetHeight(OVERHEAL_SPARK_SIZE)
+        elseif orient == "VERTICAL_INV" then
+            spark:SetTexture(SPARK_MEDIA .. "DF_Gradient_V")
+            spark:SetPoint("BOTTOMLEFT", hb, "BOTTOMLEFT", 0, 0)
+            spark:SetPoint("BOTTOMRIGHT", hb, "BOTTOMRIGHT", 0, 0)
+            spark:SetHeight(OVERHEAL_SPARK_SIZE)
+        else
+            spark:SetTexture(SPARK_MEDIA .. "DF_Gradient_H_Rev")
+            spark:SetPoint("TOPRIGHT", hb, "TOPRIGHT", 0, 0)
+            spark:SetPoint("BOTTOMRIGHT", hb, "BOTTOMRIGHT", 0, 0)
+            spark:SetWidth(OVERHEAL_SPARK_SIZE)
+        end
+    end
+    spark:SetVertexColor(color.r, color.g, color.b, 1)
+    spark:SetAlphaFromBoolean(overhealing, OVERHEAL_SPARK_ALPHA, 0)
+    spark:Show()
+end
+
+-- At file scope, not inside UpdateHealPrediction: defined there it was a fresh closure on
+-- every call -- live calls included, which never run it -- and most of DF's allocation in combat.
+local function testHealValues(frame, db, showMode, testData)
+    local maxHealth = (testData and testData.maxHealth) or 100000
+    local healthPct = (testData and testData.healthPercent) or 0.75
+    local healPct = (testData and testData.healPredictionPercent) or 0
+    -- Net of the unit's consuming heal absorb, mirroring the live calculator's
+    -- HealAbsorbMode 0: the absorb eats the first points of incoming healing, so
+    -- only the remainder is a real promise of future health.
+    -- ☠ GATED ON THE TEST PANEL'S ABSORBS TOGGLE. In the preview, what is rendered
+    -- IS the data: Absorbs off means "these units have no absorbs", so a hidden
+    -- wash must not go on eating the heal -- toggling Absorbs off and watching the
+    -- heal NOT grow back is exactly how this shipped wrong.
+    -- Live is deliberately different: a real heal absorb eats healing whether or
+    -- not it is displayed; only the preview's fiction follows its toggles.
+    local haPct = (db.testShowAbsorbs and testData and testData.healAbsorbPercent) or 0
+    local total = math.max(0, healPct - haPct) * maxHealth   -- safe: nothing is secret in test
+    -- Mirrors SetIncomingHealClampMode 0 at overflow 1.0: never more than the missing
+    -- health, with the excess reported as the clamped flag that lights the spark.
+    local missing = math.max(0, maxHealth - healthPct * maxHealth)
+    local overhealing = total > missing
+    total = math.min(total, missing)
+    -- The breakdown live gets from the calculator. An even split is the only
+    -- honest preview: there is no real healer to attribute to.
+    local myHeals, othersHeals = total * 0.5, total * 0.5
+    frame.dfTotalHeals, frame.dfMyHeals, frame.dfOthersHeals = total, myHeals, othersHeals
+    local incomingHeals
+    if showMode == "MINE" or showMode == "SPLIT" then
+        incomingHeals = myHeals
+    elseif showMode == "OTHERS" then
+        incomingHeals = othersHeals
+    else
+        incomingHeals = total
+    end
+    return maxHealth, incomingHeals, myHeals, othersHeals, overhealing
 end
 
 function DF:UpdateHealPrediction(frame, testIndex)
     if not frame or not frame.healthBar then return end
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
     if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
+    -- Every early return below leaves the spark hidden; only the OVERLAY branch shows it.
+    if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
     
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
     if DF:MemTestDisabled("enableHealPrediction") and not DF.testMode and not DF.raidTestMode then
@@ -2237,6 +2437,8 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- Get values - either from test data or real unit
     local maxHealth, incomingHeals
     local myHeals, othersHeals          -- Per-source breakdown (SPLIT mode)
+    local overhealing                   -- The calculator's clamped flag (may be secret)
+    local haveOverheal = false          -- Plain flag: overhealing was set (never test overhealing itself)
     -- ⚠ There is deliberately NO isTestMode flag any more. It existed only to pick
     -- a different render path, and every one of those forks was a bug waiting to
     -- happen. If you find yourself wanting it back, the answer is almost certainly
@@ -2249,55 +2451,17 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- and a visible gap the moment Animate Health swings. Nothing in live's path is secret-bound
     -- here (a StatusBar fed a plain value behaves as one fed a secret), so test follows live.
     --
-    -- ★ ONE ceiling for live's calculator AND the test mirror, or they drift -- the fast-path-copy
-    -- trap this file is prone to. 1.05 matches Blizzard's own compact party/raid frames, which cap
-    -- the overheal tail at 5% past the bar.
-    local OVERHEAL_CEILING = 1.05
-    local function applyTestHeals(testData)
-        maxHealth = (testData and testData.maxHealth) or 100000
-        local healthPct = (testData and testData.healthPercent) or 0.75
-        local healPct = (testData and testData.healPredictionPercent) or 0
-        -- Net of the unit's consuming heal absorb, mirroring the live calculator's
-        -- HealAbsorbMode 0: the absorb eats the first points of incoming healing, so
-        -- only the remainder is a real promise of future health.
-        -- ☠ GATED ON THE TEST PANEL'S ABSORBS TOGGLE. In the preview, what is rendered
-        -- IS the data: Absorbs off means "these units have no absorbs", so a hidden
-        -- wash must not go on eating the heal -- toggling Absorbs off and watching the
-        -- heal NOT grow back is exactly how this shipped wrong.
-        -- Live is deliberately different: a real heal absorb eats healing whether or
-        -- not it is displayed; only the preview's fiction follows its toggles.
-        local haPct = (db.testShowAbsorbs and testData and testData.healAbsorbPercent) or 0
-        local total = math.max(0, healPct - haPct) * maxHealth   -- safe: nothing is secret in test
-        -- Mirrors SetIncomingHealClampMode + the overflow ceiling. With overheal off
-        -- the calculator never reports more than the missing health, so neither may
-        -- the preview; with it on the overhang spills past the bar (it is parented to
-        -- the frame, not the health bar, for exactly that) but is capped at the SAME
-        -- ceiling live's calculator enforces -- an uncapped preview promised a tail
-        -- live never draws.
-        if not db.healPredictionShowOverheal then
-            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth))
-        else
-            total = math.min(total, math.max(0, maxHealth * OVERHEAL_CEILING - healthPct * maxHealth))
-        end
-        -- The breakdown live gets from the calculator. An even split is the only
-        -- honest preview: there is no real healer to attribute to.
-        myHeals, othersHeals = total * 0.5, total * 0.5
-        frame.dfTotalHeals, frame.dfMyHeals, frame.dfOthersHeals = total, myHeals, othersHeals
-        if showMode == "MINE" or showMode == "SPLIT" then
-            incomingHeals = myHeals
-        elseif showMode == "OTHERS" then
-            incomingHeals = othersHeals
-        else
-            incomingHeals = total
-        end
-    end
 
     if DF.testMode and testIndex ~= nil then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
-        applyTestHeals(type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+            type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
+        haveOverheal = true
     elseif DF.raidTestMode and testIndex ~= nil then
-        applyTestHeals(type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
+        maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
+            type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
+        haveOverheal = true
     else
         -- Only process valid units for real data
         if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
@@ -2310,7 +2474,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
             if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
             return
         end
-        
+
+        -- No prediction on a blanked frame. Offline and dead units get a fixed health bar from
+        -- the health code, which hides the absorb and heal absorb on the same branches; a
+        -- prediction drawn against that fixed bar measures nothing real.
+        if (UnitIsPlayer(unit) and not UnitIsConnected(unit)) or UnitIsDead(unit) or UnitIsGhost(unit) then
+            if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+            if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+            return
+        end
+
         -- Get maxHealth - StatusBar API handles secret values internally via SetMinMaxValues
         maxHealth = UnitHealthMax(unit)
         
@@ -2323,35 +2496,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
             
             local calc = frame.healPredictionCalculator
             
-            -- ☠ CLAMP MODE 0 IN BOTH STATES — the overheal toggle drives the OVERFLOW
-            -- PERCENT, never the mode. Per the enum docs the overflow belongs to mode 0
-            -- ("clamp to the amount of missing health WITH OVERFLOW APPLIED"), while
-            -- mode 1 (MaximumHealth) is a VALUE cap of the whole health pool with no
-            -- overflow term at all — so under mode 1 the ceiling never binds, the value
-            -- may reach maxHealth on its own, and a near-full unit renders health+heal
-            -- at close to DOUBLE the bar. That was field-caught as a full-bar blue
-            -- overhang the first time overheal actually
-            -- rendered: an earlier cut set mode 1 for ON on the assumption the ceiling
-            -- capped the sum in every mode. It caps only mode 0's.
-            -- Mode 0 + ceiling is also literally Blizzard's compact-frame formula
-            -- (trim when health + heals > max * 1.05): sum <= ceiling * max, i.e. a
-            -- bounded tail with overheal on, flush at the bar edge with it off.
+            -- ☠ CLAMP MODE 0, never 1. Mode 0 clamps to the missing health with the overflow
+            -- percent applied; mode 1 (MaximumHealth) caps the value at the whole health pool
+            -- with no overflow term, so a near-full unit rendered health + heal at close to
+            -- DOUBLE the bar -- field-caught as a full-bar overhang.
             calc:SetIncomingHealClampMode(0)
-            -- ☠ THE OVERFLOW PERCENT IS A CEILING ON THE SUM, NOT A "SHOW THIS MUCH".
-            -- Per the API doc: "Increasing this to a value OVER 1.0 will mean that
-            -- incoming heals can extend beyond maximum health." So 1.0 pins
-            -- health + heal at exactly the bar edge — zero overhang — and the old
-            -- unconditional 1.0 here (commented "Always 100%", read backwards) is why
-            -- Show Overheal never showed overheals: the clamp-mode line above did
-            -- everything right and this line capped the sum anyway.
-            -- ON  -> OVERHEAL_CEILING (1.05, declared above applyTestHeals so the test
-            --        mirror caps at the same number): mode 0's cap becomes
-            --        missing + 5% of max — a bounded tail past the bar, matching
-            --        Blizzard's own compact frames. The render is built for the spill —
-            --        the bar is parented to the frame, not the health bar, precisely so
-            --        it can overhang.
-            -- OFF -> 1.0: mode 0's cap is exactly the missing health — flush at the bar.
-            calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and OVERHEAL_CEILING or 1.0)
+            -- ☠ OVERFLOW 1.0 IN BOTH STATES: health + heal stops exactly at the bar edge. Above
+            -- 1.0 the API lets heals "extend beyond maximum health" -- the old Show Overheal
+            -- tail. Overheal is now the spark, lit by the clamped flag this leaves meaning
+            -- "heals ran past the missing health".
+            calc:SetIncomingHealOverflowPercent(1.0)
             -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
             -- This IS the engine default the bar has ridden all along — pinned
             -- explicitly so it can never drift. The netting is engine-side, where
@@ -2367,9 +2521,14 @@ function DF:UpdateHealPrediction(frame, testIndex)
             end
 
             UnitGetDetailedHealPrediction(unit, healerUnit, calc)
+            -- Range from the same snapshot as the value (see UpdateAbsorb).
+            if calc.GetMaximumHealth then maxHealth = calc:GetMaximumHealth() end
 
             local amount, amountFromHealer, amountFromOthers, clamped = calc:GetIncomingHeals()
             myHeals, othersHeals = amountFromHealer, amountFromOthers
+            overhealing = clamped
+            -- issecretvalue first: the nil test is only reached on a plain value.
+            haveOverheal = (issecretvalue and issecretvalue(clamped)) or clamped ~= nil
 
             -- TD stash: expose the heal breakdown so the TextDesigner LiveSource
             -- reads it without a second calculator pass. dfTotalHeals is the
@@ -2470,6 +2629,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         if barTex then
             barTex:SetDrawLayer("ARTWORK", 1)
         end
+        HoldFillUntilPlaced(bar)
     end
     
     local barTex = bar:GetStatusBarTexture()
@@ -2477,7 +2637,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         barTex:SetBlendMode(blendMode)
     end
     
-    bar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
+    SetFillColor(bar, color.r, color.g, color.b, color.a or 0.7)
     -- Kept as one table: the split mode's second segment reuses its span and axis.
     -- Reused per bar rather than built per call: this runs on every heal-prediction
     -- event, and ApplyBarTextureLayers reads the fields without keeping the table.
@@ -2492,6 +2652,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     if DF:BarTextureLayersWanted(bar, db, "healPrediction") then
         DF:ApplyBarTextureLayers(bar, "healPrediction", db, healPredLayerOpts)
     end
+    DF:MaskBarToHealthBar(frame, bar, mode ~= "FLOATING")
     bar:ClearAllPoints()
     
     -- ============================================================
@@ -2540,7 +2701,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
 
         -- Use secret-aware SetBarValue. SPLIT already halved incomingHeals upstream
         -- (live via the calculator's per-healer breakdown, preview via
-        -- applyTestHeals), so there is nothing test-specific left to do here.
+        -- testHealValues), so there is nothing test-specific left to do here.
         DF.SetBarValue(bar, incomingHeals, frame)
         bar:Show()
 
@@ -2548,6 +2709,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
             StyleHealPredSegment(seg2, tex, blendMode, othersColor, db, healPredLayerOpts)
+            DF:MaskBarToHealthBar(frame, seg2, false)
             seg2:SetParent(frame)
             seg2:SetFrameStrata(bar:GetFrameStrata())
             seg2:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -2574,7 +2736,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- No arithmetic on secret values - anchor and let StatusBar handle it
     -- ============================================================
     else
-        -- Parent to frame (not healthBar) to avoid clipping when showing overheal
+        -- Parented to the frame so it keeps its ladder level; the mask keeps it in the bar.
         bar:SetParent(frame)
         bar:SetFrameStrata(frame:GetFrameStrata())
         bar:SetFrameLevel(predictionLevel)
@@ -2638,6 +2800,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         DF.SetBarValue(bar, incomingHeals, frame)
 
         bar:Show()
+        UpdateOverhealSpark(frame, db, color, overhealing, haveOverheal)
 
         -- ============================================================
         -- SPLIT: second segment ("others' heals"), chained after the
@@ -2649,6 +2812,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
             StyleHealPredSegment(seg2, tex, blendMode, othersColor, db, healPredLayerOpts)
+            DF:MaskBarToHealthBar(frame, seg2, true)
             seg2:SetParent(frame)
             seg2:SetFrameStrata(frame:GetFrameStrata())
             seg2:SetFrameLevel(predictionLevel)
@@ -2656,7 +2820,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
             -- Full-width segment; StatusBar fills the others' proportion. The preview
-            -- reaches here with othersHeals already set (applyTestHeals), so it takes
+            -- reaches here with othersHeals already set (testHealValues), so it takes
             -- the same path -- do not size the segment by hand.
             AnchorHealPredSegment(seg2, prevTex, healthOrient, barWidth, barHeight)
             seg2:SetMinMaxValues(0, maxHealth)

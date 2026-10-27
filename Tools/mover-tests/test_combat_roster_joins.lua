@@ -92,6 +92,7 @@ local function buildFlat(world)
     local DF = {
         MELEE_SPECS = {}, MELEE_CLASSES = {},
         GetPinnedHiddenNames = function() return world.hidden end,
+        UnitIsUnit = function(a, b) return _G.UnitIsUnit(a, b) end,
     }
     local FRF = {}
     local src = cut(flat, "local function WithPlaceholderToken", "return result")
