@@ -2884,8 +2884,9 @@ function DF:DriveDispelOverlayFactory(frame, db)
             -- includeDispelTypes.
             frameLevelOffset = 0,   -- widget levels are set absolutely (legacy layering)
             enabled = true,
-            -- The style pass below runs once, now. A build paced to a later frame has no
-            -- buttons yet, and no aura event drives this function again.
+            -- Overlay builds are never paced, so today this does not fire. Kept so the
+            -- style pass below still lands if that ever changes: no aura event drives
+            -- this function again.
             onBuilt = function() DF:UpdateDispelOverlay(frame) end,
         })
         frame.dispelFactory = h

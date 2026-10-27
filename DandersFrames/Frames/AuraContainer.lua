@@ -8544,7 +8544,7 @@ local function drainBuilds(self)
         local h = buildQueue[buildHead]
         buildQueue[buildHead] = nil
         buildHead = buildHead + 1
-        -- Destroyed while waiting, or built already (a Rebuild runs _build itself).
+        -- Destroyed while waiting, or built already (queued twice).
         if h and not h._destroyed and not h.backend then
             timedBuild(h)
             -- ☠ A deferred build lands with nobody watching. An owner that styles the
