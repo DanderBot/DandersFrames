@@ -74,7 +74,7 @@ local function FlatModeReachable()
     local real = DF._realRaidDB
     if real and real.raidUseGroups == false then return true end
     local ap = DF.db and DF.db.raidAutoProfiles
-    if type(ap) ~= "table" then return false end
+    if type(ap) ~= "table" or not ap.enabled then return false end
     local function flat(p)
         return type(p) == "table" and type(p.overrides) == "table" and p.overrides.raidUseGroups == false
     end
@@ -1432,6 +1432,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             and FlatModeReachable() then
             DebugPrint("PLAYER_ENTERING_WORLD: pre-creating flat raid frames")
             FlatRaidFrames:CreateFrames()
+            -- Pre-creation briefly shows the header, and its children's unit assignments
+            -- overwrite the grouped frames' unit map entries. Hand them back now rather
+            -- than at the PLAYER_ENTERING_WORLD +0.1s rebuild.
+            if DF.RebuildUnitFrameMap then DF:RebuildUnitFrameMap() end
         end
         return
     end
