@@ -904,6 +904,7 @@ do
             S = S, P = P,
             DF = { Say = function(_, m) W.said[#W.said + 1] = m end,
                    DebugWarn = function() W.warned = W.warned + 1 end,
+                   DebugActive = function() return true end,
                    InvalidateAuraLayout = function() end, UpdateAllFrames = function() end,
                    AuraDesigner = {} },
             GetTime = function() W.now = (W.now or 0) + 1 return W.now end,

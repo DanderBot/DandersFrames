@@ -750,8 +750,10 @@ function DF:UpdatePermanentMoverAnchor(mode)
     local offsetY = db.permanentMoverOffsetY or 0
     local attachFrame = DF:GetPermanentMoverAttachFrame(mode)
 
-    DF:Debug("POSITION", "UpdatePermanentMoverAnchor(%s): anchor=%s offset=%.0f,%.0f attachFrame=%s",
-        mode, anchor, offsetX, offsetY, attachFrame and attachFrame:GetName() or "nil")
+    if DF:DebugActive("POSITION") then
+        DF:Debug("POSITION", "UpdatePermanentMoverAnchor(%s): anchor=%s offset=%.0f,%.0f attachFrame=%s",
+            mode, anchor, offsetX, offsetY, attachFrame and attachFrame:GetName() or "nil")
+    end
 
     handle:ClearAllPoints()
     handle:SetPoint(anchor, attachFrame, anchor, offsetX, offsetY)
@@ -827,15 +829,19 @@ end
 
 function DF:UpdatePermanentMoverVisibility()
     local inCombat = InCombatLockdown()
-    DF:Debug("POSITION", "UpdatePermanentMoverVisibility: combat=%s", tostring(inCombat))
+    if DF:DebugActive("POSITION") then
+        DF:Debug("POSITION", "UpdatePermanentMoverVisibility: combat=%s", tostring(inCombat))
+    end
 
     -- Party
     if DF.permanentPartyMover then
         local db = DF:GetDB()
         -- Show if enabled and locked, but hide if raid test mode is active
         local show = db.permanentMover and db.locked and not DF.raidTestMode and not IsInRaid()
-        DF:Debug("POSITION", "  Party mover: enabled=%s locked=%s show=%s",
-            tostring(db.permanentMover), tostring(db.locked), tostring(show))
+        if DF:DebugActive("POSITION") then
+            DF:Debug("POSITION", "  Party mover: enabled=%s locked=%s show=%s",
+                tostring(db.permanentMover), tostring(db.locked), tostring(show))
+        end
         if show then
             if inCombat and db.permanentMoverHideInCombat then
                 DF.permanentPartyMover:Hide()
@@ -861,8 +867,10 @@ function DF:UpdatePermanentMoverVisibility()
     if DF.permanentRaidMover and DF.raidContainer then
         local db = DF:GetRaidDB()
         local raidEnabled = db.permanentMover
-        DF:Debug("POSITION", "  Raid mover: enabled=%s locked=%s inRaid=%s testMode=%s",
-            tostring(raidEnabled), tostring(db.raidLocked), tostring(IsInRaid()), tostring(DF.raidTestMode))
+        if DF:DebugActive("POSITION") then
+            DF:Debug("POSITION", "  Raid mover: enabled=%s locked=%s inRaid=%s testMode=%s",
+                tostring(raidEnabled), tostring(db.raidLocked), tostring(IsInRaid()), tostring(DF.raidTestMode))
+        end
         -- In raid test mode, also show if party mover is enabled
         if DF.raidTestMode and not raidEnabled then
             raidEnabled = DF:GetDB().permanentMover
@@ -1320,14 +1328,16 @@ function DF:NoteRaidContainerMove(cx, cy, rec)
             ping.warned = now
             local apu = DF.AutoProfilesUI
             local layout = apu and apu.activeRuntimeProfile
-            DF:DebugWarn("RAIDPOS",
-                "raid container bounced %d times in %.1fs between (%.1f,%.1f) and (%.1f,%.1f) -- layout=%s editing=%s anchored=%s moverSession=%s trail=%s",
-                ping.n, now - ping.t0, cx, cy, ping.x1, ping.y1,
-                tostring(layout and layout.name or "none"),
-                tostring(apu and apu.IsEditing and apu:IsEditing() or false),
-                tostring(rec and rec.anchor and rec.anchor.target or false),
-                tostring(Mover and Mover:IsUnlocked() or false),
-                #trail > 0 and table.concat(trail, " ") or "(turn on RAIDPOS for callers)")
+            if DF:DebugActive("RAIDPOS") then
+                DF:DebugWarn("RAIDPOS",
+                    "raid container bounced %d times in %.1fs between (%.1f,%.1f) and (%.1f,%.1f) -- layout=%s editing=%s anchored=%s moverSession=%s trail=%s",
+                    ping.n, now - ping.t0, cx, cy, ping.x1, ping.y1,
+                    tostring(layout and layout.name or "none"),
+                    tostring(apu and apu.IsEditing and apu:IsEditing() or false),
+                    tostring(rec and rec.anchor and rec.anchor.target or false),
+                    tostring(Mover and Mover:IsUnlocked() or false),
+                    #trail > 0 and table.concat(trail, " ") or "(turn on RAIDPOS for callers)")
+            end
         end
     end
     ping.x2, ping.y2 = ping.x1, ping.y1

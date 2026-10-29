@@ -1192,8 +1192,10 @@ function DF:UpdateAllFrames_Now()
     local inGroup = IsInGroup()
     local numPartyMembers = GetNumSubgroupMembers()
     
-    DF:Debug("VISIBILITY", "UpdateAllFrames: inGroup=%s party=%d testMode=%s soloMode=%s",
-        tostring(inGroup), numPartyMembers or 0, tostring(DF.testMode), tostring(db.soloMode))
+    if DF:DebugActive("VISIBILITY") then
+        DF:Debug("VISIBILITY", "UpdateAllFrames: inGroup=%s party=%d testMode=%s soloMode=%s",
+            tostring(inGroup), numPartyMembers or 0, tostring(DF.testMode), tostring(db.soloMode))
+    end
     
     -- Determine what to show:
     -- Test Mode: show everything (player + 4 party frames)
@@ -1207,9 +1209,11 @@ function DF:UpdateAllFrames_Now()
     local showPlayerFrame = (DF.testMode and not DF.raidTestMode) or ((inGroup or (db.soloMode == true)) and not db.hidePlayerFrame and not DF.raidTestMode)
     local showPartyFrames = (DF.testMode and not DF.raidTestMode) or (inGroup and not DF.raidTestMode)
     
-    DF:Debug("VISIBILITY", "UpdateAllFrames: showPlayer=%s showParty=%s hidePlayer=%s raidTest=%s",
-        tostring(showPlayerFrame), tostring(showPartyFrames),
-        tostring(db.hidePlayerFrame), tostring(DF.raidTestMode))
+    if DF:DebugActive("VISIBILITY") then
+        DF:Debug("VISIBILITY", "UpdateAllFrames: showPlayer=%s showParty=%s hidePlayer=%s raidTest=%s",
+            tostring(showPlayerFrame), tostring(showPartyFrames),
+            tostring(db.hidePlayerFrame), tostring(DF.raidTestMode))
+    end
     
     -- Update container position (always use CENTER for consistency with position panel)
     local partyScale = db.frameScale or 1.0

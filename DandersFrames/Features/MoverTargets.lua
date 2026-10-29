@@ -504,7 +504,9 @@ function MT:RefreshUnitTargets(scope)
     -- One batched re-solve for the scope's slots AND its semantic keys, so everything
     -- anchored to any of them settles in a single pass instead of one pass per key.
     Mover:RefreshAnchorTargets(ADDON_KEY, self:SubTargetKeys(scope))
-    DF:Debug("LAYOUT", "MoverTargets: rebuilt %s targets (%d registered)", scope, #tracked)
+    if DF:DebugActive("LAYOUT") then
+        DF:Debug("LAYOUT", "MoverTargets: rebuilt %s targets (%d registered)", scope, #tracked)
+    end
 end
 
 -- Shared debounce. A raid join fires GROUP_ROSTER_UPDATE several times in a row and a

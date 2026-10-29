@@ -537,8 +537,10 @@ local function KnowsPoisonCleansingTotem()
     if not warnedNoSpellProbe then
         warnedNoSpellProbe = true
         if DF.DebugError then
-            DF:DebugError("DISPEL", "no spellbook API available - cannot test for "
-                .. "Poison Cleansing Totem; the Shaman dispel-flag repair is inactive")
+            if DF:DebugActive("DISPEL") then
+                DF:DebugError("DISPEL", "no spellbook API available - cannot test for "
+                    .. "Poison Cleansing Totem; the Shaman dispel-flag repair is inactive")
+            end
         end
     end
     return nil
@@ -706,8 +708,10 @@ do
             if now == lastKnown then return end
             local before = lastKnown
             lastKnown = now
-            DF:Debug("DISPEL", "dispel exclusion changed: [%s] -> [%s] (re-planning)",
-                tostring(before), now)
+            if DF:DebugActive("DISPEL") then
+                DF:Debug("DISPEL", "dispel exclusion changed: [%s] -> [%s] (re-planning)",
+                    tostring(before), now)
+            end
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
         end)
     end
@@ -3900,20 +3904,28 @@ local function confirmRetarget(h, label, unit)
     if c and c.GetUnit then
         local okU, bound = pcall(c.GetUnit, c)
         if okU and type(bound) == "string" and unit and bound ~= unit then
-            DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
-                .. " bound to %s; this row is showing %s's auras",
-                label, tostring(unit), tostring(bound), tostring(bound))
+            if DF:DebugActive("AURAROW") then
+                DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
+                    .. " bound to %s; this row is showing %s's auras",
+                    label, tostring(unit), tostring(bound), tostring(bound))
+            end
         end
     end
     local reparsed = h:Refresh()
     if reparsed then
-        DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+        end
     elseif h.backend then
-        DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
-            .. "still be showing the previous occupant", label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
+                .. "still be showing the previous occupant", label, tostring(unit))
+        end
     else
-        DF:Debug("AURAROW", "%s: retarget re-parse deferred on %s (backend not attached yet)",
-            label, tostring(unit))
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "%s: retarget re-parse deferred on %s (backend not attached yet)",
+                label, tostring(unit))
+        end
     end
 end
 
@@ -4051,9 +4063,11 @@ function DF:DriveBuffFactory(frame, db)
 
     -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "buff", frame.unit)
     end
@@ -4094,8 +4108,10 @@ function DF:DriveBuffFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
-                tostring(frame.buffFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
+                    tostring(frame.buffFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.buffFactoryStructSig, frame.buffFactoryTuningSig
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
@@ -4110,12 +4126,16 @@ function DF:DriveBuffFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips) — discrete, leak-safe
             if not okRB then
                 frame.buffFactoryStructSig, frame.buffFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "buff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "buff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.buffFactoryTuningSig = tuningSig
                 -- Per-record filter STRINGS and candidateFilters both ride cfg.filter;
                 -- the struct sig pins every record's KEY, so the fresh list is
@@ -4274,9 +4294,11 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "debuff", frame.unit)
     end
@@ -4318,8 +4340,10 @@ function DF:DriveDebuffFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
-                tostring(frame.debuffFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
+                    tostring(frame.debuffFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
@@ -4327,12 +4351,16 @@ function DF:DriveDebuffFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural — REPLACES the config wholesale (structSig = park key)
             if not okRB then
                 frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "debuff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "debuff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.debuffFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.debuffFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.debuffFactoryTuningSig = tuningSig
                 -- hideLong minutes / Keep Important within a stable category set
                 -- live in the RECORDS' candidateFilters — swap the (group-identical)
@@ -4362,7 +4390,9 @@ function DF:SetPlayerDeadState(dead)
     dead = dead and true or false
     if DF.playerIsDead == dead then return end
     DF.playerIsDead = dead
-    DF:Debug("AURAROW", "player dead state -> %s", tostring(dead))
+    if DF:DebugActive("AURAROW") then
+        DF:Debug("AURAROW", "player dead state -> %s", tostring(dead))
+    end
 end
 
 -- ============================================================
@@ -4586,9 +4616,11 @@ function DF:DriveDefensiveFactory(frame, db)
 
     -- Keep the container on the frame's current unit; Handle:SetUnit applies in combat too.
     if h:GetUnit() ~= frame.unit then
-        DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
-            tostring(h:GetUnit()), tostring(frame.unit),
-            InCombatLockdown() and " (in combat)" or "")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
+                tostring(h:GetUnit()), tostring(frame.unit),
+                InCombatLockdown() and " (in combat)" or "")
+        end
         h:SetUnit(frame.unit)
         confirmRetarget(h, "defensive", frame.unit)
     end
@@ -4611,8 +4643,10 @@ function DF:DriveDefensiveFactory(frame, db)
             -- "I changed a setting and nothing happened" is always answered by WHICH
             -- SIG MOVED. Both are already computed, and this only runs when the
             -- layout version bumped, so it is free at steady state.
-            DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
-                tostring(frame.defensiveFactoryStructSig), tostring(structSig))
+            if DF:DebugActive("AURAROW") then
+                DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
+                    tostring(frame.defensiveFactoryStructSig), tostring(structSig))
+            end
             local prevStruct, prevTuning = frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
@@ -4620,12 +4654,16 @@ function DF:DriveDefensiveFactory(frame, db)
             local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips); structSig = park key
             if not okRB then
                 frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig = prevStruct, prevTuning
-                DF:DebugWarn("AURAROW", "defensive: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                if DF:DebugActive("AURAROW") then
+                    DF:DebugWarn("AURAROW", "defensive: rebuild failed (sig restored for retry): %s", tostring(errRB))
+                end
             end
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
-                DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
-                    tostring(frame.defensiveFactoryTuningSig), tostring(tuningSig))
+                if DF:DebugActive("AURAROW") then
+                    DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
+                        tostring(frame.defensiveFactoryTuningSig), tostring(tuningSig))
+                end
                 frame.defensiveFactoryTuningSig = tuningSig
                 h.config.filter = cfg.filter    -- group-identical records (see the buff driver)
                 h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
@@ -4979,9 +5017,11 @@ function DF:DriveMissingBuffFactory(frame, db)
     if not cells or frame.missingFactorySig ~= sig then
         -- The one destructive edge in this row: every cell is destroyed and the set
         -- rebuilt. Worth seeing, and it only fires when the tracked-buff set moves.
-        DF:Debug("AURAROW", "missing buff: REBUILD cells - sig %s -> %s (%s)",
-            tostring(frame.missingFactorySig), tostring(sig),
-            cells and "replacing existing" or "first build")
+        if DF:DebugActive("AURAROW") then
+            DF:Debug("AURAROW", "missing buff: REBUILD cells - sig %s -> %s (%s)",
+                tostring(frame.missingFactorySig), tostring(sig),
+                cells and "replacing existing" or "first build")
+        end
         if cells then
             for _, h in pairs(cells) do h:Destroy() end
         end
@@ -6064,14 +6104,16 @@ local function checkFrameOverflow(frame)
                             if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
                             local inRange = frame.dfInRange
                             if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
-                            DF:DebugWarn("AURAROW",
-                                "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
-                                .. " this one group at once (latched even if since healed)"
-                                .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
-                                tostring(frame.unit), label, tostring(key), prev, n, prev,
-                                tostring(DF.playerIsDead), tostring(DF.playerInCombat),
-                                tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
-                                tostring(inRange))
+                            if DF:DebugActive("AURAROW") then
+                                DF:DebugWarn("AURAROW",
+                                    "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
+                                    .. " this one group at once (latched even if since healed)"
+                                    .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
+                                    tostring(frame.unit), label, tostring(key), prev, n, prev,
+                                    tostring(DF.playerIsDead), tostring(DF.playerInCombat),
+                                    tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
+                                    tostring(inRange))
+                            end
                         end
                     end
                 end

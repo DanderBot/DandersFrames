@@ -388,7 +388,9 @@ function R:ImportCustomFilters(imported)
         -- the pairs() loops below. defHasContent now type-checks, but everything after it
         -- indexes `def` directly.
         if type(def) ~= "table" then
-            DF:DebugWarn("FILTER", "ImportCustomFilters: skipping non-table entry '%s'", tostring(cfId))
+            if DF:DebugActive("FILTER") then
+                DF:DebugWarn("FILTER", "ImportCustomFilters: skipping non-table entry '%s'", tostring(cfId))
+            end
         else
         -- Forever only: drop ids the client doesn't have BEFORE matching, so a
         -- pruned import can collapse onto a local filter with the same live content.

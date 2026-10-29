@@ -67,7 +67,9 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     L = L,
 
     print = function(msg) DF:Say(tostring(msg)) end,
-    error = function(msg) DF:DebugError("GUI", "%s", tostring(msg)) end,
+    error = function(msg)
+        if DF:DebugActive("GUI") then DF:DebugError("GUI", "%s", tostring(msg)) end
+    end,
 
     -- ---- fonts -------------------------------------------------
     getFontSetting = function()
