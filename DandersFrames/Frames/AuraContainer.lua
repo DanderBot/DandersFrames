@@ -697,14 +697,18 @@ local SWEEP_INTERVAL = 30
 -- the AURACONTAINER debug channel is on so normal users pay nothing.
 local flowCounts, flowTotal = {}, 0
 local flowFrame = CreateFrame("Frame")
+local syncFlowWatch
 flowFrame:SetScript("OnEvent", function(_, _, unit)
+    -- Re-checked per event so turning the channel off stops the counting at once, not at
+    -- the next sweep.
+    if not DF:DebugActive(DBG) then syncFlowWatch() return end
     if unit then
         flowTotal = flowTotal + 1
         flowCounts[unit] = (flowCounts[unit] or 0) + 1
     end
 end)
 local flowArmed = false
-local function syncFlowWatch()
+function syncFlowWatch()
     local want = (DF.DebugActive and DF:DebugActive(DBG)) and true or false
     if want == flowArmed then return end
     flowArmed = want
@@ -899,6 +903,7 @@ local function checkPartition(unit)
 end
 
 local function checkParkSentinel()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     -- The player every sweep (cheap, and the baseline every other reading is compared
     -- against), plus one rotating group member.
@@ -937,10 +942,8 @@ local OOR_MIN_UNITS  = 2      -- per half, before the comparison means anything
 local OOR_MIN_AURAS  = 3      -- per half; tiny samples swing the ratio wildly
 local function checkOutOfRangeAttribution()
     if sentinelWarned.oorAttribution then return end
-    -- ⚠ CHANNEL-GATED, unlike the park sentinel above. That one is five C calls; this
-    -- walks the whole group at two calls a unit — 80 in a full raid, every sweep, for a
-    -- verdict only a log reader will ever see. Same contract as the flow watch and the
-    -- pool-growth sampler: investigation tools cost nothing while nobody is investigating.
+    -- ⚠ CHANNEL-GATED, like every diagnostic on this sweep: investigation tools cost
+    -- nothing while nobody is investigating.
     if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     if not IsInGroup() then return end
@@ -1036,6 +1039,7 @@ end
 local SLOT_ACCUM_WARN = 24
 local accumWarned = setmetatable({}, { __mode = "k" })
 local function checkSlotAccumulation()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     local byOwner
     for h in pairs(AuraContainer._slotHandles or {}) do
         local ow = h.owner
