@@ -54,6 +54,7 @@ end
 local function newDF()
     local df = { counts = {}, order = {} }
     df.Debug = function() end
+    df.DebugActive = function() return true end
     df.DebugWarn = function() end
     df.DebugError = function() end
     local function recorder(kind)

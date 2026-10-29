@@ -3063,8 +3063,10 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
         -- reappearing with no record of having gone. Exactly the bug class the edge-trigger
         -- was added to prevent, on the reverse edge.
         if frame.dfLastRoleShown ~= false or frame.dfLastRole ~= role then
-            DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
-                tostring(frame.unit), tostring(role))
+            if DF:DebugActive("ROLE") then
+                DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
+                    tostring(frame.unit), tostring(role))
+            end
             frame.dfLastRoleShown = false
             frame.dfLastRole = role
         end
@@ -3092,9 +3094,11 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
     -- party and raid frame, and GUI option callbacks drive it, so logging here
     -- unconditionally floods the console on any slider drag.
     if frame.dfLastRoleShown ~= shouldShow or frame.dfLastRole ~= role then
-        DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
-            tostring(frame.unit), tostring(role), tostring(shouldShow),
-            tostring(db.roleIconHideInCombat), tostring(inCombat))
+        if DF:DebugActive("ROLE") then
+            DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
+                tostring(frame.unit), tostring(role), tostring(shouldShow),
+                tostring(db.roleIconHideInCombat), tostring(inCombat))
+        end
         frame.dfLastRoleShown = shouldShow
         frame.dfLastRole = role
     end
@@ -3130,7 +3134,9 @@ function DF:UpdateAllRoleIcons()
     -- Use our tracked combat state
     local inCombat = DF.playerInCombat or false
     
-    DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    if DF:DebugActive("ROLE") then
+        DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
+    end
     
     local function updateFrame(frame)
         if frame and frame:IsShown() then

@@ -32,6 +32,7 @@ local savedCreateFrame = CreateFrame
 CreateFrame = function() return FakeUIFrame() end
 local DF = {}
 DF.Debug, DF.DebugWarn, DF.DebugError = function() end, function() end, function() end
+DF.DebugActive = function() return true end
 load_df_file_into("Features/Highlights.lua", DF)
 CreateFrame = savedCreateFrame
 

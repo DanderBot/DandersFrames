@@ -1860,7 +1860,9 @@ function P.PIH_SetEnabled(on)
     if s.enabled and not P.PIH_Exists() then
         local ok, why = pihCreateSignal("burst")
         if not ok then
-            DF:DebugWarn("AURADESIGNER", "PIH: could not seed the helper -- %s", tostring(why))
+            if DF:DebugActive("AURADESIGNER") then
+                DF:DebugWarn("AURADESIGNER", "PIH: could not seed the helper -- %s", tostring(why))
+            end
         end
     end
     P.PIH_Apply()
@@ -2444,7 +2446,9 @@ local function BuildGlobalView(parent)
                     for k in pairs(dest) do dest[k] = nil end
                     for k, v in pairs(source) do dest[k] = DeepCopy(v) end
                 end
-                DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
+                if DF:DebugActive("AD") then
+                    DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
+                end
             end)
             g:AddWidget(copyBtn, 32)
         end
@@ -6959,9 +6963,11 @@ local function pihSweep()
             end
             if f.disabled and not next(f.disabled) then f.disabled = nil end
             if n > 0 then
-                DF:Debug("AURADESIGNER",
-                    "PIH sweep: removed %d amplifier spell(s) copied into the cooldown list; "
-                    .. "they are referenced now", n)
+                if DF:DebugActive("AURADESIGNER") then
+                    DF:Debug("AURADESIGNER",
+                        "PIH sweep: removed %d amplifier spell(s) copied into the cooldown list; "
+                        .. "they are referenced now", n)
+                end
             end
         end
     end
@@ -7921,7 +7927,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
     if pihAddPick == "icon" then
         local function add(showsAura)
             local ok, why = P.PIH_AddSurface("burst", "icon", showsAura)
-            if not ok then DF:DebugWarn("AURADESIGNER",
+            if not ok and DF:DebugActive("AURADESIGNER") then DF:DebugWarn("AURADESIGNER",
                 "PIH: could not add the icon -- %s", tostring(why)) end
             pihAddPick = nil
             if Refresh then Refresh() end
@@ -7962,7 +7968,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
               Paint = function(pv) PaintIconRowOnThumb(pv, egIDs, 3) end,
               onClick = function()
                   local ok, why = P.PIH_AddIconGroup()
-                  if not ok then DF:DebugWarn("AURADESIGNER",
+                  if not ok and DF:DebugActive("AURADESIGNER") then DF:DebugWarn("AURADESIGNER",
                       "PIH: could not add the cooldown icons -- %s", tostring(why)) end
                   pihAddPick = nil
                   if Refresh then Refresh() end
@@ -8008,7 +8014,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
                         return
                     end
                     local ok, why = P.PIH_AddSurface("burst", capturedType)
-                    if not ok then DF:DebugWarn("AURADESIGNER",
+                    if not ok and DF:DebugActive("AURADESIGNER") then DF:DebugWarn("AURADESIGNER",
                         "PIH: could not add %s -- %s", tostring(capturedType), tostring(why)) end
                     if Refresh then Refresh() end
                 end,

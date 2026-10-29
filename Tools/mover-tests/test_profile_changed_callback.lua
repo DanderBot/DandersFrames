@@ -21,6 +21,7 @@ local order = {}
 local fired = {}
 local DF = {}
 function DF:Debug() end
+function DF:DebugActive() return true end
 function DF:WrapDB() end
 function DF:ApplyProfileRootDefaults() end
 function DF:FullProfileRefresh() order[#order + 1] = "refresh" end

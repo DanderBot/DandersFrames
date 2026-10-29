@@ -463,8 +463,10 @@ local function UpdateRangeSpell()
     currentRezSpell = rezSpells[1]
 
     if currentFriendlySpell or currentHostileSpell then
-        DF:Debug("RANGE", "range spells (%s, spec %s): friendly=%s hostile=%s", source,
-            tostring(specID), DescribeSpells(friendlySpells), DescribeSpells(hostileSpells))
+        if DF:DebugActive("RANGE") then
+            DF:Debug("RANGE", "range spells (%s, spec %s): friendly=%s hostile=%s", source,
+                tostring(specID), DescribeSpells(friendlySpells), DescribeSpells(hostileSpells))
+        end
         return
     end
 
@@ -472,8 +474,10 @@ local function UpdateRangeSpell()
     -- CheckInteractDistance / always-in-range for the rest of the session: fading either
     -- stops working or sticks on. RANGE otherwise logs only transitions, so an empty log
     -- would read the same as a healthy session with nobody moving.
-    DF:DebugWarn("RANGE", "no range spell for class %s (spec %s) - falling back to interact distance",
-        tostring(playerClass), tostring(specID))
+    if DF:DebugActive("RANGE") then
+        DF:DebugWarn("RANGE", "no range spell for class %s (spec %s) - falling back to interact distance",
+            tostring(playerClass), tostring(specID))
+    end
 end
 
 -- ============================================================
@@ -722,7 +726,9 @@ function DF:UpdateRange(frame)
 
     debugStats.cacheMisses = debugStats.cacheMisses + 1
     rangeCache[unit] = inRange
-    DebugPrint("UPDATE", unit, "was:", tostring(cached), "now:", tostring(inRange))
+    if DF:DebugActive("RANGE") then
+        DebugPrint("UPDATE", unit, "was:", tostring(cached), "now:", tostring(inRange))
+    end
 
     -- ☠ AURA SNAPSHOT AT THE RANGE EDGE — the one moment that answers "did the aura
     -- really persist, or did Only Mine stop filtering?", and the one moment nobody can

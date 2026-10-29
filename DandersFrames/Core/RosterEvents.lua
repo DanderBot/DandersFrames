@@ -115,7 +115,9 @@ local function RouteEvent(self, event, ...)
     for object, handler in pairs(subscribers) do
         local ok, err = pcall(handler, object, event, ...)
         if not ok and DF.DebugError then
-            DF:DebugError("ROSTER", "Handler error for %s: %s", event, tostring(err))
+            if DF:DebugActive("ROSTER") then
+                DF:DebugError("ROSTER", "Handler error for %s: %s", event, tostring(err))
+            end
         end
     end
 end
@@ -233,7 +235,9 @@ function DF:RegisterRosterUnitEvent(object, event, method)
     local handler = object[methodName]
     if type(handler) ~= "function" then
         if DF.DebugError then
-            DF:DebugError("ROSTER", "RegisterRosterUnitEvent: %s.%s is not a function", tostring(object), tostring(methodName))
+            if DF:DebugActive("ROSTER") then
+                DF:DebugError("ROSTER", "RegisterRosterUnitEvent: %s.%s is not a function", tostring(object), tostring(methodName))
+            end
         end
         return
     end
@@ -312,7 +316,9 @@ end
 local selfTestProbe = {}
 function selfTestProbe:UNIT_AURA(event, unit, info)
     if DF.Debug then
-        DF:Debug("ROSTER", "Self-test: %s on %s", event, tostring(unit))
+        if DF:DebugActive("ROSTER") then
+            DF:Debug("ROSTER", "Self-test: %s on %s", event, tostring(unit))
+        end
     end
 end
 

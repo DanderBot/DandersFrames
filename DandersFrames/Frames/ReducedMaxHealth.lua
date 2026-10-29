@@ -198,8 +198,10 @@ function DF:UpdateReducedMaxHealth(frame)
                 -- Re-pin the plain rect directly. RestoreHealthBarFromReducedMax is not
                 -- usable here: it early-returns unless dfReducedMaxHealthClipping is already
                 -- set, and this failed before setting it.
-                DF:DebugWarn("HEALTH", "ReducedMaxHealth: health-bar clip refused on unit=%s; "
-                    .. "falling back to the unclipped rect", tostring(unit or "(test)"))
+                if DF:DebugActive("HEALTH") then
+                    DF:DebugWarn("HEALTH", "ReducedMaxHealth: health-bar clip refused on unit=%s; "
+                        .. "falling back to the unclipped rect", tostring(unit or "(test)"))
+                end
                 frame.healthBar:ClearAllPoints()
                 frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
                 frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
@@ -232,8 +234,10 @@ function DF:UpdateReducedMaxHealth(frame)
 
     if DF.Debug then
         -- Never pass the raw pct to Debug on the secret path — format/concat taints.
-        DF:Debug("HEALTH", "ReducedMaxHealth updated: unit=%s pct=%s",
-            tostring(unit or "(test)"), tostring(pctIsSecret and "<secret>" or pct))
+        if DF:DebugActive("HEALTH") then
+            DF:Debug("HEALTH", "ReducedMaxHealth updated: unit=%s pct=%s",
+                tostring(unit or "(test)"), tostring(pctIsSecret and "<secret>" or pct))
+        end
     end
 end
 

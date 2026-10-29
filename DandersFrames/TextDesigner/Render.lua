@@ -453,8 +453,10 @@ local function suspendMirrors(frame, reg, why)
         Render._mirrorSuspendWarned = true
         DF:DebugWarn("TD", "mirror write denied — AD text colour covers frozen until combat ends")
     end
-    DF:Debug("TD", "mirror write denied (%s) — '%s' covers suspended until combat ends (unit=%s)",
-        tostring(why), tostring(reg.category), tostring(frame.unit))
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "mirror write denied (%s) — '%s' covers suspended until combat ends (unit=%s)",
+            tostring(why), tostring(reg.category), tostring(frame.unit))
+    end
 end
 
 -- One guarded mirror write. `m` is the region the write targets (the
@@ -844,7 +846,9 @@ end
 -- renders. Live frames pass nil/false so the master toggle still hides them.
 function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     if not frame or not tdDB then
-        DF:Debug("TD", "Render:UpdateFrame: nil frame or tdDB (isPreview=%s)", tostring(isPreview))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "Render:UpdateFrame: nil frame or tdDB (isPreview=%s)", tostring(isPreview))
+        end
         return
     end
     -- ☠ GUARDED — and note the `or {}` in the length: unguarded, that allocated a
@@ -1054,7 +1058,9 @@ function DF:RenderTextDesignerNow(frame, hint)
     -- TD preset, so without this guard an enabled TD would stamp party/raid-styled
     -- text onto pet frames. Keep TD off them entirely.
     if frame.isPetFrame then
-        DF:Debug("TD", "UpdateTextDesigner: skipping pet frame %s", tostring(frame.unit))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "UpdateTextDesigner: skipping pet frame %s", tostring(frame.unit))
+        end
         return
     end
     -- MEMORY TEST (enableTextDesigner): TD re-renders every element on every frame
@@ -1073,12 +1079,16 @@ function DF:RenderTextDesignerNow(frame, hint)
     frame.dfTDMemTestCleared = nil
     local db = DF:GetFrameDB(frame)
     if not db then
-        DF:Debug("TD", "UpdateTextDesigner: no db for frame.unit=%s", tostring(frame.unit))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "UpdateTextDesigner: no db for frame.unit=%s", tostring(frame.unit))
+        end
         return
     end
     local tdDB = DF:ResolveTextDesigner(frame)
     if not tdDB then
-        DF:Debug("TD", "UpdateTextDesigner: no resolved textDesigner preset for unit=%s", tostring(frame.unit))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "UpdateTextDesigner: no resolved textDesigner preset for unit=%s", tostring(frame.unit))
+        end
         return
     end
     -- Guarded: this runs per unit per health tick in combat, and the argument list

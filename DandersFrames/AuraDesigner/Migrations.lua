@@ -834,8 +834,10 @@ local function MigrateOrphanAuraKeysLazy(adDB)
                 end
 
                 if DF.DebugWarn then
-                    DF:DebugWarn("AD", "orphan aura key repaired: %s[%q] -> %q",
-                        tostring(spec), mv.from, mv.to)
+                    if DF:DebugActive("AD") then
+                        DF:DebugWarn("AD", "orphan aura key repaired: %s[%q] -> %q",
+                            tostring(spec), mv.from, mv.to)
+                    end
                 end
             end
         end

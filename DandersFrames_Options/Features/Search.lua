@@ -1329,8 +1329,10 @@ function Search:ScrollToSection(tabName, sectionName)
     -- was renamed or moved into a group -- the jump scrolls nowhere and never flashes, in
     -- silence. Naming both halves makes it a one-line fix instead of a hunt.
     if not flashTarget then
-        DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
-            tostring(sectionName), tostring(tabName))
+        if DF:DebugActive("SEARCH") then
+            DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
+                tostring(sectionName), tostring(tabName))
+        end
         return
     end
 

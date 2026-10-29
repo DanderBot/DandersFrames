@@ -507,7 +507,9 @@ local function GetSpecAuras(spec)
             for _, k in ipairs(toRemove) do
                 specAuras[k] = nil
             end
-            DF:DebugWarn("AD", "Cleaned %d corrupted entries from spec auras table", #toRemove)
+            if DF:DebugActive("AD") then
+                DF:DebugWarn("AD", "Cleaned %d corrupted entries from spec auras table", #toRemove)
+            end
         end
         sanitizedSpecAuras[specAuras] = true
     end
@@ -544,7 +546,9 @@ local function GetOtherAuras()
             for _, k in ipairs(toRemove) do
                 otherAuras[k] = nil
             end
-            DF:DebugWarn("AD", "Cleaned %d corrupted entries from other auras table", #toRemove)
+            if DF:DebugActive("AD") then
+                DF:DebugWarn("AD", "Cleaned %d corrupted entries from other auras table", #toRemove)
+            end
         end
         sanitizedSpecAuras[otherAuras] = true
     end

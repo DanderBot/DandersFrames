@@ -177,6 +177,7 @@ do
     DF.PartyDefaults = {}
     DF.RaidDefaults = {}
     function DF:DebugWarn() end
+    function DF:DebugActive() return true end
 
     local parked, adopted = {}, {}
     local GUI = {
@@ -591,6 +592,7 @@ do
     DF.RaidDefaults = {}
     function DF:Debug() end
     function DF:DebugWarn() end
+    function DF:DebugActive() return true end
 
     local dock, home = { name = "dock" }, { name = "content" }
     local GUI = {

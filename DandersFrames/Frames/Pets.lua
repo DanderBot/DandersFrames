@@ -604,8 +604,10 @@ function DF:SetPetFrameVisible(frame, visible)
                 local okL = pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
                 if not (okS and okL) and not frame._dfPetLayerWarned then
                     frame._dfPetLayerWarned = true
-                    DF:DebugWarn("PET", "SetPetFrameVisible: %s layering refused (strata=%s level=%s) - pet may render under a neighbour",
-                        frame.unit or "?", tostring(okS), tostring(okL))
+                    if DF:DebugActive("PET") then
+                        DF:DebugWarn("PET", "SetPetFrameVisible: %s layering refused (strata=%s level=%s) - pet may render under a neighbour",
+                            frame.unit or "?", tostring(okS), tostring(okL))
+                    end
                 end
             end
             frame:Show()
@@ -1073,9 +1075,11 @@ function DF:UpdatePetFrame(frame)
     -- Edge-triggered: log only when visibility flips, not on every roster/pet event.
     if frame.dfLastPetVisible ~= shouldShow then
         frame.dfLastPetVisible = shouldShow
-        DF:Debug("PET", "UpdatePetFrame: %s %s (unitExists=%s ownerDead=%s)",
-            tostring(frame.unit), shouldShow and "VISIBLE" or "HIDDEN",
-            tostring(unitExists), tostring(ownerDead))
+        if DF:DebugActive("PET") then
+            DF:Debug("PET", "UpdatePetFrame: %s %s (unitExists=%s ownerDead=%s)",
+                tostring(frame.unit), shouldShow and "VISIBLE" or "HIDDEN",
+                tostring(unitExists), tostring(ownerDead))
+        end
     end
 end
 
@@ -1764,7 +1768,9 @@ end
 function DF:InitializePetFrames()
     local db = DF:GetDB()
 
-    DF:Debug("PET", "InitializePetFrames called. petEnabled=%s petFramesInitialized=%s", tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "InitializePetFrames called. petEnabled=%s petFramesInitialized=%s", tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+    end
 
     -- Don't create if pets are disabled
     if not db.petEnabled then
@@ -1788,7 +1794,9 @@ function DF:InitializePetFrames()
         DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false, PET_TRACK_PARTY)
         DF:Debug("PET", "InitializePetFrames: created player pet frame")
     end
-    DF:Debug("PET", "InitializePetFrames: playerFrame=%s petFrames.player=%s", tostring(playerFrame ~= nil), tostring(DF.petFrames.player ~= nil))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "InitializePetFrames: playerFrame=%s petFrames.player=%s", tostring(playerFrame ~= nil), tostring(DF.petFrames.player ~= nil))
+    end
 
     -- Create party pet frames
     local partyCount = 0
@@ -1827,8 +1835,10 @@ function DF:UpdateAllPetFrames(force)
 
     local db = DF:GetDB()
 
-    DF:Debug("PET", "UpdateAllPetFrames called. testMode=%s raidTestMode=%s petEnabled=%s testShowPets=%s",
-        tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(db.testShowPets))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "UpdateAllPetFrames called. testMode=%s raidTestMode=%s petEnabled=%s testShowPets=%s",
+            tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(db.testShowPets))
+    end
 
     -- Hide party pet group container if in raid test mode
     if DF.raidTestMode then
@@ -1876,7 +1886,9 @@ function DF:UpdateAllPetFrames(force)
         shouldShowPets = db.petEnabled
     end
 
-    DF:Debug("PET", "UpdateAllPetFrames: shouldShowPets=%s", tostring(shouldShowPets))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "UpdateAllPetFrames: shouldShowPets=%s", tostring(shouldShowPets))
+    end
 
     if not shouldShowPets then
         -- Hide all pet frames if disabled
@@ -1923,9 +1935,11 @@ function DF:UpdateAllPetFrames(force)
     DF:Debug("PET", "UpdateAllPetFrames: LIVE MODE - calling InitializePetFrames")
     DF:InitializePetFrames()
 
-    DF:Debug("PET", "UpdateAllPetFrames: LIVE MODE - playerPet=%s partyPets=%d",
-        tostring(DF.petFrames.player ~= nil),
-        (DF.partyPetFrames[1] and 1 or 0) + (DF.partyPetFrames[2] and 1 or 0) + (DF.partyPetFrames[3] and 1 or 0) + (DF.partyPetFrames[4] and 1 or 0))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "UpdateAllPetFrames: LIVE MODE - playerPet=%s partyPets=%d",
+            tostring(DF.petFrames.player ~= nil),
+            (DF.partyPetFrames[1] and 1 or 0) + (DF.partyPetFrames[2] and 1 or 0) + (DF.partyPetFrames[3] and 1 or 0) + (DF.partyPetFrames[4] and 1 or 0))
+    end
 
     -- Update player pet
     if DF.petFrames.player then
@@ -2266,7 +2280,9 @@ end
 function DF:HandleUnitPetEvent(unit)
     local db = DF:GetDB()
 
-    DF:Debug("PET", "HandleUnitPetEvent: unit=%s petEnabled=%s petFramesInitialized=%s", tostring(unit), tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "HandleUnitPetEvent: unit=%s petEnabled=%s petFramesInitialized=%s", tostring(unit), tostring(db.petEnabled), tostring(DF.petFramesInitialized))
+    end
 
     -- Lazy-load pet frames on first pet event (if pets are enabled)
     -- InitializePetFrames sets the flag internally only when frames are created
@@ -2286,8 +2302,10 @@ function DF:ApplyPetSettings()
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
 
-    DF:Debug("PET", "ApplyPetSettings called. testMode=%s raidTestMode=%s petEnabled=%s raidPetEnabled=%s",
-        tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(raidDb.petEnabled))
+    if DF:DebugActive("PET") then
+        DF:Debug("PET", "ApplyPetSettings called. testMode=%s raidTestMode=%s petEnabled=%s raidPetEnabled=%s",
+            tostring(DF.testMode), tostring(DF.raidTestMode), tostring(db.petEnabled), tostring(raidDb.petEnabled))
+    end
 
     -- Update party/solo pet frames
     local partyPetsEnabled = DF.testMode and (db.petEnabled and db.testShowPets ~= false) or (not DF.testMode and db.petEnabled)
