@@ -1,47 +1,35 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.6.0]
 
 ### New Features
 
-- (Bars) The Absorb, Heal Absorb, Heal Prediction, Reduced Max Health, Health and Resource bars get a **Tile** setting under their Texture, and the first four a **Tile Size** too: Auto uses the texture's own size, Fit to Bar repeats the pattern once per bar height, or set your own. New **Texture Layers** stack up to two more textures on top: a pattern and a shading layer, each with its own texture, colour, blend and tiling. A live preview shows the result at your frames' size, and a **Presets** dropdown fills the layers with a ready-made look you can then adjust; the changed-dots then show what you changed from that preset. Off by default, so your bars look exactly as before. (by Krathe, original idea by Aphoex)
-- (Bars) A **Mirror** tick leans striped and diagonal textures the other way, on the bar's own texture and on each layer, so the stripes can match another look. (by Krathe)
-- (Bars) Twelve new pattern textures for Texture Layers: Biohazard, Heart, Minus, Plus, Radioactive, Shield, Star and X designs. (art by Aphoex)
+- (Bars) New **Tile** and **Texture Layers** options for bar textures: repeat a pattern along the bar and stack up to two extra pattern and shading layers, with presets and a live preview. Off by default. (by Krathe, original idea by Aphoex)
+- (Bars) A **Mirror** option leans striped textures the other way. (by Krathe)
+- (Bars) Twelve new pattern textures for Texture Layers. (art by Aphoex)
 
 ### Improvements
 
-- (Auras) Buff and debuff rows, the dispel overlay and Aura Designer indicators now set up and update during combat. Settings changed mid-fight apply straight away, and anything that first appears in a fight (a frame that gets its player late, an arena match) shows at once instead of only after combat. (by Krathe)
-- (Debuffs) Ticking both Non-Player and From Any Player covers every debuff, so the bar now treats it as All Debuffs: Max Debuffs is one limit for the row instead of one per ticked category. (by Krathe)
-- (Debuffs) The note under Max Debuffs now counts the categories your bar really uses, including any your Aura Designer debuff groups take over. (by Krathe)
+- (Performance) Smoother raids: no more multi-second freezes when joining a large group or switching auto layouts, no stutter on pull, and less work during combat. (by Krathe)
+- (Auto Layouts) Joining a raid or switching layouts no longer flashes the wrong layout or rebuilds frames twice. (by Krathe)
+- (Auras) Buffs, debuffs, the dispel overlay and Aura Designer indicators now set up and update during combat. (by Krathe)
+- (Debuffs) Ticking both Non-Player and From Any Player now counts as All Debuffs, with one Max Debuffs limit. (by Krathe)
 - (Tooltips) The in-combat and out-of-combat tooltip settings now follow whether you are in combat. (by Krathe)
-- (Performance) Joining a large group or switching auto layouts no longer freezes the game for several seconds: frames build once instead of dozens of times, and aura rows are built over a few frames instead of all in one. (by Krathe)
-- (Performance) Less work in raid combat: nameplate updates are skipped early, Text Designer only re-lays text out when it changes, and heal prediction no longer creates garbage on every update. (by Krathe)
-- (Performance) Other group members finding their spec no longer refreshes every frame mid-fight, which caused short stutters in raids. (by Krathe)
-- (Auto Layouts) After a loading screen the active layout is no longer dropped and re-applied while the group settles, which rebuilt every frame twice. (by Krathe)
-- (Auto Layouts) Joining a raid no longer flashes your base raid layout before the auto layout's, and frames show the right player's name and health straight away when the group reshuffles. (by Krathe)
-- (Performance) Hidden boss frames and ready checks do less work. (by Krathe)
-- (Auto Layouts) Switching from one auto layout to another, or back to your base layout, refreshes the frames once instead of twice, halving the pause. (by Krathe)
-- (Performance) With the Power Infusion helper set up, people joining or leaving a raid no longer re-checks your aura rows several times in a row. (by Krathe)
-- (Performance) Pulling no longer rebuilds every frame, which caused a short stutter on each pull. Entering combat now only updates the icons set to Hide in Combat. (by Krathe)
-- (Performance) Less memory churn from aura refreshes and click-casting setup, and threat changes on enemy nameplates no longer search through your raid frames. (by Krathe)
-- (Heal Prediction) Show Overheal now lights a spark at the end of the health bar when heals would overheal, instead of letting them spill past it. Absorbs, heal absorbs and incoming heals now never draw outside the health bar. (by Krathe)
-- (Absorbs) The Attached absorb's Clamp Mode setting is gone. Now that the shield stays inside the health bar, None and Max Health drew the same as Missing Health but without the overshield glow or overflow, so anyone using them moves to Missing Health. (by Krathe)
+- (Heal Prediction) Show Overheal now lights a spark at the end of the health bar, and absorbs and heals no longer draw outside the bar. (by Krathe)
+- (Absorbs) The Attached absorb's Clamp Mode setting is removed; existing setups move to Missing Health. (by Krathe)
 
 ### Bug Fixes
 
-- (Range) Out-of-range fading checks a player against every range spell you know before falling back to 40 yards, so classes such as Evoker no longer fade players who are in range. Spells replaced by hero talents are tried under their new form. (by Krathe)
-- (Range) Devourer Demon Hunters get their own range spells. (by Krathe)
-- (Range) The range shown for your range-check spell updates after a talent change, without a reload. (by Krathe)
-- (Raid Frames) With a name-list sort (role, class or custom order), a player who joins mid-combat now appears on your frames as soon as combat ends, and the Sorting page says which settings delay them. (by Krathe)
-- (Reduced Max Health) The health bar no longer runs under the reduced max health area after a frame refresh or resize. (by Krathe)
-- (Fonts) Fonts are correct straight away after a reload during combat. (by Krathe)
-- (Dispel) The dispel overlay and dispel symbols now show in battlegrounds and arena, and after logging in anywhere auras are restricted. They stayed blank until a /reload, while test mode looked fine. (by Krathe)
-- (Icons) **Hide In Combat** on the leader, raid marker, ready check, summon, phased, AFK, vehicle, raid role and ping icons now hides them as combat starts, instead of only once the fight was over. (by Krathe)
-- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again, such as after leaving a Mythic+ key or a PvP match, instead of waiting for your next fight to end. (by Krathe)
-- (Heal Prediction) Joining a large group, or logging in inside one, no longer flashes extra frame-sized bars beside the raid frames. (by Krathe)
-- (Absorbs) Joining a large group no longer flashes absorb shields as boxes beside the raid frames, and leaving a group no longer flashes your heal absorb across your own frame. (by Krathe)
-- (Heal Prediction) The heal prediction bar is hidden on offline and dead players, like the absorb bars already were. (by Krathe)
-- (Borders) A class or role coloured frame border no longer gets stuck on the plain border colour after people join or the raid reshuffles. (by Krathe)
+- (Range) Range fading now checks all your range spells, so classes such as Evoker no longer fade players who are in range. Devourer Demon Hunters get their own range spells, and talent changes apply without a reload. (by Krathe)
+- (Raid Frames) With a name-list sort, players who join mid-combat now appear as soon as combat ends. (by Krathe)
+- (Reduced Max Health) The health bar no longer runs under the reduced max health area after a refresh. (by Krathe)
+- (Fonts) Fonts are correct straight away after a reload in combat. (by Krathe)
+- (Dispel) The dispel overlay and symbols now show in battlegrounds, arena and after logging in where auras are restricted. (by Krathe)
+- (Icons) **Hide In Combat** status icons now hide as combat starts, not after it ends. (by Krathe)
+- (Text Designer) Text that stopped updating mid-fight now catches up as soon as it's allowed again. (by Krathe)
+- (Absorbs) No more stray heal prediction bars or absorb boxes flashing beside the frames when joining or leaving a group. (by Krathe)
+- (Heal Prediction) Hidden on offline and dead players. (by Krathe)
+- (Borders) Class and role coloured borders no longer get stuck on the plain colour after the raid reshuffles. (by Krathe)
 
 ## [5.5.0]
 
