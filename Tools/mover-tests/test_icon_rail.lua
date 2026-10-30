@@ -61,6 +61,7 @@ local UI = {
     Colors = {
         text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.6, g = 0.6, b = 0.6 },
         hover = { r = 0.22, g = 0.22, b = 0.22 }, notice = { r = 0.91, g = 0.66, b = 0.25 },
+        border = { r = 0.25, g = 0.25, b = 0.25 },
     },
 }
 function UI:GetAccent() return ACCENT end
@@ -157,6 +158,26 @@ rail:SetItems({
 check(not g.shown, "items: an item left out is hidden")
 check(rail:GetSelected() == nil, "items: ...and a selection on it is dropped")
 check(rail:GetItem("clicks") == c, "items: buttons are pooled by id")
+
+print("-- Icon rail: dividers")
+rail:SetItems({
+    { id = "home",   icon = "home.png",  label = "Home", slot = "top", dividerAfter = true },
+    { id = "group",  icon = "grid.png",  label = "Groups", slot = "top" },
+    { id = "clicks", icon = "mouse.png", label = "Binds", slot = "top" },
+    { id = "global", icon = "gear.png",  label = "Global", slot = "bottom" },
+})
+local h = rail:GetItem("home")
+local div = g.points[1][2]
+check(div ~= h and div ~= rail and div.points and div.points[1][2] == h,
+      "divider: the item after a dividerAfter hangs from a divider under it")
+eq(div.h, 1, "divider: ...a 1px hairline")
+eq(c.points[1][2], g, "divider: items without one stack as before")
+rail:SetItems({
+    { id = "group",  icon = "grid.png",  label = "Groups", slot = "top" },
+    { id = "clicks", icon = "mouse.png", label = "Binds", slot = "top" },
+})
+eq(c.points[1][2], g, "divider: a set without dividers lays out without one")
+check(not div.shown, "divider: ...and the unused one is hidden")
 
 print("-- Icon rail: the kit names no consumer")
 do

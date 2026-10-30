@@ -58,6 +58,7 @@ local function SyncRailItems(rail)
                 label = function() return Resolve(def.railLabel) or GUI:ModuleLabel(def) end,
                 tooltip = function() return GUI:ModuleLabel(def) end,
                 accent = def.accent,
+                dividerAfter = def.dividerAfter,
             }
         end
     end

@@ -71,7 +71,7 @@ check(GUI.RegisterModule and GUI.SelectModule and GUI.GetModule and GUI.GetModul
       and GUI.SetModuleLocked and GUI.IsModuleLocked, "api: the registry API is on GUI")
 local ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "home,group,clicks,modules,profiles,global", "order: the built-ins, top slot first, global last at the bottom")
+eq(table.concat(ids, ","), "home,group,units,clicks,modules,profiles,global", "order: the built-ins, top slot first, global last at the bottom")
 eq(GUI.SelectedModule, "group", "state: the window starts on Group Frames")
 eq(GUI:GetModule().id, "group", "get: no id is the module showing")
 eq(GUI:GetModule("clicks").id, "clicks", "get: ...and an id is that module")
@@ -84,11 +84,11 @@ GUI:RegisterModule({ id = "zz_test", order = 5, slot = "top" })
 GUI:RegisterModule({ id = "zz_bottom", order = 1, slot = "bottom" })
 ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "home,zz_test,group,clicks,zz_bottom,modules,profiles,global", "order: by slot, then order")
+eq(table.concat(ids, ","), "home,zz_test,group,units,clicks,zz_bottom,modules,profiles,global", "order: by slot, then order")
 GUI:RegisterModule({ id = "zz_test", order = 50 })
 ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "home,group,clicks,zz_test,zz_bottom,modules,profiles,global", "register: re-registering an id replaces it, not duplicates it")
+eq(table.concat(ids, ","), "home,group,units,clicks,zz_test,zz_bottom,modules,profiles,global", "register: re-registering an id replaces it, not duplicates it")
 calls = {}
 check(GUI:RegisterModule({}) == nil and joined() == "error", "register: no id is refused, loudly in debug")
 calls = {}
@@ -312,8 +312,8 @@ do
     GUI:BuildModuleShell(region(), deck2, function() end)
     check(GUI.ModuleRail == rail, "rail: built and published")
     local ids = table.concat(rail:GetItemIds(), ",")
-    check(ids:find("home,group,clicks", 1, true) == 1 and ids:find("modules,profiles,global", 1, true) ~= nil,
-          "rail: Home, Group Frames and Click-Casting on top; Modules, Profiles, Global at the bottom")
+    check(ids:find("home,group,units,clicks", 1, true) == 1 and ids:find("modules,profiles,global", 1, true) ~= nil,
+          "rail: Home, Group Frames, Units and Click-Casting on top; Modules, Profiles, Global at the bottom")
     check(GUI.PartyButton and GUI.RaidButton and GUI.PartyButton.styleText == "PARTY",
           "deck: Party / Raid tabs built from the module's tabs")
     eq(GUI.RaidButton.styleAccent, "RAID", "deck: ...Raid in the raid accent")

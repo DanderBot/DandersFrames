@@ -1895,6 +1895,7 @@ L["Undo"] = true
 L["Uninterruptible Color"] = true
 L["Unit Frame"] = true
 L["Unit Frame Sorting"] = true
+L["Unit Frames"] = true
 L["Unit Selection"] = true
 L["Unlock this layout's frames to drag them. Changes save to this layout."] = true
 L["Unlock to Move"] = true

@@ -663,7 +663,8 @@ function DF:CreateGUI()
     -- saved width to the same floor.
     local defaultWidth  = GUI.WindowDefaults.width
     local defaultHeight = GUI.WindowDefaults.height
-    local minWidth, minHeight = GUI.WindowDefaults.minWidth, 400
+    -- minHeight 440: the module rail's six items and its divider need it.
+    local minWidth, minHeight = GUI.WindowDefaults.minWidth, GUI.WindowDefaults.minHeight
     local maxWidth, maxHeight = 1200, 900
     
     -- Load saved position and size. Account-wide, NOT per-profile: see

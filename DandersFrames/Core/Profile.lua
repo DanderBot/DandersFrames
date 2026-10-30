@@ -54,8 +54,9 @@ end
 -- 520 -> 580 (GUI.WindowDefaults). A saved width still AT the old default is moved to the
 -- new one ONCE (_railWidth700), so a user who later drags it back to 640 keeps 640; a
 -- saved width under the new floor is lifted to it on every read (SetSize ignores the
--- resize bounds, so nothing else would).
-local RAIL_OLD_DEFAULT_W, RAIL_NEW_DEFAULT_W, RAIL_MIN_W = 640, 700, 580
+-- resize bounds, so nothing else would). The height floor went 400 -> 440 the same way: the
+-- rail's items need it.
+local RAIL_OLD_DEFAULT_W, RAIL_NEW_DEFAULT_W, RAIL_MIN_W, RAIL_MIN_H = 640, 700, 580, 440
 function DF:GetWindowState()
     if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
     local ws = DandersFramesDB_v2.windowState
@@ -68,6 +69,7 @@ function DF:GetWindowState()
         ws._railWidth700 = true
     end
     if type(ws.width) == "number" and ws.width < RAIL_MIN_W then ws.width = RAIL_MIN_W end
+    if type(ws.height) == "number" and ws.height < RAIL_MIN_H then ws.height = RAIL_MIN_H end
     return ws
 end
 

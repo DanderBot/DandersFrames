@@ -54,6 +54,7 @@ DF.ICON_MANIFEST = {
         "open_in_full",
         "open_with",
         "palette",
+        "person",
         "preview",
         "preview_off",
         "priority_high",

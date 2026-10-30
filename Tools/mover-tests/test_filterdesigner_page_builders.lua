@@ -68,7 +68,7 @@ do
         return tonumber((src:match(pat)))
     end
     local TH        = ui_file_source("Theme.lua")
-    local minWidth  = num(df_file_source("GUI/GUI.lua"), "minWidth = (%d+) }")
+    local minWidth  = num(df_file_source("GUI/GUI.lua"), "minWidth = (%d+),")
     local railW     = num(options_file_source("GUI/Rail.lua"), "GUI.RailWidth = (%d+)")
     local navW      = num(PANEL, "tabFrame:SetWidth%(SnapLen%(frame, (%d+)%)%)")
     local windowPad = num(PANEL, "windowPad = (%d+)")

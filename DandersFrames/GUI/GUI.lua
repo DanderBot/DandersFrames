@@ -482,7 +482,7 @@ end
 -- 700 / 580 since the module rail (62px) went down the window's left edge: 640 / 520
 -- plus the rail, so the content box keeps its width. DF:GetWindowState moves a saved
 -- 640 (the old default) to 700 once, and clamps a saved width below the floor.
-GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580 }
+GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580, minHeight = 440 }
 
 -- ============================================================
 -- MODE + THEME (DandersFrames-only)

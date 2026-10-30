@@ -567,6 +567,16 @@ Placeholder({
     icon = ICONS .. "home.png",
     order = 0,
     slot = "top",
+    dividerAfter = true,
+})
+
+Placeholder({
+    id = "units",
+    label = function() return L["Unit Frames"] end,
+    railLabel = function() return L["Units"] end,
+    icon = ICONS .. "person.png",
+    order = 15,
+    slot = "top",
 })
 
 Placeholder({

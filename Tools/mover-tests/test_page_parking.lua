@@ -384,7 +384,7 @@ do
     has("local defaultHeight = GUI.WindowDefaults.height", "...both halves of it")
     -- The resize FLOOR is deliberately NOT the default -- a user who wants the
     -- window smaller than it opens can still drag it there.
-    has("local minWidth, minHeight = GUI.WindowDefaults.minWidth, 400", "...with the resize floor left below it")
+    has("local minWidth, minHeight = GUI.WindowDefaults.minWidth, GUI.WindowDefaults.minHeight", "...with the resize floor left below it")
     -- The module rail (GUI/Rail.lua) sits left of the nav; every term below pays for it.
     has('tabFrame:SetPoint("TOPLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, -64))',
         "the nav pane starts right of the module rail")
@@ -443,8 +443,8 @@ do
         RAIL_W = RAIL_W or 62
         do
             local gui = df_file_source("GUI/GUI.lua")
-            check(gui:find("GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580 }", 1, true) ~= nil,
-                  "band: the shipped default really is 700x600, floor 580")
+            check(gui:find("GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580, minHeight = 440 }", 1, true) ~= nil,
+                  "band: the shipped default really is 700x600, floor 580x440")
             local core = df_file_source("Core.lua")
             check(core:find("DF.GUI.WindowDefaults) or { width = 700, height = 600 }", 1, true) ~= nil,
                   "band: ...and /df resetgui restores that, not a literal of its own")

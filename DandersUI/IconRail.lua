@@ -21,7 +21,8 @@ if not UI then return end
 --       { id = "a", icon = "Interface\\...\\x.png", label = "A",
 --         tooltip = "Long name" or { title = ..., lines = ... },
 --         accent = {r,g,b} or function() return {r,g,b} end,
---         slot = "top" | "bottom" },
+--         slot = "top" | "bottom",
+--         dividerAfter = true },   -- a hairline between this item and the next
 --   })
 --   rail:Select("a")          -- paints only; onSelect fires on a USER click
 --   rail:SetBadge("a", "New") / rail:SetBadge("a", nil)
@@ -45,6 +46,9 @@ local WHITE = "Interface\\Buttons\\WHITE8x8"
 -- The kit's disabled alpha (CreateSlider, CreateCheckbox, StyleButton's
 -- SetEnabled and CreateGlyphButton all use it).
 local DISABLED_ALPHA = 0.4
+
+-- A divider: inset from the rail's sides, with this much air above and below.
+local DIVIDER_INSET, DIVIDER_GAP = 12, 6
 
 local function Resolve(v)
     if type(v) == "function" then return v() end
@@ -183,6 +187,25 @@ function UI:CreateIconRail(parent, opts)
         return btn
     end
 
+    -- Dividers: hairlines between groups of items (an item's dividerAfter),
+    -- pooled and re-placed on every layout.
+    local dividers = {}
+    local function Divider(n)
+        local d = dividers[n]
+        if not d then
+            d = rail:CreateTexture(nil, "ARTWORK")
+            d:SetTexture(WHITE)
+            d:SetHeight(1)
+            local c = UI.Colors.border
+            d:SetVertexColor(c.r, c.g, c.b, 1)
+            dividers[n] = d
+        end
+        d:ClearAllPoints()
+        d:SetWidth(width - DIVIDER_INSET * 2)
+        d:Show()
+        return d
+    end
+
     -- Lay the current set out: top slot down from the top, bottom slot up from
     -- the bottom (so the LAST bottom item sits on the bottom edge).
     local function Layout()
@@ -191,28 +214,46 @@ function UI:CreateIconRail(parent, opts)
             local item = items[id]
             if item.slot == "bottom" then bottom[#bottom + 1] = id else top[#top + 1] = id end
         end
-        local prev
+        local used = 0
+        -- prev is the last region placed (an item or a divider); gap is the
+        -- space to leave under it.
+        local prev, gap
         for _, id in ipairs(top) do
             local btn = buttons[id]
             btn:ClearAllPoints()
             if prev then
-                btn:SetPoint("TOP", prev, "BOTTOM", 0, -spacing)
+                btn:SetPoint("TOP", prev, "BOTTOM", 0, -gap)
             else
                 btn:SetPoint("TOP", rail, "TOP", 0, -padTop)
             end
-            prev = btn
+            prev, gap = btn, spacing
+            if items[id].dividerAfter then
+                used = used + 1
+                local d = Divider(used)
+                d:SetPoint("TOP", btn, "BOTTOM", 0, -DIVIDER_GAP)
+                prev, gap = d, DIVIDER_GAP
+            end
         end
-        prev = nil
+        prev, gap = nil, nil
         for i = #bottom, 1, -1 do
             local btn = buttons[bottom[i]]
             btn:ClearAllPoints()
             if prev then
-                btn:SetPoint("BOTTOM", prev, "TOP", 0, spacing)
+                btn:SetPoint("BOTTOM", prev, "TOP", 0, gap)
             else
                 btn:SetPoint("BOTTOM", rail, "BOTTOM", 0, padBot)
             end
-            prev = btn
+            prev, gap = btn, spacing
+            -- dividerAfter on the item ABOVE this one draws between the two.
+            local above = bottom[i - 1]
+            if above and items[above].dividerAfter then
+                used = used + 1
+                local d = Divider(used)
+                d:SetPoint("BOTTOM", btn, "TOP", 0, DIVIDER_GAP)
+                prev, gap = d, DIVIDER_GAP
+            end
         end
+        for n = used + 1, #dividers do dividers[n]:Hide() end
     end
 
     function rail:SetItems(newItems)
