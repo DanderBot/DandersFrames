@@ -67,8 +67,20 @@ if G.CurrentAccent then
     check(G.CurrentAccent() == G.GlobalAccent, "accent: GLOBAL up -- its own")
     G.GlobalView = false; G.SelectedMode = "raid"
     check(G.CurrentAccent() == RAID, "accent: otherwise the mode's")
+    -- Profiles wears its PAGE's accent (GUI.ProfilesPageAccents), whatever is
+    -- under it: Auto Layouts is Raid's, Click Casting Binds' green, the rest teal.
     G.GlobalView, G.ProfilesView = true, true
-    check(G.CurrentAccent() == RAID, "accent: Profiles over GLOBAL keeps the mode's")
+    check(G.CurrentAccent("profiles_manage") == G.GlobalAccent, "accent: a Profiles page over GLOBAL wears teal")
+    G.GlobalView = false; G.SelectedMode = "party"
+    check(G.CurrentAccent("profiles_auto") == RAID, "accent: Auto Layouts wears Raid's, even over Party")
+    check(G.CurrentAccent("profiles_importexport") == G.GlobalAccent, "accent: ...another Profiles page, teal")
+    G.ClicksAccent = { r = 0.2, g = 0.8, b = 0.4 }
+    check(G.CurrentAccent("profiles_clickcast") == G.ClicksAccent, "accent: Click Casting wears Binds' green")
+    G.ClicksAccent = nil
+    G.CurrentPageName = "profiles_auto"
+    check(G.CurrentAccent() == RAID, "accent: no page asked for -- the page showing")
+    G.CurrentPageName = nil
+    G.SelectedMode = "raid"
     G.GlobalView, G.ProfilesView = false, false
     G.SelectedMode = "party"
 end

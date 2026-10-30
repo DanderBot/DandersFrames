@@ -573,10 +573,28 @@ function GUI.IsProfilesPage(name)
     return name ~= nil and GUI.ProfilesPages[name] == true
 end
 
--- The accent for whichever tab the window is showing. Profiles keeps the
--- frame mode's own, as its pages always had.
-function GUI.CurrentAccent()
-    if GUI.GlobalView and not GUI.ProfilesView then return GUI.GlobalAccent end
+-- ★ A PROFILES PAGE CARRIES ITS OWN ACCENT, the one the window wears while it
+-- is selected -- the sidebar marker, deck 2's crumb, the group headers and the
+-- cards. Auto Layouts is Raid's (it only ever changes raid frames), Click
+-- Casting is Binds' green, and every other Profiles page is account-wide, so
+-- it takes GLOBAL's teal. A page not listed here gets the teal.
+-- ⚠ LATE-BOUND: ClicksAccent is declared by the companion (ModuleRegistry.lua).
+GUI.ProfilesPageAccents = {
+    profiles_auto      = function() return GetThemeColorFor(true) end,
+    profiles_clickcast = function() return GUI.ClicksAccent or GUI.GlobalAccent end,
+}
+
+function GUI.ProfilesAccentFor(page)
+    local f = page and GUI.ProfilesPageAccents[page]
+    return f and f() or GUI.GlobalAccent
+end
+
+-- The accent for whichever tab the window is showing. Under Profiles it is the
+-- page's own (above): `page` is the page about to show (SelectTab asks before
+-- it updates GUI.CurrentPageName), else the page showing.
+function GUI.CurrentAccent(page)
+    if GUI.ProfilesView then return GUI.ProfilesAccentFor(page or GUI.CurrentPageName) end
+    if GUI.GlobalView then return GUI.GlobalAccent end
     return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
 

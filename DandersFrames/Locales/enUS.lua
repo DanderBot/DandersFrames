@@ -500,6 +500,7 @@ L["Absorb Amount"] = true
 L["Absorb Shield"] = true
 L["Absorbs"] = true
 L["Actions"] = true
+L["Active"] = true
 L["Add"] = true
 L["active"] = true
 L["Remove this pinned set? Its members and settings will be lost."] = true
@@ -610,6 +611,7 @@ L["Auto Layout \"%s\" is active"] = true
 -- ⚠ Translators: both slots are filled at runtime -- %1 is the player's own name for
 -- the thing and is never translated, %2 is the kind.
 L["%s (%s)"] = true
+L["Auto Layouts change your raid frames by content. Party frames are not affected."] = true
 L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."] = true
 L["Auto Layouts module not loaded."] = true
 L["Auto-add DPS"] = true
@@ -625,6 +627,7 @@ L["Auto-Switch by Spec"] = true
 L["Auto-switched to profile: %s"] = true
 L["Auto-switching disabled"] = true
 L["Automatically add players by role when they join your group."] = true
+L["Automatic"] = true
 L["Available Profiles"] = true
 L["Back to Effects"] = true
 L["Background"] = true

@@ -150,7 +150,9 @@ calls = {}
 GUI:SelectModule("profiles")
 eq(GUI.SelectedMode, "raid", "binds: Profiles from Binds puts the frame mode back under it")
 check(joined():find("invalidate", 1, true) ~= nil, "binds: ...and the search index is rebuilt for it")
-check(joined():find("accent:RAID", 1, true) ~= nil, "binds: ...in that mode's accent")
+-- Profiles wears its page's accent (GUI.ProfilesPageAccents), not the mode's:
+-- with no Profiles page up yet, the account-wide teal.
+check(joined():find("accent:" .. tostring(GUI.GlobalAccent), 1, true) ~= nil, "binds: ...in the Profiles accent, not the mode's")
 
 -- ---- the frame mode under the view (Changed Settings' scope picker) ---------
 print("-- Profiles module: switching the mode underneath without leaving")

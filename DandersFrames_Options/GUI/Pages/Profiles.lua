@@ -34,13 +34,54 @@ local function RefreshAfterRename()
     if page and page:IsShown() and page.Refresh then page:Refresh() end
 end
 
--- Helper to add a group to a column without the Add() row-height pass: a group
--- sizes itself.
-local function Adder(self)
-    return function(widget, col, colNum)
-        widget.layoutCol = colNum or col
-        tinsert(self.children, widget)
+-- ============================================================
+-- THE CARDS -- the same rounded, collapsible cards every other settings page
+-- builds (GUI:CreatePopoutPageTools' OpenSection / CloseSection), under group
+-- headers in the page's accent. Each Profiles page wears its own accent
+-- (GUI.ProfilesPageAccents, DandersFrames/GUI/GUI.lua), so the headers, the
+-- chevrons and the kind icons follow it.
+--   Open(label, key, col, kind, summaryFn, hideFn) -> band   (a settings group)
+--   Close(band)                                    -- after its last widget
+--   Header(label, col, hideOn)
+-- ☠ A STABLE collapseKey per card (never the title): the fold persists by it.
+-- ============================================================
+local function Cards(self, Add)
+    local tools = GUI:CreatePopoutPageTools(self)
+    local K = {}
+    function K.Open(label, key, col, kind, summaryFn, hideFn)
+        return tools.OpenSection(Add, label, key, col, summaryFn, nil, hideFn, nil, nil, { kind = kind })
     end
+    function K.Close(band) tools.CloseSection(Add, band) end
+    function K.Header(label, col, hideOn)
+        local h = GUI:CreateHeader(self.child, label)
+        if hideOn then h.hideOn = hideOn end
+        Add(h, 40, col)
+        return h
+    end
+    return K
+end
+
+-- A page banner in the PAGE's accent: the kit's info banner (built by the
+-- caller, with its own dismissKey), re-tinted -- accent icon, an accent-tinted
+-- fill and border, caption text -- and re-tinted again whenever the banner
+-- repaints itself (its UpdateTheme re-applies the tone, which would put the
+-- info blue back).
+local function TintBanner(b, accentFn)
+    local function Tint()
+        local c = accentFn()
+        if b.SetBackdropColor then b:SetBackdropColor(c.r, c.g, c.b, 0.09) end
+        if b.SetBackdropBorderColor then b:SetBackdropBorderColor(c.r, c.g, c.b, 0.35) end
+        if b.SetIconColor then b:SetIconColor(c.r, c.g, c.b) end
+        local cc = GUI.Colors.textCaption or GUI.Colors.text
+        if b.body then b.body:SetTextColor(cc.r, cc.g, cc.b) end
+    end
+    local base = b.UpdateTheme
+    b.UpdateTheme = function()
+        if base then base(b) end
+        Tint()
+    end
+    Tint()
+    return b
 end
 
 -- Small themed checkbox (the Import / Export rows). Moved here with the page.
@@ -107,26 +148,19 @@ local function BuildManage(self, db, Add, AddSpace, AddSyncPoint)
     local currentProfile = DF:GetCurrentProfile()
     local profiles = DF:GetProfiles()
     
-    -- Helper to add to current section (for collapsible sections this pattern won't apply, but we use groups)
-    local currentSection = nil
-    local function AddToSection(widget, col, colNum)
-        widget.layoutCol = colNum or col
-        table.insert(self.children, widget)
-    end
-    
+    local K = Cards(self, Add)
+
     -- ============================================
-    -- COLUMN 1: Profile List & Creation
+    -- ACTIVE: the profile in use and the list (column 1), a new one (column 2)
     -- ============================================
-    
-    -- Current Profile Info Group
-    local currentGroup = GUI:CreateSettingsGroup(self.child, 280)
-    currentGroup:AddWidget(GUI:CreateHeader(self.child, L["Current Profile"]), 40)
-    currentGroup:AddWidget(GUI:CreateLabel(self.child, "|cff00ff00" .. currentProfile .. "|r", 240), 25)
-    AddToSection(currentGroup, nil, 1)
-    
-    -- Available Profiles Group
-    local listGroup = GUI:CreateSettingsGroup(self.child, 280)
-    listGroup:AddWidget(GUI:CreateHeader(self.child, L["Available Profiles"]), 40)
+    K.Header(L["Active"], "both")
+
+    -- The current profile and every profile, one card; shut, it names the
+    -- profile in use.
+    local listGroup = K.Open(L["Current Profile"], "profiles_manage_current", 1, "profile",
+        function() return DF:GetCurrentProfile() or "" end)
+    listGroup:AddWidget(GUI:CreateLabel(self.child, "|cff00ff00" .. currentProfile .. "|r", 240), 25)
+    listGroup:AddWidget(GUI:CreateLabel(self.child, L["Available Profiles"], 240), 22)
     
     -- Container for the profile list. Width comes from the group rather than a
     -- literal, so the rows reach the group's right edge.
@@ -190,11 +224,10 @@ local function BuildManage(self, db, Add, AddSpace, AddSyncPoint)
         py = py - 28
     end
     
-    AddToSection(listGroup, nil, 1)
+    K.Close(listGroup)
     
-    -- Create New Profile Group
-    local createGroup = GUI:CreateSettingsGroup(self.child, 280)
-    createGroup:AddWidget(GUI:CreateHeader(self.child, L["Create New Profile"]), 40)
+    -- Create New Profile
+    local createGroup = K.Open(L["Create New Profile"], "profiles_manage_create", 2, "profile")
     
     local input = GUI:CreateInput(self.child, L["Profile Name"], 240)
     createGroup:AddWidget(input, 50)
@@ -233,15 +266,15 @@ local function BuildManage(self, db, Add, AddSpace, AddSyncPoint)
     dupeBtn:SetPoint("LEFT", createBtn, "RIGHT", 10, 0)
     
     createGroup:AddWidget(btnRow, 32)
-    AddToSection(createGroup, nil, 1)
-    
+    K.Close(createGroup)
+
     -- ============================================
-    -- COLUMN 2: Actions & Settings
+    -- ACTIONS: on the current profile (column 1), Party <-> Raid (column 2)
     -- ============================================
-    
-    -- Profile Actions Group
-    local actionsGroup = GUI:CreateSettingsGroup(self.child, 280)
-    actionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Profile Actions"]), 40)
+    AddSyncPoint()
+    K.Header(L["Actions"], "both")
+
+    local actionsGroup = K.Open(L["Profile Actions"], "profiles_manage_actions", 1, "settings")
     
     actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "delete", L["Delete Current Profile"], 240, 26, function()
         local p = DF:GetCurrentProfile()
@@ -306,11 +339,10 @@ local function BuildManage(self, db, Add, AddSpace, AddSyncPoint)
         })
     end, nil, "left"), 32)
     
-    AddToSection(actionsGroup, nil, 2)
+    K.Close(actionsGroup)
     
-    -- Copy Settings Group
-    local copyGroup = GUI:CreateSettingsGroup(self.child, 280)
-    copyGroup:AddWidget(GUI:CreateHeader(self.child, L["Copy Settings"]), 40)
+    -- Copy Settings
+    local copyGroup = K.Open(L["Copy Settings"], "profiles_manage_copy", 2, "copy")
     copyGroup:AddWidget(GUI:CreateLabel(self.child, L["Copy all settings between Party and Raid modes."], 240), 25)
     
     -- Both directions are the same confirm with the modes swapped.
@@ -342,7 +374,7 @@ local function BuildManage(self, db, Add, AddSpace, AddSyncPoint)
             L["Copy Raid settings to Party?\n\nThis will overwrite all Party settings with your current Raid settings."])
     end, nil, "left"), 32)
     
-    AddToSection(copyGroup, nil, 2)
+    K.Close(copyGroup)
     
     -- See Also links
     AddSpace(GUI.Space.block, "both")
@@ -359,19 +391,21 @@ end
 -- ============================================================
 local function BuildSpec(self, db, Add, AddSpace, AddSyncPoint)
     local profiles = DF:GetProfiles()
-    local AddToSection = Adder(self)
+    local K = Cards(self, Add)
+    K.Header(L["Automatic"], "both")
 
-    local charGroup = GUI:CreateSettingsGroup(self.child, 280)
-    charGroup:AddWidget(GUI:CreateHeader(self.child, L["Character"]), 40)
+    local charGroup = K.Open(L["Character"], "profiles_spec_character", 1, "character",
+        function() return DF:GetCurrentProfile() or "" end)
     charGroup:AddWidget(GUI:CreateLabel(self.child,
         format(L["This character uses the profile: %s"], DF:GetCurrentProfile()), 240), nil)
     charGroup:AddWidget(GUI:CreateLabel(self.child,
         L["Everything on this page is saved for this character only."], 240), nil)
-    AddToSection(charGroup, nil, 1)
+    K.Close(charGroup)
 
-    -- Auto-Switch by Spec Group
-    local specGroup = GUI:CreateSettingsGroup(self.child, 280)
-    specGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Switch by Spec"]), 40)
+    -- Auto-Switch by Spec. Shut, the card says whether it is on.
+    local specGroup = K.Open(L["Auto-Switch by Spec"], "profiles_spec_auto", 2, "character", function()
+        return (DandersFramesCharDB and DandersFramesCharDB.enableSpecSwitch) and L["On"] or L["Off"]
+    end)
     
     -- Initialize per-character data if needed
     if not DandersFramesCharDB then 
@@ -412,9 +446,8 @@ local function BuildSpec(self, db, Add, AddSpace, AddSyncPoint)
     else
         specGroup:AddWidget(GUI:CreateLabel(self.child, L["Specialization data not available."], 240), 25)
     end
-    
 
-    AddToSection(specGroup, nil, 2)
+    K.Close(specGroup)
 end
 
 -- ============================================================
@@ -429,20 +462,26 @@ end
 local CLICKCAST_PANEL_H = 500
 
 local function BuildClickCast(self, db, Add, AddSpace)
-    Add(GUI:CreateLabel(self.child,
-        L["Click-cast profiles are saved per class and switch with your talent loadout. They are separate from the profiles on the Manage page."]),
-        nil, "both")
+    -- The page's one-line note, as a banner in Binds' green.
+    local note = TintBanner(GUI:CreateInfoBanner(self.child, {
+        tone = "info", notice = true, dismissKey = "profiles_clickcast_note",
+        text = L["Click-cast profiles are saved per class and switch with your talent loadout. They are separate from the profiles on the Manage page."],
+    }), function() return GUI.ProfilesAccentFor("profiles_clickcast") end)
+    Add(note, note.layoutHeight or 44, "both")
     AddSpace(GUI.Space.block, "both")
 
+    local K = Cards(self, Add)
+    local band = K.Open(L["Click-Cast Profiles"], "profiles_clickcast_panel", "both", "clickcast")
     local CC = DF.ClickCast
     if not (CC and CC.db and CC.profilesPanel) then
-        Add(GUI:CreateLabel(self.child, L["Click casting is not available."]), nil, "both")
+        band:AddWidget(GUI:CreateLabel(self.child, L["Click casting is not available."]), nil)
+        K.Close(band)
         return
     end
 
     local holder = CreateFrame("Frame", nil, self.child)
     holder:SetSize(400, CLICKCAST_PANEL_H)
-    Add(holder, CLICKCAST_PANEL_H, "both")
+    band:AddWidget(holder, CLICKCAST_PANEL_H)
 
     -- Into THIS build's holder, every time it shows: a rebuild retires the
     -- previous holder (and would take the panel to the trash with it), and Binds
@@ -461,6 +500,7 @@ local function BuildClickCast(self, db, Add, AddSpace)
     end
     holder:SetScript("OnShow", Adopt)
     Adopt()
+    K.Close(band)
 end
 
 -- ============================================================
@@ -506,7 +546,6 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
     self.importFrameTypes = {party = true, raid = true}
     self.parsedImport = nil
     self.exportKind = self.exportKind or "profile"
-    local AddToSection = Adder(self)
 
     -- Derived from the category registry (single source of truth) so this list
     -- can never drift from DF.ExportCategories when categories change.
@@ -524,11 +563,13 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
     })
     Add(scopeBanner, scopeBanner.layoutHeight or 44, "both")
 
+    local K = Cards(self, Add)
+
     -- ========================================
     -- IMPORT: the one paste box (column 1) and what to do with it (column 2)
     -- ========================================
-    local importGroup = GUI:CreateSettingsGroup(self.child, 280)
-    importGroup:AddWidget(GUI:CreateHeader(self.child, L["Import String"]), 40)
+    K.Header(L["Import"], "both")
+    local importGroup = K.Open(L["Import String"], "profiles_ie_import", 1, "import")
     importGroup:AddWidget(GUI:CreateLabel(self.child,
         L["Paste any DandersFrames string: a profile, a click-cast profile or a filter."], 240), nil)
 
@@ -602,16 +643,14 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         self:RefreshStates()
     end), 30)
     importGroup:AddWidget(status, 34)
-    AddToSection(importGroup, nil, 1)
+    K.Close(importGroup)
 
     -- "What to Import": a DandersFrames profile's options. Shown only once a
     -- profile string has been parsed -- every other kind has its own flow.
-    local importSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-    importSettingsGroup.hideOn = function()
+    local importSettingsGroup = K.Open(L["What to Import"], "profiles_ie_whatimport", 2, "import", nil, function()
         local p = self.parsedImport
         return not (p and p.ok and p.kind == "profile")
-    end
-    importSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["What to Import"]), 40)
+    end)
 
     local impNameInput = GUI:CreateInput(self.child, L["Profile Name"], 240)
     impNameInput.EditBox:SetText(L["Imported Profile"])
@@ -652,7 +691,7 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         self.importCheckboxes[cat] = cb
         importSettingsGroup:AddWidget(catRow, 20)
     end
-    AddToSection(importSettingsGroup, nil, 2)
+    K.Close(importSettingsGroup)
 
     -- The profile import itself -- unchanged from the old page.
     local function ImportProfile(parsed)
@@ -744,8 +783,7 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         end
     end
 
-    local importActionsGroup = GUI:CreateSettingsGroup(self.child, 280)
-    importActionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Import"]), 40)
+    local importActionsGroup = K.Open(L["Actions"], "profiles_ie_importactions", 2, "import")
     importActionsGroup:AddWidget(GUI:CreateIconButton(self.child, "download", L["Import"], 240, 26, function()
         local parsed = self.parsedImport
         -- Edited since it was parsed: parse what is in the box now.
@@ -778,7 +816,7 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         self.parsedImport = nil
         self:RefreshStates()
     end), 28)
-    AddToSection(importActionsGroup, nil, 2)
+    K.Close(importActionsGroup)
 
     AddSyncPoint()
     AddSpace(GUI.Space.block, "both")
@@ -786,8 +824,8 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
     -- ========================================
     -- EXPORT: what (column 1), then the string (column 2)
     -- ========================================
-    local kindGroup = GUI:CreateSettingsGroup(self.child, 280)
-    kindGroup:AddWidget(GUI:CreateHeader(self.child, L["What to Export"]), 40)
+    K.Header(L["Export"], "both")
+    local kindGroup = K.Open(L["What to Export"], "profiles_ie_whatexport", 1, "export")
     local kindLabels = {
         profile   = L["Profile"],
         clickcast = L["Click-Cast Profile"],
@@ -802,11 +840,11 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
             if self.exportEditBox then self.exportEditBox:SetText("") end
             self:RefreshStates()
         end), 55)
-    AddToSection(kindGroup, nil, 1)
+    K.Close(kindGroup)
 
     -- ---- a DandersFrames profile: the old export options, unchanged ----
-    local exportSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-    exportSettingsGroup.hideOn = function() return self.exportKind ~= "profile" end
+    local exportSettingsGroup = K.Open(L["Profile"], "profiles_ie_profile", 1, "profile", nil,
+        function() return self.exportKind ~= "profile" end)
 
     local nameInput = GUI:CreateInput(self.child, L["Profile Name"], 240)
     -- The current profile's name. ☠ This read DF.db.keys.profile, which does not
@@ -880,11 +918,11 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
             if enabled then cb:Enable() else cb:Disable() end
         end
     end
-    AddToSection(exportSettingsGroup, nil, 1)
+    K.Close(exportSettingsGroup)
 
     -- ---- the active click-cast profile ----
-    local ccGroup = GUI:CreateSettingsGroup(self.child, 280)
-    ccGroup.hideOn = function() return self.exportKind ~= "clickcast" end
+    local ccGroup = K.Open(L["Click-Cast Profile"], "profiles_ie_clickcast", 1, "clickcast", nil,
+        function() return self.exportKind ~= "clickcast" end)
     local ccLine = CreateStatusLine(self.child, 240)
     -- Read on show: the active click-cast profile follows the talent loadout.
     local function PaintCCLine()
@@ -900,11 +938,11 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
     ccLine:SetScript("OnShow", PaintCCLine)
     PaintCCLine()
     ccGroup:AddWidget(ccLine, 34)
-    AddToSection(ccGroup, nil, 1)
+    K.Close(ccGroup)
 
     -- ---- a filter (preset or custom; R:ExportFilter takes either) ----
-    local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
-    filterGroup.hideOn = function() return self.exportKind ~= "filter" end
+    local filterGroup = K.Open(L["Filter"], "profiles_ie_filter", 1, "filters", nil,
+        function() return self.exportKind ~= "filter" end)
     -- value -> { key, name }. Rebuilt on every open: filters come and go.
     local filterRefs = {}
     local function FilterOptions()
@@ -924,11 +962,10 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
         function() return self.exportFilter end,
         function(v) self.exportFilter = v end,
         { optionsFunc = FilterOptions }), 55)
-    AddToSection(filterGroup, nil, 1)
+    K.Close(filterGroup)
 
     -- ---- the string ----
-    local exportActionsGroup = GUI:CreateSettingsGroup(self.child, 280)
-    exportActionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Export"]), 40)
+    local exportActionsGroup = K.Open(L["Actions"], "profiles_ie_exportactions", 2, "export")
 
     local function ExportProfileString()
         local selectedCats = {}
@@ -993,7 +1030,7 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
             self.exportEditBox:SetFocus()
         end
     end), 28)
-    AddToSection(exportActionsGroup, nil, 2)
+    K.Close(exportActionsGroup)
 
     -- See Also
     AddSpace(GUI.Space.block, "both")
@@ -1103,9 +1140,19 @@ local function BuildChangedSettings(self, Add, AddSpace)
             nil, "both")
     end
 
-    -- ===== HEADER BOX =====
-    local headerGroup = GUI:CreateSettingsGroup(self.child, 280)
-    headerGroup:AddWidget(GUI:CreateHeader(self.child, L["Changed Settings"]), 40)
+    -- The page's cards (after BuildReport -- see the note above it). Group
+    -- header: the scope being shown.
+    local K = Cards(self, Add)
+    K.Header(modeLabel, "both")
+
+    -- ===== HEADER CARD =====
+    -- Shut, it says how many settings differ.
+    local headerGroup = K.Open(L["Changed Settings"], "profiles_changed_header", "both", "changed", function()
+        if report and report.count and report.count > 0 then
+            return format(L["%d settings differ from defaults"], report.count)
+        end
+        return ""
+    end)
     headerGroup:AddWidget(CreateScopePicker(self), 55)
 
     if not report then
@@ -1118,7 +1165,7 @@ local function BuildChangedSettings(self, Add, AddSpace)
         -- No footnote here: "not everything is listed" under a page that
         -- listed nothing at all is noise. It belongs on the EMPTY state,
         -- where it is the caveat on a real claim.
-        Add(headerGroup, nil, "both")
+        K.Close(headerGroup)
         return
     end
 
@@ -1129,7 +1176,7 @@ local function BuildChangedSettings(self, Add, AddSpace)
 
     if report.count == 0 then
         headerGroup:AddWidget(GUI:CreateLabel(self.child, L["Everything is at its defaults."]), nil)
-        Add(headerGroup, nil, "both")
+        K.Close(headerGroup)
         AddFootnote()
         return
     end
@@ -1153,12 +1200,14 @@ local function BuildChangedSettings(self, Add, AddSpace)
         })
     end), 32)
 
-    Add(headerGroup, nil, "both")
+    K.Close(headerGroup)
 
-    -- ===== ONE BOX PER SOURCE PAGE =====
+    -- ===== ONE CARD PER SOURCE PAGE =====
+    -- Keyed by the source page's id (stable), never its localised label.
     for _, group in ipairs(report.groups) do
-        local box = GUI:CreateSettingsGroup(self.child, 280)
-        box:AddWidget(GUI:CreateHeader(self.child, group.label), 40)
+        local nRows = #group.rows
+        local box = K.Open(group.label, "profiles_changed:" .. tostring(group.tab or group.label), "both", "changed",
+            function() return tostring(nRows) end)
 
         for _, row in ipairs(group.rows) do
             -- A plain kit button with NO opts.text: StyleButton grows a
@@ -1236,7 +1285,7 @@ local function BuildChangedSettings(self, Add, AddSpace)
             box:AddWidget(rowBtn, 24)
         end
 
-        Add(box, nil, "both")
+        K.Close(box)
     end
 
     AddFootnote()
@@ -1255,8 +1304,30 @@ function DF:SetupProfilesPages(_, CreateCategory, CreateSubTab, BuildPage)
     BuildPage(pageSpec, BuildSpec)
 
     -- Raid's, whatever mode sits under the view (AutoProfilesUI:BuildPage).
+    -- ★ RAID ONLY, AND IT SAYS SO THREE WAYS: a RAID tag on its sidebar row,
+    -- a raid-orange banner at the top of the page, and the page's own accent
+    -- (GUI.ProfilesPageAccents) -- raid orange on its headers and cards.
     local pageAutoProfiles = CreateSubTab("profiles", "profiles_auto", L["Auto Layouts"])
+    local autoTab = GUI.Tabs and GUI.Tabs.profiles_auto
+    if autoTab and autoTab.Text and not autoTab.raidTag then
+        local tag = autoTab:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        GUI:SetSettingsFont(tag, 9)
+        tag:SetPoint("LEFT", autoTab.Text, "RIGHT", 6, 0)
+        tag:SetText(L["RAID"])
+        local rc = GUI.GetThemeColorFor(true)
+        tag:SetTextColor(rc.r, rc.g, rc.b)
+        autoTab.raidTag = tag
+    end
     BuildPage(pageAutoProfiles, function(self, db, Add, AddSpace)
+        -- notice: a statement of what the page affects, not a tip, so the
+        -- "start tips closed" option does not hide it -- only its own x does.
+        local banner = TintBanner(GUI:CreateInfoBanner(self.child, {
+            tone = "info", notice = true, dismissKey = "profiles_auto_raidonly",
+            text = L["Auto Layouts change your raid frames by content. Party frames are not affected."],
+        }), function() return GUI.ProfilesAccentFor("profiles_auto") end)
+        banner.isAutoLayoutsRaidBanner = true
+        Add(banner, banner.layoutHeight or 44, "both")
+        AddSpace(GUI.Space.block, "both")
         if DF.AutoProfilesUI and DF.AutoProfilesUI.BuildPage then
             DF.AutoProfilesUI:BuildPage(GUI, self, db, Add, AddSpace)
         else

@@ -739,7 +739,12 @@ GUI:RegisterModule({
     slot = "bottom",
     noTile = true,
     sidebar = true,
-    accent = function() return GUI.Colors.text end,
+    -- The page's own accent (GUI.ProfilesPageAccents, GUI/GUI.lua): the rail
+    -- item and deck 2's crumb follow the page selected, teal when none is.
+    accent = function()
+        if GUI.ProfilesView and GUI.CurrentAccent then return GUI.CurrentAccent() end
+        return GUI.GlobalAccent or GUI.Colors.text
+    end,
     isEnabled = function() return true end,
     ownsPage = function(name) return GUI.IsProfilesPage and GUI.IsProfilesPage(name) or false end,
     -- tabId: a Profiles page to land on (Home's profile link asks for Manage);
@@ -777,6 +782,11 @@ function GUI:SetUnderlyingFrameMode(mode)
     end
     if mode == "raid" then EnterRaid() else EnterParty() end
     GUI:SyncSelectedModule()
+    -- The switch painted the MODE's accent; Profiles wears its page's.
+    if GUI.ProfilesView and GUI.CurrentAccent then
+        GUI:SetAccent(GUI.CurrentAccent())
+        GUI.UpdateThemeColors()
+    end
     return GUI.SelectedMode == mode
 end
 

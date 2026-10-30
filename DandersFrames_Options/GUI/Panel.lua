@@ -3003,6 +3003,11 @@ function DF:CreateGUI()
             GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })
             SwitchMark("view")
         end
+        -- ★ A Profiles page wears its own accent (GUI.ProfilesPageAccents,
+        -- GUI/GUI.lua), so the accent moves with the PAGE here, before the page
+        -- is built or shown -- the marker, the crumb and the repaint below all
+        -- read it.
+        if GUI.ProfilesView and GUI.CurrentAccent then GUI:SetAccent(GUI.CurrentAccent(name)) end
 
         -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
         -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the

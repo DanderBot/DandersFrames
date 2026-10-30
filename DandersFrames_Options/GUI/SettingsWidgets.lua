@@ -390,6 +390,14 @@ do
         -- The plain outline skull: a slashed or badged one blurs to a blob at
         -- card size.
         dead       = ICONS .. "skull.png",
+        -- The Profiles pages' cards (GUI/Pages/Profiles.lua).
+        profile    = ICONS .. "account_circle.png",
+        character  = ICONS .. "person.png",
+        clickcast  = ICONS .. "mouse.png",
+        import     = ICONS .. "download.png",
+        export     = ICONS .. "upload.png",
+        copy       = ICONS .. "content_copy.png",
+        changed    = ICONS .. "edit_square.png",
     }
 end
 

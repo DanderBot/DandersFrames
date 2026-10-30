@@ -125,5 +125,7 @@ do
     -- The pages' own settings groups only: every card's band is built in
     -- GUI/Controls.lua, so the count is small, but a sweep that silently read
     -- nothing finds none.
-    check(groups > 10, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
+    -- ⚠ FLOOR LOWERED 2026-10-30: the Profiles pages, the last big user of
+    -- bare settings groups, moved onto the cards too.
+    check(groups >= 4, "alignment: the sweep actually read the pages (" .. groups .. " groups)")
 end
