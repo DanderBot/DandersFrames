@@ -5,7 +5,7 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 
-local ipairs, pairs, type = ipairs, pairs, type
+local ipairs, pairs, type, tostring = ipairs, pairs, type, tostring
 local CreateFrame = CreateFrame
 local concat = table.concat
 
@@ -79,6 +79,9 @@ local function SyncRailItems(rail)
 end
 
 -- "New" on a rail item while a page it owns is in GUI.NewTabs and unseen.
+-- Home instead shows how many Needs attention items are conflicts or setup
+-- (severity 1-2), from the list as last evaluated (GUI.Home.BadgeCount) --
+-- this never runs the checks.
 -- Run on every shell refresh and from SelectTab once a page is marked seen.
 function GUI:RefreshRailBadges()
     local rail = GUI.ModuleRail
@@ -91,8 +94,13 @@ function GUI:RefreshRailBadges()
             if id then new[id] = true end
         end
     end
+    local attention = GUI.Home and GUI.Home.BadgeCount and GUI.Home.BadgeCount() or 0
     for _, id in ipairs(rail:GetItemIds()) do
-        rail:SetBadge(id, new[id] and L["New"] or nil)
+        if id == "home" and attention > 0 then
+            rail:SetBadge(id, tostring(attention))
+        else
+            rail:SetBadge(id, new[id] and L["New"] or nil)
+        end
     end
 end
 
@@ -253,9 +261,11 @@ end
 -- overlay. Otherwise the last place, unless that module has since been
 -- switched off (it left the rail), which also lands on Home.
 -- ★ THE Q3 HOOK: a conflict-level (severity 1) Needs-attention item opens
--- Home too. Nothing raises one until DF.Attention exists (Phase 3); the
--- check reads it through GUI.HomeHasConflict, which is nil-safe.
+-- Home too. Opening the window is one of the moments the checks run
+-- (GUI:EvaluateAttention, which also repaints the rail badge), so it runs
+-- first -- even on an update, which lands on Home anyway.
 function GUI:ModuleToOpen(id, updated)
+    if GUI.EvaluateAttention then GUI:EvaluateAttention() end
     if not GUI:GetModule("home") then return id end
     if updated then return "home" end
     if GUI.HomeHasConflict and GUI:HomeHasConflict() then return "home" end

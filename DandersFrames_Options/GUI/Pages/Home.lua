@@ -132,25 +132,31 @@ local TAG_LABEL = {
 
 -- ============================================================
 -- PURE: NEEDS ATTENTION
--- Phase 3 adds DF.Attention:GetActive(), returning items
+-- The resident registry (DandersFrames/Features/Attention.lua) answers
+-- DF.Attention:GetActive(useCache) with items
 -- { id, severity (1 conflict, 2 setup, 3 info), title, detail,
---   fix = { label, run | page, combatSafe } }. Until then -- or for a caller
--- that wants to show its own -- GUI:SetHomeAttentionItems(list) supplies them
--- (nil hands back to DF.Attention). At most 4 show.
+--   fix = { label, run | page, combatSafe }, dismiss }, sorted. A caller that
+-- wants to show its own list uses GUI:SetHomeAttentionItems(list) (nil hands
+-- back to DF.Attention). At most 4 show.
+--
+-- WHEN IT IS EVALUATED: the window opening (GUI:ModuleToOpen calls
+-- GUI:EvaluateAttention), Home showing, and after a fix or a dismiss. Every
+-- other re-layout (a resize step) reads the cached list. Never on a timer.
 -- ============================================================
 local MAX_ATTENTION = 4
+local BADGE_SEVERITY = 2  -- the rail badge counts conflicts and setup items
 
 function GUI:SetHomeAttentionItems(list)
     GUI._homeAttention = list
     if GUI.RefreshHomeView then GUI:RefreshHomeView() end
 end
 
-function Home.AttentionItems()
+function Home.AttentionItems(useCache)
     local list = GUI._homeAttention
     if list == nil then
         local A = DF.Attention
         if A and A.GetActive then
-            local ok, res = pcall(A.GetActive, A)
+            local ok, res = pcall(A.GetActive, A, useCache)
             if ok then list = res end
         end
     end
@@ -163,14 +169,40 @@ function Home.AttentionItems()
     return out
 end
 
+-- How many items the Home rail item's badge counts (severity 1-2), from the
+-- list as last evaluated -- the badge never runs the checks itself.
+function Home.BadgeCount()
+    local n = 0
+    for _, item in ipairs(Home.AttentionItems(true)) do
+        if type(item.severity) == "number" and item.severity <= BADGE_SEVERITY then n = n + 1 end
+    end
+    return n
+end
+
+-- Run the checks now and repaint the badge. The window's open path and Home
+-- call this; nothing else should need to.
+function GUI:EvaluateAttention()
+    local items = Home.AttentionItems(false)
+    if GUI.RefreshRailBadges then GUI:RefreshRailBadges() end
+    return items
+end
+
 -- Q3's rule, for GUI:ModuleToOpen (GUI/Rail.lua): a conflict-level item opens
--- the window on Home. Nothing raises one before Phase 3.
+-- the window on Home. Reads the list as last evaluated (the open path
+-- evaluates first).
 function GUI:HomeHasConflict()
-    for _, item in ipairs(Home.AttentionItems()) do
+    for _, item in ipairs(Home.AttentionItems(true)) do
         if item.severity == 1 then return true end
     end
     return false
 end
+
+-- A fix or a dismiss changed something: re-run the checks, repaint.
+local function AfterAttentionChange()
+    GUI:EvaluateAttention()
+    if GUI.RefreshHomeView then GUI:RefreshHomeView() end
+end
+Home.AfterAttentionChange = AfterAttentionChange
 
 -- ============================================================
 -- THE VIEW
@@ -311,15 +343,34 @@ local function RowButton(r)
                 GUI:LinkToSetting({ page = fix.page })
             end
         end
-        if GUI.RefreshHomeView then GUI:RefreshHomeView() end
+        -- A fix that reloads never gets here; one that opened a page has
+        -- left Home, and the refresh below is a no-op then.
+        AfterAttentionChange()
     end)
     r.Fix = b
     return b
 end
 
+-- The dismiss "x" on a dismissable attention row, built on first need.
+local function RowDismiss(r)
+    if r.Dismiss then return r.Dismiss end
+    local b = GUI:CreateCloseButton(r, {
+        size = 16,
+        tooltip = L["Dismiss"],
+        onClick = function(self)
+            local A = DF.Attention
+            if self.itemId and A and A.Dismiss then A:Dismiss(self.itemId) end
+            AfterAttentionChange()
+        end,
+    })
+    b:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, 0)
+    r.Dismiss = b
+    return b
+end
+
 -- Lay a panel out at width pw; returns its height.
 local function LayoutAttention(p, pw)
-    local items = Home.AttentionItems()
+    local items = Home.AttentionItems(true)
     p.Title:SetText(L["Needs attention"])
     p.Aside:SetText(#items > 0 and tostring(#items) or "")
     local inner = pw - PAD * 2
@@ -334,6 +385,7 @@ local function LayoutAttention(p, pw)
         Tint(r.TitleFS, C.textDim)
         r.TextFS:SetText("")
         if r.Fix then r.Fix:Hide() end
+        if r.Dismiss then r.Dismiss:Hide() end
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
         r:SetSize(inner, h)
@@ -345,7 +397,9 @@ local function LayoutAttention(p, pw)
         local r = PanelRow(p, i)
         r.Tag:SetText("")
         local fix = type(item.fix) == "table" and item.fix or nil
-        local textW = fix and (inner - 90) or inner
+        local canDismiss = item.dismiss ~= nil and item.id ~= nil
+        local rightW = (fix and 90 or 0) + (canDismiss and 22 or 0)
+        local textW = inner - rightW
         r.TitleFS:ClearAllPoints()
         r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
         Tint(r.TitleFS, C.text)
@@ -358,11 +412,20 @@ local function LayoutAttention(p, pw)
             b.fix = fix
             if b.Text then b.Text:SetText(fix.label or "") end
             b:SetEnabled(not (combat and not fix.combatSafe))
+            b:ClearAllPoints()
+            b:SetPoint("TOPRIGHT", r, "TOPRIGHT", canDismiss and -22 or 0, 0)
             b:Show()
         elseif r.Fix then
             r.Fix:Hide()
         end
-        local h = max(h1 + (h2 > 0 and h2 + 2 or 0), fix and 22 or 0)
+        if canDismiss then
+            local d = RowDismiss(r)
+            d.itemId = item.id
+            d:Show()
+        elseif r.Dismiss then
+            r.Dismiss:Hide()
+        end
+        local h = max(h1 + (h2 > 0 and h2 + 2 or 0), fix and 22 or 0, canDismiss and 16 or 0)
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
         r:SetSize(inner, h)
@@ -371,6 +434,7 @@ local function LayoutAttention(p, pw)
     end
     return y - 10 + PAD
 end
+Home.LayoutAttention = LayoutAttention   -- the headless tests drive it on a fake panel
 
 -- The changelog text is fixed for the session and the parse walks all of it
 -- (~180 KB), so it runs once -- not on every resize step.
@@ -641,6 +705,12 @@ local function Build()
     W.attention = MakePanel()
     W.news = MakePanel()
 
+    -- Fix buttons grey in combat and come back after it: repaint on the edges
+    -- (the list itself is the cached one -- checks never run in combat).
+    view:RegisterEvent("PLAYER_REGEN_DISABLED")
+    view:RegisterEvent("PLAYER_REGEN_ENABLED")
+    view:SetScript("OnEvent", function() GUI:RefreshHomeView() end)
+
     view:SetScript("OnSizeChanged", function()
         GUI:RefreshHomeView()
         -- Results are laid out against the panel's width too.
@@ -664,6 +734,8 @@ function GUI:ShowHomeView()
     end
     view:Show()
     AdoptSearch()
+    -- Home showing is one of the moments the checks run.
+    GUI:EvaluateAttention()
     GUI:RefreshHomeView()
 end
 
