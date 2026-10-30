@@ -80,7 +80,10 @@ function UI:CreateIconRail(parent, opts)
     local selected
 
     local marker = host:CreateSelectionMarker(rail, {
-        axis = "y", thickness = opts.markerThickness or 3,
+        -- A short pill, not a full-height square bar: the plates are rounded,
+        -- so the edge mark is too, and it stops short of the plate's corners.
+        axis = "y", thickness = opts.markerThickness or 4, pill = true,
+        inset = opts.markerInset or 12,
     })
     rail.Marker = marker
 

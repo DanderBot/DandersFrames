@@ -139,6 +139,31 @@ do
 
     local rail = host:CreateSelectionMarker(deck, { axis = "y", thickness = 3 })
     eq(rail:GetWidth(), 3, "build: a y-axis marker is sized on ITS short axis (width)")
+    check(not rawget(rail, "pill"), "build: a plain marker is a square bar")
+end
+
+-- ============================================================
+-- 1b. PILL AND INSET (the settings icon rail)
+-- ============================================================
+do
+    local deck = CreateFrame("Frame")
+    local a = member(deck)
+    local m = host:CreateSelectionMarker(deck, { axis = "y", thickness = 4, pill = true, inset = 12 })
+    check(rawget(m, "pill") == true, "pill: a y-axis pill marker takes the rounded art")
+    check(tostring(m.Texture._texture):find("Round\\pill_w4", 1, true) ~= nil, "pill: ...pill_w4 from the kit's Round folder")
+    local sm = m.Texture._sliceMargins
+    check(sm and sm[1] == 0 and sm[2] == 2 and sm[3] == 0 and sm[4] == 2, "pill: caps sliced at their baked 2px, sides not sliced")
+    m:SetTo(a, { r = 1, g = 1, b = 1 })
+    local _, _, _, x1, y1 = m:GetPoint(1)
+    local _, _, _, x2, y2 = m:GetPoint(2)
+    check(x1 == 0 and y1 == -12 and x2 == 0 and y2 == 12, "inset: the bar stops 12 short of both ends")
+
+    local u = host:CreateSelectionMarker(deck, { axis = "x", pill = true, inset = 5 })
+    check(not rawget(u, "pill"), "pill: an x-axis marker ignores pill (no horizontal art)")
+    u:SetTo(a, { r = 1, g = 1, b = 1 })
+    local _, _, _, ux1 = u:GetPoint(1)
+    local _, _, _, ux2 = u:GetPoint(2)
+    check(ux1 == 5 and ux2 == -5, "inset: an underline is pulled in from both sides")
 end
 
 -- ============================================================

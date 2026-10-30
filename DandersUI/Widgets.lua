@@ -724,6 +724,13 @@ end
 --              StyleButton draws when a group does NOT share one of these.
 --   duration   the glide, in seconds. Default 0.12.
 --   color      the resting colour; SetTo's own colour argument wins per call.
+--   inset      pull the bar in this far from BOTH ends of the member's long
+--              edge, so it reads as a tab on the edge rather than the edge
+--              itself. Default 0.
+--   pill       "y" axis only: round both ends (Media/Round/pill_w4.tga, a 4px
+--              bar with half-circle caps), for members drawn as rounded plates.
+--              Pass thickness = 4 with it -- the art is baked at that width.
+--              Falls back to a square bar on a client without texture slicing.
 --
 -- Parented to the group's CONTAINER, never to a member: it has to be able to sit
 -- BETWEEN two members mid-glide, and it has to outlive any one of them being
@@ -746,6 +753,7 @@ function UI:CreateSelectionMarker(parent, opts)
     local axis = opts.axis == "y" and "y" or "x"
     local thickness = opts.thickness or 3
     local dur = opts.duration or 0.12
+    local inset = opts.inset or 0
 
     local marker = CreateFrame("Frame", nil, parent)
     -- Above the members it marks: a member's own backdrop is drawn at the
@@ -755,6 +763,15 @@ function UI:CreateSelectionMarker(parent, opts)
     if axis == "x" then marker:SetHeight(thickness) else marker:SetWidth(thickness) end
     local tex = marker:CreateTexture(nil, "OVERLAY")
     tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+    if opts.pill and axis == "y" and type(tex.SetTextureSliceMargins) == "function"
+       and type(tex.SetTextureSliceMode) == "function" then
+        -- One sliced texture, caps held at their baked 2px, middle stretched:
+        -- the same single-quad approach as Round.lua, for the same reason.
+        tex:SetTexture((UI.MEDIA or "") .. "Round\\pill_w4")
+        tex:SetTextureSliceMargins(0, 2, 0, 2)
+        tex:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
+        marker.pill = true
+    end
     tex:SetAllPoints(marker)
     marker.Texture = tex
     marker:Hide()
@@ -765,11 +782,11 @@ function UI:CreateSelectionMarker(parent, opts)
     local function Place(target)
         marker:ClearAllPoints()
         if axis == "x" then
-            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
-            marker:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", 0, 0)
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", inset, 0)
+            marker:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", -inset, 0)
         else
-            marker:SetPoint("TOPLEFT", target, "TOPLEFT", 0, 0)
-            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
+            marker:SetPoint("TOPLEFT", target, "TOPLEFT", 0, -inset)
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, inset)
         end
     end
 
