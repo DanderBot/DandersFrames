@@ -16,13 +16,9 @@ local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DI
 -- The window's own ground. Only the window is drawn in it -- every panel inside
 -- is C_PANEL over it -- which is why it has not been needed in this file before.
 local C_BACKGROUND = GUI.Colors.background
--- The BINDS tab's own accent. Not in GUI.Colors because it is not a MODE colour
--- the theme tracks (party purple / raid orange are); it is one tab's identity.
--- Hoisted out of its StyleButton call because the shared underline needs to wear
--- it too, and the two must not be able to disagree.
-local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
--- The GLOBAL tab's: see THE GLOBAL TAB in GUI/GUI.lua.
-local C_GLOBAL = GUI.GlobalAccent
+-- (Binds' green and GLOBAL's teal are the modules' own accents now: see
+-- GUI.ClicksAccent in GUI/ModuleRegistry.lua and GUI.GlobalAccent in GUI/GUI.lua.
+-- The rail and deck 2 read them through each module's accent().)
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -643,29 +639,31 @@ function DF:CreateGUI()
     
     -- Default and saved sizes
     --
-    -- ★ 640x600 is the DEFAULT only: a narrower page is a longer one, so the height pays
-    -- for the width.
+    -- ★ 700x600 is the DEFAULT only: a narrower page is a longer one, so the height pays
+    -- for the width. (640 before the module rail; the rail's 62 was added on top so the
+    -- content box keeps the width it had.)
     --
     -- ⚠ IT STAYS SINGLE-COLUMN. The cutover is 590 CONTENT pixels (SettingsBox.minCol * 2
-    -- + colGutter), which is a 777px window once the two margins, the 155 nav and its gap
-    -- are paid for.
+    -- + colGutter), which is an 839px window once the 62 rail, the two margins, the 155
+    -- nav and its gap are paid for.
     --
     -- ⚠ guiDb.width/height are read below and win outright -- these two are what a
     -- profile with no stored size falls back to, which after the account-wide move (see
     -- DF:GetWindowState) means a fresh install and nothing else.
     --
-    -- ...and the RESIZE FLOOR is 520x400, deliberately: the default is not a minimum, and
+    -- ...and the RESIZE FLOOR is 580x400, deliberately: the default is not a minimum, and
     -- a user who wants it smaller than it opens should be able to drag it there. See
-    -- normalMinWidth below, and ApplyPageWidthBounds, which raises the floor to 850 on
-    -- the wide pages -- opening one of those from a 640 window widens it.
+    -- normalMinWidth below, and ApplyPageWidthBounds, which raises the floor to 912 on
+    -- the wide pages -- opening one of those from a 700 window widens it.
     --
     -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
     -- `/df resetgui` writes the default back into the window state from Core.lua,
     -- which can run before this companion has ever loaded -- so a literal here
-    -- and a literal there would be free to disagree.
+    -- and a literal there would be free to disagree. DF:GetWindowState clamps a
+    -- saved width to the same floor.
     local defaultWidth  = GUI.WindowDefaults.width
     local defaultHeight = GUI.WindowDefaults.height
-    local minWidth, minHeight = 520, 400
+    local minWidth, minHeight = GUI.WindowDefaults.minWidth, 400
     local maxWidth, maxHeight = 1200, 900
     
     -- Load saved position and size. Account-wide, NOT per-profile: see
@@ -1051,15 +1049,16 @@ function DF:CreateGUI()
     GUI.UpdateProfileChip = UpdateProfileChip
 
     -- The title yields to the cluster rather than running under it: at the
-    -- window's 520 minimum a long build tag and a long profile name would
+    -- window's 580 minimum a long build tag and a long profile name would
     -- otherwise overlap. Two anchors + no wrap means the tag clips instead.
     versionTag:SetPoint("RIGHT", profileOverrideStar, "LEFT", -8, 0)
     versionTag:SetJustifyH("LEFT")
     versionTag:SetWordWrap(false)
 
-    -- Changelog overlay (covers full content area below title bar)
+    -- Changelog overlay (covers full content area below title bar, right of the
+    -- module rail -- GUI/Rail.lua)
     local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -30)
+    changelogOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", GUI.RailWidth, -30)
     changelogOverlay:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     changelogOverlay:SetFrameStrata("FULLSCREEN_DIALOG")
     changelogOverlay:SetFrameLevel(300)
@@ -1660,7 +1659,7 @@ function DF:CreateGUI()
     end)
     
     -- =========================================================================
-    -- DECK 2 (operation): mode tabs left, verbs right
+    -- DECK 2 (operation): the current module's tabs left, verbs right
     -- -------------------------------------------------------------------------
     -- The strip the mode tabs and Test/Unlock have always drawn in, now an
     -- actual frame -- which is what lets it DRAG (the buttons are its children,
@@ -1668,11 +1667,19 @@ function DF:CreateGUI()
     -- and what lets the two clusters be anchored to its edges rather than to
     -- absolute offsets into the window.
     --
+    -- It starts RIGHT OF THE MODULE RAIL (GUI/Rail.lua): the rail runs from
+    -- under the title bar to the footer down the window's left edge, and its
+    -- items replace the old Global / Party / Raid / Binds tabs. What deck 2's
+    -- left side shows is the CURRENT module's own tabs (Party / Raid for Group
+    -- Frames) or, for a module without tabs, its name -- built and painted by
+    -- GUI:BuildModuleShell / GUI:RefreshModuleShell, both in GUI/Rail.lua, so
+    -- this function (near Lua's 200-local limit) declares nothing for them.
+    --
     -- ⚠ NO STRATA OF ITS OWN. See the header note on deck 1: these buttons must
     -- stay at the window's DIALOG strata, where they have always been.
     -- =========================================================================
     local deck2 = CreateFrame("Frame", nil, frame)
-    deck2:SetPoint("TOPLEFT", 0, -30)
+    deck2:SetPoint("TOPLEFT", GUI.RailWidth, -30)
     deck2:SetPoint("TOPRIGHT", 0, -30)
     deck2:SetHeight(30)
     deck2:EnableMouse(true)
@@ -1682,49 +1689,10 @@ function DF:CreateGUI()
     deck2:SetFrameLevel(frame:GetFrameLevel() + 1)
     GUI.HeaderDeck2 = deck2
 
-    -- Global / Party / Raid / Binds
-    local btnGlobal = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    -- Head of the LEFT chain (Global <- Party <- Raid <- Clicks), so this offset
-    -- is what every button along it inherits. The +1 lifts the 24px button off
-    -- deck 2's centre onto the row the header has always used.
-    btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)
-    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
-    -- label colour and the cell. `tabStripe = false` on all four: the underlines
-    -- are ONE bar that glides between them (modeUnderline below), not stripes
-    -- switching off here and on there.
-    GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.GlobalButton = btnGlobal
-
-    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)
-    GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.PartyButton = btnParty  -- Store for external access
-
-    local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
-    GUI:StyleButton(btnRaid, { tab = true, tabStripe = false, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.RaidButton = btnRaid  -- Store for external access
-
-    -- Click Casting tab button
-    local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
-    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
-    GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
-    GUI.ClicksButton = btnClicks
-
-    -- Each tab stands for a settings module (GUI/ModuleRegistry.lua). Attached
-    -- so GUI:SetModuleLocked can grey the right one; their clicks are wired to
-    -- GUI:SelectModule below UpdateThemeColors.
-    GUI:AttachModuleButton("global", nil, btnGlobal)
-    GUI:AttachModuleButton("group", "party", btnParty)
-    GUI:AttachModuleButton("group", "raid", btnRaid)
-    GUI:AttachModuleButton("clicks", nil, btnClicks)
-
-    -- ONE underline for the three mode tabs, which GLIDES from the tab that was
-    -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
-    -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
-    -- UpdateThemeColors drives it, right where the three SetActive calls are.
-    local modeUnderline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })
-    GUI.ModeUnderline = modeUnderline
+    -- The rail, the module tabs (GUI.PartyButton / GUI.RaidButton, attached to
+    -- the registry so SetModuleLocked can grey them), their gliding underline
+    -- (GUI.ModeUnderline) and the module title. Clicks go to GUI:SelectModule.
+    GUI:BuildModuleShell(frame, deck2, SaveWindowPos)
 
     -- =========================================================================
     -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
@@ -2222,15 +2190,6 @@ function DF:CreateGUI()
     end
 
     local function UpdateThemeColors()
-        -- Mode buttons use the shared underline-tab style; SetActive drives the
-        -- accent label + the cell (each button's per-mode accent set at creation).
-        -- GLOBAL showing means none of the three is: the mode under it is only
-        -- remembered, not active.
-        local globalView = GUI.GlobalView and true or false
-        btnGlobal:SetActive(globalView)
-        btnParty:SetActive(not globalView and GUI.SelectedMode == "party")
-        btnRaid:SetActive(not globalView and GUI.SelectedMode == "raid")
-        btnClicks:SetActive(not globalView and GUI.SelectedMode == "clicks")
         -- The frame mode GLOBAL returns to when it is entered from BINDS.
         if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then
             GUI._lastFrameMode = GUI.SelectedMode
@@ -2238,22 +2197,15 @@ function DF:CreateGUI()
         -- The derived module id: ToggleGUI writes SelectedMode directly and
         -- reaches here, so this is where a write that bypassed SelectModule is caught.
         GUI:SyncSelectedModule()
-        -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
-        -- the three is active and wearing that tab's own accent from the moment
-        -- it sets off.
+        -- The module rail and deck 2's left side (GUI/Rail.lua): the rail item
+        -- lit in its module's accent, and the current module's tabs -- Party /
+        -- Raid with the one shared underline glided onto the active tab in that
+        -- tab's own accent -- or the module's name.
         --
         -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
         -- the note below the function), and a glide nobody can see would only
         -- leave the bar mid-flight for the next visible one to start from.
-        local activeMode = (globalView and btnGlobal)
-            or (GUI.SelectedMode == "raid" and btnRaid)
-            or (GUI.SelectedMode == "clicks" and btnClicks)
-            or btnParty
-        local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)
-            or (activeMode == btnRaid and C_RAID)
-            or (activeMode == btnClicks and C_CLICKS)
-            or C_ACCENT
-        modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
+        GUI:RefreshModuleShell(not frame:IsShown())
         SwitchMark("t:modes")
 
         -- Test button look via the shared toggle styling (matches how the Lock
@@ -2297,8 +2249,8 @@ function DF:CreateGUI()
         local nc = GetThemeColor()
         -- ⚠ GUI.navMarker, not the local: the nav is built ~400 lines BELOW this
         -- function, so the upvalue does not exist yet at this point in the file
-        -- and a bare `navMarker` here would resolve as a global. (modeUnderline
-        -- above is fine -- deck 2 is built first.) Guarded for the same reason:
+        -- and a bare `navMarker` here would resolve as a global. (The module
+        -- shell above is fine -- deck 2 is built first.) Guarded for the same reason:
         -- this can run before the nav exists.
         local rail = GUI.navMarker
         for name, btn in pairs(GUI.Tabs) do
@@ -2411,14 +2363,11 @@ function DF:CreateGUI()
     -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
     -- to themeColor@0.5 rather than the neutral border.
 
-    -- The four tabs are thin callers of GUI:SelectModule (GUI/ModuleRegistry.lua),
-    -- which owns everything a switch does: the Party/Raid sync, locking the
-    -- departing mode, carrying test mode across, ending a mover session first,
-    -- and GLOBAL's shortcut back to the mode it sat on.
-    btnGlobal:SetScript("OnClick", function() GUI:SelectModule("global") end)
-    btnParty:SetScript("OnClick", function() GUI:SelectModule("group", "party") end)
-    btnRaid:SetScript("OnClick", function() GUI:SelectModule("group", "raid") end)
-    btnClicks:SetScript("OnClick", function() GUI:SelectModule("clicks") end)
+    -- The rail items and the deck-2 tabs are thin callers of GUI:SelectModule
+    -- (wired in GUI/Rail.lua); the registry (GUI/ModuleRegistry.lua) owns
+    -- everything a switch does: the Party/Raid sync, locking the departing
+    -- mode, carrying test mode across, ending a mover session first, and
+    -- GLOBAL's shortcut back to the mode it sat on.
 
     -- Tab container (left side) - with scrolling
     -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
@@ -2432,8 +2381,9 @@ function DF:CreateGUI()
     -- fractional baseline -- which is what is left of the nav ghost now that the
     -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, -64))
-    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, 36))
+    -- Right of the module rail (GUI.RailWidth, GUI/Rail.lua), then the usual pad.
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, 36))
     tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
@@ -2700,7 +2650,7 @@ function DF:CreateGUI()
     -- CLICK CASTING PANEL (full width, replaces normal content when active)
     -- =========================================================================
     local clickCastPanel = CreateFrame("Frame", nil, frame)
-    clickCastPanel:SetPoint("TOPLEFT", 12, -64)
+    clickCastPanel:SetPoint("TOPLEFT", GUI.RailWidth + 12, -64)   -- right of the module rail
     clickCastPanel:SetPoint("BOTTOMRIGHT", -12, 36)
     CreateElementBackdrop(clickCastPanel)
     clickCastPanel:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
@@ -2845,16 +2795,18 @@ function DF:CreateGUI()
     end
     
     -- Store min width references for tab switching
-    local normalMinWidth = minWidth  -- 520
+    local normalMinWidth = minWidth  -- 580
     -- Shared minimum width for the "wide" pages (Binds/Click Casting and every
     -- page in WIDE_PAGES).
-    local wideMinWidth = 850
+    -- 850 before the module rail; + GUI.RailWidth so a wide page keeps the same
+    -- content width it had.
+    local wideMinWidth = 850 + GUI.RailWidth
 
-    -- Pages drawn full width rather than in card columns. They fit 640, but read
-    -- as a sliver of a tool there, so opening one widens the window to 850.
+    -- Pages drawn full width rather than in card columns. They fit 700, but read
+    -- as a sliver of a tool there, so opening one widens the window to 912.
     -- ☠ Hoisted to panel scope on purpose. This lived INSIDE SelectTab, which meant
     -- (a) it was rebuilt on every tab click, and (b) ShowNormalContent could not see it --
-    -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
+    -- so returning from BINDS to PARTY/RAID reset the minimum to 580 while a wide page was
     -- still the visible one, and it could then be dragged narrow. Any new consumer of the
     -- wide-page rule reads THIS table; do not re-declare a local copy.
     local WIDE_PAGES = {
@@ -2885,8 +2837,8 @@ function DF:CreateGUI()
         if content then content:Show() end
 
         -- Restore the minimum width FOR THE PAGE WE ARE RETURNING TO -- not a blanket
-        -- normalMinWidth: resetting to 520 unconditionally leaves a wide page we are
-        -- returning to draggable down to 520 and squashed.
+        -- normalMinWidth: resetting to 580 unconditionally leaves a wide page we are
+        -- returning to draggable down to 580 and squashed.
         ApplyPageWidthBounds(GUI.CurrentPageName)
 
         -- Update tab availability for current mode (greys out tabs for disabled modes)

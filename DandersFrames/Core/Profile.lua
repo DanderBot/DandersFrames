@@ -46,8 +46,16 @@ end
 -- in db.party enforces the declared intent: switching or creating a profile cannot move,
 -- resize or rescale the window out from under the user.
 --
--- Fields: scale, width, height, point, relPoint, x, y. All optional; every reader supplies
--- its own fallback.
+-- Fields: scale, width, height, point, relPoint, x, y, lastModule, lastTab. All optional;
+-- every reader supplies its own fallback. lastModule/lastTab: where the window was last
+-- (written by the options companion's GUI:SyncSelectedModule).
+--
+-- ★ THE MODULE RAIL WIDENED THE WINDOW (5.7.0). The default went 640 -> 700 and the floor
+-- 520 -> 580 (GUI.WindowDefaults). A saved width still AT the old default is moved to the
+-- new one ONCE (_railWidth700), so a user who later drags it back to 640 keeps 640; a
+-- saved width under the new floor is lifted to it on every read (SetSize ignores the
+-- resize bounds, so nothing else would).
+local RAIL_OLD_DEFAULT_W, RAIL_NEW_DEFAULT_W, RAIL_MIN_W = 640, 700, 580
 function DF:GetWindowState()
     if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
     local ws = DandersFramesDB_v2.windowState
@@ -55,6 +63,11 @@ function DF:GetWindowState()
         ws = {}
         DandersFramesDB_v2.windowState = ws
     end
+    if not ws._railWidth700 then
+        if ws.width == RAIL_OLD_DEFAULT_W then ws.width = RAIL_NEW_DEFAULT_W end
+        ws._railWidth700 = true
+    end
+    if type(ws.width) == "number" and ws.width < RAIL_MIN_W then ws.width = RAIL_MIN_W end
     return ws
 end
 

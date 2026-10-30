@@ -74,8 +74,10 @@ Features\ChangedSettings.lua
 GUI\Sections.lua
 GUI\Controls.lua
 # Settings module registry (Group Frames / Binds / Global and GUI:SelectModule).
-# Before Panel.lua: CreateGUI attaches the tab buttons to these modules.
+# Before Panel.lua: CreateGUI builds the rail and tabs from these modules.
 GUI\ModuleRegistry.lua
+# The module rail + deck 2 tabs (CreateGUI calls GUI:BuildModuleShell).
+GUI\Rail.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
 GUI\TextureLayerControls.lua

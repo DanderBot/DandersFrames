@@ -638,6 +638,7 @@ L["Below Owner"] = true
 L["Below Party"] = true
 L["Below Raid"] = true
 L["Binding Tooltips"] = true
+L["Binds"] = true
 L["BINDS"] = true
 L["GLOBAL"] = true
 L["Bleed / Enrage"] = true

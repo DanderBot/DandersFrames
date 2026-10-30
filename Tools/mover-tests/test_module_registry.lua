@@ -223,6 +223,169 @@ GUI:SetModuleLocked("clicks", false)
 check(not bG.disabled and bG.mouse and not bP.disabled and bP.mouse and not bC.disabled and bC.mouse
       and bP.textA == 1, "lock: unlocked, all three take the mouse again")
 
+-- ---- the rail: locks, last place, deck 2 --------------------------------
+-- GUI/Rail.lua over the same stubs. The rail and its frames are recorders, so
+-- what is checked is what the shell asks them to draw.
+print("-- Module registry: the rail")
+do
+    GUI.Colors = { panel = { r = 0.1, g = 0.1, b = 0.1 }, border = { r = 0.2, g = 0.2, b = 0.2 } }
+    GUI.NewTabs = { text_designer = true, general_settings = true }
+    GUI.Tabs = { text_designer = {}, general_settings = {} }
+    function GUI.SnapLen(_, v) return v end
+    local prevCF = CreateFrame
+    local function region()
+        local r = { shown = true }
+        for _, k in ipairs({ "SetPoint", "SetAllPoints", "SetTexture", "SetVertexColor", "SetWidth",
+                             "SetJustifyH", "SetWordWrap", "SetFrameLevel", "EnableMouse",
+                             "RegisterForDrag", "SetScript" }) do
+            r[k] = function(self, a, b) if k == "SetScript" then self[a] = b end end
+        end
+        function r:Show() self.shown = true end
+        function r:Hide() self.shown = false end
+        function r:SetText(t) self.text = t end
+        function r:SetTextColor(r_, g, b) self.color = { r_, g, b } end
+        function r:CreateTexture() return region() end
+        function r:CreateFontString() return region() end
+        function r:GetFrameLevel() return 1 end
+        return r
+    end
+    CreateFrame = function() return region() end
+    function GUI:StyleButton(b, o)
+        b.styleText, b.styleAccent = o.text, o.accent
+        function b:SetActive(v) self.active = v end
+        b.Text = {}
+        function b.Text:SetTextColor() end
+        function b.Text:SetAlpha() end
+        function b:SetBackdropColor() end
+        function b:SetBackdropBorderColor() end
+    end
+    local rail = region()
+    rail.items, rail.disabled, rail.badges = {}, {}, {}
+    function rail:SetItems(list) self.items = list; self.sets = (self.sets or 0) + 1 end
+    function rail:GetItemIds()
+        local out = {}
+        for i, it in ipairs(self.items) do out[i] = it.id end
+        return out
+    end
+    function rail:Select(id) self.selected = id end
+    function rail:SetBadge(id, t) self.badges[id] = t end
+    function rail:SetDisabled(id, v) self.disabled[id] = v and true or false end
+    function GUI:CreateIconRail(_, o) rail.onSelect = o.onSelect; return rail end
+    local marker = { }
+    function marker:SetTo(t, c) self.owner, self.color = t, c end
+    function marker:Clear() self.owner = nil end
+    function GUI:CreateSelectionMarker() return marker end
+    DandersFramesDB_v2 = { seenTabs = { general_settings = true } }
+
+    load_options_file_into("GUI/Rail.lua", NS)
+    eq(GUI.RailWidth, 62, "rail: 62 wide")
+    local deck2 = region()
+    GUI.SelectedMode = "party"; GUI.GlobalView = false; GUI:SyncSelectedModule()
+    GUI:BuildModuleShell(region(), deck2, function() end)
+    check(GUI.ModuleRail == rail, "rail: built and published")
+    local ids = table.concat(rail:GetItemIds(), ",")
+    check(ids:find("group,clicks", 1, true) == 1 and ids:find("global", 1, true) ~= nil,
+          "rail: Group Frames and Click-Casting on top, Global listed")
+    check(GUI.PartyButton and GUI.RaidButton and GUI.PartyButton.styleText == "PARTY",
+          "deck: Party / Raid tabs built from the module's tabs")
+    eq(GUI.RaidButton.styleAccent, "RAID", "deck: ...Raid in the raid accent")
+
+    -- both modes off: Group Frames and Click-Casting stay (alwaysInRail)
+    DF.db = { partyEnabled = false, raidEnabled = false }
+    DF.ClickCast = { db = { enabled = false } }
+    check(GUI:GetModule("group").isEnabled() == false and GUI:GetModule("clicks").isEnabled() == false,
+          "enabled: isEnabled reads the real switches")
+    GUI:RefreshModuleShell(true)
+    ids = table.concat(rail:GetItemIds(), ",")
+    check(ids:find("group", 1, true) and ids:find("clicks", 1, true),
+          "enabled: ...but both stay in the rail until the Modules page exists")
+    DF.db, DF.ClickCast = nil, nil
+
+    print("-- Module registry: rail paints locks")
+    GUI:SetModuleLocked("clicks", true)
+    check(rail.disabled.clicks == true, "lock: a locked module greys its rail item")
+    GUI:SetModuleLocked("group", true, "party")
+    check(rail.disabled.group ~= true and GUI.PartyButton.disabled == true and not GUI.PartyButton.mouse,
+          "lock: a locked TAB greys the deck-2 tab, not the rail item")
+    rail.onSelect("clicks")
+    check(GUI.SelectedMode ~= "clicks", "lock: a click on a locked rail item does nothing")
+    GUI:SetModuleLocked("clicks", false)
+    GUI:SetModuleLocked("group", false, "party")
+    check(rail.disabled.clicks == false and not GUI.PartyButton.disabled, "lock: ...and unlocking restores both")
+
+    print("-- Module registry: rail paints the current module")
+    GUI.SelectedMode = "raid"; GUI.GlobalView = false
+    GUI:RefreshModuleShell(true)
+    eq(rail.selected, "group", "paint: Group Frames lit")
+    check(GUI.RaidButton.active and not GUI.PartyButton.active and GUI.RaidButton.shown,
+          "paint: Raid tab active and shown")
+    check(marker.owner == GUI.RaidButton and marker.color == "RAID", "paint: the underline on Raid, in its accent")
+    eq(rail.badges.group, "New", "badge: an unseen New page in Group Frames badges its rail item")
+    eq(rail.badges.global, nil, "badge: ...a seen one does not")
+    GUI.GlobalView = true
+    GUI:RefreshModuleShell(true)
+    eq(rail.selected, "global", "paint: Global lit")
+    check(not GUI.PartyButton.shown and not GUI.RaidButton.shown and marker.owner == nil,
+          "paint: the mode tabs and the underline go while Global is up")
+    eq(GUI.ModuleCrumb.text, "Global", "paint: ...and deck 2 names the module")
+    check(GUI.ModuleCrumb.shown, "paint: ...visibly")
+    GUI.GlobalView = false
+
+    print("-- Module registry: last place")
+    local ws = {}
+    function DF:GetWindowState() return ws end
+    DF.GUIFrame = { IsShown = function() return false end }
+    GUI.SelectedMode = "party"
+    GUI:SyncSelectedModule()
+    eq(ws.lastModule, nil, "last: nothing is recorded while the window is hidden (the open auto-pick)")
+    DF.GUIFrame.IsShown = function() return true end
+    GUI:SyncSelectedModule()
+    check(ws.lastModule == "group" and ws.lastTab == "party", "last: the module (and tab) shown is recorded")
+    GUI.GlobalView = true; GUI:SyncSelectedModule(); GUI.GlobalView = false
+    check(ws.lastModule == "global" and ws.lastTab == nil, "last: Global records no tab")
+    eq(GUI:LastModuleOnOpen(), "global", "last: read back for the next open")
+
+    calls = {}
+    GUI.SelectedMode = "party"; GUI.GlobalView = false
+    GUI:RestoreModuleOnOpen("global")
+    check(GUI.GlobalView == true and GUI.SelectedMode == "party", "restore: Global reopens on Global, the mode kept under it")
+    GUI.GlobalView = false; GUI:SyncSelectedModule()
+    calls = {}
+    GUI:RestoreModuleOnOpen("group")
+    eq(joined(), "", "restore: Group Frames does nothing (the party/raid auto-pick already chose)")
+    DF.testMode = true
+    GUI:RestoreModuleOnOpen("clicks")
+    check(GUI.SelectedMode == "party", "restore: Binds is skipped while a preview is up")
+    DF.testMode = false
+    partyDb.locked = true
+    GUI:RestoreModuleOnOpen("clicks")
+    eq(GUI.SelectedMode, "clicks", "restore: ...otherwise Binds reopens on Binds")
+    GUI:SelectModule("group", "party")
+
+    -- the open path reads the saved place BEFORE it repaints
+    local TOGGLE = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
+    local readAt = TOGGLE:find("local lastModule = GUI.LastModuleOnOpen and GUI:LastModuleOnOpen()", 1, true)
+    local pickAt = TOGGLE:find('GUI.SelectedMode = "raid"', 1, true)
+    local restoreAt = TOGGLE:find("GUI:RestoreModuleOnOpen(lastModule)", 1, true)
+    local showAt = TOGGLE:find("DF.GUIFrame:Show()", 1, true)
+    check(readAt and pickAt and readAt < pickAt, "open: the last place is read before the auto-pick")
+    check(restoreAt and showAt and showAt < restoreAt, "open: ...and restored once the window is up")
+
+    print("-- Module registry: the saved width")
+    local PROFILE = df_file_source("Core/Profile.lua"):gsub("\r\n", "\n")
+    check(PROFILE:find("if ws.width == RAIL_OLD_DEFAULT_W then ws.width = RAIL_NEW_DEFAULT_W end", 1, true) ~= nil
+          and PROFILE:find("ws._railWidth700 = true", 1, true) ~= nil,
+          "width: a saved 640 (the old default) becomes 700, once")
+    check(PROFILE:find("ws.width < RAIL_MIN_W then ws.width = RAIL_MIN_W end", 1, true) ~= nil,
+          "width: a saved width under the 580 floor is lifted to it")
+
+    DandersFramesDB_v2 = nil
+    DF.GUIFrame = nil
+    DF.GetWindowState = nil
+    GUI.OnModuleLockChanged = nil
+    CreateFrame = prevCF
+end
+
 DandersFrames = savedDF
 
 -- ---- the callers (source shape) -------------------------------------

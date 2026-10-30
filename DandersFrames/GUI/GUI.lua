@@ -478,7 +478,11 @@ end
 -- ⚠ THE DEFAULT, NOT A MINIMUM. A stored guiDb.width/height wins over it everywhere, and
 -- the resize floor (Panel.lua's minWidth/minHeight) is lower on purpose -- a user who
 -- wants the window smaller than it opens can drag it there.
-GUI.WindowDefaults = { width = 640, height = 600 }
+--
+-- 700 / 580 since the module rail (62px) went down the window's left edge: 640 / 520
+-- plus the rail, so the content box keeps its width. DF:GetWindowState moves a saved
+-- 640 (the old default) to 700 once, and clamps a saved width below the floor.
+GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580 }
 
 -- ============================================================
 -- MODE + THEME (DandersFrames-only)

@@ -17,6 +17,7 @@ local SW       = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n
 local CONTROLS = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
 local AUTOPROF = options_file_source("GUI/Pages/AutoProfiles.lua"):gsub("\r\n", "\n")
 local OPTIONS  = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
+local RAIL     = options_file_source("GUI/Rail.lua"):gsub("\r\n", "\n")
 -- The tab switches themselves: the bodies of the old tab handlers, now the
 -- built-in modules' onEnter (GUI/ModuleRegistry.lua).
 local REGISTRY = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
@@ -115,14 +116,19 @@ end
 
 -- ---- the wiring ---------------------------------------------------------
 print("-- Global tab: the wiring")
-check(PANEL:find('GUI:StyleButton(btnGlobal, { tab = true, tabStripe = false, text = L["GLOBAL"], accent = C_GLOBAL,', 1, true) ~= nil,
-      "tab: a GLOBAL tab in its own accent")
-check(PANEL:find('btnGlobal:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnGlobal, 12), 1)', 1, true) ~= nil
-      and PANEL:find('btnParty:SetPoint("LEFT", btnGlobal, "RIGHT", SnapLen(btnParty, 4), 0)', 1, true) ~= nil,
-      "tab: ...left of PARTY, heading the chain")
-check(PANEL:find("btnParty:SetActive(not globalView and GUI.SelectedMode == \"party\")", 1, true) ~= nil
-      and PANEL:find("local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)", 1, true) ~= nil,
-      "tab: GLOBAL up lights it and not the mode under it; the underline wears its accent")
+-- GLOBAL is a rail item now (GUI/Rail.lua), in the bottom slot, in its own accent;
+-- deck 2 shows its name, and the Party/Raid tabs are hidden while it is up.
+check(REGISTRY:find('accent = function() return GUI.GlobalAccent end', 1, true) ~= nil
+      and REGISTRY:find('id = "global",', 1, true) ~= nil
+      and REGISTRY:find('slot = "bottom",', 1, true) ~= nil,
+      "tab: GLOBAL is a bottom-slot rail module in its own accent")
+check(PANEL:find("GUI:BuildModuleShell(frame, deck2, SaveWindowPos)", 1, true) ~= nil
+      and PANEL:find("GUI:RefreshModuleShell(not frame:IsShown())", 1, true) ~= nil,
+      "tab: the panel builds the rail and repaints it on every theme pass")
+check(RAIL:find("local on = (def == curDef)", 1, true) ~= nil
+      and RAIL:find("b:SetActive(isActive)", 1, true) ~= nil
+      and RAIL:find('deckCrumb:SetText(GUI:ModuleLabel(curDef) or "")', 1, true) ~= nil,
+      "tab: GLOBAL up hides the mode tabs and names itself; the mode under it is not lit")
 local sel = between(PANEL, "    local function SelectTab(name)", "        -- ☠ CLOSE OPEN MENUS FIRST.") or ""
 check(sel:find("GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })", 1, true) ~= nil
       and REGISTRY:find("onEnterForPage = function() GUI:EnterView(true) end", 1, true) ~= nil
@@ -206,8 +212,8 @@ do
     end
     -- A mover session is ended first (a15 #7), then the GLOBAL hand-off is asked.
     -- (Behaviour: test_module_registry. Here: the buttons go through SelectModule.)
-    check(PANEL:find('btnParty:SetScript("OnClick", function() GUI:SelectModule("group", "party") end)', 1, true) ~= nil
-      and PANEL:find('btnRaid:SetScript("OnClick", function() GUI:SelectModule("group", "raid") end)', 1, true) ~= nil
+    check(RAIL:find('b:SetScript("OnClick", function() GUI:SelectModule(moduleId, tabId) end)', 1, true) ~= nil
+      and RAIL:find("GUI:SelectModule(id)", 1, true) ~= nil
       and REGISTRY:find("if not forPage and def.endsMoverSession and DeferForMoverSession(id, tabId) then", 1, true) ~= nil
       and REGISTRY:find('local function EnterParty()\n    if LeaveGlobalTo("party") then return end', 1, true) ~= nil
       and REGISTRY:find('local function EnterRaid()\n    if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,

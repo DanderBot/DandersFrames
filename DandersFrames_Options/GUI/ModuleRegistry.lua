@@ -15,8 +15,8 @@ local tsort = table.sort
 -- tabs, Binds, Global) as data, and the ONE way to move between them:
 -- GUI:SelectModule(id, tabId).
 --
--- Today the four deck-2 tab buttons are thin callers of SelectModule; the
--- icon rail that replaces them reads GUI:GetModules() instead. Everything a
+-- The icon rail and deck 2's module tabs (GUI/Rail.lua) read GUI:GetModules()
+-- and are thin callers of SelectModule. Everything a
 -- switch DOES -- the Party/Raid sync, locking the departing mode's frames,
 -- carrying test mode across, ending a mover session first -- lives in the
 -- modules below, not in whatever widget asked for it.
@@ -33,6 +33,12 @@ local locks = {}         -- id or "id:tab" -> true
 
 local SLOT_RANK = { top = 1, bottom = 2 }
 
+-- Click-Casting's fixed identity accent (green). Here rather than in Panel.lua
+-- so the rail can read it: it loads before the panel (companion TOC order).
+GUI.ClicksAccent = GUI.ClicksAccent or { r = 0.2, g = 0.8, b = 0.4 }
+
+local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
 local function Resort()
     tsort(ordered, function(a, b)
         local sa, sb = SLOT_RANK[a.slot] or 1, SLOT_RANK[b.slot] or 1
@@ -43,8 +49,10 @@ local function Resort()
 end
 
 -- def: id, label, icon, order, slot ("top"|"bottom"), accent(), tabs
--- ({ {id, label}, ... }, optional), sidebar (bool), isEnabled(), ownsPage(name),
--- onEnter(tabId), onEnterForPage(tabId, pageName), onLeave(), endsMoverSession.
+-- ({ {id, label, deckLabel, accent}, ... }, optional), activeTab(), sidebar (bool),
+-- isEnabled(), ownsPage(name), onEnter(tabId), onEnterForPage(tabId, pageName),
+-- onLeave(), endsMoverSession, railLabel (short label under the rail icon),
+-- alwaysInRail (listed in the rail even while isEnabled() is false).
 -- A label may be a string or a function returning one (so a language override
 -- is picked up -- a string resolved from L at file scope freezes on enUS).
 function GUI:RegisterModule(def)
@@ -86,9 +94,24 @@ local function CurrentModuleId()
 end
 GUI.CurrentModuleId = CurrentModuleId
 
+-- ★ AND IT IS WHERE THE LAST PLACE IS RECORDED (account-wide window state),
+-- for the next open to go back to (GUI:RestoreModuleOnOpen, GUI/Rail.lua).
+-- Only while the window is SHOWN: ToggleGUI writes its party/raid auto-pick
+-- and repaints before the window shows, and that is not the user's choice.
+-- lastTab is recorded for later use; the open path still picks Party or Raid
+-- by group type.
 function GUI:SyncSelectedModule()
-    GUI.SelectedModule = CurrentModuleId()
-    return GUI.SelectedModule
+    local id = CurrentModuleId()
+    GUI.SelectedModule = id
+    local f = DF.GUIFrame
+    if f and f.IsShown and f:IsShown() and DF.GetWindowState then
+        local ws = DF:GetWindowState()
+        if ws then
+            ws.lastModule = id
+            ws.lastTab = (id == "group") and GUI.SelectedMode or nil
+        end
+    end
+    return id
 end
 
 -- The def for `id`, or for the module showing when no id is given.
@@ -141,6 +164,8 @@ local function PaintLocked(btn, locked)
 end
 
 -- Lock or unlock a module, or one of its tabs when tabId is given.
+-- A whole-module lock also greys its rail item (GUI.OnModuleLockChanged, set
+-- by GUI/Rail.lua once the rail exists); a tab lock greys only that deck-2 tab.
 function GUI:SetModuleLocked(id, locked, tabId)
     local def = modules[id]
     if not def then return end
@@ -151,6 +176,9 @@ function GUI:SetModuleLocked(id, locked, tabId)
             PaintLocked(btn, isLocked)
         end
     end
+    if tabId == nil and GUI.OnModuleLockChanged then
+        GUI.OnModuleLockChanged(id, locks[id] == true)
+    end
 end
 
 function GUI:IsModuleLocked(id, tabId)
@@ -158,8 +186,9 @@ function GUI:IsModuleLocked(id, tabId)
     return tabId ~= nil and locks[LockKey(id, tabId)] == true
 end
 
--- The deck-2 button that stands for a module (or one of its tabs). Panel.lua
--- attaches them as it builds them; SetModuleLocked greys these.
+-- The deck-2 button that stands for a module's tab. GUI/Rail.lua attaches
+-- them as it builds them; SetModuleLocked greys these (rail items are greyed
+-- through GUI.OnModuleLockChanged instead).
 function GUI:AttachModuleButton(id, tabId, btn)
     local def = modules[id]
     if not def or not btn then return end
@@ -382,17 +411,30 @@ end
 GUI:RegisterModule({
     id = "group",
     label = function() return L["Group Frames"] end,
-    icon = "group",
+    railLabel = function() return L["Frames"] end,
+    icon = ICONS .. "grid_view.png",
     order = 10,
     slot = "top",
     tabs = {
-        { id = "party", label = function() return L["Party"] end },
-        { id = "raid",  label = function() return L["Raid"] end },
+        { id = "party", label = function() return L["Party"] end,
+          deckLabel = function() return L["PARTY"] end,
+          accent = function() return GUI.GetThemeColorFor(false) end },
+        { id = "raid",  label = function() return L["Raid"] end,
+          deckLabel = function() return L["RAID"] end,
+          accent = function() return GUI.GetThemeColorFor(true) end },
     },
+    -- The deck-2 tab lit while this module shows.
+    activeTab = function() return GUI.SelectedMode end,
     sidebar = true,
     endsMoverSession = true,
     accent = function() return GUI.GetThemeColorFor(GUI.SelectedMode == "raid") end,
-    isEnabled = function() return true end,
+    -- Party or Raid frames switched on. ⚠ alwaysInRail until the Modules page
+    -- exists: with both off the rail would otherwise have no way back in.
+    isEnabled = function()
+        local db = DF.db
+        return not db or db.partyEnabled ~= false or db.raidEnabled ~= false
+    end,
+    alwaysInRail = true,
     -- Every page that is not GLOBAL's is Party's/Raid's.
     ownsPage = function(name) return not GUI.IsGlobalPage(name) end,
     -- No tab asked for: the frame mode showing, else the one Binds/GLOBAL left.
@@ -448,13 +490,21 @@ end
 GUI:RegisterModule({
     id = "clicks",
     label = function() return L["Click-Casting"] end,
-    icon = "clicks",
+    railLabel = function() return L["Binds"] end,
+    icon = ICONS .. "mouse.png",
     order = 20,
     slot = "top",
     sidebar = false,
     endsMoverSession = true,
-    accent = function() return GUI.GetThemeColorFor(false) end,
-    isEnabled = function() return true end,
+    -- Its fixed identity green (the rail, the deck-2 title). The HOST accent
+    -- while Binds shows stays party's -- see EnterClicks.
+    accent = function() return GUI.ClicksAccent end,
+    -- ⚠ alwaysInRail until the Modules page exists -- see Group Frames.
+    isEnabled = function()
+        local CC = DF.ClickCast
+        return not (CC and CC.db) or CC.db.enabled ~= false
+    end,
+    alwaysInRail = true,
     onEnter = EnterClicks,
 })
 
@@ -468,7 +518,8 @@ GUI:RegisterModule({
 GUI:RegisterModule({
     id = "global",
     label = function() return L["Global"] end,
-    icon = "global",
+    railLabel = function() return L["Global"] end,
+    icon = ICONS .. "settings.png",
     order = 90,
     slot = "bottom",
     sidebar = true,

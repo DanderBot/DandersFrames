@@ -7113,7 +7113,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. The window builder lives on the OTHER side of the
                 -- load-on-demand split; GUI.WindowDefaults is resident precisely so both readers share
                 -- one value and "reset to default" cannot restore a size the addon no longer ships.
-                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 640, height = 600 }
+                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 700, height = 600 }
                 local ws = DF:GetWindowState()
                 ws.scale = 1.0
                 ws.width = wd.width

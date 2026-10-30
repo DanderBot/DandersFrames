@@ -1075,7 +1075,7 @@ do
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
     check(WIDE:find("auras_auradesigner", 1, true) ~= nil,
-          "wide: the Aura Designer widens the window to 850")
+          "wide: the Aura Designer widens the window to 912 (850 + the rail)")
     check(WIDE:find("text_designer", 1, true) ~= nil,
           "wide: ...as does the Text Designer")
     check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,

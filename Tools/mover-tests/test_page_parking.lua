@@ -384,7 +384,10 @@ do
     has("local defaultHeight = GUI.WindowDefaults.height", "...both halves of it")
     -- The resize FLOOR is deliberately NOT the default -- a user who wants the
     -- window smaller than it opens can still drag it there.
-    has("local minWidth, minHeight = 520, 400", "...with the resize floor left below it")
+    has("local minWidth, minHeight = GUI.WindowDefaults.minWidth, 400", "...with the resize floor left below it")
+    -- The module rail (GUI/Rail.lua) sits left of the nav; every term below pays for it.
+    has('tabFrame:SetPoint("TOPLEFT", SnapLen(frame, GUI.RailWidth + PageBox.windowPad), SnapLen(frame, -64))',
+        "the nav pane starts right of the module rail")
 
     do
         local PAGE_WINDOW_PAD, PAGE_INSET = 12, 8
@@ -421,53 +424,58 @@ do
         eq(bandRowEdge, corridor,
            "corridor: a full-width feature row ends on the same line as a boxed widget")
 
-        -- What the band actually BUYS, at the 640 default window: the content box
-        -- is the window less its two margins and the nav pane, the child is that
+        -- What the band actually BUYS, at the 700 default window: the content box
+        -- is the window less the module rail, its two margins and the nav pane, the child is that
         -- less the inset and the gutter, and a row is the child less the page's
         -- two margins and the band's two paddings. The old 280-box row stopped
         -- well inside the window; this is the number that replaces it.
         -- The nav pane's width and the gap beside it are Panel.lua's, pinned as
         -- source above (`navGap    = 8,`) and by the nav's own SetWidth(155).
         --
-        -- ☠ 640 IS PINNED TO THE DECLARATION, not copied into this test. The
+        -- ☠ 700 IS PINNED TO THE DECLARATION, not copied into this test. The
         -- window's default size is resident (GUI.WindowDefaults) because `/df
         -- resetgui` writes it back from Core.lua, which can run before this
         -- companion has ever loaded -- and the two used to be separate literals
         -- free to disagree.
-        local NAV_W, NAV_GAP, DEFAULT_WIN = 155, 8, 640
+        local NAV_W, NAV_GAP, DEFAULT_WIN = 155, 8, 700
+        local RAIL_W = tonumber(options_file_source("GUI/Rail.lua"):match("GUI.RailWidth = (%d+)"))
+        eq(RAIL_W, 62, "band: the module rail is 62 wide")
+        RAIL_W = RAIL_W or 62
         do
             local gui = df_file_source("GUI/GUI.lua")
-            check(gui:find("GUI.WindowDefaults = { width = 640, height = 600 }", 1, true) ~= nil,
-                  "band: the shipped default really is 640x600")
+            check(gui:find("GUI.WindowDefaults = { width = 700, height = 600, minWidth = 580 }", 1, true) ~= nil,
+                  "band: the shipped default really is 700x600, floor 580")
             local core = df_file_source("Core.lua")
-            check(core:find("DF.GUI.WindowDefaults) or { width = 640, height = 600 }", 1, true) ~= nil,
+            check(core:find("DF.GUI.WindowDefaults) or { width = 700, height = 600 }", 1, true) ~= nil,
                   "band: ...and /df resetgui restores that, not a literal of its own")
         end
-        local contentW = DEFAULT_WIN - PAGE_WINDOW_PAD - NAV_W - NAV_GAP - PAGE_WINDOW_PAD
+        local contentW = DEFAULT_WIN - RAIL_W - PAGE_WINDOW_PAD - NAV_W - NAV_GAP - PAGE_WINDOW_PAD
         local childW   = contentW - PAGE_INSET - scroll.gutter
         local rowW     = childW - 2 * box.colMargin - 2 * box.pad
         check(contentW < box.minCol * 2 + box.colGutter,
               "band: the default window is a ONE-column page, so the band is the whole of it")
-        eq(rowW, 401, "band: a feature row is 401 wide at the default window")
+        -- ⚠ 2px UNDER WHAT 640 GAVE. The approved default is 700, not 640 + the
+        -- 62 rail (702), so a fresh window's content box is 2px narrower than it
+        -- was before the rail: 401 -> 399.
+        eq(rowW, 399, "band: a feature row is 399 wide at the default window")
         -- ...against what it was inside the 280 box: the inner width of a group.
-        eq(rowW - (box.group - 2 * box.pad), 141,
-           "band: which is 141px wider than the same row inside a 280 box")
+        eq(rowW - (box.group - 2 * box.pad), 139,
+           "band: which is 139px wider than the same row inside a 280 box")
         -- And the boxed row's right edge really was that far inside the window.
         eq(childW - (box.colMargin + box.pad + (box.group - 2 * box.pad))
-           + scroll.gutter + PAGE_WINDOW_PAD, 182,
-           "band: the boxed row used to stop 182px inside the window; the band stops at 41")
+           + scroll.gutter + PAGE_WINDOW_PAD, 180,
+           "band: the boxed row used to stop 180px inside the window; the band stops at 41")
 
         -- ☠ THE CUTOVER IS STILL ABOVE THE DEFAULT, AND WAS ALREADY ABOVE THE
-        -- OLD ONE. 640 is not what makes the shipped window single-column -- the
-        -- cutover is 590 content pixels, which is a 777px window once the two
-        -- margins, the nav and its gap are paid for, so 760 was under it too.
-        -- Pinned so "narrowing the default made everything one column" cannot be
-        -- believed, and so a future default that crosses 777 fails here.
+        -- OLD ONE. The default is not what makes the shipped window single-column --
+        -- the cutover is 590 content pixels, which is an 839px window once the
+        -- module rail, the two margins, the nav and its gap are paid for (777
+        -- before the rail). Pinned so a future default that crosses it fails here.
         local cutoverWindow = box.minCol * 2 + box.colGutter
-                            + PAGE_WINDOW_PAD + NAV_W + NAV_GAP + PAGE_WINDOW_PAD
-        eq(cutoverWindow, 777, "band: two columns need a 777px window")
-        check(DEFAULT_WIN < cutoverWindow, "band: ...which the 640 default is under")
-        check(760 < cutoverWindow, "band: ...and so was the 760 it replaced")
+                            + RAIL_W + PAGE_WINDOW_PAD + NAV_W + NAV_GAP + PAGE_WINDOW_PAD
+        eq(cutoverWindow, 839, "band: two columns need an 839px window (777 + the rail)")
+        check(DEFAULT_WIN < cutoverWindow, "band: ...which the 700 default is under")
+        check(760 + RAIL_W < cutoverWindow, "band: ...and so was the 760 it replaced, plus the rail")
     end
 
     -- ---- SelectTab: park the outgoing, adopt the incoming ------------
@@ -517,17 +525,24 @@ do
     -- factory in test_selection_marker.lua. What only the source can say is that
     -- the shell actually WIRED it -- and, the part that would silently draw two
     -- bars at once, that no member still carries a stripe of its own.
-    has('GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })',
+    -- The module tabs (Party / Raid) and their underline live in GUI/Rail.lua now;
+    -- the panel builds them through GUI:BuildModuleShell and repaints them from
+    -- UpdateThemeColors.
+    local RAILSRC = options_file_source("GUI/Rail.lua"):gsub("\r\n", "\n")
+    check(RAILSRC:find('underline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })', 1, true) ~= nil,
         "the mode tabs share one underline, parented to deck 2")
     has('GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })',
         "...and the nav shares one rail, parented to the scroll child so it scrolls")
-    has("modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())",
+    has("GUI:RefreshModuleShell(not frame:IsShown())", "the module shell is repainted, instant while the window is hidden")
+    check(RAILSRC:find("underline:SetTo(activeBtn, activeAccent, instant)", 1, true) ~= nil,
         "the underline follows the active mode, instant while the window is hidden")
     has("navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())",
         "...and the rail follows the selected page, by the same rule")
-    -- Four tabs, four opt-outs -- plus the one in the comment that explains it.
-    eq(countOf("tabStripe = false"), 5,
-       "panel: all four mode tabs (Global, Party, Raid, Binds) decline StyleButton's own stripe")
+    -- The module tabs decline StyleButton's own stripe (one call builds them all),
+    -- and the panel no longer builds a tab of its own.
+    check(RAILSRC:find("tab = true, tabStripe = false,", 1, true) ~= nil,
+       "rail: the module tabs decline StyleButton's own stripe")
+    eq(countOf("tabStripe = false"), 0, "panel: no mode tab is built in the panel any more")
     check(src:find("btn.accent", 1, true) == nil,
           "panel: and no nav row builds a left accent bar of its own any more")
 

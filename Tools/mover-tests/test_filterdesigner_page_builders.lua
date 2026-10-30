@@ -68,7 +68,8 @@ do
         return tonumber((src:match(pat)))
     end
     local TH        = ui_file_source("Theme.lua")
-    local minWidth  = num(PANEL, "local minWidth, minHeight = (%d+)")
+    local minWidth  = num(df_file_source("GUI/GUI.lua"), "minWidth = (%d+) }")
+    local railW     = num(options_file_source("GUI/Rail.lua"), "GUI.RailWidth = (%d+)")
     local navW      = num(PANEL, "tabFrame:SetWidth%(SnapLen%(frame, (%d+)%)%)")
     local windowPad = num(PANEL, "windowPad = (%d+)")
     local navGap    = num(PANEL, "navGap    = (%d+)")
@@ -77,12 +78,12 @@ do
     local pad       = num(TH,    "pad = (%d+)")
     local colMargin = num(TH,    "colMargin  = (%d+)")
     local groupW    = num(TH,    "group      = (%d+)")
-    check(minWidth and navW and windowPad and navGap and inset and bar and pad
+    check(minWidth and railW and navW and windowPad and navGap and inset and bar and pad
           and colMargin and groupW,
           "narrow: every term of the band arithmetic can be read from its own file")
 
     -- contentFrame -> page child -> the width a "both" widget is stretched to.
-    local contentW = minWidth - windowPad - navW - navGap - windowPad
+    local contentW = minWidth - railW - windowPad - navW - navGap - windowPad
     local childW   = contentW - inset - (bar + pad)
     local bandW    = math.max(childW - 2 * colMargin, groupW)
     check(bandW > 290 and bandW < 315,
@@ -174,7 +175,7 @@ do
     local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
     check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
     check((WIDE or ""):find("auras_filterdesigner", 1, true) ~= nil,
-          "wide: the Filter Designer widens the window to 850")
+          "wide: the Filter Designer widens the window to 912 (850 + the rail)")
     check((WIDE or ""):find("general_pinnedframes", 1, true) ~= nil,
           "wide: ...as does Pinned Frames")
     check((WIDE or ""):find("general_nicknames", 1, true) ~= nil,

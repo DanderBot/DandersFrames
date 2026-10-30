@@ -4188,6 +4188,10 @@ function DF:ToggleGUI()
         if not DF.GUIFrame then
             DF:CreateGUI()
         end
+
+        -- Where the window was last (account window state). Read NOW: the
+        -- repaint on show below records the auto-pick over it.
+        local lastModule = GUI.LastModuleOnOpen and GUI:LastModuleOnOpen()
         
         -- Auto-detect mode based on current group status
         -- ARENA FIX: Arena returns IsInRaid()=true but uses party-style layout/settings.
@@ -4222,6 +4226,9 @@ function DF:ToggleGUI()
         end
         
         DF.GUIFrame:Show()
+        -- Back to the module it was on (GUI/Rail.lua). Group Frames keeps the
+        -- party/raid pick above; only WHICH module is remembered.
+        if GUI.RestoreModuleOnOpen then GUI:RestoreModuleOnOpen(lastModule) end
         -- Through the page cache, not a forced rebuild: opening the window
         -- changes no data, and the rebuild leaked the page on screen on every
         -- open. Why that is safe is written at GUI.RefreshCurrentPageCached
