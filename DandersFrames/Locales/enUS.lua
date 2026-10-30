@@ -3357,6 +3357,7 @@ L["Tile"] = true
 L["Tube"] = true
 -- Profiles rail item: Manage (rename), Spec & Character, Click Casting and the
 -- Import / Export paste box that routes every string type.
+L["Filter imported: %s. Find it in the Filter Designer."] = true
 L["Renamed profile '%s' to '%s'."] = true
 L["The Default profile can't be renamed."] = true
 --@end-do-not-package@
