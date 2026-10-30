@@ -5,7 +5,7 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 
-local ipairs, pairs, type = ipairs, pairs, type
+local ipairs, pairs, type, tostring = ipairs, pairs, type, tostring
 local format = string.format
 local CreateFrame = CreateFrame
 
@@ -150,9 +150,19 @@ end
 
 -- ============================================================
 -- THE VIEW
+-- Drawn to the approved mockup (docs/superpowers/specs/2026-10-30-settings-
+-- nav-options.html, modulesPage) at the live window's scale. Rounded pieces
+-- are the kit's surfaces (radii 4 / 6 / 8); colours are GUI.Colors and the
+-- module accents. No filter box: the page has no filtering to drive one.
 -- ============================================================
 
-local ROW_H, SUB_H, GAP, SUB_INDENT = 46, 30, 6, 34
+local MAX_W = 900                 -- the content column, centred
+local ROW_H, SUB_H = 40, 32       -- 30px icon box + 5px padding; a sub-row
+local GAP = 9                     -- between blocks
+local ROW_GAP = 4                 -- between the rows of a group
+local ICON_BOX, ICON_GLYPH = 30, 18
+local SUB_INDENT = 40             -- Party / Raid sit under Group Frames' name
+local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 local C = GUI.Colors
 
 local view                -- GUI:CreateModuleView's frame, built on first show
@@ -160,9 +170,33 @@ local W = {}              -- the page's fixed pieces
 local rows = {}           -- key -> row, reused across refreshes
 local headers = {}        -- group name -> header
 
-local function Dim(fs)
-    local d = C.textDim
-    fs:SetTextColor(d.r, d.g, d.b)
+local function Tint(fs, c, a)
+    fs:SetTextColor(c.r, c.g, c.b, a or 1)
+end
+
+local function RGBA(c, a)
+    return { c.r, c.g, c.b, a or 1 }
+end
+
+local function Label(parent, size, color)
+    local fs = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+    GUI:SetSettingsFont(fs, size)
+    fs:SetJustifyH("LEFT")
+    Tint(fs, color or C.text)
+    return fs
+end
+
+local function ModAccent(def)
+    local a = def and def.accent
+    if type(a) == "function" then a = a() end
+    return a or GUI:GetAccent()
+end
+
+-- Gold (the mockup's --gold): the kit's caution tone, the one gold it has.
+local function Gold()
+    local g = GUI.GetToneColor and GUI:GetToneColor("caution") or nil
+    if g then return { r = g[1] or g.r, g = g[2] or g.g, b = g[3] or g.b } end
+    return C.notice
 end
 
 local function RefreshAll()
@@ -172,25 +206,31 @@ local function RefreshAll()
     if CC and CC.headerEnableCb and CC.headerEnableCb.Refresh then CC.headerEnableCb:Refresh() end
 end
 
--- A list row. Bespoke on purpose (an icon, two lines and two controls in a
--- pooled list row); its pieces are the shared ones: the element backdrop,
--- GUI:CreateCheckRow for the switch, StyleButton for Open.
+-- A list row. Bespoke on purpose (an icon box, two lines and two controls in
+-- a pooled list row); its pieces are the shared ones: the kit's rounded
+-- surface, GUI:CreateCheckRow for the switch (the kit has no pill switch, so
+-- the shared checkbox stands in, tinted in the module's accent), StyleButton
+-- for Open.
 local function MakeRow(sub)
-    local row = CreateFrame("Frame", nil, view.body, "BackdropTemplate")
-    GUI:CreateElementBackdrop(row)
+    local row = CreateFrame("Frame", nil, view.body)
     row:SetHeight(sub and SUB_H or ROW_H)
+    row.plate = GUI:CreateRoundedSurface(row, { radius = 6, fill = RGBA(C.panel, 1), border = RGBA(C.border, 0.7) })
 
     local x = 12
     if not sub then
-        local icon = row:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(22, 22)
-        icon:SetPoint("LEFT", row, "LEFT", 12, 0)
-        row.Icon = icon
-        x = 46
+        local box = CreateFrame("Frame", nil, row)
+        box:SetSize(ICON_BOX, ICON_BOX)
+        box:SetPoint("LEFT", row, "LEFT", 10, 0)
+        box.surface = GUI:CreateRoundedSurface(box, { radius = 6, border = false, fill = RGBA(C.text, 0.05) })
+        local icon = box:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(ICON_GLYPH, ICON_GLYPH)
+        icon:SetPoint("CENTER", box, "CENTER", 0, 0)
+        row.Box, row.Icon = box, icon
+        x = 10 + ICON_BOX + 12
     end
 
     local open = CreateFrame("Button", nil, row, "BackdropTemplate")
-    GUI:StyleButton(open, { text = L["Open"], width = 64, height = 22 })
+    GUI:StyleButton(open, { text = L["Open"], width = 62, height = 24 })
     open:SetPoint("RIGHT", row, "RIGHT", -10, 0)
     open:SetScript("OnClick", function(self)
         -- A locked module (Auto Layout editing) is refused, as on the rail.
@@ -204,32 +244,34 @@ local function MakeRow(sub)
         label = "",
         onClick = function(want) if row.onSwitch then row.onSwitch(want, row.Switch) end end,
     })
-    switch:SetPoint("RIGHT", open, "LEFT", -14, 0)
+    switch:SetPoint("RIGHT", open, "LEFT", -12, 0)
     row.Switch = switch
 
-    local status = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    status:SetPoint("RIGHT", switch, "LEFT", -10, 0)
+    -- Coming soon: a gold tag where the switch would be.
+    local soon = Label(row, 10, Gold())
+    soon:SetPoint("RIGHT", open, "LEFT", -12, 0)
+    soon:Hide()
+    row.Soon = soon
+
+    local status = Label(row, 11, C.textDim)
+    status:SetPoint("RIGHT", switch, "LEFT", -12, 0)
     status:SetJustifyH("RIGHT")
     status:SetWordWrap(false)
-    Dim(status)
     row.Status = status
 
-    local name = row:CreateFontString(nil, "OVERLAY", sub and "DFFontHighlightSmall" or "DFFontHighlight")
-    name:SetJustifyH("LEFT")
+    local name = Label(row, sub and 12 or 13, C.text)
     name:SetWordWrap(false)
     row.Name = name
     if sub then
         name:SetPoint("LEFT", row, "LEFT", x, 0)
         name:SetPoint("RIGHT", status, "LEFT", -10, 0)
     else
-        name:SetPoint("TOPLEFT", row, "TOPLEFT", x, -8)
+        name:SetPoint("BOTTOMLEFT", row, "LEFT", x, 1)
         name:SetPoint("RIGHT", status, "LEFT", -10, 0)
-        local desc = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        desc:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -3)
+        local desc = Label(row, 11, C.textDim)
+        desc:SetPoint("TOPLEFT", row, "LEFT", x, -2)
         desc:SetPoint("RIGHT", status, "LEFT", -10, 0)
-        desc:SetJustifyH("LEFT")
         desc:SetWordWrap(false)
-        Dim(desc)
         row.Desc = desc
     end
     return row
@@ -244,55 +286,78 @@ local function GetRow(key, sub)
     return row
 end
 
+-- "ON  3": 11px uppercase caption, the count dim beside it.
 local function GetHeader(key)
     local h = headers[key]
     if not h then
-        h = view.body:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-        h:SetJustifyH("LEFT")
-        local cc = C.textCaption or C.textDim
-        h:SetTextColor(cc.r, cc.g, cc.b)
+        h = Label(view.body, 11, C.textCaption or C.textDim)
+        h.Count = Label(view.body, 11, C.textDim)
+        h.Count:SetPoint("BOTTOMLEFT", h, "BOTTOMRIGHT", 6, 0)
         headers[key] = h
     end
     return h
 end
 
+-- An off row has no fill (the plate's ring only) and a greyed icon box.
+local function PaintPlate(row, on)
+    row.plate:SetFillShown(on and true or false)
+    local b = C.border
+    row.plate:SetBorderColor(b.r, b.g, b.b, 0.7)
+end
+
 -- Paint one module row. on: switched on. soon: coming soon (no switch).
 local function PaintModuleRow(row, def, on, soon)
+    local a = ModAccent(def)
+    PaintPlate(row, on)
     row.Icon:SetTexture(def.icon)
-    row.Icon:SetAlpha(on and 1 or 0.45)
+    if on then
+        row.Box.surface:SetFillColor(a.r, a.g, a.b, 0.18)
+        row.Icon:SetVertexColor(a.r, a.g, a.b)
+        row.Icon:SetAlpha(1)
+    else
+        row.Box.surface:SetFillColor(C.text.r, C.text.g, C.text.b, 0.05)
+        row.Icon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
+        row.Icon:SetAlpha(0.6)
+    end
     row.Name:SetText(GUI:ModuleLabel(def) or "")
     row.Name:SetAlpha(on and 1 or 0.7)
     row.Desc:SetText(GUI:ModuleText(def, "description") or "")
-    row.Status:SetText(soon and L["Coming soon"] or (on and GUI:ModuleStatus(def) or L["Off"]))
+    -- The status only where it says something: an off row's switch already
+    -- says Off, and a coming-soon row has its tag.
+    row.Status:SetText((on and not soon) and GUI:ModuleStatus(def) or "")
     local sw = not soon and SwitchFor(def)
     if sw then
         row.Switch:Show()
         row.Switch:SetChecked(on)
+        if row.Switch.ApplyThemeColor then row.Switch.ApplyThemeColor(a) end
         row.onSwitch = function(want, checkbox) sw(want, checkbox, RefreshAll) end
     else
         row.Switch:Hide()
         row.onSwitch = nil
     end
-    if soon then
-        row.Open:Hide()
-    else
-        row.Open:Show()
-        row.Open.target, row.Open.targetTab = def.id, nil
-        row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))
-    end
+    row.Soon:SetShown(soon and true or false)
+    if soon then row.Soon:SetText(string.upper(L["Coming soon"])) end
+    -- Open only on a module that is on (the mockup hides it on the rest).
+    row.Open.target, row.Open.targetTab = def.id, nil
+    row.Open:SetShown(on and not soon)
+    row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))
 end
 
--- Party Frames / Raid Frames under the master.
+-- Party Frames / Raid Frames under the master, each in its own accent.
 local function PaintSubRow(row, mode)
     local on = (mode == "raid") and GF.RaidOn() or GF.PartyOn()
+    local a = GUI.GetThemeColorFor and GUI.GetThemeColorFor(mode == "raid") or GUI:GetAccent()
+    PaintPlate(row, on)
     row.Name:SetText(mode == "raid" and L["Raid Frames"] or L["Party Frames"])
     row.Name:SetAlpha(on and 1 or 0.7)
-    row.Status:SetText(on and L["On"] or L["Off"])
+    row.Status:SetText("")
+    row.Soon:Hide()
     row.Switch:Show()
     row.Switch:SetChecked(on)
+    if row.Switch.ApplyThemeColor then row.Switch.ApplyThemeColor(a) end
     row.onSwitch = function(want) GF.SetMode(mode, want); RefreshAll() end
-    row.Open:Show()
     row.Open.target, row.Open.targetTab = "group", mode
+    row.Open:SetShown(on)
     row.Open:SetEnabled(on and not GUI:IsModulePickLocked("group", mode))
 end
 
@@ -302,18 +367,20 @@ function GUI:RefreshModulesView()
     if w < 50 then return end
     local body = view.body
     body:SetWidth(w)
+    local cw = math.min(w, MAX_W)
+    local x0 = math.floor((w - cw) / 2)
 
     for _, row in pairs(rows) do row:Hide() end
-    for _, h in pairs(headers) do h:Hide() end
+    for _, h in pairs(headers) do h:Hide(); h.Count:Hide() end
 
     local y = 0
     W.title:ClearAllPoints()
-    W.title:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-    y = y + 24
+    W.title:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
+    y = y + 22 + 3
     W.lead:ClearAllPoints()
-    W.lead:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-    W.lead:SetWidth(w)
-    y = y + (W.lead:GetStringHeight() or 14) + 14
+    W.lead:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
+    W.lead:SetWidth(cw)
+    y = y + (W.lead:GetStringHeight() or 14) + GAP + 6
 
     local on, off, soon = GUI:ModulesPageModel()
     local groups = {
@@ -324,20 +391,22 @@ function GUI:RefreshModulesView()
     for _, g in ipairs(groups) do
         if #g.list > 0 then
             local h = GetHeader(g.key)
-            h:SetText(format("%s  (%d)", g.label, #g.list))
+            h:SetText(string.upper(g.label))
+            h.Count:SetText(tostring(#g.list))
             h:ClearAllPoints()
-            h:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
+            h:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
             h:Show()
-            y = y + 20
+            h.Count:Show()
+            y = y + 14 + ROW_GAP
             for _, def in ipairs(g.list) do
                 local isOn = g.key == "on"
                 local row = GetRow(def.id, false)
                 PaintModuleRow(row, def, isOn, g.key == "soon")
                 row:ClearAllPoints()
-                row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-                row:SetWidth(w)
+                row:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
+                row:SetWidth(cw)
                 row:Show()
-                y = y + ROW_H + GAP
+                y = y + ROW_H + ROW_GAP
                 -- Group Frames: Party and Raid, each with its own switch.
                 -- Shown off with the master off, and still clickable.
                 if def.id == "group" then
@@ -345,22 +414,26 @@ function GUI:RefreshModulesView()
                         local sr = GetRow("group:" .. mode, true)
                         PaintSubRow(sr, mode)
                         sr:ClearAllPoints()
-                        sr:SetPoint("TOPLEFT", body, "TOPLEFT", SUB_INDENT, -y)
-                        sr:SetWidth(w - SUB_INDENT)
+                        sr:SetPoint("TOPLEFT", body, "TOPLEFT", x0 + SUB_INDENT, -y)
+                        sr:SetWidth(cw - SUB_INDENT)
                         sr:Show()
-                        y = y + SUB_H + 4
+                        y = y + SUB_H + ROW_GAP
                     end
-                    y = y + GAP - 4
                 end
             end
-            y = y + 8
+            y = y - ROW_GAP + GAP
         end
     end
 
-    W.note:ClearAllPoints()
-    W.note:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-    W.note:SetWidth(w)
-    y = y + (W.note:GetStringHeight() or 14) + 8
+    -- The note: a gold-tinted rounded box with the refresh glyph.
+    local note = W.note
+    note:ClearAllPoints()
+    note:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
+    note:SetWidth(cw)
+    note.Text:SetWidth(cw - 12 - 18 - 8 - 12)
+    local nh = math.max((note.Text:GetStringHeight() or 14), 18) + 16
+    note:SetHeight(nh)
+    y = y + nh + 8
     body:SetHeight(y)
 end
 
@@ -369,23 +442,26 @@ local function Build()
     if not view then return nil end
     local body = view.body
 
-    local title = body:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-    title:SetJustifyH("LEFT")
+    local title = Label(body, 17, C.text)
     title:SetText(L["Modules"])
-    local t = C.text
-    title:SetTextColor(t.r, t.g, t.b)
     W.title = title
 
-    local lead = body:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lead:SetJustifyH("LEFT")
+    local lead = Label(body, 12, C.textDim)
     lead:SetText(L["Turn off what you don't use. A module that is off is not set up, and its icon leaves the rail."])
-    Dim(lead)
     W.lead = lead
 
-    local note = body:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    note:SetJustifyH("LEFT")
-    note:SetText(L["Turning a module on or off takes effect after a reload. Its settings are kept either way."])
-    Dim(note)
+    local gold = Gold()
+    local note = CreateFrame("Frame", nil, body)
+    note.surface = GUI:CreateRoundedSurface(note, { radius = 6, fill = RGBA(gold, 0.08), border = RGBA(gold, 0.25) })
+    local icon = note:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(18, 18)
+    icon:SetPoint("LEFT", note, "LEFT", 12, 0)
+    icon:SetTexture(ICONS .. "refresh.png")
+    icon:SetVertexColor(gold.r, gold.g, gold.b)
+    local text = Label(note, 11, C.textCaption or C.textDim)
+    text:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+    text:SetText(L["Turning a module on or off takes effect after a reload. Its settings are kept either way."])
+    note.Text = text
     W.note = note
 
     -- A resize changes every width; the page is small, so re-run it whole.
