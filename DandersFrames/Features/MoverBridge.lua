@@ -330,11 +330,10 @@ end
 --  * DF:EnsureOptionsLoaded() pulls in the LoD companion (GUI/LoadOptions.lua).
 --  * DF:ToggleGUI() (DandersFrames_Options/GUI/Controls.lua) builds and
 --    shows the window when it is not already up.
---  * GUI.PartyButton / GUI.RaidButton :Click() is how the codebase itself
---    switches GUI.SelectedMode programmatically (buttons published at
---    DandersFrames_Options/GUI/Panel.lua).
+--  * GUI:SelectModule("group", mode) is how the codebase itself switches
+--    GUI.SelectedMode programmatically (DandersFrames_Options/GUI/ModuleRegistry.lua).
 --    Safe during an open mover session: the departing mode's lock/test
---    cleanup in those handlers only touches the mode being LEFT, which is
+--    cleanup in the group module only touches the mode being LEFT, which is
 --    never the one the session claimed.
 --  * GUI.SelectTab(pageId) (DandersFrames_Options/GUI/Panel.lua) opens
 --    the page.
@@ -351,18 +350,17 @@ local function openOptionsPage(mode, pageId)
     if not (GUI and DF.GUIFrame and DF.GUIFrame:IsShown()) then return end
     -- Skipped when the window already shows the right mode; ToggleGUI's open
     -- half auto-detects from the live group though, so a raid-mode session
-    -- reopened while solo lands on party and does need the click (which runs a
+    -- reopened while solo lands on party and does need the switch (which runs a
     -- full page rebuild in the new mode -- see the PERF line).
     if mode and GUI.SelectedMode ~= mode then
-        local btn = (mode == "raid") and GUI.RaidButton or GUI.PartyButton
-        if btn and btn.Click then
+        if GUI.SelectModule then
             local t = perfStart()
-            -- Flagged so the mode buttons' end-the-session-first guard lets this through.
+            -- Flagged so SelectModule's end-the-session-first guard lets this through.
             GUI._moverOwnedClick = true
-            local okClick, err = pcall(btn.Click, btn)
+            local okClick, err = pcall(GUI.SelectModule, GUI, "group", (mode == "raid") and "raid" or "party")
             GUI._moverOwnedClick = nil
             if not okClick then geterrorhandler()(err) end
-            perfLog(t, "openOptionsPage: mode button Click (page rebuild)")
+            perfLog(t, "openOptionsPage: mode switch (page rebuild)")
         end
     end
     if GUI.SelectTab then

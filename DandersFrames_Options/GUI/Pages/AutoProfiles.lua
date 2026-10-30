@@ -1763,23 +1763,13 @@ function AutoProfilesUI:RefreshEditingUI()
     
     -- Disable the Global, Party and Binds buttons when editing (must stay in Raid
     -- mode; GLOBAL's pages are nothing a layout can change)
-    local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton, GUI.ClicksButton}
-    for _, btn in ipairs(buttonsToDisable) do
-        if btn then
-            if self:IsEditing() then
-                btn.disabled = true
-                btn:EnableMouse(false)
-                btn.Text:SetTextColor(0.2, 0.2, 0.2)
-                btn.Text:SetAlpha(0.8)
-                btn:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-                btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.5)
-            else
-                btn.disabled = false
-                btn:EnableMouse(true)
-                btn.Text:SetAlpha(1)
-                -- Colors will be restored by UpdateThemeColors below
-            end
-        end
+    -- (GUI:SetModuleLocked, GUI/ModuleRegistry.lua, greys them and takes the
+    -- mouse off them; unlocking leaves the colours to UpdateThemeColors below.)
+    if GUI.SetModuleLocked then
+        local editing = self:IsEditing() and true or false
+        GUI:SetModuleLocked("global", editing)
+        GUI:SetModuleLocked("group", editing, "party")
+        GUI:SetModuleLocked("clicks", editing)
     end
     
     -- Restore proper button colors when not editing

@@ -145,7 +145,9 @@ check(SW:find("if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return fal
       "greyed: a GLOBAL page is never greyed by a mode being off")
 check(CONTROLS:find("GUI:SetAccent(GUI.CurrentAccent())", 1, true) ~= nil,
       "open: the window reopens in the accent of the tab it was closed on")
-check(AUTOPROF:find("local buttonsToDisable = {GUI.GlobalButton, GUI.PartyButton, GUI.ClicksButton}", 1, true) ~= nil,
+check(AUTOPROF:find('GUI:SetModuleLocked("global", editing)', 1, true) ~= nil
+      and AUTOPROF:find('GUI:SetModuleLocked("group", editing, "party")', 1, true) ~= nil
+      and AUTOPROF:find('GUI:SetModuleLocked("clicks", editing)', 1, true) ~= nil,
       "editing: GLOBAL is locked with Party and Binds while an auto layout is edited")
 check(OPTIONS:find("Settings on this page apply globally", 1, true) == nil,
       "settings: the 'applies globally' banner is gone -- the tab says it")

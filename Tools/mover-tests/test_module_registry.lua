@@ -224,3 +224,24 @@ check(not bG.disabled and bG.mouse and not bP.disabled and bP.mouse and not bC.d
       and bP.textA == 1, "lock: unlocked, all three take the mouse again")
 
 DandersFrames = savedDF
+
+-- ---- the callers (source shape) -------------------------------------
+print("-- Module registry: nothing clicks a mode tab any more")
+do
+    local PANEL  = options_file_source("GUI/Panel.lua"):gsub("\r\n", "\n")
+    local BRIDGE = df_file_source("Features/MoverBridge.lua"):gsub("\r\n", "\n")
+    local AUTOP  = options_file_source("GUI/Pages/AutoProfiles.lua"):gsub("\r\n", "\n")
+    for _, b in ipairs({ "GlobalButton", "PartyButton", "RaidButton", "ClicksButton" }) do
+        for name, src in pairs({ Panel = PANEL, MoverBridge = BRIDGE, AutoProfiles = AUTOP }) do
+            check(not src:find("GUI." .. b .. ":Click()", 1, true) and not src:find("GUI." .. b .. " then GUI." .. b, 1, true),
+                  "callers: " .. name .. " does not click " .. b)
+        end
+    end
+    check(BRIDGE:find('pcall(GUI.SelectModule, GUI, "group", (mode == "raid") and "raid" or "party")', 1, true) ~= nil,
+          "callers: the mover's Configure switches mode through SelectModule, flagged")
+    check(PANEL:find('GUI:SelectModule("clicks")\n            return', 1, true) ~= nil
+          and PANEL:find('if GUI.SelectedMode == "clicks" then GUI:SelectModule("group", "party") end', 1, true) ~= nil,
+          "callers: the changelog's links switch through SelectModule")
+    check(AUTOP:find("local buttonsToDisable", 1, true) == nil,
+          "callers: Auto Layout editing locks modules, not buttons")
+end

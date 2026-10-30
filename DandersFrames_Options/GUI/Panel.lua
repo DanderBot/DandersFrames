@@ -1185,12 +1185,12 @@ function DF:CreateGUI()
         if not target then return end
         changelogOverlay:Hide()
         if target == "clicks" then
-            if GUI.ClicksButton then GUI.ClicksButton:Click() end
+            GUI:SelectModule("clicks")
             return
         end
         -- Sub-tabs live under the party/raid modes; from Clicks, step back to
-        -- Party first (the toolbar button owns that transition and its cleanup).
-        if GUI.SelectedMode == "clicks" and GUI.PartyButton then GUI.PartyButton:Click() end
+        -- Party first (the group module owns that transition and its cleanup).
+        if GUI.SelectedMode == "clicks" then GUI:SelectModule("group", "party") end
         C_Timer.After(0, function()
             if GUI.LinkToSetting then GUI:LinkToSetting({ page = target, flash = false }) end
         end)
