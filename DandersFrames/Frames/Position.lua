@@ -1409,6 +1409,7 @@ function DF:UnlockFrames()
     -- the one fallback for MOVING them is the permanent handle (spec Decision 1b).
     if not Mover then
         DF:Say(L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."])
+        DF.unlockWithoutMover = true   -- Needs attention (Features/Attention.lua)
         return
     end
 

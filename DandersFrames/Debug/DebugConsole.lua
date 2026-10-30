@@ -131,6 +131,7 @@ local CATEGORY_GROUPS = {
             -- driven from DF:UpdateHealthFast — i.e. per unit per health tick in combat.
             { key = "TD",           desc = "Text Designer render and mirror state", noisy = true },
             { key = "TEXTURE",      desc = "Texture and atlas resolution, including missing-file fallback" },
+            { key = "ATTENTION",    desc = "Needs attention checks that failed to evaluate" },
         },
     },
 }

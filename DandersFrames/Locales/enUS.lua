@@ -133,6 +133,7 @@ L["Your bindings were copied to this new profile. You can customize it in the Pr
 L["clear stuck auto-layout overrides"] = true
 L["console page"] = true
 L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."] = true
+L["Two click-casting addons on the same frames fight over every click."] = true
 L["Enable those only while reproducing a layout or sorting bug."] = true
 L["debug commands"] = true
 L["Debug logging"] = true
@@ -418,6 +419,7 @@ L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n
 L["%s detected.\n\nWhich click-casting addon would you like to use?"] = true
 L["This profile was created for %s%s%s.\nSome bindings may not be compatible with %s%s%s."] = true
 L["Some bindings use spells that are not available\nto your current class or specialization."] = true
+L["Some changes only take effect after a reload."] = true
 L["Profile: %s%s%s\n%s%d compatible%s   %s%d incompatible%s   %s%d total%s"] = true
 -- ClickCasting UI strings (additional)
 L["Add #showtooltip"] = true
@@ -489,6 +491,7 @@ L["\"%s\" will be overwritten."] = true
 L["A layout with this name already exists in %s"] = true
 L["A profile with this name already exists"] = true
 L["A to Z"] = true
+L["A UI reload is needed"] = true
 L["Abbreviate"] = true
 L["Above Owner"] = true
 L["Above Party"] = true
@@ -600,6 +603,7 @@ L["Auto Layouts"] = true
 -- PAGE, this names ONE layout, and it is only ever used as the kind suffix on a
 -- layout's own name. Same split as Pinned / L["Pinned Frames"].
 L["Auto Layout"] = true
+L["Auto Layout \"%s\" is active"] = true
 -- "<name> (<kind>)" for the template sharing tooltip's user list. A pinned set or an
 -- auto layout is called whatever the player called it, so without the suffix the list
 -- read "Also used by: test" and named neither the kind nor the page to find it on.
@@ -650,6 +654,9 @@ L["Blend Mode"] = true
 L["Blessing of the Bronze (Evoker)"] = true
 L["Blizzard"] = true
 L["Blizzard Frames"] = true
+L["Blizzard party and raid frames are still showing"] = true
+L["Blizzard party frames are still showing"] = true
+L["Blizzard raid frames are still showing"] = true
 L["Border"] = true
 L["Border Alpha"] = true
 L["Border Blend Mode"] = true
@@ -726,6 +733,8 @@ L["Center (Vertical)"] = true
 L["Center of Group"] = true
 L["Choose which groups to display."] = true
 L["Click-casting changes require a UI reload to take effect.\n\nReload now?"] = true
+L["Click-casting conflicts with %s"] = true
+L["Click-casting conflicts with another addon"] = true
 L["Class"] = true
 L["Class Color"] = true
 L["Class Color Alpha"] = true
@@ -836,6 +845,7 @@ L["Debug Log Export (part %d of %d)"] = true
 L["Next Part"] = true
 L["Debug console module not loaded."] = true
 L["Debug logging %s"] = true
+L["Debug logging is on"] = true
 L["Decimal Places"] = true
 L["Default"] = true
 L["Default (Slot Order)"] = true
@@ -1049,6 +1059,7 @@ L["Frame Type"] = true
 L["Frame Tooltips"] = true
 L["Frame Width"] = true
 L["Frames & Layout"] = true
+L["Frames are unlocked"] = true
 L["Frames centered on screen."] = true
 L["Frames Grow From"] = true
 L["Frames locked."] = true
@@ -1139,6 +1150,7 @@ L["Has Aggro Text"] = true
 L["Hide % Symbol"] = true
 L["Hide Above (seconds)"] = true
 L["Hide Above Threshold"] = true
+L["Hide and Reload"] = true
 L["Hide Long Buffs"] = true
 L["Hide Long Debuffs"] = true
 L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."] = true
@@ -1152,6 +1164,7 @@ L["Hiding %d"] = true
 L["Any"] = true
 L["a debuff shows if it fits any ticked Show row."] = true
 L["it must fit every ticked Show row. Boss and Magic shows only magic boss debuffs; ticked dispel types count as one."] = true
+L["It records extra data every session. Turn it off unless you are reporting a bug."] = true
 L["Hide rows remove debuffs either way."] = true
 L["Hide"] = true
 L["Show every debuff. Tick Hide on a category to take it away."] = true
@@ -1168,6 +1181,7 @@ L["Magic debuffs, whoever can dispel them."] = true
 L["Curse debuffs, whoever can dispel them."] = true
 L["Poison debuffs, whoever can dispel them."] = true
 L["Disease debuffs, whoever can dispel them."] = true
+L["Dismiss"] = true
 L["Bleed"] = true
 L["Bleed effects."] = true
 L["Hide Permanent Auras"] = true
@@ -1315,6 +1329,7 @@ L["Left to Right"] = true
 L["Line"] = true
 L["Loading..."] = true
 L["Lock"] = true
+L["Lock them so they can't be dragged by accident."] = true
 L["Locked by Auto Layout"] = true
 -- Export-page preset button, resolved dynamically via L[p.name]. Its three
 -- siblings (All / Layout / None) were declared; this one was not, so no locale
@@ -1327,6 +1342,7 @@ L["Noisy category"] = true
 L["This category can fill the log very quickly, burying the entries you are looking for."] = true
 L["Turn it on only while reproducing the bug it relates to."] = true
 L["Turn modules on or off on the %s."] = true
+L["Turn Off"] = true
 L["Turn off what you don't use. A module that is off is not set up, and its icon leaves the rail."] = true
 L["Lunar Power"] = true
 L["Maelstrom"] = true
@@ -1374,6 +1390,7 @@ L["Missing Health Color"] = true
 L["Missing Health Gradient"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
+L["Missing textures"] = true
 L["Melee DPS"] = true
 L["Match ALL groups"] = true
 L["Match ANY group"] = true
@@ -1386,6 +1403,7 @@ L["Monochrome Thick Outline"] = true
 L["Most Urgent"] = true
 L["Movement"] = true
 L["Moves the glow to the opposite side (no HP side instead of max HP side)."] = true
+L["Moving frames needs it. Enable DandersMover in the AddOns list, then reload."] = true
 L["Different color in pandemic window"] = true
 L["Pandemic Color"] = true
 L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."] = true
@@ -1426,6 +1444,7 @@ L["not in database"] = true
 -- 12.1 unsupported-version guard popup (Core.lua)
 L["Unsupported Game Version"] = true
 L["DandersFrames doesn't support this version of the game.\n\nThis build is made for World of Warcraft 12.1. Please install the version that matches your client from CurseForge or Wago."] = true
+L["DandersMover is disabled"] = true
 L["Cmd + Left Click unavailable on Mac"] = true
 L["Font sizes are not changed. Adjust sizes in each element's page."] = true
 L["Note"] = true
@@ -1610,6 +1629,7 @@ L["Reset %s settings to defaults?\n\n%s\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."] = true
 L["Reset: %s"] = true
+L["Resolve"] = true
 L["Restore this filter's spell list to its defaults. Other filters are not affected."] = true
 L["Reset All to Default"] = true
 L["Reset Border to Inherited"] = true
@@ -1836,6 +1856,7 @@ L["Test frames stay visible while frames are unlocked - they will hide when you 
 L["Test mode disabled."] = true
 L["Test mode enabled."] = true
 L["Test mode ended — entering combat."] = true
+L["Test mode is on"] = true
 L["Text"] = true
 L["Text Alpha"] = true
 L["Text Color"] = true
@@ -1867,6 +1888,7 @@ L["These defaults apply to all text elements that haven't been individually cust
 L["These frames are anchored to another frame, so dragging opens DandersMover instead."] = true
 L["These indicators trigger no matter who casts the buff."] = true
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
+L["They show alongside DandersFrames. Hiding them takes a UI reload."] = true
 L["Thick"] = true
 L["Thick Outline"] = true
 L["Thickness"] = true
@@ -1930,6 +1952,7 @@ L["Unchecked categories are not logged at all. Disable noisy categories before r
 L["Unlock Frames"] = true
 L["Unnamed"] = true
 L["Up"] = true
+L["Update available"] = true
 L["Usage: /df clearoverride <key|prefix|all>  (see /df debug overrides for keys)"] = true
 L["No override matching \"%s\" on layout \"%s\"."] = true
 L["Cleared %d override(s) from layout \"%s\":"] = true
@@ -1951,6 +1974,7 @@ L["Utility"] = true
 L["v%s loaded. %s/df%s for settings, %s/df help%s for commands."] = true
 L["Show the login message"] = true
 L["The one-line greeting printed to chat when you log in. Takes effect at your next login."] = true
+L["The preview frames are still showing."] = true
 L["Valid range"] = true
 L["Vehicle"] = true
 L["Vehicle Icon"] = true
@@ -2544,6 +2568,7 @@ L["doesn't have a profile assigned."] = true
 L["for all your loadouts."] = true
 L["instead of Command for left click modifiers."] = true
 L["is already bound to:"] = true
+L["It is changing %d settings on your raid frames."] = true
 L["or "] = true
 L["when switching to this spec"] = true
 
@@ -3229,6 +3254,7 @@ L["Already added. Remove it from the list below to change it."] = true
 -- and racials reach it automatically as they are ticked there, with no second control here
 -- that could disagree. The number is the list's own enabled total, so it moves when they do.
 L["%d spells, from your Triggers"] = true
+L["%d texture files couldn't be found, so a stock texture is shown instead. Reinstall or re-enable the addon that provides them."] = true
 -- ⚠ AND THE PLAIN COUNT, for a group that has been given its own SHOW set. Saying "from your
 -- Triggers" on a group that no longer follows them would be the header contradicting the block
 -- directly beneath it, which says it has stopped following.

@@ -969,6 +969,18 @@ end
 -- ============================================================
 DF.STOCK_BAR_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
 local _df_warnedMissingTexture = {}
+-- The paths warnMissingTexture actually reported (the db repair also claims
+-- paths in the table above, for textures it has already fixed -- those are not
+-- missing any more). Read through DF:GetMissingTextures for Needs attention.
+local _df_missingTextures = {}
+
+-- Read-only copy, sorted: the texture paths found missing this session.
+function DF:GetMissingTextures()
+    local out = {}
+    for path in pairs(_df_missingTextures) do out[#out + 1] = path end
+    table.sort(out)
+    return out
+end
 
 DF.OUR_MEDIA_PREFIX = "interface\\addons\\dandersframes\\media\\"
 
@@ -1038,6 +1050,7 @@ DF.IsTexturePresent = textureKnown
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
+    _df_missingTextures[path] = true
     -- ☠ WARN, not INFO. A missing texture is significant enough that the next lines print
     -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
     -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
@@ -5238,6 +5251,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- can only be (un)created on /reload.
         DF.loadedPartyEnabled = DF.db.partyEnabled ~= false
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
+        -- ...and the other settings that only apply on a reload, for the Needs
+        -- attention "reload needed" item (Features/Attention.lua).
+        if DF.Attention and DF.Attention.SnapshotLoaded then DF.Attention:SnapshotLoaded() end
 
         -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
         -- loaded; the Settings Font dropdowns re-apply it through the same call)

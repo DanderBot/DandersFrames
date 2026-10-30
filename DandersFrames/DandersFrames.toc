@@ -203,5 +203,9 @@ ClickCasting\Frames.lua
 ClickCasting\Bindings.lua
 ClickCasting\Events.lua
 
+# Needs attention registry (the settings Home renders it). After everything its
+# checks read; the checks are lazy, so this only orders definitions.
+Features\Attention.lua
+
 # External API (for Wago UI Packs, etc.)
 Core\API.lua

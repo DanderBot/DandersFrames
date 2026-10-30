@@ -303,6 +303,12 @@ VC.handlers["V"] = function(self, sender, payload, channel)
     if not payload or payload == "" then return end
     self.seenUsers[sender] = { version = payload, lastSeen = GetTime() }
     if self:ShouldNag(payload) then
+        -- The newest one seen, for the settings Home's Needs attention item
+        -- (Features/Attention.lua). The chat nag below is unchanged.
+        local newest = self.newestSeen
+        if not newest or self:CompareVersions(payload, newest.version) == 1 then
+            self.newestSeen = { version = payload, from = sender }
+        end
         self:ShowNag(payload)
     end
 end

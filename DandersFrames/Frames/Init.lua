@@ -660,6 +660,7 @@ function DF:UnlockRaidFrames()
     -- No DandersMover, no editing surface: see DF:UnlockFrames.
     if not Mover then
         DF:Say(L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."])
+        DF.unlockWithoutMover = true   -- Needs attention (Features/Attention.lua)
         return
     end
 
