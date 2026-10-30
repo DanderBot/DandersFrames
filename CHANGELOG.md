@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### New Features
+
+- (Settings) The settings window has a new layout: an icon bar down the left side replaces the Global / Party / Raid / Binds tabs. **Groups** holds your party and raid settings (switch between them with the Party and Raid tabs along the top), **Binds** is click-casting, and **Modules**, **Profiles** and **Global** sit at the bottom.
+- (Settings) New **Home** page: search every setting, jump to any part of the addon, see what's new in this version, and get a short **Needs attention** list of problems with a one-click fix, such as Blizzard frames still showing, a reload being needed, or test mode left on.
+- (Settings) New **Modules** page to turn Group Frames (with separate Party and Raid switches) and Click-Casting on or off in one place. Turned-off modules leave the icon bar.
+- (Profiles) Every profile tool now lives on the **Profiles** page: manage profiles, spec switching, Auto Layouts, click-casting profiles, import/export and changed settings. You can now **rename** profiles, and one import box accepts profile, click-casting and filter strings.
+
+### Bug Fixes
+
+- (Profiles) The export name now defaults to your current profile's name instead of "My Profile".
+
 ## [5.6.0]
 
 ### New Features
