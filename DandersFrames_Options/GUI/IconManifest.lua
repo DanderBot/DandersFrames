@@ -35,6 +35,7 @@ DF.ICON_MANIFEST = {
         "format_color_fill",
         "grid_view",
         "group_add",
+        "groups",
         "heart_minus",
         "info",
         "keyboard",

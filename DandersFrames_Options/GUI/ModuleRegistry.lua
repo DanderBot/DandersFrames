@@ -411,8 +411,8 @@ end
 GUI:RegisterModule({
     id = "group",
     label = function() return L["Group Frames"] end,
-    railLabel = function() return L["Frames"] end,
-    icon = ICONS .. "grid_view.png",
+    railLabel = function() return L["Groups"] end,
+    icon = ICONS .. "groups.png",
     order = 10,
     slot = "top",
     tabs = {

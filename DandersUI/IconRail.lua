@@ -40,7 +40,8 @@ local ipairs, type, pairs = ipairs, type, pairs
 
 local C_TEXT, C_TEXT_DIM, C_HOVER, C_NOTICE =
       UI.Colors.text, UI.Colors.textDim, UI.Colors.hover, UI.Colors.notice
-local WHITE = "Interface\\Buttons\\WHITE8x8"
+-- The hover/selected plate: a rounded pill inset inside the rail's width.
+local PLATE_INSET_X, PLATE_INSET_Y, PLATE_RADIUS = 4, 2, 6
 
 -- The kit's disabled alpha (CreateSlider, CreateCheckbox, StyleButton's
 -- SetEnabled and CreateGlyphButton all use it).
@@ -99,12 +100,12 @@ function UI:CreateIconRail(parent, opts)
         btn:SetAlpha(isOff and DISABLED_ALPHA or 1)
         if isSel then
             local r, g, b = Unpack(AccentOf(id), 1, 1, 1)
-            btn.Plate:SetVertexColor(r, g, b, 0.18)
+            btn.PlateSurface:SetFillColor(r, g, b, 0.18)
             btn.Plate:Show()
             btn.Icon:SetVertexColor(r, g, b)
             btn.Label:SetTextColor(r, g, b)
         elseif btn.hovered and not isOff then
-            btn.Plate:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.75)
+            btn.PlateSurface:SetFillColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.75)
             btn.Plate:Show()
             btn.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -140,9 +141,14 @@ function UI:CreateIconRail(parent, opts)
         btn:SetSize(width, itemH)
         btn:RegisterForClicks("LeftButtonUp")
 
-        local plate = btn:CreateTexture(nil, "BACKGROUND")
-        plate:SetTexture(WHITE)
-        plate:SetAllPoints(btn)
+        -- The plate is a rounded surface on its own child frame, inset from the
+        -- rail's edges so it reads as a pill rather than a full-width band (the
+        -- selection marker keeps the rail's left edge to itself).
+        local plate = CreateFrame("Frame", nil, btn)
+        plate:SetPoint("TOPLEFT", btn, "TOPLEFT", PLATE_INSET_X, -PLATE_INSET_Y)
+        plate:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -PLATE_INSET_X, PLATE_INSET_Y)
+        plate:SetFrameLevel(btn:GetFrameLevel())
+        btn.PlateSurface = host:CreateRoundedSurface(plate, { radius = PLATE_RADIUS, border = false })
         plate:Hide()
         btn.Plate = plate
 

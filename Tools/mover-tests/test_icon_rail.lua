@@ -76,6 +76,13 @@ function UI:CreateSelectionMarker(parent, opts)
     function m:Clear() self.owner = nil; markerLog[#markerLog + 1] = { clear = true } end
     return m
 end
+local surfaces = {}
+function UI:CreateRoundedSurface(frame, opts)
+    local s = { frame = frame, radius = opts.radius, border = opts.border }
+    function s:SetFillColor(r, g, b, a) self.fill = { r, g, b, a } end
+    surfaces[#surfaces + 1] = s
+    return s
+end
 local ns = { __DandersUI = UI }
 load_ui_file_into("IconRail.lua", ns)
 
@@ -112,6 +119,10 @@ check(last.target == g and last.color == RED and last.instant == true, "select: 
 eq(g.Label.color[1], 1, "select: the selected label wears the accent")
 check(g.Plate.shown, "select: ...over a tinted plate")
 check(not c.Plate.shown, "select: the others rest with no plate")
+check(g.PlateSurface and g.PlateSurface.radius == 6 and g.PlateSurface.border == false,
+      "select: the plate is a borderless rounded surface")
+check(g.PlateSurface.fill and g.PlateSurface.fill[1] == 1 and g.PlateSurface.fill[4] == 0.18,
+      "select: ...filled with the accent at a light tint")
 rail:Select("clicks")
 last = markerLog[#markerLog]
 check(last.target == c and last.color == ACCENT, "select: no accent given falls back to the host accent")
