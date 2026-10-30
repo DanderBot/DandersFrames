@@ -73,6 +73,9 @@ Features\Search.lua
 Features\ChangedSettings.lua
 GUI\Sections.lua
 GUI\Controls.lua
+# Settings module registry (Group Frames / Binds / Global and GUI:SelectModule).
+# Before Panel.lua: CreateGUI attaches the tab buttons to these modules.
+GUI\ModuleRegistry.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
 GUI\TextureLayerControls.lua
