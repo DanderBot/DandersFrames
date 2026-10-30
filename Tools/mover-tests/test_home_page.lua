@@ -194,5 +194,52 @@ local TOC = options_file_source("DandersFrames_Options.toc")
 check(TOC:find("GUI\\Pages\\Home.lua", 1, true) ~= nil and TOC:find("GUI\\Pages\\ModulesPage.lua", 1, true) ~= nil,
       "toc: both pages are listed")
 
+-- ---- locks: Home and the Modules page refuse what the rail refuses ------------
+print("-- Home: a locked module is refused from Home and the Modules page")
+do
+    -- Auto Layout editing: GLOBAL, Party, Binds and Profiles locked; Raid open.
+    GUI.SelectedMode = "raid"
+    GUI:SetModuleLocked("global", true)
+    GUI:SetModuleLocked("group", true, "party")
+    GUI:SetModuleLocked("clicks", true)
+    GUI:SetModuleLocked("profiles", true)
+    check(GUI:IsModulePickLocked("global") and GUI:IsModulePickLocked("clicks")
+          and GUI:IsModulePickLocked("profiles", "profiles_manage"),
+          "lock: Global, Binds and Profiles are refused")
+    check(not GUI:IsModulePickLocked("group"), "lock: Group Frames with no tab lands on Raid, which is open")
+    check(GUI:IsModulePickLocked("group", "party") and not GUI:IsModulePickLocked("group", "raid"),
+          "lock: ...its Party tab is refused, its Raid tab is not")
+    check(not GUI:IsModulePickLocked("home") and not GUI:IsModulePickLocked("modules")
+          and not GUI:IsModulePickLocked("nope"), "lock: Home, Modules and an unknown id are never refused")
+    local gdef, entered = GUI:GetModule("global"), false
+    local origEnter = gdef.onEnter
+    gdef.onEnter = function() entered = true end
+    check(GUI:SelectModule("global") == true and entered, "lock: a programmatic SelectModule is still not refused")
+    gdef.onEnter = origEnter
+    GUI:SetModuleLocked("global", false)
+    GUI:SetModuleLocked("group", false, "party")
+    GUI:SetModuleLocked("clicks", false)
+    GUI:SetModuleLocked("profiles", false)
+    check(not GUI:IsModulePickLocked("global") and not GUI:IsModulePickLocked("group", "party"),
+          "lock: ...and unlocking opens them again")
+    GUI.SelectedMode = "party"
+
+    local MODS = options_file_source("GUI/Pages/ModulesPage.lua"):gsub("\r\n", "\n")
+    local H = options_file_source("GUI/Pages/Home.lua"):gsub("\r\n", "\n")
+    check(H:find("if self.target and not GUI:IsModulePickLocked(self.target) then\n            GUI:SelectModule(self.target)", 1, true) ~= nil,
+          "entry: a Home tile checks the lock before it switches")
+    check(H:find("t:SetEnabled(not GUI:IsModulePickLocked(def.id))", 1, true) ~= nil,
+          "entry: ...and is greyed while locked")
+    check(H:find('if GUI:IsModulePickLocked("profiles", "profiles_manage") then return end\n        GUI:SelectModule("profiles", "profiles_manage")', 1, true) ~= nil,
+          "entry: the Profile link checks the lock")
+    check(H:find("if not GUI:IsModulePickLocked(fix.page) then GUI:SelectModule(fix.page) end", 1, true) ~= nil,
+          "entry: ...and so does a Needs-attention fix that opens a module")
+    check(MODS:find("if self.target and not GUI:IsModulePickLocked(self.target, self.targetTab) then", 1, true) ~= nil,
+          "entry: a Modules-page Open button checks the lock")
+    check(MODS:find("row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))", 1, true) ~= nil
+          and MODS:find('row.Open:SetEnabled(on and not GUI:IsModulePickLocked("group", mode))', 1, true) ~= nil,
+          "entry: ...and is greyed while locked")
+end
+
 DF.db, DF.ClickCast = nil, nil
 DandersFrames = savedDF

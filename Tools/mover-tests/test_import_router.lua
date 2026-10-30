@@ -151,8 +151,8 @@ check(PAGE:find("DF.ImportRouter.Parse(self.importEditBox:GetText())", 1, true) 
       "page: Parse String asks the router")
 check(PAGE:find("pcall(CC.ImportProfile, CC, parsed.str)", 1, true) ~= nil,
       "page: a click-cast string goes to CC:ImportProfile (its binding picker included)")
-check(PAGE:find("DF.ImportFilterString(parsed.str)", 1, true) ~= nil,
-      "page: a filter string goes to the Filter Designer's own flow")
+check(PAGE:find("DF.ImportFilterString(parsed.str, true)", 1, true) ~= nil,
+      "page: a filter string goes to the Filter Designer's own flow, flagged as not the designer's paste")
 check(PAGE:find("pcall(DF.ApplyImportedProfile, DF, importData,", 1, true) ~= nil,
       "page: a profile string keeps the profile import")
 check(PAGE:find("if not parsed or parsed.str ~= now then", 1, true) ~= nil,
@@ -160,6 +160,11 @@ check(PAGE:find("if not parsed or parsed.str ~= now then", 1, true) ~= nil,
 local FILTERUI = options_file_source("FilterRegistry/UI/Options.lua"):gsub("\r\n", "\n")
 check(FILTERUI:find("onAccept    = function(text) DF.ImportFilterString(text) end,", 1, true) ~= nil,
       "page: the Filter Designer's own Import Filter runs the same flow")
+check(FILTERUI:find('SelectFilter("custom", id)\n        if not outside then return end', 1, true) ~= nil,
+      "page: an import from outside the designer still confirms in chat once the designer is built")
+check(select(2, FILTERUI:gsub("ImportNamed%(def, outside%)", "")) == 3
+      and select(2, FILTERUI:gsub("ShowImported%(R:ImportFilterPayload%(def%), outside%)", "")) == 2,
+      "page: ...the flag reaches every import path")
 local TOC = options_file_source("DandersFrames_Options.toc"):gsub("\r\n", "\n")
 local routerAt = TOC:find("Features\\ImportRouter.lua", 1, true)
 local pagesAt = TOC:find("GUI\\Pages\\Profiles.lua", 1, true)

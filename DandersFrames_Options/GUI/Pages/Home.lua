@@ -270,7 +270,10 @@ local function MakeTile()
     Tint(status, C.textDim)
     t.TileStatus = status
     t:SetScript("OnClick", function(self)
-        if self.target then GUI:SelectModule(self.target) end
+        -- A locked module (Auto Layout editing) is refused, as on the rail.
+        if self.target and not GUI:IsModulePickLocked(self.target) then
+            GUI:SelectModule(self.target)
+        end
     end)
     return t
 end
@@ -338,7 +341,7 @@ local function RowButton(r)
             if not ok and err then geterrorhandler()(err) end
         elseif fix.page then
             if GUI:GetModule(fix.page) then
-                GUI:SelectModule(fix.page)
+                if not GUI:IsModulePickLocked(fix.page) then GUI:SelectModule(fix.page) end
             elseif GUI.LinkToSetting then
                 GUI:LinkToSetting({ page = fix.page })
             end
@@ -494,7 +497,11 @@ local function PaintHeader()
     W.hello:SetText(name and format(L["Hello, %s"], name) or L["Home"])
 
     local profile = DF.GetCurrentProfile and DF:GetCurrentProfile() or nil
-    local text = format(L["Profile: %s"], LinkMarkup("dfProfiles", profile or L["Profiles"]))
+    -- Profiles locked (an Auto Layout is being edited): the name is plain
+    -- text, not a link, and a click does nothing.
+    local locked = GUI:IsModulePickLocked("profiles", "profiles_manage")
+    local shown = profile or L["Profiles"]
+    local text = format(L["Profile: %s"], locked and (tostring(shown):gsub("|", "")) or LinkMarkup("dfProfiles", shown))
     local AP = DF.AutoProfilesUI
     local layout = AP and AP.IsLayoutActive and AP:IsLayoutActive()
         and AP.GetActiveLayoutName and AP:GetActiveLayoutName()
@@ -502,7 +509,10 @@ local function PaintHeader()
         text = text .. "  \194\183  " .. format(L["Layout: %s"], (tostring(layout):gsub("|", "")))
     end
     local w = max((view:GetWidth() or 0) - 4, 200)
-    local link = LinkFor("profile", view, text, function() GUI:SelectModule("profiles", "profiles_manage") end, w)
+    local link = LinkFor("profile", view, text, function()
+        if GUI:IsModulePickLocked("profiles", "profiles_manage") then return end
+        GUI:SelectModule("profiles", "profiles_manage")
+    end, w)
     link:ClearAllPoints()
     link:SetPoint("TOPLEFT", W.hello, "BOTTOMLEFT", 0, -6)
 end
@@ -543,6 +553,9 @@ function GUI:RefreshHomeView()
             t.target = def.id
             t.TileIcon:SetTexture(def.icon)
             t.TileIcon:SetAlpha(1)
+            -- Greyed and click-proof while the module is locked (Auto Layout
+            -- editing), as its rail item is.
+            t:SetEnabled(not GUI:IsModulePickLocked(def.id))
             t.TileName:SetText(GUI:ModuleLabel(def) or "")
             t.TileStatus:SetText(GUI:ModuleStatus(def))
         else
@@ -551,6 +564,7 @@ function GUI:RefreshHomeView()
             for _, def in ipairs(entry.more) do names[#names + 1] = GUI:ModuleLabel(def) or def.id end
             local mod = GUI:GetModule("modules")
             t.target = "modules"
+            t:SetEnabled(true)
             t.TileIcon:SetTexture(mod and mod.icon or nil)
             t.TileIcon:SetAlpha(0.6)
             t.TileName:SetText(format(L["%d more"], #entry.more))

@@ -193,7 +193,10 @@ local function MakeRow(sub)
     GUI:StyleButton(open, { text = L["Open"], width = 64, height = 22 })
     open:SetPoint("RIGHT", row, "RIGHT", -10, 0)
     open:SetScript("OnClick", function(self)
-        if self.target then GUI:SelectModule(self.target, self.targetTab) end
+        -- A locked module (Auto Layout editing) is refused, as on the rail.
+        if self.target and not GUI:IsModulePickLocked(self.target, self.targetTab) then
+            GUI:SelectModule(self.target, self.targetTab)
+        end
     end)
     row.Open = open
 
@@ -275,7 +278,7 @@ local function PaintModuleRow(row, def, on, soon)
     else
         row.Open:Show()
         row.Open.target, row.Open.targetTab = def.id, nil
-        row.Open:SetEnabled(on)
+        row.Open:SetEnabled(on and not GUI:IsModulePickLocked(def.id))
     end
 end
 
@@ -290,7 +293,7 @@ local function PaintSubRow(row, mode)
     row.onSwitch = function(want) GF.SetMode(mode, want); RefreshAll() end
     row.Open:Show()
     row.Open.target, row.Open.targetTab = "group", mode
-    row.Open:SetEnabled(on)
+    row.Open:SetEnabled(on and not GUI:IsModulePickLocked("group", mode))
 end
 
 function GUI:RefreshModulesView()

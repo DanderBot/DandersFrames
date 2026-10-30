@@ -418,6 +418,40 @@ do
     check(GUI.ModuleCrumb.shown, "paint: ...visibly")
     GUI.GlobalView = false
 
+    print("-- Module registry: every switch repaints the rail, once")
+    do
+        GUI.Colors.text = GUI.Colors.text or { r = 1, g = 1, b = 1 }
+        local selects = 0
+        local origSelect = rail.Select
+        function rail:Select(id, i) selects = selects + 1; return origSelect(self, id, i) end
+        GUI.SelectedMode = "party"; GUI.GlobalView = false; GUI:SyncSelectedModule()
+        GUI:SelectModule("global")
+        eq(rail.selected, "global", "shell: Global lit after the switch to it")
+        GUI:SelectModule("home")
+        eq(rail.selected, "home", "shell: ...Home lit after Global -> Home")
+        GUI:SelectModule("global")
+        eq(rail.selected, "global", "shell: Global -> Home -> Global lights Global again (its onEnter returns early)")
+        eq(GUI.ModuleCrumb.text, "Global", "shell: ...and deck 2 names Global, not Home")
+        GUI:SelectModule("modules")
+        GUI:SelectModule("global")
+        eq(rail.selected, "global", "shell: ...from the Modules page too")
+        -- A switch that paints on its own (UpdateThemeColors) is not painted twice.
+        local origTheme = GUI.UpdateThemeColors
+        GUI.UpdateThemeColors = function() GUI:RefreshModuleShell(true) end
+        selects = 0
+        GUI:SelectModule("home")
+        eq(selects, 1, "shell: a switch that repainted itself is not repainted again")
+        selects = 0
+        GUI:SelectModule("global")
+        eq(selects, 1, "shell: ...and one that did not is repainted once")
+        selects = 0
+        GUI:SelectModule("group", nil, { forPage = "general_frame" })
+        eq(selects, 0, "shell: the page path leaves the repaint to SelectTab")
+        GUI.UpdateThemeColors = origTheme
+        rail.Select = origSelect
+        GUI.SelectedMode = "party"; GUI.GlobalView = false; GUI:SyncSelectedModule()
+    end
+
     print("-- Module registry: last place")
     local ws = {}
     function DF:GetWindowState() return ws end

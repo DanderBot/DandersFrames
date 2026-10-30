@@ -216,11 +216,28 @@ function GUI:SetModuleLocked(id, locked, tabId)
     if tabId == nil and GUI.OnModuleLockChanged then
         GUI.OnModuleLockChanged(id, locks[id] == true)
     end
+    -- Home's tiles and the Modules page's Open buttons grey with the lock too
+    -- (both refreshes do nothing while their page is hidden).
+    if GUI.RefreshHomeView then GUI:RefreshHomeView() end
+    if GUI.RefreshModulesView then GUI:RefreshModulesView() end
 end
 
 function GUI:IsModuleLocked(id, tabId)
     if locks[id] then return true end
     return tabId ~= nil and locks[LockKey(id, tabId)] == true
+end
+
+-- ★ FOR A USER-FACING WAY INTO A MODULE THAT IS NOT THE RAIL (Home's tiles and
+-- profile link, the Modules page's Open buttons, a Needs-attention fix): is
+-- the pick refused? As the rail's own click is. A pick without a tab lands
+-- on the module's default one, so that is the tab whose lock counts (Group
+-- Frames while an Auto Layout is edited: Raid is open, Party is not).
+-- SelectModule itself still refuses nothing -- see LOCKS above.
+function GUI:IsModulePickLocked(id, tabId)
+    local def = modules[id]
+    if not def then return false end
+    if tabId == nil and def.defaultTab then tabId = def.defaultTab() end
+    return GUI:IsModuleLocked(id, tabId)
 end
 
 -- The deck-2 button that stands for a module's tab. GUI/Rail.lua attaches
@@ -272,6 +289,7 @@ function GUI:SelectModule(id, tabId, opts)
     end
 
     local fromId = CurrentModuleId()
+    local paintsBefore = GUI._shellPaints
     if fromId ~= id then
         local from = modules[fromId]
         if from and from.onLeave then from.onLeave() end
@@ -286,6 +304,18 @@ function GUI:SelectModule(id, tabId, opts)
     -- LeaveGlobalTo); never outlives the switch.
     GUI._leavingProfiles = nil
     GUI:SyncSelectedModule()
+    -- ★ THE RAIL AND DECK 2 FOLLOW EVERY SWITCH. Most onEnters end in a page
+    -- select or UpdateThemeColors, which repaints them; one that has nothing
+    -- to do (GLOBAL picked again from Home, with its view still up underneath)
+    -- returns early, and the rail stayed lit on the module just left -- with
+    -- a click on the right one then ignored as "already showing". Painted
+    -- here only when the switch did not paint it already (RefreshModuleShell
+    -- counts its paints), so nothing glides twice. Not on the page path:
+    -- SelectTab is mid-switch and ends in its own repaint.
+    if not forPage and GUI.RefreshModuleShell and GUI._shellPaints == paintsBefore then
+        local f = DF.GUIFrame
+        GUI:RefreshModuleShell(not (f and f.IsShown and f:IsShown()))
+    end
     return true
 end
 

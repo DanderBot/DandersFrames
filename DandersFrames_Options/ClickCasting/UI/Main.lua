@@ -58,8 +58,9 @@ function CC:RequestEnabled(wantEnabled, checkbox, onDone)
         end
 
         if #conflicts > 0 then
-            -- The popup owns the decision from here; it unchecks on cancel.
-            CC:ShowClickCastConflictPopup(conflicts, checkbox)
+            -- The popup owns the decision from here; it unchecks on cancel,
+            -- and runs onDone once a choice turns click-casting on.
+            CC:ShowClickCastConflictPopup(conflicts, checkbox, onDone)
             return
         end
 

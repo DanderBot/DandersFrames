@@ -764,7 +764,8 @@ local function BuildImportExport(self, db, Add, AddSpace, AddSyncPoint)
             ImportClickCast(parsed)
         elseif parsed.kind == "filter" then
             if DF.ImportFilterString then
-                DF.ImportFilterString(parsed.str)
+                -- true: not the designer's own paste, so it confirms in chat.
+                DF.ImportFilterString(parsed.str, true)
             else
                 DF:Err(L["Import failed. Please try again or check for errors."])
             end

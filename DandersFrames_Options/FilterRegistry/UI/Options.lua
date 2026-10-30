@@ -127,24 +127,25 @@ end
 -- BuildFilterDesignerPage assigns into. Same trap as `GUI`, noted further up.
 local SelectFilter   -- forward declaration; assigned in DF:BuildFilterDesignerPage
 
--- Select the imported filter in the designer when its page has been built;
--- otherwise (Profiles > Import / Export, before the designer was ever opened)
--- the import still happens, and chat says where to find it.
-local function ShowImported(id)
+-- Select the imported filter in the designer when its page has been built,
+-- and say in chat where to find it unless the paste was the designer's own:
+-- from Profiles > Import / Export (`outside`) the designer is not on screen
+-- even once it has been built, so selecting it there alone shows nothing.
+local function ShowImported(id, outside)
     if SelectFilter then
         SelectFilter("custom", id)
-        return
+        if not outside then return end
     end
     local R = DF.FilterRegistry
     local f = R and id and R:GetCustomFilter(id)
     DF:Say(format(L["Filter imported: %s. Find it in the Filter Designer."], (f and f.name) or tostring(id)))
 end
 
-local function ImportNamed(def)
+local function ImportNamed(def, outside)
     local R = DF.FilterRegistry
     if not R then return end
     if not R:IsCustomFilterNameTaken(def.name) then
-        ShowImported(R:ImportFilterPayload(def))
+        ShowImported(R:ImportFilterPayload(def), outside)
         return
     end
     ChainPopup(function()
@@ -156,7 +157,7 @@ local function ImportNamed(def)
                 text = Trim(text or "")
                 if text == "" then return end
                 def.name = text     -- decoded payload is ours; safe to retitle
-                ShowImported(R:ImportFilterPayload(def))
+                ShowImported(R:ImportFilterPayload(def), outside)
             end)
     end)
 end
@@ -178,7 +179,9 @@ end
 -- (GUI/Pages/Profiles.lua) both run this. Decode, then ask only when the
 -- content or the name already exists. Returns false when the string was refused
 -- (the error popup is already up), true when the import went ahead or is asking.
-function DF.ImportFilterString(text)
+-- outside: the paste was not the designer's own (Profiles > Import / Export),
+-- so the import always confirms in chat -- see ShowImported.
+function DF.ImportFilterString(text, outside)
     local R = DF.FilterRegistry
     if not R or not text or Trim(text) == "" then return false end
     local def, err = R:DecodeFilterString(text)
@@ -194,7 +197,7 @@ function DF.ImportFilterString(text)
         -- No content match, but the NAME can still collide -- that is the case
         -- nothing checked: two rows reading the same thing with different spells
         -- behind them. ImportNamed asks only if it does.
-        ImportNamed(def)
+        ImportNamed(def, outside)
         return true
     end
     -- Content-equal filter already present. Profile import silently reuses it,
@@ -210,7 +213,7 @@ function DF.ImportFilterString(text)
             message = message,
             buttons = {
                 { label = L["Import as Copy"], onClick = function()
-                    ImportNamed(def)
+                    ImportNamed(def, outside)
                 end },
                 { label = L["Use Existing"], onClick = function()
                     if SelectFilter then SelectFilter("custom", match) end

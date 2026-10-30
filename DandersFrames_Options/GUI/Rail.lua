@@ -204,6 +204,8 @@ end
 function GUI:RefreshModuleShell(instant)
     local rail = GUI.ModuleRail
     if not rail then return end
+    -- Counted for GUI:SelectModule, which repaints after a switch that did not.
+    GUI._shellPaints = (GUI._shellPaints or 0) + 1
     local cur = GUI.CurrentModuleId()
     SyncRailItems(rail)
     rail:Select(cur, instant)
