@@ -244,6 +244,8 @@ function GUI:RestoreModuleOnOpen(id)
         if not GUI.GlobalView and not GUI:IsModuleLocked("global") then
             GUI:SelectModule("global")
         end
+    elseif GUI:GetModule(id) and GUI:GetModule(id).placeholder then
+        GUI:SelectModule(id)
     elseif id == "clicks" then
         -- Binds hides frames and drops test mode on the way in. A user who
         -- reopens with a preview up or a mover session running is looking at
@@ -255,4 +257,50 @@ function GUI:RestoreModuleOnOpen(id)
     end
     -- "group" (or nothing saved): ToggleGUI's party/raid auto-pick already
     -- put the window there.
+end
+
+-- ============================================================
+-- PLACEHOLDER PANEL -- what a rail item with no page yet shows (Home,
+-- Modules, Profiles). Built once, over the same rect as the Binds panel;
+-- GUI:ShowPlaceholderContent (GUI/Panel.lua) hides the sidebar and page.
+-- ============================================================
+function GUI:GetPlaceholderPanel()
+    local panel = GUI.PlaceholderPanel
+    if panel then return panel end
+    local frame = DF.GUIFrame
+    if not frame then return nil end
+    panel = CreateFrame("Frame", nil, frame)
+    panel:SetPoint("TOPLEFT", GUI.RailWidth + 12, -64)
+    panel:SetPoint("BOTTOMRIGHT", -12, 36)
+    panel:SetFrameLevel(frame:GetFrameLevel() + 2)
+
+    local icon = panel:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(48, 48)
+    icon:SetPoint("CENTER", panel, "CENTER", 0, 40)
+    local dim = GUI.Colors.textDim
+    icon:SetVertexColor(dim.r, dim.g, dim.b)
+    panel.Icon = icon
+
+    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+    title:SetPoint("TOP", icon, "BOTTOM", 0, -12)
+    panel.Title = title
+
+    local note = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    note:SetPoint("TOP", title, "BOTTOM", 0, -6)
+    note:SetTextColor(dim.r, dim.g, dim.b)
+    note:SetText(L["Coming in a later update."])
+    panel.Note = note
+
+    panel:Hide()
+    GUI.PlaceholderPanel = panel
+    return panel
+end
+
+function GUI:PaintPlaceholderPanel(def)
+    local panel = GUI:GetPlaceholderPanel()
+    if not panel then return end
+    panel.Icon:SetTexture(def.icon)
+    panel.Title:SetText(GUI:ModuleLabel(def) or "")
+    panel.Note:SetText(L["Coming in a later update."])
+    panel:Show()
 end

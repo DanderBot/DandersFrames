@@ -2833,6 +2833,7 @@ function DF:CreateGUI()
     -- Function to show normal Party/Raid content
     function GUI:ShowNormalContent()
         if clickCastPanel then clickCastPanel:Hide() end
+        if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
         if tabFrame then tabFrame:Show() end
         if content then content:Show() end
 
@@ -2845,10 +2846,21 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
     end
     
+    -- A rail item with no page yet (GUI/Rail.lua, PLACEHOLDER PANEL).
+    function GUI:ShowPlaceholderContent(def)
+        if tabFrame then tabFrame:Hide() end
+        if content then content:Hide() end
+        if clickCastPanel then clickCastPanel:Hide() end
+        -- Off Binds' wider minimum: nothing here needs it.
+        frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
+        GUI:PaintPlaceholderPanel(def)
+    end
+
     -- Function to show Click Casting content
     function GUI:ShowClickCastingContent()
         if tabFrame then tabFrame:Hide() end
         if content then content:Hide() end
+        if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
         
         -- Set larger minimum width for clicks tab
         frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)

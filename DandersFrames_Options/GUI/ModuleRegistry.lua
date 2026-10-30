@@ -88,6 +88,9 @@ end
 -- of GlobalView, OR on Binds", which this order reproduces exactly even for a
 -- (never written) Binds-with-GlobalView state.
 local function CurrentModuleId()
+    -- A placeholder rail item (Home, Modules, Profiles) sits over whatever
+    -- state the window was in, so it wins over all of it.
+    if GUI.PlaceholderView then return GUI.PlaceholderView end
     if GUI.SelectedMode == "clicks" then return "clicks" end
     if GUI.GlobalView == true then return "global" end
     return "group"
@@ -532,6 +535,54 @@ GUI:RegisterModule({
         GUI.SelectTab(GUI:LastTabInView())
     end,
     onEnterForPage = function() GUI:EnterView(true) end,
+})
+
+-- ============================================================
+-- PLACEHOLDER MODULES: HOME, MODULES, PROFILES
+-- In the rail now so the layout is final; each shows a "coming in a later
+-- update" panel until its page is built. Like GLOBAL they leave the mode
+-- under them exactly as it is -- no test-mode or unlock hand-over, no mover
+-- session to end -- and leaving one puts the normal content back first.
+-- ============================================================
+
+local function Placeholder(def)
+    def.placeholder = true
+    def.sidebar = false
+    def.accent = def.accent or function() return GUI.Colors.text end
+    def.onEnter = function()
+        GUI.PlaceholderView = def.id
+        GUI:ShowPlaceholderContent(def)
+        GUI.UpdateThemeColors()
+    end
+    def.onLeave = function()
+        GUI.PlaceholderView = nil
+        GUI:ShowNormalContent()
+    end
+    GUI:RegisterModule(def)
+end
+
+Placeholder({
+    id = "home",
+    label = function() return L["Home"] end,
+    icon = ICONS .. "home.png",
+    order = 0,
+    slot = "top",
+})
+
+Placeholder({
+    id = "modules",
+    label = function() return L["Modules"] end,
+    icon = ICONS .. "extension.png",
+    order = 80,
+    slot = "bottom",
+})
+
+Placeholder({
+    id = "profiles",
+    label = function() return L["Profiles"] end,
+    icon = ICONS .. "account_circle.png",
+    order = 85,
+    slot = "bottom",
 })
 
 GUI:SyncSelectedModule()

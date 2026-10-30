@@ -6,6 +6,7 @@ local DF = DandersFrames
 
 DF.ICON_MANIFEST = {
     df = {
+        "account_circle",
         "add",
         "auto_awesome",
         "border_style",
@@ -27,6 +28,7 @@ DF.ICON_MANIFEST = {
         "expand_content",
         "expand_less",
         "expand_more",
+        "extension",
         "favorite",
         "filter_alt",
         "filter_header",
@@ -37,6 +39,7 @@ DF.ICON_MANIFEST = {
         "group_add",
         "groups",
         "heart_minus",
+        "home",
         "info",
         "keyboard",
         "language",

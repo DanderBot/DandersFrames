@@ -26,6 +26,7 @@ function GUI:SetAccent(c) calls[#calls + 1] = "accent:" .. tostring(c) end
 function GUI.UpdateThemeColors() calls[#calls + 1] = "theme" end
 function GUI:ShowNormalContent() calls[#calls + 1] = "normal" end
 function GUI:ShowClickCastingContent() calls[#calls + 1] = "clickcontent" end
+function GUI:ShowPlaceholderContent(def) calls[#calls + 1] = "placeholder:" .. tostring(def.id) end
 function GUI:UpdateTabAvailability() calls[#calls + 1] = "avail" end
 function GUI:RefreshCurrentPageForModeSwitch() calls[#calls + 1] = "refresh" end
 function GUI:LastTabInView() return GUI.GlobalView and "general_settings" or "general_frame" end
@@ -70,7 +71,7 @@ check(GUI.RegisterModule and GUI.SelectModule and GUI.GetModule and GUI.GetModul
       and GUI.SetModuleLocked and GUI.IsModuleLocked, "api: the registry API is on GUI")
 local ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "group,clicks,global", "order: the three built-ins, top slot first, global at the bottom")
+eq(table.concat(ids, ","), "home,group,clicks,modules,profiles,global", "order: the built-ins, top slot first, global last at the bottom")
 eq(GUI.SelectedModule, "group", "state: the window starts on Group Frames")
 eq(GUI:GetModule().id, "group", "get: no id is the module showing")
 eq(GUI:GetModule("clicks").id, "clicks", "get: ...and an id is that module")
@@ -83,11 +84,11 @@ GUI:RegisterModule({ id = "zz_test", order = 5, slot = "top" })
 GUI:RegisterModule({ id = "zz_bottom", order = 1, slot = "bottom" })
 ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "zz_test,group,clicks,zz_bottom,global", "order: by slot, then order")
+eq(table.concat(ids, ","), "home,zz_test,group,clicks,zz_bottom,modules,profiles,global", "order: by slot, then order")
 GUI:RegisterModule({ id = "zz_test", order = 50 })
 ids = {}
 for _, def in ipairs(GUI:GetModules()) do ids[#ids + 1] = def.id end
-eq(table.concat(ids, ","), "group,clicks,zz_test,zz_bottom,global", "register: re-registering an id replaces it, not duplicates it")
+eq(table.concat(ids, ","), "home,group,clicks,zz_test,zz_bottom,modules,profiles,global", "register: re-registering an id replaces it, not duplicates it")
 calls = {}
 check(GUI:RegisterModule({}) == nil and joined() == "error", "register: no id is refused, loudly in debug")
 calls = {}
@@ -187,6 +188,33 @@ GUI:SelectModule("group", "raid", { forPage = "general_frame" })
 check(replay == nil, "mover: the page path ends no session")
 DF.MoverBridge = nil
 
+-- ---- placeholders ------------------------------------------------------
+print("-- Module registry: placeholder rail items")
+DF.MoverBridge = nil
+GUI:SelectModule("group", "party")
+calls = {}
+GUI:SelectModule("home")
+eq(GUI.SelectedModule, "home", "placeholder: Home is the module showing")
+eq(GUI.SelectedMode, "party", "placeholder: ...over the mode it left, untouched")
+check(joined():find("placeholder:home", 1, true) ~= nil, "placeholder: its panel is shown")
+check(GUI:GetModule("home").placeholder and GUI:GetModule("profiles").placeholder
+      and GUI:GetModule("modules").placeholder, "placeholder: Home, Modules and Profiles are placeholders")
+calls = {}
+GUI:SelectModule("profiles")
+eq(GUI.SelectedModule, "profiles", "placeholder: one placeholder to another")
+calls = {}
+GUI:SelectModule("group", "raid")
+eq(GUI.PlaceholderView, nil, "placeholder: leaving it clears the view")
+eq(GUI.SelectedModule, "group", "placeholder: ...and Group Frames shows")
+check(joined():find("normal", 1, true) ~= nil, "placeholder: ...with the normal content put back")
+GUI:SelectModule("global")
+calls = {}
+GUI:SelectModule("modules")
+GUI:SelectModule("global")
+eq(GUI.SelectedModule, "global", "placeholder: back to Global from a placeholder opened on Global")
+check(GUI.GlobalView == true, "placeholder: ...the Global view it sat over is still there")
+GUI:SelectModule("group", "party")
+
 -- ---- locks ------------------------------------------------------------
 print("-- Module registry: locks")
 local function button()
@@ -284,8 +312,8 @@ do
     GUI:BuildModuleShell(region(), deck2, function() end)
     check(GUI.ModuleRail == rail, "rail: built and published")
     local ids = table.concat(rail:GetItemIds(), ",")
-    check(ids:find("group,clicks", 1, true) == 1 and ids:find("global", 1, true) ~= nil,
-          "rail: Group Frames and Click-Casting on top, Global listed")
+    check(ids:find("home,group,clicks", 1, true) == 1 and ids:find("modules,profiles,global", 1, true) ~= nil,
+          "rail: Home, Group Frames and Click-Casting on top; Modules, Profiles, Global at the bottom")
     check(GUI.PartyButton and GUI.RaidButton and GUI.PartyButton.styleText == "PARTY",
           "deck: Party / Raid tabs built from the module's tabs")
     eq(GUI.RaidButton.styleAccent, "RAID", "deck: ...Raid in the raid accent")
