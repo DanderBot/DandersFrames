@@ -3355,4 +3355,8 @@ L["The list starts with only the textures made for this layer. Tick to choose fr
 L["Tile Size"] = true
 L["Tile"] = true
 L["Tube"] = true
+-- Profiles rail item: Manage (rename), Spec & Character, Click Casting and the
+-- Import / Export paste box that routes every string type.
+L["Renamed profile '%s' to '%s'."] = true
+L["The Default profile can't be renamed."] = true
 --@end-do-not-package@

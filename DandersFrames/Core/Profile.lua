@@ -569,6 +569,70 @@ function DF:DuplicateProfile(newName)
 end
 
 -- ============================================================
+-- RENAME
+-- Moves the stored profile to a new key. Nothing in it changes, so there is no
+-- refresh: DF.db is the same live table before and after, only the name it is
+-- saved under moves.
+--
+-- ⚠ ONLY THIS CHARACTER'S REFERENCES CAN BE UPDATED. DandersFramesCharDB is the
+-- logged-in character's alone; every other character's currentProfile and spec
+-- assignments still name the old profile. Those are handled where they are read:
+-- the login pass (Core.lua, "Set current profile") falls back to Default when
+-- the named profile is missing, and DF:CheckProfileAutoSwitch skips a spec whose
+-- profile no longer exists. The rename prompt says so.
+--
+-- Returns true, or false plus a reason: "empty", "default", "missing", "exists".
+-- ============================================================
+function DF:RenameProfile(oldName, newName)
+    local L = DF.L
+    if type(newName) == "string" then newName = newName:match("^%s*(.-)%s*$") end
+    if type(newName) ~= "string" or newName == "" then
+        DF:Err(L["Please enter a profile name."])
+        return false, "empty"
+    end
+    if oldName == "Default" then
+        DF:Err(L["The Default profile can't be renamed."])
+        return false, "default"
+    end
+    local sv = DandersFramesDB_v2
+    local profiles = sv and sv.profiles
+    if type(oldName) ~= "string" or type(profiles) ~= "table" or profiles[oldName] == nil then
+        return false, "missing"
+    end
+    if newName == oldName then return true end
+    -- Default is always listed (DF:GetProfiles) whether or not it is stored yet.
+    if newName == "Default" or profiles[newName] ~= nil then
+        DF:Err(format(L["Profile '%s' already exists."], newName))
+        return false, "exists"
+    end
+
+    profiles[newName] = profiles[oldName]
+    profiles[oldName] = nil
+
+    if sv.currentProfile == oldName then sv.currentProfile = newName end
+    local char = DandersFramesCharDB
+    if type(char) == "table" then
+        if char.currentProfile == oldName then char.currentProfile = newName end
+        if type(char.specProfiles) == "table" then
+            for spec, name in pairs(char.specProfiles) do
+                if name == oldName then char.specProfiles[spec] = newName end
+            end
+        end
+    end
+    -- An auto layout being edited remembers whose snapshot it holds by NAME
+    -- (AutoProfilesUI.globalSnapshotOwner); the profile is the same one.
+    local AP = DF.AutoProfilesUI
+    if AP and AP.globalSnapshotOwner == oldName then AP.globalSnapshotOwner = newName end
+
+    -- The title-bar chip names the current profile.
+    local GUI = DF.GUI
+    if GUI and GUI.UpdateProfileChip then GUI.UpdateProfileChip() end
+
+    DF:Say(format(L["Renamed profile '%s' to '%s'."], oldName, newName))
+    return true
+end
+
+-- ============================================================
 -- BASE64 ENCODING/DECODING
 -- ============================================================
 
