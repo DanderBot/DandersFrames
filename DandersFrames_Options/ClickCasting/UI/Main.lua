@@ -27,6 +27,60 @@ if originalCreateUnitFrame then
 end
 
 -- ============================================================
+-- TURNING CLICK-CASTING ON OR OFF FROM THE UI
+-- The one path both switches take: the Enabled box in the Binds header and
+-- the Click-Casting row on the settings window's Modules page.
+--
+-- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning
+-- opens a popup, and the write happens in that popup's confirm callback, not
+-- on the click. `checkbox` stays ticked while the popup is up; the popup's
+-- CANCEL path unchecks it. `onDone` (optional) runs after a write this
+-- function makes itself (disable, or a confirmed enable).
+-- ============================================================
+function CC:RequestEnabled(wantEnabled, checkbox, onDone)
+    if wantEnabled then
+        -- Check for conflicting addons
+        local conflicts = {}
+        if C_AddOns and C_AddOns.IsAddOnLoaded then
+            if C_AddOns.IsAddOnLoaded("Clique") then
+                table.insert(conflicts, "Clique")
+            end
+            if C_AddOns.IsAddOnLoaded("Clicked") then
+                table.insert(conflicts, "Clicked")
+            end
+        elseif IsAddOnLoaded then
+            if IsAddOnLoaded("Clique") then
+                table.insert(conflicts, "Clique")
+            end
+            if IsAddOnLoaded("Clicked") then
+                table.insert(conflicts, "Clicked")
+            end
+        end
+
+        if #conflicts > 0 then
+            -- The popup owns the decision from here; it unchecks on cancel.
+            CC:ShowClickCastConflictPopup(conflicts, checkbox)
+            return
+        end
+
+        -- No addon conflicts - show Blizzard warning
+        CC:ShowBlizzardClickCastWarning(checkbox, function()
+            -- Proceed with enabling
+            CC.db.enabled = true
+            CC:SetEnabled(true)
+            if onDone then onDone() end
+        end)
+        -- The warning's confirm callback owns the write; it unchecks on cancel.
+        return
+    end
+
+    -- Disabling - proceed normally (no popup, so write it here).
+    CC.db.enabled = false
+    CC:SetEnabled(false)
+    if onDone then onDone() end
+end
+
+-- ============================================================
 -- INITIALIZATION HOOK
 -- ============================================================
 
@@ -161,48 +215,11 @@ function CC:CreateClickCastUI(parent)
         nativeCheck = true,
         labelGap    = 3,
         get         = function() return CC.db and CC.db.enabled end,
-        onClick     = function(wantEnabled)
-        if wantEnabled then
-            -- Check for conflicting addons
-            local conflicts = {}
-            if C_AddOns and C_AddOns.IsAddOnLoaded then
-                if C_AddOns.IsAddOnLoaded("Clique") then
-                    table.insert(conflicts, "Clique")
-                end
-                if C_AddOns.IsAddOnLoaded("Clicked") then
-                    table.insert(conflicts, "Clicked")
-                end
-            elseif IsAddOnLoaded then
-                if IsAddOnLoaded("Clique") then
-                    table.insert(conflicts, "Clique")
-                end
-                if IsAddOnLoaded("Clicked") then
-                    table.insert(conflicts, "Clicked")
-                end
-            end
-            
-            if #conflicts > 0 then
-                -- The popup owns the decision from here; it unchecks on cancel.
-                CC:ShowClickCastConflictPopup(conflicts, enableCb)
-                return
-            end
-
-            -- No addon conflicts - show Blizzard warning
-            CC:ShowBlizzardClickCastWarning(enableCb, function()
-                -- Proceed with enabling
-                CC.db.enabled = true
-                CC:SetEnabled(true)
-            end)
-            -- The warning's confirm callback owns the write; it unchecks on cancel.
-            return
-        end
-
-        -- Disabling - proceed normally (no popup, so write it here).
-        CC.db.enabled = false
-        CC:SetEnabled(false)
-        end,
+        onClick     = function(wantEnabled) CC:RequestEnabled(wantEnabled, enableCb) end,
     })
     enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
+    -- The Modules page switches click-casting too; it repaints this box after.
+    CC.headerEnableCb = enableCb
 
     -- Profile settings cogwheel (far right of row 1)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")

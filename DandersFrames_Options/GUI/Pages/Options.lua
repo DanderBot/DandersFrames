@@ -2444,6 +2444,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- party (typical intent) and "disabling" DF party also enables
         -- Blizzard party (so the user isn't left with no frames).
         local function PromptReloadAfterModeToggle(mode)
+            -- A mode ticked back on here makes the Modules page's master-switch
+            -- stash meaningless (GUI/Pages/ModulesPage.lua, GF.Settle).
+            if GUI.GroupFrames and GUI.GroupFrames.Settle then GUI.GroupFrames.Settle() end
             if not DF:EnableFlagsDifferFromLoaded() then return end
             if not DF.ShowPopupAlert then return end
 
@@ -2579,6 +2582,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent,
                 L["Completely enable or disable the Party or Raid frame system. Disabled modes are never created, consuming zero performance in the background. Requires a UI reload to apply."],
                 260), 80)
+            -- The same two switches, plus the Group Frames master, live on the
+            -- settings window's Modules page (GUI/Pages/ModulesPage.lua). These
+            -- stay and keep working; the line points there.
+            local modulesLink = format("|cffffffff|HdfModules|h%s|h|r", L["Modules page"])
+            local note = GUI:CreateLink(parent, format(L["Turn modules on or off on the %s."], modulesLink), {
+                width = GUI:GroupInnerWidth(group),
+                onLinkClick = function() GUI:SelectModule("modules") end,
+            })
+            group:AddWidget(note, (note.layoutHeight or 16) + 2)
         end
 
         -- The modes that are running, always: "Party · Raid", "Raid only",

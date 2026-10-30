@@ -98,13 +98,15 @@ end
 
 -- Show the standard "reload to apply enable changes" popup if the flags
 -- have diverged from the loaded state. Safe to call from any context.
-function DF:PromptReloadIfEnableFlagsChanged()
+-- `message` (optional): the popup's text, for a caller that is not a profile
+-- change (the Modules page's switches); the default speaks of a new profile.
+function DF:PromptReloadIfEnableFlagsChanged(message)
     if not DF:EnableFlagsDifferFromLoaded() then return end
     if not DF.ShowPopupAlert then return end
     local L = DF.L
     DF:ShowPopupAlert({
         title = L["Reload Required"],
-        message = L["The new profile changes which frame modes are enabled. A UI reload is required to apply this.\n\nReload now?"],
+        message = message or L["The new profile changes which frame modes are enabled. A UI reload is required to apply this.\n\nReload now?"],
         buttons = {
             { label = L["Reload Now"], onClick = function() ReloadUI() end },
             { label = L["Later"] },
