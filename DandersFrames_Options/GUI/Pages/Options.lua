@@ -347,8 +347,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     GUI.CreateResetOnlyButton = CreateResetOnlyButton
 
-    -- Define category order
-    GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
+    -- Define category order. "profiles" is the Profiles rail item's own sidebar
+    -- (GUI/Pages/Profiles.lua): GUI:IsTabInView shows it there and nowhere else.
+    GUI.CategoryOrder = {"general", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
     -- ========================================
     -- CATEGORY: General

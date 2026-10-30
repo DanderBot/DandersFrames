@@ -541,9 +541,6 @@ GUI.GlobalPages = {
     general_nicknames     = true,
     display_classcolors   = true,
     auras_filterdesigner  = true,
-    profiles_manage       = true,
-    profiles_importexport = true,
-    profiles_changed_global = true,
     debug_console         = true,
 }
 GUI.GlobalView = false
@@ -552,9 +549,34 @@ function GUI.IsGlobalPage(name)
     return name ~= nil and GUI.GlobalPages[name] == true
 end
 
--- The accent for whichever tab the window is showing.
+-- ============================================================
+-- THE PROFILES SIDEBAR
+-- ------------------------------------------------------------
+-- The Profiles rail item's pages (DandersFrames_Options/GUI/Pages/Profiles.lua).
+-- They belong to neither Party/Raid nor GLOBAL, and they are MODE-NEUTRAL: one
+-- build whatever mode sits underneath (BuildPage, GUI/Panel.lua). A page that
+-- needs a mode asks for it on the page itself.
+-- ☠ Like GLOBAL, GUI.SelectedMode stays "party" or "raid" underneath while
+-- Profiles is up; GUI.ProfilesView is the only thing that says it is showing.
+-- ============================================================
+GUI.ProfilesPages = {
+    profiles_manage       = true,
+    profiles_spec         = true,
+    profiles_auto         = true,
+    profiles_clickcast    = true,
+    profiles_importexport = true,
+    profiles_changed      = true,
+}
+GUI.ProfilesView = false
+
+function GUI.IsProfilesPage(name)
+    return name ~= nil and GUI.ProfilesPages[name] == true
+end
+
+-- The accent for whichever tab the window is showing. Profiles keeps the
+-- frame mode's own, as its pages always had.
 function GUI.CurrentAccent()
-    if GUI.GlobalView then return GUI.GlobalAccent end
+    if GUI.GlobalView and not GUI.ProfilesView then return GUI.GlobalAccent end
     return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
 

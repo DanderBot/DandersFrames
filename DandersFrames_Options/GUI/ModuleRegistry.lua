@@ -96,6 +96,8 @@ local function CurrentModuleId()
     -- A placeholder rail item (Home, Modules, Profiles) sits over whatever
     -- state the window was in, so it wins over all of it.
     if GUI.PlaceholderView then return GUI.PlaceholderView end
+    -- Profiles sits over the frame mode (and GLOBAL, if it was up) the same way.
+    if GUI.ProfilesView then return "profiles" end
     if GUI.SelectedMode == "clicks" then return "clicks" end
     if GUI.GlobalView == true then return "global" end
     return "group"
@@ -280,6 +282,9 @@ function GUI:SelectModule(id, tabId, opts)
     elseif def.onEnter then
         def.onEnter(tabId)
     end
+    -- Set by Profiles' onLeave for the one onEnter that follows it (see
+    -- LeaveGlobalTo); never outlives the switch.
+    GUI._leavingProfiles = nil
     GUI:SyncSelectedModule()
     return true
 end
@@ -293,8 +298,11 @@ end
 -- the handlers below -- the sync, the locks, the test hand-over, a new search
 -- index, a second refresh of the page and of every override dot -- has
 -- nothing to do. This is GLOBAL's own path, the other way.
+-- ALSO PROFILES' WAY BACK (GUI._leavingProfiles, set by its onLeave): Profiles
+-- sat over the mode too, so returning to that same mode is the view switch
+-- alone.
 local function LeaveGlobalTo(mode)
-    if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
+    if not ((GUI.GlobalView or GUI._leavingProfiles) and GUI.SelectedMode == mode) then return false end
     GUI:EnterView(false)
     GUI.SelectTab(GUI:LastTabInView())
     return true
@@ -481,8 +489,11 @@ GUI:RegisterModule({
         return L["Off"]
     end,
     description = function() return L["Party and raid frames: layout, bars, auras and indicators."] end,
-    -- Every page that is not GLOBAL's is Party's/Raid's.
-    ownsPage = function(name) return not GUI.IsGlobalPage(name) end,
+    -- Every page that is not GLOBAL's or Profiles' is Party's/Raid's.
+    ownsPage = function(name)
+        return not GUI.IsGlobalPage(name)
+            and not (GUI.IsProfilesPage and GUI.IsProfilesPage(name))
+    end,
     -- No tab asked for: the frame mode showing, else the one Binds/GLOBAL left.
     defaultTab = function()
         if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then return GUI.SelectedMode end
@@ -583,7 +594,9 @@ GUI:RegisterModule({
     status = function() return L["Fonts, colors and integrations"] end,
     ownsPage = function(name) return GUI.IsGlobalPage(name) end,
     onEnter = function()
-        if GUI.GlobalView then return end
+        -- Already up -- unless Profiles was over it (_leavingProfiles), when
+        -- the view and page still have to come back.
+        if GUI.GlobalView and not GUI._leavingProfiles then return end
         GUI:EnterView(true)
         GUI.SelectTab(GUI:LastTabInView())
     end,
@@ -591,7 +604,7 @@ GUI:RegisterModule({
 })
 
 -- ============================================================
--- VIEW MODULES: HOME, MODULES -- AND PLACEHOLDERS: UNITS, PROFILES
+-- VIEW MODULES: HOME, MODULES -- AND A PLACEHOLDER: UNITS
 -- A view is a full-window page of its own over the rect Binds' panel uses
 -- (Home: GUI/Pages/Home.lua, Modules: GUI/Pages/ModulesPage.lua); a
 -- placeholder shows a "coming in a later update" panel until its page is
@@ -658,13 +671,83 @@ ViewModule({
     hideView = function() if GUI.HideModulesView then GUI:HideModulesView() end end,
 })
 
-ViewModule({
+-- ============================================================
+-- PROFILES -- a sidebar module of its own (GUI/Pages/Profiles.lua)
+-- Not tied to Party or Raid: its pages are mode-neutral (THE PROFILES SIDEBAR,
+-- GUI/GUI.lua) and a page that needs a mode asks on the page. Like GLOBAL it
+-- leaves the frame mode under it exactly as it is -- no test-mode or unlock
+-- hand-over, no mover session to end -- except from BINDS, where it steps back
+-- onto the frame mode BINDS was entered from, as GLOBAL does (GUI:EnterView).
+-- ☠ GUI.GlobalView IS LEFT ALONE UNDERNEATH. Profiles is read first everywhere
+-- (CurrentModuleId, GUI:IsTabInView, GUI.CurrentAccent), and its onLeave flags
+-- the one switch that follows (GUI._leavingProfiles) so GLOBAL and Party/Raid
+-- bring their view and page back even when the state under it already says them.
+-- ============================================================
+
+local function EnterProfilesView()
+    if GUI.SelectedMode == "clicks" then
+        GUI.SelectedMode = GUI._lastFrameMode or "party"
+        -- The index is per frame mode, and BINDS had none.
+        if DF.Search and DF.Search.InvalidateRegistry then DF.Search:InvalidateRegistry() end
+    end
+    GUI.ProfilesView = true
+    GUI:SyncSelectedModule()
+    if GUI.CurrentAccent then GUI:SetAccent(GUI.CurrentAccent()) end
+    -- The page is the caller's to pick, so the redirect off a page this view
+    -- does not list is held off, as GUI:EnterView does.
+    local held = GUI._redirectingTab
+    GUI._redirectingTab = true
+    GUI:ShowNormalContent()
+    GUI._redirectingTab = held
+end
+
+GUI:RegisterModule({
     id = "profiles",
     label = function() return L["Profiles"] end,
     icon = ICONS .. "account_circle.png",
     order = 85,
     slot = "bottom",
     noTile = true,
+    sidebar = true,
+    accent = function() return GUI.Colors.text end,
+    isEnabled = function() return true end,
+    ownsPage = function(name) return GUI.IsProfilesPage and GUI.IsProfilesPage(name) or false end,
+    -- tabId: a Profiles page to land on (Home's profile link asks for Manage);
+    -- none, the page Profiles showed last.
+    onEnter = function(tabId)
+        local want = tabId and GUI.IsProfilesPage and GUI.IsProfilesPage(tabId)
+            and GUI.Tabs and GUI.Tabs[tabId] and tabId or nil
+        if GUI.ProfilesView and not want then return end
+        EnterProfilesView()
+        local page = want or GUI:LastTabInView()
+        if page then GUI.SelectTab(page) end
+    end,
+    onEnterForPage = function() EnterProfilesView() end,
+    onLeave = function()
+        GUI.ProfilesView = false
+        GUI._leavingProfiles = true
+    end,
 })
+
+-- ★ SWITCH THE FRAME MODE UNDER PROFILES, WITHOUT LEAVING IT. For a Profiles
+-- page whose in-page Party / Raid choice IS the frame mode (Changed Settings'
+-- scope picker: its report is built from the search index, which is per mode).
+-- It is the whole Party/Raid switch -- the sync, the locks, test mode carried
+-- across -- so it refuses what the Party/Raid tabs refuse: a locked tab (Auto
+-- Layout editing) and a running mover session (ended first, then replayed).
+-- Returns true when the mode under the view is `mode` afterwards.
+function GUI:SetUnderlyingFrameMode(mode)
+    if mode ~= "party" and mode ~= "raid" then return false end
+    if GUI.SelectedMode == mode then return true end
+    if GUI:IsModuleLocked("group", mode) then return false end
+    local B = DF.MoverBridge
+    if B and B.IsSessionActive and B:IsSessionActive() and B.EndSessionThen then
+        B:EndSessionThen(function() GUI:SetUnderlyingFrameMode(mode) end)
+        return false
+    end
+    if mode == "raid" then EnterRaid() else EnterParty() end
+    GUI:SyncSelectedModule()
+    return GUI.SelectedMode == mode
+end
 
 GUI:SyncSelectedModule()

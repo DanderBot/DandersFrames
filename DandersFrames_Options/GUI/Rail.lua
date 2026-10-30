@@ -281,6 +281,12 @@ function GUI:RestoreModuleOnOpen(id)
         if not GUI.GlobalView and not GUI:IsModuleLocked("global") then
             GUI:SelectModule("global")
         end
+    elseif id == "profiles" then
+        -- Over whatever mode ToggleGUI picked, as GLOBAL is; already up when
+        -- the window was closed on it this session.
+        if not GUI.ProfilesView and not GUI:IsModuleLocked("profiles") then
+            GUI:SelectModule("profiles")
+        end
     elseif def and (def.placeholder or def.view) then
         GUI:SelectModule(id)
     elseif id == "clicks" then
@@ -297,8 +303,8 @@ function GUI:RestoreModuleOnOpen(id)
 end
 
 -- ============================================================
--- PLACEHOLDER PANEL -- what a rail item with no page yet shows (Units,
--- Profiles). Home and Modules have pages of their own (view modules). Built once, over the same rect as the Binds panel;
+-- PLACEHOLDER PANEL -- what a rail item with no page yet shows (Units).
+-- Home and Modules have pages of their own (view modules). Built once, over the same rect as the Binds panel;
 -- GUI:ShowPlaceholderContent (GUI/Panel.lua) hides the sidebar and page.
 -- ============================================================
 function GUI:GetPlaceholderPanel()

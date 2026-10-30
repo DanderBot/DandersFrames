@@ -1175,7 +1175,10 @@ function DF:CreateGUI()
         textdesigner = "text_designer", text = "text_designer",
         range = "display_fading", fading = "display_fading", classcolors = "display_classcolors",
         tooltips = "display_tooltips", visibility = "display_visibility",
+        -- The Profiles rail item's pages; SelectTab takes the window there.
         profiles = "profiles_manage", importexport = "profiles_importexport",
+        autolayouts = "profiles_auto", autoprofiles = "profiles_auto",
+        changedsettings = "profiles_changed",
         debug = "debug_console", wizards = "wizards",
         clickcasting = "clicks",
     }
@@ -1192,7 +1195,10 @@ function DF:CreateGUI()
         end
         -- Sub-tabs live under the party/raid modes; from Clicks, step back to
         -- Party first (the group module owns that transition and its cleanup).
-        if GUI.SelectedMode == "clicks" then GUI:SelectModule("group", "party") end
+        -- A Profiles page needs no frame mode: SelectTab takes it there directly.
+        if GUI.SelectedMode == "clicks" and not (GUI.IsProfilesPage and GUI.IsProfilesPage(target)) then
+            GUI:SelectModule("group", "party")
+        end
         C_Timer.After(0, function()
             if GUI.LinkToSetting then GUI:LinkToSetting({ page = target, flash = false }) end
         end)
@@ -2892,6 +2898,11 @@ function DF:CreateGUI()
     -- =========================================================================
     -- Is this nav row in the sidebar for the tab now showing?
     function GUI:IsTabInView(btn)
+        -- PROFILES first: its own sidebar, whatever GLOBAL/mode sit underneath
+        -- (THE PROFILES SIDEBAR, GUI/GUI.lua). Its pages are on no other tab.
+        local isProfiles = GUI.IsProfilesPage and GUI.IsProfilesPage(btn.tabName) or false
+        if GUI.ProfilesView then return isProfiles end
+        if isProfiles then return false end
         if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
         return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
     end
@@ -2924,7 +2935,10 @@ function DF:CreateGUI()
 
     -- The page this tab showed last, else its first.
     function GUI:LastTabInView()
-        local last = GUI.GlobalView and GUI._lastGlobalPage or GUI._lastModePage
+        local last = (GUI.ProfilesView and GUI._lastProfilesPage)
+            or (not GUI.ProfilesView and GUI.GlobalView and GUI._lastGlobalPage)
+            or (not GUI.ProfilesView and not GUI.GlobalView and GUI._lastModePage)
+            or nil
         local btn = last and GUI.Tabs[last]
         if btn and GUI:IsTabInView(btn) then return last end
         return GUI:FirstTabInView()
@@ -3187,7 +3201,9 @@ function DF:CreateGUI()
         GUI.CurrentPageName = name
         -- What each tab comes back to.
         if GUI.Tabs[name] then
-            if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end
+            if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name
+            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name
+            else GUI._lastModePage = name end
         end
         SwitchMark("nav")
         UpdateThemeColors()
@@ -3823,8 +3839,10 @@ function DF:CreateGUI()
         end
     end
 
-    -- Pages in GUI/Pages/Modules.lua that opt out (page.singleModeBuild), named
-    -- here by tab rather than flagged at their CreateSubTab:
+    -- Pages that opt out (page.singleModeBuild), named here by tab rather than
+    -- flagged at their CreateSubTab (the two profiles_* pages are in
+    -- GUI/Pages/Profiles.lua, and are mode-neutral as well -- one build either
+    -- way -- so for them the opt-out only keeps a rebuild a rebuild):
     --   profiles_auto         -- its disabled scrim and sidebar hint are single
     --                            frames re-anchored to the LATEST build, and its
     --                            content follows the auto-layout editing state.
@@ -3841,6 +3859,20 @@ function DF:CreateGUI()
 
     local function BuildPage(page, builderFunc)
         if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end
+        -- ★ A PROFILES PAGE IS MODE-NEUTRAL (THE PROFILES SIDEBAR, GUI/GUI.lua): ONE
+        -- build, whatever mode sits under the Profiles view. Its builds are keyed on
+        -- a fixed name instead of GUI.SelectedMode, and bound to the party table only
+        -- so a profile switch (which replaces it) still reads as stale. A page that
+        -- needs a mode reads its own in-page choice.
+        if page and GUI.IsProfilesPage and GUI.IsProfilesPage(page.tabName) then page.modeNeutral = true end
+        local function PageMode(self)
+            if self.modeNeutral then return "_neutral" end
+            return GUI.SelectedMode
+        end
+        local function PageDb(self)
+            if self.modeNeutral then return DF.db and DF.db.party end
+            return DF.db[GUI.SelectedMode]
+        end
         -- Move the build on screen into its mode's slot, hidden. Anchors and
         -- parent are kept -- it is coming back.
         local function StashActiveBuild(self)
@@ -3917,13 +3949,13 @@ function DF:CreateGUI()
         -- Called on first visit and whenever the cache is invalidated.
         -- Always finishes by calling RefreshStates() so callers don't need to.
         local function DoBuild(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             if not db then return end
 
             -- Bring this mode's previous build (if any) in, so the retire below
             -- takes THAT one and the other mode's build stays parked.
             if not self.singleModeBuild then
-                SwapToMode(self, GUI.SelectedMode)
+                SwapToMode(self, PageMode(self))
                 self._pendingShown = nil
             end
 
@@ -3936,7 +3968,7 @@ function DF:CreateGUI()
                 -- Marked in progress, so a builder that errors part-way leaves an
                 -- invalid build of THIS mode (retired next time) rather than one
                 -- still claiming whatever the previous build was.
-                self.builtForMode = GUI.SelectedMode
+                self.builtForMode = PageMode(self)
                 self.cacheValid = false
             end
             self.child.ThemeListeners = {}
@@ -3992,12 +4024,12 @@ function DF:CreateGUI()
             -- Debug, Targeted List, Personal Targeted) always render normally.
             if GUI:IsTabDisabledForCurrentMode(self.tabName) then
                 local banner = GUI:CreateInfoBanner(parent, { dismissKey = "mode_disabled", notice = true, tone = "info" })
-                banner:SetText(GUI.SelectedMode == "raid"
+                banner:SetText((self.modeNeutral or GUI.SelectedMode == "raid")
                     and (L["Raid frames are currently disabled. Changes here will apply after re-enabling Raid in the General tab and reloading."])
                     or  (L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."]))
                 table.insert(self.children, banner)
                 banner.layoutCol = "both"
-                self.builtForMode = GUI.SelectedMode
+                self.builtForMode = PageMode(self)
                 self.builtForDisabled = true
                 self.cacheValid = true
                 self._builtDb = db
@@ -4055,7 +4087,7 @@ function DF:CreateGUI()
                     prevTab, prevTabLabel, prevSection
             end
             self._searchEntries = capture
-            self.builtForMode = GUI.SelectedMode
+            self.builtForMode = PageMode(self)
             self.builtForDisabled = false
             self.cacheValid = true
             self._builtDb = db
@@ -4094,20 +4126,20 @@ function DF:CreateGUI()
         -- cheap visibility/layout pass; otherwise rebuild. This is the perf path
         -- that makes revisiting a tab cheap.
         page.RefreshCached = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
 
             -- Put the build on screen away and bring this mode's in, if the page
             -- was last built for the other mode. Nothing is trashed by this.
-            if not self.singleModeBuild then SwapToMode(self, GUI.SelectedMode) end
+            if not self.singleModeBuild then SwapToMode(self, PageMode(self)) end
 
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
             -- ⚠ Asked only when everything else says the cache is good, so a page
             -- with no key -- every page but one -- pays one table lookup for it.
             local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
             if self.cacheValid
-               and self.builtForMode == GUI.SelectedMode
+               and self.builtForMode == PageMode(self)
                and self.builtForDisabled == isDisabled
                and (self.singleModeBuild or BuildDbMatches(self, db))
                and (not keyFn or keyFn() == self.builtCacheKey) then
@@ -4122,7 +4154,7 @@ function DF:CreateGUI()
             -- DoBuild sets cacheValid and calls RefreshStates() before returning.
             -- Which test failed, for the GUI trace's BUILT mark.
             GUI._lastBuildReason = (not self.cacheValid and "invalid")
-                or (self.builtForMode ~= GUI.SelectedMode and "mode")
+                or (self.builtForMode ~= PageMode(self) and "mode")
                 or (self.builtForDisabled ~= isDisabled and "disabled")
                 or (not self.singleModeBuild and not BuildDbMatches(self, db) and "db")
                 or "key"
@@ -4137,7 +4169,7 @@ function DF:CreateGUI()
         -- mode build, because "data changed" is exactly what that build cannot have
         -- seen. It is retired when it is next rebuilt, not now.
         page.Refresh = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             -- Guard against nil db (e.g., when "clicks" mode is selected)
             if not db then return end
             DoBuild(self)
@@ -4150,7 +4182,7 @@ function DF:CreateGUI()
         -- to re-run the builder -- registration happens there -- but it changes no
         -- data, so unlike Refresh() it leaves the other mode's build valid.
         page.RefreshForIndex = function(self)
-            local db = DF.db[GUI.SelectedMode]
+            local db = PageDb(self)
             if not db then return end
             DoBuild(self)
         end
@@ -4164,8 +4196,8 @@ function DF:CreateGUI()
         -- cache key (GUI.PageCacheKeys) always answers nil -- its key can be a
         -- function of the index itself, and asking it from here would recurse.
         page.GetIndexEntries = function(self)
-            local mode = GUI.SelectedMode
-            local db = DF.db[mode]
+            local mode = PageMode(self)
+            local db = PageDb(self)
             if not db then return nil end
             if GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName] then return nil end
             local build

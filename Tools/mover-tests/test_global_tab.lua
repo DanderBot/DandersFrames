@@ -42,7 +42,7 @@ if defs then
     if chunk then chunk(G, function(isRaid) return isRaid and RAID or PARTY end) end
 end
 local want = { "general_settings", "general_integrations", "general_nicknames", "general_fonts", "display_classcolors",
-               "auras_filterdesigner", "profiles_manage", "profiles_importexport", "profiles_changed_global", "debug_console" }
+               "auras_filterdesigner", "debug_console" }
 for _, id in ipairs(want) do
     check(G.IsGlobalPage and G.IsGlobalPage(id), "pages: " .. id .. " is on GLOBAL")
 end
@@ -53,6 +53,13 @@ for _, id in ipairs({ "general_frame", "auras_auradesigner", "text_designer",
                       "profiles_auto", "auras_buffs" }) do
     check(G.IsGlobalPage and not G.IsGlobalPage(id), "pages: " .. id .. " stays on Party/Raid")
 end
+-- The Profiles rail item's pages are neither GLOBAL's nor a mode's.
+for _, id in ipairs({ "profiles_manage", "profiles_spec", "profiles_auto", "profiles_clickcast",
+                      "profiles_importexport", "profiles_changed" }) do
+    check(G.IsProfilesPage and G.IsProfilesPage(id), "pages: " .. id .. " is a Profiles page")
+end
+check(G.IsProfilesPage and not G.IsProfilesPage("general_settings") and not G.IsProfilesPage("general_frame"),
+      "pages: ...and nothing else is")
 local ga = G.GlobalAccent or {}
 check(ga.r == 0.25 and ga.g == 0.78 and ga.b == 0.85, "accent: GLOBAL is teal-cyan")
 if G.CurrentAccent then
@@ -60,6 +67,9 @@ if G.CurrentAccent then
     check(G.CurrentAccent() == G.GlobalAccent, "accent: GLOBAL up -- its own")
     G.GlobalView = false; G.SelectedMode = "raid"
     check(G.CurrentAccent() == RAID, "accent: otherwise the mode's")
+    G.GlobalView, G.ProfilesView = true, true
+    check(G.CurrentAccent() == RAID, "accent: Profiles over GLOBAL keeps the mode's")
+    G.GlobalView, G.ProfilesView = false, false
     G.SelectedMode = "party"
 end
 
@@ -79,7 +89,7 @@ local function tab(name, extra)
 end
 G.Tabs = {}
 for _, id in ipairs({ "general_settings", "general_frame", "general_fonts", "display_visibility",
-                      "display_classcolors", "debug_console" }) do
+                      "display_classcolors", "debug_console", "profiles_manage", "profiles_auto" }) do
     G.Tabs[id] = tab(id, id == "display_visibility" and { partyOnly = true } or nil)
 end
 G.Categories = {
@@ -87,8 +97,9 @@ G.Categories = {
     display = { children = { G.Tabs.display_classcolors, G.Tabs.display_visibility },
                 navSpec = { "display_visibility", "display_classcolors" } },
     debug   = { children = { G.Tabs.debug_console } },
+    profiles = { children = { G.Tabs.profiles_manage, G.Tabs.profiles_auto } },
 }
-G.CategoryOrder = { "general", "display", "debug" }
+G.CategoryOrder = { "general", "display", "profiles", "debug" }
 
 if G.IsTabInView and G.FirstTabInView and G.LastTabInView then
     G.GlobalView, G.SelectedMode = false, "party"
@@ -112,6 +123,25 @@ if G.IsTabInView and G.FirstTabInView and G.LastTabInView then
     G.SelectedMode = "party"
     G._lastModePage = "general_settings"
     eq(G:LastTabInView(), "general_frame", "land: ...as does one from the other tab")
+
+    -- PROFILES: its own sidebar, over whatever is underneath.
+    check(not G:IsTabInView(G.Tabs.profiles_manage), "view: Party does not list a Profiles page")
+    G.GlobalView = true
+    check(not G:IsTabInView(G.Tabs.profiles_manage), "view: ...nor does GLOBAL")
+    G.ProfilesView = true
+    check(G:IsTabInView(G.Tabs.profiles_manage) and G:IsTabInView(G.Tabs.profiles_auto),
+          "view: Profiles lists its pages, with GLOBAL under it")
+    check(not G:IsTabInView(G.Tabs.general_settings) and not G:IsTabInView(G.Tabs.general_frame),
+          "view: ...and nothing else")
+    eq(G:FirstTabInView(), "profiles_manage", "land: Profiles opens on Manage")
+    G._lastProfilesPage = "profiles_auto"
+    eq(G:LastTabInView(), "profiles_auto", "land: Profiles comes back to the page it showed last")
+    G._lastProfilesPage = "general_frame"
+    eq(G:LastTabInView(), "profiles_manage", "land: ...never to a page of another tab")
+    G._lastGlobalPage = "debug_console"
+    G.ProfilesView = false
+    eq(G:LastTabInView(), "debug_console", "land: GLOBAL's last page is still its own after Profiles")
+    G.GlobalView, G.SelectedMode = false, "party"
 end
 
 -- ---- the wiring ---------------------------------------------------------
@@ -134,7 +164,7 @@ check(sel:find("GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name 
       and REGISTRY:find("onEnterForPage = function() GUI:EnterView(true) end", 1, true) ~= nil
       and REGISTRY:find("onEnterForPage = function() GUI:EnterView(false) end", 1, true) ~= nil,
       "select: asking for a page switches to the tab it lives on (search, cross-links)")
-check(PANEL:find("if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end", 1, true) ~= nil,
+check(PANEL:find("if GUI.IsProfilesPage and GUI.IsProfilesPage(name) then GUI._lastProfilesPage = name\n            elseif GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name\n            else GUI._lastModePage = name end", 1, true) ~= nil,
       "select: each tab remembers its last page")
 for _, h in ipairs({ "EnterParty", "EnterRaid", "EnterClicks" }) do
     local body = between(REGISTRY, "local function " .. h .. "()", "DF:SyncLinkedSections()")

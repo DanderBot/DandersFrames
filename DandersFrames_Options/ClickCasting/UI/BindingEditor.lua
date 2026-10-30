@@ -1946,18 +1946,11 @@ function CC:RefreshSpellGrid(skipScrollReset)
         self.UpdateProfileDropdown()
     end
     
-    -- If profiles tab is active, show profiles panel and hide spell grid
-    if self.activeTab == "profiles" then
-        if self.spellGrid then self.spellGrid:Hide() end
-        if self.profilesPanel then 
-            self.profilesPanel:Show() 
-            self:RefreshProfilesPanel()
-        end
-        return
-    else
-        if self.spellGrid then self.spellGrid:Show() end
-        if self.profilesPanel then self.profilesPanel:Hide() end
-    end
+    -- The spell grid is always this panel's body. The profiles panel is NOT
+    -- touched here: it is hosted on Profiles > Click Casting
+    -- (GUI/Pages/Profiles.lua), and hiding it from Binds' refresh would leave
+    -- that page blank on its next visit.
+    if self.spellGrid then self.spellGrid:Show() end
     
     -- Update dropdown values (if they exist)
     if self.showDropdown and self.showDropdown.SetValue then

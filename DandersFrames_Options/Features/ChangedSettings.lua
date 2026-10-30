@@ -71,13 +71,18 @@ DF.ChangedSettings = ChangedSettings
 -- spelling.
 ChangedSettings.PAGE_ID = "profiles_changed"
 
--- The GLOBAL tab's ledger: every setting on a Global-tab page, and the mode
--- ledgers list every setting on the OTHER pages. Split by PAGE, not by store,
+-- ONE PAGE, THREE SCOPES (Profiles > Changed Settings has a Party / Raid /
+-- Global picker): the Global scope lists every setting on a Global-tab page,
+-- and the mode scopes list every setting on the OTHER pages. Split by PAGE, not by store,
 -- because a ledger answers "what did I change on the pages in front of me":
 -- ☠ split by store, the Global ledger read only the account-wide table and said
 -- "Everything is at its defaults" over a Global Settings page showing a
 -- changed Blizzard toggle, which is stored in the party table.
-ChangedSettings.GLOBAL_PAGE_ID = "profiles_changed_global"
+-- `scope` is the picker's choice: "global", or nil for the frame mode the
+-- Profiles view sits on (picking Party or Raid switches that mode -- the index
+-- the report is built from is per mode; GUI:SetUnderlyingFrameMode).
+-- Session-only, like the window's other navigation state.
+ChangedSettings.scope = nil
 
 -- The profile ROOT's shipped values (the panel font, the frame-mode switches):
 -- the scalars a new profile is created with. Built once -- the constructor deep
@@ -484,7 +489,7 @@ end
 --   "unbuilt"  the panel cannot produce a registry at all yet
 function ChangedSettings:BuildReport(GUI, scope)
     local Search = DF.Search
-    local pageId = (scope == "global") and ChangedSettings.GLOBAL_PAGE_ID or ChangedSettings.PAGE_ID
+    local pageId = ChangedSettings.PAGE_ID
     if not Search then return nil, "unbuilt" end
 
     -- An index that can be put together from the pages' retained builds is,
@@ -620,10 +625,10 @@ end
 -- the headless tests, which load this file against a bare host.
 if DF.GUI then
     DF.GUI.PageCacheKeys = DF.GUI.PageCacheKeys or {}
+    -- The scope drawn is part of what the page SHOWS, so it leads the key: a
+    -- pick that changes it rebuilds even when both reports happen to match.
     DF.GUI.PageCacheKeys[ChangedSettings.PAGE_ID] = function()
-        return ChangedSettings:CacheKey(DF.GUI)
-    end
-    DF.GUI.PageCacheKeys[ChangedSettings.GLOBAL_PAGE_ID] = function()
-        return ChangedSettings:CacheKey(DF.GUI, "global")
+        local scope = ChangedSettings.scope
+        return tostring(scope or DF.GUI.SelectedMode) .. "|" .. ChangedSettings:CacheKey(DF.GUI, scope)
     end
 end

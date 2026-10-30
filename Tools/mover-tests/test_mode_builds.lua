@@ -373,15 +373,17 @@ end
 -- opt-out does not have to live in Modules.lua). Pin both halves: the name is in
 -- the set, and it is the tab that page is really created under.
 local panelSrc = options_file_source("GUI/Panel.lua")
+-- The two Profiles pages moved to GUI/Pages/Profiles.lua with the rail item.
+local profilesSrc = options_file_source("GUI/Pages/Profiles.lua")
 for _, pair in ipairs({
-    { "pageAutoProfiles", "profiles_auto" },
-    { "pageImportExport", "profiles_importexport" },
-    { "pageDebugConsole", "debug_console" },
+    { "pageAutoProfiles", "profiles_auto", profilesSrc },
+    { "pageImportExport", "profiles_importexport", profilesSrc },
+    { "pageDebugConsole", "debug_console", modules },
 }) do
-    local v, tab = pair[1], pair[2]
+    local v, tab, src = pair[1], pair[2], pair[3]
     check(panelSrc:find("%s" .. tab .. " = true,") ~= nil,
           "modebuilds: " .. v .. " is opted out of the retained builds (by tab name)")
-    check(modules:find("local " .. v .. " = CreateSubTab%([^,]+, \"" .. tab .. "\"") ~= nil,
+    check(src:find("local " .. v .. " = CreateSubTab%([^,]+, \"" .. tab .. "\"") ~= nil,
           "modebuilds: " .. v .. " is really created under tab " .. tab)
 end
 check(panelSrc:find("if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end", 1, true) ~= nil,

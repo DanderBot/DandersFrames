@@ -502,7 +502,7 @@ local function PaintHeader()
         text = text .. "  \194\183  " .. format(L["Layout: %s"], (tostring(layout):gsub("|", "")))
     end
     local w = max((view:GetWidth() or 0) - 4, 200)
-    local link = LinkFor("profile", view, text, function() GUI:SelectModule("profiles") end, w)
+    local link = LinkFor("profile", view, text, function() GUI:SelectModule("profiles", "profiles_manage") end, w)
     link:ClearAllPoints()
     link:SetPoint("TOPLEFT", W.hello, "BOTTOMLEFT", 0, -6)
 end

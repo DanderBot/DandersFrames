@@ -3357,7 +3357,27 @@ L["Tile"] = true
 L["Tube"] = true
 -- Profiles rail item: Manage (rename), Spec & Character, Click Casting and the
 -- Import / Export paste box that routes every string type.
+L["Click casting is not available."] = true
+L["Click-Cast Profile"] = true
+L["Click-cast profiles are managed on the Profiles page."] = true
+L["Click-cast profiles are saved per class and switch with your talent loadout. They are separate from the profiles on the Manage page."] = true
+L["Everything on this page is saved for this character only."] = true
+L["Exports your active click-cast profile: %s"] = true
 L["Filter imported: %s. Find it in the Filter Designer."] = true
+L["Filter: %s"] = true
+L["Other characters using this profile switch to Default at their next login."] = true
+L["Parse a string first."] = true
+L["Paste a string first."] = true
+L["Paste any DandersFrames string: a profile, a click-cast profile or a filter."] = true
+L["Pick a filter first."] = true
+L["Profile"] = true
+L["Profiles include both Party and Raid settings. Use the 'Export for' and 'Import for' checkboxes to choose which mode's settings are included."] = true
+L["Rename Current Profile"] = true
 L["Renamed profile '%s' to '%s'."] = true
+L["Setup wizard strings are no longer supported."] = true
+L["Spec & Character"] = true
+L["That doesn't look like a DandersFrames string."] = true
+L["That filter can't be exported."] = true
 L["The Default profile can't be renamed."] = true
+L["This character uses the profile: %s"] = true
 --@end-do-not-package@

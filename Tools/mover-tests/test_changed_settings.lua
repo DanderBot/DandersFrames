@@ -594,7 +594,10 @@ end
 -- ============================================================
 print("-- Changed Settings: the Global tab's ledger")
 do
-    eq(CS.GLOBAL_PAGE_ID, "profiles_changed_global", "global: its own page id")
+    -- ONE page now (Profiles > Changed Settings), with a Party / Raid / Global
+    -- scope picker; Global is a scope, not a page of its own.
+    eq(CS.GLOBAL_PAGE_ID, nil, "global: a scope of the one page, not a page id of its own")
+    eq(CS.scope, nil, "global: the picker starts on the frame mode")
     local savedGet, savedDefs, savedNew = DF.GetGlobalDB, DF.GlobalDefaults, DF.NewProfileTable
     DF.GlobalDefaults = { pageTips = "show", notifyOutdated = true, colorPickerOverride = true }
     local store = { pageTips = "fold", notifyOutdated = true, colorPickerOverride = true }
@@ -682,7 +685,8 @@ do
         return nil
     end
 
-    local ledger = options_file_source("GUI/Pages/Modules.lua")
+    -- The ledger page moved to the Profiles rail item's file.
+    local ledger = options_file_source("GUI/Pages/Profiles.lua")
     check(ledger:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
           "glyphs: the ledger row's arrow is an inline icon")
 
@@ -698,7 +702,7 @@ do
     check(ledger:find("value:SetWordWrap(false)", 1, true) ~= nil,
           "glyphs: ...and does not wrap into a second line instead")
     eq(arrowInCode(ledger), nil,
-       "glyphs: ...and no live line in Modules.lua carries a bare arrow")
+       "glyphs: ...and no live line in Profiles.lua carries a bare arrow")
 
     local panel = options_file_source("GUI/Panel.lua")
     check(panel:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
@@ -810,8 +814,22 @@ do
     load_options_file_into("Features/ChangedSettings.lua", NS)
     check(type(host.GUI.PageCacheKeys) == "table"
           and type(host.GUI.PageCacheKeys["profiles_changed"]) == "function"
-          and type(host.GUI.PageCacheKeys["profiles_changed_global"]) == "function",
-          "cachekey: the ledger registers its key under its page id")
+          and host.GUI.PageCacheKeys["profiles_changed_global"] == nil,
+          "cachekey: the ledger registers its key under its one page id")
+    -- The scope leads the key, so a pick that changes it rebuilds the page.
+    local hostCS = host.ChangedSettings
+    if hostCS then
+        hostCS.CacheKey = function() return "same" end
+        host.GUI.SelectedMode = "party"
+        local partyKey = host.GUI.PageCacheKeys["profiles_changed"]()
+        host.GUI.SelectedMode = "raid"
+        local raidKey = host.GUI.PageCacheKeys["profiles_changed"]()
+        hostCS.scope = "global"
+        local globalKey = host.GUI.PageCacheKeys["profiles_changed"]()
+        hostCS.scope = nil
+        check(partyKey ~= raidKey and raidKey ~= globalKey and partyKey ~= globalKey,
+              "cachekey: Party, Raid and Global each key the page differently")
+    end
     DandersFrames = DF
 
     local panel = options_file_source("GUI/Panel.lua")

@@ -200,8 +200,8 @@ check(joined():find("placeholder:home", 1, true) ~= nil, "placeholder: its panel
 check(GUI:GetModule("home").view and GUI:GetModule("modules").view
       and not GUI:GetModule("home").placeholder and not GUI:GetModule("modules").placeholder,
       "view: Home and Modules are pages of their own, not placeholders")
-check(GUI:GetModule("profiles").placeholder and GUI:GetModule("units").placeholder,
-      "placeholder: Profiles and Unit Frames still are")
+check(GUI:GetModule("units").placeholder and not GUI:GetModule("profiles").placeholder,
+      "placeholder: Unit Frames still is; Profiles is a sidebar module now")
 check(GUI:GetModule("home").noTile and GUI:GetModule("modules").noTile and GUI:GetModule("profiles").noTile
       and not GUI:GetModule("group").noTile and not GUI:GetModule("global").noTile,
       "tiles: Home, Modules and Profiles are never Home tiles; the rest are")
@@ -502,7 +502,7 @@ do
     check(BRIDGE:find('pcall(GUI.SelectModule, GUI, "group", (mode == "raid") and "raid" or "party")', 1, true) ~= nil,
           "callers: the mover's Configure switches mode through SelectModule, flagged")
     check(PANEL:find('GUI:SelectModule("clicks")\n            return', 1, true) ~= nil
-          and PANEL:find('if GUI.SelectedMode == "clicks" then GUI:SelectModule("group", "party") end', 1, true) ~= nil,
+          and PANEL:find('if GUI.SelectedMode == "clicks" and not (GUI.IsProfilesPage and GUI.IsProfilesPage(target)) then\n            GUI:SelectModule("group", "party")', 1, true) ~= nil,
           "callers: the changelog's links switch through SelectModule")
     check(AUTOP:find("local buttonsToDisable", 1, true) == nil,
           "callers: Auto Layout editing locks modules, not buttons")

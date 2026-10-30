@@ -1017,6 +1017,24 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         end
     end
 
+    -- ☠ EDITING HAPPENS ON RAID'S PAGES, so step onto Raid FIRST. Auto Layouts
+    -- lives under Profiles now, which is mode-neutral, so the frame mode under it
+    -- can be Party -- and the SelectTab at the end of this function would then
+    -- open Party's Frame page over a raid layout. Before anything below writes
+    -- into the live raid db: the switch syncs linked sections between the modes.
+    -- Refused (a mover session is being ended first) -> nothing has been touched
+    -- yet, so stop; the user clicks Edit again.
+    do
+        local GUI = DF.GUI
+        if GUI and GUI.SelectedMode ~= "raid" and GUI.SelectModule then
+            GUI:SelectModule("group", "raid")
+            if GUI.SelectedMode ~= "raid" then
+                DF:DebugWarn("AUTOPROFILE", "EnterEditing: could not switch to Raid first")
+                return false, "Not in Raid mode"
+            end
+        end
+    end
+
     -- Clear overlay so snapshot captures true globals (no RemoveRuntimeProfile
     -- needed — real table was never mutated)
     if self.activeRuntimeProfile then

@@ -235,7 +235,7 @@ function CC:CreateClickCastUI(parent)
         self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
         DF.GUI:ShowTooltip(self, {
             title = L["Profile Settings"],
-            lines = { L["Open the Profiles tab to manage profiles"] },
+            lines = { L["Click-cast profiles are managed on the Profiles page."] },
         })
     end)
     profileCogwheel:HookScript("OnLeave", function(self)
@@ -909,11 +909,19 @@ function CC:CreateClickCastUI(parent)
     
     -- Tab switching function (defined after all controls exist)
     local function SetActiveTab(tabName)
+        -- ★ CLICK-CAST PROFILES LIVE UNDER PROFILES NOW (Profiles > Click
+        -- Casting, GUI/Pages/Profiles.lua), which hosts the one profiles panel
+        -- this file builds. The Profiles tab and the header cog are kept as the
+        -- way there; neither switches this panel's own tab any more.
+        if tabName == "profiles" then
+            if DF.GUI and DF.GUI.SelectTab then DF.GUI.SelectTab("profiles_clickcast") end
+            return
+        end
         CC.activeTab = tabName
         spellsTab:SetActive(tabName == "spells")
         macrosTab:SetActive(tabName == "macros")
         itemsTab:SetActive(tabName == "items")
-        profilesTab:SetActive(tabName == "profiles")
+        profilesTab:SetActive(false)
         
         -- Toggle spell controls
         local showSpellControls = (tabName == "spells")
@@ -934,26 +942,20 @@ function CC:CreateClickCastUI(parent)
         local showItemsControls = (tabName == "items")
         itemsHint:SetShown(showItemsControls)
         
-        -- Toggle profiles panel
-        local showProfiles = (tabName == "profiles")
-        if CC.profilesPanel then
-            CC.profilesPanel:SetShown(showProfiles)
-        end
-        if CC.spellGrid then
-            CC.spellGrid:SetShown(not showProfiles)
-        end
-        
-        if not showProfiles then
-            CC:RefreshSpellGrid()
-        else
-            CC:RefreshProfilesPanel()
-        end
+        -- (The profiles panel is not this tab strip's to show or hide: it is
+        -- hosted on Profiles > Click Casting.)
+        if CC.spellGrid then CC.spellGrid:Show() end
+        CC:RefreshSpellGrid()
     end
     
     spellsTab:SetScript("OnClick", function() SetActiveTab("spells") end)
     macrosTab:SetScript("OnClick", function() SetActiveTab("macros") end)
     itemsTab:SetScript("OnClick", function() SetActiveTab("items") end)
     profilesTab:SetScript("OnClick", function() SetActiveTab("profiles") end)
+    profilesTab:HookScript("OnEnter", function(self)
+        DF.GUI:ShowTooltip(self, { title = L["Profiles"], lines = { L["Click-cast profiles are managed on the Profiles page."] } })
+    end)
+    profilesTab:HookScript("OnLeave", function() DF.GUI:HideTooltip() end)
     
     -- Store reference for external access (e.g., from profile settings cogwheel)
     CC.SetActiveTab = SetActiveTab
@@ -1358,8 +1360,8 @@ function CC:RefreshClickCastingUI()
         self:RefreshSpellGrid()
     end
     
-    -- Refresh profiles panel if visible
-    if self.activeTab == "profiles" and self.profilesPanel then
+    -- Refresh profiles panel if visible (hosted on Profiles > Click Casting)
+    if self.profilesPanel and self.profilesPanel:IsVisible() then
         self:RefreshProfilesPanel()
     end
     

@@ -157,6 +157,15 @@ function GUI:IsTabDisabledForCurrentMode(tabName)
     if GUI.AlwaysAccessiblePages[tabName] then return false end
     -- A GLOBAL page belongs to neither mode, so neither mode being off greys it.
     if GUI.IsGlobalPage and GUI.IsGlobalPage(tabName) then return false end
+    -- A Profiles page is mode-neutral (GUI/Pages/Profiles.lua): the mode under
+    -- it says nothing. Auto Layouts is the one that is Raid's whatever sits
+    -- underneath, so it greys with Raid alone.
+    if GUI.IsProfilesPage and GUI.IsProfilesPage(tabName) then
+        if tabName == "profiles_auto" then
+            return DF.db ~= nil and DF.db.raidEnabled == false
+        end
+        return false
+    end
     if GUI.SelectedMode == "party" and DF.db and DF.db.partyEnabled == false then return true end
     if GUI.SelectedMode == "raid"  and DF.db and DF.db.raidEnabled  == false then return true end
     return false

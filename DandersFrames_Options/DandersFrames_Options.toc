@@ -71,6 +71,8 @@ Features\Search.lua
 # at build time) and before the pages, one of which reads its PAGE_ID at file
 # scope to name its own tab.
 Features\ChangedSettings.lua
+# Profiles > Import / Export's one paste box: what a pasted string is.
+Features\ImportRouter.lua
 GUI\Sections.lua
 GUI\Controls.lua
 # Settings module registry (Group Frames / Binds / Global and GUI:SelectModule).
@@ -87,6 +89,9 @@ GUI\Pages\Frames.lua
 GUI\Pages\Auras.lua
 GUI\Pages\Indicators.lua
 GUI\Pages\Modules.lua
+# The Profiles rail item's pages (Modules.lua calls DF:SetupProfilesPages at
+# runtime, where the old Profiles category was built).
+GUI\Pages\Profiles.lua
 GUI\Pages\AutoProfiles.lua
 GUI\Pages\NicknamesPage.lua
 GUI\Pages\NicknamesPicker.lua

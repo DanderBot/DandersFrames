@@ -34,18 +34,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     local autoDb = DF.db.raidAutoProfiles
     
-    -- Only show for Raid mode
-    if GUI.SelectedMode ~= "raid" then
-        -- The disabled overlay survives page rebuilds (see the bottom of this
-        -- function), so a raid -> party switch has to put it away explicitly or
-        -- it hangs over the Raid-only message anchored to a discarded section.
-        if pageFrame.autoDisabledOverlay then pageFrame.autoDisabledOverlay:Hide() end
-        Add(GUI:CreateHeader(pageFrame.child, L["Raid Auto Layouts"]), 40, "both")
-        Add(GUI:CreateLabel(pageFrame.child,
-            L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."],
-            500, {r = 0.6, g = 0.6, b = 0.6}), 60, "both")
-        return
-    end
+    -- ★ ALWAYS RAID'S. The page lives under Profiles, which is mode-neutral (THE
+    -- PROFILES SIDEBAR, GUI/GUI.lua), so the frame mode under it says nothing about
+    -- it any more. Auto layouts are Raid's whatever sits underneath; editing one
+    -- steps the window onto Raid first (AutoProfilesUI:EnterEditing).
 
     -- =============================================
     -- Enable Checkbox
@@ -1761,8 +1753,8 @@ function AutoProfilesUI:RefreshEditingUI()
         end
     end
     
-    -- Disable the Global, Party and Binds buttons when editing (must stay in Raid
-    -- mode; GLOBAL's pages are nothing a layout can change)
+    -- Disable the Global, Party, Binds and Profiles buttons when editing (must
+    -- stay in Raid mode; GLOBAL's pages are nothing a layout can change)
     -- (GUI:SetModuleLocked, GUI/ModuleRegistry.lua, greys them and takes the
     -- mouse off them; unlocking leaves the colours to UpdateThemeColors below.)
     if GUI.SetModuleLocked then
@@ -1770,6 +1762,12 @@ function AutoProfilesUI:RefreshEditingUI()
         GUI:SetModuleLocked("global", editing)
         GUI:SetModuleLocked("group", editing, "party")
         GUI:SetModuleLocked("clicks", editing)
+        -- Profiles too: its Auto Layouts, Manage and Import / Export rows were
+        -- the tabs this used to take out of play, and a profile switch or import
+        -- mid-edit is what they guarded. Exit Editing still lands on Auto Layouts
+        -- (ExitEditing's SelectTab): a lock refuses the user's click, never a
+        -- programmatic switch.
+        GUI:SetModuleLocked("profiles", editing)
     end
     
     -- Restore proper button colors when not editing
