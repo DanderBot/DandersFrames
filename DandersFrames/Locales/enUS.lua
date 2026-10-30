@@ -173,6 +173,7 @@ L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delaye
 L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."] = true
 -- Footer support links (Discord / PayPal / Patreon)
 L["Need support? Join our Discord"] = true
+L["Needs attention"] = true
 L["Join the DandersFrames Discord"] = true
 L["Settings to include"] = true
 L["Status Icons"] = true
@@ -456,6 +457,7 @@ L["%d more settings"] = true
 -- a way to keep them open beside another page.
 L["Pin settings in popout"] = true
 L["%d of %d IDs"] = true
+L["%d of %d on"] = true
 L["%d of %d tracked"] = true
 -- The header on a CURATED custom filter once some of its spells are ticked off. The plain
 -- form below still serves every other case, so an ordinary filter's header never changes.
@@ -526,6 +528,7 @@ L["All Classes"] = true
 L["All Debuffs"] = true
 L["All Frames"] = true
 L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."] = true
+L["All good. Nothing needs your attention."] = true
 L["All Incoming"] = true
 L["All players in a unified grid. Sorting applies raid-wide."] = true
 L["Alpha"] = true
@@ -868,6 +871,7 @@ L["every debuff that can be dispelled, including ones you can't remove."] = true
 L["Never light the overlay for Magic debuffs."] = true
 L["Never light the overlay for Curse debuffs."] = true
 L["Never light the overlay for Poison debuffs."] = true
+L["NEW"] = true
 L["Never light the overlay for Disease debuffs."] = true
 L["Never light the overlay for Bleed effects, including a Dwarf's own Stoneform bleeds."] = true
 L["From Any Player"] = true
@@ -1129,6 +1133,7 @@ L["Health Threshold Fading"] = true
 L["Health X Offset"] = true
 L["Health Y Offset"] = true
 L["Height"] = true
+L["Hello, %s"] = true
 L["Hidden"] = true
 L["Has Aggro Text"] = true
 L["Hide % Symbol"] = true
@@ -1330,6 +1335,7 @@ L["Magic"] = true
 L["Mana"] = true
 L["Manage"] = true
 L["Manage Filters"] = true
+L["Manage modules"] = true
 L["Manage Profiles"] = true
 L["Mark of the Wild (Druid)"] = true
 L["Match Health Bar Height"] = true
@@ -1960,6 +1966,7 @@ L["Weight"] = true
 L["What happens when your groups wrap onto more than one row. Needs Groups Anchor on a centre position.\n\nDefault: all groups stay centred together, so they shift sideways as the raid fills up.\n\nFixed: the first groups stay put, and extra groups appear to one side of them."] = true
 L["What to Export"] = true
 L["What to Import"] = true
+L["What's new in %s"] = true
 L["When auto-detect is OFF, select which raid buffs to monitor manually."] = true
 L["When enabled, a spark at the end of the health bar shows when incoming heals would overheal."] = true
 L["When enabled, the group you are in will always be displayed first."] = true
@@ -2072,6 +2079,7 @@ L["Import Buffs Tab Defaults"] = true
 L["Import from Buffs Tab"] = true
 L["Import your existing Buffs tab settings as defaults for all auras. Compatible settings will be applied automatically."] = true
 L["Imported!"] = true
+L["IMPROVED"] = true
 -- Chat confirmations for the Aura Designer's keep-or-replace question: it writes the Buff
 -- Bar's own Show Buffs setting, which lives on another page, so the answer has to say so.
 -- Sits beside "Keep Buffs" / "Replace Buffs", the buttons that produce it.
@@ -2331,6 +2339,7 @@ L["This only changes who controls names on DandersFrames frames - you can change
 L["Use %s nicknames"] = true
 L["You are not in a guild."] = true
 L["Your click-casting bindings came from WoW Forever. They have been put aside because spells differ on retail, and come back if you use them on WoW Forever again."] = true
+L["Your modules"] = true
 L["Your click-casting bindings came from retail. They have been put aside because spells and ranks differ on WoW Forever, and come back if you use them on retail again."] = true
 L["Your nickname (broadcast)"] = true
 
@@ -2350,6 +2359,7 @@ L["Enable Test Mode"] = true
 L["Expand sections to toggle features. Click label text to jump to its settings page."] = true
 L["Frame Count"] = true
 L["Full"] = true
+L["Full changelog"] = true
 L["Indicators & Icons"] = true
 L["Missing Buff"] = true
 L["QUICK PRESETS"] = true
@@ -2447,6 +2457,7 @@ L["(Empty)"] = true
 L["+ Drop Item"] = true
 L["..."] = true
 L["%d icons, drawn from Google Material Symbols (Apache 2.0)"] = true
+L["%d more"] = true
 L["Add Trigger"] = true
 L["Add aura"] = true
 L["Assist"] = true
@@ -2507,6 +2518,7 @@ L["Red"] = true
 L["Save Anyway"] = true
 L["Scroll Down"] = true
 L["Scroll Up"] = true
+L["Search every setting..."] = true
 L["Set Focus"] = true
 L["Specialization"] = true
 L["Sync with Raid"] = true
@@ -3297,6 +3309,7 @@ L["Diagonal Pattern"] = true
 L["Dots Pattern"] = true
 L["Fills in the layers below with a ready-made look, which you can then adjust. It does not change the bar's own texture or colour."] = true
 L["Fit to Bar"] = true
+L["FIX"] = true
 L["Gloss"] = true
 L["Grid Pattern"] = true
 L["How big one repeat of the texture is drawn. Auto uses the texture's own preset size; Fit to Bar makes one repeat as thick as the bar; Custom sets it in pixels."] = true

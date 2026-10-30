@@ -4225,6 +4225,18 @@ function DF:ToggleGUI()
             AutoProfilesUI:RefreshTabOverrideStars()
         end
         
+        -- First open after an update (spec Q2): marked seen here, and the
+        -- window lands on Home, whose What's new replaces the old auto-shown
+        -- changelog overlay (the full changelog is one click away there).
+        -- GUI:ModuleToOpen (GUI/Rail.lua) also sends a module that has since
+        -- been switched off -- it left the rail -- to Home.
+        local updated = false
+        if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
+            DandersFramesDB_v2.lastSeenVersion = DF.VERSION
+            updated = true
+        end
+        if GUI.ModuleToOpen then lastModule = GUI:ModuleToOpen(lastModule, updated) end
+
         DF.GUIFrame:Show()
         -- Back to the module it was on (GUI/Rail.lua). Group Frames keeps the
         -- party/raid pick above; only WHICH module is remembered.
@@ -4239,11 +4251,9 @@ function DF:ToggleGUI()
             GUI:RefreshCurrentPage()
         end
 
-        -- Auto-show changelog on first open after update
-        if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
-            DandersFramesDB_v2.lastSeenVersion = DF.VERSION
-            if GUI.ShowChangelog then GUI:ShowChangelog() end
-        end
+        -- No Home to land on (it did not register): the update still shows the
+        -- changelog, as it always did.
+        if updated and lastModule ~= "home" and GUI.ShowChangelog then GUI:ShowChangelog() end
     end
 end
 

@@ -90,8 +90,9 @@ GUI\Pages\Modules.lua
 GUI\Pages\AutoProfiles.lua
 GUI\Pages\NicknamesPage.lua
 GUI\Pages\NicknamesPicker.lua
-# The Modules rail item's own page (GUI\ModuleRegistry.lua view module).
-# Called at runtime only, so its place among the pages is free.
+# The Home and Modules rail items' own pages (GUI\ModuleRegistry.lua view
+# modules). Called at runtime only, so their place among the pages is free.
+GUI\Pages\Home.lua
 GUI\Pages\ModulesPage.lua
 
 # Aura Designer editor (migrations stay resident in the main addon)
