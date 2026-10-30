@@ -235,7 +235,6 @@ local function LeaveGlobalTo(mode)
     GUI.SelectTab(GUI:LastTabInView())
     return true
 end
-GUI._LeaveGlobalTo = LeaveGlobalTo
 
 local function EnterParty()
     if LeaveGlobalTo("party") then return end

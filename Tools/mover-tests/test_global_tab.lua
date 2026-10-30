@@ -17,6 +17,9 @@ local SW       = options_file_source("GUI/SettingsWidgets.lua"):gsub("\r\n", "\n
 local CONTROLS = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
 local AUTOPROF = options_file_source("GUI/Pages/AutoProfiles.lua"):gsub("\r\n", "\n")
 local OPTIONS  = options_file_source("GUI/Pages/Options.lua"):gsub("\r\n", "\n")
+-- The tab switches themselves: the bodies of the old tab handlers, now the
+-- built-in modules' onEnter (GUI/ModuleRegistry.lua).
+local REGISTRY = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
 
 local function between(src, a, b)
     local s = src:find(a, 1, true)
@@ -121,13 +124,15 @@ check(PANEL:find("btnParty:SetActive(not globalView and GUI.SelectedMode == \"pa
       and PANEL:find("local activeModeAccent = (activeMode == btnGlobal and C_GLOBAL)", 1, true) ~= nil,
       "tab: GLOBAL up lights it and not the mode under it; the underline wears its accent")
 local sel = between(PANEL, "    local function SelectTab(name)", "        -- ☠ CLOSE OPEN MENUS FIRST.") or ""
-check(sel:find("GUI:EnterView(GUI.IsGlobalPage(name))", 1, true) ~= nil,
+check(sel:find("GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })", 1, true) ~= nil
+      and REGISTRY:find("onEnterForPage = function() GUI:EnterView(true) end", 1, true) ~= nil
+      and REGISTRY:find("onEnterForPage = function() GUI:EnterView(false) end", 1, true) ~= nil,
       "select: asking for a page switches to the tab it lives on (search, cross-links)")
 check(PANEL:find("if GUI.IsGlobalPage(name) then GUI._lastGlobalPage = name else GUI._lastModePage = name end", 1, true) ~= nil,
       "select: each tab remembers its last page")
-for _, h in ipairs({ "btnParty", "btnRaid", "btnClicks" }) do
-    local body = between(PANEL, h .. ':SetScript("OnClick", function()', "DF:SyncLinkedSections()")
-              or between(PANEL, h .. ':SetScript("OnClick", function()', "-- Clean up any test/unlock state")
+for _, h in ipairs({ "EnterParty", "EnterRaid", "EnterClicks" }) do
+    local body = between(REGISTRY, "local function " .. h .. "()", "DF:SyncLinkedSections()")
+              or between(REGISTRY, "local function " .. h .. "()", "-- Clean up any test/unlock state")
               or ""
     check(body:find("GUI.GlobalView = false", 1, true) ~= nil, "leave: " .. h .. " leaves GLOBAL")
 end
@@ -180,7 +185,7 @@ end
 
 print("-- Global tab: back to the mode it sat on is not a mode switch")
 do
-    local fn = PANEL:match("\n    local function LeaveGlobalTo%(mode%).-\n    end\n")
+    local fn = REGISTRY:match("\nlocal function LeaveGlobalTo%(mode%).-\nend\n")
     check(fn ~= nil, "leave: the shortcut can be read")
     local LeaveGlobalTo = fn and loadstring("local GUI = ...\n" .. fn .. "\nreturn LeaveGlobalTo")
     if LeaveGlobalTo then
@@ -198,13 +203,17 @@ do
         eq(leave("party"), false, "leave: from Party itself it does nothing")
     end
     -- A mover session is ended first (a15 #7), then the GLOBAL hand-off is asked.
-    check(PANEL:find('btnParty:SetScript("OnClick", function()\n        if DeferForMoverSession(btnParty, "party") then return end\n        if LeaveGlobalTo("party") then return end', 1, true) ~= nil
-      and PANEL:find('btnRaid:SetScript("OnClick", function()\n        if DeferForMoverSession(btnRaid, "raid") then return end\n        if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
+    -- (Behaviour: test_module_registry. Here: the buttons go through SelectModule.)
+    check(PANEL:find('btnParty:SetScript("OnClick", function() GUI:SelectModule("group", "party") end)', 1, true) ~= nil
+      and PANEL:find('btnRaid:SetScript("OnClick", function() GUI:SelectModule("group", "raid") end)', 1, true) ~= nil
+      and REGISTRY:find("if not forPage and def.endsMoverSession and DeferForMoverSession(id, tabId) then", 1, true) ~= nil
+      and REGISTRY:find('local function EnterParty()\n    if LeaveGlobalTo("party") then return end', 1, true) ~= nil
+      and REGISTRY:find('local function EnterRaid()\n    if LeaveGlobalTo("raid") then return end', 1, true) ~= nil,
           "leave: both mode buttons end a mover session, then ask")
     -- The mover's own Configure clicks a mode button mid-session on purpose; that click,
     -- and a click on the mode already showing, must not end the session.
-    check(PANEL:find("if GUI._moverOwnedClick then return false end", 1, true) ~= nil
-      and PANEL:find("if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end", 1, true) ~= nil,
+    check(REGISTRY:find("if GUI._moverOwnedClick then return false end", 1, true) ~= nil
+      and REGISTRY:find("if tabId and id == CurrentModuleId() and GUI.SelectedMode == tabId then return false end", 1, true) ~= nil,
           "leave: Configure's own click and a same-mode click keep the session")
 end
 
@@ -213,7 +222,7 @@ do
     local ev = PANEL:match("\n    function GUI:EnterView%(global%)(.-)\n    end\n")
     check(ev ~= nil and ev:find("UpdateThemeColors()", 1, true) == nil,
           "switch: EnterView leaves the repaint to the SelectTab that follows it")
-    local _, holds = PANEL:gsub("GUI._holdPageRepaint = true\n        UpdateThemeColors%(%)\n        GUI._holdPageRepaint = nil", "")
+    local _, holds = REGISTRY:gsub("GUI._holdPageRepaint = true\n    GUI.UpdateThemeColors%(%)\n    GUI._holdPageRepaint = nil", "")
     eq(holds, 2, "switch: Party and Raid hold the walk until the build is swapped")
     check(PANEL:find("if isWide and (widened or (pageNow and not pageNow._widthSettled)) then", 1, true) ~= nil,
           "switch: a wide page's width nudge runs when the window widened or on its first showing only")

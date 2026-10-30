@@ -1711,6 +1711,14 @@ function DF:CreateGUI()
     GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
 
+    -- Each tab stands for a settings module (GUI/ModuleRegistry.lua). Attached
+    -- so GUI:SetModuleLocked can grey the right one; their clicks are wired to
+    -- GUI:SelectModule below UpdateThemeColors.
+    GUI:AttachModuleButton("global", nil, btnGlobal)
+    GUI:AttachModuleButton("group", "party", btnParty)
+    GUI:AttachModuleButton("group", "raid", btnRaid)
+    GUI:AttachModuleButton("clicks", nil, btnClicks)
+
     -- ONE underline for the three mode tabs, which GLIDES from the tab that was
     -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
     -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
@@ -2227,6 +2235,9 @@ function DF:CreateGUI()
         if GUI.SelectedMode == "party" or GUI.SelectedMode == "raid" then
             GUI._lastFrameMode = GUI.SelectedMode
         end
+        -- The derived module id: ToggleGUI writes SelectedMode directly and
+        -- reaches here, so this is where a write that bypassed SelectModule is caught.
+        GUI:SyncSelectedModule()
         -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
         -- the three is active and wearing that tab's own accent from the moment
         -- it sets off.
@@ -2400,220 +2411,15 @@ function DF:CreateGUI()
     -- OnEnter/OnLeave left a stuck theme-coloured border because its OnLeave reset
     -- to themeColor@0.5 rather than the neutral border.
 
-    -- GLOBAL: the mode under it is left exactly as it is (see THE GLOBAL TAB in
-    -- GUI/GUI.lua), so there is no test-mode or unlock hand-over to make here.
-    btnGlobal:SetScript("OnClick", function()
-        if GUI.GlobalView then return end
-        GUI:EnterView(true)
-        GUI.SelectTab(GUI:LastTabInView())
-    end)
+    -- The four tabs are thin callers of GUI:SelectModule (GUI/ModuleRegistry.lua),
+    -- which owns everything a switch does: the Party/Raid sync, locking the
+    -- departing mode, carrying test mode across, ending a mover session first,
+    -- and GLOBAL's shortcut back to the mode it sat on.
+    btnGlobal:SetScript("OnClick", function() GUI:SelectModule("global") end)
+    btnParty:SetScript("OnClick", function() GUI:SelectModule("group", "party") end)
+    btnRaid:SetScript("OnClick", function() GUI:SelectModule("group", "raid") end)
+    btnClicks:SetScript("OnClick", function() GUI:SelectModule("clicks") end)
 
-    -- Back from GLOBAL to the mode it sat on. No mode changes, so the switch in
-    -- the handlers below -- the sync, the locks, the test hand-over, a new search
-    -- index, a second refresh of the page and of every override dot -- has
-    -- nothing to do. This is GLOBAL's own path, the other way.
-    -- ☠ A MODE SWITCH MUST NOT OVERLAP A MOVER SESSION. The handlers below lock the
-    -- departing mode and carry test mode across, but with unsaved moves the lock is only a
-    -- PROMPT -- the switch ran on underneath it, and the prompt's answer then released the
-    -- session's claim against the wrong mode: test frames stuck on screen, or both groups
-    -- hidden (Aphoex, a15 #7). So the session is ended first and the click replayed after.
-    -- Not for the mover's own Configure (MoverBridge.openOptionsPage clicks these buttons
-    -- mid-session on purpose, flagged by _moverOwnedClick), and not for a click on the
-    -- mode already showing, which switches nothing.
-    local function DeferForMoverSession(btn, mode)
-        if GUI._moverOwnedClick then return false end
-        if mode and GUI.SelectedMode == mode and not GUI.GlobalView then return false end
-        local B = DF.MoverBridge
-        if not (B and B.IsSessionActive and B:IsSessionActive()) then return false end
-        B:EndSessionThen(function() btn:Click() end)
-        return true
-    end
-    local function LeaveGlobalTo(mode)
-        if not (GUI.GlobalView and GUI.SelectedMode == mode) then return false end
-        GUI:EnterView(false)
-        GUI.SelectTab(GUI:LastTabInView())
-        return true
-    end
-
-    btnParty:SetScript("OnClick", function()
-        if DeferForMoverSession(btnParty, "party") then return end
-        if LeaveGlobalTo("party") then return end
-        -- Leaving GLOBAL, if it was up: the page it showed is not in Party's
-        -- sidebar, and UpdateTabAvailability (via ShowNormalContent) moves off it.
-        GUI.GlobalView = false
-        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
-        -- this file), so that mode's retained page builds stay valid.
-        DF:SyncLinkedSections()
-
-        -- Carry test mode across the mode switch (raid test -> party test)
-        local carryTest = false
-        -- Before switching tabs, clean up current mode's test mode and unlock state
-        if GUI.SelectedMode == "raid" then
-            -- Lock raid frames if unlocked. LockRaidFrames owns the WHOLE transition:
-            -- the db flag, the container, the mover, grid, panel and pinned chrome.
-            -- ⚠ Do NOT stamp raidLocked or poke the container here before calling: when
-            -- LockRaidFrames' combat guard refuses, the db would say locked while every
-            -- mover stayed on screen for the rest of the fight, and the Lock button then
-            -- offered Unlock. In combat the state stays UNLOCKED (the guard says so in
-            -- chat) and the user locks after regen. A direct SetMovable poke also fights
-            -- UpdatePermanentMoverVisibility, which owns container movability.
-            local raidDb = DF:GetRaidDB()
-            if not raidDb.raidLocked then
-                if DF.LockRaidFrames then DF:LockRaidFrames() end
-            end
-            -- Disable raid test mode if active
-            if DF.raidTestMode then
-                carryTest = true
-                -- Hand-over: stay in container/pinned test mode across the swap rather
-                -- than tearing every aura container down for live data we never show
-                -- and rebuilding it a moment later. Cleared below.
-                DF._testModeHandover = true
-                DF:HideRaidTestFrames(true)  -- silent
-                -- Hides directly rather than through the owners, so drop raid's
-                -- claims to match. carryTest re-claims in the scope we land in.
-                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
-            end
-        end
-
-        GUI.SelectedMode = "party"
-        GUI:SetAccent(GUI.GetThemeColorFor(false))
-        if DF.Search then
-            DF.Search:InvalidateRegistry()
-            DF.Search:RefreshIfActive()
-        end
-        -- The page on screen is still the OTHER mode's build until the refresh
-        -- below swaps it; repainting it here would be undone on the way back.
-        GUI._holdPageRepaint = true
-        UpdateThemeColors()
-        GUI._holdPageRepaint = nil
-        GUI:ShowNormalContent()
-        GUI:UpdateTabAvailability()
-        -- Cached, not forced: a mode switch shows the other mode's build if it
-        -- is still good rather than trashing the page and building a new one.
-        GUI:RefreshCurrentPageForModeSwitch()
-
-        -- Keep test mode active when switching modes (just switch which mode it runs in).
-        -- Carried as the USER's claim: they had a preview up and are still asking for
-        -- one, just in the other scope.
-        if carryTest and DF.SetTestModeOwner then
-            DF:SetTestModeOwner("party", "user", true, true)   -- silent: the mode swap is the visible event
-            -- ShowTestFrames (unlike ShowRaidTestFrames) doesn't refresh the GUI,
-            -- so the test panel's toggle label would stay on "Enable Test Mode".
-            -- Refresh it now that party test mode is active.
-            if DF.TestPanel and DF.TestPanel:IsShown() then
-                DF.TestPanel:UpdateStateNoCallback()
-            end
-        end
-        if carryTest then
-            -- End the hand-over and settle: ShowTestFrames can bail (combat, party
-            -- frames disabled), which would otherwise leave the engines parked in
-            -- test mode with nothing testing. Teardown re-reads the real flags, so
-            -- it is a no-op when the incoming mode did start.
-            DF._testModeHandover = nil
-            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
-        end
-    end)
-    btnRaid:SetScript("OnClick", function()
-        if DeferForMoverSession(btnRaid, "raid") then return end
-        if LeaveGlobalTo("raid") then return end
-        -- Leaving GLOBAL, if it was up -- see the Party handler.
-        GUI.GlobalView = false
-        -- Copies INTO the other mode's tables (THE SYNC KEEPS TABLES, bottom of
-        -- this file), so that mode's retained page builds stay valid.
-        DF:SyncLinkedSections()
-
-        -- Carry test mode across the mode switch (party test -> raid test)
-        local carryTest = false
-        -- Before switching tabs, clean up current mode's test mode and unlock state
-        if GUI.SelectedMode == "party" then
-            -- Lock party frames if unlocked
-            local partyDb = DF:GetDB()
-            if not partyDb.locked then
-                partyDb.locked = true
-                if DF.partyContainer then
-                    DF.partyContainer:EnableMouse(false)
-                    DF.partyContainer:SetMovable(false)
-                end
-                if DF.LockFrames then DF:LockFrames() end
-            end
-            -- Disable party test mode if active
-            if DF.testMode then
-                carryTest = true
-                -- Hand-over: see the raid->party handler above.
-                DF._testModeHandover = true
-                DF:HideTestFrames(true)  -- silent
-                -- Hides directly rather than through the owners, so drop party's
-                -- claims to match. carryTest re-claims in the scope we land in.
-                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
-            end
-        end
-
-        GUI.SelectedMode = "raid"
-        GUI:SetAccent(GUI.GetThemeColorFor(true))
-        if DF.Search then
-            DF.Search:InvalidateRegistry()
-            DF.Search:RefreshIfActive()
-        end
-        -- See the Party handler.
-        GUI._holdPageRepaint = true
-        UpdateThemeColors()
-        GUI._holdPageRepaint = nil
-        GUI:ShowNormalContent()
-        GUI:UpdateTabAvailability()
-        -- Cached, not forced: a mode switch shows the other mode's build if it
-        -- is still good rather than trashing the page and building a new one.
-        GUI:RefreshCurrentPageForModeSwitch()
-
-        -- Keep test mode active when switching modes (just switch which mode it runs in).
-        -- Carried as the USER's claim: they had a preview up and are still asking for
-        -- one, just in the other scope.
-        if carryTest and DF.SetTestModeOwner then
-            DF:SetTestModeOwner("raid", "user", true, true)    -- silent: the mode swap is the visible event
-        elseif carryTest and DF.ShowRaidTestFrames then
-            DF:ShowRaidTestFrames()
-        end
-        if carryTest then
-            -- End the hand-over and settle; see the raid->party handler above.
-            DF._testModeHandover = nil
-            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
-        end
-    end)
-    
-    -- Click Casting tab click handler
-    btnClicks:SetScript("OnClick", function()
-        if DeferForMoverSession(btnClicks) then return end
-        GUI.GlobalView = false
-        -- Clean up any test/unlock state from previous mode
-        if GUI.SelectedMode == "party" then
-            local partyDb = DF:GetDB()
-            if partyDb and not partyDb.locked then
-                partyDb.locked = true
-                if DF.LockFrames then DF:LockFrames() end
-            end
-            if DF.testMode then DF:HideTestFrames(true) end
-            -- Leaving for a tab with no frames: nobody is asking for a preview
-            -- any more, so drop the claims rather than let them outlive it.
-            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
-        elseif GUI.SelectedMode == "raid" then
-            local raidDb = DF:GetRaidDB()
-            if raidDb and not raidDb.raidLocked then
-                raidDb.raidLocked = true
-                if DF.LockRaidFrames then DF:LockRaidFrames() end
-            end
-            if DF.raidTestMode then DF:HideRaidTestFrames(true) end
-            -- As above: no preview is wanted on a tab that has no frames.
-            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
-        end
-
-        GUI.SelectedMode = "clicks"
-        GUI:SetAccent(GUI.GetThemeColorFor(false))
-        if DF.Search then 
-            DF.Search:HideResults()
-        end
-        UpdateThemeColors()
-        GUI:ShowClickCastingContent()
-    end)
-    
     -- Tab container (left side) - with scrolling
     -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
     -- the page viewport is: these frames are anchored by two corners, nothing
@@ -3167,6 +2973,7 @@ function DF:CreateGUI()
             switchMarks = { last = t0, t0 = t0 }
         end
         GUI.GlobalView = global and true or false
+        GUI:SyncSelectedModule()
         GUI:SetAccent(GUI.CurrentAccent())
         SwitchMark("accent")
         local held = GUI._redirectingTab
@@ -3205,10 +3012,11 @@ function DF:CreateGUI()
         end
         -- ★ A PAGE LIVES ON ONE TAB, and asking for it goes there: search results,
         -- cross-links and every "open in Filter Designer" land here, from either
-        -- side and from BINDS.
-        if GUI.Tabs[name] and (GUI.IsGlobalPage(name) ~= (GUI.GlobalView == true)
-                               or GUI.SelectedMode == "clicks") then
-            GUI:EnterView(GUI.IsGlobalPage(name))
+        -- side and from BINDS. The page's module is asked for through
+        -- SelectModule's page path, which changes the view only (EnterView) and
+        -- leaves the page to the rest of this function.
+        if GUI.Tabs[name] and GUI:ModuleForPage(name) ~= GUI.CurrentModuleId() then
+            GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })
             SwitchMark("view")
         end
 

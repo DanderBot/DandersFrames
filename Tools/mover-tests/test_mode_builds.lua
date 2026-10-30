@@ -323,11 +323,14 @@ end
 
 -- The mode tabs go through the cached path, and the Sync no longer needs its
 -- pages invalidated (it copies into the existing tables -- section 3).
-eq(count(panel, "        GUI:RefreshCurrentPageForModeSwitch()"), 2,
+-- The mode tabs' switch bodies live in the module registry (group.onEnter).
+local registry = options_file_source("GUI/ModuleRegistry.lua"):gsub("\r\n", "\n")
+eq(count(registry, "    GUI:RefreshCurrentPageForModeSwitch()"), 2,
    "modebuilds: both mode tabs refresh through the cached path")
-eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()"), 0,
+eq(count(panel, "        GUI:UpdateTabAvailability()\n        GUI:RefreshCurrentPage()")
+   + count(registry, "    GUI:UpdateTabAvailability()\n    GUI:RefreshCurrentPage()"), 0,
    "modebuilds: no mode tab forces a rebuild any more")
-eq(count(panel, "        DF:SyncLinkedSections()\n"), 2, "modebuilds: both mode tabs still sync")
+eq(count(registry, "    DF:SyncLinkedSections()\n"), 2, "modebuilds: both mode tabs still sync")
 eq(count(panel, "InvalidateSyncedPages()"), 0,
    "modebuilds: ...and no longer throw the synced pages' other-mode builds away (that rebuilt them every switch)")
 
