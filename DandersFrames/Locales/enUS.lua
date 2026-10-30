@@ -447,6 +447,7 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
+L["%d bindings"] = true
 -- The way IN, on a settings row's footer strip: what is left behind the click
 -- once the row's commonly-changed controls are drawn on the plate itself.
 L["%d more settings"] = true
@@ -1058,6 +1059,7 @@ L["Ghost"] = true
 L["Gaining Aggro Text"] = true
 L["Global Defaults"] = true
 L["Fonts"] = true
+L["Fonts, colors and integrations"] = true
 L["Global Frame Fade"] = true
 L["Glow"] = true
 L["Glow (ADD)"] = true
@@ -1465,6 +1467,7 @@ L["Parse String"] = true
 L["Party"] = true
 L["PARTY"] = true
 L["Party & Raid %s settings are synced.\nClick to stop syncing."] = true
+L["Party and raid frames: layout, bars, auras and indicators."] = true
 L["Party Frames"] = true
 L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."] = true
 L["Party frames are disabled. Enable them in General settings to use party test mode."] = true
@@ -1492,6 +1495,7 @@ L["Pinned Units"] = true
 L["Pixel-Perfect Scaling"] = true
 L["Player Frames"] = true
 L["Player Range"] = true
+L["Player, target, target of target, focus, pet and boss frames."] = true
 L["Players Grow From"] = true
 L["Players Per Column"] = true
 L["Players Per Row"] = true
@@ -3098,6 +3102,7 @@ L["On: only the players listed below. An empty list still means everyone."] = tr
 -- The compact picker's row button, which toggles. Both states are spelled out because the
 -- glyph alone (a chevron, or a tick) says which state you are IN and not what a click does.
 L["Click to watch this player."] = true
+L["Click-cast bindings for every frame."] = true
 L["Click to stop watching this player."] = true
 -- ⚠ ASKED POSITIVELY, like every other tick on the panel. It was "Hide the helper while your
 -- Power Infusion is on cooldown" -- the one control in a box of enables that turned a

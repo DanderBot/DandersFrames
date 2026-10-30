@@ -6,7 +6,8 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 
-local ipairs, pairs, type, tostring = ipairs, pairs, type, tostring
+local ipairs, pairs, type, tostring, pcall = ipairs, pairs, type, tostring, pcall
+local format = string.format
 local tsort = table.sort
 
 -- ============================================================
@@ -52,7 +53,11 @@ end
 -- ({ {id, label, deckLabel, accent}, ... }, optional), activeTab(), sidebar (bool),
 -- isEnabled(), ownsPage(name), onEnter(tabId), onEnterForPage(tabId, pageName),
 -- onLeave(), endsMoverSession, railLabel (short label under the rail icon),
--- alwaysInRail (listed in the rail even while isEnabled() is false).
+-- alwaysInRail (listed in the rail even while isEnabled() is false),
+-- status() (one line for Home's tile and the Modules page), description,
+-- noTile (never a Home tile: Home, Modules, Profiles), comingSoon (listed,
+-- nothing to switch on yet), view (a full-window page of its own, shown and
+-- hidden through showView / hideView -- Home, Modules).
 -- A label may be a string or a function returning one (so a language override
 -- is picked up -- a string resolved from L at file scope freezes on enUS).
 function GUI:RegisterModule(def)
@@ -126,6 +131,33 @@ function GUI:ModuleLabel(def)
     local label = def and def.label
     if type(label) == "function" then return label() end
     return label
+end
+
+-- Is a module ON: switched on, and something you can use today. A
+-- placeholder or coming-soon module is never on; one without isEnabled is
+-- always on (Global).
+function GUI:IsModuleOn(def)
+    if type(def) == "string" then def = modules[def] end
+    if not def or def.placeholder or def.comingSoon then return false end
+    if def.isEnabled then return def.isEnabled() and true or false end
+    return true
+end
+
+-- The module's one-line status, or "" (status() is optional, and a broken
+-- one must not take Home down with it).
+function GUI:ModuleStatus(def)
+    if type(def) == "string" then def = modules[def] end
+    local fn = def and def.status
+    if type(fn) ~= "function" then return "" end
+    local ok, text = pcall(fn)
+    return (ok and type(text) == "string") and text or ""
+end
+
+-- A def field that may be a string or a function returning one.
+function GUI:ModuleText(def, field)
+    local v = def and def[field]
+    if type(v) == "function" then return v() end
+    return v
 end
 
 -- Which module a sidebar page belongs to (nil: none claims it).
@@ -431,13 +463,24 @@ GUI:RegisterModule({
     sidebar = true,
     endsMoverSession = true,
     accent = function() return GUI.GetThemeColorFor(GUI.SelectedMode == "raid") end,
-    -- Party or Raid frames switched on. ⚠ alwaysInRail until the Modules page
-    -- exists: with both off the rail would otherwise have no way back in.
+    -- Party or Raid frames switched on. With both off the module leaves the
+    -- rail; the Modules page is the way back in (GUI/Pages/ModulesPage.lua).
     isEnabled = function()
         local db = DF.db
         return not db or db.partyEnabled ~= false or db.raidEnabled ~= false
     end,
-    alwaysInRail = true,
+    -- "Party · Raid", "Party only", "Raid only" or "Off" -- what the Frame
+    -- Modes card says. ⚠ `~= false`: ABSENT MEANS ENABLED for these two keys.
+    status = function()
+        local db = DF.db
+        local party = not db or db.partyEnabled ~= false
+        local raid = not db or db.raidEnabled ~= false
+        if party and raid then return format("%s \194\183 %s", L["Party"], L["Raid"]) end
+        if party then return format(L["%s only"], L["Party"]) end
+        if raid then return format(L["%s only"], L["Raid"]) end
+        return L["Off"]
+    end,
+    description = function() return L["Party and raid frames: layout, bars, auras and indicators."] end,
     -- Every page that is not GLOBAL's is Party's/Raid's.
     ownsPage = function(name) return not GUI.IsGlobalPage(name) end,
     -- No tab asked for: the frame mode showing, else the one Binds/GLOBAL left.
@@ -502,12 +545,21 @@ GUI:RegisterModule({
     -- Its fixed identity green (the rail, the deck-2 title). The HOST accent
     -- while Binds shows stays party's -- see EnterClicks.
     accent = function() return GUI.ClicksAccent end,
-    -- ⚠ alwaysInRail until the Modules page exists -- see Group Frames.
+    -- Switched off, it leaves the rail -- see Group Frames. ⚠ TRUTHINESS, as
+    -- CC:IsEnabled reads it: click-casting is opt-in (off by default), so an
+    -- unset flag is OFF -- the opposite of partyEnabled / raidEnabled.
     isEnabled = function()
         local CC = DF.ClickCast
-        return not (CC and CC.db) or CC.db.enabled ~= false
+        return not (CC and CC.db) or CC.db.enabled and true or false
     end,
-    alwaysInRail = true,
+    status = function()
+        local CC = DF.ClickCast
+        if CC and CC.db and not CC.db.enabled then return L["Off"] end
+        local list = CC and CC.db and CC.db.bindings
+        if type(list) ~= "table" then return L["On"] end
+        return format(L["%d bindings"], #list)
+    end,
+    description = function() return L["Click-cast bindings for every frame."] end,
     onEnter = EnterClicks,
 })
 
@@ -528,6 +580,7 @@ GUI:RegisterModule({
     sidebar = true,
     accent = function() return GUI.GlobalAccent end,
     isEnabled = function() return true end,
+    status = function() return L["Fonts, colors and integrations"] end,
     ownsPage = function(name) return GUI.IsGlobalPage(name) end,
     onEnter = function()
         if GUI.GlobalView then return end
@@ -538,15 +591,20 @@ GUI:RegisterModule({
 })
 
 -- ============================================================
--- PLACEHOLDER MODULES: HOME, MODULES, PROFILES
--- In the rail now so the layout is final; each shows a "coming in a later
--- update" panel until its page is built. Like GLOBAL they leave the mode
--- under them exactly as it is -- no test-mode or unlock hand-over, no mover
--- session to end -- and leaving one puts the normal content back first.
+-- VIEW MODULES: HOME, MODULES -- AND PLACEHOLDERS: UNITS, PROFILES
+-- A view is a full-window page of its own over the rect Binds' panel uses
+-- (Home: GUI/Pages/Home.lua, Modules: GUI/Pages/ModulesPage.lua); a
+-- placeholder shows a "coming in a later update" panel until its page is
+-- built. Like GLOBAL they leave the mode under them exactly as it is -- no
+-- test-mode or unlock hand-over, no mover session to end -- and leaving one
+-- puts the normal content back first.
+-- GUI:ShowPlaceholderContent (GUI/Panel.lua) hides the sidebar and page and
+-- hands over to GUI:PaintPlaceholderPanel (GUI/Rail.lua), which shows the
+-- module's view, or the placeholder panel when it has none.
 -- ============================================================
 
-local function Placeholder(def)
-    def.placeholder = true
+local function ViewModule(def)
+    if not def.view then def.placeholder = true end
     def.sidebar = false
     def.accent = def.accent or function() return GUI.Colors.text end
     def.onEnter = function()
@@ -556,43 +614,57 @@ local function Placeholder(def)
     end
     def.onLeave = function()
         GUI.PlaceholderView = nil
+        if def.hideView then def.hideView() end
         GUI:ShowNormalContent()
     end
     GUI:RegisterModule(def)
 end
 
-Placeholder({
+ViewModule({
     id = "home",
     label = function() return L["Home"] end,
     icon = ICONS .. "home.png",
     order = 0,
     slot = "top",
     dividerAfter = true,
+    noTile = true,
+    view = true,
+    -- Late-bound: the page files load after this one.
+    showView = function() if GUI.ShowHomeView then GUI:ShowHomeView() end end,
+    hideView = function() if GUI.HideHomeView then GUI:HideHomeView() end end,
 })
 
-Placeholder({
+ViewModule({
     id = "units",
     label = function() return L["Unit Frames"] end,
     railLabel = function() return L["Units"] end,
     icon = ICONS .. "person.png",
     order = 15,
     slot = "top",
+    comingSoon = true,
+    status = function() return L["Coming in a later update."] end,
+    description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
 })
 
-Placeholder({
+ViewModule({
     id = "modules",
     label = function() return L["Modules"] end,
     icon = ICONS .. "extension.png",
     order = 80,
     slot = "bottom",
+    noTile = true,
+    view = true,
+    showView = function() if GUI.ShowModulesView then GUI:ShowModulesView() end end,
+    hideView = function() if GUI.HideModulesView then GUI:HideModulesView() end end,
 })
 
-Placeholder({
+ViewModule({
     id = "profiles",
     label = function() return L["Profiles"] end,
     icon = ICONS .. "account_circle.png",
     order = 85,
     slot = "bottom",
+    noTile = true,
 })
 
 GUI:SyncSelectedModule()

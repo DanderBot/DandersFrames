@@ -41,8 +41,16 @@ local function Resolve(v)
     return v
 end
 
+-- A module is listed while it is switched on (or has no switch). Group Frames
+-- and Click-Casting leave the rail when they are turned off; the Modules page
+-- (always listed, bottom slot) is the way back in.
 local function InRail(def)
     return def.alwaysInRail or not def.isEnabled or def.isEnabled() and true or false
+end
+
+function GUI:IsModuleInRail(id)
+    local def = GUI:GetModule(id)
+    return def ~= nil and InRail(def)
 end
 
 -- The rail's items, rebuilt only when the set of modules shown changes.
@@ -240,12 +248,30 @@ function GUI:LastModuleOnOpen()
     return ws and ws.lastModule or nil
 end
 
+-- WHERE THE WINDOW OPENS (spec Q2/Q3). `updated`: the first open after an
+-- update -- Home, with What's new on it, instead of the old changelog
+-- overlay. Otherwise the last place, unless that module has since been
+-- switched off (it left the rail), which also lands on Home.
+-- ★ THE Q3 HOOK: a conflict-level (severity 1) Needs-attention item opens
+-- Home too. Nothing raises one until DF.Attention exists (Phase 3); the
+-- check reads it through GUI.HomeHasConflict, which is nil-safe.
+function GUI:ModuleToOpen(id, updated)
+    if not GUI:GetModule("home") then return id end
+    if updated then return "home" end
+    if GUI.HomeHasConflict and GUI:HomeHasConflict() then return "home" end
+    -- Nothing saved means Group Frames (ToggleGUI's party/raid auto-pick).
+    local effective = id or "group"
+    if GUI:GetModule(effective) and not GUI:IsModuleInRail(effective) then return "home" end
+    return id
+end
+
 function GUI:RestoreModuleOnOpen(id)
+    local def = id and GUI:GetModule(id)
     if id == "global" then
         if not GUI.GlobalView and not GUI:IsModuleLocked("global") then
             GUI:SelectModule("global")
         end
-    elseif GUI:GetModule(id) and GUI:GetModule(id).placeholder then
+    elseif def and (def.placeholder or def.view) then
         GUI:SelectModule(id)
     elseif id == "clicks" then
         -- Binds hides frames and drops test mode on the way in. A user who
@@ -261,8 +287,8 @@ function GUI:RestoreModuleOnOpen(id)
 end
 
 -- ============================================================
--- PLACEHOLDER PANEL -- what a rail item with no page yet shows (Home,
--- Modules, Profiles). Built once, over the same rect as the Binds panel;
+-- PLACEHOLDER PANEL -- what a rail item with no page yet shows (Units,
+-- Profiles). Home and Modules have pages of their own (view modules). Built once, over the same rect as the Binds panel;
 -- GUI:ShowPlaceholderContent (GUI/Panel.lua) hides the sidebar and page.
 -- ============================================================
 function GUI:GetPlaceholderPanel()
@@ -297,11 +323,55 @@ function GUI:GetPlaceholderPanel()
     return panel
 end
 
+-- Every view module's page hidden but `keepId`'s. Panel.lua's
+-- ShowNormalContent / ShowClickCastingContent call it with no id.
+function GUI:HideModuleViews(keepId)
+    for _, def in ipairs(GUI:GetModules()) do
+        if def.view and def.id ~= keepId and def.hideView then def.hideView() end
+    end
+end
+
 function GUI:PaintPlaceholderPanel(def)
+    GUI:HideModuleViews(def and def.id)
+    -- A module with a page of its own shows it instead of the panel.
+    if def and def.view and def.showView then
+        if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
+        def.showView()
+        return
+    end
     local panel = GUI:GetPlaceholderPanel()
     if not panel then return end
     panel.Icon:SetTexture(def.icon)
     panel.Title:SetText(GUI:ModuleLabel(def) or "")
     panel.Note:SetText(L["Coming in a later update."])
     panel:Show()
+end
+
+-- ============================================================
+-- VIEW FRAME -- the page a view module (Home, Modules) draws into: the
+-- placeholder panel's rect, with a scrolling body. `top` leaves room above the
+-- scroll for anything pinned (Home's greeting and search box).
+-- Returns nil before the window exists.
+-- ============================================================
+function GUI:CreateModuleView(top)
+    local frame = DF.GUIFrame
+    if not frame then return nil end
+    top = top or 0
+    local view = CreateFrame("Frame", nil, frame)
+    view:SetPoint("TOPLEFT", GUI.RailWidth + 12, -64)
+    view:SetPoint("BOTTOMRIGHT", -12, 36)
+    view:SetFrameLevel(frame:GetFrameLevel() + 2)
+    view:Hide()
+
+    local gutter = (GUI.Scroll and GUI.Scroll.gutter) or 14
+    local scroll = CreateFrame("ScrollFrame", nil, view, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -top)
+    scroll:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -gutter, 0)
+    if GUI.StyleScrollBar then GUI.StyleScrollBar(scroll) end
+    if GUI.PinScrollBar then GUI.PinScrollBar(scroll, view, -top, 0) end
+    local body = CreateFrame("Frame", nil, scroll)
+    body:SetSize(1, 1)
+    scroll:SetScrollChild(body)
+    view.scroll, view.body = scroll, body
+    return view
 end

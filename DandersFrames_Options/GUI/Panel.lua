@@ -1139,6 +1139,8 @@ function DF:CreateGUI()
         end
         return versions
     end
+    -- Home's What's new reads the same parse (GUI/Pages/Home.lua).
+    GUI.ParseChangelog = ParseChangelog
 
     -- ★ DEEP LINKS. A feature card whose category names a settings page is a
     -- button: click closes the changelog and lands on that page (EUI's rule —
@@ -2835,6 +2837,7 @@ function DF:CreateGUI()
     function GUI:ShowNormalContent()
         if clickCastPanel then clickCastPanel:Hide() end
         if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
+        if GUI.HideModuleViews then GUI:HideModuleViews() end
         if tabFrame then tabFrame:Show() end
         if content then content:Show() end
 
@@ -2847,7 +2850,8 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
     end
     
-    -- A rail item with no page yet (GUI/Rail.lua, PLACEHOLDER PANEL).
+    -- A rail item with a page of its own (Home, Modules) or none yet (GUI/Rail.lua,
+    -- PLACEHOLDER PANEL): the sidebar and page make way for it.
     function GUI:ShowPlaceholderContent(def)
         if tabFrame then tabFrame:Hide() end
         if content then content:Hide() end
@@ -2862,6 +2866,7 @@ function DF:CreateGUI()
         if tabFrame then tabFrame:Hide() end
         if content then content:Hide() end
         if GUI.PlaceholderPanel then GUI.PlaceholderPanel:Hide() end
+        if GUI.HideModuleViews then GUI:HideModuleViews() end
         
         -- Set larger minimum width for clicks tab
         frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)

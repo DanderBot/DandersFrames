@@ -197,8 +197,26 @@ GUI:SelectModule("home")
 eq(GUI.SelectedModule, "home", "placeholder: Home is the module showing")
 eq(GUI.SelectedMode, "party", "placeholder: ...over the mode it left, untouched")
 check(joined():find("placeholder:home", 1, true) ~= nil, "placeholder: its panel is shown")
-check(GUI:GetModule("home").placeholder and GUI:GetModule("profiles").placeholder
-      and GUI:GetModule("modules").placeholder, "placeholder: Home, Modules and Profiles are placeholders")
+check(GUI:GetModule("home").view and GUI:GetModule("modules").view
+      and not GUI:GetModule("home").placeholder and not GUI:GetModule("modules").placeholder,
+      "view: Home and Modules are pages of their own, not placeholders")
+check(GUI:GetModule("profiles").placeholder and GUI:GetModule("units").placeholder,
+      "placeholder: Profiles and Unit Frames still are")
+check(GUI:GetModule("home").noTile and GUI:GetModule("modules").noTile and GUI:GetModule("profiles").noTile
+      and not GUI:GetModule("group").noTile and not GUI:GetModule("global").noTile,
+      "tiles: Home, Modules and Profiles are never Home tiles; the rest are")
+check(GUI:GetModule("units").comingSoon and not GUI:IsModuleOn("units"), "units: coming soon, so never on")
+do
+    local hidden = 0
+    local origHide = GUI:GetModule("modules").hideView
+    GUI:GetModule("modules").hideView = function() hidden = hidden + 1 end
+    calls = {}
+    GUI:SelectModule("modules")
+    GUI:SelectModule("home")
+    eq(hidden, 1, "view: leaving a view module hides its page")
+    GUI:GetModule("modules").hideView = origHide
+    GUI:SelectModule("home")
+end
 calls = {}
 GUI:SelectModule("profiles")
 eq(GUI.SelectedModule, "profiles", "placeholder: one placeholder to another")
@@ -318,16 +336,57 @@ do
           "deck: Party / Raid tabs built from the module's tabs")
     eq(GUI.RaidButton.styleAccent, "RAID", "deck: ...Raid in the raid accent")
 
-    -- both modes off: Group Frames and Click-Casting stay (alwaysInRail)
+    -- both modes off, click-casting off: both leave the rail (no alwaysInRail
+    -- now that the Modules page is the way back in)
     DF.db = { partyEnabled = false, raidEnabled = false }
     DF.ClickCast = { db = { enabled = false } }
     check(GUI:GetModule("group").isEnabled() == false and GUI:GetModule("clicks").isEnabled() == false,
           "enabled: isEnabled reads the real switches")
+    check(not GUI:GetModule("group").alwaysInRail and not GUI:GetModule("clicks").alwaysInRail,
+          "enabled: neither is pinned into the rail any more")
     GUI:RefreshModuleShell(true)
     ids = table.concat(rail:GetItemIds(), ",")
-    check(ids:find("group", 1, true) and ids:find("clicks", 1, true),
-          "enabled: ...but both stay in the rail until the Modules page exists")
+    eq(ids, "home,units,zz_test,zz_bottom,modules,profiles,global",
+       "enabled: switched off, both leave the rail -- Home, Modules, Profiles and Global stay")
+    check(not GUI:IsModuleInRail("group") and not GUI:IsModuleInRail("clicks") and GUI:IsModuleInRail("modules"),
+          "enabled: IsModuleInRail agrees")
+    DF.ClickCast = { db = {} }
+    check(GUI:GetModule("clicks").isEnabled() == false, "enabled: click-casting is opt-in -- an unset flag is off")
+
+    print("-- Module registry: where the window opens")
+    eq(GUI:ModuleToOpen("group", false), "home", "open: a last module now switched off opens Home")
+    eq(GUI:ModuleToOpen("clicks", false), "home", "open: ...Binds too")
+    eq(GUI:ModuleToOpen("global", false), "global", "open: otherwise the last place")
+    eq(GUI:ModuleToOpen("home", false), "home", "open: ...Home included")
+    eq(GUI:ModuleToOpen(nil, false), "home", "open: nothing saved is Group Frames -- switched off, so Home")
+    eq(GUI:ModuleToOpen("global", true), "home", "open: the first open after an update is Home")
+    GUI.HomeHasConflict = function() return true end
+    eq(GUI:ModuleToOpen("global", false), "home", "open: a conflict-level attention item opens Home (Q3 hook)")
+    GUI.HomeHasConflict = nil
+    DF.db = { partyEnabled = false, raidEnabled = true }
+    DF.ClickCast = { db = { enabled = true, bindings = { {}, {}, {} } } }
+    eq(GUI:ModuleToOpen("group", false), "group", "open: Group Frames with Raid on reopens on it")
+    eq(GUI:ModuleToOpen("clicks", false), "clicks", "open: ...and Binds with click-casting on")
+    eq(GUI:ModuleToOpen(nil, false), nil, "open: nothing saved stays nothing (the party/raid auto-pick)")
+    GUI:RefreshModuleShell(true)
+    ids = table.concat(rail:GetItemIds(), ",")
+    eq(ids, "home,group,units,clicks,zz_test,zz_bottom,modules,profiles,global", "enabled: switched back on, both return to the rail")
+
+    print("-- Module registry: status lines")
+    eq(GUI:ModuleStatus("group"), "Raid only", "status: Group Frames with one mode on")
+    DF.db = {}
+    eq(GUI:ModuleStatus("group"), "Party \194\183 Raid", "status: ...both (absent means enabled)")
+    DF.db = { partyEnabled = false, raidEnabled = false }
+    eq(GUI:ModuleStatus("group"), "Off", "status: ...neither")
+    eq(GUI:ModuleStatus("clicks"), "3 bindings", "status: Click-Casting counts its bindings")
+    DF.ClickCast.db.enabled = false
+    eq(GUI:ModuleStatus("clicks"), "Off", "status: ...or says it is off")
+    eq(GUI:ModuleStatus("units"), "Coming in a later update.", "status: Unit Frames is coming")
+    eq(GUI:ModuleStatus("home"), "", "status: a module without one says nothing")
+    GUI:RegisterModule({ id = "zz_broken", status = function() error("boom") end })
+    eq(GUI:ModuleStatus("zz_broken"), "", "status: a broken status() says nothing rather than erroring")
     DF.db, DF.ClickCast = nil, nil
+    GUI:RefreshModuleShell(true)
 
     print("-- Module registry: rail paints locks")
     GUI:SetModuleLocked("clicks", true)
@@ -389,6 +448,11 @@ do
     GUI:RestoreModuleOnOpen("clicks")
     eq(GUI.SelectedMode, "clicks", "restore: ...otherwise Binds reopens on Binds")
     GUI:SelectModule("group", "party")
+    GUI:RestoreModuleOnOpen("home")
+    eq(GUI.SelectedModule, "home", "restore: Home reopens on Home")
+    GUI:RestoreModuleOnOpen("modules")
+    eq(GUI.SelectedModule, "modules", "restore: ...and the Modules page on itself")
+    GUI:SelectModule("group", "party")
 
     -- the open path reads the saved place BEFORE it repaints
     local TOGGLE = options_file_source("GUI/Controls.lua"):gsub("\r\n", "\n")
@@ -398,6 +462,13 @@ do
     local showAt = TOGGLE:find("DF.GUIFrame:Show()", 1, true)
     check(readAt and pickAt and readAt < pickAt, "open: the last place is read before the auto-pick")
     check(restoreAt and showAt and showAt < restoreAt, "open: ...and restored once the window is up")
+    -- Q2: the first open after an update lands on Home instead of the overlay.
+    local updAt = TOGGLE:find("DandersFramesDB_v2.lastSeenVersion = DF.VERSION\n            updated = true", 1, true)
+    local toOpenAt = TOGGLE:find("if GUI.ModuleToOpen then lastModule = GUI:ModuleToOpen(lastModule, updated) end", 1, true)
+    check(updAt and toOpenAt and updAt < toOpenAt and toOpenAt < showAt,
+          "open: an update is marked seen, then decides where the window opens, before it shows")
+    check(TOGGLE:find('if updated and lastModule ~= "home" and GUI.ShowChangelog then GUI:ShowChangelog() end', 1, true) ~= nil,
+          "open: the changelog overlay only opens when there is no Home to land on")
 
     print("-- Module registry: the saved width")
     local PROFILE = df_file_source("Core/Profile.lua"):gsub("\r\n", "\n")
