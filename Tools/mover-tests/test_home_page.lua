@@ -185,7 +185,7 @@ eq(#Home.AttentionItems(), 0, "attention: nil hands back to DF.Attention")
 -- ---- source shape -------------------------------------------------------------
 print("-- Home: reuses the search, does not fork it")
 local HOME = options_file_source("GUI/Pages/Home.lua"):gsub("\r\n", "\n")
-check(HOME:find("S:CreateSearchBar(view)", 1, true) ~= nil, "search: Home's box is the search's own bar")
+check(HOME:find("S:CreateSearchBar(view, {", 1, true) ~= nil, "search: Home's box is the search's own bar")
 check(HOME:find("function Search:", 1, true) == nil and HOME:find(":Find(", 1, true) == nil,
       "search: ...and Home runs no query of its own")
 check(HOME:find("S.SearchBar = W.search", 1, true) ~= nil and HOME:find("S.SearchBar = W.sidebarSearch", 1, true) ~= nil,
@@ -228,7 +228,7 @@ do
     local H = options_file_source("GUI/Pages/Home.lua"):gsub("\r\n", "\n")
     check(H:find("if self.target and not GUI:IsModulePickLocked(self.target) then\n            GUI:SelectModule(self.target)", 1, true) ~= nil,
           "entry: a Home tile checks the lock before it switches")
-    check(H:find("t:SetEnabled(not GUI:IsModulePickLocked(def.id))", 1, true) ~= nil,
+    check(H:find("local locked = GUI:IsModulePickLocked(def.id)\n    t:SetEnabled(not locked)", 1, true) ~= nil,
           "entry: ...and is greyed while locked")
     check(H:find('if GUI:IsModulePickLocked("profiles", "profiles_manage") then return end\n        GUI:SelectModule("profiles", "profiles_manage")', 1, true) ~= nil,
           "entry: the Profile link checks the lock")

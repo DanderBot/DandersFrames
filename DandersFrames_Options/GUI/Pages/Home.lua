@@ -206,14 +206,36 @@ Home.AfterAttentionChange = AfterAttentionChange
 
 -- ============================================================
 -- THE VIEW
+-- Drawn to the approved mockup (docs/superpowers/specs/2026-10-30-settings-
+-- nav-options.html, homeLaunch) at the live window's scale, 1 CSS px = 1 UI
+-- unit. Every curved corner is the kit's rounded surface (DandersUI/Round.lua,
+-- radii 4 / 6 / 8 -- the only ones baked); colours are GUI.Colors and the
+-- module accents, never literals.
+--
+-- ⚠ BESPOKE ON PURPOSE: the tiles, panels and rows are pooled list pieces with
+-- an icon box, two lines and a control -- no shared widget has that shape. Their
+-- parts are the shared ones: CreateRoundedSurface, StyleButton,
+-- CreateCloseButton, CreateLink, SetSettingsFont.
 -- ============================================================
 
-local TOP = 92            -- greeting (two lines) + the search box, above the scroll
-local GAP = 10
-local TILE_H, TILE_MIN = 46, 200
-local PANEL_MIN = 260     -- below two of these the panels stack
-local PAD = 12            -- inside a panel
-local TAG_W = 66
+local MAX_W = 900         -- the content column, centred
+local GAP = 14            -- between the blocks
+local TILE_GAP, TILE_MIN = 8, 200
+local TILE_PAD_X, TILE_PAD_Y = 12, 10
+local ICON_BOX, ICON_GLYPH = 36, 20
+local TILE_H = ICON_BOX + TILE_PAD_Y * 2
+local PANEL_MIN = 640     -- below this content width the two panels stack
+local PAD = 14            -- inside a panel
+local ROW_GAP = 10        -- between a panel's rows
+local NEWS_GAP = 11       -- between What's new lines
+local TAG_W, TAG_H = 62, 16
+local FIX_W = 90          -- room kept for an attention row's button
+local HELLO_Y = 4
+local SEARCH_Y = 62       -- greeting (18) + the profile line (12) + the gap
+local SEARCH_H = 52
+local TOP = SEARCH_Y + SEARCH_H + GAP   -- above the scroll
+
+local ICONS = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
 
 local C = GUI.Colors
 local view
@@ -225,6 +247,30 @@ local function Tint(fs, c, a)
     fs:SetTextColor(c.r, c.g, c.b, a or 1)
 end
 
+local function RGBA(c, a)
+    return { c.r, c.g, c.b, a or 1 }
+end
+
+local function Hex(c)
+    return format("|cff%02x%02x%02x", floor(c.r * 255 + 0.5), floor(c.g * 255 + 0.5), floor(c.b * 255 + 0.5))
+end
+
+-- A sized label in the settings font.
+local function Label(parent, size, color, layer)
+    local fs = parent:CreateFontString(nil, layer or "OVERLAY", "DFFontHighlight")
+    GUI:SetSettingsFont(fs, size)
+    fs:SetJustifyH("LEFT")
+    Tint(fs, color or C.text)
+    return fs
+end
+
+-- A module's accent, resolved (a def's accent may be a function).
+local function ModAccent(def)
+    local a = def and def.accent
+    if type(a) == "function" then a = a() end
+    return a or GUI:GetAccent()
+end
+
 -- GUI:CreateLink is fixed-layout (it flows once), so a line whose text changes
 -- is a new link; each distinct text is built once and kept.
 local function LinkFor(slot, parent, text, onClick, width)
@@ -233,7 +279,8 @@ local function LinkFor(slot, parent, text, onClick, width)
     for _, f in pairs(cache) do f:Hide() end
     local f = cache[text]
     if not f then
-        f = GUI:CreateLink(parent, text, { width = width, onLinkClick = onClick, padTop = 0, padBottom = 0 })
+        f = GUI:CreateLink(parent, text, { width = width, onLinkClick = onClick, padTop = 0, padBottom = 0,
+                                           fontTemplate = "DFFontHighlight", lineHeight = 16 })
         cache[text] = f
     end
     f:Show()
@@ -245,30 +292,69 @@ local function LinkMarkup(data, text)
     return format("|cffffffff|H%s|h%s|h|r", data, (tostring(text or ""):gsub("|", "")))
 end
 
+-- A link that is ONLY a link, shrunk to its own width so it can be pinned by
+-- its right edge (the mockup's right-aligned "Manage modules" / "Full
+-- changelog"). CreateLink's one link segment is its frame's one child.
+local function ShrinkLink(f)
+    local btn = f:GetChildren()
+    local w = btn and btn.GetWidth and btn:GetWidth() or 0
+    if w > 0 then f:SetWidth(w) end
+    return f
+end
+
 -- ---- tiles ------------------------------------------------------------
--- A tile is a list button: bespoke content (icon, name, a status line) on the
--- shared StyleButton backdrop and hover wash.
+-- A tile is a Button on a rounded panel surface: a 36px rounded icon box in
+-- the module's accent (18% fill, the glyph full strength), the name and a
+-- one-line status, a dim chevron. Hover lights the border and the chevron in
+-- the accent.
+local function PaintTileRest(t)
+    local b = C.border
+    if t.isMore then
+        local d = C.textDim
+        t.surface:SetBorderColor(d.r, d.g, d.b, t.hover and 0.8 or 0.35)
+    elseif t.hover and t.accent then
+        local a = t.accent
+        t.surface:SetBorderColor(a.r, a.g, a.b, 1)
+    else
+        t.surface:SetBorderColor(b.r, b.g, b.b, 0.7)
+    end
+    local cc = (t.hover and t.accent and not t.isMore) and t.accent or C.textDim
+    t.Chevron:SetVertexColor(cc.r, cc.g, cc.b)
+end
+
 local function MakeTile()
-    local t = CreateFrame("Button", nil, view.body, "BackdropTemplate")
+    local t = CreateFrame("Button", nil, view.body)
     t:SetSize(TILE_MIN, TILE_H)
-    GUI:StyleButton(t, { height = TILE_H })
-    local icon = t:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(22, 22)
-    icon:SetPoint("LEFT", t, "LEFT", 12, 0)
+    t.surface = GUI:CreateRoundedSurface(t, { radius = 6, fill = RGBA(C.panel, 1), border = RGBA(C.border, 0.7) })
+
+    local box = CreateFrame("Frame", nil, t)
+    box:SetSize(ICON_BOX, ICON_BOX)
+    box:SetPoint("LEFT", t, "LEFT", TILE_PAD_X, 0)
+    t.boxSurface = GUI:CreateRoundedSurface(box, { radius = 8, border = false, fill = RGBA(C.text, 0.05) })
+    local icon = box:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(ICON_GLYPH, ICON_GLYPH)
+    icon:SetPoint("CENTER", box, "CENTER", 0, 0)
     t.TileIcon = icon
-    local name = t:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    name:SetPoint("TOPLEFT", t, "TOPLEFT", 46, -8)
-    name:SetPoint("RIGHT", t, "RIGHT", -10, 0)
-    name:SetJustifyH("LEFT")
+
+    local chev = t:CreateTexture(nil, "ARTWORK")
+    chev:SetSize(18, 18)
+    chev:SetPoint("RIGHT", t, "RIGHT", -10, 0)
+    chev:SetTexture(ICONS .. "chevron_right.png")
+    t.Chevron = chev
+
+    local name = Label(t, 13, C.text)
+    name:SetPoint("BOTTOMLEFT", box, "RIGHT", 12, 1)
+    name:SetPoint("RIGHT", chev, "LEFT", -6, 0)
     name:SetWordWrap(false)
     t.TileName = name
-    local status = t:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    status:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -3)
-    status:SetPoint("RIGHT", t, "RIGHT", -10, 0)
-    status:SetJustifyH("LEFT")
+    local status = Label(t, 11, C.textDim)
+    status:SetPoint("TOPLEFT", box, "RIGHT", 12, -2)
+    status:SetPoint("RIGHT", chev, "LEFT", -6, 0)
     status:SetWordWrap(false)
-    Tint(status, C.textDim)
     t.TileStatus = status
+
+    t:SetScript("OnEnter", function(self) self.hover = true; PaintTileRest(self) end)
+    t:SetScript("OnLeave", function(self) self.hover = false; PaintTileRest(self) end)
     t:SetScript("OnClick", function(self)
         -- A locked module (Auto Layout editing) is refused, as on the rail.
         if self.target and not GUI:IsModulePickLocked(self.target) then
@@ -278,21 +364,82 @@ local function MakeTile()
     return t
 end
 
+local function PaintModuleTile(t, def)
+    local a = ModAccent(def)
+    t.isMore, t.accent = false, a
+    t.target = def.id
+    t.surface:SetFillShown(true)
+    t.surface:SetFillColor(C.panel.r, C.panel.g, C.panel.b, 1)
+    t.boxSurface:SetFillColor(a.r, a.g, a.b, 0.18)
+    t.TileIcon:SetTexture(def.icon)
+    t.TileIcon:SetVertexColor(a.r, a.g, a.b)
+    t.Chevron:Show()
+    -- Greyed and click-proof while the module is locked (Auto Layout editing),
+    -- as its rail item is.
+    local locked = GUI:IsModulePickLocked(def.id)
+    t:SetEnabled(not locked)
+    t:SetAlpha(locked and 0.4 or 1)
+    t.TileName:SetText(GUI:ModuleLabel(def) or "")
+    t.TileStatus:SetText(GUI:ModuleStatus(def))
+    PaintTileRest(t)
+end
+
+-- Off and coming-soon modules, folded: opens the Modules page. No fill, a
+-- faint border and a neutral "+" box. (The mockup's border is dashed; the kit
+-- has no dashed surface, so it is a fainter solid one.)
+local function PaintMoreTile(t, more)
+    local names = {}
+    for _, def in ipairs(more) do names[#names + 1] = GUI:ModuleLabel(def) or def.id end
+    t.isMore, t.accent = true, nil
+    t.target = "modules"
+    t:SetEnabled(true)
+    t:SetAlpha(1)
+    t.surface:SetFillShown(false)
+    t.boxSurface:SetFillColor(C.text.r, C.text.g, C.text.b, 0.05)
+    t.TileIcon:SetTexture(ICONS .. "add.png")
+    local cc = C.textCaption or C.textDim
+    t.TileIcon:SetVertexColor(cc.r, cc.g, cc.b)
+    t.Chevron:Hide()
+    t.TileName:SetText(format(L["%d more"], #more))
+    t.TileStatus:SetText(concat(names, " \194\183 "))
+    PaintTileRest(t)
+end
+
 -- ---- panels -------------------------------------------------------------
-local function MakePanel()
-    local p = CreateFrame("Frame", nil, view.body, "BackdropTemplate")
-    GUI:CreatePanelBackdrop(p, { bgColor = C.panel, borderColor = C.border })
-    local title = p:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -PAD)
-    title:SetJustifyH("LEFT")
-    Tint(title, C.text)
+local function MakePanel(iconName)
+    local p = CreateFrame("Frame", nil, view.body)
+    p.surface = GUI:CreateRoundedSurface(p, { radius = 8, fill = RGBA(C.panel, 1), border = RGBA(C.border, 0.7) })
+    local icon = p:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(20, 20)
+    icon:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -PAD)
+    icon:SetTexture(ICONS .. iconName .. ".png")
+    p.Icon = icon
+    local title = Label(p, 14, C.text)
+    title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
     p.Title = title
-    local aside = p:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    aside:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    Tint(aside, C.textDim)
+    -- The count pill (Needs attention): notice fill, dark text.
+    local pill = CreateFrame("Frame", nil, p)
+    pill:SetHeight(16)
+    pill:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    pill.surface = GUI:CreateRoundedSurface(pill, { radius = 8, border = false, fill = RGBA(C.notice, 1) })
+    local pt = Label(pill, 10, C.background)
+    pt:SetPoint("CENTER", pill, "CENTER", 0, 0)
+    pill.Text = pt
+    pill:Hide()
+    p.Pill = pill
+    -- Right-aligned aside (What's new: the build, when it is not the section's).
+    local aside = Label(p, 11, C.textDim)
+    aside:SetPoint("RIGHT", p, "RIGHT", -PAD, 0)
+    aside:SetPoint("TOP", icon, "TOP", 0, -4)
+    aside:SetJustifyH("RIGHT")
     p.Aside = aside
     p.rows = {}
     return p
+end
+
+local function PaintPanelChrome(p)
+    local a = GUI:GetAccent()
+    p.Icon:SetVertexColor(a.r, a.g, a.b)
 end
 
 -- One wrapped text line inside a panel row; returns its height at `w`.
@@ -302,25 +449,37 @@ local function SetWrapped(fs, text, w)
     return (text and text ~= "") and (fs:GetStringHeight() or 14) or 0
 end
 
+-- A row: an optional rounded plate (attention items) or a tag pill (What's
+-- new), a title and a detail line.
 local function PanelRow(p, i)
     local r = p.rows[i]
     if r then return r end
     r = CreateFrame("Frame", nil, p)
-    local tag = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    r.plate = GUI:CreateRoundedSurface(r, { radius = 4, fill = RGBA(C.text, 0.025), border = RGBA(C.border, 0.7) })
+    -- The kind stripe: 3px, inside the ring and clear of the corner arcs.
+    local stripe = r:CreateTexture(nil, "BORDER")
+    stripe:SetWidth(3)
+    stripe:SetPoint("TOPLEFT", r, "TOPLEFT", 1, -4)
+    stripe:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", 1, 4)
+    r.Stripe = stripe
+    local kind = r:CreateTexture(nil, "ARTWORK")
+    kind:SetSize(20, 20)
+    kind:SetPoint("LEFT", r, "LEFT", 10, 0)
+    r.Kind = kind
+    -- The tag pill (What's new).
+    local tag = CreateFrame("Frame", nil, r)
+    tag:SetSize(TAG_W, TAG_H)
     tag:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
-    tag:SetWidth(TAG_W)
-    tag:SetJustifyH("LEFT")
-    Tint(tag, C.textCaption or C.textDim)
+    tag.surface = GUI:CreateRoundedSurface(tag, { radius = 4, border = false, fill = RGBA(C.text, 0.08) })
+    local tt = Label(tag, 10, C.textDim)
+    tt:SetPoint("CENTER", tag, "CENTER", 0, 0)
+    tag.Text = tt
     r.Tag = tag
-    local title = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    title:SetJustifyH("LEFT")
+    local title = Label(r, 12, C.text)
     title:SetWordWrap(true)
-    Tint(title, C.text)
     r.TitleFS = title
-    local text = r:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    text:SetJustifyH("LEFT")
+    local text = Label(r, 11, C.textDim)
     text:SetWordWrap(true)
-    Tint(text, C.textDim)
     r.TextFS = text
     p.rows[i] = r
     return r
@@ -330,8 +489,7 @@ end
 local function RowButton(r)
     if r.Fix then return r.Fix end
     local b = CreateFrame("Button", nil, r, "BackdropTemplate")
-    GUI:StyleButton(b, { text = "", width = 80, height = 22 })
-    b:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, 0)
+    GUI:StyleButton(b, { text = "", width = 80, height = 24 })
     b:SetScript("OnClick", function(self)
         local fix = self.fix
         if not fix then return end
@@ -366,22 +524,43 @@ local function RowDismiss(r)
             AfterAttentionChange()
         end,
     })
-    b:SetPoint("TOPRIGHT", r, "TOPRIGHT", 0, 0)
+    b:SetPoint("RIGHT", r, "RIGHT", -8, 0)
     r.Dismiss = b
     return b
 end
 
+-- Severity 1-2 (a conflict, a setup step) read as a warning in the notice
+-- amber; 3 (info) in GLOBAL's teal.
+local function KindFor(item)
+    if type(item.severity) == "number" and item.severity <= BADGE_SEVERITY then
+        return C.notice or C.text, ICONS .. "warning.png"
+    end
+    return GUI.GlobalAccent or C.text, ICONS .. "info.png"
+end
+
+local HEAD_H = 20         -- a panel's header row (the 20px icon)
+
 -- Lay a panel out at width pw; returns its height.
 local function LayoutAttention(p, pw)
     local items = Home.AttentionItems(true)
-    p.Title:SetText(L["Needs attention"])
-    p.Aside:SetText(#items > 0 and tostring(#items) or "")
+    if p.Title then p.Title:SetText(L["Needs attention"]) end
+    if p.Pill then
+        p.Pill:SetShown(#items > 0)
+        if #items > 0 then
+            p.Pill.Text:SetText(tostring(#items))
+            p.Pill:SetWidth(max(16, (p.Pill.Text:GetStringWidth() or 6) + 10))
+        end
+    end
+    if p.Aside then p.Aside:SetText("") end
     local inner = pw - PAD * 2
-    local y = PAD + 22
+    local y = PAD + HEAD_H + ROW_GAP
     for _, r in ipairs(p.rows) do r:Hide() end
     if #items == 0 then
         local r = PanelRow(p, 1)
-        r.Tag:SetText("")
+        r.plate:Hide()
+        r.Stripe:Hide()
+        r.Kind:Hide()
+        r.Tag:Hide()
         r.TitleFS:ClearAllPoints()
         r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
         local h = SetWrapped(r.TitleFS, L["All good. Nothing needs your attention."], inner)
@@ -398,25 +577,35 @@ local function LayoutAttention(p, pw)
     local combat = InCombatLockdown()
     for i, item in ipairs(items) do
         local r = PanelRow(p, i)
-        r.Tag:SetText("")
+        r.plate:Show()
+        r.Tag:Hide()
+        local kc, kicon = KindFor(item)
+        r.Stripe:SetColorTexture(kc.r, kc.g, kc.b, 1)
+        r.Stripe:Show()
+        r.Kind:SetTexture(kicon)
+        r.Kind:SetVertexColor(kc.r, kc.g, kc.b)
+        r.Kind:Show()
         local fix = type(item.fix) == "table" and item.fix or nil
         local canDismiss = item.dismiss ~= nil and item.id ~= nil
-        local rightW = (fix and 90 or 0) + (canDismiss and 22 or 0)
-        local textW = inner - rightW
-        r.TitleFS:ClearAllPoints()
-        r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", 0, 0)
+        local rightW = (fix and FIX_W or 0) + (canDismiss and 24 or 0)
+        local textX = 10 + 20 + 10
+        local textW = inner - textX - 10 - rightW
         Tint(r.TitleFS, C.text)
         local h1 = SetWrapped(r.TitleFS, item.title, textW)
-        r.TextFS:ClearAllPoints()
-        r.TextFS:SetPoint("TOPLEFT", r.TitleFS, "BOTTOMLEFT", 0, -2)
         local h2 = SetWrapped(r.TextFS, item.detail, textW)
+        local textH = h1 + (h2 > 0 and h2 + 1 or 0)
+        local h = max(textH, 24) + 18
+        r.TitleFS:ClearAllPoints()
+        r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", textX, -(9 + max(0, (max(textH, 24) - textH) / 2)))
+        r.TextFS:ClearAllPoints()
+        r.TextFS:SetPoint("TOPLEFT", r.TitleFS, "BOTTOMLEFT", 0, -1)
         if fix then
             local b = RowButton(r)
             b.fix = fix
             if b.Text then b.Text:SetText(fix.label or "") end
             b:SetEnabled(not (combat and not fix.combatSafe))
             b:ClearAllPoints()
-            b:SetPoint("TOPRIGHT", r, "TOPRIGHT", canDismiss and -22 or 0, 0)
+            b:SetPoint("RIGHT", r, "RIGHT", canDismiss and -32 or -10, 0)
             b:Show()
         elseif r.Fix then
             r.Fix:Hide()
@@ -428,14 +617,13 @@ local function LayoutAttention(p, pw)
         elseif r.Dismiss then
             r.Dismiss:Hide()
         end
-        local h = max(h1 + (h2 > 0 and h2 + 2 or 0), fix and 22 or 0, canDismiss and 16 or 0)
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
         r:SetSize(inner, h)
         r:Show()
-        y = y + h + 10
+        y = y + h + 6
     end
-    return y - 10 + PAD
+    return y - 6 + PAD
 end
 Home.LayoutAttention = LayoutAttention   -- the headless tests drive it on a fake panel
 
@@ -452,49 +640,83 @@ local function WhatsNewData()
     return newsCache
 end
 
+-- The tag pills: NEW in Binds' green, IMPROVED in GLOBAL's teal, FIX dim.
+local function TagColors(tag)
+    if tag == "NEW" then
+        local g = GUI.ClicksAccent or GUI:GetAccent()
+        return g, 0.25, g
+    elseif tag == "IMPROVED" then
+        local t = GUI.GlobalAccent or GUI:GetAccent()
+        return t, 0.22, t
+    end
+    return C.text, 0.08, C.textDim
+end
+
 local function LayoutWhatsNew(p, pw)
     local inner = pw - PAD * 2
     local news = WhatsNewData()
-    p.Title:SetText(format(L["What's new in %s"], news and news.version or (VersionBase(DF.VERSION) or "")))
-    p.Aside:SetText("")
+    local shown = news and news.version or (VersionBase(DF.VERSION) or "")
+    p.Title:SetText(format(L["What's new in %s"], shown))
+    p.Pill:Hide()
+    -- The build running, when it is not the section shown (an alpha).
+    local running = tostring(DF.VERSION or "")
+    p.Aside:SetText((running ~= "" and VersionBase(running) ~= running:gsub("^v", "")) and running or "")
     for _, r in ipairs(p.rows) do r:Hide() end
-    local y = PAD + 22
+    local y = PAD + HEAD_H + ROW_GAP
     local entries = news and news.entries or {}
-    local textW = inner - TAG_W
     for i, e in ipairs(entries) do
         local r = PanelRow(p, i)
+        r.plate:Hide()
+        r.Stripe:Hide()
+        r.Kind:Hide()
         local tl = TAG_LABEL[e.tag]
-        r.Tag:SetText(tl and tl() or "")
+        local fill, fa, ink = TagColors(e.tag)
+        r.Tag.Text:SetText(tl and tl() or "")
+        Tint(r.Tag.Text, ink)
+        r.Tag.surface:SetFillColor(fill.r, fill.g, fill.b, fa)
+        local tagW = max(TAG_W, (r.Tag.Text:GetStringWidth() or 0) + 12)
+        r.Tag:SetWidth(tagW)
+        r.Tag:Show()
+        local textX = tagW + 10
+        local textW = inner - textX
         r.TitleFS:ClearAllPoints()
-        r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", TAG_W, 0)
+        r.TitleFS:SetPoint("TOPLEFT", r, "TOPLEFT", textX, -1)
         Tint(r.TitleFS, C.text)
         local h1 = SetWrapped(r.TitleFS, e.title, textW)
         r.TextFS:ClearAllPoints()
         if h1 > 0 then
             r.TextFS:SetPoint("TOPLEFT", r.TitleFS, "BOTTOMLEFT", 0, -2)
         else
-            r.TextFS:SetPoint("TOPLEFT", r, "TOPLEFT", TAG_W, 0)
+            r.TextFS:SetPoint("TOPLEFT", r, "TOPLEFT", textX, -1)
         end
+        Tint(r.TextFS, C.textCaption or C.textDim)
         local h2 = SetWrapped(r.TextFS, e.text, textW)
-        local h = max(h1 + (h1 > 0 and h2 > 0 and 2 or 0) + h2, 14)
+        local h = max(h1 + (h1 > 0 and h2 > 0 and 2 or 0) + h2 + 1, TAG_H)
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
         r:SetSize(inner, h)
         r:Show()
-        y = y + h + 10
+        y = y + h + NEWS_GAP
     end
     -- "Full changelog": the existing overlay, as it was.
-    local link = LinkFor("changelog", p, LinkMarkup("dfChangelog", L["Full changelog"]),
-        function() if GUI.ShowChangelog then GUI:ShowChangelog() end end, inner)
+    local link = ShrinkLink(LinkFor("changelog", p, LinkMarkup("dfChangelog", L["Full changelog"]),
+        function() if GUI.ShowChangelog then GUI:ShowChangelog() end end, inner))
     link:ClearAllPoints()
     link:SetPoint("TOPLEFT", p, "TOPLEFT", PAD, -y)
-    return y + (link.layoutHeight or 14) + PAD
+    return y + (link.layoutHeight or 16) + PAD
 end
 
 -- ---- the whole page ---------------------------------------------------------
-local function PaintHeader()
+-- x0 / cw: the centred content column (MAX_W at most).
+local function PaintHeader(x0, cw)
     local name = UnitName and UnitName("player") or nil
-    W.hello:SetText(name and format(L["Hello, %s"], name) or L["Home"])
+    local cc = C.textCaption or C.text
+    -- The name in the text colour on the caption-coloured line. The escape is
+    -- outside L: the colour is ours, the words are the translator's.
+    W.hello:SetText(name and format(L["Hello, %s"], Hex(C.text) .. name .. "|r") or L["Home"])
+    Tint(W.hello, cc)
+    W.hello:ClearAllPoints()
+    W.hello:SetPoint("TOPLEFT", view, "TOPLEFT", x0, -HELLO_Y)
 
     local profile = DF.GetCurrentProfile and DF:GetCurrentProfile() or nil
     -- Profiles locked (an Auto Layout is being edited): the name is plain
@@ -508,13 +730,18 @@ local function PaintHeader()
     if layout then
         text = text .. "  \194\183  " .. format(L["Layout: %s"], (tostring(layout):gsub("|", "")))
     end
-    local w = max((view:GetWidth() or 0) - 4, 200)
     local link = LinkFor("profile", view, text, function()
         if GUI:IsModulePickLocked("profiles", "profiles_manage") then return end
         GUI:SelectModule("profiles", "profiles_manage")
-    end, w)
+    end, max(cw - 4, 200))
     link:ClearAllPoints()
     link:SetPoint("TOPLEFT", W.hello, "BOTTOMLEFT", 0, -6)
+
+    if W.search then
+        W.search:ClearAllPoints()
+        W.search:SetPoint("TOPLEFT", view, "TOPLEFT", x0, -SEARCH_Y)
+        W.search:SetSize(cw, SEARCH_H)
+    end
 end
 
 function GUI:RefreshHomeView()
@@ -523,79 +750,63 @@ function GUI:RefreshHomeView()
     if w < 50 then return end
     local body = view.body
     body:SetWidth(w)
-    PaintHeader()
+    local cw = math.min(w, MAX_W)
+    local x0 = floor((w - cw) / 2)
+    PaintHeader(x0, cw)
 
     -- ---- Your modules ----
     local y = 0
     local on, more, total = Home.TileModel()
     W.secTitle:ClearAllPoints()
-    W.secTitle:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-    W.secTitle:SetText(L["Your modules"])
-    local countText = format(L["%d of %d on"], #on, total)
-    local secLink = LinkFor("modules", body,
-        countText .. "  \194\183  " .. LinkMarkup("dfModules", L["Manage modules"]),
-        function() GUI:SelectModule("modules") end, max(w - 160, 120))
+    W.secTitle:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -(y + 2))
+    -- Uppercase, as the mockup's section caption. string.upper only touches
+    -- ASCII letters, so a translated title keeps its other characters.
+    W.secTitle:SetText(string.upper(L["Your modules"]))
+    W.secCount:SetText(format(L["%d of %d on"], #on, total))
+    local secLink = ShrinkLink(LinkFor("modules", body, LinkMarkup("dfModules", L["Manage modules"]),
+        function() GUI:SelectModule("modules") end, 300))
     secLink:ClearAllPoints()
-    secLink:SetPoint("LEFT", W.secTitle, "RIGHT", 12, 0)
-    y = y + 24
+    secLink:SetPoint("TOPRIGHT", body, "TOPRIGHT", -(w - x0 - cw), -y)
+    y = y + 16 + 8
 
     local list = {}
     for _, def in ipairs(on) do list[#list + 1] = { def = def } end
     if #more > 0 then list[#list + 1] = { more = more } end
-    local cols = max(1, floor((w + GAP) / (TILE_MIN + GAP)))
-    local tileW = (w - GAP * (cols - 1)) / cols
+    local cols = max(1, floor((cw + TILE_GAP) / (TILE_MIN + TILE_GAP)))
+    local tileW = (cw - TILE_GAP * (cols - 1)) / cols
     for _, t in ipairs(tiles) do t:Hide() end
     for i, entry in ipairs(list) do
         local t = tiles[i]
         if not t then t = MakeTile(); tiles[i] = t end
-        if entry.def then
-            local def = entry.def
-            t.target = def.id
-            t.TileIcon:SetTexture(def.icon)
-            t.TileIcon:SetAlpha(1)
-            -- Greyed and click-proof while the module is locked (Auto Layout
-            -- editing), as its rail item is.
-            t:SetEnabled(not GUI:IsModulePickLocked(def.id))
-            t.TileName:SetText(GUI:ModuleLabel(def) or "")
-            t.TileStatus:SetText(GUI:ModuleStatus(def))
-        else
-            -- Off and coming-soon modules, folded: opens the Modules page.
-            local names = {}
-            for _, def in ipairs(entry.more) do names[#names + 1] = GUI:ModuleLabel(def) or def.id end
-            local mod = GUI:GetModule("modules")
-            t.target = "modules"
-            t:SetEnabled(true)
-            t.TileIcon:SetTexture(mod and mod.icon or nil)
-            t.TileIcon:SetAlpha(0.6)
-            t.TileName:SetText(format(L["%d more"], #entry.more))
-            t.TileStatus:SetText(concat(names, " \194\183 "))
-        end
+        if entry.def then PaintModuleTile(t, entry.def) else PaintMoreTile(t, entry.more) end
         local col, row = (i - 1) % cols, floor((i - 1) / cols)
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", body, "TOPLEFT", col * (tileW + GAP), -(y + row * (TILE_H + GAP)))
+        t:SetPoint("TOPLEFT", body, "TOPLEFT", x0 + col * (tileW + TILE_GAP), -(y + row * (TILE_H + TILE_GAP)))
         t:SetSize(tileW, TILE_H)
         t:Show()
     end
     local tileRows = floor((#list + cols - 1) / cols)
-    y = y + tileRows * (TILE_H + GAP) + 8
+    y = y + tileRows * (TILE_H + TILE_GAP) - TILE_GAP + GAP
 
     -- ---- Needs attention + What's new ----
-    local two = w >= PANEL_MIN * 2 + GAP
-    local pw = two and floor((w - GAP) / 2) or w
+    PaintPanelChrome(W.attention)
+    PaintPanelChrome(W.news)
+    local two = cw >= PANEL_MIN
+    local pw = two and floor((cw - GAP) / 2) or cw
     local ha = LayoutAttention(W.attention, pw)
-    local hn = LayoutWhatsNew(W.news, pw)
+    local hn = LayoutWhatsNew(W.news, two and (cw - pw - GAP) or cw)
     W.attention:ClearAllPoints()
     W.news:ClearAllPoints()
-    W.attention:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
+    W.attention:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
     W.attention:SetSize(pw, ha)
     if two then
-        W.news:SetPoint("TOPLEFT", body, "TOPLEFT", pw + GAP, -y)
-        W.news:SetSize(w - pw - GAP, hn)
+        W.news:SetPoint("TOPLEFT", body, "TOPLEFT", x0 + pw + GAP, -y)
+        W.news:SetSize(cw - pw - GAP, hn)
         y = y + max(ha, hn)
     else
         y = y + ha + GAP
-        W.news:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
-        W.news:SetSize(pw, hn)
+        W.news:SetPoint("TOPLEFT", body, "TOPLEFT", x0, -y)
+        W.news:SetSize(cw, hn)
         y = y + hn
     end
     body:SetHeight(y + 8)
@@ -682,25 +893,21 @@ local function Build()
     view = GUI:CreateModuleView(TOP)
     if not view then return nil end
 
-    local hello = view:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-    hello:SetPoint("TOPLEFT", view, "TOPLEFT", 2, -4)
-    hello:SetJustifyH("LEFT")
-    Tint(hello, C.text)
-    W.hello = hello
+    -- 18px caption line, the player's name in the text colour (PaintHeader).
+    W.hello = Label(view, 18, C.textCaption or C.text)
 
-    local gutter = (GUI.Scroll and GUI.Scroll.gutter) or 14
     local S = DF.Search
     if S and S.CreateSearchBar then
         -- CreateSearchBar makes the bar it builds THE bar; the sidebar's stays
-        -- it until Home is shown (AdoptSearch).
+        -- it until Home is shown (AdoptSearch). The mockup's big box: 52 tall,
+        -- radius 8, a 24px glyph and 15px text (placed in PaintHeader).
+        -- No key hint: the window has no search shortcut to name.
         local prev = S.SearchBar
-        local bar = S:CreateSearchBar(view)
+        local bar = S:CreateSearchBar(view, { radius = 8, iconSize = 24, iconX = 16, fontSize = 15 })
         S.SearchBar = prev
         bar:ClearAllPoints()
-        bar:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -50)
-        bar:SetPoint("TOPRIGHT", view, "TOPRIGHT", -gutter, -50)
-        bar:SetHeight(32)
-        if DFFontHighlight and bar.editbox then bar.editbox:SetFontObject(DFFontHighlight) end
+        bar:SetPoint("TOPLEFT", view, "TOPLEFT", 0, -SEARCH_Y)
+        bar:SetHeight(SEARCH_H)
         if bar.placeholder then bar.placeholder:SetText(L["Search every setting..."]) end
         W.search = bar
     end
@@ -711,13 +918,13 @@ local function Build()
     host:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", 0, 0)
     W.resultsHost = host
 
-    local secTitle = view.body:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    secTitle:SetJustifyH("LEFT")
-    Tint(secTitle, C.textCaption or C.text)
-    W.secTitle = secTitle
+    -- "YOUR MODULES"  N of M on ...................... Manage modules
+    W.secTitle = Label(view.body, 12, C.textCaption or C.text)
+    W.secCount = Label(view.body, 11, C.textDim)
+    W.secCount:SetPoint("BOTTOMLEFT", W.secTitle, "BOTTOMRIGHT", 8, 0)
 
-    W.attention = MakePanel()
-    W.news = MakePanel()
+    W.attention = MakePanel("notifications")
+    W.news = MakePanel("auto_awesome")
 
     -- Fix buttons grey in combat and come back after it: repaint on the edges
     -- (the list itself is the cached one -- checks never run in combat).

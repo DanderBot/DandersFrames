@@ -343,6 +343,13 @@ eq(#A:GetActive(), 0, "quiet again")
 -- ---- Home -----------------------------------------------------------------
 print("-- Attention: Home rows, combat, dismiss, badge, Q3")
 function GUI:StyleButton(b) b.Text = FakeUIFrame() end
+-- The rows' rounded plates and sized labels (Home's view).
+function GUI:CreateRoundedSurface()
+    local s = {}
+    for _, k in ipairs({ "Show", "Hide", "SetFillColor", "SetBorderColor", "SetFillShown" }) do s[k] = function() end end
+    return s
+end
+function GUI:SetSettingsFont() end
 function GUI:CreateCloseButton(parent, opts)
     local b = FakeUIFrame()
     b._opts = opts
@@ -372,10 +379,12 @@ eq(badges.group, nil, "badge: other items keep their own (none)")
 eq(GUI:ModuleToOpen("group", false), "home", "Q3: a severity-1 item opens the window on Home")
 
 local p = FakeUIFrame()
-p.Title, p.Aside, p.rows = FakeUIFrame(), FakeUIFrame(), {}
+p.Title, p.Aside, p.Pill, p.rows = FakeUIFrame(), FakeUIFrame(), FakeUIFrame(), {}
+p.Pill.Text = FakeUIFrame()
 local h = Home.LayoutAttention(p, 400)
 check(h > 0, "rows: laid out")
-eq(p.Aside:GetText(), "3", "rows: the panel's count")
+eq(p.Pill.Text:GetText(), "3", "rows: the panel's count, in its pill")
+check(p.Pill:IsShown(), "rows: ...which shows while there is something to count")
 local r1, r2, r3 = p.rows[1], p.rows[2], p.rows[3]
 eq(r1.TitleFS:GetText(), "Blizzard party frames are still showing", "rows: sorted, conflict first")
 eq(r3.TitleFS:GetText(), "Debug logging is on", "rows: info last")

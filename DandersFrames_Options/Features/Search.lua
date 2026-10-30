@@ -1312,10 +1312,18 @@ end
 -- ============================================================
 -- SEARCH BAR
 -- ============================================================
-function Search:CreateSearchBar(parent)
+-- opts (all optional; the sidebar's bar passes none and is unchanged):
+--   radius     draw the well as a ROUNDED surface (Round.lua) instead of the square
+--              input backdrop -- the same fill and edge, so it reads as the same control
+--   iconSize   the leading search glyph's size (default 15)
+--   iconX      its left inset (default 6); the text starts one gap after it
+--   fontSize   the typed text and the placeholder, at the settings font (default:
+--              the small template font)
+function Search:CreateSearchBar(parent, opts)
+    opts = opts or {}
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(150, 28)
-    
+
     -- ☠ THE SHARED INPUT CHROME, not a private copy of it. INPUT_FILL/INPUT_EDGE are
     -- file-locals in Widgets.lua, so GUI:StyleEditBox IS the supported way to reach them;
     -- there is no palette entry to reference instead.
@@ -1325,22 +1333,39 @@ function Search:CreateSearchBar(parent)
     -- font (set below).
     DF.GUI:StyleEditBox(frame, { skipFont = true })
 
+    -- The rounded well: the SAME two colours (published by the kit as
+    -- UI.InputColors), on a sliced rounded surface. ApplyRoundedChrome takes the
+    -- square backdrop down -- it would otherwise paint over the rounded fill.
+    local surface
+    local IC = DF.GUI.InputColors
+    if opts.radius and IC and DF.GUI.ApplyRoundedChrome then
+        surface = DF.GUI:ApplyRoundedChrome(frame, { radius = opts.radius, fill = IC.fill, border = IC.edge })
+    end
+
+    local iconSize = opts.iconSize or 15
+    local iconX = opts.iconX or 6
+    local textX = iconX + iconSize + (opts.radius and 12 or 5)
     local icon = frame:CreateTexture(nil, "OVERLAY")
-    icon:SetPoint("LEFT", 6, 0)
-    icon:SetSize(15, 15)
+    icon:SetPoint("LEFT", iconX, 0)
+    icon:SetSize(iconSize, iconSize)
     icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search.png")
     icon:SetVertexColor(0.72, 0.72, 0.72)
 
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("LEFT", 26, 0)
+    editbox:SetPoint("LEFT", textX, 0)
     editbox:SetPoint("RIGHT", -24, 0)
-    editbox:SetHeight(20)
-    editbox:SetFontObject(DFFontHighlightSmall)
+    editbox:SetHeight(opts.fontSize and (opts.fontSize + 8) or 20)
+    if opts.fontSize then
+        DF.GUI:SetSettingsFont(editbox, opts.fontSize)
+    else
+        editbox:SetFontObject(DFFontHighlightSmall)
+    end
     editbox:SetAutoFocus(false)
     editbox:SetTextInsets(2, 2, 0, 0)
-    
+
     local placeholder = frame:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    placeholder:SetPoint("LEFT", 26, 0)
+    placeholder:SetPoint("LEFT", textX + 2, 0)
+    if opts.fontSize then DF.GUI:SetSettingsFont(placeholder, opts.fontSize) end
     placeholder:SetText(L["Search..."])
     -- textDim from the palette, so placeholder text moves with it instead of being pinned.
     local cDim = DF.GUI.Colors.textDim
@@ -1364,7 +1389,11 @@ function Search:CreateSearchBar(parent)
     
     editbox:SetScript("OnEditFocusGained", function()
         local c = GetThemeColor()
-        frame:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+        if surface then
+            surface:SetBorderColor(c.r, c.g, c.b, 1)
+        else
+            frame:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+        end
         placeholder:Hide()
     end)
 
@@ -1374,7 +1403,12 @@ function Search:CreateSearchBar(parent)
         -- a change to the shared input look would have fixed the resting state and left
         -- the after-focus state on the old colour, which is the sort of drift only ever
         -- noticed by accident.
-        DF.GUI:StyleEditBox(frame, { skipFont = true })
+        if surface then
+            local e = IC.edge
+            surface:SetBorderColor(e[1], e[2], e[3], e[4])
+        else
+            DF.GUI:StyleEditBox(frame, { skipFont = true })
+        end
         if editbox:GetText() == "" then
             placeholder:Show()
         end

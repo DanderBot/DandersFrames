@@ -1827,6 +1827,10 @@ end
 -- straight to CreateElementBackdrop, which only reads them.
 local INPUT_FILL = { 0, 0, 0, 0.5 }
 local INPUT_EDGE = { 0.3, 0.3, 0.3, 1 }
+-- Published read-only, for a consumer that draws the same well on a ROUNDED
+-- surface (the settings Home's big search box) and so cannot go through
+-- StyleEditBox's square backdrop. The same tables: never mutate them.
+UI.InputColors = { fill = INPUT_FILL, edge = INPUT_EDGE }
 
 -- StyleEditBox: normalize a bare (label-less) EditBox to the standard input
 -- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
