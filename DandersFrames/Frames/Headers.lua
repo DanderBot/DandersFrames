@@ -34,6 +34,10 @@ rosterThrottleFrame:SetScript("OnUpdate", function(self)
     DF:Debug("ROSTER", "Throttle fired: processing %d coalesced GRU events (%d total since PEW)", gruBurstCount, gruEventCount)
     gruBurstCount = 0
     if not InCombatLockdown() then
+        -- A pending auto layout change applies first, so this lays out in the right layout.
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.RunPendingEval then
+            DF.AutoProfilesUI:RunPendingEval()
+        end
         DF:ProcessRosterUpdate()
     else
         -- ARENA FIX: Check for arena first - arena is IsInRaid()=true but needs
@@ -405,6 +409,11 @@ local function HasRosterMembershipChanged()
     return false
 end
 
+-- Forget the saved roster so the next HasRosterMembershipChanged reports a change.
+local function InvalidateRosterSnapshot()
+    lastRosterCount = -1
+end
+
 
 -- Clear GUID cache for a unit (when unit is removed)
 local function ClearUnitCache(unit)
@@ -731,8 +740,19 @@ function DF:InitializeHeaderChild(frame)
     local function QueueFullFrameRefresh(self)
         if self._dfFullRefreshQueued then return end
         self._dfFullRefreshQueued = true
+        -- debugprofilestop, not GetTime: GetTime is frozen for the whole render frame, so a
+        -- refresh earlier in the same frame, before the reassignment that queued this one,
+        -- would read as "after" and skip the repaint of the new occupant.
+        local queuedAt = debugprofilestop()
         C_Timer.After(0, function()
             self._dfFullRefreshQueued = nil
+            -- A full refresh of this same unit since the queue already read the new
+            -- assignment: a layout switch refreshes every child in the frame the header
+            -- hands out units, so this one was the third pass for each.
+            if self._dfFullRefreshAt and self._dfFullRefreshAt >= queuedAt
+                and self._dfFullRefreshUnit == self.unit then
+                return
+            end
             if self:IsVisible() and self.unit then
                 -- Use full frame refresh for complete update
                 if DF.FullFrameRefresh then
@@ -932,6 +952,14 @@ function DF:InitializeHeaderChild(frame)
             
             if actualUnit then
                 QueueFullFrameRefresh(self)
+                -- The full refresh is deferred, and in a big join it queues behind the
+                -- container builds; until it lands the frame shows the PREVIOUS occupant's
+                -- name and health, or none. The visible basics follow the new unit now.
+                pcall(DF.UpdateName, DF, self)
+                pcall(DF.UpdateHealthFast, DF, self)
+                pcall(DF.ApplyHealthColors, DF, self)
+                pcall(DF.UpdateFrameBorderUnitColor, DF, self)
+                if DF.RenderTextDesignerNow then pcall(DF.RenderTextDesignerNow, DF, self) end
             end
 
             -- Fire OnFramesSorted for external API subscribers whenever a child's
@@ -1098,8 +1126,16 @@ function DF:InitializeHeaderChild(frame)
             unitFrameMap[self.unit] = self
         end
 
-        -- Small delay to ensure unit is set
+        -- Small delay to ensure unit is set.
+        -- ONE pending refresh per frame: a flat-raid re-sort bounces the whole header
+        -- (Hide/Show), so in a filling raid every child is re-shown on every sort. Each
+        -- show used to queue its own full refresh -- ~70 per frame in one 30-player join,
+        -- all landing in the same frame (a 4 s freeze). Later shows in the burst add
+        -- nothing: the one refresh reads the frame's state when it runs.
+        if self._dfShowRefreshQueued then return end
+        self._dfShowRefreshQueued = true
         C_Timer.After(0.05, function()
+            self._dfShowRefreshQueued = nil
             if self and self.unit and self:IsVisible() then
                 DF:Debug("LAYOUT", "OnShow refresh: %s (headerChild=%s isRaid=%s)",
                     self.unit or "?", tostring(self.dfIsHeaderChild), tostring(self.isRaidFrame))
@@ -4074,6 +4110,7 @@ end
 function DF:FullFrameRefresh(frame)
     DF:RosterDebugCount("FullFrameRefresh")
     if not frame or not frame.unit then return end
+    frame._dfFullRefreshAt, frame._dfFullRefreshUnit = debugprofilestop(), frame.unit
     
     -- Clear color tracking to force re-evaluation of background colors
     -- (When units swap positions due to sorting, old colors would persist otherwise)
@@ -4174,10 +4211,9 @@ function DF:RefreshLiveFrames()
     end
 
     -- ☠ AND PINNED — a pinned frame IS a live frame. None of the three iterators above
-    -- reaches one, so every caller of this function silently skipped them: the combat-ENTRY
-    -- half of the HideInCombat gates (PLAYER_REGEN_DISABLED routes here through
-    -- RefreshAllVisibleFrames) plus every settings callback that refreshes data-driven
-    -- content. Boss sets included — they are unit frames for friendly, healable NPCs.
+    -- reaches one, so every caller of this function silently skipped them, including every
+    -- settings callback that refreshes data-driven content. Boss sets included — they are
+    -- unit frames for friendly, healable NPCs.
     if DF.IteratePinnedFrames then
         DF.IteratePinnedFrames(function(frame)
             if frame and frame.unit then
@@ -4439,7 +4475,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         if role ~= "DAMAGER" then return nil end
 
         local specID
-        if UnitIsUnit(unit, "player") then
+        if DF.UnitIsUnit(unit, "player") then
             specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization())
         else
             local cache = DF.SecureSort and DF.SecureSort.specCache
@@ -4929,6 +4965,10 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
     -- RAID: Use raid headers (only when in raid, NOT arena)
     -- ============================================================
     if inRaid then
+        -- A due auto layout applies before any raid header is shown (see the function).
+        if DF.AutoProfilesUI and DF.AutoProfilesUI.ApplyBeforeRaidShown then
+            DF.AutoProfilesUI:ApplyBeforeRaidShown()
+        end
         DF:UpdateRaidHeaderVisibility(skipRaidReposition)
     else
         -- Hide all raid headers (includes arena case)
@@ -5323,7 +5363,7 @@ function DF:GetPlayerRaidGroup()
     -- Fallback: try UnitIsUnit comparison
     for i = 1, 40 do
         local name, _, subgroup = GetRaidRosterInfo(i)
-        if name and UnitIsUnit("raid" .. i, "player") then
+        if name and DF.UnitIsUnit("raid" .. i, "player") then
             headerDebug("GetPlayerRaidGroup: Found via UnitIsUnit at raid", i, "subgroup=", subgroup)
             return subgroup
         end
@@ -5599,18 +5639,18 @@ headerCombatFrame:SetScript("OnEvent", function()
     -- Process pending flat layout refresh (queued during combat roster changes)
     if DF.pendingFlatLayoutRefresh then
         DF.pendingFlatLayoutRefresh = false
-        -- Clear FlatRaidFrames pending flags - SetEnabled(true) handles everything
-        -- This prevents a duplicate UpdateNameList from FlatRaidFrames' own REGEN handler
+        -- The sort below replaces FlatRaidFrames' own queued name-list rebuild.
         if DF.FlatRaidFrames then
             DF.FlatRaidFrames.pendingNameListUpdate = false
             DF.FlatRaidFrames.pendingLayoutUpdate = false
         end
+        DF:UpdateHeaderVisibility()
+        -- ☠ THE SORT, NOT JUST VISIBILITY. A name-list header shows only the names on its
+        -- list, so a member who joined in combat stays hidden until the list is rebuilt.
+        -- UpdateHeaderVisibility does not rebuild it: on an already-visible header,
+        -- SetEnabled(true) takes its "refresh child sizes only" path.
         if isFlatRaid then
-            -- UpdateHeaderVisibility → SetEnabled(true) handles layout + nameList rebuild
-            DF:UpdateHeaderVisibility()
-        else
-            -- Mode changed during combat (was flat raid, now not) - update visibility
-            DF:UpdateHeaderVisibility()
+            DF:ApplyRaidFlatSorting()
         end
     end
     
@@ -5821,7 +5861,7 @@ function DF:BuildArenaNameList(selfPosition)
                 table.insert(members, {
                     unit = unit,
                     name = name,
-                    isPlayer = UnitIsUnit(unit, "player")
+                    isPlayer = DF.UnitIsUnit(unit, "player")
                 })
             end
         end
@@ -7000,8 +7040,8 @@ function DF:FinalizeHeaderInit()
     -- ============================================================
     DF.initialized = true
 
-    -- Do an immediate missing buff check
-    if not InCombatLockdown() and DF.UpdateAllMissingBuffIcons then
+    -- Do an immediate missing buff check (a container drive: legal in combat)
+    if DF.UpdateAllMissingBuffIcons then
         DF:UpdateAllMissingBuffIcons()
     end
     
@@ -7363,7 +7403,24 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         
         -- Only if headers are fully initialized
         if not DF.headersInitialized then return end
-        
+
+        -- ☠ A PARTY HEADER IN A RAID SHOWS YOUR SUBGROUP. With showParty on, the game's own
+        -- header update treats party1-4 as the raid subgroup the moment a raid forms, and
+        -- draws them in the party layout until the visibility update hides the header -- a
+        -- frame later, behind the auto layout's long build frame (join scan: party shown=5
+        -- for 0.45 s on a big join). Hidden here, in the same event, it never draws. The
+        -- deferred update hides it in a raid anyway; this only does it first. Not in combat:
+        -- a secure header cannot be hidden then, and a mid-fight raid behaves as it did.
+        if event == "GROUP_ROSTER_UPDATE" and IsInRaid() and not InCombatLockdown()
+            and DF.partyHeader and DF.partyHeader:IsShown()
+            and not (DF.testMode or DF.raidTestMode) then
+            local contentType = DF.GetContentType and DF:GetContentType()
+            if contentType ~= "arena" then
+                DF.partyHeader:Hide()
+                DF:Debug("VISIBILITY", "raid formed: party header hidden in the roster event")
+            end
+        end
+
         -- ARENA RELOAD FIX: On UI reload, enable the content type fallback so that
         -- GetContentType() can use the saved arena hint from before the reload.
         -- This must run BEFORE any call to GetContentType() in this handler.
@@ -7744,6 +7801,8 @@ function DF:ProcessRosterUpdate()
         local function refreshName(frame)
             if frame.unit then
                 DF:UpdateName(frame)
+                -- Same net for a class / role border: nothing but a full refresh paints it.
+                DF:UpdateFrameBorderUnitColor(frame)
                 -- TD mirrors this legacy safety net: refresh identity text on
                 -- every roster change so TD names don't go stale/duplicate when
                 -- the secure header reshuffles frames (the per-frame path misses some).
@@ -7887,6 +7946,10 @@ function DF:ProcessRosterUpdate()
     -- Queue for after combat if in combat lockdown
     if InCombatLockdown() then
         DF.pendingSortingUpdate = true
+        -- ☠ The check above already SAVED this roster as seen, so the post-combat re-run
+        -- would find it "unchanged" and skip the sort -- leaving a mid-combat joiner off a
+        -- name-list header for good. Forget it so that re-run sorts.
+        InvalidateRosterSnapshot()
         headerDebug("Sorting update queued (combat lockdown)")
         return
     end
@@ -8222,6 +8285,11 @@ end
 headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- Skip if headers not initialized
     if not DF.headersInitialized then return end
+    -- The UNIT_* events here are registered globally, so every enemy nameplate's health
+    -- and power ticks land here too: two-thirds of all calls in an LFR fight, each still
+    -- paying the pinned lookup and a Text Designer refresh. No DF frame shows a nameplate
+    -- unit. (An anchored find allocates nothing.)
+    if type(arg1) == "string" and arg1:find("^nameplate") then return end
     
     -- ========================================
     -- UNIT-SPECIFIC EVENTS (high frequency, checked first)
@@ -8311,16 +8379,20 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                 end
             end
 
+            -- A name that arrives late means the unit's details did too, so a class
+            -- border painted before now may have fallen back to the static colour.
             if frame and frame.dfEventsEnabled ~= false then
                 if DF.UpdateName then
                     DF:UpdateName(frame)
                 end
+                DF:UpdateFrameBorderUnitColor(frame)
             end
             local pinnedFrame = FindPinnedFrameForUnit(unit)
             if pinnedFrame and pinnedFrame.dfEventsEnabled ~= false then
                 if DF.UpdateName then
                     DF:UpdateName(pinnedFrame)
                 end
+                DF:UpdateFrameBorderUnitColor(pinnedFrame)
             end
             tdRefresh(frame, pinnedFrame, "name")
 
@@ -8469,20 +8541,22 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- READY_CHECK events: Update ready check icons
     if event == "READY_CHECK" or event == "READY_CHECK_CONFIRM" then
         if DF.UpdateReadyCheckIcon then
-            DF:IteratePartyFrames(function(frame)
-                if frame.dfIsHeaderChild then
+            -- A confirm names the one player who answered; only their frames change.
+            local only = event == "READY_CHECK_CONFIRM" and type(arg1) == "string" and arg1 or nil
+            local function update(frame)
+                -- A withheld comparison (nil) updates rather than risk a stale icon.
+                if not only or (frame.unit and DF.UnitIsUnit(frame.unit, only) ~= false) then
                     DF:UpdateReadyCheckIcon(frame)
                 end
+            end
+            DF:IteratePartyFrames(function(frame)
+                if frame.dfIsHeaderChild then update(frame) end
             end)
             DF:IterateRaidFrames(function(frame)
-                if frame.dfIsHeaderChild then
-                    DF:UpdateReadyCheckIcon(frame)
-                end
+                if frame.dfIsHeaderChild then update(frame) end
             end)
             -- Also update pinned frames
-            IteratePinnedFrames(function(frame)
-                DF:UpdateReadyCheckIcon(frame)
-            end)
+            IteratePinnedFrames(update)
         end
         return
     end

@@ -191,8 +191,21 @@ end
 -- Applies anchor / font / color to the FontString.
 local function applyAppearance(fs, frame, elem, globalDefaults)
     local app = resolveAppearance(elem, globalDefaults)
-    -- Font
-    DF:SafeSetFont(fs, fontPath(app.font), app.fontSize, app.outline)
+    -- Font, only when it changed: this runs on every text update, and a full SafeSetFont
+    -- re-resolves the font and forces a re-render each time. The family generation and
+    -- the slug option are part of the key because both change the applied font without
+    -- changing these settings; shadow edits reach shared families in place.
+    local slug = DF.db and DF.db.fontSlug and true or false
+    local gen = DF.fontFamilyGen
+    if fs._tdFont ~= app.font or fs._tdFontSize ~= app.fontSize or fs._tdFontOutline ~= app.outline
+        or fs._tdFontSlug ~= slug or fs._tdFontGen ~= gen then
+        if DF:SafeSetFont(fs, fontPath(app.font), app.fontSize, app.outline) then
+            fs._tdFont, fs._tdFontSize, fs._tdFontOutline = app.font, app.fontSize, app.outline
+            fs._tdFontSlug, fs._tdFontGen = slug, gen
+        else
+            fs._tdFont = nil
+        end
+    end
     -- Color
     if app.useClassColor then
         -- For LiveSource we'd read source:GetClassToken() — but Render doesn't
@@ -211,10 +224,18 @@ end
 -- Applies position to the FontString (separate from appearance so we can
 -- update position when anchorTo's target moves).
 local function applyPosition(fs, frame, elem, fontStringsById, enabledById)
-    fs:ClearAllPoints()
     local target = resolveAnchorTarget(elem, frame, fontStringsById, enabledById)
-    fs:SetPoint(elem.anchor or "CENTER", target, elem.anchor or "CENTER",
-        elem.offsetX or 0, elem.offsetY or 0)
+    local point, x, y = elem.anchor or "CENTER", elem.offsetX or 0, elem.offsetY or 0
+    -- Re-anchoring makes the client lay the text out again, and this runs on every update
+    -- (each health tick per unit); the anchor only moves when one of these four does.
+    -- A torn-down frame gets fresh FontStrings (Render:Teardown), so the stamp resets.
+    if fs._tdPosTarget == target and fs._tdPosPoint == point
+        and fs._tdPosX == x and fs._tdPosY == y then
+        return
+    end
+    fs:ClearAllPoints()
+    fs:SetPoint(point, target, point, x, y)
+    fs._tdPosTarget, fs._tdPosPoint, fs._tdPosX, fs._tdPosY = target, point, x, y
 end
 
 -- ============================================================
@@ -270,9 +291,10 @@ end
 --      IsForbidden(), so this layer alone is never trusted.
 --   2. pcall backstop with a SUSPEND LATCH — the first failed write flips
 --      reg.suspended, every later mirror write for that registry is skipped,
---      and PLAYER_REGEN_ENABLED clears the latch and forces one category
---      render to resync (same regen-drain idiom as AuraContainer's
---      _registerRegen).
+--      and the drain below clears the latch and forces one category render to
+--      resync once auras stop being secret (AuraContainer's _registerRegen
+--      idiom). Secrecy, not combat: it can outlast combat (M+ between pulls)
+--      and lift with no combat edge (leaving a key or a PvP zone).
 --
 -- ☠ NEVER Hide() as a failure fallback — Hide is itself a denied write on the
 -- same object. Skipping entirely is the only safe response to a denial.
@@ -287,7 +309,7 @@ end
 -- stays correct throughout.
 -- ============================================================
 
--- Lazily-created PLAYER_REGEN_ENABLED drain for suspended registries. Weak
+-- Lazily-created drain for suspended registries. Weak
 -- keys, like AuraContainer._regen._handles: a frame released while suspended
 -- must not be pinned alive by the drain set.
 local function registerMirrorRegen(frame)
@@ -296,7 +318,11 @@ local function registerMirrorRegen(frame)
         drain = CreateFrame("Frame")
         drain._frames = setmetatable({}, { __mode = "k" })
         drain:RegisterEvent("PLAYER_REGEN_ENABLED")
+        drain:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
         drain:SetScript("OnEvent", function(self)
+            -- Still secret: a resync now would only be refused and re-latch.
+            local AC = DF.AuraContainer
+            if AC and AC.AurasRestricted and AC.AurasRestricted() then return end
             -- Removing the CURRENT key during pairs is legal; nothing here can
             -- ADD one mid-loop — UpdateTextDesigner only marks the coalescing
             -- buffer, so no write (hence no re-suspend) runs before next frame.

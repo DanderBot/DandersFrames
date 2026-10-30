@@ -154,7 +154,7 @@ function DF:ShowBindingTooltip(anchorFrame)
     local db = DF:GetFrameDB(anchorFrame)
     if not db.tooltipBindingEnabled then return end
 
-    local inCombat = InCombatLockdown()
+    local inCombat = DF.playerInCombat and true or false
     -- ★ This box's OWN visibility pair (tooltipBindingOutOfCombat / ...Combat) -- the
     -- frame tooltip beside it has its own, so you can require a key for the binding
     -- list while the unit tooltip stays on plain hover, or suppress one in combat
@@ -365,7 +365,8 @@ local TOOLTIP_MOD_CHECK = {
 -- feature rather than a misconfigured one.
 function DF:TooltipVisibilityMode(db, kind)
     if not db or not kind then return "SHOW" end
-    local key = InCombatLockdown() and "Combat" or "OutOfCombat"
+    -- The PLAYER's combat state (DF.playerInCombat), not the secure-frame lock.
+    local key = DF.playerInCombat and "Combat" or "OutOfCombat"
     return db["tooltip" .. kind .. key] or "SHOW"
 end
 
@@ -436,7 +437,7 @@ function DF:TooltipAllowed(db, kind, path)
     if DF.DebugActive and DF:DebugActive("TOOLTIP") then
         DF:Debug("TOOLTIP", "%s %s: mode=%s combat=%s -> %s",
             tostring(path or "?"), tostring(kind), tostring(mode),
-            InCombatLockdown() and "y" or "n", allowed and "SHOW" or "suppress")
+            DF.playerInCombat and "y" or "n", allowed and "SHOW" or "suppress")
     end
     return allowed
 end

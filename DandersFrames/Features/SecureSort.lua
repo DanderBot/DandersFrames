@@ -108,6 +108,7 @@ local SPEC_ROLE = {
     [267]  = 4, -- Warlock Destruction
     [1467] = 4, -- Evoker Devastation
     [1473] = 4, -- Evoker Augmentation
+    [1480] = 4, -- Demon Hunter Devourer
 }
 
 -- Cache for spec data by player name (persists across sorts)
@@ -218,7 +219,7 @@ end
 function SecureSort:QueueInspect(unit)
     if not UnitExists(unit) then return end
     if not UnitIsPlayer(unit) then return end
-    if UnitIsUnit(unit, "player") then return end  -- Don't inspect self
+    if DF.UnitIsUnit(unit, "player") then return end  -- Don't inspect self
     
     -- canaccessvalue also covers the nil case (a secret GUID can't be a table key)
     local guid = UnitGUID(unit)
@@ -350,7 +351,7 @@ function SecureSort:OnInspectReady(guid)
                 if DF.FlatRaidFrames and DF.FlatRaidFrames.initialized then
                     local rdb = DF:GetRaidDB()
                     if rdb and not rdb.raidUseGroups then
-                        DF.FlatRaidFrames:UpdateNameList()
+                        DF.FlatRaidFrames:RequestSpecResort()
                     else
                         DF:Debug("FLATRAID", "Skipping UpdateNameList from inspect: grouped mode active")
                     end
@@ -418,7 +419,7 @@ function SecureSort:ScanGroupForSpecs()
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
             local unit = "raid" .. i
-            if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            if UnitExists(unit) and not DF.UnitIsUnit(unit, "player") then
                 self:QueueInspect(unit)
             end
         end
@@ -1207,7 +1208,9 @@ roleUpdateFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
     
-    -- Handle spec changes (always process - caches spec and triggers FlatRaidFrames re-sort)
+    -- Handle spec changes (always process - caches spec and triggers FlatRaidFrames re-sort).
+    -- Fires for EVERY group member whose spec becomes known, not just the player: joining
+    -- a 40-player raid fired it 40 times, and each one re-sorted the whole raid directly.
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         -- Re-cache player spec
         local playerSpecID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 0)
@@ -1221,7 +1224,7 @@ roleUpdateFrame:SetScript("OnEvent", function(self, event, arg1)
             if DF.FlatRaidFrames and DF.FlatRaidFrames.initialized then
                 local rdb = DF:GetRaidDB()
                 if rdb and not rdb.raidUseGroups then
-                    DF.FlatRaidFrames:UpdateNameList()
+                    DF.FlatRaidFrames:RequestSpecResort()
                 else
                     DF:Debug("FLATRAID", "Skipping UpdateNameList from spec change: grouped mode active")
                 end

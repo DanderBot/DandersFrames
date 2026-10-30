@@ -24,7 +24,7 @@ local addonName, DF = ...
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:ApplyTuning(tuning) -- in-place max/sort/candidateFilters/filter-string mutate (no
---                            teardown; OOC-only, defers to regen in combat). REPLACES all keys.
+--                            teardown; applies in combat too). REPLACES all keys.
 --   h:Rebuild(config)      -- structural rebuild (record key set / region toggles / frozen
 --                             opts); a table REPLACES the config wholesale (callers pass
 --                             complete configs)
@@ -157,11 +157,8 @@ AuraContainer.SAFE_BORDER_ANIM = SAFE_OVERLAY_ANIM
 -- Lazy + cached. IsSupported() is the primary gate every consumer checks; when it
 -- is false, Create() returns nil and the feature keeps its existing (pre-12.1)
 -- render path. This keeps the live 12.0.7 client completely unchanged.
--- The probe creates a live AuraContainer, which hard-errors in combat (uncatchable
--- by pcall) — so IsSupported() never probes in lockdown: on a cold
--- cache they return false WITHOUT caching, and a login warm (below) primes the cache
--- out of combat. A false/nil taken in that login-into-combat window is TRANSIENT;
--- consumers must re-check, never latch it.
+-- The probe creates a live AuraContainer, which is legal in combat (see
+-- NativeBackend:build); the login warm below just answers it before anyone asks.
 -- ============================================================
 local _supported            -- tri-state: nil = not yet probed
 
@@ -184,12 +181,6 @@ end
 
 function AuraContainer.IsSupported()
     if _supported == nil then
-        -- Never probe in combat: probeSupported creates a live AuraContainer, which fires
-        -- WoW's hard error dialog in lockdown and pcall does NOT catch it. Answer false for
-        -- THIS call but DON'T cache it, so a later out-of-combat call (or the login warm
-        -- below) probes for real. Caching false here would permanently disable a supported
-        -- client whose first check happened to land mid-combat.
-        if InCombatLockdown() then return false end
         local ok, res = pcall(probeSupported)
         _supported = (ok and res) and true or false
         DF:Debug(DBG, "IsSupported probe -> %s (toc=%s)", tostring(_supported), tostring(select(4, GetBuildInfo())))
@@ -235,19 +226,25 @@ function AuraContainer.HasPandemic()
         and type(C_UnitAuras.GetAuraBaseDuration) == "function"
 end
 
--- Warm the support probe once, out of combat, at login — so no consumer's first
--- IsSupported() call ever lands the probe in combat (the probe creates a live
--- AuraContainer, uncatchable-fatal in lockdown). If we log in / reload while already
--- in combat (reconnect mid-fight), defer the warm to the next PLAYER_REGEN_ENABLED.
+-- ★ WHAT IS RESTRICTED, AND WHEN. Calls on the CONTAINER -- create, unit, enable,
+-- show/hide, filters, tuning, adding slots -- are legal in combat: Blizzard_AuraContainer
+-- has no combat gate. Writes to the BUTTONS are what get refused, by
+-- DenyTaintedAccessWhenAurasAreSecret, and that follows aura SECRECY, not combat: refused
+-- out of combat in M+ and PvP, allowed in open-world combat. So the one deferral left
+-- (restyling) gates on this, never on InCombatLockdown().
+function AuraContainer.AurasRestricted()
+    local f = C_Secrets and C_Secrets.ShouldAurasBeSecret
+    if not f then return InCombatLockdown() end
+    local ok, secret = pcall(f)
+    return (not ok) or secret == true
+end
+
+-- Warm the support probe once at login, so no consumer pays for it mid-refresh.
 do
     local warm = CreateFrame("Frame")
     warm:RegisterEvent("PLAYER_LOGIN")
     warm:SetScript("OnEvent", function(self)
-        if InCombatLockdown() then
-            self:RegisterEvent("PLAYER_REGEN_ENABLED")   -- retry once combat drops
-            return
-        end
-        AuraContainer.IsSupported()   -- probes + caches while safe
+        AuraContainer.IsSupported()
         self:UnregisterAllEvents()
     end)
 end
@@ -554,17 +551,17 @@ end
 -- that appears in NEITHER _handles nor anywhere rebuildAll can see. Walking handles alone
 -- is the same omission that once left the collapsed AD path with no identity gate at all.
 -- Slots share one container per frame, hence the dedupe.
+-- Called as pcall(bounceContainer, c): the inline closure form allocated one per call, and
+-- refreshes run per aura edge.
+local function bounceContainer(c)
+    c:Hide(); c:Show()
+end
+
 local function reparseContainer(c)
     if not c then return end
-    -- Same combat contract as NativeBackend:refresh: the Hide/Show bounce crosses the
-    -- partition and re-arms a real parse, but it is an OOC-only op class. In lockdown
-    -- mark-only and let the next combat aura event pick the flags up — combat is exactly
-    -- when that traffic is dense.
-    if not InCombatLockdown() then
-        pcall(function() c:Hide(); c:Show() end)
-    elseif type(c.UpdateAllAuras) == "function" then
-        pcall(function() c:UpdateAllAuras() end)
-    end
+    -- The Hide/Show bounce crosses the partition and re-arms a real parse (see
+    -- NativeBackend:refresh).
+    pcall(bounceContainer, c)
 end
 
 -- ⚠ CHUNKED, deliberately. Running the whole walk synchronously inside
@@ -578,9 +575,8 @@ end
 --   * Every live handle and every slot-owner container is still bounced exactly once
 --     per exit — the work list is SNAPSHOTTED up front (dedupe included), and each
 --     item is re-validated at execution time (_destroyed / backend gone are skipped).
---   * Combat is handled per item, not per kick: refresh()/reparseContainer already
---     fall back to mark-only UpdateAllAuras under lockdown, so combat starting
---     mid-chunk degrades exactly like the synchronous version did.
+--   * Combat starting mid-chunk needs no handling: the bounce is legal mid-fight
+--     (see NativeBackend:refresh).
 --   * RE-ENTERING test mode aborts the remainder: live frames are hidden again and
 --     the provider is back on the sample source, so bouncing them would arm parses
 --     of sample data. The NEXT exit snapshots and kicks everything afresh (the
@@ -660,13 +656,12 @@ end
 -- the next UNIT_AURA on that unit — a DEAF container (dropped event registrations, the
 -- prime suspect) never hears one, so mark-only heals nothing there.
 -- The Hide/Show bounce crosses the partition, re-registers events AND re-arms a real
--- parse — and it is OOC-only, which is why the schedule is:
---   * a full kick shortly after EVERY combat end (the first legal moment a container
---     that stuck mid-fight can actually be cured), delayed a beat so the regen-flush
+-- parse. A sweep bounces EVERY container, so it runs on a schedule that keeps it out of
+-- the fight for cost (the bounce itself is legal in combat):
+--   * a full kick shortly after EVERY combat end, delayed a beat so the regen-flush
 --     machinery and event burst go first;
 --   * a slow out-of-combat sweep as the background net for stuck-while-idle cases;
---   * nothing in combat: mark-only there mostly re-marks containers the dense combat
---     traffic is already driving, and the deaf case it cannot reach anyway.
+--   * nothing in combat: a whole-raid re-parse mid-pull is the wrong moment for it.
 -- Cost: one test-exit-sized chunked kick per combat drop / per interval — invisible in
 -- practice.
 local SWEEP_INTERVAL = 30
@@ -931,7 +926,7 @@ local function checkOutOfRangeAttribution()
     local outN, outAll, outMine = 0, 0, 0
     for i = 1, count do
         local unit = prefix .. i
-        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+        if UnitExists(unit) and not DF.UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
             -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
             -- checked=false means "could not test", not "out of range", and counting
             -- those as distant would poison the out-of-range half with units that are
@@ -1172,7 +1167,9 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     samplePoolGrowth()
     flushFlowLog()
     if AuraContainer._testMode then return end
-    if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
+    -- Out of combat only: the sentinel and pandemic sampling below READ aura data, which is
+    -- secret in combat. The regen kick below owns the combat-end heal.
+    if InCombatLockdown() then return end
     checkParkSentinel()
     -- ★ PANDEMIC WINDOW SAMPLING — rides here rather than owning an event path of its own.
     -- The two requirements are already satisfied by this ticker: OUT OF COMBAT (the early
@@ -1553,7 +1550,7 @@ local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
 -- should be its own change with its own testing.
 local function helperUnitRole(unit)
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
+    if DF.UnitIsUnit(unit, "player") and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         local role = spec and GetSpecializationRole(spec)
         if role and role ~= "NONE" then return role end
@@ -3839,10 +3836,10 @@ function NativeBackend:build()
     local handle = self.handle
     local config = handle.config
 
-    -- Never stand up a container in combat: in-lockdown create/enable is a hard client
-    -- error pcall can't catch. Every caller already gates this
-    -- (Create / _rebuild / the regen handler); a stray path defers instead of dying.
-    if InCombatLockdown() then handle:_deferRebuild(); return end
+    -- ★ BUILT IN COMBAT TOO. Nothing in Blizzard_AuraContainer gates on combat (no
+    -- InCombatLockdown, no protected template), and peers create containers mid-fight on
+    -- live. Deferring to regen left a container that first needed building in combat --
+    -- a frame that gets its unit mid-fight, an arena match -- blank for the whole fight.
 
     -- OUR OWN plain per-consumer container, parented to the handle's anchor frame. Insecure
     -- creation is fine — this exact plain-create pattern is confirmed to run live in combat.
@@ -3931,9 +3928,10 @@ function NativeBackend:build()
         end
     end
 
-    -- Fresh generation: buttons are created in lazy batches (of 10) as needed, so a slot's
-    -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
-    -- gen token makes a late callback from a torn-down/rebuilt container no-op.
+    -- Fresh generation: a GROUP's buttons are created in batches (of 10) as needed, so its
+    -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion); a
+    -- slot's one button is created inside AddAuraSlot, at build. The gen token makes a late
+    -- callback from a torn-down/rebuilt container no-op.
     handle._slotCounter = 0
     -- ☠ _genCounter is MONOTONIC and never reused; _gen is merely "which generation is
     -- live right now". They are separate because container parking RESTORES an older
@@ -4184,6 +4182,19 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind AddDispelTypeTexture in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
+                -- ☠ ANCHOR THE BUTTON AT BIRTH. initializeFrame runs before the
+                -- button's access restrictions; the SetAllPoints after AddAuraSlot
+                -- returns runs after them and, while auras are secret, is refused and
+                -- swallowed by its pcall. An unanchored button has no rect, so
+                -- everything hung on it draws nothing: the dispel overlay was blank
+                -- after a login into secret content while group rows, which the
+                -- engine lays out itself, were fine. Anchored first, so the consumer's
+                -- onInit measures a placed button.
+                local host, innerInit = handle.frame, slotInit
+                slotInit = function(button)
+                    pcall(button.SetAllPoints, button, host)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4198,6 +4209,13 @@ function NativeBackend:build()
                 local slotInit = (rec.style or rec.onInit)
                     and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     or initFn
+                -- Positioned at birth for the overlay's reason (see above).
+                local fa, padY, innerInit = handle._flowAnchor or "TOPLEFT", handle._flowPadY or 0, slotInit
+                slotInit = function(button)
+                    pcall(button.ClearAllPoints, button)
+                    pcall(button.SetPoint, button, fa, c, fa, 0, padY)
+                    return innerInit(button)
+                end
                 local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
                     { initializeFrame = slotInit, candidateFilters = cf,
                       sortMethod = sortMethod, sortDirection = sortDirection })
@@ -4394,21 +4412,16 @@ function NativeBackend:setUnit(unit)
         -- An addon-side SetUnit marks the rebuild but cannot arm the private-side dirty
         -- processor, so the container would keep showing the previous unit's parse. The
         -- Hide/Show bounce runs the intrinsic OnShow secure-side, which re-registers for
-        -- the new unit and arms the parse. The bounce is OOC-only; in combat mark the
-        -- rebuild and let the new unit's next UNIT_AURA process it (the post-combat heal
-        -- bounces everything after regen).
-        if not InCombatLockdown() then
-            pcall(function() c:Hide(); c:Show() end)
-        elseif type(c.UpdateAllAuras) == "function" then
-            pcall(c.UpdateAllAuras, c)
-        end
+        -- the new unit and arms the parse -- in combat too, where a retarget waiting for
+        -- the new unit's next UNIT_AURA showed the previous unit's auras until then.
+        pcall(bounceContainer, c)
     end
 end
 
 -- Hot-apply layout (anchor/growth/wrap/size/spacing/offset/scale) to the LIVE container.
 -- Every underlying setter is a live mutator (MarkDirty only), so a slider drag re-lays
 -- out without a rebuild. Row mode only; the overlay's SetAllPoints never changes.
--- Callers combat-gate this (ApplyStyle defers to regen in lockdown).
+-- Reached through ApplyStyle, which waits while auras are secret.
 function NativeBackend:applyLayout()
     local c = self.container
     -- Overlay: SetAllPoints never changes. Missing: the push anchor + cell layout are
@@ -4447,11 +4460,8 @@ function NativeBackend:applyLayout()
     -- run across the partition — so the change would sit unprocessed until the next
     -- UNIT_AURA event ("one event late" slider lag). The intrinsic OnShow runs
     -- SECURE-side and calls UpdateAllAuras from inside the partition -> arms +
-    -- processes next frame. OOC-only (this whole path is combat-gated by ApplyStyle,
-    -- but guard anyway — Show re-arms the parse, same op class as enable).
-    if not InCombatLockdown() then
-        pcall(function() c:Hide(); c:Show() end)
-    end
+    -- processes next frame.
+    pcall(bounceContainer, c)
 end
 
 -- Hot-apply TUNING (maxFrameCount / sort / candidateFilters) to the LIVE container's
@@ -4460,9 +4470,9 @@ end
 -- All three natives are live mutators (68569 source: SetAuraGroupMaxFrameCount /
 -- SetAuraGroupSortMethod MarkDirty(AuraFrameAssignments); SetAuraGroupCandidateFilters
 -- runs UpdateAllAuras). Row mode only — overlay/missing guard mirrors applyLayout;
--- slot-mode tuning (SetAuraSlot* setters) is a deferred follow-up. Callers combat-gate
--- this (ApplyTuning defers to regen in lockdown): no native tuning setter ever runs
--- in combat.
+-- slot-mode tuning (SetAuraSlot* setters) is a deferred follow-up. The setters are
+-- legal in combat (no combat check in Blizzard_AuraContainer), so ApplyTuning and
+-- _readoptParked call this at once, mid-fight included.
 function NativeBackend:applyGroupTuning()
     local c = self.container
     if not c then return end
@@ -4601,15 +4611,11 @@ function NativeBackend:applyGroupTuning()
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
-    -- lands one aura event late. OOC-only path, but guard anyway (Show re-arms the
-    -- parse, same op class as enable).
-    if not InCombatLockdown() then
-        pcall(function() c:Hide(); c:Show() end)
-    end
+    -- lands one aura event late.
+    pcall(bounceContainer, c)
 end
 
--- Callers combat-gate this (Handle:_applyEnabled defers to regen in lockdown) — enabling
--- a container in combat is forbidden, same class of op as creating one.
+-- Legal in combat (see Handle:_applyEnabled).
 function NativeBackend:setEnabled(on)
     local c = self.container
     if c then pcall(function() c:SetEnabled(on and true or false) end) end
@@ -4619,9 +4625,7 @@ end
 -- context sets the dirty flags but cannot ARM the private-side processor, so on its own
 -- it waits for the next UNIT_AURA event. The Hide/Show bounce crosses the partition
 -- (intrinsic OnShow runs secure-side -> UpdateAllAuras from inside -> arms + processes
--- next frame) = the immediate refresh, OOC only (Show re-arms the parse, same op class
--- as enable). In combat: mark-only best-effort — combat aura events are frequent, so the
--- flags get picked up on the next one.
+-- next frame) = the immediate refresh, in or out of combat.
 -- ★ RETURNS WHETHER AN IMMEDIATE RE-PARSE HAPPENED. UpdateAllAuras marks ParseAuras
 -- (a full membership re-run); the limitation is ARMING/timing (addon-context marks
 -- process at the next OnShow / UNIT_AURA), not scope. The return distinguishes
@@ -4629,18 +4633,12 @@ end
 function NativeBackend:refresh()
     local c = self.container
     if not c then return false end
-    if not InCombatLockdown() then
-        return pcall(function() c:Hide(); c:Show() end)
-    elseif type(c.UpdateAllAuras) == "function" then
-        pcall(function() c:UpdateAllAuras() end)
-    end
-    return false
+    return pcall(bounceContainer, c)
 end
 
 -- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
 -- the ref. The next build creates a fresh container
 -- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
--- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
 -- park = true: PARKING teardown (see Handle:_parkContainer). The container is quiesced
 -- exactly as a real teardown quiesces it -- disabled so it stops registering for aura
 -- events, hidden so it draws nothing -- but its frames are NOT released and the backend
@@ -6038,9 +6036,7 @@ function Handle:SetBadgeSize(w, h)
         for _, key in ipairs(backend.groupKeys) do
             pcall(function() c:SetAuraGroupLayout(key, cellLayout) end)
         end
-        if not InCombatLockdown() then
-            pcall(function() c:Hide(); c:Show() end)
-        end
+        pcall(bounceContainer, c)
     end
 end
 
@@ -6226,7 +6222,7 @@ end
 -- and ApplyTuning ends by calling _pushEngineDark, so queuing a tuning replay is what
 -- re-asserts the enable state after combat.
 function Handle:_queueDarkReplay(ok)
-    if not ok or InCombatLockdown() then
+    if not ok then
         self._pendingTuning = true
         self:_registerRegen()
     end
@@ -6294,17 +6290,13 @@ local function GateLog(fmt, ...)
     DF:Debug("IDGATE", fmt, ...)
 end
 
--- Enable/disable the container's parse+bind. ★ 68914 re-verified: SetEnabled is NOT
--- combat-locked — it's plain mixin state (AuraContainerSharedMixin:SetEnabled = a field
--- write + UpdateEventRegistrations/UpdateAllAuras, no protected calls; /al combatops
--- ran it clean mid-combat). The deferral is KEPT for DISPLAY correctness, not legality:
--- an addon-context enable sets the dirty flags but cannot ARM the private-side
--- processor (see NativeBackend:refresh), so a combat enable wouldn't render until the
--- next aura event anyway — flushing at regen is the deliberate, deterministic choice.
+-- Enable/disable the container's parse+bind, in combat too: SetEnabled is plain mixin
+-- state (a field write + UpdateEventRegistrations/UpdateAllAuras, no protected calls; ran
+-- clean mid-combat on 68914). Deferring it to regen kept an enabled container dark for the
+-- rest of the fight.
 function Handle:_applyEnabled(on)
     on = on and true or false
     self.config.enabled = on
-    if InCombatLockdown() then self:_queueOp("enable"); return end
     if self.backend then self.backend:setEnabled(on) end
 end
 
@@ -6367,13 +6359,11 @@ function Handle:ApplyStyle(style, layout)
         self.config.layout = layout   -- optional geometry swap (size/scale/spacing/growth/offsets)
     end
     self:_ppPrepare()
-    -- BUILD-ONCE-LEAVE-IT (combat parity with the proven DF_AuraLab pattern): a live
-    -- native container's buttons are NEVER re-touched in combat. The lab builds once,
-    -- lets Blizzard drive, and only restyles on explicit OOC user action; restyling
-    -- live buttons mid-combat (SetSize/SetPoint/SetTexCoord/SafeSetFont on regions the
-    -- native driver owns) is a divergence from the combat-proven pattern. Config is
-    -- already captured above; the restyle replays at regen.
-    if InCombatLockdown() then
+    -- ☠ WAITS ON AURA SECRECY, NOT COMBAT. A restyle writes to the buttons (SetSize /
+    -- SetPoint / SetTexCoord / fonts), which are refused exactly while auras are secret
+    -- (see AuraContainer.AurasRestricted). Config is already captured above; the restyle
+    -- replays when the restriction lifts.
+    if AuraContainer.AurasRestricted() then
         self._pendingRestyle = true
         self:_registerRegen()
         return
@@ -6458,7 +6448,7 @@ end
 
 -- Public structural rebuild — for changes ApplyStyle can't do live: max, toggling a
 -- region on/off, or a creation-frozen opt (bar direction, duration expiredText/zeroText/
--- updateInterval, dispel flags). Combat-guarded (defers to regen).
+-- updateInterval, dispel flags). Runs in combat too (see NativeBackend:build).
 -- Structural rebuild. `config` REPLACES the handle's config WHOLESALE when given —
 -- both bridge callers (buff/defensive) pass a COMPLETE freshly-built config. The
 -- previous pairs()-merge could never CLEAR a key that went nil: a disabled
@@ -6492,8 +6482,8 @@ end
 -- differ) — group keys must line up with the declared groups. Changing the filter SET
 -- itself (strings/keys/record count) — or anything else — is structural: use
 -- Rebuild/SetFilter.
--- Combat: no native tuning setter ever runs in lockdown. Defers exactly like ApplyStyle: mark pending, flush
--- via applyGroupTuning at regen — the deferred flush costs no flicker/leak either.
+-- Applies at once, in combat too: the native tuning setters are live mutators with no
+-- combat gate.
 function Handle:ApplyTuning(tuning)
     if type(tuning) == "table" then
         self.config.max = tuning.max
@@ -6511,14 +6501,8 @@ function Handle:ApplyTuning(tuning)
     end
     -- Test mode: the preview's per-slot pin groups can't be tuned in place
     -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
-    -- _rebuild carries its own combat gate.
     if AuraContainer._testMode then
         self:_rebuild()
-        return
-    end
-    if InCombatLockdown() then
-        self._pendingTuning = true
-        self:_registerRegen()
         return
     end
     if self.backend and self.backend.applyGroupTuning then
@@ -6609,10 +6593,10 @@ function AuraContainer.GetHelperGate() return helperGateDark end
 -- filter while the gate has since re-opened, so the border and the group render and one placed
 -- icon does not. Four reports, four different theories, no measurement.
 --
--- ⚠ `pending` IS THE ONE THAT NAMES THE CAUSE. SlotHandle:_applyHelperGate cannot call a
--- native tuning setter in combat, so it defers to PLAYER_REGEN_ENABLED -- and Power Infusion
--- is pressed in combat by definition. A slot sitting at pending>0 with the gate OPEN is that
--- deferral, visible for the first time.
+-- ⚠ `pending` IS THE ONE THAT NAMES THE CAUSE. SlotHandle:_applyHelperGate defers to
+-- PLAYER_REGEN_ENABLED only when its native push is REFUSED -- and Power Infusion is pressed
+-- in combat by definition. A slot sitting at pending>0 with the gate OPEN is that refusal,
+-- visible.
 -- ⚠ DERIVED, NEVER STORED. Each answer is re-asked off the live handle, so this cannot drift
 -- from what the slots are doing -- the fault every "same config, different outcome" hunt in
 -- this addon has come down to.
@@ -6672,7 +6656,7 @@ end
 
 function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
 
--- Backstop for pushes swallowed during lockdown by the pcall'd native setters. Idempotent,
+-- Backstop for pushes the pcall'd native setters refused. Idempotent,
 -- out of combat, and the same shape the identity gate already uses for its combat-exit
 -- re-verify.
 --
@@ -6689,9 +6673,17 @@ function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
 local PIH_REGEN_EVENTS = { "PLAYER_REGEN_ENABLED", "PLAYER_ROLES_ASSIGNED",
                            "GROUP_ROSTER_UPDATE", "PLAYER_SPECIALIZATION_CHANGED",
                            "ACTIVE_TALENT_GROUP_CHANGED" }
+-- ⚠ ONE PUSH PER FRAME. Each push re-parses every owned container, and LFR fires these events
+-- in bursts as people come and go; the next frame reads the same roles either way. Direct
+-- callers (the gate edge, the allowed-players list) still push at once.
 local helperGateRegen = CreateFrame("Frame")
+helperGateRegen:Hide()
 local helperGateRegistered = false
-helperGateRegen:SetScript("OnEvent", function()
+helperGateRegen:SetScript("OnEvent", function(self)
+    self:Show()
+end)
+helperGateRegen:SetScript("OnUpdate", function(self)
+    self:Hide()
     AuraContainer.SetHelperGate(helperGateDark)
 end)
 
@@ -6700,6 +6692,7 @@ function AuraContainer.SetHelperGateActive(active)
     active = active and true or false
     if active == helperGateRegistered then return end
     helperGateRegistered = active
+    if not active then helperGateRegen:Hide() end
     for _, ev in ipairs(PIH_REGEN_EVENTS) do
         if active then helperGateRegen:RegisterEvent(ev)
         else helperGateRegen:UnregisterEvent(ev) end
@@ -6757,8 +6750,7 @@ function Handle:_updateDynRefresh()
     end
 end
 
--- Tear down the (secure) container + buttons. Combat-unsafe on its own, so callers
--- gate it (Destroy defers this to regen in combat).
+-- Tear down the container + buttons -- a guarded disable + hide, legal in combat.
 -- park = true: quiesce for re-adoption rather than discard (Handle:_parkContainer).
 -- Everything that must stop regardless still stops -- the border animation drivers and
 -- the test duration bindings both tick from OUTSIDE the container subtree, so a parked
@@ -6862,11 +6854,8 @@ function Handle:Destroy()
     if self.frame and not (self.config and self.config.parentDrivenVisibility) then
         safeHideWindow(self.frame)
     end
-    if InCombatLockdown() then
-        -- Can't tear down secure container state in lockdown; defer to regen.
-        self:_queueOp("destroy")
-        return
-    end
+    -- Torn down at once, in combat too: teardown is a guarded disable + hide (see
+    -- NativeBackend:teardown), and waiting left the dead container parsing auras.
     self._pendingOp = nil
     self._pendingRestyle = nil
     self._pendingTuning = nil
@@ -6956,7 +6945,6 @@ function Handle:_readoptParked()
     local p = self._parked
     if not p then return false end
     if AuraContainer._testMode then return false end
-    if InCombatLockdown() then return false end
     if type(self._structKey) ~= "string" or self._structKey == "" then return false end
     if p.key ~= self._structKey then return false end
     local be = p.backend
@@ -7019,18 +7007,22 @@ function Handle:_readoptParked()
     -- The key pins only what is STRUCTURAL. Everything else -- max, sort,
     -- candidateFilters, filter strings, and every cosmetic -- may differ from when this
     -- container was parked, so both live-apply passes run now. Tuning before style:
-    -- population first, cosmetics second (same order as the regen flush).
+    -- population first, cosmetics second (same order as the regen flush). The tuning lands
+    -- at once (live setters); ApplyStyle waits while auras are secret.
     if be.applyGroupTuning then pcall(function() be:applyGroupTuning() end) end
     self:ApplyStyle()
     return true
 end
 
--- Rebuild the container from scratch (structural changes). Combat-guarded.
+-- Rebuild the container from scratch (structural changes), in or out of combat (see
+-- NativeBackend:build).
 function Handle:_rebuild()
     if self._destroyed then return end
-    if InCombatLockdown() then self:_deferRebuild(); return end
     if not self:_parkContainer() then self:_teardownContainer() end
-    self:_build()
+    -- Paced like a first build (PACED BUILDS, above AuraContainer:Create): a layout switch
+    -- in a formed raid rebuilt every member's Aura Designer groups inside one frame. Both
+    -- teardown paths clear the backend, so a queued rebuild is not mistaken for built.
+    AuraContainer._pacedBuild(self)
 end
 
 -- Register this handle for a one-shot action the moment combat ends. Ops (precedence
@@ -7041,7 +7033,12 @@ function Handle:_registerRegen()
         AuraContainer._regen = CreateFrame("Frame")
         AuraContainer._regen._handles = setmetatable({}, { __mode = "k" })
         AuraContainer._regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        -- Restyles wait on aura secrecy, which can lift without combat ending (leaving a
+        -- key, a PvP zone) and can outlast it (M+ between pulls).
+        AuraContainer._regen:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
         AuraContainer._regen:SetScript("OnEvent", function(self)
+            local restricted = AuraContainer.AurasRestricted()
+            local still = {}
             for h in pairs(self._handles) do
                 self._handles[h] = nil
                 local op = h._pendingOp
@@ -7073,9 +7070,9 @@ function Handle:_registerRegen()
                                 -- ☠ A NEVER-BUILT NESTED LINK MUST STILL BUILD HERE. skipNested
                                 -- exists because a parent link's rebuild re-fires onHost, which
                                 -- recreates the child — driving the child here AS WELL races
-                                -- that and strands a duplicate (d80f319). But a link whose
-                                -- Create happened IN COMBAT has _deferRebuild queueing its ONLY
-                                -- build path: the parent is not rebuilding, onHost will not
+                                -- that and strands a duplicate (d80f319). But a link with no
+                                -- backend has this queued rebuild as its ONLY build
+                                -- path: the parent is not rebuilding, onHost will not
                                 -- re-fire (host.dfChainLink is already stamped), and chainSig
                                 -- matches so no sync heals it. With no backend there is nothing
                                 -- a duplicate could be stranded FROM, so the escape cannot
@@ -7100,7 +7097,7 @@ function Handle:_registerRegen()
                             end
                         end)
                     end
-                    -- Combat-deferred in-place tuning (ApplyTuning hit in lockdown):
+                    -- Deferred in-place tuning (a refused push queued it):
                     -- flush via the in-place mutate, NOT a recreate — the deferred
                     -- change costs no flicker/leak either. A rebuild redeclares the
                     -- groups from the already-swapped config, so only a rebuild that
@@ -7109,14 +7106,20 @@ function Handle:_registerRegen()
                     if tune and not rebuilt and h.backend and h.backend.applyGroupTuning then
                         pcall(function() h.backend:applyGroupTuning() end)
                     end
-                    -- Combat-deferred cosmetic restyle (ApplyStyle hit in lockdown). A
+                    -- Deferred restyle (ApplyStyle hit while auras were secret). A
                     -- rebuild that ran already styles fresh buttons from the updated
-                    -- config; one that was skipped styled nothing.
+                    -- config; one that was skipped styled nothing. Still secret: keep it.
                     if restyle and not rebuilt then
-                        pcall(function() h:ApplyStyle() end)
+                        if restricted then
+                            h._pendingRestyle = true
+                            still[#still + 1] = h
+                        else
+                            pcall(function() h:ApplyStyle() end)
+                        end
                     end
                 end
             end
+            for i = 1, #still do self._handles[still[i]] = true end
         end)
     end
     AuraContainer._regen._handles[self] = true
@@ -7487,10 +7490,6 @@ local function ensureProviderWatch()
             local reset = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
             if reset and pcall(reset) then return end      -- the real-switch branch restores
             DF:DebugWarn(DBG, "ResetAuraDataProvider unavailable/failed; rebuilding instead")
-            -- Containers cannot be stood up in lockdown; stay parked until the real
-            -- switch arrives (Edit Mode cannot be opened in combat anyway -- this only
-            -- covers another addon switching the provider mid-fight).
-            if InCombatLockdown() then return end
             rebirthAll(self)
         end)
     end)
@@ -7668,8 +7667,7 @@ local function ensureOwner(frame, unit)
     local owner = ownerOf(frame)
     if owner then return owner end
     if not AuraContainer.IsSupported() then return nil end
-    -- Container creation is combat-gated everywhere else in this file; do not diverge.
-    if InCombatLockdown() then return nil end
+    -- In combat too: container creation is legal there (see NativeBackend:build).
 
     local anchor = CreateFrame("Frame", nil, frame)
     anchor:SetAllPoints(frame)
@@ -7734,9 +7732,9 @@ end
 -- Behaviour is identical to today. (dfLevelHost stays available for a future consumer
 -- that wants level to become live, which would need regions reparented onto it.)
 --
--- Returns a SlotHandle, or nil if unsupported / test frame / in combat with no owner yet
--- / in combat needing a NEW slot (re-adoption of an existing key still works in combat;
--- its mutators defer and replay at regen).
+-- Returns a SlotHandle, or nil if unsupported / test frame. Works in combat: a new slot
+-- is born and initialised inside AddAuraSlot exactly as out of it, and a re-adopted
+-- one's pushes replay at regen only if refused.
 function AuraContainer:AcquireSlot(frame, slotKey, spec)
     if type(slotKey) ~= "string" or slotKey == "" or type(spec) ~= "table" then return nil end
     if not frame then return nil end
@@ -7768,15 +7766,6 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
         end
         return existing
     end
-
-    -- ☠ NO NEW SLOT IN COMBAT. AddAuraSlot on the secure container is exactly the class
-    -- of call ensureOwner refuses above ("container creation is combat-gated everywhere
-    -- else in this file"). Re-adoption above is fine -- every mutator it uses defers and
-    -- replays -- but a NEW slot has no deferral story (AddAuraSlot is add-only, one-shot,
-    -- and its initializeFrame window is pre-seal). Returning nil sends the caller down
-    -- its documented fallback: placedAcquire creates a per-indicator CONTAINER, which
-    -- defers its build to regen properly.
-    if InCombatLockdown() then return nil end
 
     -- ☠ THE PARK TABLE IS UNBOUNDED AND CANNOT BE FREED. AddAuraSlot is add-only -- the
     -- engine exposes no remove -- so every distinct slotKey ever seen on this frame is a
@@ -7979,7 +7968,10 @@ local function registerSlotRegen(handle)
         -- Weak keys: a slot torn down before regen must not be kept alive by this.
         reg._pending = setmetatable({}, { __mode = "k" })
         reg:RegisterEvent("PLAYER_REGEN_ENABLED")
+        reg:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")   -- see the container drain
         reg:SetScript("OnEvent", function(selfFrame)
+            local restricted = AuraContainer.AurasRestricted()
+            local still = {}
             for h in pairs(selfFrame._pending) do
                 selfFrame._pending[h] = nil
                 -- pcall per slot so one failure cannot strand the rest, matching the
@@ -7988,11 +7980,14 @@ local function registerSlotRegen(handle)
                     h._pendingTuning = nil
                     pcall(h._replayTuning, h)
                 end
-                if h._pendingRestyle then
+                if h._pendingRestyle and restricted then
+                    still[#still + 1] = h
+                elseif h._pendingRestyle then
                     h._pendingRestyle = nil
                     pcall(h.ApplyStyle, h)
                 end
             end
+            for i = 1, #still do selfFrame._pending[still[i]] = true end
         end)
         AuraContainer._slotRegen = reg
     end
@@ -8087,10 +8082,7 @@ function SlotHandle:Park()
     if self.parked then return true end
     self.parked = true
     local ok = self:_pushFilter()
-    -- ⚠ Queue on lockdown even when pcall reported success: whether a secure setter
-    -- refuses loudly (error) or quietly (no-op) is the engine's business, and the replay
-    -- is idempotent either way.
-    if not ok or InCombatLockdown() then
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
     end
@@ -8107,11 +8099,11 @@ function SlotHandle:Restore()
     -- never reached the engine. Reading through _cf() means un-parking lands on the CURRENT
     -- verdict rather than whatever was last pushed before the park.
     local c = self.owner and self.owner.container
-    if c and self._lastCandidateFilters ~= nil and not InCombatLockdown() then
+    if c and self._lastCandidateFilters ~= nil then
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
     end
     local ok = self:_pushFilter()
-    if not ok or InCombatLockdown() then
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
     end
@@ -8127,7 +8119,7 @@ function SlotHandle:_setDeathLatch(on)
     if self._deathLatched == on then return end
     self._deathLatched = on
     local ok = self:_pushFilter()
-    if not ok or InCombatLockdown() then
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
     end
@@ -8143,7 +8135,7 @@ function SlotHandle:_setVisLatch(_on)
     if self._visLatched == want then return end
     self._visLatched = want          -- memo of what was applied, NOT the authority
     local ok = self:_pushFilter()
-    if not ok or InCombatLockdown() then
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
     end
@@ -8183,17 +8175,10 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         self._lastSortDirection = sortDirection or 0
     end
     -- Recompute the source-relative flag whenever either half of the filter moves (the
-    -- visibility latch reads it). Pure stored state, so it is correct to do even in
-    -- lockdown -- only the secure pushes defer.
+    -- visibility latch reads it).
     if filterChanged or candidatesChanged then
         local cf = self._lastCandidateFilters   -- RAW on purpose -- see _cf()'s header
         self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
-    end
-    -- Defer and replay, mirroring ApplyStyle below.
-    if InCombatLockdown() then
-        self._pendingTuning = true
-        registerSlotRegen(self)
-        return false
     end
     -- A dark slot stores the new candidates (above) without pushing them; _pushFilter
     -- sends them when the slot wakes. Recording _cfWant stops the value-tracked push in
@@ -8371,7 +8356,8 @@ function SlotHandle:ApplyStyle(style, layout)
     -- Handle:ApplyStyle already does exactly this (_pendingRestyle + _registerRegen); the
     -- slot side never got an equivalent. Replaying with NO arguments is correct: the
     -- `type(...) == "table"` guards above mean a bare call re-paints from stored cfg.
-    if InCombatLockdown() then
+    -- Gated on aura secrecy, like Handle:ApplyStyle -- the writes are refused then.
+    if AuraContainer.AurasRestricted() then
         self._pendingRestyle = true
         registerSlotRegen(self)
         return false
@@ -8523,6 +8509,91 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     return ok
 end
 
+-- ============================================================
+-- PACED BUILDS
+-- ============================================================
+-- A container build is the costly part of standing up a frame: every AddAuraGroup creates
+-- a batch of ten buttons up front, and a member carries ~7 containers. Joining a full
+-- 40-player group built ~280 of them inside ONE frame -- a 3 s freeze. Builds now spend at
+-- most a budget of wall time per rendered frame and the rest queue for the next frames,
+-- as the peers' build workers do. The handle works without a backend meanwhile (the shape
+-- the old combat deferral used): unit, style and tuning land in config, and the build
+-- reads config when it runs. A build bigger than the budget still runs whole.
+local BUILD_BUDGET_MS_COMBAT, BUILD_BUDGET_MS_IDLE = 8, 30
+local buildQueue, buildHead, buildTail = {}, 1, 0
+local buildFrameStamp, buildSpentMs = nil, 0
+local buildDrainer
+local burstQueued, burstFrames = 0, 0
+
+local function buildBudgetLeft()
+    local now = GetTime()   -- constant within a rendered frame, so it names the frame
+    if buildFrameStamp ~= now then buildFrameStamp, buildSpentMs = now, 0 end
+    return (DF.playerInCombat and BUILD_BUDGET_MS_COMBAT or BUILD_BUDGET_MS_IDLE) - buildSpentMs
+end
+
+local function timedBuild(h)
+    local t0 = debugprofilestop()
+    local ok, err = pcall(h._build, h)
+    buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+    if not ok then DF:DebugWarn(DBG, "paced build failed: %s", tostring(err)) end
+end
+
+local function drainBuilds(self)
+    burstFrames = burstFrames + 1
+    while buildHead <= buildTail and buildBudgetLeft() > 0 do
+        local h = buildQueue[buildHead]
+        buildQueue[buildHead] = nil
+        buildHead = buildHead + 1
+        -- Destroyed while waiting, or built already (queued twice).
+        if h and not h._destroyed and not h.backend then
+            timedBuild(h)
+            -- ☠ A deferred build lands with nobody watching. An owner that styles the
+            -- buttons itself after Create saw none when it looked, and nothing calls it
+            -- again on its own: config.onBuilt is that call.
+            local onBuilt = h.backend and h.config.onBuilt
+            if onBuilt then
+                local ok, err = pcall(onBuilt, h)
+                if not ok then DF:DebugWarn(DBG, "onBuilt failed: %s", tostring(err)) end
+            end
+        end
+    end
+    if buildHead > buildTail then
+        buildHead, buildTail = 1, 0
+        self:Hide()
+        DF:Debug(DBG, "paced builds: %d deferred, drained over %d frames", burstQueued, burstFrames)
+        burstQueued, burstFrames = 0, 0
+    end
+end
+
+local function pacedBuild(h)
+    -- ☠ SLOT CONTAINERS ARE NEVER DEFERRED. Overlay, missing and single-slot builds that
+    -- landed on a later frame came up blank in game -- the dispel overlay and its symbols
+    -- undressed, the Aura Designer frame border not animating -- while immediate builds of
+    -- the same containers were fine and deferred GROUP rows were fine. The mechanism is not
+    -- pinned; the cost is: one button each, against ten per group, so the groups the budget
+    -- exists for are still paced.
+    local cfg = h.config
+    if cfg and (cfg.mode == "overlay" or cfg.mode == "missing" or cfg.singleSlot) then
+        return h:_build()
+    end
+    -- Straight through while this frame has budget and nothing is waiting ahead of it.
+    if buildHead > buildTail and buildBudgetLeft() > 0 then
+        local t0 = debugprofilestop()
+        h:_build()
+        buildSpentMs = buildSpentMs + (debugprofilestop() - t0)
+        return
+    end
+    buildTail = buildTail + 1
+    buildQueue[buildTail] = h
+    burstQueued = burstQueued + 1
+    if not buildDrainer then
+        buildDrainer = CreateFrame("Frame")
+        buildDrainer:SetScript("OnUpdate", drainBuilds)
+    end
+    buildDrainer:Show()
+end
+AuraContainer._pacedBuild = pacedBuild   -- Handle:_rebuild sits above this block
+
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
     if not parent or type(config) ~= "table" then
@@ -8616,13 +8687,7 @@ function AuraContainer:Create(parent, config)
         end
     end
     h:_applyZOrder()   -- level + strata; also re-runs on every _build (see the method)
-
-    if InCombatLockdown() then
-        -- Can't safely stand up secure container state in combat; build on regen.
-        h:_deferRebuild()
-    else
-        h:_build()
-    end
+    pacedBuild(h)
     -- FALLBACK PATH ONLY (_fakeActive never latches once deafening is confirmed):
     -- born during a foreign fake-data period (e.g. roster change while the user
     -- sits in Edit Mode), start hidden like the rest, restored on the real switch.

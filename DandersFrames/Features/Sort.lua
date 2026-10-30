@@ -79,7 +79,7 @@ function Sort:GetUnitRole(unit, db)
             -- For player, we can get spec directly
             -- WoW Forever has one generic spec per class (no melee/ranged meaning), so it
             -- takes the class branch below like everyone else.
-            if UnitIsUnit(unit, "player") and not DF.IS_FOREVER then
+            if DF.UnitIsUnit(unit, "player") and not DF.IS_FOREVER then
                 specID = C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization() or 1)
             else
                 -- For other players, try to get from inspection cache or guess from class

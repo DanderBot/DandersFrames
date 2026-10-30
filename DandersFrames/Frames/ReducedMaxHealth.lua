@@ -119,6 +119,11 @@ function DF:UpdateReducedMaxHealth(frame)
     if tex then
         tex:SetBlendMode(db.reducedMaxHealthBlendMode or "BLEND")
     end
+    -- The bar spans the whole frame, so its own rect is the span for a custom tile size.
+    if DF:BarTextureLayersWanted(bar, db, "reducedMaxHealth") then
+        DF:ApplyBarTextureLayers(bar, "reducedMaxHealth", db, DF:BarLayerOpts(
+            bar, isVertical, c, db.reducedMaxHealthBlendMode or "BLEND"))
+    end
 
     -- Re-anchor the bar to the current padding. It is otherwise positioned only
     -- at creation (CreateReducedMaxHealthBar), so a padding change left it — and

@@ -1269,6 +1269,24 @@ DF.ExportCategories = {
 -- ===========================================
 -- CATEGORY DISPLAY INFO
 -- ===========================================
+-- The texture-layer keys are generated per bar beside their defaults (Core/Config.lua),
+-- so their category entries are generated from the same list and cannot drift from it.
+do
+    local bars = DF.ExportCategories.bars
+    for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS or {}) do
+        bars[#bars + 1] = prefix .. "TextureLayersEnabled"
+        bars[#bars + 1] = prefix .. "TextureLook"
+        bars[#bars + 1] = prefix .. "TileMode"
+        bars[#bars + 1] = prefix .. "TileSize"
+        bars[#bars + 1] = prefix .. "TileMirror"
+        for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
+            for _, suffix in ipairs({ "Enabled", "Texture", "Color", "BlendMode", "TileMode", "TileSize", "TileMirror" }) do
+                bars[#bars + 1] = prefix .. "Layer" .. n .. suffix
+            end
+        end
+    end
+end
+
 DF.ExportCategoryInfo = {
     position = {
         name = "Position",

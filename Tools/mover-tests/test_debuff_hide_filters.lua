@@ -68,16 +68,49 @@ end
 
 -- ---- who cast it -------------------------------------------------------------------------
 do
-    local r = build(db({ debuffFilterNonPlayer = true, debuffFilterPlayer = true, debuffFilterMagic = true }))
-    local by = {}
-    for _, rec in ipairs(r or {}) do by[rec.key] = rec end
+    local function keyed(r)
+        local by = {}
+        for _, rec in ipairs(r or {}) do by[rec.key] = rec end
+        return by
+    end
+    local by = keyed(build(db({ debuffFilterNonPlayer = true, debuffFilterMagic = true })))
     check(by.nonplayer and by.nonplayer.candidateFilters.isFromPlayerOrPlayerPet == false,
           "who: Non-Player shows what no player cast")
+    by = keyed(build(db({ debuffFilterPlayer = true, debuffFilterMagic = true })))
     check(by.anyplayer and by.anyplayer.candidateFilters.isFromPlayerOrPlayerPet == true,
           "who: From Any Player shows what a player cast")
     check(by.anyplayer and by.anyplayer.candidateFilters.excludeDispelTypes
           and by.anyplayer.candidateFilters.excludeDispelTypes.Magic,
           "who: ...leaving a picked dispel type to its own record")
+
+    -- Both shown is every debuff: built as All Debuffs, one record under one cap.
+    local everything = { debuffFilterBoss = true, debuffFilterRole = true, debuffFilterPriority = true,
+        debuffFilterCrowdControl = true, debuffFilterDispellable = true, debuffFilterNonPlayer = true,
+        debuffFilterPlayer = true, debuffFilterMagic = true, debuffFilterCurse = true,
+        debuffFilterPoison = true, debuffFilterDisease = true, debuffFilterBleed = true }
+    check(build(db(everything)) == nil, "who: both shown with every other tick is plain All Debuffs")
+    local adGroup = build(db({ debuffEmptyShowsNothing = true, debuffFilterNonPlayer = true, debuffFilterPlayer = true }))
+    check(adGroup and #adGroup == 1 and adGroup[1].filter == "HARMFUL",
+          "who: an Aura Designer group gets the record spelled out (nil there means nothing)")
+    local t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffHideBoss = true
+    t.debuffFilterBoss = nil
+    local r = build(db(t))
+    check(r and #r == 1 and r[1].key == "all" and r[1].candidateFilters.isBossAura == false,
+          "who: ...a Hide still applies, in the one record")
+    t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffImportantHighlight = true
+    r = build(db(t))
+    check(r and #r == 3 and r[1].key == "allboss" and r[1].style ~= nil,
+          "who: ...and the highlight splits it the way All Debuffs does")
+    t = {}
+    for k, v in pairs(everything) do t[k] = v end
+    t.debuffMaxDurationEnabled, t.debuffMaxDurationKeepImportant = true, true
+    by = keyed(build(db(t)))
+    check(by.bossrole and by.nonplayer and by.anyplayer,
+          "who: Keep Important on shown important debuffs keeps the categories (All cannot exempt them)")
     r = build(db({ debuffFilterMine = true, debuffFilterCrowdControl = true }))
     by = {}
     for _, rec in ipairs(r or {}) do by[rec.key] = rec end
@@ -127,7 +160,7 @@ do
           and r[1].candidateFilters.excludeDispelTypes.Bleed,
           "dwarf: Hide By Me also hides own bleeds")
     local drive = src:sub(src:find("function DF:DriveDebuffFactory", 1, true) or 1)
-    check(drive:find("(frame.dfDebuffFactoryVersion ~= ver or selfMoved)", 1, true) ~= nil,
+    check(drive:find("frame.dfDebuffFactoryVersion ~= ver or selfMoved then", 1, true) ~= nil,
           "dwarf: a frame reassigned to or from the player re-plans without a layout bump")
     local fac = df_file_source("AuraDesigner/Factory.lua"):gsub("\r\n", "\n")
     check(fac:find("resolveDebuffGroup(group, dedupOn and claimedSoFar or nil, racialSelf)", 1, true) ~= nil
@@ -210,25 +243,35 @@ do
     end
 end
 
--- ---- the Max Debuffs ceiling counts the records a claim adds -----------------------------
+-- ---- the Max Debuffs note counts the records the REAL claims build ----------------------
 do
     local a4 = src:find("local GROUP_COUNT_CLAIMS", 1, true)
     local b4 = a4 and src:find("\nend\n", a4, true)
-    local groupCount = a4 and b4 and assert(loadstring("local DF = {}\nlocal BuildDirectDebuffFilters = ...\n"
-        .. src:sub(a4, b4 + 4) .. "\nreturn function(d) return DF:GetDebuffRowGroupCount(d) end"))(build)
-    check(groupCount ~= nil, "group count: lifted")
-    if groupCount then
-        local d = db({ directDebuffShowAll = true })
-        local most = 1
-        for _, c in ipairs({ false, { dispellable = true } }) do
-            for _, so in ipairs({ false, true }) do
-                local r = build(d, c or nil, so)
-                if r and #r > most then most = #r end
-            end
+    -- DF is a parameter so each case can hand it a live frame (or none) and real claims.
+    local lift = a4 and b4 and assert(loadstring("local BuildDirectDebuffFilters, DF = ...\n"
+        .. src:sub(a4, b4 + 4) .. "\nreturn function(d) return DF:GetDebuffRowGroupCount(d) end"))
+    check(lift ~= nil, "group count: lifted")
+    if lift then
+        local function count(d, frames, claims)
+            local DF = {
+                GetRaidDB = function() return "raid-db" end,
+                IteratePartyFrames = function(_, cb) for _, f in ipairs(frames or {}) do if cb(f) then return true end end end,
+                GetClaimedDebuffCategories = function() return claims end,
+            }
+            return lift(build, DF)(d)
         end
+        -- All Debuffs + the default highlight + Hide Crowd Control: the field report's setup.
+        local d = db({ directDebuffShowAll = true, debuffImportantHighlight = true, debuffHideCrowdControl = true })
         local plain = build(d, nil) or {}
-        check(groupCount(d) == most, "group count: the ceiling is the largest build, claims included")
-        check(groupCount(d) >= #plain, "group count: never below the unclaimed build")
+        local byMe = build(d, { dispellable = true }) or {}
+        check(#byMe > #plain, "group count: setup check, a By Me claim really adds records")
+        eq(count(d, { { unit = "player" } }, nil), #plain,
+           "group count: no Aura Designer claim, the note counts what is really built")
+        eq(count(d, { { unit = "player" } }, { dispellable = true }), #byMe,
+           "group count: a real By Me claim is counted")
+        eq(count(d, {}, nil), #byMe,
+           "group count: no frame to ask, the ceiling (claims included) -- never an under-count")
+        eq(count(d, { {} }, nil), #byMe, "group count: a unitless frame is not asked")
     end
 end
 

@@ -68,6 +68,28 @@ local function ShouldBeActive()
     return db and not db.raidUseGroups
 end
 
+-- Could flat mode ever be used: now, or through an auto layout that turns groups off.
+local function FlatModeReachable()
+    if ShouldBeActive() then return true end
+    local real = DF._realRaidDB
+    if real and real.raidUseGroups == false then return true end
+    local ap = DF.db and DF.db.raidAutoProfiles
+    if type(ap) ~= "table" or not ap.enabled then return false end
+    local function flat(p)
+        return type(p) == "table" and type(p.overrides) == "table" and p.overrides.raidUseGroups == false
+    end
+    if type(ap.mythic) == "table" and flat(ap.mythic.profile) then return true end
+    for _, ct in ipairs({ "instanced", "openWorld" }) do
+        local list = type(ap[ct]) == "table" and ap[ct].profiles
+        if type(list) == "table" then
+            for _, p in ipairs(list) do
+                if flat(p) then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- ============================================================
 -- ANCHOR CALCULATION
 -- ============================================================
@@ -137,6 +159,18 @@ end
 
 -- Build a sorted nameList string based on current settings
 -- This replaces the complex groupBy/groupingOrder/groupFilter juggling
+-- ★ THE LIST ENDS WITH THE PLACEHOLDER NAME. A member the roster still calls UNKNOWNOBJECT
+-- (loading in, or renamed to it by an effect mid-fight, when the list cannot be rewritten)
+-- matches no real name and the header would hide them; the token keeps them visible, sorted
+-- last, until the next rebuild lists their real name. Left off while that would show someone
+-- the list excludes: a placeholder sitting in a hidden group, or any pinned "Hide from Main
+-- Frames" set, whose members a placeholder cannot be told apart from.
+local function WithPlaceholderToken(list, hidden, placeholderOutsideSet)
+    if hidden or placeholderOutsideSet or not UNKNOWNOBJECT then return list end
+    if list == "" then return UNKNOWNOBJECT end
+    return list .. "," .. UNKNOWNOBJECT
+end
+
 function FlatRaidFrames:BuildSortedNameList()
     local db = GetRaidDB()
     if not db then return "" end
@@ -170,7 +204,7 @@ function FlatRaidFrames:BuildSortedNameList()
         -- across once the inspect resolved. The persistent cache is what stops that flip,
         -- which is precisely why the header path consults it first.
         local specID
-        if UnitIsUnit(unit, "player") then
+        if DF.UnitIsUnit(unit, "player") then
             local spec = C_SpecializationInfo.GetSpecialization()
             if spec then
                 specID = C_SpecializationInfo.GetSpecializationInfo(spec)
@@ -254,6 +288,7 @@ function FlatRaidFrames:BuildSortedNameList()
     -- nil (the common case) is a cheap no-op. Name match mirrors the secure-header
     -- builder: realm-qualified fullName for others, __hidePlayer flag for self.
     local hidden = DF.GetPinnedHiddenNames and DF:GetPinnedHiddenNames()
+    local placeholderOutsideSet = false
 
     for i = 1, numMembers do
         local unit = "raid" .. i
@@ -270,6 +305,10 @@ function FlatRaidFrames:BuildSortedNameList()
         -- filling in fires GROUP_ROSTER_UPDATE, which rebuilds this list.
         -- (issecretvalue first: comparing/testing a secret value crashes.)
         local fullName, _, subgroup = GetRaidRosterInfo(i)
+        if not issecretvalue(fullName) and fullName == UNKNOWNOBJECT
+            and subgroup and db.raidGroupVisible and db.raidGroupVisible[subgroup] == false then
+            placeholderOutsideSet = true
+        end
 
         if not issecretvalue(fullName) and fullName and fullName ~= UNKNOWNOBJECT then
             -- Filter by group visibility
@@ -293,7 +332,7 @@ function FlatRaidFrames:BuildSortedNameList()
                 sortRole = role
             end
             
-            local isPlayer = UnitIsUnit(unit, "player")
+            local isPlayer = DF.UnitIsUnit(unit, "player")
             
             local entry = {
                 name = name,
@@ -339,7 +378,7 @@ function FlatRaidFrames:BuildSortedNameList()
         for _, e in ipairs(ordered) do
             idxNames[#idxNames + 1] = e.isPlayer and e.name or e.fullName
         end
-        local idxResult = table.concat(idxNames, ",")
+        local idxResult = WithPlaceholderToken(table.concat(idxNames, ","), hidden, placeholderOutsideSet)
         DebugPrint("BuildSortedNameList (sorting off, index order):", idxResult)
         return idxResult
     end
@@ -426,7 +465,7 @@ function FlatRaidFrames:BuildSortedNameList()
         end
     end
     
-    local result = table.concat(names, ",")
+    local result = WithPlaceholderToken(table.concat(names, ","), hidden, placeholderOutsideSet)
     DebugPrint("BuildSortedNameList result:", result)
     return result
 end
@@ -1078,6 +1117,27 @@ function FlatRaidFrames:UpdateNameList()
     self:UpdateSorting()
 end
 
+-- A re-sort asked for by a new inspect result. Joining a raid streams one result per
+-- member, and each full re-sort bounces the header and re-lays out every child (one took
+-- 2.9 s in a 30-player join), so the burst is batched, as the party path already does.
+-- A spec only moves anyone in NAMELIST mode (groupBy / INDEX never read it), and then
+-- only if the rebuilt list differs from the one the header already has.
+function FlatRaidFrames:RequestSpecResort()
+    if self.pendingSpecResortTimer then return end
+    self.pendingSpecResortTimer = C_Timer.NewTimer(0.75, function()
+        self.pendingSpecResortTimer = nil
+        local header = self.header
+        if not header then return end
+        if InCombatLockdown() then
+            self.pendingNameListUpdate = true
+            return
+        end
+        if header:GetAttribute("sortMethod") ~= "NAMELIST" then return end
+        if header:GetAttribute("nameList") == self:BuildSortedNameList() then return end
+        self:UpdateSorting()
+    end)
+end
+
 -- ============================================================
 -- ENABLE / DISABLE
 -- ============================================================
@@ -1087,6 +1147,11 @@ end
 -- Refresh all child frames (called after enabling for combat reload support)
 function FlatRaidFrames:RefreshAllChildFrames()
     if not self.header then return end
+    -- Inside a profile refresh (a layout switch) the refresh's own visible-frame sweep
+    -- runs every child again at its end, AFTER the new layout's sizes land -- the pass
+    -- that has to run. This one, before them, was a second full refresh per member in
+    -- the same frame.
+    if DF._profileSweepPending == GetTime() then return end
     
     for i = 1, 40 do
         local child = self.header:GetAttribute("child" .. i)
@@ -1345,6 +1410,7 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 -- NOTE: GROUP_ROSTER_UPDATE, ROLE_CHANGED_INFORM, and PLAYER_SPECIALIZATION_CHANGED
 -- are NOT registered here. Roster changes are handled by ProcessRosterUpdate() in Headers.lua
 -- which calls ApplyRaidFlatSorting() -> UpdateNameList(). Handling them here too caused
@@ -1352,6 +1418,27 @@ eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 -- the throttled ProcessRosterUpdate, making frames visibly jump on every roster change.
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
+    -- ============================================================
+    -- PLAYER_ENTERING_WORLD - pre-create behind the loading screen
+    -- With groups on and an auto layout that turns them off, the header and its 40
+    -- secure children were first created at the layout switch itself -- in the frame
+    -- you join a full raid, ~0.5 s of native work inside the freeze. Created here they
+    -- stay hidden and are reused when flat mode turns on (SetEnabled skips CreateFrames
+    -- once the header exists). Hidden children skip their refreshes, so no containers
+    -- are built early.
+    -- ============================================================
+    if event == "PLAYER_ENTERING_WORLD" then
+        if not FlatRaidFrames.header and not InCombatLockdown() and DF.db and DF.raidContainer
+            and FlatModeReachable() then
+            DebugPrint("PLAYER_ENTERING_WORLD: pre-creating flat raid frames")
+            FlatRaidFrames:CreateFrames()
+            -- Pre-creation briefly shows the header, and its children's unit assignments
+            -- overwrite the grouped frames' unit map entries. Hand them back now rather
+            -- than at the PLAYER_ENTERING_WORLD +0.1s rebuild.
+            if DF.RebuildUnitFrameMap then DF:RebuildUnitFrameMap() end
+        end
+        return
+    end
     -- ============================================================
     -- ADDON_LOADED - Initialize immediately for combat safety
     -- During /reload, this fires BEFORE combat lockdown is re-established

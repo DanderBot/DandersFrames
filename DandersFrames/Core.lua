@@ -571,6 +571,22 @@ end
 -- Frames track the version they were last laid out with to avoid redundant work.
 DF.auraLayoutVersion = 1
 
+-- UnitIsUnit that never throws and never hands back a secret. The engine refuses the call
+-- for a token pair it will not compare (C_Secrets.CanCompareUnitTokens false) and answers
+-- with a SECRET boolean when unit comparison is restricted, which errors at the first `if`.
+-- true / false, or nil when the answer is withheld; callers read nil as "not the same".
+do
+    local UnitIsUnit, issecretvalue = UnitIsUnit, issecretvalue
+    local CanCompareUnitTokens = C_Secrets and C_Secrets.CanCompareUnitTokens
+    function DF.UnitIsUnit(unit1, unit2)
+        if not (unit1 and unit2) then return nil end
+        if CanCompareUnitTokens and not CanCompareUnitTokens(unit1, unit2) then return nil end
+        local same = UnitIsUnit(unit1, unit2)
+        if issecretvalue and issecretvalue(same) then return nil end
+        return same
+    end
+end
+
 function DF:InvalidateAuraLayout()
     DF.auraLayoutVersion = (DF.auraLayoutVersion or 0) + 1
     -- 12.1 factory rows: the drives that consume this version run inside the aura
@@ -1192,6 +1208,10 @@ local SYMBOL_TILES = {
 }
 
 DF.TILED_BAR_TEXTURES = {}
+-- The size one repeat of a tiled texture is meant to be drawn at, in pixels, for art
+-- whose file is bigger than one repeat should look on a bar. Absent = the file's own
+-- size, which is right for every texture DandersFrames draws to tile.
+DF.TILED_BAR_TILE_SIZE = {}
 for _, list in ipairs({ ABSORB_TILES, SYMBOL_TILES }) do
     for _, name in ipairs(list) do
         DF.TILED_BAR_TEXTURES["Interface\\AddOns\\DandersFrames\\Media\\" .. name .. ".png"] = "BOTH"
@@ -1246,6 +1266,74 @@ for _, name in ipairs(ABSORB_TILES) do
     DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
 end
 
+-- ============================================================
+-- MIRRORED TWINS
+-- ============================================================
+-- The leaning textures each ship a mirrored twin (<name>_Mirror, and _Mirror_Vert for
+-- vertical bars), so a bar can lean its stripes the other way -- the Mirror tick. A
+-- twin is the original flipped pixel for pixel, so it tiles exactly as the original
+-- does, and the bar simply gets a different file: no rotation, no redraw, and it works
+-- on every bar. Its vertical companion is the vertical original flipped top to bottom
+-- (rotating a mirror image is flipping the rotated one).
+--   Symmetric art (plus, minus, dots, grid, checker) has no twin: mirrored it is the
+-- same picture, so the tick is not offered for it.
+DF.TILED_MIRROR_COMPANION = {}
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    for _, name in ipairs({ "DF_Absorb_V1", "DF_Absorb_V1_Medium", "DF_Absorb_V1_Wide", "DF_Absorb_V1_Wider", "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD" }) do
+        local base, mirror = MEDIA .. name .. ".png", MEDIA .. name .. "_Mirror.png"
+        local mirrorVert = MEDIA .. name .. "_Mirror_Vert.png"
+        DF.TILED_MIRROR_COMPANION[base] = mirror
+        DF.TILED_VERTICAL_COMPANION[mirror] = mirrorVert
+        -- Both twins normalise straight to the ORIGINAL, so every resolve starts from
+        -- the same base whichever variant is on the bar now.
+        DF.TILED_COMPANION_BASE[mirror] = base
+        DF.TILED_COMPANION_BASE[mirrorVert] = base
+        DF.TILED_BAR_TEXTURES[mirror] = "BOTH"
+        DF.TILED_BAR_TEXTURES[mirrorVert] = "BOTH"
+    end
+end
+
+-- Whether this texture has a mirrored twin (the Mirror tick is only offered when it does).
+function DF:CanMirrorTexture(path)
+    if not path then return false end
+    local base = DF.TILED_COMPANION_BASE[path] or path
+    return DF.TILED_MIRROR_COMPANION[base] ~= nil
+end
+
+-- The texture-layer masks (Media/DF_Layer_*). Patterns tile both ways; the two
+-- diagonals lean, so they carry companions like the stripes above, while dots, grid
+-- and checker read the same either way. Shading is a gradient ACROSS the bar, so it
+-- tiles only ALONG it (HORIZ) -- and its companion runs the gradient across a
+-- vertical bar's thickness, which makes the companion's mode VERT, not BOTH.
+do
+    local MEDIA = "Interface\\AddOns\\DandersFrames\\Media\\"
+    local patterns = { "DF_Layer_Diagonal", "DF_Layer_Diagonal_HD", "DF_Layer_Dots", "DF_Layer_Grid", "DF_Layer_Checker" }
+    local leaning = { DF_Layer_Diagonal = true, DF_Layer_Diagonal_HD = true }
+    for _, name in ipairs(patterns) do
+        local path = MEDIA .. name .. ".png"
+        DF.TILED_BAR_TEXTURES[path] = "BOTH"
+        if leaning[name] then
+            local vert = MEDIA .. name .. "_Vert.png"
+            DF.TILED_VERTICAL_COMPANION[path] = vert
+            DF.TILED_COMPANION_BASE[vert] = path
+            DF.TILED_BAR_TEXTURES[vert] = "BOTH"
+        end
+    end
+    -- The pattern masks repeat both ways. Each file holds two repeats per axis.
+    for _, name in ipairs({ "DF_Pattern_Biohazard_V1", "DF_Pattern_Heart_V1", "DF_Pattern_Heart_V2", "DF_Pattern_Minus_B_V1", "DF_Pattern_Plus_B_V1", "DF_Pattern_Plus_B_V2", "DF_Pattern_Plus_BG_V1", "DF_Pattern_Radioactive_V1", "DF_Pattern_Shield_V1", "DF_Pattern_Star_V1", "DF_Pattern_X_B_V1", "DF_Pattern_X_B_V2" }) do
+        DF.TILED_BAR_TEXTURES[MEDIA .. name .. ".png"] = "BOTH"
+        DF.TILED_BAR_TILE_SIZE[MEDIA .. name .. ".png"] = 64
+    end
+    for _, name in ipairs({ "DF_Layer_Shade_Top", "DF_Layer_Shade_Bottom", "DF_Layer_Shade_Bevel", "DF_Layer_Shade_Tube" }) do
+        local path, vert = MEDIA .. name .. ".png", MEDIA .. name .. "_Vert.png"
+        DF.TILED_BAR_TEXTURES[path] = "HORIZ"
+        DF.TILED_VERTICAL_COMPANION[path] = vert
+        DF.TILED_COMPANION_BASE[vert] = path
+        DF.TILED_BAR_TEXTURES[vert] = "VERT"
+    end
+end
+
 -- Swap a tiled texture for its vertical companion when the bar fills vertically.
 -- Returns the path unchanged for everything else, so it is safe to call on any
 -- texture from any call site.
@@ -1256,9 +1344,11 @@ end
 -- more than one point (the db-driven one at the texture site, the live-orientation
 -- one in ApplyBarFillOrientation), and they must be able to disagree about direction
 -- without the result depending on which ran last.
-function DF:ResolveBarTexture(path, isVertical)
+function DF:ResolveBarTexture(path, isVertical, mirror)
     if not path then return path end
     local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    -- Mirror first, then the axis: the mirrored twin carries its own vertical companion.
+    if mirror then base = DF.TILED_MIRROR_COMPANION and DF.TILED_MIRROR_COMPANION[base] or base end
     if isVertical then
         return DF.TILED_VERTICAL_COMPANION[base] or base
     end
@@ -1274,16 +1364,37 @@ end
 -- untouched, so it is inert for all of them.
 --   Shared by Frames/Bars.lua and Frames/Update.lua: both set the absorb texture
 -- in the same pass, and if only one resolved, the other would overwrite it.
+--   The bar's Mirror tick is read here too, named off the same key: every caller's
+-- orientation key is "<bar>Orientation", and its mirror is "<bar>TileMirror".
 function DF:ResolveBarTextureForFill(db, tex, mode, floatingOrientKey)
     local orient = (mode == "FLOATING") and (db[floatingOrientKey] or "HORIZONTAL")
         or (db.healthOrientation or "HORIZONTAL")
     local isVertical = (orient == "VERTICAL" or orient == "VERTICAL_INV")
-    return DF:ResolveBarTexture(tex, isVertical), isVertical
+    local mirror = floatingOrientKey and db[(floatingOrientKey:gsub("Orientation$", "TileMirror"))]
+    return DF:ResolveBarTexture(tex, isVertical, mirror), isVertical
 end
 
 -- Returns the mode string, or nil for a normal stretched texture.
 function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
+end
+
+-- The texture's preset repeat size (DF.TILED_BAR_TILE_SIZE), or nil for its own size.
+-- A vertical companion answers with its base's size.
+function DF:GetBarTextureTileSize(path)
+    local sizes = DF.TILED_BAR_TILE_SIZE
+    if not (path and sizes) then return nil end
+    local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    return sizes[base] or sizes[path]
+end
+
+-- The tiling a bar or layer actually uses. nil / "AUTO" is the texture's own answer
+-- above; anything else is the user's Tile setting, honoured even for art that was
+-- not drawn to tile (seams are then theirs to judge, which is why it is opt-in).
+function DF:ResolveTileMode(path, override)
+    if override == "OFF" then return nil end
+    if override == "BOTH" or override == "HORIZ" or override == "VERT" then return override end
+    return DF:GetBarTextureTiling(path)
 end
 
 -- The SetTexture wrap descriptors a tiling mode asks for, per axis. Same strings
@@ -1306,7 +1417,7 @@ function DF:ApplyBarTextureTiling(bar, path)
     if not bar or not bar.GetStatusBarTexture then return false end
     local fill = bar:GetStatusBarTexture()
     if not fill then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, bar.dfTileOverride)
     -- ☠ THE TILE FLAGS ALONE LEAVE THE SAMPLER CLAMPED. SetHorizTile/SetVertTile
     -- make the REGION repeat, but the wrap (address) mode is a property of the
     -- texture SET -- and SetStatusBarTexture takes no wrap arguments, so the fill
@@ -1323,12 +1434,12 @@ function DF:ApplyBarTextureTiling(bar, path)
     -- DF:ApplyBarFillOrientation for the companion swap), so a fresh set always
     -- arrives here with the stamp gone and re-applies the wrap.
     if mode then
-        if fill.dfWrapPath ~= path then
+        if fill.dfWrapPath ~= path or fill.dfWrapMode ~= mode then
             fill:SetTexture(path, tileWrapArgs(mode))
-            fill.dfWrapPath = path
+            fill.dfWrapPath, fill.dfWrapMode = path, mode
         end
     else
-        fill.dfWrapPath = nil
+        fill.dfWrapPath, fill.dfWrapMode = nil, nil
     end
     fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     fill:SetVertTile(mode == "BOTH" or mode == "VERT")
@@ -1341,9 +1452,9 @@ end
 -- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
 -- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
 -- be cropping on purpose and a StatusBar fill is the only one we fully own.
-function DF:ApplyTextureTiling(region, path, wrapAlreadySet)
+function DF:ApplyTextureTiling(region, path, wrapAlreadySet, override)
     if not (region and region.SetHorizTile) then return false end
-    local mode = DF:GetBarTextureTiling(path)
+    local mode = DF:ResolveTileMode(path, override)
     -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
     -- every caller here runs right after its own SetTexture (which clamps), and
     -- none is a per-update re-assert, so re-issuing the set is always both
@@ -1371,9 +1482,10 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
     if not bar then return end
     isVertical = isVertical and true or false
     local base = bar.dfBaseTexture
-    if base and DF:GetBarTextureTiling(base) then
+    if base and DF:ResolveTileMode(base, bar.dfTileOverride) then
         if bar.SetRotatesTexture then bar:SetRotatesTexture(false) end
-        local want = DF:ResolveBarTexture(base, isVertical)
+        -- bar.dfTileMirror is stamped by DF:ApplyBarTextureLayers from the bar's Mirror tick.
+        local want = DF:ResolveBarTexture(base, isVertical, bar.dfTileMirror)
         if want ~= bar.dfAppliedTexture then
             bar:SetStatusBarTexture(want)
             bar.dfAppliedTexture = want
@@ -2003,7 +2115,7 @@ function DF:GetUnitRole(unit)
     -- already collapse nil and "NONE" into the same branch.
     if issecretvalue and issecretvalue(role) then role = nil end
     -- (Not on WoW Forever: its one generic spec per class says nothing about healing vs damage.)
-    if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
+    if (not role or role == "NONE") and DF.UnitIsUnit(unit, "player")
        and GetSpecializationRole and not DF.IS_FOREVER then
         local spec = C_SpecializationInfo.GetSpecialization()
         if spec then role = GetSpecializationRole(spec) or role end
@@ -2081,6 +2193,24 @@ function DF:GetFrameBorderColor(frame, db)
     end
 
     return br, bg, bb, ba
+end
+
+-- Repaint a live frame's border when its colour follows the unit (class / role).
+-- ☠ FullFrameRefresh was the ONLY live path that painted it, so a frame whose last refresh
+-- ran before its unit was readable kept the static fallback colour until some later refresh
+-- happened by. Joins and pulls used to refresh every frame many times over and hid that;
+-- with the repeats gone the roster and unit paths call this themselves.
+-- A static colour does not depend on the unit, so it is left to the refresh.
+function DF:UpdateFrameBorderUnitColor(frame)
+    if not (frame and frame.unit and frame.border and frame.border.SetBorderColor) then return end
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    local source = db.frameBorderColorSource
+    if source == "STATIC" or (not source and not db.frameBorderUseClassColor
+        and not db.frameBorderUseRoleColor) then
+        return
+    end
+    frame.border:SetBorderColor(DF:GetFrameBorderColor(frame, db))
 end
 
 -- Returns custom power color if set, otherwise falls back to
@@ -3472,9 +3602,19 @@ local TEXTURE_KEY_LABELS = {
     buffPandemicBorderTexture = "Buff Pandemic Border",
 }
 
+-- Each bar's two texture layers heal the same way, labelled after the bar.
+for _, prefix in ipairs(DF.TEXTURE_LAYER_BARS or {}) do
+    local label = TEXTURE_KEY_LABELS[prefix .. "Texture"] or prefix
+    for _, n in ipairs(DF.TEXTURE_LAYER_EXTRA or {}) do
+        local key = prefix .. "Layer" .. n .. "Texture"
+        TEXTURE_REPAIR_KEYS[#TEXTURE_REPAIR_KEYS + 1] = key
+        TEXTURE_KEY_LABELS[key] = label .. " Layer " .. n
+    end
+end
+
 -- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. This is HEALING, not a migration: a one-shot
 -- flag would repair the profile once and leave every later rename -- every future addon
--- update -- unfixed forever. The pass is a table walk over 14 keys across 2 modes; the
+-- update -- unfixed forever. The pass is a table walk over 26 keys across 2 modes; the
 -- cost is nothing.
 --
 -- ☠ AND IT ONLY EVER TOUCHES OUR OWN MEDIA. A third-party path is left alone even
@@ -3892,6 +4032,31 @@ function DF:MigrateHealPredictionBelowAbsorb()
                 end)
             end
             profile._healPredBelowAbsorbV1 = true
+        end
+    end
+end
+
+-- The absorb clamp lost None (0) and Max Health (2). With the shield masked to the health bar
+-- they drew what Missing Health draws, minus the overshield glow and the overflow wrap, which
+-- only fired once the shield passed the WHOLE max health. Value-gated with no flag: neither
+-- value can be picked any more, so a stored one is always stale and a re-run is a no-op.
+-- Reaches raid layout overrides too -- "absorbBar" is an override prefix (OVERRIDE_TAB_MAP).
+function DF:MigrateAbsorbClampMode()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local function fold(t)
+        if type(t) ~= "table" then return end
+        local v = t.absorbBarAttachedClampMode
+        if v == 0 or v == 2 then t.absorbBarAttachedClampMode = 1 end
+    end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            fold(profile.party)
+            fold(profile.raid)
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    fold(layout.overrides)
+                end)
+            end
         end
     end
 end
@@ -7810,6 +7975,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:MigrateHealPredictionBelowAbsorb()
             end
 
+            -- Absorb clamp None / Max Health -> Missing Health (value-gated).
+            if DF.MigrateAbsorbClampMode then
+                DF:MigrateAbsorbClampMode()
+            end
+
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
             -- stale "REVERSE"); group order now comes from Group Display Order.
             if DF.MigrateDeprecateRaidGroupOrder then
@@ -7883,14 +8053,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:UpdateDefaultPlayerFrame()
             end
             
-            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat reload)
+            -- Refresh fonts (may not have been fully available during ADDON_LOADED combat
+            -- reload). SetFont on our own font strings is not protected: in combat too.
             if DF.RefreshAllFonts then
-                if InCombatLockdown() then
-                    -- Queue font refresh for after combat
-                    DF.pendingFontRefresh = true
-                else
-                    DF:RefreshAllFonts()
-                end
+                DF:RefreshAllFonts()
             end
             
             -- Flat layout refresh to ensure correct positioning on load
@@ -7940,11 +8106,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- the roster settles. The 0.1s throttle inside UpdateAllMissingBuffIcons
         -- prevents spam from rapid GRU bursts on group transitions.
         if DF.UpdateAllMissingBuffIcons then
-            C_Timer.After(0.3, function()
-                if not InCombatLockdown() then
-                    DF:UpdateAllMissingBuffIcons()
-                end
-            end)
+            C_Timer.After(0.3, function() DF:UpdateAllMissingBuffIcons() end)
         end
         return
         
@@ -7958,7 +8120,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- join as the client syncs talent/spec data. Doing a full UpdateAllFrames
         -- + Aura Designer refresh on every fire caused a noticeable hitch when
         -- joining a large raid. Coalesce the burst into a single deferred refresh.
-        if not DF._specTalentRefreshScheduled then
+        -- ☠ PLAYER_SPECIALIZATION_CHANGED FIRES FOR EVERY GROUP MEMBER whose spec becomes
+        -- known (arg1 = their unit), not just the player. Everything below is the player's
+        -- own concern (spec profile switch, resource bar colours, the player's dispel
+        -- talents), and in a raid the others' events re-ran it mid-fight: a restyle of every
+        -- frame's rows, plus a second one queued for the end of combat.
+        if (event ~= "PLAYER_SPECIALIZATION_CHANGED" or not arg1 or arg1 == "player")
+            and not DF._specTalentRefreshScheduled then
             DF._specTalentRefreshScheduled = true
             C_Timer.After(0.15, function()
                 DF._specTalentRefreshScheduled = false
@@ -8150,11 +8318,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end)
             end
             if DF.UpdateAllMissingBuffIcons then
-                C_Timer.After(0.1, function()
-                    if not InCombatLockdown() then
-                        DF:UpdateAllMissingBuffIcons()
-                    end
-                end)
+                C_Timer.After(0.1, function() DF:UpdateAllMissingBuffIcons() end)
             end
             if DF.UpdateAllPetFrames then
                 C_Timer.After(0.1, function()
@@ -8187,13 +8351,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:UpdateAll()
         end
         
-        -- Process pending font refresh (queued during combat reload)
-        if DF.pendingFontRefresh then
-            DF.pendingFontRefresh = false
-            if DF.RefreshAllFonts then
-                DF:RefreshAllFonts()
-            end
-        end
         
         -- Update missing buff icons now that we're out of combat
         if DF.UpdateAllMissingBuffIcons then
@@ -8207,7 +8364,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- ☠ UpdateAllRoleIcons reaches ONLY the role and leader icons; MT/MA, AFK,
         -- phased, vehicle, summon, raid target and ready check have the same option
         -- and were never refreshed here, so they stayed hidden after the fight.
-        -- The entering-combat half is covered by RefreshAllVisibleFrames below.
+        -- PLAYER_REGEN_DISABLED below makes the same call to hide them.
         if DF.UpdateAllCombatGatedIcons then
             DF:UpdateAllCombatGatedIcons()
         elseif DF.UpdateAllRoleIcons then
@@ -8319,16 +8476,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
-        -- line logs "inCombat=true" itself, with more information and from the code that
-        -- actually acts on it.
-        -- Update role icons (in case hideInCombat is enabled)
-        if DF.UpdateAllRoleIcons then
+        -- Hide every "Hide in Combat" icon: the same pass PLAYER_REGEN_ENABLED makes to
+        -- restore them. ⚠ Not a full frame refresh -- nothing else on a frame reads the
+        -- player's combat state (aura filtering runs in the containers, frame fade and the
+        -- Power Infusion helper have their own combat handlers), and a full refresh here
+        -- stalled every pull.
+        if DF.UpdateAllCombatGatedIcons then
+            DF:UpdateAllCombatGatedIcons()
+        elseif DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
-        end
-        -- Refresh auras so combat-aware blacklist filters apply immediately
-        if DF.RefreshAllVisibleFrames then
-            DF:RefreshAllVisibleFrames()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run
         -- after any deferred frame refreshes that might reset backdrop colors
@@ -8579,6 +8735,11 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE LAYOUTS ===
+    -- From here to the visible-frame sweep below, a per-child refresh would only be
+    -- redone by that sweep (see FlatRaidFrames:RefreshAllChildFrames).
+    -- A frame stamp, not a flag: readers compare it to GetTime(), so an error before the
+    -- clear below cannot leave their refreshes skipped past this frame.
+    DF._profileSweepPending = GetTime()
     -- Update party layout (this handles positioning, visibility, etc.)
     if DF.UpdateAllFrames_Now then
         DF:UpdateAllFrames_Now()
@@ -8692,9 +8853,10 @@ function DF:FullProfileRefresh()
     end
     
     -- === REFRESH AURAS ===
-    if DF.UpdateAllAuras then
-        DF:UpdateAllAuras()
-    end
+    -- Done by the visible-frame sweep below: its FullFrameRefresh re-drives each frame's
+    -- auras over the same party / raid / pinned set (boss sets included). Calling
+    -- UpdateAllAuras here as well re-drove every frame's auras twice per layout switch,
+    -- the second pass trickling over the frames after it in chunks.
     
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then
@@ -8705,6 +8867,7 @@ function DF:FullProfileRefresh()
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
     -- _Now: same sync seam as the three above.
+    DF._profileSweepPending = nil
     if DF.RefreshAllVisibleFrames_Now then
         DF:RefreshAllVisibleFrames_Now()
     end

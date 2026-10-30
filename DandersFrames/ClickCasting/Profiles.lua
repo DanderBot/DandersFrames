@@ -75,16 +75,17 @@ end
 -- enforces the same thing and now states the reasoning itself rather than pointing
 -- here. It also held a second copy of the modifier probes in BuildModifierPrefix.
 
+local BUTTON_NUMBERS = {
+    LeftButton = 1,
+    RightButton = 2,
+    MiddleButton = 3,
+}
+
 -- Get the button attribute name (e.g., "shift-ctrl-type1" for shift+ctrl+left click)
 local function GetButtonNumber(button)
     if not button then return 1 end
-    local buttonMap = {
-        LeftButton = 1,
-        RightButton = 2,
-        MiddleButton = 3,
-    }
     -- Handle Button4-Button31 dynamically
-    local num = buttonMap[button]
+    local num = BUTTON_NUMBERS[button]
     if not num then
         num = button:match("Button(%d+)")
         if num then

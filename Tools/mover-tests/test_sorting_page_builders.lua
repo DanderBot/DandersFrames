@@ -270,8 +270,8 @@ do
     for name in PAGE:gmatch('OpenSection%(L%["([^"]+)"%]') do order[#order + 1] = name end
     eq(table.concat(order, " | "), "Unit Frame Sorting | FrameSort Integration | Role Priority | Class Priority",
        "order: the cards open in the one-column fold's order")
-    check(PAGE:find('combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end', 1, true) ~= nil,
-          "page: the combat banner keeps its own gate")
+    check(PAGE:find('return HideSortOptions(d) or not (d.sortEnabled or HidesPinnedMembers(d))', 1, true) ~= nil,
+          "page: the combat banner keeps its own gate, and shows for a Hide from Main Frames set with sorting off")
     check(PAGE:find('{pageId = "general_frame", label = L["Frame"]}', 1, true) ~= nil,
           "page: the See Also block is unchanged")
 end

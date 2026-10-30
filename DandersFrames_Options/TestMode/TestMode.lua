@@ -973,6 +973,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- has to leave the same rendered state the live pathway would.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+        if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
     end
 
     -- Damage absorb LAST — reads the prediction's chain tail and stamps.
@@ -2137,12 +2138,8 @@ function DF:HideTestFrames(silent)
     end
     
     -- Update missing buff icons immediately when leaving test mode
-    if not InCombatLockdown() and DF.UpdateAllMissingBuffIcons then
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                DF:UpdateAllMissingBuffIcons()
-            end
-        end)
+    if DF.UpdateAllMissingBuffIcons then
+        C_Timer.After(0.1, function() DF:UpdateAllMissingBuffIcons() end)
     end
     
     -- Update pet frames based on real unit data

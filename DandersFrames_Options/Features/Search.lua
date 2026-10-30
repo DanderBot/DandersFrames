@@ -1386,7 +1386,8 @@ function Search:CreateSearchBar(parent)
             placeholder:Hide()
             clearBtn:Show()
             if userInput then
-                -- Don't search during combat - building registry creates UI elements
+                -- Not during combat: a search may rebuild the registry (~34 page
+                -- builders), which is not worth a hitch mid-fight.
                 if InCombatLockdown() then
                     Search:CancelQueuedSearch()
                     Search:ShowCombatMessage()

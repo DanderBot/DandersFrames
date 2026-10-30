@@ -1167,7 +1167,8 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- DF:UpdateAll, which invalidates. Only the entry lacked it.
     -- InvalidateAuraLayout also runs the test-mode passes itself, so the preview picks
     -- the new values up here rather than waiting for RefreshTestFramesWithLayout below;
-    -- it is combat-safe (RefreshFactoryRows re-queues at regen) and cheap when nothing
+    -- it is combat-safe (RefreshFactoryRows drives in combat; restyles wait while auras
+    -- are secret) and cheap when nothing
     -- moved (every drive is signature-gated under the version gate).
     if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
 
@@ -1910,8 +1911,9 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     if DF.GUI and DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
 end
 
--- Remove the active runtime profile overlay
-function AutoProfilesUI:RemoveRuntimeProfile()
+-- Remove the active runtime profile overlay. `callerRefreshes`: the caller runs its own
+-- FullProfileRefresh straight after, in the same call.
+function AutoProfilesUI:RemoveRuntimeProfile(callerRefreshes)
     if not self.activeRuntimeProfile then return end
     DF:Debug("AUTOPROFILE", "RemoveRuntimeProfile: deactivating \"%s\" (%s)", self.activeRuntimeProfile.name or "?", self.activeRuntimeContentKey or "?")
 
@@ -1922,9 +1924,11 @@ function AutoProfilesUI:RemoveRuntimeProfile()
     self.activeRuntimeProfile = nil
     self.activeRuntimeContentKey = nil
 
-    -- Snap frames to base settings immediately so they are never in a
-    -- partially-configured state between overlay clear and the caller's refresh
-    if not InCombatLockdown() and DF.FullProfileRefresh then
+    -- Snap frames to base settings so they are never left half-configured. Skipped when the
+    -- caller refreshes anyway: FullProfileRefresh rebuilds headers, flat/grouped visibility
+    -- and sorting from any starting state and nothing is drawn in between, so a base pass
+    -- first only doubled the cost of every layout switch.
+    if not callerRefreshes and not InCombatLockdown() and DF.FullProfileRefresh then
         DF:FullProfileRefresh()
     end
 
@@ -2185,6 +2189,17 @@ local function MigrateAutoProfileOverrides()
 end
 
 -- Evaluate current content/raid state and apply/remove profiles as needed
+-- ☠ THE GROUP IS NOT SETTLED STRAIGHT AFTER A LOADING SCREEN. For a few seconds after
+-- zoning into an instance the evaluation can find no layout at all, then the real one --
+-- measured at over two seconds into LFR. Acting on the "none" dropped the active layout and
+-- rebuilt every frame on the base settings, only to rebuild them all again moments later.
+-- So for SETTLE_SECONDS after a loading screen a drop to NO layout is held and re-checked
+-- every second; a real layout, a different one included, applies the moment it is found.
+-- A drop that is still the answer when the window closes goes through.
+local SETTLE_SECONDS = 8
+local settleUntil = 0
+local settleRecheckArmed = false
+
 function AutoProfilesUI:EvaluateAndApply()
     if not DF.initialized then return end
     if self:IsEditing() then
@@ -2213,6 +2228,19 @@ function AutoProfilesUI:EvaluateAndApply()
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
 
+    if newProfile == nil and self.activeRuntimeProfile and GetTime() < settleUntil then
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: \"%s\" -> none held while the group settles after the loading screen",
+            oldName)
+        if not settleRecheckArmed then
+            settleRecheckArmed = true
+            C_Timer.After(math.min(1, settleUntil - GetTime() + 0.05), function()
+                settleRecheckArmed = false
+                AutoProfilesUI:EvaluateAndApply()
+            end)
+        end
+        return
+    end
+
     -- ☠ THE UNDO FENCE, and it belongs BELOW the two no-change guards above --
     -- not at the head of this function. Evaluation runs on every roster change,
     -- zone change and combat drop; clearing there would wipe the user's undo
@@ -2228,9 +2256,10 @@ function AutoProfilesUI:EvaluateAndApply()
     -- Capture whether an old profile was active before clearing state
     local oldWasActive = (self.activeRuntimeProfile ~= nil)
 
-    -- Remove old profile if one was active (clears overlay and state only)
+    -- Remove old profile if one was active (clears overlay and state only). Both branches
+    -- below refresh, except ApplyRuntimeProfile on a profile with no overrides table.
     if self.activeRuntimeProfile then
-        self:RemoveRuntimeProfile()
+        self:RemoveRuntimeProfile(not newProfile or newProfile.overrides ~= nil)
     end
 
     -- Apply new profile if one matches (sets overlay then calls FullProfileRefresh: 1 refresh)
@@ -2289,6 +2318,36 @@ local function QueueAutoProfileEval()
     autoProfileThrottleFrame:Show()
 end
 
+-- ☠ THE ROSTER UPDATE ASKS FIRST. Both this evaluation and the roster update are queued
+-- for the next frame by the same GROUP_ROSTER_UPDATE, and which runs first is not ours to
+-- choose. When the roster ran first it laid the raid out in the BASE settings, then this
+-- switched layouts: a join showed the base arrangement, at the base position, before the
+-- layout's. The roster update now runs a pending evaluation itself before doing anything.
+-- ☠ NO RAID HEADER IS SHOWN IN THE BASE SETTINGS WHILE A LAYOUT IS DUE. The roster path
+-- runs a pending evaluation first (RunPendingEval), but a login or reload inside a raid
+-- reaches the header code from its own startup path, before this file's evaluation is even
+-- queued: the base layout stood on screen for over a second (join scan: groups 1-4 in the
+-- base arrangement, then the flat layout). Called from UpdateHeaderVisibility just before
+-- raid headers are shown. Only while no layout is active, and once per group size and
+-- instance type, so a raid with no matching layout does not re-evaluate on every call.
+local lastPreShowKey
+function AutoProfilesUI:ApplyBeforeRaidShown()
+    if not DF.initialized or self.activeRuntimeProfile or InCombatLockdown() or self:IsEditing() then return end
+    local autoDb = DF.db and DF.db.raidAutoProfiles
+    if not (autoDb and autoDb.enabled) then return end
+    local _, instanceType = IsInInstance()
+    local key = tostring(GetNumGroupMembers()) .. ":" .. tostring(instanceType)
+    if key == lastPreShowKey then return end
+    lastPreShowKey = key
+    self:EvaluateAndApply()
+end
+
+function AutoProfilesUI:RunPendingEval()
+    if not autoProfileThrottleFrame:IsShown() then return false end
+    autoProfileThrottleFrame:GetScript("OnUpdate")(autoProfileThrottleFrame)
+    return true
+end
+
 autoProfileEventFrame:SetScript("OnEvent", function(self, event)
     if not DF.initialized then return end
     if event == "PLAYER_REGEN_ENABLED" then
@@ -2300,6 +2359,7 @@ autoProfileEventFrame:SetScript("OnEvent", function(self, event)
         return
     end
 
+    if event == "PLAYER_ENTERING_WORLD" then settleUntil = GetTime() + SETTLE_SECONDS end
     DF:Debug("AUTOPROFILE", "Event: %s — queuing evaluation", event)
     QueueAutoProfileEval()
 end)

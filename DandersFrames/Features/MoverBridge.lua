@@ -1075,7 +1075,20 @@ local function installHooks()
     hooksecurefunc(DF, "UpdateRaidLayout_Now",        guarded(refreshRaid))
     hooksecurefunc(DF, "SyncRaidMoverToContainer",    guarded(refreshRaid))
     if DF.FlatRaidFrames then
-        hooksecurefunc(DF.FlatRaidFrames, "UpdateContainerSize", guarded(refreshRaid))
+        -- Coalesced to once per frame: a filling raid resizes the flat grid on every
+        -- sort and every child refresh (248 times in one 30-player join), and each
+        -- refresh re-measures every target. A size change only; the position hooks
+        -- above stay synchronous, which is what keeps the drag re-entrancy guard whole.
+        local sizeRefreshPending = false
+        local refreshRaidGuarded = guarded(refreshRaid)
+        hooksecurefunc(DF.FlatRaidFrames, "UpdateContainerSize", function()
+            if sizeRefreshPending then return end
+            sizeRefreshPending = true
+            C_Timer.After(0, function()
+                sizeRefreshPending = false
+                refreshRaidGuarded()
+            end)
+        end)
     end
     -- The RECORD itself may have changed wholesale (profile switch, import, auto layout),
     -- so re-solve and re-fire our own onChanged, not just the descendants.

@@ -2,7 +2,7 @@
 ## Title: DandersFrames |cff9482c9Options|r
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders
-## Version: v5.5.0
+## Version: v5.6.0-alpha.2
 ## Category: Danders
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## LoadOnDemand: 1
@@ -75,6 +75,7 @@ GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
+GUI\TextureLayerControls.lua
 # Settings pages -- Options.lua heads the chain, the rest follow in order
 GUI\Pages\Options.lua
 GUI\Pages\Frames.lua
