@@ -594,12 +594,50 @@ end
 function UFO.HideFilteredControls(list)
     for _, w in ipairs(list or {}) do
         local entry = type(w) == "table" and rawget(w, "searchEntry")
-        if type(entry) == "table" and entry.dfFilteredOut then w.hideOn = Never end
+        if type(entry) == "table" and entry.dfFilteredOut then
+            w.hideOn = Never
+            w.dfFilteredOut = true
+        end
         local kids = type(w) == "table" and rawget(w, "groupChildren")
         if type(kids) == "table" then
             local ws = {}
             for i, e in ipairs(kids) do ws[i] = e.widget end
             UFO.HideFilteredControls(ws)
+        end
+    end
+    UFO.HideOrphanHeaders(list)
+end
+
+-- A bare section header (GUI:CreateHeader) whose cards are ALL filtered off the
+-- page goes with them. Its own hideOn cannot know: the party page's "Content"
+-- header hides on GUI.SelectedMode ~= "raid", and under a unit page the mode can
+-- be Raid while the card beneath it is filtered for units -- a header over nothing.
+-- What counts as "its cards": the widgets after it in the same column, up to the
+-- next bare header there; spacers and sync points are not content.
+local function SameCol(a, b)
+    return a == b or a == "both" or b == "both"
+end
+function UFO.HideOrphanHeaders(list)
+    if type(list) ~= "table" then return end
+    for i, h in ipairs(list) do
+        if type(h) == "table" and rawget(h, "isSectionHeader") and not rawget(h, "dfFilteredOut") then
+            local col = rawget(h, "layoutCol") or 1
+            local filtered, content = 0, 0
+            for j = i + 1, #list do
+                local w = list[j]
+                if type(w) == "table" and SameCol(rawget(w, "layoutCol") or 1, col) then
+                    if rawget(w, "isSectionHeader") then break end
+                    if rawget(w, "dfFilteredOut") then
+                        filtered = filtered + 1
+                    elseif not (rawget(w, "isSpacer") or rawget(w, "isSyncPoint")) then
+                        content = content + 1
+                    end
+                end
+            end
+            if filtered > 0 and content == 0 then
+                h.hideOn = Never
+                h.dfFilteredOut = true
+            end
         end
     end
 end
