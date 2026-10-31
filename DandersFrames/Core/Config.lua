@@ -278,6 +278,7 @@ local SHIPPED_MEDIA_FILES = {
     "DF_Layer_Shade_Tube_Vert.png",
     "DF_Matte.tga",
     "DF_Minimalist.tga",
+    "DF_OuterGlow.tga",
     "DF_Pattern_Biohazard_V1.png",
     "DF_Pattern_Heart_V1.png",
     "DF_Pattern_Heart_V2.png",
