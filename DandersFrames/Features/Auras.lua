@@ -1824,7 +1824,10 @@ end
 -- A claim can ADD records: a By Me claim puts !RAID on the shown records, and each of
 -- those gets an uncleansable twin. So the count uses the claims the Aura Designer REALLY
 -- makes, asked of a live frame of the same mode -- claims are per mode and spec, the same
--- on every frame. With no frame to ask (raid mode while not in a raid) it falls back to the
+-- on every frame. A standalone frame's own table (DF:InitStandaloneFrame) is asked of that
+-- frame, never of a party frame: its claims come from ITS Aura Designer, not the party's
+-- (a frame that reads the table but has no unit yet means the ceiling below).
+-- With no frame to ask (raid mode while not in a raid) it falls back to the
 -- larger of the unclaimed and By Me-claimed builds: a ceiling, never an under-count. Each
 -- build is taken with and without the racial self gap (a Dwarf's own frame). Nil records
 -- mean the show-all fallback, which is a single group.
@@ -1837,9 +1840,19 @@ function DF:GetDebuffRowGroupCount(dbLike)
         local function pick(f)
             if f and f.unit then frame = f return true end
         end
-        local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
-        local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
-        if iterate then iterate(DF, pick) end
+        -- A standalone frame reading this very table answers for it.
+        local standaloneDB = false
+        for f in pairs(DF.StandaloneFrames or {}) do
+            if f.dfDB == dbLike then
+                standaloneDB = true
+                if f.unit then frame = f break end
+            end
+        end
+        if not standaloneDB then
+            local isRaid = DF.GetRaidDB and dbLike == DF:GetRaidDB()
+            local iterate = isRaid and DF.IterateRaidFrames or DF.IteratePartyFrames
+            if iterate then iterate(DF, pick) end
+        end
         if frame then
             local okC, claimed = pcall(DF.GetClaimedDebuffCategories, DF, frame, dbLike)
             if okC then claimSets = { claimed or false } end

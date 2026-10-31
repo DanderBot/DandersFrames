@@ -1240,6 +1240,10 @@ function DF:InitStandaloneFrame(frame, db)
     end
     frame.dfStandalone = true
     frame.dfDB = db
+    -- Weak-keyed: who asks "which frame reads this table" (DF:GetDebuffRowGroupCount)
+    -- finds it here; a frame that is gone takes its entry with it.
+    DF.StandaloneFrames = DF.StandaloneFrames or setmetatable({}, { __mode = "k" })
+    DF.StandaloneFrames[frame] = true
     frame.isRaidFrame = false
     frame.isArenaFrame = false
     frame.isPinnedFrame = false
