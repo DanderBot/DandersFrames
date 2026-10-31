@@ -1690,6 +1690,49 @@ function UFO.UnitTabs()
     return tabs
 end
 
+-- ============================================================
+-- RESET (the Modules page's Reset on Unit Frames; MODULE RESET in
+-- GUI/ModuleRegistry.lua). The data and the frames are UF:ResetProfile's
+-- (DandersFrames_UnitFrames/Core.lua); this side refreshes the settings pages and,
+-- when the reset changed who draws a unit, asks for the reload that change needs.
+-- Only while the module is loaded: switched off, it has no button.
+-- ============================================================
+UFO.Reset = {
+    available = function()
+        local UF = DF.UnitFrames
+        return UFO.IsLoaded() and UF and UF.ResetProfile and true or false
+    end,
+    covers = function()
+        return {
+            L["Every unit frame's settings"],
+            L["Frame positions"],
+            L["Linked frames: the default Player and Target link is made again"],
+            L["The Unit Frames Settings page"],
+            L["The Unit Frames and Unit Frames (Small) text templates"],
+        }
+    end,
+    keeps = function()
+        return { L["Aura Designer and Text Designer presets saved under other names"] }
+    end,
+    run = function()
+        local UF = DF.UnitFrames
+        if not (UF and UF.ResetProfile) then return false end
+        local ok, needsReload = UF:ResetProfile()
+        if not ok then return false end
+        -- Every unit page was built against a table that is gone.
+        if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+        if GUI.RefreshPageMarks then GUI:RefreshPageMarks() end
+        if needsReload then
+            -- Deferred: this can run inside another popup's button (a mover
+            -- session's Save / Discard), which hides the frame after it returns.
+            C_Timer.After(0, function()
+                UFO.PromptReload(L["Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?"])
+            end)
+        end
+        return true
+    end,
+}
+
 function UFO.RegisterModule()
     return GUI:SidebarModule({
         id = UFO.MODULE,
@@ -1719,6 +1762,7 @@ function UFO.RegisterModule()
         setEnabled = UFO.SetEnabled,
         status = UFO.Status,
         description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
+        reset = UFO.Reset,
     })
 end
 

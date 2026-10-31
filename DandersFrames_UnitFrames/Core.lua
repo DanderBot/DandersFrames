@@ -340,6 +340,66 @@ function UF:OnProfileChanged()
 end
 
 -- ============================================================
+-- RESET (the Modules page's Reset on Unit Frames)
+-- The current profile's DF.db.unitframes becomes a new profile's -- every unit's
+-- settings and position, the links, the module-wide settings -- and the two
+-- built-in Text Designer templates ("Unit Frames", "Unit Frames (Small)") are
+-- dropped so EnsureTextPresets makes them fresh. Then what a profile change runs
+-- (OnProfileChanged): the default Player/Target link made again (Links:Ensure,
+-- which only seeds a table with no unitLinks), the proxies dropped, positions,
+-- the mover, live and preview frames.
+-- KEPT: the module's on/off switch (the addon list's own, not in the profile),
+-- every other profile, and Text Designer presets under any other name (the
+-- library is shared with group frames).
+-- Returns ok, needsReload: who draws a unit (its `source`) and the hiding of
+-- Blizzard's player cast bar only come back with a reload (BlizzardHide.lua).
+-- ⚠ Out of combat only: positions, sizes and the mover are secure.
+-- ============================================================
+local function DrawState()
+    local out = {}
+    for _, unit in ipairs(UF.SPAWNED_UNITS) do
+        local db = UF:GetUnitDB(unit)
+        out[#out + 1] = unit .. "=" .. tostring(db and db.source)
+    end
+    local BH = UF.BlizzardHide
+    if BH and BH.ShouldHideCastBar then
+        out[#out + 1] = "castbar=" .. tostring(BH:ShouldHideCastBar() and true or false)
+    end
+    return table.concat(out, ";")
+end
+
+function UF:ResetProfile()
+    local L = DF.L
+    if InCombatLockdown() then
+        DF:Err(L["Cannot use this action in combat."])
+        return false
+    end
+    local name = DF.GetCurrentProfile and DF:GetCurrentProfile()
+    local profiles = DandersFramesDB_v2 and DandersFramesDB_v2.profiles
+    -- The STORED profile, never DF.db (a proxy over it).
+    local p = name and type(profiles) == "table" and profiles[name]
+    if type(p) ~= "table" then return false end
+    local before = DrawState()
+
+    -- What a new profile is seeded with (the profile-root registry), then the
+    -- registry's migrate pass, which a fresh seed never gets.
+    p.unitframes = nil
+    if DF.ApplyProfileRootTable then DF:ApplyProfileRootTable(p, "unitframes") end
+    if type(p.unitframes) ~= "table" then p.unitframes = DF:DeepCopy(UF.ProfileDefaults or {}) end
+    if UF.MigrateProfileTable then UF.MigrateProfileTable(p.unitframes) end
+
+    local lib = DF.GetTextDesignerPresets and DF:GetTextDesignerPresets()
+    if lib then lib[UF.TEXT_PRESET], lib[UF.TEXT_PRESET_SMALL] = nil, nil end
+
+    UF:OnProfileChanged()
+    -- A detached cast bar's mover element follows its (now default) settings.
+    if UF.Mover and UF.Mover.SyncChildren then UF.Mover:SyncChildren() end
+
+    DF:Say(string.format(L["%s reset to defaults in profile %s."], L["Unit Frames"], name))
+    return true, DrawState() ~= before
+end
+
+-- ============================================================
 -- START-UP
 -- Spawns at our own ADDON_LOADED (DandersFrames, a RequiredDep, has already
 -- loaded its profile by then). Secure frames cannot be made in combat, so a

@@ -1379,6 +1379,46 @@ do
     eq(DF.db.unitframes.units.target.frameWidth, 222, "...writing into the new profile")
 end
 
+-- The Modules page's Reset on Unit Frames (UFO.Reset; MODULE RESET in
+-- GUI/ModuleRegistry.lua). The data is UF:ResetProfile's (test_uf_reset.lua);
+-- this side offers it only while the module is loaded, refreshes the settings
+-- pages, and asks for the reload when a unit changed hands.
+print("-- The Modules page's Reset")
+do
+    check(def.reset == UFO.Reset, "reset: the module carries UFO.Reset")
+    check(G:GetModuleReset("units") ~= nil, "reset: offered while the module is loaded")
+    addon.loaded = false
+    eq(G:GetModuleReset("units"), nil, "reset: not offered while it is not loaded")
+    addon.loaded = true
+    local covers = table.concat(UFO.Reset.covers(), "|")
+    check(covers:find("Every unit frame's settings", 1, true) and covers:find("Frame positions", 1, true)
+          and covers:find("Linked frames: the default Player and Target link is made again", 1, true)
+          and covers:find("The Unit Frames Settings page", 1, true),
+          "reset: covers every unit, positions, links and the module's settings")
+    eq(UFO.Reset.scope, nil, "reset: the current profile's (the default scope line)")
+
+    local realReset = UF.ResetProfile
+    local invalidated = 0
+    G.InvalidateAllPages = function() invalidated = invalidated + 1 end
+    popups = {}
+    UF.ResetProfile = function() return true, true end
+    eq(UFO.Reset.run(), true, "run: reports success")
+    eq(invalidated, 1, "run: every settings page is rebuilt on its next show")
+    local last = popups[#popups]
+    eq(last and last.message, "Changing who draws a unit frame requires a UI reload to take effect.\n\nReload now?",
+       "run: a unit changed hands -- the reload prompt")
+    popups = {}
+    UF.ResetProfile = function() return true, false end
+    UFO.Reset.run()
+    eq(#popups, 0, "run: no reload prompt when nothing changed hands")
+    invalidated = 0
+    UF.ResetProfile = function() return false end
+    eq(UFO.Reset.run(), false, "run: a refused reset reports it")
+    eq(invalidated, 0, "run: ...and refreshes nothing")
+    UF.ResetProfile = realReset
+    G.InvalidateAllPages = nil
+end
+
 DandersFrames = saved.DandersFrames
 CreateFrame = saved.CreateFrame
 C_AddOns = saved.C_AddOns

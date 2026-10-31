@@ -3632,4 +3632,10 @@ L["The profile's options: cast on key down, quick bind and smart resurrection"] 
 L["These go back to their defaults:"] = true
 L["This cannot be undone."] = true
 L["To keep a copy, export it first: %s > %s."] = true
+-- Unit frames: the Modules page's Reset (DandersFrames_Options/UnitFrames/Pages.lua, UFO.Reset).
+L["Every unit frame's settings"] = true
+L["Frame positions"] = true
+L["Linked frames: the default Player and Target link is made again"] = true
+L["The Unit Frames and Unit Frames (Small) text templates"] = true
+L["The Unit Frames Settings page"] = true
 --@end-do-not-package@
