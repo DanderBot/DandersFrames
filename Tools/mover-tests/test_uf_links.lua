@@ -464,6 +464,45 @@ do
 end
 
 -- ============================================================
+-- 5b. THE ONE-TIME ORIENTATION REPAIR
+-- ============================================================
+print("-- Links: a Player-follows-Target link from the first card is turned round once")
+do
+    local fresh = newProfile()
+    Links:Ensure(fresh)
+    eq(fresh.global.unitLinksVersion, Links.VERSION, "a new profile is stamped at the current version")
+    eq(fresh.global.unitLinks.target.to, "player", "...with Target following Player")
+
+    -- An older profile: the first card stored the pair backwards.
+    local old = newProfile()
+    local els = { health = { layout = "mirror", look = "same" }, text = { layout = "mirror", look = "same" } }
+    old.global.unitLinks = { player = { to = "target", elements = els, except = { healthColorMode = true } } }
+    old.units.player.healthTexture = "Kept"
+    Links:Ensure(old)
+    local t = old.global.unitLinks
+    eq(t.player, nil, "the backwards link is gone")
+    eq(t.target and t.target.to, "player", "...Target follows Player now")
+    eq(t.target and t.target.elements, els, "...with its own parts")
+    check(t.target and t.target.except and t.target.except.healthColorMode, "...and its kept keys")
+    eq(old.units.target.healthTexture, nil, "...and nothing copied (the frames were already in step)")
+    eq(Links:IsTextMirrored(old, "target"), true, "Target draws the mirrored text again")
+    eq(Links:IsTextMirrored(old, "player"), false, "...Player as written")
+
+    -- After the repair, a Player-follows-Target link is the user's choice.
+    Links:Unlink(old, "target")
+    Links:SetLink(old, "player", "target", els)
+    Links:Ensure(old)
+    eq(old.global.unitLinks.player and old.global.unitLinks.player.to, "target", "a later Player-follows-Target is left alone")
+
+    -- A backwards pair whose Target already follows someone else is not touched.
+    local busy = newProfile()
+    busy.global.unitLinks = { player = { to = "target", elements = {} }, focus = { to = "pet", elements = {} } }
+    Links:Ensure(busy)
+    eq(busy.global.unitLinks.target and busy.global.unitLinks.target.to, "player", "the repair ignores unrelated links")
+    eq(busy.global.unitLinks.focus.to, "pet", "...which stay as they are")
+end
+
+-- ============================================================
 -- 6. MIGRATING THE PER-PAGE SYNC
 -- ============================================================
 print("-- Links: migrating the per-page sync")

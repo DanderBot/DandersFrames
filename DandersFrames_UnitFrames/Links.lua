@@ -721,6 +721,31 @@ function Links:Migrate(root)
 end
 
 -- ============================================================
+-- ONE-TIME REPAIR (unitLinksVersion 2): the first build's Linked Frames card
+-- made the frame being edited the FOLLOWER, so linking Target from Player's side
+-- stored "Player follows Target" -- the default pair the wrong way round, with
+-- Player drawing the mirrored text and the page reading "Player is a mirror
+-- image of Target". Turned round once, keeping its parts and kept keys; the two
+-- frames are already in step, so nothing is copied. After this a Player-follows-
+-- Target link is the user's own choice and is left alone.
+-- ============================================================
+Links.VERSION = 2
+function Links:RepairOrientation(root)
+    local g = Global(root)
+    if (tonumber(g.unitLinksVersion) or 1) >= Links.VERSION then return false end
+    g.unitLinksVersion = Links.VERSION
+    local t = g.unitLinks
+    local d = Links.DEFAULT
+    local link = type(t) == "table" and t[d.leader]
+    if type(link) == "table" and link.to == d.follower and t[d.follower] == nil then
+        t[d.follower] = { to = d.leader, elements = link.elements, except = link.except }
+        t[d.leader] = nil
+        return true
+    end
+    return false
+end
+
+-- ============================================================
 -- ENSURE: migrate, then the default link on a profile that never had links.
 -- Safe to run any number of times, on any stored profile's table.
 -- ============================================================
@@ -730,6 +755,7 @@ function Links:Ensure(root)
     local first = (g.unitLinks == nil)
     if type(g.unitLinks) ~= "table" then g.unitLinks = {} end
     self:Migrate(root)
+    self:RepairOrientation(root)
     if first then self:CreateDefault(root) end
 end
 
