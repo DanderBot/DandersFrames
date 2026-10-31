@@ -198,6 +198,8 @@ CB.Pick, CB.AlphaFrom, CB.IsNil = Pick, AlphaFrom, IsNil
 -- ============================================================
 function CB:Attach(f)
     if not f or f.dfUFCastBar or not CB.UNITS[f.dfUFUnit] then return end
+    -- The aura rows' reserve under an attached cast bar (AURA ROW RESERVE).
+    f.dfAuraRowOffset = CB.AuraRowOffset
     local cb = CreateFrame("Frame", nil, f)
     cb:Hide()
     cb.owner = f
@@ -311,6 +313,44 @@ function CB:IsDetached(f, db)
     if f and f.dfUFSlot then return false end
     db = db or K.DB(f)
     return db and db.castbarDetached and true or false
+end
+
+-- ============================================================
+-- AURA ROW RESERVE
+-- A cast bar attached UNDER the frame owns the band below it, so an aura row
+-- anchored to the frame's bottom edge (BOTTOMLEFT / BOTTOM / BOTTOMRIGHT) is pushed
+-- down past that band: the cast bar's gap, height and border, less any lift of its
+-- own Y. Worked out from the SETTINGS, never the bar's shown state, so it is a
+-- standing reserve that does not jump when a cast starts or stops, and a change of
+-- height, gap, border, enable or attach moves the rows at their next drive.
+-- Rows anchored to the top or a side are never pushed; nor is anything on a frame
+-- whose cast bar is off, detached (Player's default) or attached on top.
+-- Reaches the rows through DandersFrames' per-frame row offset (frame.dfAuraRowOffset,
+-- Features/Auras.lua), set on every unit frame that has a cast bar (CB:Attach).
+-- ============================================================
+function CB.BottomReserve(f, db)
+    db = db or K.DB(f)
+    if not db or not Enabled(db) or CB:IsDetached(f, db) or db.castbarSide == "TOP" then return 0 end
+    local h = tonumber(db.castbarHeight) or 18
+    local gap = tonumber(db.castbarGap) or 2
+    local y = tonumber(db.castbarY) or 0
+    -- K.Border draws OUTSIDE the bar, at least 1px, on every side.
+    local border = 0
+    if db.castbarBorderEnabled ~= false then
+        border = tonumber(db.castbarBorderSize) or 1
+        if border < 1 then border = 1 end
+    end
+    local r = gap - y + h + border
+    if r < 0 then r = 0 end
+    return r
+end
+
+-- frame.dfAuraRowOffset: (frame, db, prefix, anchor) -> dx, dy in the frame's units.
+function CB.AuraRowOffset(f, db, prefix, anchor)
+    if type(anchor) ~= "string" or not anchor:find("BOTTOM", 1, true) then return 0, 0 end
+    local r = CB.BottomReserve(f, db)
+    if r == 0 then return 0, 0 end
+    return 0, -r
 end
 
 function CB:Layout(f)

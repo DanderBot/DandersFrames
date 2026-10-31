@@ -250,6 +250,76 @@ eq(CB:IsDetached(BS), false, "a boss slot's cast bar never detaches (one record,
 UF:GetUnitDB("boss").castbarDetached = nil
 CB:SetActive(BS, false)
 
+print("-- Aura row reserve: an attached cast bar under the frame pushes bottom rows down")
+do
+    eq(T.dfAuraRowOffset, CB.AuraRowOffset, "a frame with a cast bar carries DF's row-offset hook")
+    eq(TT.dfAuraRowOffset, nil, "...a frame without one does not")
+    local function off(f, anchor)
+        local x, y = f.dfAuraRowOffset(f, f.dfDB, "debuff", anchor)
+        return x .. "," .. y
+    end
+    local tdb = UF:GetUnitDB("target")
+    -- Target's defaults: on, attached under, 18 high, 2 gap, 1px border.
+    eq(CB.BottomReserve(T), 21, "target: 2 gap + 18 high + 1 border = 21")
+    eq(off(T, "BOTTOMLEFT"), "0,-21", "a BOTTOMLEFT row: pushed down 21")
+    eq(off(T, "BOTTOM"), "0,-21", "a BOTTOM row: pushed too")
+    eq(off(T, "BOTTOMRIGHT"), "0,-21", "a BOTTOMRIGHT row: pushed too")
+    for _, a in ipairs({ "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "RIGHT", "CENTER" }) do
+        eq(off(T, a), "0,0", "a " .. a .. " row: never pushed")
+    end
+    eq(select("#", T.dfAuraRowOffset(T, tdb, "buff", "TOPLEFT")), 2, "always two answers")
+    -- Follows the settings, live.
+    tdb.castbarHeight = 30
+    eq(off(T, "BOTTOMLEFT"), "0,-33", "taller (30): pushed further (33)")
+    tdb.castbarGap = 5
+    eq(off(T, "BOTTOMLEFT"), "0,-36", "a bigger gap (5): 36")
+    tdb.castbarY = 4
+    eq(off(T, "BOTTOMLEFT"), "0,-32", "the bar lifted 4: 32")
+    tdb.castbarBorderSize = 3
+    eq(off(T, "BOTTOMLEFT"), "0,-34", "a 3px border: 34")
+    tdb.castbarBorderEnabled = false
+    eq(off(T, "BOTTOMLEFT"), "0,-31", "no border: 31")
+    tdb.castbarBorderSize = 0
+    tdb.castbarBorderEnabled = nil
+    eq(off(T, "BOTTOMLEFT"), "0,-32", "a border of 0 still draws 1px (as K.Border does): 32")
+    tdb.castbarHeight, tdb.castbarGap, tdb.castbarY, tdb.castbarBorderSize = nil, nil, nil, nil
+    eq(CB.BottomReserve(T), 21, "back to the defaults: 21")
+    tdb.castbarY = 40
+    eq(off(T, "BOTTOMLEFT"), "0,0", "a bar lifted over the frame reserves nothing (never negative)")
+    tdb.castbarY = nil
+    -- Off, detached or on top: nothing.
+    tdb.castbarEnabled = false
+    eq(off(T, "BOTTOMLEFT"), "0,0", "cast bar off: nothing reserved")
+    tdb.castbarEnabled = nil
+    tdb.castbarDetached = true
+    eq(off(T, "BOTTOMLEFT"), "0,0", "detached: nothing reserved")
+    tdb.castbarDetached = nil
+    tdb.castbarSide = "TOP"
+    eq(off(T, "BOTTOMLEFT"), "0,0", "attached on top: nothing reserved under the frame")
+    tdb.castbarSide = nil
+    -- Not the cast state: the same answer mid-cast and idle.
+    cb.active = true
+    eq(off(T, "BOTTOMLEFT"), "0,-21", "a cast running: the same reserve")
+    cb.active = nil
+    -- Player (detached by default), pet (off), boss (attached, rows on top corners).
+    eq(off(P, "BOTTOMRIGHT"), "0,0", "player: detached by default, nothing reserved")
+    local PET = Owner("pet")
+    CB:Attach(PET)
+    eq(off(PET, "BOTTOMLEFT"), "0,0", "pet: cast bar off, nothing reserved")
+    eq(CB.BottomReserve(BS), 17, "boss slot: attached (14 high + 2 gap + 1 border = 17)")
+    local bdb = UF:GetUnitDB("boss")
+    eq(off(BS, bdb.debuffAnchor), "0,0", "boss: its debuff row (" .. bdb.debuffAnchor .. ") is not pushed")
+    eq(off(BS, bdb.buffAnchor), "0,0", "boss: nor its buff row (" .. bdb.buffAnchor .. ")")
+    local F = Owner("focus")
+    CB:Attach(F)
+    local fdb = UF:GetUnitDB("focus")
+    eq(off(F, fdb.debuffAnchor), "0,-19", "focus: its debuff row is pushed under its 16-high bar (19)")
+    eq(off(F, fdb.buffAnchor), "0,0", "focus: its buff row (above) is not")
+    -- (Target's anchors are Player's mirrored by Links.lua, not loaded here.)
+    eq(off(T, "BOTTOMLEFT"), "0,-21", "target: its debuff row (below) is pushed")
+    eq(off(T, "TOPLEFT"), "0,0", "target: its buff row (above) is not")
+end
+
 print("-- A secret enemy cast: the client owns the fill, the text and the colour")
 local nameS, texS, niS, spellS = Secret("name"), Secret("texture"), Secret("notInterruptible"), Secret("spellID")
 cast = { nameS, nil, texS, Secret("start"), Secret("end"), false, Secret("castID"), niS, spellS }
