@@ -225,11 +225,42 @@ local function applyAppearance(fs, frame, elem, globalDefaults)
     return app   -- resolved appearance, reused by the AD mirror sync
 end
 
+-- ============================================================
+-- MIRRORED TEXT (frame.dfMirrorText)
+-- A frame can draw its text mirrored: every element's horizontal anchor is
+-- flipped (LEFT <-> RIGHT, TOPLEFT <-> TOPRIGHT, ...) and its x offset negated,
+-- at layout time, on that frame only. The template itself is never touched, so
+-- two frames sharing one template can draw it as a pair of mirror images.
+-- An element anchored to another element anchors at the SAME point on both
+-- (SetPoint(point, target, point, ...)), so flipping both ends keeps the pair
+-- together. The renderer sets no horizontal justify of its own (a FontString
+-- held by one point sizes to its text), so there is no justify to flip.
+-- ============================================================
+local function mirrorPoint(point)
+    if type(point) ~= "string" then return point end
+    if point:find("LEFT", 1, true) then return (point:gsub("LEFT", "RIGHT")) end
+    if point:find("RIGHT", 1, true) then return (point:gsub("RIGHT", "LEFT")) end
+    return point
+end
+
+-- Where an element sits on a frame: point, x, y, mirrored when the frame says so.
+-- A local (published below): applyPosition runs per element per health tick.
+local function placement(frame, elem)
+    local point, x, y = elem.anchor or "CENTER", elem.offsetX or 0, elem.offsetY or 0
+    if frame and frame.dfMirrorText == true then
+        point = mirrorPoint(point)
+        if x ~= 0 then x = -x end
+    end
+    return point, x, y
+end
+Render.Placement = placement
+Render.MirrorPoint = mirrorPoint
+
 -- Applies position to the FontString (separate from appearance so we can
 -- update position when anchorTo's target moves).
 local function applyPosition(fs, frame, elem, fontStringsById, enabledById)
     local target = resolveAnchorTarget(elem, frame, fontStringsById, enabledById)
-    local point, x, y = elem.anchor or "CENTER", elem.offsetX or 0, elem.offsetY or 0
+    local point, x, y = placement(frame, elem)
     -- Re-anchoring makes the client lay the text out again, and this runs on every update
     -- (each health tick per unit); the anchor only moves when one of these four does.
     -- A torn-down frame gets fresh FontStrings (Render:Teardown), so the stamp resets.
