@@ -3637,7 +3637,6 @@ L["whether Unit Frames is on, and text templates under other names"] = true
 L["Elite"] = true
 L["Fixed Health"] = true
 L["Raid Target Icon"] = true
-L["Shows sample unit frames. Party and raid test frames stay hidden while this is on."] = true
 L["toggle the unit frames test mode panel"] = true
 L["Unit Frames is not loaded."] = true
 -- Unit frames: the Resting icon's glow (DandersFrames_Options/UnitFrames/Pages.lua).
