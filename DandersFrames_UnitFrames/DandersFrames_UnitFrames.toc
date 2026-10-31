@@ -1,0 +1,24 @@
+## Interface: 120105, 16001
+## Title: DandersFrames |cffa66bffUnit Frames|r
+## Notes: Player, target and target of target frames, drawn and configured by DandersFrames.
+## Author: Danders
+## Version: v5.7.0-alpha.1
+## Category: Danders
+## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## RequiredDeps: DandersFrames
+## OptionalDeps: DandersMover
+## AllowAddOnTableAccess: 1
+
+# ============================================================
+# DandersFrames Unit Frames -- resident companion
+# ============================================================
+# No SavedVariables: every setting lives in the active DandersFrames profile
+# (DF.db.unitframes, registered as a profile-root table), so profiles, import
+# and export carry it with everything else.
+# No DandersUI embed: this addon draws no settings widgets. Its pages live in
+# DandersFrames_Options.
+# Load order: Core (namespace, db accessors) -> Defaults (registers the profile
+# table) -> Units (spawning, events) -> BlizzardHide -> Mover.
+
+Core.lua
+Defaults.lua

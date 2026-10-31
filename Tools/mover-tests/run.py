@@ -109,6 +109,11 @@ lua.globals().load_df_file_into = lambda name, tns: run(HERE.parents[1] / "Dande
 # namespace handed in here is inert -- a test of one stubs `DandersFrames`
 # itself before loading. The arg is kept so every door reads the same.
 lua.globals().load_options_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames_Options" / name, "DandersFrames_Options", tns)
+# ...and the same door for the unit frames companion. Its files take the HOST off
+# the global (`local DF = DandersFrames`) and their OWN namespace off the varargs,
+# so a test stubs `DandersFrames` and hands in a fresh table as the addon's `UF`.
+lua.globals().load_uf_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames_UnitFrames" / name, "DandersFrames_UnitFrames", tns)
+lua.globals().uf_file_source = lambda name: (HERE.parents[1] / "DandersFrames_UnitFrames" / name).read_text(encoding="utf-8")
 # Source text only, for a compile-only (loadstring) syntax check that must not
 # run the file. Read here rather than in Lua so the path resolves the same way
 # every other load does, whatever the cwd is.
@@ -159,7 +164,7 @@ for _f in sorted((HERE.parent.parent / "DandersUI").glob("*.lua")):
 # ============================================================
 _tex = _re.compile(r'"Interface\\[^\\\\"]')
 _texviol = []
-for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersFrames_UnitFrames", "DandersUI"):
     _base = HERE.parents[1] / _root
     if not _base.is_dir():
         continue
@@ -182,7 +187,7 @@ for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
 _pub = _re.compile(r"^\s*(P|S)\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*$")
 _dcl = _re.compile(r"^\s*local (?:function )?([A-Za-z_]\w*)\s*(?:=\s*function)?")
 _fwd = []
-for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersFrames_UnitFrames", "DandersUI"):
     _base = HERE.parents[1] / _root
     if not _base.is_dir():
         continue
@@ -236,7 +241,7 @@ if _viol:
 # ============================================================
 _unpackban = _re.compile(r"unpack\s*\([^)]*Colors\s*\.")
 _colviol = []
-for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersFrames_UnitFrames", "DandersMover", "DandersUI"):
     _root = HERE.parents[1] / _dir
     if not _root.is_dir():
         continue
@@ -270,7 +275,7 @@ if _colviol:
 # ============================================================
 _parse = lua.eval("function(s) local f, e = loadstring(s); return (f ~= nil), e end")
 _badparse = []
-for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersFrames_UnitFrames", "DandersMover", "DandersUI"):
     _root = HERE.parents[1] / _dir
     if not _root.is_dir():
         continue
