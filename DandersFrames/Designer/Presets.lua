@@ -145,8 +145,12 @@ local function ResolvePreset(frame, lib, presetKey)
         and "dfAuraPresetOverride" or "dfTextPresetOverride"]
     if override and lib[override] then return lib[override] end
 
+    -- A standalone frame (DF:InitStandaloneFrame) names its template in its own
+    -- settings table (DF:GetFrameDB). Gated on the flag, not GetFrameDB for every
+    -- frame: a pinned frame's dfDB can sit on the other mode from FrameMode once
+    -- the raid registry goes stale, and that answer must not move.
     local mode = FrameMode(frame)
-    local modeDB = DF:GetDB(mode)
+    local modeDB = (frame and frame.dfStandalone and DF:GetFrameDB(frame)) or DF:GetDB(mode)
     local name = (modeDB and modeDB[presetKey]) or DefaultPresetNameForMode(mode)
     return lib[name] or lib[DF.DEFAULT_PRESET]
 end
