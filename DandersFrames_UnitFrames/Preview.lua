@@ -31,7 +31,7 @@ if not DF then return end
 
 local pairs, ipairs, type = pairs, ipairs, type
 
-local P = { owners = {}, frames = {}, shown = false }
+local P = { owners = {}, frames = {}, shown = false, LEVEL_ABOVE_LIVE = 100 }
 UF.Preview = P
 
 -- ============================================================
@@ -170,6 +170,17 @@ function P:GetParent()
     if P.parent then return P.parent end
     local p = CreateFrame("Frame", "DandersUnitFramesPreview", UIParent)
     p:SetAllPoints(UIParent)
+    -- ABOVE THE LIVE FRAMES, so the mouse reaches the preview. The live holders are
+    -- only faded (alpha 0 still takes clicks), and switching their mouse off is not
+    -- an option: EnableMouse on a protected button is blocked in combat. So the
+    -- preview's own (plain) parent is lifted over the live parent instead -- set
+    -- here, before any preview frame exists, so every one inherits it. +100 clears
+    -- the deepest level offset inside a frame (+60). Never touches a secure frame.
+    local live = UF.Units and UF.Units.parent
+    if live then
+        p:SetFrameStrata(live:GetFrameStrata())
+        p:SetFrameLevel(live:GetFrameLevel() + P.LEVEL_ABOVE_LIVE)
+    end
     P.parent = p
     return p
 end

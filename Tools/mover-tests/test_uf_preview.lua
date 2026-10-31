@@ -228,6 +228,16 @@ eq(P:IsActive(), true, "the session ending leaves the Settings switch's preview 
 P:SetOwner("settings", false)
 eq(P:IsActive(), false, "...until it is switched off too")
 
+print("-- The preview sits above the live frames (the mouse reaches it, not the faded buttons)")
+do
+    local live, prev = UF.Units.parent, P.parent
+    check(live and prev, "both parents exist")
+    if live and prev then
+        eq(prev:GetFrameStrata(), live:GetFrameStrata(), "same strata as the live parent")
+        check(prev:GetFrameLevel() >= live:GetFrameLevel() + 100, "...and 100 levels above it")
+    end
+end
+
 print("-- Combat: the preview never touches the secure buttons")
 IN_COMBAT = true
 local before = {}
