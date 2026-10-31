@@ -45,8 +45,15 @@ DF.UnitFramePageData = {
         },
         {
             kind = "bosslayout", category = "general", title = "Boss Layout",
-            later = true,
             units = { boss = true },
+            cards = {
+                arrangement = { boss = true },
+                behaviour = { boss = true },
+            },
+            hide = {
+                bossRangeAlpha = { boss = true },
+                bossRangeFade = { boss = true },
+            },
         },
         {
             kind = "visibility", category = "display", title = "Visibility",
@@ -192,6 +199,7 @@ DF.UnitFramePageData = {
             },
             hide = {
                 castbarClassColor = { target = true, focus = true, pet = true, boss = true },
+                castbarDetached = { boss = true },
                 castbarEmpower = { target = true, focus = true, pet = true, boss = true },
                 castbarIconSide = { target = true, focus = true, pet = true, boss = true },
                 castbarImportantGlow = { player = true, pet = true },

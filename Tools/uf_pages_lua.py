@@ -43,7 +43,12 @@ KIND = {
 }
 # New pages whose runtime is built: emitted without `later`, with the units their
 # cards reach and the per-unit `hide` list; Pages.lua draws their controls.
-BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait"}
+BUILT_NEW = {"uf_visibility", "uf_castbar", "uf_classpower", "uf_portrait", "uf_bosslayout"}
+# Controls hidden for a unit on top of what the inventory says, because the runtime
+# cannot honour them there: page id -> db key -> units.
+#   castbarDetached on Boss: five boss cast bars share one settings table, so one
+#   detached record would stack all five on one spot (CastBar.lua IsDetached).
+EXTRA_HIDE = {"uf_castbar": {"castbarDetached": {"boss"}}}
 # New cards on a DF page that get a built page of their own instead:
 # source page id -> (kind, category, title) of the page that draws them.
 SPLIT_CARDS = {"indicators_icons": ("unitIcons", "indicators", "Unit Icons")}
@@ -134,6 +139,8 @@ def main():
                                 hidden = [u for u in cu if u not in ct["units"]]
                                 if hidden:
                                     hide.setdefault(k, set()).update(hidden)
+        for k, us in EXTRA_HIDE.get(pid, {}).items():
+            hide.setdefault(k, set()).update(u for u in us if u in units)
         rec["cards"], rec["hide"], rec["laterCards"] = cards, hide, later_cards
         if pid in BUILT_NEW:
             rec["built"] = True

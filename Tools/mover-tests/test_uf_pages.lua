@@ -240,7 +240,7 @@ local WANT = {
     targettarget = "frame,tooltips,health,text,highlights",
     focus = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,icons,unitIcons,highlights",
     pet = "frame,visibility,tooltips,fading,portrait,health,resource,absorbs,healpred,castbar,text,buffs,debuffs,auradesigner,icons,highlights",
-    boss = "frame,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,highlights",
+    boss = "frame,bosslayout,tooltips,fading,portrait,health,resource,absorbs,castbar,text,buffs,debuffs,icons,highlights",
 }
 for _, unit in ipairs(UFO.UNITS) do
     local kinds = {}
@@ -256,7 +256,10 @@ for _, unit in ipairs(UFO.UNITS) do
     end
     eq(table.concat(kinds, ","), WANT[unit], unit .. ": its pages, in sidebar order")
 end
-check(made.pages.uf_boss_bosslayout == nil, "a new page waiting for its runtime is left out (Boss Layout)")
+check(made.pages.uf_boss_bosslayout ~= nil, "Boss Layout: built now the boss frames exist")
+eq(made.pages.uf_boss_bosslayout.cat, "uf_general", "...under General, after Frame")
+eq(made.pages.uf_player_bosslayout, nil, "...for Boss only")
+eq(made.pages.uf_boss_visibility, nil, "Boss has no Visibility page (the inventory gives it none)")
 check(made.pages.uf_player_castbar ~= nil and made.pages.uf_player_classpower ~= nil
       and made.pages.uf_player_portrait ~= nil and made.pages.uf_player_unitIcons ~= nil,
       "Cast Bar, Class Power, Portrait, Unit Icons: built now their runtime exists")
@@ -581,6 +584,30 @@ do
     cards, keys = BuildPage("pet", "castbar")
     check(not has(keys, "castbarShowTarget"), "pet: no Spell Target (the card does not reach it)")
     eq(table.concat(UFO.Prefixes("castbar"), ","), "castbar", "Cast Bar: Reset / Sync / Copy act on the castbar keys")
+    cards, keys = BuildPage("boss", "castbar")
+    check(not has(keys, "castbarDetached"), "boss: no Detach (five bars, one record)")
+    check(has(keys, "castbarKickTick") and has(keys, "castbarShowTarget"), "boss: kick-ready mark and Spell Target stay")
+
+    print("-- Stage G pages: Boss Layout")
+    cards, keys, byKey, pAdded = BuildPage("boss", "bosslayout")
+    eq(cards, "uf_boss_arrangement,uf_boss_behaviour", "Boss Layout: Arrangement, Behaviour")
+    check(pAdded[1].w.dfUnitRow ~= nil, "Boss Layout: the unit row (Reset / Sync / Copy)")
+    eq(table.concat(keys, ","), "bossGrowth,bossSpacing,bossUnitsPerRow,bossRowSpacing,bossPreviewCount,bossPreviewNum",
+       "Boss Layout: growth, spacing, per row, row spacing, test-mode placeholders, preview count")
+    check(not has(keys, "bossRangeFade") and not has(keys, "bossRangeAlpha"),
+          "...no range controls (hidden for Boss; the Fading page fades a boss)")
+    w = byKey.bossGrowth
+    eq(w and w.args[2] and table.concat(w.args[2]._order, ","), "DOWN,UP,LEFT,RIGHT", "Growth Direction: down, up, left, right")
+    w = byKey.bossUnitsPerRow
+    eq(w and w.args[3], UF.BOSS_COUNT or 5, "Units Per Row stops at the slot count")
+    eq(byKey.bossPreviewNum and byKey.bossPreviewNum.args[3], UF.BOSS_COUNT or 5, "Preview Frames stops at the slot count")
+    w = byKey.bossRowSpacing
+    check(w and w.disableOn and w.disableOn({ bossUnitsPerRow = 5 }) and not w.disableOn({ bossUnitsPerRow = 2 }),
+          "Row Spacing greys until a row wraps")
+    local editRow
+    for _, x in ipairs(built) do if x.kind == "buttons" then editRow = x end end
+    check(editRow and editRow.args[1][1].label == "Edit in Mover", "Arrangement: Edit in Mover")
+    eq(table.concat(UFO.Prefixes("bosslayout"), ","), "boss", "Boss Layout: Reset / Sync / Copy act on the boss keys")
 
     print("-- Stage F pages: Class Power")
     cards, keys, byKey = BuildPage("player", "classpower")

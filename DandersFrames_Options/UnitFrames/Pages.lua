@@ -237,6 +237,7 @@ function UFO.Prefixes(kind)
     if kind == "classpower" then return { "classPower" } end
     if kind == "portrait" then return { "portrait" } end
     if kind == "unitIcons" then return { "restingIcon", "pvpIcon", "classification" } end
+    if kind == "bosslayout" then return { "boss" } end
     return {}
 end
 
@@ -859,8 +860,11 @@ function UFO.BuildCastBarPage(self, db, Add, rec, unit)
 
     band = Open(L["Position"], "uf_cb_position", 1,
         function(d) return detached(d) and L["Detached"] or L["Attached"] end, "position")
-    w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "castbarDetached", changed), 30)
-    w.disableOn = off
+    -- Not on Boss: five boss cast bars share one record (CastBar.lua IsDetached).
+    if shown("castbarDetached") then
+        w = band:AddWidget(GUI:CreateCheckbox(self.child, L["Detach"], db, "castbarDetached", changed), 30)
+        w.disableOn = off
+    end
     w = band:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"],
         { BOTTOM = L["Bottom"], TOP = L["Top"], _order = { "BOTTOM", "TOP" } }, db, "castbarSide", changed), 55)
     w.disableOn, w.hideOn = off, detached
@@ -1151,6 +1155,55 @@ function UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
     end
 end
 
+-- ---- Boss Layout (a page new to unit frames; Boss only) ----------------------
+-- How the boss slots are laid out in their container (DandersFrames_UnitFrames/
+-- Boss.lua): growth direction, spacing, wrapping, and the sample bosses the
+-- preview shows. The sliders stop at the slot count this build draws.
+-- Inventory controls deliberately NOT drawn: Fade Out of Range and Out of Range
+-- Alpha (the generated `hide` list drops them for Boss -- the Fading page's Out of
+-- Range card is what fades a boss frame).
+function UFO.BossGrowthOptions()
+    return { DOWN = L["Down"], UP = L["Up"], LEFT = L["Left"], RIGHT = L["Right"],
+             _order = { "DOWN", "UP", "LEFT", "RIGHT" } }
+end
+
+function UFO.BossCount()
+    local UF = DF.UnitFrames
+    return (UF and UF.BOSS_COUNT) or 5
+end
+
+function UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
+    Add(UFO.CreatePageRow(self, rec, unit), 25, 2)
+    local Open, Close = Tools(self, Add)
+    local function changed() self:RefreshStates(); RefreshFrames() end
+    local count = UFO.BossCount()
+    local growth = UFO.BossGrowthOptions()
+    local w
+
+    local band = Open(L["Arrangement"], "uf_boss_arrangement", 1, function(d)
+        local g = d and growth[d.bossGrowth] or growth.DOWN
+        return format("%s%s%s", g, SEP, tostring(d and d.bossSpacing or ""))
+    end, "layout")
+    band:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growth, db, "bossGrowth", changed), 55)
+    band:AddWidget(GUI:CreateSlider(self.child, L["Frame Spacing"], 0, 150, 1, db, "bossSpacing", changed), 55)
+    band:AddWidget(GUI:CreateSlider(self.child, L["Units Per Row"], 1, count, 1, db, "bossUnitsPerRow", changed), 55)
+    w = band:AddWidget(GUI:CreateSlider(self.child, L["Row Spacing"], -5, 50, 1, db, "bossRowSpacing", changed), 55)
+    -- Only matters once a row wraps.
+    w.disableOn = function(d) return not (d and tonumber(d.bossUnitsPerRow) and d.bossUnitsPerRow < count) end
+    band:AddWidget(GUI:CreateButtonRow(self.child, {
+        { label = L["Edit in Mover"], width = 120, icon = "open_with",
+          onClick = function() UFO.EditInMover("boss") end },
+    }, { width = 250 }), 30)
+    Close(band)
+
+    band = Open(L["Behaviour"], "uf_boss_behaviour", 2, function(d)
+        return (d and d.bossPreviewCount == false) and L["Off"] or tostring(d and d.bossPreviewNum or "")
+    end, "settings")
+    band:AddWidget(GUI:CreateCheckbox(self.child, L["Show Placeholder Frames in Test Mode"], db, "bossPreviewCount", changed), 30)
+    band:AddWidget(GUI:CreateSlider(self.child, L["Preview Frames"], 1, count, 1, db, "bossPreviewNum", changed), 55)
+    Close(band)
+end
+
 -- ---- moving a frame ----------------------------------------------------------
 function UFO.EditInMover(unit)
     local UF = DF.UnitFrames
@@ -1168,6 +1221,11 @@ function UFO.ResetPosition(unit)
     local stored = UF and UF:GetStoredUnit(unit)
     if not stored then return end
     stored.position = nil
+    -- Boss: the record is the container's (Boss.lua).
+    if unit == "boss" and UF.Boss and UF.Boss.ApplyPosition then
+        UF:RunOutOfCombat("position:boss", function() UF.Boss:ApplyPosition() end)
+        if UF.Boss.PreviewApplyPosition then UF.Boss:PreviewApplyPosition() end
+    end
     local f = UF.frames and UF.frames[unit]
     if f and UF.Units and UF.Units.ApplyPosition then
         UF:RunOutOfCombat("position:" .. unit, function() UF.Units:ApplyPosition(f) end)
@@ -1223,6 +1281,8 @@ function UFO.PageBuilder(rec, unit)
             UFO.BuildPortraitPage(self, db, Add, rec, unit)
         elseif rec.kind == "unitIcons" then
             UFO.BuildUnitIconsPage(self, db, Add, rec, unit)
+        elseif rec.kind == "bosslayout" then
+            UFO.BuildBossLayoutPage(self, db, Add, rec, unit)
         end
     end
 end
