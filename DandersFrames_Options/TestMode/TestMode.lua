@@ -3557,146 +3557,36 @@ end
 -- FLOATING TEST PANEL
 -- ============================================================
 
-function DF:CreateTestPanel()
-    if DF.TestPanel then return DF.TestPanel end
-
-    -- ============================================================
-    -- COLOUR CONSTANTS
-    -- ============================================================
-    -- Neutral tones reuse the shared GUI palette (same numeric values, zero
-    -- visual change) so they track any future palette change in lockstep. The
-    -- mode accent stays driven by GetThemeColor() below (party/raid aware).
+-- ============================================================
+-- TEST PANEL WIDGET KIT
+-- The test panel's own widgets -- themed checkbox (two to a row, its label
+-- optionally a link to a settings page), mini slider, collapsible section with
+-- a count badge -- built here once so every test panel looks and behaves the
+-- same. The panel supplies where a checkbox writes and what follows a write:
+--   opts.contentWidth        the panel's content width
+--   opts.themeColor()        -> { r, g, b } accent for checks, sliders, badges
+--   opts.getDB()             -> the table a checkbox writes its key into
+--   opts.callbackArg()       optional: second argument to a checkbox's callback
+--   opts.afterToggle(cb)     optional: after the write and the callback
+--   opts.saveSection(key, expanded)  optional: a section folded / unfolded
+--   opts.relayout()          optional: ...and the panel re-lays itself out
+-- Returns { Checkbox = fn, Slider = fn, Section = fn, sections = { ... } } with
+-- the same signatures the party / raid panel has always used:
+--   Checkbox(parent, text, dbKey, callback, pageId, setValue)
+--   Slider(parent, width, min, max, step)
+--   Section(parentFrame, title, sectionKey)  -- :AddCheckbox / :AddWidget / ...
+-- ============================================================
+function DF:CreateTestPanelKit(opts)
+    local kit = { sections = {} }
     local GUIColors  = DF.GUI.Colors
-    local C_PARTY    = GUIColors.accent
-    local C_RAID     = GUIColors.raid
-    local C_BG       = GUIColors.background
     local C_PANEL    = GUIColors.panel
     local C_ELEMENT  = GUIColors.element
     local C_BORDER   = GUIColors.border
     local C_HOVER    = GUIColors.hover
     local C_TEXT     = GUIColors.text
     local C_TEXT_DIM = GUIColors.textDim
-
-    local PANEL_WIDTH   = 320
-    local CONTENT_WIDTH = PANEL_WIDTH - 24  -- 12px padding each side
-    local HEADER_TOP    = 108  -- Space used by title + toggle button + description + separator
-
-    local function GetThemeColor()
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        return isRaidMode and C_RAID or C_PARTY
-    end
-
-    local function IsTestActive()
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        return isRaidMode and DF.raidTestMode or DF.testMode
-    end
-
-    -- ============================================================
-    -- MAIN PANEL FRAME
-    -- ============================================================
-    local panel = CreateFrame("Frame", "DandersFramesTestPanel", UIParent, "BackdropTemplate")
-    panel:SetSize(PANEL_WIDTH, 420)
-    panel:SetPoint("CENTER", UIParent, "CENTER", 300, 0)
-    panel:SetFrameStrata("FULLSCREEN_DIALOG")
-    panel:SetFrameLevel(100)
-    panel:SetMovable(true)
-    panel:EnableMouse(true)
-    panel:RegisterForDrag("LeftButton")
-    panel:SetScript("OnDragStart", panel.StartMoving)
-    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
-    DF.GUI:CreatePanelBackdrop(panel, { bgAlpha = C_BG.a, borderColor = { r = 0, g = 0, b = 0, a = 1 } })
-    panel:Hide()
-
-    local function ApplyScale(self)
-        self:SetScale(DF:GetWindowState().scale or 1.0)
-    end
-
-    panel:SetScript("OnHide", function()
-        -- Closing the panel drops the USER's claim on both scopes -- and only that;
-        -- it must not hide the frames itself. Unlock's own claim decides whether they
-        -- stay up, and the later lock takes them down.
-        DF:SetTestModeOwner("party", "user", false)
-        DF:SetTestModeOwner("raid", "user", false)
-        if DF.GUI and DF.GUI.UpdateTestButtonState then
-            DF.GUI.UpdateTestButtonState()
-        end
-    end)
-
-    tinsert(UISpecialFrames, "DandersFramesTestPanel")
-
-    -- ============================================================
-    -- HEADER
-    -- ============================================================
-    -- Title
-    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    title:SetPoint("TOPLEFT", 12, -10)
-    title:SetText(L["Test Mode"])
-    panel.title = title
-
-    -- Mode badge
-    local badge = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    badge:SetSize(40, 18)
-    badge:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    -- Colours are pushed per mode (party/raid theme) when the panel refreshes.
-    DF.GUI:CreateElementBackdrop(badge)
-    badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    badge.text:SetPoint("CENTER", 0, 0)
-    badge.text:SetText(L["Party"])
-    panel.badge = badge
-
-    -- Close button
-    local closeBtn = DF.GUI:CreateCloseButton(panel, {
-        size = 22,
-        onClick = function() panel:Hide() end,
-    })
-    closeBtn:SetPoint("TOPRIGHT", -8, -6)
-
-    -- Separator below header
-    local headerSep = panel:CreateTexture(nil, "ARTWORK")
-    headerSep:SetPoint("TOPLEFT", 0, -32)
-    headerSep:SetPoint("TOPRIGHT", 0, -32)
-    headerSep:SetHeight(1)
-    headerSep:SetColorTexture(1, 1, 1, 0.06)
-
-    -- ============================================================
-    -- TOGGLE BUTTON
-    -- ============================================================
-    local toggleBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
-    toggleBtn:SetPoint("TOPLEFT", 12, -38)
-    -- Full-width toggle. The active/inactive look (accent fill + "Disable Test
-    -- Mode" label when on) is driven by SetActive(testActive) in
-    -- UpdateStateInternal; here we just set the resting (inactive) label.
-    DF.GUI:StyleButton(toggleBtn, {
-        width = CONTENT_WIDTH,
-        height = 30,
-        font = "DFFontHighlight",
-        text = L["Enable Test Mode"],
-    })
-    toggleBtn:SetScript("OnClick", function()
-        DF:ToggleTestMode()
-        -- This button and the toolbar's test button are the SAME action: turn the
-        -- preview off and close the panel. An open panel always means "the user is
-        -- asking for a preview", which is what makes the toggle's label unambiguous.
-        --
-        -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
-        -- idempotent with the release ToggleTestMode just did.
-        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
-        if not DF:IsTestModeOwnedBy(scope, "user") then
-            panel:Hide()
-        else
-            panel:UpdateState()
-        end
-    end)
-    panel.toggleBtn = toggleBtn
-
-    -- Description text
-    local desc = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    desc:SetPoint("TOPLEFT", 12, -74)
-    desc:SetPoint("TOPRIGHT", -12, -74)
-    desc:SetJustifyH("LEFT")
-    desc:SetSpacing(2)
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-    desc:SetText(L["Expand sections to toggle features. Click label text to jump to its settings page."])
+    local CONTENT_WIDTH = opts.contentWidth
+    local GetThemeColor = opts.themeColor
 
     -- ============================================================
     -- THEMED CHECKBOX HELPER
@@ -3853,52 +3743,18 @@ function DF:CreateTestPanel()
         box:SetScript("OnClick", function()
             if container.dfDisabled then return end
             container:SetChecked(not container.checked)
-            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-            local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+            local db = opts.getDB()
             if setValue then
                 setValue(db, container.checked)
-            else
+            elseif db then
                 db[dbKey] = container.checked
             end
-            if callback then callback(container.checked, isRaidMode) end
-            if isRaidMode and DF.raidTestMode then
-                DF:UpdateRaidTestFrames()
-                -- ☠ SECOND PASS NEXT TICK — the same one ENTRY runs, for the same
-                -- reason. A toggle flipped on for the first time this session CREATES
-                -- its bars during this pass, and an anchor-derived rect is 0 for the
-                -- whole creation tick — so anything anchored to a new bar's own
-                -- texture (the absorb chained to the brand-new prediction fill)
-                -- paints at width 0 and stays invisible until another toggle pass. The painter order
-                -- fixes the within-pass dependency; this fixes the rects. It goes through the SAME
-                -- UpdateTestFrame pathway — no second painter.
-                C_Timer.After(0, function()
-                    if DF.raidTestMode and DF.UpdateRaidTestFrames then
-                        DF:UpdateRaidTestFrames()
-                    end
-                end)
-            elseif not isRaidMode and DF.testMode then
-                -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below
-                -- and the After(0) "second pass over settled rects" both depend
-                -- on this rebuild having already happened this tick.
-                DF:UpdateAllFrames_Now()
-                if DF.RefreshTestFrames then DF:RefreshTestFrames() end
-                -- Same second pass as the raid branch above — see that comment.
-                C_Timer.After(0, function()
-                    if DF.testMode and DF.RefreshTestFrames then
-                        DF:RefreshTestFrames()
-                    end
-                end)
-            end
+            if callback then callback(container.checked, opts.callbackArg and opts.callbackArg()) end
+            if opts.afterToggle then opts.afterToggle(container) end
             -- Update badge on parent section
             if container.section and container.section.UpdateBadge then
                 container.section:UpdateBadge()
             end
-            -- ☠ RE-EVALUATE THE PRESET HIGHLIGHT. Flipping a toggle can make the state
-            -- stop matching the highlighted preset -- or start matching another one.
-            -- The full panel refresh is not usable from inside a checkbox handler (it re-runs
-            -- SetChecked on every box, including this one, mid-click), so refresh just the
-            -- preset row.
-            if panel.RefreshPresetHighlight then panel:RefreshPresetHighlight() end
         end)
 
         -- Hover on whole container toggles too
@@ -4031,7 +3887,7 @@ function DF:CreateTestPanel()
     -- ============================================================
     -- COLLAPSIBLE SECTION HELPER
     -- ============================================================
-    local allSections = {}
+    local allSections = kit.sections
 
     local function CreateSection(parentFrame, sectionTitle, sectionKey)
         local section = CreateFrame("Frame", nil, parentFrame)
@@ -4164,12 +4020,9 @@ function DF:CreateTestPanel()
 
         section.Toggle = function(self)
             self:SetExpanded(not self.expanded)
-            -- Save collapsed state to DB
-            if self.sectionKey and DF.db then
-                if not DF.db.testPanelSections then DF.db.testPanelSections = {} end
-                DF.db.testPanelSections[self.sectionKey] = self.expanded
-            end
-            panel:RecalculateLayout()
+            -- Save collapsed state (the panel's own store)
+            if self.sectionKey and opts.saveSection then opts.saveSection(self.sectionKey, self.expanded) end
+            if opts.relayout then opts.relayout() end
         end
 
         -- Hover effects on header
@@ -4190,6 +4043,211 @@ function DF:CreateTestPanel()
         table.insert(allSections, section)
         return section
     end
+
+    kit.Checkbox = CreateThemedCheckbox
+    kit.Slider = CreateThemedSlider
+    kit.Section = CreateSection
+    return kit
+end
+
+function DF:CreateTestPanel()
+    if DF.TestPanel then return DF.TestPanel end
+
+    -- ============================================================
+    -- COLOUR CONSTANTS
+    -- ============================================================
+    -- Neutral tones reuse the shared GUI palette (same numeric values, zero
+    -- visual change) so they track any future palette change in lockstep. The
+    -- mode accent stays driven by GetThemeColor() below (party/raid aware).
+    local GUIColors  = DF.GUI.Colors
+    local C_PARTY    = GUIColors.accent
+    local C_RAID     = GUIColors.raid
+    local C_BG       = GUIColors.background
+    local C_PANEL    = GUIColors.panel
+    local C_ELEMENT  = GUIColors.element
+    local C_BORDER   = GUIColors.border
+    local C_HOVER    = GUIColors.hover
+    local C_TEXT     = GUIColors.text
+    local C_TEXT_DIM = GUIColors.textDim
+
+    local PANEL_WIDTH   = 320
+    local CONTENT_WIDTH = PANEL_WIDTH - 24  -- 12px padding each side
+    local HEADER_TOP    = 108  -- Space used by title + toggle button + description + separator
+
+    local function GetThemeColor()
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+        return isRaidMode and C_RAID or C_PARTY
+    end
+
+    local function IsTestActive()
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+        return isRaidMode and DF.raidTestMode or DF.testMode
+    end
+
+    -- ============================================================
+    -- MAIN PANEL FRAME
+    -- ============================================================
+    local panel = CreateFrame("Frame", "DandersFramesTestPanel", UIParent, "BackdropTemplate")
+    panel:SetSize(PANEL_WIDTH, 420)
+    panel:SetPoint("CENTER", UIParent, "CENTER", 300, 0)
+    panel:SetFrameStrata("FULLSCREEN_DIALOG")
+    panel:SetFrameLevel(100)
+    panel:SetMovable(true)
+    panel:EnableMouse(true)
+    panel:RegisterForDrag("LeftButton")
+    panel:SetScript("OnDragStart", panel.StartMoving)
+    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
+    DF.GUI:CreatePanelBackdrop(panel, { bgAlpha = C_BG.a, borderColor = { r = 0, g = 0, b = 0, a = 1 } })
+    panel:Hide()
+
+    local function ApplyScale(self)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
+    end
+
+    panel:SetScript("OnHide", function()
+        -- Closing the panel drops the USER's claim on both scopes -- and only that;
+        -- it must not hide the frames itself. Unlock's own claim decides whether they
+        -- stay up, and the later lock takes them down.
+        DF:SetTestModeOwner("party", "user", false)
+        DF:SetTestModeOwner("raid", "user", false)
+        if DF.GUI and DF.GUI.UpdateTestButtonState then
+            DF.GUI.UpdateTestButtonState()
+        end
+    end)
+
+    tinsert(UISpecialFrames, "DandersFramesTestPanel")
+
+    -- ============================================================
+    -- HEADER
+    -- ============================================================
+    -- Title
+    local title = panel:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    title:SetPoint("TOPLEFT", 12, -10)
+    title:SetText(L["Test Mode"])
+    panel.title = title
+
+    -- Mode badge
+    local badge = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    badge:SetSize(40, 18)
+    badge:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    -- Colours are pushed per mode (party/raid theme) when the panel refreshes.
+    DF.GUI:CreateElementBackdrop(badge)
+    badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    badge.text:SetPoint("CENTER", 0, 0)
+    badge.text:SetText(L["Party"])
+    panel.badge = badge
+
+    -- Close button
+    local closeBtn = DF.GUI:CreateCloseButton(panel, {
+        size = 22,
+        onClick = function() panel:Hide() end,
+    })
+    closeBtn:SetPoint("TOPRIGHT", -8, -6)
+
+    -- Separator below header
+    local headerSep = panel:CreateTexture(nil, "ARTWORK")
+    headerSep:SetPoint("TOPLEFT", 0, -32)
+    headerSep:SetPoint("TOPRIGHT", 0, -32)
+    headerSep:SetHeight(1)
+    headerSep:SetColorTexture(1, 1, 1, 0.06)
+
+    -- ============================================================
+    -- TOGGLE BUTTON
+    -- ============================================================
+    local toggleBtn = CreateFrame("Button", nil, panel, "BackdropTemplate")
+    toggleBtn:SetPoint("TOPLEFT", 12, -38)
+    -- Full-width toggle. The active/inactive look (accent fill + "Disable Test
+    -- Mode" label when on) is driven by SetActive(testActive) in
+    -- UpdateStateInternal; here we just set the resting (inactive) label.
+    DF.GUI:StyleButton(toggleBtn, {
+        width = CONTENT_WIDTH,
+        height = 30,
+        font = "DFFontHighlight",
+        text = L["Enable Test Mode"],
+    })
+    toggleBtn:SetScript("OnClick", function()
+        DF:ToggleTestMode()
+        -- This button and the toolbar's test button are the SAME action: turn the
+        -- preview off and close the panel. An open panel always means "the user is
+        -- asking for a preview", which is what makes the toggle's label unambiguous.
+        --
+        -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
+        -- idempotent with the release ToggleTestMode just did.
+        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
+        if not DF:IsTestModeOwnedBy(scope, "user") then
+            panel:Hide()
+        else
+            panel:UpdateState()
+        end
+    end)
+    panel.toggleBtn = toggleBtn
+
+    -- Description text
+    local desc = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", 12, -74)
+    desc:SetPoint("TOPRIGHT", -12, -74)
+    desc:SetJustifyH("LEFT")
+    desc:SetSpacing(2)
+    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+    desc:SetText(L["Expand sections to toggle features. Click label text to jump to its settings page."])
+
+    -- ============================================================
+    -- WIDGETS (the shared test panel kit, DF:CreateTestPanelKit above)
+    -- ============================================================
+    local kit = DF:CreateTestPanelKit({
+        contentWidth = CONTENT_WIDTH,
+        themeColor = GetThemeColor,
+        getDB = function()
+            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+            return isRaidMode and DF:GetRaidDB() or DF:GetDB()
+        end,
+        callbackArg = function() return DF.GUI and DF.GUI.SelectedMode == "raid" end,
+        afterToggle = function()
+            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+            if isRaidMode and DF.raidTestMode then
+                DF:UpdateRaidTestFrames()
+                -- ☠ SECOND PASS NEXT TICK — the same one ENTRY runs, for the same
+                -- reason. A toggle flipped on for the first time this session CREATES
+                -- its bars during this pass, and an anchor-derived rect is 0 for the
+                -- whole creation tick — so anything anchored to a new bar's own
+                -- texture (the absorb chained to the brand-new prediction fill)
+                -- paints at width 0 and stays invisible until another toggle pass. The painter order
+                -- fixes the within-pass dependency; this fixes the rects. It goes through the SAME
+                -- UpdateTestFrame pathway — no second painter.
+                C_Timer.After(0, function()
+                    if DF.raidTestMode and DF.UpdateRaidTestFrames then
+                        DF:UpdateRaidTestFrames()
+                    end
+                end)
+            elseif not isRaidMode and DF.testMode then
+                -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below
+                -- and the After(0) "second pass over settled rects" both depend
+                -- on this rebuild having already happened this tick.
+                DF:UpdateAllFrames_Now()
+                if DF.RefreshTestFrames then DF:RefreshTestFrames() end
+                -- Same second pass as the raid branch above — see that comment.
+                C_Timer.After(0, function()
+                    if DF.testMode and DF.RefreshTestFrames then
+                        DF:RefreshTestFrames()
+                    end
+                end)
+            end
+            -- ☠ RE-EVALUATE THE PRESET HIGHLIGHT. Flipping a toggle can make the state
+            -- stop matching the highlighted preset -- or start matching another one.
+            -- The full panel refresh is not usable from inside a checkbox handler (it re-runs
+            -- SetChecked on every box, including this one, mid-click), so refresh just the
+            -- preset row.
+            if panel.RefreshPresetHighlight then panel:RefreshPresetHighlight() end
+        end,
+        saveSection = function(key, expanded)
+            if not DF.db then return end
+            if not DF.db.testPanelSections then DF.db.testPanelSections = {} end
+            DF.db.testPanelSections[key] = expanded
+        end,
+        relayout = function() panel:RecalculateLayout() end,
+    })
+    local CreateThemedSlider, CreateSection = kit.Slider, kit.Section
+    local allSections = kit.sections
 
     -- ============================================================
     -- CREATE SECTIONS
