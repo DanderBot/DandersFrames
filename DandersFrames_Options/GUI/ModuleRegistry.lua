@@ -54,8 +54,8 @@ local function Resort()
 end
 
 -- def: id, label, icon, order, slot ("top"|"bottom"), accent(), tabs
--- ({ {id, label, deckLabel, accent}, ... }, optional), activeTab(), sidebar (bool),
--- isEnabled(), ownsPage(name), onEnter(tabId), onEnterForPage(tabId, pageName),
+-- ({ {id, label, deckLabel, accent, mark}, ... }, optional), activeTab(), sidebar (bool),
+-- isEnabled(), ownsPage(name), pageMark(name) (see STATE MARKS), onEnter(tabId), onEnterForPage(tabId, pageName),
 -- onLeave(), endsMoverSession, railLabel (short label under the rail icon),
 -- alwaysInRail (listed in the rail even while isEnabled() is false),
 -- status() (one line for Home's tile and the Modules page), description,
@@ -188,6 +188,31 @@ function GUI:ModuleForPage(name)
     for i = 1, #ordered do
         local def = ordered[i]
         if def.ownsPage and def.ownsPage(name) then return def.id end
+    end
+end
+
+-- ============================================================
+-- STATE MARKS on a module's sidebar rows and deck-2 tabs
+-- def.pageMark(pageName) -> spec | nil   a glyph after that page's sidebar label
+-- tab.mark() -> spec | nil               a glyph after that deck-2 tab's label
+-- spec is UI:SetLabelMark's (texture, size, gap, color). Only pages given to a
+-- module with GUI:SetPageModule are asked -- the catch-all ownsPage is not walked
+-- for every row on every layout. Repainted on every sidebar layout and deck
+-- refresh; a consumer whose state changed calls GUI:RefreshPageMarks() (rows) and
+-- GUI:RefreshModuleShell() (tabs).
+-- ============================================================
+function GUI:RefreshPageMarks()
+    if not (GUI.Tabs and GUI.SetLabelMark) then return end
+    local owners = GUI.ModulePageOwner or {}
+    for name, btn in pairs(GUI.Tabs) do
+        local def = owners[name] and modules[owners[name]]
+        local fn = def and def.pageMark
+        local spec
+        if fn then
+            local ok, s = pcall(fn, name)
+            spec = ok and s or nil
+        end
+        if spec or rawget(btn, "dfLabelMark") then GUI:SetLabelMark(btn, spec) end
     end
 end
 

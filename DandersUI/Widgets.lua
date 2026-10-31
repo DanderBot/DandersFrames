@@ -99,6 +99,57 @@ local function ResolveTooltipSpec(widget, label)
     return nil
 end
 
+-- ============================================================
+-- WHY IS IT GREY? -- widget.disableReason
+--
+-- A greyed control says "not now" but never said why. A consumer can set
+--     widget.disableReason = "Turn on Portrait to change this"
+--     widget.disableReason = function(db) return ... end   (nil = no reason)
+-- and while the widget is greyed its hover shows the reason as the first line,
+-- under the widget's own title, ahead of whatever its tooltip already said.
+--
+-- "Greyed" is what the grey sweep last decided, stamped as `dfGreyed` by the
+-- code that calls SetEnabled from a disableOn (Sections' RefreshChildStates, and
+-- a host's own page sweep). The stamp rather than asking SetEnabled's widget:
+-- every factory spells its disabled state differently, and the sweep is the one
+-- place that knows the answer for all of them.
+--
+-- ⚠ THE HOVER STILL REACHES A GREYED WIDGET. The hit frame (UI:AttachTooltip,
+-- below) is a motion-only child built over the label, and no SetEnabled touches
+-- it -- the control underneath may stop taking the mouse, the label's rect never
+-- does. A widget built with noHit has no rect, so it shows no reason either.
+-- ============================================================
+local function ResolveDisableReason(host, widget)
+    if not rawget(widget, "dfGreyed") then return nil end
+    local reason = widget.disableReason
+    if type(reason) == "function" then
+        local ok, r = pcall(reason, host:Call("getSettingsDB"))
+        reason = ok and r or nil
+    end
+    if type(reason) ~= "string" or reason == "" then return nil end
+    return reason
+end
+
+-- The tooltip a hover shows: the widget's own, with the disable reason (if it is
+-- greyed and has one) put first. Never mutates the widget's spec table -- a
+-- reason is state, and a spec stamped with one would keep it once re-enabled.
+local function HoverSpec(host, widget, label)
+    local spec = ResolveTooltipSpec(widget, label)
+    local reason = ResolveDisableReason(host, widget)
+    if not reason then return spec end
+    local out = { title = (spec and spec.title) or label, tone = spec and spec.tone,
+                  icons = spec and spec.icons, iconSize = spec and spec.iconSize }
+    if not out.title then return spec end
+    local lines = { { text = reason, accent = true } }
+    if spec and type(spec.lines) == "table" then
+        for _, line in ipairs(spec.lines) do lines[#lines + 1] = line end
+    end
+    out.lines = lines
+    return out
+end
+UI.ResolveDisableReason = ResolveDisableReason
+UI.HoverSpec = HoverSpec
+
 --   widget       the frame the caller holds and sets .tooltip on (the container)
 --   label        the default title
 --   labelRegion  the label FontString — the hit frame is built over ITS rect
@@ -167,7 +218,7 @@ function UI:AttachTooltip(widget, label, labelRegion, opts)
             })
             return
         end
-        local spec = ResolveTooltipSpec(widget, label)
+        local spec = HoverSpec(host, widget, label)
         if spec then host:ShowTooltip(hit, spec) end
     end)
     hit:SetScript("OnLeave", function() host:HideTooltip() end)
@@ -855,6 +906,86 @@ function UI:CreateSelectionMarker(parent, opts)
     return marker
 end
 UI.CreateSelectionMarkerNative = UI.CreateSelectionMarker
+
+-- ============================================================
+-- A LABEL MARK -- a small state glyph right after a button's label
+--
+--   host:SetLabelMark(btn, spec)    spec nil/false clears it
+--   spec = { texture = path, size = 12, gap = 3, color = {r,g,b},
+--            grow = false }
+--
+-- For a row or tab whose label should say "this one is in a state" without a
+-- second widget: a nav row whose page is linked, a tab whose subject is. The
+-- glyph sits right after btn.Text, vertically centred on it, tinted the dim text
+-- colour unless spec.color says otherwise (colour is for state, so a caller that
+-- wants one passes it).
+--
+-- A label anchored at its CENTRE (StyleButton's default "center" layout, the deck
+-- tabs) is nudged left by half the glyph so the label + glyph pair stays centred,
+-- and put back when the mark clears. A label anchored any other way (a LEFT-
+-- anchored nav row) is left where it is -- the glyph just follows it.
+--
+-- spec.grow: widen the button when label + glyph no longer fit (grow only, like
+-- StyleButton's fitText -- a declared width is a minimum). For a free-standing
+-- tab; never for a row whose width its container owns.
+--
+-- ⚠ IDEMPOTENT. Callers repaint marks on every refresh, so setting the same spec
+-- twice must not nudge the label twice: the label's own resting offset is read
+-- ONCE, the first time a mark goes on, and every later nudge is from that.
+-- ============================================================
+function UI:SetLabelMark(btn, spec)
+    if not btn then return nil end
+    local text = rawget(btn, "Text")
+    local mark = rawget(btn, "dfLabelMark")
+    if not spec then
+        if mark then
+            mark:Hide()
+            -- Only a centred label was ever moved, so only it is put back.
+            local rest = rawget(btn, "dfLabelMarkRest")
+            if text and rest and rest[1] == "CENTER" then
+                text:ClearAllPoints()
+                text:SetPoint(rest[1], rest[2], rest[3], rest[4], rest[5])
+            end
+        end
+        return nil
+    end
+    if not text then return nil end
+    local size = spec.size or 12
+    local gap = spec.gap or 3
+    if not mark then
+        mark = btn:CreateTexture(nil, "OVERLAY")
+        btn.dfLabelMark = mark
+    end
+    mark:SetTexture(spec.texture)
+    mark:SetSize(size, size)
+    local c = spec.color or C_TEXT_DIM
+    mark:SetVertexColor(c.r or c[1] or 1, c.g or c[2] or 1, c.b or c[3] or 1)
+    mark:ClearAllPoints()
+    mark:SetPoint("LEFT", text, "RIGHT", gap, 0)
+    mark:Show()
+
+    -- The label's resting anchor, remembered once (see IDEMPOTENT above).
+    local rest = rawget(btn, "dfLabelMarkRest")
+    if not rest then
+        local p, rel, relP, x, y = text:GetPoint(1)
+        if p then
+            rest = { p, rel or btn, relP or p, x or 0, y or 0 }
+            btn.dfLabelMarkRest = rest
+        end
+    end
+    if rest and rest[1] == "CENTER" then
+        text:ClearAllPoints()
+        text:SetPoint("CENTER", rest[2], rest[3], rest[4] - (size + gap) / 2, rest[5])
+    end
+    if spec.grow then
+        local tw = text:GetStringWidth() or 0
+        if tw > 0 then
+            local need = math.ceil(tw) + size + gap + 10
+            if need > (btn:GetWidth() or 0) then btn:SetWidth(need) end
+        end
+    end
+    return mark
+end
 
 
 function UI:CreateCloseButton(parent, opts)
