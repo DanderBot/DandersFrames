@@ -5,4 +5,5 @@
 	<Script file="PopoutRow.lua"/>
 	<Script file="ColorPicker.lua"/>
 	<Script file="IconRail.lua"/>
+	<Script file="RowList.lua"/>
 </Ui>

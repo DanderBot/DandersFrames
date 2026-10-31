@@ -180,6 +180,33 @@ rail:SetItems({
 eq(c.points[1][2], g, "divider: a set without dividers lays out without one")
 check(not div.shown, "divider: ...and the unused one is hidden")
 
+print("-- Icon rail: filled (an item that is ON) and the content height")
+do
+    local r2 = UI:CreateIconRail(Frame(), { width = 52, itemHeight = 40, iconSize = 16, iconTop = 6,
+                                            spacing = 1, paddingTop = 6, paddingBottom = 6 })
+    r2:SetItems({
+        { id = "mode:a", icon = "a.png", label = "A", accent = RED, dividerAfter = false },
+        { id = "mode:b", icon = "b.png", label = "B", dividerAfter = true },
+        { id = "sec:x",  icon = "x.png", label = "X" },
+        { id = "sec:y",  icon = "y.png", label = "Y" },
+    })
+    local a = r2:GetItem("mode:a")
+    eq(a.w, 52, "compact: items take the rail width")
+    eq(a.h, 40, "compact: ...and the item height")
+    eq(a.Icon.points[1][5], -6, "compact: iconTop insets the icon")
+    r2:SetFilled("mode:a", true)
+    check(r2:IsFilled("mode:a"), "filled: remembered")
+    check(a.Plate.shown and a.Plate.color[1] == 1 and a.Plate.color[4] == 0.85,
+          "filled: a solid plate in the item's accent")
+    eq(a.Label.color[1], 1, "filled: label in full white on it")
+    r2:Select("sec:x", true)
+    check(a.Plate.shown and r2:GetSelected() == "sec:x", "filled: independent of the selection")
+    r2:SetFilled("mode:a", false)
+    check(not a.Plate.shown, "filled: off returns to the resting look")
+    -- 6 + 4*40 + 6, two joins at `spacing` 1, one divider (6 + 1 + 6) instead of a join
+    eq(r2:GetContentHeight(), 6 + 4 * 40 + 6 + 2 * 1 + 13, "height: items, joins and the divider")
+end
+
 print("-- Icon rail: the kit names no consumer")
 do
     local src = ui_file_source("IconRail.lua")
