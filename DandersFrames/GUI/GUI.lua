@@ -190,6 +190,13 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         local SU = DF.SettingsUndo
         if SU then SU:OnInterceptWrite(db, key, value) end
         if GUI.SelectedMode ~= "raid" then return false end
+        -- ☠ ONLY A WRITE TO THE RAID TABLE ITSELF. The runtime handler matches by key
+        -- NAME, so any other table written while Raid is up -- a nested table on a
+        -- raid page, a page with a settings table of its own -- whose key happened
+        -- to be a raid key under a running layout was swallowed: written to the raid
+        -- baseline instead of where it was aimed. The proxy (DF.db.raid) and the real
+        -- table under it (DF._realRaidDB) are the raid table; nothing else is.
+        if not db or not (DF.db and (db == DF.db.raid or db == DF._realRaidDB)) then return false end
         local AP = DF.AutoProfilesUI
         if not AP then return false end
         return AP:HandleRuntimeWrite(key, value) and true or false
