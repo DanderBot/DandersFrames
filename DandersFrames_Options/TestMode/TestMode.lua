@@ -1201,10 +1201,9 @@ function DF:UpdateTestIcons(frame, testData)
         if not db.leaderIconEnabled then
             frame.leaderIcon:Hide()
         elseif testData.isLeader or testData.isAssist then
-            frame.leaderIcon.texture:SetTexture(testData.isLeader
+            DF:SetUpgradedStatusIcon(frame.leaderIcon.texture, testData.isLeader
                 and "Interface\\GroupFrame\\UI-Group-LeaderIcon"
                 or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
-            frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.leaderIcon, db, "leaderIcon")
@@ -1402,8 +1401,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.combatIconEnabled or db.testShowStatusIcons == false then
             frame.combatIcon:Hide()
         elseif testData.isInCombat then
-            frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
-            frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
+            DF:SetCombatStatusIcon(frame.combatIcon.texture)
 
             -- ☠ THE LIVE APPLIER, like the other seven icons. ApplyStatusIconSettings carries
             -- combatIconAlpha, combatIconFrameLevel and the out-of-range/dead fade (via

@@ -883,6 +883,8 @@ local LEGACY_STATUS_ICON_ATLAS = {
     ["Interface\\Vehicles\\UI-Vehicles-Raid-Icon"]     = "RaidFrame-Icon-Vehicle",
     ["Interface\\GroupFrame\\UI-Group-MainTankIcon"]   = "RaidFrame-Icon-MainTank",
     ["Interface\\GroupFrame\\UI-Group-MainAssistIcon"] = "RaidFrame-Icon-MainAssist",
+    ["Interface\\GroupFrame\\UI-Group-LeaderIcon"]     = "UI-HUD-UnitFrame-Player-Group-LeaderIcon",
+    -- No modern assistant atlas exists: UI-Group-AssistantIcon stays the file.
 }
 
 -- Render a known legacy status-icon texture as its modern atlas (sharper),
@@ -893,10 +895,27 @@ function DF:SetUpgradedStatusIcon(region, legacyTexture)
     if not region or not legacyTexture then return end
     local atlas = LEGACY_STATUS_ICON_ATLAS[legacyTexture]
     if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        -- SetAtlas keeps an earlier SetTexCoord crop (see SetIconTextureOrAtlas).
+        region:SetTexCoord(0, 1, 0, 1)
         region:SetAtlas(atlas)
     else
         region:SetTexture(legacyTexture)
         region:SetTexCoord(0, 1, 0, 1)
+    end
+end
+
+-- The combat icon: the modern crossed-swords atlas, or the swords quadrant of
+-- the legacy UI-StateIcon sheet (swords + resting) when the atlas is missing.
+-- Owns the texcoord state like SetUpgradedStatusIcon.
+local COMBAT_ICON_ATLAS = "UI-HUD-UnitFrame-Player-CombatIcon"
+function DF:SetCombatStatusIcon(region)
+    if not region then return end
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(COMBAT_ICON_ATLAS) then
+        region:SetTexCoord(0, 1, 0, 1)
+        region:SetAtlas(COMBAT_ICON_ATLAS)
+    else
+        region:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
+        region:SetTexCoord(0.5, 1.0, 0, 0.49)
     end
 end
 
