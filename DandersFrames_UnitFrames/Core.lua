@@ -117,8 +117,16 @@ end
 
 function UF:GetUnitDB(unit)
     local eff = effCache[unit]
-    if eff then return eff end
     local stored = UF:GetStoredUnit(unit)
+    -- ⚠ A cached proxy is only good while it still sits on the live profile's table.
+    -- A profile switch replaces that table, and the settings pages can ask for the
+    -- unit's table before OnProfileChanged has dropped the cache -- a proxy over the
+    -- old table would write the user's changes into the profile they just left.
+    if eff then
+        local mt = getmetatable(eff)
+        if stored == nil or (mt and mt.__realTable == stored) then return eff end
+        effCache[unit] = nil
+    end
     if not stored then
         -- Before the profile exists: defaults only, and nothing written is kept.
         return BuildEffective(unit, {})
