@@ -41,13 +41,19 @@ UFO.ADDON = "DandersFrames_UnitFrames"
 UFO.MODULE = "units"
 -- Every unit with pages of its own (its settings table).
 UFO.UNITS = { "player", "target", "targettarget", "focus", "focustarget", "pet", "boss" }
--- The deck-2 tabs. SIX, NOT SEVEN: the tab row (12 + 7 x 70 + 6 x 4 = 526 px)
--- cannot hold a seventh tab at the window's 580 px minimum (deck 2 is 518 px wide
--- beside the rail, before its Undo / Test / Unlock cluster). A unit with no tab
--- lives on another unit's tab, in a sidebar category of its own (UFO.TAB_OF).
+-- The deck-2 tabs. Six at UFO.TAB_WIDTH: 12 + 6 x 58 + 5 x 4 = 380 px. Deck 2 is
+-- the window minus the 62 px rail, and its Undo / Redo / Test / Unlock cluster
+-- takes ~229 px from the right (English), so at the 580 px window minimum the row
+-- and the cluster overlap. While this module shows, the window's minimum is raised
+-- to what the row + cluster actually measure (GUI:ModuleDeckMinWidth, GUI/Rail.lua),
+-- never below UFO.MIN_WINDOW_WIDTH (the default 700). A seventh tab would need
+-- another ~62 px. A unit with no tab lives on another unit's tab, in a sidebar
+-- category of its own (UFO.TAB_OF).
 UFO.TABS = { "player", "target", "targettarget", "focus", "pet", "boss" }
 -- unit -> the tab its pages sit on (absent: its own tab).
 UFO.TAB_OF = { focustarget = "focus" }
+UFO.TAB_WIDTH = 58           -- deck-2 tab width (fitText still grows a long label)
+UFO.MIN_WINDOW_WIDTH = 700   -- floor on the measured minimum while Units shows
 UFO.unit = "player"          -- the deck-2 tab showing
 UFO.pageMeta = {}            -- page name -> { unit = u | nil (every tab), tab = t, kind = k }
 UFO.pagesByUnit = {}         -- unit -> kind -> page name
@@ -1496,6 +1502,8 @@ function UFO.RegisterModule()
         slot = "top",
         accent = function() return GUI.UnitsAccent end,
         tabs = UFO.UnitTabs(),
+        tabWidth = UFO.TAB_WIDTH,
+        minWindowWidth = UFO.MIN_WINDOW_WIDTH,
         activeTab = function() return UFO.unit end,
         defaultTab = function() return UFO.unit end,
         onTab = function(tabId) if UFO.IsTab(tabId) then UFO.unit = tabId end end,
