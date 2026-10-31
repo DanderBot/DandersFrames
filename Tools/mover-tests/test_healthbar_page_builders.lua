@@ -268,6 +268,11 @@ local HEALTH_COLOR = {
     { "dropdown",    "Color Mode",          "healthColorMode", 55 },
     { "slider",      "Health Bar Alpha",    "classColorAlpha", 55 },
     { "colorpicker", "Custom Health Color", "healthColor",     35 },
+    -- The reaction colours, one picker in a loop over hostile / neutral / friendly /
+    -- tapped, built only on a page that offers the reaction modes
+    -- (page.extraHealthColorModes -- the unit frames pages). Bound to the profile's
+    -- reactionColors table, not the page's db, so no db key reads here.
+    { "colorpicker", "(none)",              "(none)",          35 },
 }
 local HEALTH_TEXTURE = {
     { "texturedropdown", "Texture",              "healthTexture",     55 },
@@ -401,7 +406,10 @@ print("-- Health Bar page: the two gradient editor cards")
 do
     check(PAGE:find("local function BuildGradientStopBox(prefix, hideOn)", 1, true) ~= nil,
           "gradient: the one builder still serves both ramps")
-    check(PAGE:find("if pageHealthBar and pageHealthBar.Refresh then pageHealthBar:Refresh() end", 1, true) ~= nil,
+    -- (The page being BUILT -- self -- so a page drawing these cards from
+    -- page.dfBuilder rebuilds itself, not the party page.)
+    check(PAGE:find("local pg = self or pageHealthBar", 1, true) ~= nil
+          and PAGE:find("if pg and pg.Refresh then pg:Refresh() end", 1, true) ~= nil,
           "gradient: ...and it still rebuilds the PAGE on a structural edit, which is why it has no pin")
 
     -- The card in column 1 under a stable key

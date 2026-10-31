@@ -160,6 +160,15 @@ end
 -- An entry offered while the registry is sealed is stamped and captured but NOT
 -- added to the Registry, as before.
 function Search:Register(entry)
+    -- ★ A PAGE BUILD MAY TAKE SOME CONTROLS OFF ITS PAGE (Search.EntryFilter, set
+    -- around the build by whoever draws it): such an entry is marked and never
+    -- registered, and the page hides the widget it came back on (widget.searchEntry).
+    -- First, so the mark lands whatever else would have returned early.
+    local filter = self.EntryFilter
+    if filter and entry and filter(entry) == false then
+        entry.dfFilteredOut = true
+        return entry
+    end
     local capture = self._captureEntries
     if self.RegistryBuilt and not capture then
         return entry
@@ -430,7 +439,7 @@ function Search:_BeginRegistryBuild()
                 return
             end
 
-            self:SetCurrentTab(tabName, page.tabLabel or tabName)
+            self:SetCurrentTab(tabName, page.searchTabLabel or page.tabLabel or tabName)
             self.CurrentSection = nil
 
             local wasShown = page:IsShown()
@@ -901,6 +910,16 @@ end
 -- Create actual editable widgets in search results
 -- ============================================================
 
+-- The settings table an entry's setting lives in: its page's own table when the
+-- page has one (a module page -- GUI.PageBuildDb), else the frame mode's. An inline
+-- control bound to the mode table would edit the wrong settings for such a page.
+local function EntryDB(entry)
+    local GUI = DF.GUI
+    local page = entry and entry.tab and GUI.Pages and GUI.Pages[entry.tab]
+    local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
+    return own or DF.db[GUI.SelectedMode]
+end
+
 function Search:CreateInlineCheckbox(parent, entry)
     -- A custom checkbox has no dbKey to bind, so there is nothing for the shared
     -- builder to drive -- show the label and point at the real page instead.
@@ -929,7 +948,7 @@ function Search:CreateInlineCheckbox(parent, entry)
     -- indicators and the label-only tooltip -- all of which the hand-rolled copy
     -- here lacked. Re-registration is not a concern: Search:Register early-returns
     -- once RegistryBuilt is set, and Find() sets it before any result is built.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     return DF.GUI:CreateCheckbox(parent, entry.label, db, entry.dbKey, entry.callback)
 end
 
@@ -942,7 +961,7 @@ function Search:CreateInlineSlider(parent, entry)
     -- accentColor is left nil ON PURPOSE: CreateSlider falls back to
     -- GetThemeColor(), so the thumb and fill track party purple / raid orange like
     -- every other slider.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     local minVal = entry.minVal or 0
     local maxVal = entry.maxVal or 100
     local step = entry.step or 1
@@ -959,7 +978,7 @@ function Search:CreateInlineColorPicker(parent, entry)
     -- a full refresh merely on OPENING the picker) and mutates db[dbKey] in place
     -- rather than rebuilding it as a fresh table, plus the themed swatch, the factory
     -- row height and the label-only tooltip.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     return DF.GUI:CreateColorPicker(parent, entry.label, db, entry.dbKey,
         entry.hasAlpha, entry.callback)
 end
@@ -971,7 +990,7 @@ function Search:CreateInlineDropdown(parent, entry)
     -- get/set, and entry.callback onto its callback. entry.values is the same
     -- keyed value->display table (with optional _order) that was registered, so
     -- it passes straight through as the builder's options arg.
-    local db = DF.db[DF.GUI.SelectedMode]
+    local db = EntryDB(entry)
     local values = entry.values or {}
 
     -- Returns CreateDropdown's container Frame (exposes :UpdateText / :SetEnabled /

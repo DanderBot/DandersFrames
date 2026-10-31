@@ -307,7 +307,16 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- disableOn / refreshContent predicates against: whichever mode the window
     -- is currently editing. Every predicate in the pages takes exactly this
     -- table, so it has to follow SelectedMode rather than being pinned.
-    getSettingsDB = function() return DF.db and DF.db[GUI.SelectedMode] end,
+    -- ...unless the page showing was built against a table of its own (a module
+    -- page: GUI.PageBuildDb, companion GUI/ModuleRegistry.lua), whose predicates
+    -- take that table.
+    getSettingsDB = function()
+        local name = GUI.CurrentPageName
+        local page = name and GUI.Pages and GUI.Pages[name]
+        local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
+        if own then return own end
+        return DF.db and DF.db[GUI.SelectedMode]
+    end,
 
     -- A collapsible settings group opened or closed. The Aura Designer page owns
     -- its own layout and has to re-run it either way; BuildPage pages re-flow

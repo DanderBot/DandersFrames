@@ -228,7 +228,7 @@ local runAt = panel:find("GUI:RunPageProviders(CreateCategory, CreateSubTab, Bui
 local layoutAt = panel:find("    GUI:UpdateTabLayout()\n\n    UpdateThemeColors()", 1, true)
 check(setupAt and runAt and layoutAt and setupAt < runAt and runAt < layoutAt,
       "Panel: providers run after the built-in pages, before the nav layout and first paint")
-check(panel:find("if GUI.ModuleView then return owner == GUI.ModuleView end", 1, true),
+check(panel:find("return owner == GUI.ModuleView and GUI:ModulePageInView(btn.tabName)", 1, true),
       "Panel: a module view's sidebar lists its own pages only")
 check(panel:find("GUI._lastModuleViewPage[GUI.ModulePageOwner[name]] = name", 1, true),
       "Panel: each module view remembers its last page")

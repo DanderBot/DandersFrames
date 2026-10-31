@@ -2214,6 +2214,9 @@ function GUI:CreateSeeAlso(parent, links)
     -- page instead of floating wherever the content happened to end. See the
     -- footer block in the page layout.
     container.isPageFooter = true
+    -- The links it was made from, so a page drawing another page's content can
+    -- point them at its own pages instead.
+    container.dfLinks = links
     CreateElementBackdrop(container, {
         bgColor     = { 0.1, 0.1, 0.1, 0.5 },
         borderColor = { 0.3, 0.3, 0.3, 0.8 },

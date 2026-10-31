@@ -130,6 +130,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         btn.refreshContent = UpdateAppearance
         btn.UpdateModeText = UpdateAppearance
         btn.rightAlign = true  -- Flag for layout system
+        -- What this row acts on, so a page drawing this page's content against a
+        -- table of its own can put its own row in place of this one.
+        btn.dfCopyRow = { prefixes = prefixes, sectionName = sectionName, pageId = pageId }
         
         -- Copy tooltip (HookScript so it composes with the StyleButton hover).
         btn:HookScript("OnEnter", function(self)
@@ -2666,6 +2669,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 "hideDefaultPlayerFrame"
             ), 30)
             disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
+            -- ★ ANOTHER MODULE MAY OWN THE PLAYER FRAME (GUI.PlayerFrameOwnerNote: a
+            -- function answering one line saying so, or nil). Then these two ticks
+            -- do nothing, so they leave the card and that line stands in for them.
+            -- The settings themselves are kept for when it stops.
+            local function PlayerOwnerNote()
+                local fn = GUI.PlayerFrameOwnerNote
+                local note = type(fn) == "function" and fn() or nil
+                return type(note) == "string" and note or nil
+            end
+            disablePlayerCheck.hideOn = function() return PlayerOwnerNote() ~= nil end
 
             local playerRaidOnlyCheck = group:AddWidget(GUI:CreateCheckbox(
                 parent, L["Only in a Raid Group"],
@@ -2680,6 +2693,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return not (p and p.hideDefaultPlayerFrame)
             end
             playerRaidOnlyCheck.tooltip = L["Hides the Blizzard player frame only while you are in a raid group. In a party or solo it shows as normal."]
+            playerRaidOnlyCheck.hideOn = function() return PlayerOwnerNote() ~= nil end
+            local ownerNote = group:AddWidget(GUI:CreateLabel(parent, PlayerOwnerNote() or "", 250), 30)
+            ownerNote.hideOn = function() return PlayerOwnerNote() == nil end
+            ownerNote.refreshContent = function()
+                local t = PlayerOwnerNote()
+                if t then ownerNote:SetText(t) end
+            end
 
             -- Visual divider to separate the related sub-option (Show Side Menu only
             -- applies once a Blizzard frame is disabled).

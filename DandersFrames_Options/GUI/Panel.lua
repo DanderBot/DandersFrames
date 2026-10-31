@@ -271,7 +271,9 @@ end
 -- The parameter is named `self` because it IS the page.
 local function PageRefreshStates(self)
     if not self.children then return end
-    local db = DF.db[GUI.SelectedMode]
+    -- The table this page was built against when it has one of its own (a module
+    -- page -- GUI.PageBuildDb), else the frame mode's. hideOn / disableOn read it.
+    local db = (GUI.PageBuildDb and GUI.PageBuildDb(self)) or DF.db[GUI.SelectedMode]
     if not db then return end
 
     -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
@@ -2906,7 +2908,10 @@ function DF:CreateGUI()
         -- A page given to a module (GUI:SetPageModule) is on that module's sidebar
         -- only, and that sidebar shows nothing else.
         local owner = GUI.ModulePageOwner and GUI.ModulePageOwner[btn.tabName]
-        if GUI.ModuleView then return owner == GUI.ModuleView end
+        if GUI.ModuleView then
+            -- ...less the pages its current tab does not show (def.pageInView).
+            return owner == GUI.ModuleView and GUI:ModulePageInView(btn.tabName)
+        end
         if owner then return false end
         if btn.partyOnly and GUI.SelectedMode == "raid" then return false end
         return GUI.IsGlobalPage(btn.tabName) == (GUI.GlobalView == true)
@@ -3005,7 +3010,11 @@ function DF:CreateGUI()
         -- side and from BINDS. The page's module is asked for through
         -- SelectModule's page path, which changes the view only (EnterView) and
         -- leaves the page to the rest of this function.
-        if GUI.Tabs[name] and GUI:ModuleForPage(name) ~= GUI.CurrentModuleId() then
+        -- ...and when the page is on ANOTHER TAB of the module showing (a module
+        -- whose tabs each have pages of their own -- def.tabForPage), the same path
+        -- moves the tab.
+        if GUI.Tabs[name] and (GUI:ModuleForPage(name) ~= GUI.CurrentModuleId()
+                               or GUI:PageWantsOtherTab(name)) then
             GUI:SelectModule(GUI:ModuleForPage(name), nil, { forPage = name })
             SwitchMark("view")
         end
@@ -3873,6 +3882,10 @@ function DF:CreateGUI()
 
     local function BuildPage(page, builderFunc)
         if page and SINGLE_MODE_TABS[page.tabName] then page.singleModeBuild = true end
+        -- The page's builder, kept so ANOTHER page can draw the same cards against a
+        -- settings table of its own (a page provider's pages -- see GUI.PageBuildDb).
+        -- Read-only: this page still builds through the closures below.
+        if page then page.dfBuilder = builderFunc end
         -- ★ A PROFILES PAGE IS MODE-NEUTRAL (THE PROFILES SIDEBAR, GUI/GUI.lua): ONE
         -- build, whatever mode sits under the Profiles view. Its builds are keyed on
         -- a fixed name instead of GUI.SelectedMode, and bound to the party table only
@@ -4099,7 +4112,9 @@ function DF:CreateGUI()
                     Search.CurrentTab, Search.CurrentTabLabel, Search.CurrentSection
                 Search._captureEntries = capture
                 Search.CurrentTab = self.tabName
-                Search.CurrentTabLabel = self.tabLabel or self.tabName
+                -- A page may name itself differently in search results than in the
+                -- sidebar (searchTabLabel: one of several pages that share a label).
+                Search.CurrentTabLabel = self.searchTabLabel or self.tabLabel or self.tabName
                 Search.CurrentSection = nil
             end
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)

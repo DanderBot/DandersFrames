@@ -4899,7 +4899,24 @@ function GUI:CreatePopoutPageTools(page)
     -- db as a FUNCTION, which is what the kit contract asks for: the row
     -- re-resolves on every refresh, so a mode switch is followed rather than
     -- frozen at the table this build captured.
-    local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+    -- ...and a page built against a table of its own (a module page --
+    -- GUI.PageBuildDb) hands its panels that table, not the frame mode's.
+    local function RowDB()
+        local own = GUI.PageBuildDb and GUI.PageBuildDb(page)
+        if own then return own end
+        return DF.db and DF.db[GUI.SelectedMode]
+    end
+
+    -- ★ A PAGE MAY SHOW ONLY SOME OF ITS CARDS: page.sectionFilter(key) answering
+    -- false takes that card off the page. The card is still BUILT -- the builder's
+    -- code around it runs exactly as it always does -- but it never shows, and the
+    -- controls in it register nothing with search (SuppressRegistration from the
+    -- card's OpenSection to its CloseSection). For a page that draws another page's
+    -- cards against a table of its own and only some of them apply.
+    local function CardFilteredOut(key)
+        return page.sectionFilter ~= nil and page.sectionFilter(key) == false
+    end
+    local function Never() return true end
 
     -- The width a full-width band is CONSTRUCTED at, asked for rather than
     -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
@@ -5113,6 +5130,11 @@ function GUI:CreatePopoutPageTools(page)
     --                that reads best as a list of headers -- Icons)
 
     local function OpenSection(Add, label, key, col, summaryFn, dimFn, hideFn, builder, toggle, extra)
+        local filtered = CardFilteredOut(key)
+        if filtered then
+            hideFn = Never
+            builder = nil   -- no pin on a card that never shows
+        end
         local pin
         if builder then
             -- ☠ SUPPRESSED AROUND THE EAGER BUILD, and this is not optional.
@@ -5171,6 +5193,14 @@ function GUI:CreatePopoutPageTools(page)
         section:RegisterChild(band)
         if extra and extra.twoTrack then WireTwoTrack(band) end
         if extra and extra.quietLabels then band.dfQuietLabels = true end
+        if filtered then
+            -- Held until this card's CloseSection; see CardFilteredOut.
+            local Search = DF.Search
+            if Search then
+                band.dfHeldSuppress = { held = Search.SuppressRegistration }
+                Search.SuppressRegistration = true
+            end
+        end
         return band
     end
 
@@ -5182,6 +5212,11 @@ function GUI:CreatePopoutPageTools(page)
     local function CloseSection(Add, band)
         if band.dfTwoTrack then StampFullRows(band) end
         if band.dfQuietLabels then QuietLabels(band) end
+        local held = rawget(band, "dfHeldSuppress")
+        if held then
+            band.dfHeldSuppress = nil
+            if DF.Search then DF.Search.SuppressRegistration = held.held end
+        end
         Add(band, nil, band.dfSectionCol)
     end
 
@@ -5203,6 +5238,14 @@ function GUI:CreatePopoutPageTools(page)
         for _, grp in ipairs(groups) do
             local header = GUI:CreateHeader(page.child, grp.label)
             if grp.hideOn then header.hideOn = grp.hideOn end
+            -- A group whose every card is filtered off the page loses its header too.
+            if page.sectionFilter then
+                local any = false
+                for _, key in ipairs(grp.keys) do
+                    if not CardFilteredOut(key) then any = true break end
+                end
+                if not any then header.hideOn = Never end
+            end
             Add(header, 40, grp.col)
             for _, key in ipairs(grp.keys) do
                 local mount = deferredMounts[key]

@@ -1417,6 +1417,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the control behind it says another. (The Tooltips page hoisted its five
         -- Anchor To tables for exactly this reason.)
         local colorModes = { CLASS= L["Class Color"], CUSTOM= L["Custom Color"], PERCENT= L["Health Gradient"] }
+        -- A page may offer more modes than these (page.extraHealthColorModes, value ->
+        -- label): the reaction modes, for frames that can show hostile units (see
+        -- DF.StandaloneHealthColorModes). The party/raid page sets none.
+        if type(self.extraHealthColorModes) == "table" then
+            for k, v in pairs(self.extraHealthColorModes) do colorModes[k] = v end
+        end
         local orientOptions = {
             HORIZONTAL= L["Left to Right"], HORIZONTAL_INV= L["Right to Left"],
             VERTICAL= L["Bottom to Top"], VERTICAL_INV= L["Top to Bottom"],
@@ -1459,6 +1465,21 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local customColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
             customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
+
+            -- ...and with the reaction modes on offer, their four colours (the
+            -- profile's reactionColors table, shared by every frame that uses them),
+            -- shown while a reaction mode is picked.
+            if type(self.extraHealthColorModes) == "table" and DF.db and type(DF.db.reactionColors) == "table" then
+                for _, rc in ipairs({ { "hostile", L["Hostile"] }, { "neutral", L["Neutral"] },
+                                      { "friendly", L["Friendly"] }, { "tapped", L["Tapped"] } }) do
+                    local swatch = group:AddWidget(GUI:CreateColorPicker(parent, rc[2], DF.db.reactionColors, rc[1],
+                        false, nil, function() DF:RefreshAllVisibleFrames() end, true), 35)
+                    swatch.hideOn = function(d)
+                        local modes = DF.StandaloneHealthColorModes
+                        return not (modes and d and modes[d.healthColorMode])
+                    end
+                end
+            end
         end
 
         -- The mode in the dropdown's own words, and the alpha ONLY when it is
@@ -1597,9 +1618,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Adding, removing or moving a stop changes the ROW SET, so the page has to be
         -- rebuilt for the captions and stepper bounds to stay truthful. A colour edit
         -- does not, and must not — rebuilding under an open colour picker closes it.
+        -- ⚠ `self`, the page being BUILT, not pageHealthBar: another page can draw
+        -- these cards (page.dfBuilder), and it is that page that has to rebuild.
         local function GradRebuild()
             GradApply()
-            if pageHealthBar and pageHealthBar.Refresh then pageHealthBar:Refresh() end
+            local pg = self or pageHealthBar
+            if pg and pg.Refresh then pg:Refresh() end
         end
 
         do

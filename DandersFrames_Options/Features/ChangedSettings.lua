@@ -137,10 +137,17 @@ end
 local function ScopeRegistry(registry, GUI, global)
     local isGlobalPage = GUI and GUI.IsGlobalPage
     if not isGlobalPage then return global and {} or registry end
+    -- A page given to a module of its own (GUI:SetPageModule) edits that module's
+    -- own table, not the frame mode's or Global's, so neither ledger covers it:
+    -- its values read against the mode table would be the mode's, not its own.
+    local owned = GUI.ModulePageOwner
     local out = {}
     for i = 1, #registry do
         local e = registry[i]
-        if (isGlobalPage(e.tab) and true or false) == global then out[#out + 1] = e end
+        if not (owned and e.tab and owned[e.tab])
+           and (isGlobalPage(e.tab) and true or false) == global then
+            out[#out + 1] = e
+        end
     end
     return out
 end

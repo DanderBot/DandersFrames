@@ -37,6 +37,9 @@ local SLOT_RANK = { top = 1, bottom = 2 }
 -- Click-Casting's fixed identity accent (green). Here rather than in Panel.lua
 -- so the rail can read it: it loads before the panel (companion TOC order).
 GUI.ClicksAccent = GUI.ClicksAccent or { r = 0.2, g = 0.8, b = 0.4 }
+-- Unit Frames' fixed identity accent (violet, #a66bff): its rail item, deck-2
+-- tabs and pages.
+GUI.UnitsAccent = GUI.UnitsAccent or { r = 0.651, g = 0.420, b = 1.0 }
 
 -- Page name -> owning module id (declared resident in DandersFrames/GUI/GUI.lua;
 -- here too so this file never indexes nil). See GUI:SetPageModule below.
@@ -709,6 +712,7 @@ ViewModule({
     icon = ICONS .. "person.png",
     order = 15,
     slot = "top",
+    accent = function() return GUI.UnitsAccent end,
     comingSoon = true,
     status = function() return L["Coming in a later update."] end,
     description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
@@ -836,12 +840,38 @@ end
 --   buildDb(pageName)   -- the settings table the page builds against (the
 --                          `db` handed to the builder). nil: DF.db[mode].
 -- A page may carry page.buildKey / page.buildDb itself; those win.
+-- A module whose tabs each have PAGES OF THEIR OWN (rather than one build of
+-- each page per tab) adds:
+--   pageInView(name)    -- false: the page is not on the tab showing (the
+--                          sidebar leaves it out)
+--   tabForPage(name)    -- the tab a page lives on; asking for the page moves
+--                          there (SelectTab, search results, links)
+--   pageForTab(tabId, from) -- the page to land on when the tab changes, given
+--                          the page showing (`from`, may be nil)
 -- ⚠ def.accent must not call GUI.CurrentAccent: CurrentAccent asks it.
 -- ============================================================
 
 function GUI:SetPageModule(pageName, moduleId)
     if type(pageName) ~= "string" then return end
     GUI.ModulePageOwner[pageName] = moduleId
+end
+
+-- A module whose tabs each have pages of their own (def.pageInView(name) /
+-- def.tabForPage(name)): is this page on the tab showing, and does asking for it
+-- mean moving to another tab? Both answer "yes, nothing to do" for any other page.
+function GUI:ModulePageInView(name)
+    local owner = name and GUI.ModulePageOwner[name]
+    local def = owner and modules[owner]
+    if def and def.pageInView then return def.pageInView(name) ~= false end
+    return true
+end
+
+function GUI:PageWantsOtherTab(name)
+    local owner = name and GUI.ModulePageOwner[name]
+    local def = owner and modules[owner]
+    if not (def and def.tabForPage and def.activeTab) then return false end
+    local want = def.tabForPage(name)
+    return want ~= nil and want ~= def.activeTab()
 end
 
 -- Show a sidebar module's view: its sidebar, its accent, the mode left as it is
@@ -873,9 +903,17 @@ function GUI:SidebarModule(def)
     def.ownsPage = def.ownsPage or function(name) return GUI.ModulePageOwner[name] == id end
     def.onEnter = function(tabId)
         local entering = GUI.ModuleView ~= id
+        local from = (not entering) and GUI.CurrentPageName or nil
         if entering then GUI:EnterModuleView(id) end
         if tabId ~= nil and def.onTab then def.onTab(tabId) end
-        if entering then
+        -- Pages of their own per tab: the sidebar re-lists for the tab, and the
+        -- page moves to that tab's counterpart.
+        if def.pageInView and GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
+        if def.pageForTab then
+            local page = def.pageForTab(tabId, from or GUI:LastTabInView())
+            if page then GUI.SelectTab(page) end
+            if not entering then GUI.UpdateThemeColors() end
+        elseif entering then
             local page = GUI:LastTabInView()
             if page then GUI.SelectTab(page) end
         else
@@ -885,9 +923,12 @@ function GUI:SidebarModule(def)
             GUI.UpdateThemeColors()
         end
     end
-    def.onEnterForPage = function(tabId)
+    def.onEnterForPage = function(tabId, forPage)
+        -- A page that lives on one tab takes the module to that tab.
+        if forPage and def.tabForPage then tabId = def.tabForPage(forPage) or tabId end
         if GUI.ModuleView ~= id then GUI:EnterModuleView(id) end
         if tabId ~= nil and def.onTab then def.onTab(tabId) end
+        if def.pageInView and GUI.UpdateTabLayout then GUI:UpdateTabLayout() end
     end
     def.onLeave = function()
         GUI.ModuleView = nil
