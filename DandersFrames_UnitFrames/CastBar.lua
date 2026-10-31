@@ -55,6 +55,10 @@ local tonumber, tostring = tonumber, tostring
 local format = string.format
 
 local CB = { NAME = "CastBar" }
+-- Frame level over its unit frame: above the classification dragon (+16) and
+-- border (+15), under the power bar (+20) and the text overlay (+25). Its own
+-- shield and text sit +5 / +6 above this, still under the overlay.
+CB.LEVEL = 18
 UF.CastBar = CB
 
 local E = UF.Elements
@@ -437,7 +441,10 @@ function CB:Layout(f)
             cb:SetPoint("TOP", f, "BOTTOM", x, -gap + y)
         end
     end
-    cb:SetFrameLevel(f:GetFrameLevel() + 8)
+    -- Above the classification dragon (Indicators.lua IN.DRAGON_LEVEL), so a
+    -- cast bar is never hidden by a dragon perched on this or a neighbouring
+    -- frame (unit frames share one base level).
+    cb:SetFrameLevel(f:GetFrameLevel() + CB.LEVEL)
     if UF.Mover and UF.Mover.SyncChild then UF.Mover:SyncChild(f.dfUFUnit, "castbar") end
 
     -- Idle: shown empty, or hidden.

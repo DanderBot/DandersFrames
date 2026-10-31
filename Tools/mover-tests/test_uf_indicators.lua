@@ -492,6 +492,15 @@ check(v and v.r == 1 and near(v.g, 0.80) and near(v.b, 0.32), "elite: gold")
 eq(D:GetFrameLevel() - T:GetFrameLevel(), IN.DRAGON_LEVEL, "one level above the class border")
 eq(T.dfUFIcons.classBorder:GetFrameLevel() - T:GetFrameLevel(), IN.CLASS_BORDER_LEVEL, "the class border above DF's (+14)")
 check(IN.DRAGON_LEVEL > IN.CLASS_BORDER_LEVEL and IN.CLASS_BORDER_LEVEL > 14, "dragon > class border > DF's frame border")
+do
+    -- Cast bars always draw over a dragon (CastBar.lua CB.LEVEL).
+    local fh = io.open("DandersFrames_UnitFrames/CastBar.lua", "r")
+    local src = fh and fh:read("*a") or ""
+    if fh then fh:close() end
+    local cbLevel = tonumber(src:match("CB%.LEVEL = (%d+)"))
+    check(cbLevel ~= nil and cbLevel > IN.DRAGON_LEVEL, "the cast bar sits above the dragon")
+    check(cbLevel ~= nil and cbLevel + 6 < 25, "...and its shield/text stay under the +25 text overlay")
+end
 local function tint() local x = D.tex.RIGHT.TOP._vertex; return x and string.format("%.2f,%.2f,%.2f", x.r, x.g, x.b) end
 class = "rare"; IN:Update(T)
 eq(tint(), "0.88,0.90,0.94", "rare: silver")
