@@ -5096,6 +5096,19 @@ local function RestoreParent(frame)
     end
 end
 
+-- ★ SHARED WITH OTHER MODULES. The three helpers above, for any code that hides a
+-- Blizzard frame of its own, so there is one implementation and one record of what
+-- was stripped and reparented:
+--   DF.BlizzardHide.StripEvents(frame, fullDisable)  -- needs frame.unit; see above
+--   DF.BlizzardHide.Reparent(frame)                  -- out of combat only
+--   DF.BlizzardHide.Restore(frame)                   -- back to the recorded parent
+-- Claim the frame first (DF:ClaimBlizzardFrame, Core.lua) when DandersFrames has
+-- handling of its own for it.
+DF.BlizzardHide = DF.BlizzardHide or {}
+DF.BlizzardHide.StripEvents = StripUnitFrameEvents
+DF.BlizzardHide.Reparent = ReparentToHidden
+DF.BlizzardHide.Restore = RestoreParent
+
 -- Function to restore all events on a frame (call Blizzard's setup function)
 local function RestoreUnitFrameEvents(frame)
     if not frame then return end

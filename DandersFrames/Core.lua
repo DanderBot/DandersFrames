@@ -9075,8 +9075,41 @@ function DF:ShouldHideDefaultPlayerFrame()
     return true
 end
 
+-- ★ ONE OWNER PER BLIZZARD FRAME. Another module that takes over hiding (or showing)
+-- a Blizzard frame claims it by global name, and DandersFrames' own handling of that
+-- frame stands down -- otherwise two owners fight over Show/Hide. Today only the
+-- default player frame (below) consults a claim. Nothing claimed: nothing changes.
+local blizzardFrameClaims = {}
+
+function DF:ClaimBlizzardFrame(frameName, owner)
+    if type(frameName) ~= "string" or frameName == "" then return false end
+    blizzardFrameClaims[frameName] = owner or true
+    DF:Debug("BLIZZARD", "%s claimed by %s", frameName, tostring(owner))
+    return true
+end
+
+-- Release a claim. With an owner, only that owner's claim is released.
+function DF:ReleaseBlizzardFrame(frameName, owner)
+    local cur = blizzardFrameClaims[frameName]
+    if cur == nil or (owner ~= nil and cur ~= owner) then return false end
+    blizzardFrameClaims[frameName] = nil
+    return true
+end
+
+-- Claimed? Returns true and the owner, or false.
+function DF:IsBlizzardFrameClaimed(frameName)
+    local cur = frameName and blizzardFrameClaims[frameName]
+    if cur == nil then return false end
+    return true, cur
+end
+
 function DF:UpdateDefaultPlayerFrame()
     if not DF:GetDB() then return end
+    -- Another module owns the player frame: leave it entirely to that owner.
+    if DF:IsBlizzardFrameClaimed("PlayerFrame") then
+        DF.pendingPlayerFrameUpdate = nil
+        return
+    end
     -- PlayerFrame is protected: a change that lands in combat (joining a raid mid-fight)
     -- waits for PLAYER_REGEN_ENABLED instead of being dropped.
     if InCombatLockdown() then
@@ -9094,7 +9127,7 @@ function DF:UpdateDefaultPlayerFrame()
             -- Use a hook to keep it hidden
             if not DF.playerFrameHooked then
                 hooksecurefunc(PlayerFrame, "Show", function(self)
-                    if DF:ShouldHideDefaultPlayerFrame() then
+                    if DF:ShouldHideDefaultPlayerFrame() and not DF:IsBlizzardFrameClaimed("PlayerFrame") then
                         if not InCombatLockdown() then
                             self:Hide()
                         end
