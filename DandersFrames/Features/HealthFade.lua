@@ -87,7 +87,7 @@ function DF:ApplyHealthFadeAlpha(frame)
 
     -- ★ Test frames pass through; see the dfHealthPct branch below for how the
     -- threshold is resolved without a real unit.
-    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return false end
+    if DF:FrameInTestScope(frame, "any") and not frame.dfIsTestFrame then return false end
 
     -- Dispel cancel: if dispel overlay is showing, cancel fade
     -- (IsShown is a non-tainted boolean)
@@ -177,7 +177,7 @@ function DF:UpdateHealthFade(frame)
     -- ⚠ Animate Health MASKED it: UpdateTestFrameHealthOnly calls ApplyHealthFadeAlpha
     -- directly from the ticker, AFTER the appearance pass, so it won by running last.
     -- Fixing the driver is what makes the STATIC path work.
-    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
+    if DF:FrameInTestScope(frame, "any") and not frame.dfIsTestFrame then return end
 
     local db = DF:GetFrameDB(frame)
     if not db or not db.healthFadeEnabled then

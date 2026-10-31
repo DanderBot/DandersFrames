@@ -138,7 +138,7 @@ function DF:ApplyFrameLayout(frame)
         -- drive owns them).
         local newFill = healthBar:GetStatusBarTexture()
         if newFill ~= prevFill then
-            local isTest = (DF.testMode or DF.raidTestMode) and frame.dfIsTestFrame
+            local isTest = DF:FrameInTestScope(frame, "any") and frame.dfIsTestFrame
             local ti = nil
             if isTest and DF.GetTestUnitData and frame.index ~= nil then
                 -- ☠ A PINNED test frame is NOT a pool slot, and asking with pool arguments
@@ -536,9 +536,7 @@ function DF:UpdateUnitFrame(frame, source)
     if not frame or not frame.unit then return end
     
     -- Skip if in test mode (test mode has its own update)
-    local isRaid = DF:IsRaidFrame(frame)
-    if isRaid and DF.raidTestMode then return end
-    if not isRaid and DF.testMode then return end
+    if DF:FrameInTestScope(frame) then return end
     
     local unit = frame.unit
     if not UnitExists(unit) then return end
@@ -937,9 +935,7 @@ function DF:UpdateHealthFast(frame)
     if frame.dfIsTestFrame then return end
 
     -- Skip if in test mode (blanket skip for real live frames)
-    local isRaidHF = DF:IsRaidFrame(frame)
-    if isRaidHF and DF.raidTestMode then return end
-    if not isRaidHF and DF.testMode then return end
+    if DF:FrameInTestScope(frame) then return end
 
     local unit = frame.unit
     if not UnitExists(unit) then return end

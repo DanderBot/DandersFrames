@@ -702,7 +702,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     local unit = frame.unit
     
     -- In test mode, determine highlights based on test settings and frame position
-    local inTestMode = DF.testMode or DF.raidTestMode
+    local inTestMode = DF:FrameInTestScope(frame, "any")
     if debugHighlights then
         print("  inTestMode:", inTestMode and "true" or "false")
     end

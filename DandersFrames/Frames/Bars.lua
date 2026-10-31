@@ -685,7 +685,7 @@ end
 -- test drives are the only writers for a test frame; everyone else must leave it
 -- alone. Previews differ in DATA, never in which caller happens to run last.
 local function testFrameNeedsData(frame, testIndex)
-    return (DF.testMode or DF.raidTestMode) and testIndex == nil
+    return DF:FrameInTestScope(frame, "any") and testIndex == nil
         and frame and frame.dfIsTestFrame
 end
 
@@ -799,7 +799,7 @@ function DF:UpdateAbsorb(frame, testIndex)
     if testFrameNeedsData(frame, testIndex) then return end
 
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
-    if DF:MemTestDisabled("enableAbsorbs") and not DF.testMode and not DF.raidTestMode then
+    if DF:MemTestDisabled("enableAbsorbs") and not DF:FrameInTestScope(frame, "any") then
         if frame.absorbBar then frame.absorbBar:Hide() end
         if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
@@ -820,7 +820,10 @@ function DF:UpdateAbsorb(frame, testIndex)
     local isTestRender, testHealthPercent, testIncomingPercent, testReducedPct, testHealAbsorbPct =
         false, nil, nil, nil, nil
 
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
@@ -836,7 +839,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             maxHealth = 100000
             absorbs = 0
         end
-    elseif DF.raidTestMode and testIndex ~= nil then
+    elseif testScope then
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
@@ -1838,7 +1841,7 @@ end
 function DF:RefreshAbsorbBarVisibility(frame)
     if not frame or not frame.dfAbsorbBar or not frame.absorbOverflowBar then return end
     if not frame.dfAbsorbBar:IsShown() then return end
-    if DF.testMode or DF.raidTestMode then return end
+    if DF:FrameInTestScope(frame, "any") then return end
 
     local db = DF:GetFrameDB(frame)
     if not db then return end
@@ -1899,7 +1902,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
-    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
+    if DF:FrameInTestScope(frame, "any") and testIndex == nil and frame.dfIsTestFrame then return end
     
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
@@ -1909,7 +1912,10 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     local maxHealth, healAbsorb
     local isTestRender = false
     
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
@@ -1925,7 +1931,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             maxHealth = 100000
             healAbsorb = 0
         end
-    elseif DF.raidTestMode and testIndex ~= nil then
+    elseif testScope then
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
@@ -2402,12 +2408,12 @@ end
 function DF:UpdateHealPrediction(frame, testIndex)
     if not frame or not frame.healthBar then return end
     -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
-    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
+    if DF:FrameInTestScope(frame, "any") and testIndex == nil and frame.dfIsTestFrame then return end
     -- Every early return below leaves the spark hidden; only the OVERLAY branch shows it.
     if frame.dfOverhealSpark then frame.dfOverhealSpark:Hide() end
     
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
-    if DF:MemTestDisabled("enableHealPrediction") and not DF.testMode and not DF.raidTestMode then
+    if DF:MemTestDisabled("enableHealPrediction") and not DF:FrameInTestScope(frame, "any") then
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         return
     end
@@ -2450,13 +2456,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- here (a StatusBar fed a plain value behaves as one fed a secret), so test follows live.
     --
 
-    if DF.testMode and testIndex ~= nil then
+    -- Party pool unless only raid test mode is on; a preview frame (in scope with
+    -- neither group mode) passes its own data table and takes the first branch.
+    local testScope = testIndex ~= nil and DF:FrameInTestScope(frame, "any")
+    if testScope and (DF.testMode or not DF.raidTestMode) then
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
         maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
         haveOverheal = true
-    elseif DF.raidTestMode and testIndex ~= nil then
+    elseif testScope then
         maxHealth, incomingHeals, myHeals, othersHeals, overhealing = testHealValues(frame, db, showMode,
             type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
         haveOverheal = true

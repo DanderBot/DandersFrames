@@ -494,6 +494,42 @@ function DF:IsRaidFrame(frame)
     return frame.isRaidFrame or self.raidFrameRegistry[frame] or false
 end
 
+-- ============================================================
+-- TEST SCOPE
+-- Does test mode apply to THIS frame -- should it show test data and leave live
+-- updates alone? Every per-frame test-mode decision asks this instead of reading
+-- DF.testMode / DF.raidTestMode itself.
+--
+--   scope nil      the frame's own mode (raid frame -> raid test mode, else party)
+--   scope "any"    either test mode
+--   scope "raid" / "party"  that mode, for callers that already worked out which
+--                  pool the frame belongs to (frame.isRaidFrame vs DF:IsRaidFrame
+--                  can differ after the secure template wipes the field)
+--
+-- Party, raid and pinned frames get exactly the answer the inline checks gave.
+-- A standalone frame (DF:InitStandaloneFrame) is in no group, so the group test
+-- modes never apply to it -- unless it is a PREVIEW frame (frame.dfPreview), which
+-- only ever shows test data.
+-- ============================================================
+function DF:FrameInTestScope(frame, scope)
+    if frame and frame.dfStandalone then
+        return frame.dfPreview and true or false
+    end
+    if scope == "any" then
+        return (DF.testMode or DF.raidTestMode) and true or false
+    end
+    local isRaid
+    if scope == "raid" then
+        isRaid = true
+    elseif scope == "party" then
+        isRaid = false
+    else
+        isRaid = DF:IsRaidFrame(frame)
+    end
+    if isRaid then return DF.raidTestMode and true or false end
+    return DF.testMode and true or false
+end
+
 -- Helper to get correct DB based on frame type
 function DF:GetFrameDB(frame)
     -- ★ A FRAME MAY CARRY ITS OWN SETTINGS TABLE (frame.dfDB), and then that is the

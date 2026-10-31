@@ -1038,7 +1038,7 @@ function DF:UpdatePetFrame(frame)
     if ownerUnit == "" then ownerUnit = "player" end
 
     -- Test mode handling
-    local isInTestMode = (frame.isRaidFrame and DF.raidTestMode) or (not frame.isRaidFrame and DF.testMode)
+    local isInTestMode = DF:FrameInTestScope(frame, frame.isRaidFrame and "raid" or "party")
 
     if isInTestMode then
         -- Check if pets should be shown in test mode

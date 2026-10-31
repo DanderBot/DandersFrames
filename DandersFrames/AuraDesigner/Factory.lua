@@ -72,7 +72,7 @@ end
 -- themselves (DF:UpdateAllTestAuraDesigner), so the live path must not double-drive.
 function DF:UseFactoryForAD(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
 end
 
 -- GUI-facing predicate: does the factory own AD for this mode's db? Unlike the render
@@ -6327,7 +6327,7 @@ function Factory:SyncFrame(frame)
     -- Reconcile C_UnitAuras.AddAuraSound registrations to the sound-indicator config
     -- (combat-deferred inside SyncSound). NOT a container — its own OOC/regen discipline.
     -- Skipped in test mode: previews must not register real on-apply sounds.
-    if not (DF.testMode or DF.raidTestMode) then
+    if not DF:FrameInTestScope(frame, "any") then
         self:SyncSound(frame)
     end
 

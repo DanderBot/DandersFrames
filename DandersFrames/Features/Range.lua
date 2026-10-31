@@ -658,7 +658,7 @@ function DF:UpdateRange(frame)
     if not frame or not frame.unit then return end
     
     if DF:MemTestDisabled("enableRange") then return end
-    if DF.testMode or DF.raidTestMode then return end
+    if DF:FrameInTestScope(frame, "any") then return end
     
     local unit = frame.unit
 

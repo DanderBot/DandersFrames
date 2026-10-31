@@ -1916,7 +1916,7 @@ end)
 -- provider, so the live update path must not double-drive.
 function DF:UseFactoryForBuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableAuras")
 end
 
@@ -3941,7 +3941,7 @@ end
 -- Render gate (excludes test mode, which paints legacy icons directly).
 function DF:UseFactoryForDebuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableAuras")
 end
 
@@ -4158,7 +4158,7 @@ end
 function DF:UseFactoryForDefensive(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and BuildDirectDefensiveFilters() ~= nil
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableDefensive")
 end
 
@@ -4432,7 +4432,7 @@ local MISSING_BADGE_GAP  = 2
 -- and item source of the four shared buffs (no Skyfury / Bronze there).
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         and not DF:MemTestDisabled("enableMissingBuff")
 end
 

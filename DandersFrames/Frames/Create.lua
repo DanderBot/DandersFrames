@@ -1708,17 +1708,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             end
         elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
             -- Skip in test mode - test mode handles its own absorb display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateAbsorb(self)
             end
         elseif event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
             -- Skip in test mode - test mode handles its own heal absorb display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateHealAbsorb(self)
             end
         elseif event == "UNIT_HEAL_PREDICTION" then
             -- Skip in test mode - test mode handles its own heal prediction display
-            if not DF.testMode and not DF.raidTestMode then
+            if not DF:FrameInTestScope(self, "any") then
                 DF:UpdateHealPrediction(self)
             end
         elseif event == "UNIT_CONNECTION" then
@@ -1890,7 +1890,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         end
 
         -- Check for test mode (party or raid)
-        local inTestMode = (self.isRaidFrame and DF.raidTestMode) or (not self.isRaidFrame and DF.testMode)
+        local inTestMode = DF:FrameInTestScope(self, self.isRaidFrame and "raid" or "party")
 
         if inTestMode then
             local testData = DF:GetTestUnitData(self.unit == "player" and 0 or tonumber(self.unit:match("%d+")))

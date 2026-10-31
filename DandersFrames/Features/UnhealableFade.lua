@@ -68,7 +68,7 @@ function DF:DriveUnhealableFade(frame)
     local AC = DF.AuraContainer
     local on = db and db.fadeUnhealableEnabled
         and AC and AC.IsSupported()
-        and not frame.dfIsTestFrame and not (DF.testMode or DF.raidTestMode)
+        and not frame.dfIsTestFrame and not DF:FrameInTestScope(frame, "any")
     if not on then
         dropCover(frame)
         return

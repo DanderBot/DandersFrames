@@ -2517,7 +2517,7 @@ end
 -- with the shared account palette; see UpdateDispelOverlay's test branch).
 function DF:UseFactoryForDispelOverlay(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
-        and not (DF.testMode or DF.raidTestMode)
+        and not DF:FrameInTestScope(frame, "any")
         -- Memory test: driveFactoryRowsNow (Features/Auras.lua) calls
         -- DriveDispelOverlayFactory DIRECTLY, bypassing UpdateDispelOverlay's own
         -- enableDispel guard — so without this term a GUI change would re-show
@@ -2931,7 +2931,7 @@ function DF:UpdateDispelOverlay(frame)
     local db = DF:GetFrameDB(frame)
 
     local isRaidFrame = frame.isRaidFrame
-    local inRelevantTestMode = (isRaidFrame and DF.raidTestMode) or (not isRaidFrame and DF.testMode)
+    local inRelevantTestMode = DF:FrameInTestScope(frame, isRaidFrame and "raid" or "party")
 
     -- 12.1 container path: Blizzard drives presence + colour via overlay slots; this
     -- call only keeps the bridge current (cheap when nothing changed). Excludes test
@@ -3020,7 +3020,7 @@ function DF:UpdateDispelOverlay(frame)
     end
 
     -- If we're in a test mode but this frame type doesn't match, hide any overlay and skip
-    if (DF.raidTestMode and not isRaidFrame) or (DF.testMode and isRaidFrame) then
+    if not frame.dfStandalone and ((DF.raidTestMode and not isRaidFrame) or (DF.testMode and isRaidFrame)) then
         HideDispelAndInvalidate(frame)
         return
     end

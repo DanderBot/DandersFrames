@@ -193,7 +193,7 @@ end
 function DF:UpdatePingIcon(frame)
     if not frame or not frame.pingIcon then return end
     -- Test mode paints its own sample ping; the live table has nothing for test units.
-    if DF.testMode or DF.raidTestMode then return end
+    if DF:FrameInTestScope(frame, "any") then return end
 
     local db = DF:GetFrameDB(frame)
     if not db or not db.pingIconEnabled then
