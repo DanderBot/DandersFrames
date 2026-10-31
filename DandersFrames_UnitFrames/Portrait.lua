@@ -129,16 +129,16 @@ function PO.OutsideExtent(f, db)
     return (l > 0) and l or 0, 0
 end
 
--- The frame-plus-portrait rect as four reaches past the frame's edges, in the
--- frame's units: left, right (PO.OutsideExtent), and how far an outside portrait
--- pokes past the frame's top and bottom (taller than the frame, or moved up /
--- down; its border included). All 0 without an outside portrait. Read by the
--- resting glow (Indicators.lua) to surround the frame and its portrait as one.
-function PO.OutsideBox(f, db)
+-- An outside portrait's own rect, border included, in the frame's units from
+-- its TOPLEFT (x right, y DOWN; the frame itself = 0, 0, width, height): left,
+-- top, right, bottom. nil without an outside portrait (off, inside, or moved
+-- back over the frame). Read by the resting glow (Indicators.lua) to trace the
+-- frame and its portrait as one outline.
+function PO.OutsideRect(f, db)
     db = db or K.DB(f)
     local left, right = PO.OutsideExtent(f, db)
-    if left == 0 and right == 0 then return 0, 0, 0, 0 end
-    local fh = K.FrameHeight(f, db)
+    if left == 0 and right == 0 then return nil end
+    local fw, fh = K.FrameWidth(f, db), K.FrameHeight(f, db)
     local size = tonumber(db.portraitSize) or 0
     if size <= 0 then size = fh end
     local border = 0
@@ -146,10 +146,16 @@ function PO.OutsideBox(f, db)
         border = tonumber(db.portraitBorderSize) or 1
         if border < 1 then border = 1 end
     end
-    local y = tonumber(db.portraitY) or 0
-    local half = size / 2 + border - fh / 2
-    local top, bottom = half + y, half - y
-    return left, right, (top > 0) and top or 0, (bottom > 0) and bottom or 0
+    local x, y = tonumber(db.portraitX) or 0, tonumber(db.portraitY) or 0
+    local cy = fh / 2 - y
+    local half = size / 2 + border
+    local l
+    if (db.portraitSide or "LEFT") == "RIGHT" then
+        l = fw + 2 + x - border
+    else
+        l = -2 + x - size - border
+    end
+    return l, cy - half, l + size + 2 * border, cy + half
 end
 
 -- The unit's class token, or nil (an NPC, or a secret answer).

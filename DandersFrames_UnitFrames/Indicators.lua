@@ -7,8 +7,9 @@ local addonName, UF = ...
 --   Resting       the player, while resting: DandersFrames' own animated
 --                 ZZZ (DF:CreateRestedIndicator), optionally still, with an
 --                 optional soft glow OUTSIDE the frame's edges (the builder's
---                 OUTER style), round the frame and, with Include Portrait, a
---                 portrait beside it as one rect (Portrait.lua PO.OutsideBox)
+--                 OUTER style) tracing the outline of the frame, an attached
+--                 class power bar and, with Include Portrait, a portrait beside
+--                 it (IN.GlowRects; Portrait.lua PO.OutsideRect)
 --   PvP           the player / target / focus while PvP flagged (faction crest,
 --                 or the free-for-all flag)
 --   Elite / Rare  target / focus / boss: an elite or rare dragon, or the word
@@ -83,7 +84,17 @@ function IN:Attach(f)
     for key, units in pairs(IN.ICONS) do
         if units[unit] then
             if key == "resting" then
-                icons[key] = DF:CreateRestedIndicator(host, f, { glowStyle = "OUTER" })
+                local ind = DF:CreateRestedIndicator(host, f, { glowStyle = "OUTER" })
+                icons[key] = ind
+                -- The outline is laid out in the frame's units, so a frame
+                -- resize (the Frame page's sliders mid-drag) re-traces it.
+                -- The glow frame spans the unit button; it is not secure.
+                if ind.glow and ind.SetGlowRects then
+                    ind.glow:SetScript("OnSizeChanged", function()
+                        local db = K.DB(f)
+                        if db then ind:SetGlowRects(IN.GlowRects(f, db)) end
+                    end)
+                end
             else
                 icons[key] = NewIcon(host)
             end
@@ -97,48 +108,57 @@ function IN:Enabled(db, key)
     return db and db[IN.PREFIX[key] .. "Enabled"] and true or false
 end
 
--- How far an attached class power bar reaches past the frame's edges: left,
--- right, top, bottom. From the settings ClassPower.lua's Layout places it by, so
--- the glow surrounds the bar instead of the bar sitting on top of the glow.
--- Off, detached, or on a unit without one: 0s.
-function IN.ClassPowerBox(f, db)
+-- An attached class power bar's rect, border included, in the frame's units
+-- from its TOPLEFT (x right, y DOWN): left, top, right, bottom. From the
+-- settings ClassPower.lua's Layout places it by: matching the frame's width,
+-- its outer edge (border included) IS the frame's width; a set width is that
+-- plus the border each side. nil when off, detached, or on a unit without one.
+function IN.ClassPowerRect(f, db)
     local CP = UF.ClassPower
     if not (db and db.classPowerEnabled and CP) or (CP.IsDetached and CP:IsDetached(f, db)) then
-        return 0, 0, 0, 0
+        return nil
     end
-    if not (f and f.dfUFClassPower) then return 0, 0, 0, 0 end
-    local fw = K.FrameWidth(f, db)
-    local w = db.classPowerMatchWidth ~= false and fw or (tonumber(db.classPowerWidth) or 220)
-    local h = tonumber(db.classPowerHeight) or 6
-    local x, y = tonumber(db.classPowerX) or 0, tonumber(db.classPowerY) or 0
+    if not (f and f.dfUFClassPower) then return nil end
+    local fw, fh = K.FrameWidth(f, db), K.FrameHeight(f, db)
     local border = 0
     if db.classPowerBorderEnabled ~= false then
         border = tonumber(db.classPowerBorderSize) or 1
         if border < 1 then border = 1 end
     end
-    local half = (w - fw) / 2 + border
-    local left, right = half - x, half + x
-    local reach = y + h + border
-    if reach < 0 then reach = 0 end
-    local top, bottom = reach, 0
-    if db.classPowerPosition == "BOTTOM" then top, bottom = 0, reach end
-    return (left > 0) and left or 0, (right > 0) and right or 0, top, bottom
+    local ow = fw
+    if db.classPowerMatchWidth == false then ow = (tonumber(db.classPowerWidth) or 220) + 2 * border end
+    local h = tonumber(db.classPowerHeight) or 6
+    local x, y = tonumber(db.classPowerX) or 0, tonumber(db.classPowerY) or 0
+    local l = (fw - ow) / 2 + x
+    if db.classPowerPosition == "BOTTOM" then
+        return l, fh + y - border, l + ow, fh + y + h + border
+    end
+    return l, -(y + h + border), l + ow, -(y - border)
 end
 
--- How far the resting glow reaches past the frame (left, right, top, bottom):
--- round an attached class power bar always, and an outside portrait too while
--- Include Portrait is on. One box round them all: the larger reach per edge.
-function IN.GlowExtents(f, db)
-    local l, r, t, b = IN.ClassPowerBox(f, db)
+-- How far an attached class power bar reaches past the frame's edges: left,
+-- right, top, bottom (0 for an edge it stays inside). 0s without one.
+function IN.ClassPowerBox(f, db)
+    local l, t, r, b = IN.ClassPowerRect(f, db)
+    if not l then return 0, 0, 0, 0 end
+    local fw, fh = K.FrameWidth(f, db), K.FrameHeight(f, db)
+    local function pos(v) return (v > 0) and v or 0 end
+    return pos(-l), pos(r - fw), pos(-t), pos(b - fh)
+end
+
+-- The rects the resting glow traces the outline of: the frame, an attached
+-- class power bar, and an outside portrait while Include Portrait is on. One
+-- outline round their union (an L or a step), never an empty glowing corner.
+function IN.GlowRects(f, db)
+    local rects = { { 0, 0, K.FrameWidth(f, db), K.FrameHeight(f, db) } }
+    local l, t, r, b = IN.ClassPowerRect(f, db)
+    if l then rects[#rects + 1] = { l, t, r, b } end
     local PO = UF.Portrait
-    if db and db.restingIconGlowPortrait ~= false and PO and PO.OutsideBox then
-        local pl, pr, pt, pb = PO.OutsideBox(f, db)
-        if pl > l then l = pl end
-        if pr > r then r = pr end
-        if pt > t then t = pt end
-        if pb > b then b = pb end
+    if db and db.restingIconGlowPortrait ~= false and PO and PO.OutsideRect then
+        l, t, r, b = PO.OutsideRect(f, db)
+        if l then rects[#rects + 1] = { l, t, r, b } end
     end
-    return l, r, t, b
+    return rects
 end
 
 function IN:Layout(f)
@@ -157,7 +177,7 @@ function IN:Layout(f)
                 icon:SetZScale(size / IN.RESTING_BASE_SIZE)
                 icon:SetFrameLevel(icons.host:GetFrameLevel() + 5)
                 icon:SetAnimated(db[pre .. "Animate"] ~= false)
-                if icon.SetGlowExtents then icon:SetGlowExtents(IN.GlowExtents(f, db)) end
+                if icon.SetGlowRects then icon:SetGlowRects(IN.GlowRects(f, db)) end
             else
                 icon:SetSize(size, size)
             end

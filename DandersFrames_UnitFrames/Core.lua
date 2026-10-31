@@ -362,7 +362,7 @@ end
 UF.LIVE_ELEMENTS = {
     castbar = { "CastBar" },
     -- The portrait's and the attached class power bar's rects are also the
-    -- resting glow's (Include Portrait; IN.GlowExtents).
+    -- resting glow's (Include Portrait; IN.GlowRects).
     classpower = { "ClassPower", "Indicators" },
     portrait = { "Portrait", "Indicators" }, unitIcons = { "Indicators" },
 }

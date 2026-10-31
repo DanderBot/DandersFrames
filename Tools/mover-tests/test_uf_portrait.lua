@@ -151,18 +151,20 @@ do
     db.portraitEnabled = false
     eq(reach(P), "0,0", "off: nothing")
     db.portraitEnabled, db.portraitSide, db.portraitSize = nil, nil, nil
-    -- The whole box (the resting glow's Include Portrait): left / right as above,
-    -- plus how far the portrait pokes past the frame's top and bottom.
-    local function box(f) return table.concat({ PO.OutsideBox(f) }, ",") end
-    eq(box(P), "43,0,1,1", "box: size = height, its 1px border pokes out top and bottom")
+    -- The portrait's own rect (the resting glow's Include Portrait), border
+    -- included, from the frame's TOPLEFT with y down. The frame is 220 x 40.
+    local function rect(f) local l, t, r, b = PO.OutsideRect(f); return l and table.concat({ l, t, r, b }, ",") or "nil" end
+    eq(rect(P), "-43,-1,-1,41", "rect: size = height, left of a 2px gap, its 1px border round it")
     db.portraitSize = 60
-    eq(box(P), "63,0,11,11", "box: a 60 portrait on a 40 frame: 10 + border each way")
+    eq(rect(P), "-63,-11,-1,51", "rect: a 60 portrait on a 40 frame pokes 10 + border each way")
     db.portraitY = 4
-    eq(box(P), "63,0,15,7", "box: moved up 4")
+    eq(rect(P), "-63,-15,-1,47", "rect: moved up 4")
     db.portraitSize, db.portraitY = 20, nil
-    eq(box(P), "23,0,0,0", "box: a short portrait stays inside the frame's height")
+    eq(rect(P), "-23,9,-1,31", "rect: a short portrait, centred")
+    db.portraitSide = "RIGHT"
+    eq(rect(P), "221,9,243,31", "rect: on the right")
     db.portraitSide = "INSIDE_LEFT"
-    eq(box(P), "0,0,0,0", "box: an inside portrait adds nothing")
+    eq(rect(P), "nil", "rect: an inside portrait is not outside anything")
     db.portraitSide, db.portraitSize = nil, nil
     -- Target's portrait is Player's mirrored by the link (Links.lua, not loaded here).
     local T = Owner("target")

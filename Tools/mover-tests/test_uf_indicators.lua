@@ -156,45 +156,86 @@ IN:Update(P)
 check(not R:IsShown() and not R.glow:IsShown(), "not resting: ZZZ and glow both hidden")
 pdb.restingIconSize, pdb.restingIconAnimate, pdb.restingIconGlow = 16, true, false
 
-print("-- Resting glow: Include Portrait")
-local gp = R.glow._points
-eq(gp[1][1], "TOPLEFT", "no portrait module: the frame's own rect")
-eq(gp[1][4], 0, "...no reach left"); eq(gp[2][4], 0, "...or right")
-local boxCalls = 0
-UF.Portrait = { OutsideBox = function(f, db) boxCalls = boxCalls + 1; return 50, 0, 3, 2 end }
+print("-- Resting glow: the outline of frame + portrait + class power bar")
+local function rstr(rects)
+    local out = {}
+    for _, r in ipairs(rects) do out[#out + 1] = table.concat(r, ",") end
+    return table.concat(out, " | ")
+end
+local function grects() return rstr(IN.GlowRects(P, pdb)) end
 IN:Layout(P)
-gp = R.glow._points
-eq(gp[1][4], -50, "an outside portrait on the left: the glow reaches past it")
-eq(gp[1][5], 3, "...and over a taller portrait's top")
-eq(gp[2][4], 0, "...right edge stays the frame's")
-eq(gp[2][5], -2, "...bottom too")
+eq(grects(), "0,0,220,46", "no portrait module, no class power: the frame alone")
+check(R.glow.outlineCount == 8, "...traced as one box (eight pieces)")
+local rectCalls = 0
+UF.Portrait = { OutsideRect = function(f, db) rectCalls = rectCalls + 1; return -52, -8, -2, 54 end }
+IN:Layout(P)
+eq(grects(), "0,0,220,46 | -52,-8,-2,54", "an outside portrait: its own rect, not one box")
+check(rectCalls > 0, "...asked of the portrait module")
+check(R.glow.outlineCount > 8, "...the glow follows the step (more than a box's eight pieces)")
 pdb.restingIconGlowPortrait = false
 IN:Layout(P)
-gp = R.glow._points
-eq(gp[1][4], 0, "Include Portrait off: the frame only")
-eq(gp[1][5], 0, "...top")
+eq(grects(), "0,0,220,46", "Include Portrait off: the frame only")
+eq(R.glow.outlineCount, 8, "...one box again")
 pdb.restingIconGlowPortrait = nil
-UF.Portrait = nil
-IN:Layout(P)
+UF.Portrait = { OutsideRect = function() return nil end }
+eq(grects(), "0,0,220,46", "an inside portrait (no outside rect): the frame only")
 
--- The attached class power bar sits inside the glow, not on top of it.
-local function gbox() return table.concat({ IN.GlowExtents(P, pdb) }, ",") end
-eq(gbox(), "0,0,0,0", "class power off: the frame only")
+-- The attached class power bar: its own rect, border included.
 local heldCP, heldBar = UF.ClassPower, P.dfUFClassPower
 UF.ClassPower = { IsDetached = function(_, _, d) return d.classPowerDetached and true or false end }
 P.dfUFClassPower = {}
+local function cbox() return table.concat({ IN.ClassPowerBox(P, pdb) }, ",") end
+local heldEnabled = pdb.classPowerEnabled
+pdb.classPowerEnabled = false
+eq(cbox(), "0,0,0,0", "class power off: nothing")
+eq(IN.ClassPowerRect(P, pdb), nil, "...no rect")
 pdb.classPowerEnabled = true
-eq(gbox(), "1,1,9,0", "on top, full width: 2 gap + 6 tall + 1 border above, 1 border each side")
+eq(rstr({ { IN.ClassPowerRect(P, pdb) } }), "0,-9,220,-1", "on top, matching width: outer edge = the frame's, 2 gap - 1 border to 2 + 6 + 1 up")
+eq(cbox(), "0,0,9,0", "matching width: no reach left or right, 9 above")
 pdb.classPowerPosition = "BOTTOM"
-eq(gbox(), "1,1,0,9", "below the frame: the reach moves to the bottom")
+eq(rstr({ { IN.ClassPowerRect(P, pdb) } }), "0,47,220,55", "below the frame")
+eq(cbox(), "0,0,0,9", "below: the reach moves to the bottom")
 pdb.classPowerMatchWidth, pdb.classPowerX = false, 4
-pdb.classPowerWidth = UF.Elements.Kit.FrameWidth(P, pdb) + 20
-eq(gbox(), "7,15,0,9", "wider by 20 and moved right 4")
+pdb.classPowerWidth = 240
+eq(cbox(), "7,15,0,9", "a set width of frame + 20 (+ border each side), moved right 4")
 pdb.classPowerDetached = true
-eq(gbox(), "0,0,0,0", "detached: not part of the frame")
-pdb.classPowerEnabled, pdb.classPowerPosition, pdb.classPowerMatchWidth = nil, nil, nil
-pdb.classPowerWidth, pdb.classPowerX, pdb.classPowerDetached = nil, nil, nil
+eq(IN.ClassPowerRect(P, pdb), nil, "detached: not part of the frame")
+eq(cbox(), "0,0,0,0", "detached: no reach")
+pdb.classPowerDetached, pdb.classPowerPosition, pdb.classPowerMatchWidth = nil, nil, nil
+pdb.classPowerWidth, pdb.classPowerX = nil, nil
+-- the screenshot: portrait on the left, taller; the bar over the frame only
+UF.Portrait = { OutsideRect = function() return -52, -3, -2, 49 end }
+pdb.classPowerHeight = 12
+eq(grects(), "0,0,220,46 | 0,-15,220,-1 | -52,-3,-2,49", "frame, bar and portrait each passed on")
+IN:Layout(P)
+local pieces = DF.GlowOutlinePieces(IN.GlowRects(P, pdb), R.glow.spread)
+eq(R.glow.outlineCount, #pieces, "the glow laid out from the outline")
+for _, p in ipairs(pieces) do
+    check(not (p[3] < -13 and p[2] < -10), "no glow in the empty corner above the portrait (" .. p[1] .. "," .. p[2] .. "," .. p[3] .. ")")
+end
+local pool = #R.glow.outlinePool
+for _ = 1, 3 do IN:Layout(P) end
+eq(#R.glow.outlinePool, pool, "relayout reuses the glow's textures")
+pdb.classPowerEnabled, pdb.classPowerHeight = heldEnabled, nil
+UF.Portrait = nil
 UF.ClassPower, P.dfUFClassPower = heldCP, heldBar
+IN:Layout(P)
+eq(R.glow.outlineCount, 8, "all off again: the frame's box")
+-- a frame resize (the Frame page's sliders) re-traces the outline
+local onSize = R.glow:GetScript("OnSizeChanged")
+check(type(onSize) == "function", "the glow re-traces on a frame resize")
+local heldW = pdb.frameWidth
+pdb.frameWidth = 300
+if onSize then onSize(R.glow) end
+local widest = 0
+for i = 1, R.glow.outlineCount do
+    local t = R.glow.outlinePool[i]
+    local pt = t._points and t._points[1] or t.points and t.points[1]
+    if pt and pt[4] > widest then widest = pt[4] end
+end
+eq(widest, 300, "...to the new width (the right edge's strip at x = 300)")
+pdb.frameWidth = heldW
+IN:Layout(P)
 
 print("-- PvP")
 pvp = true
