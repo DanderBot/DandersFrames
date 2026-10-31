@@ -285,6 +285,13 @@ function GUI:RefreshModuleShell(instant)
                 if on then b:Show() else b:Hide() end
                 local isActive = on and activeId == tab.id
                 b:SetActive(isActive)
+                -- A tab's state glyph (tab.mark, GUI/ModuleRegistry.lua). A tab
+                -- stands alone in the row, so it may widen to fit it.
+                if tab.mark or rawget(b, "dfLabelMark") then
+                    local spec = on and Resolve(tab.mark) or nil
+                    if spec and spec.grow == nil then spec.grow = true end
+                    GUI:SetLabelMark(b, spec)
+                end
                 if isActive then activeBtn, activeAccent = b, Resolve(tab.accent) end
             end
         end

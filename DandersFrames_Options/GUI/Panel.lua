@@ -349,6 +349,9 @@ local function PageRefreshStatesBody(self)
                 local shouldDisable = widget.disableOn(db)
                 if widget.SetEnabled then
                     widget:SetEnabled(not shouldDisable)
+                    -- The kit's hover reads this to show widget.disableReason
+                    -- (DandersUI/Widgets.lua, WHY IS IT GREY?).
+                    rawset(widget, "dfGreyed", shouldDisable and true or nil)
                 end
             end
             
@@ -3786,6 +3789,10 @@ function DF:CreateGUI()
         -- Update scroll child height
         local totalHeight = math.abs(y) + 20
         GUI.tabContainer:SetHeight(totalHeight)
+        -- A module's rows may carry a state glyph after their label (def.pageMark,
+        -- GUI/ModuleRegistry.lua). Repainted with every layout so a row that comes
+        -- into view shows its current state.
+        if GUI.RefreshPageMarks then GUI:RefreshPageMarks() end
     end
 
     -- Re-sync each category's expanded state from the current profile's saved

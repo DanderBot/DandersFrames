@@ -43,6 +43,7 @@ DF.ICON_MANIFEST = {
         "info",
         "keyboard",
         "language",
+        "link",
         "lock",
         "lock_open",
         "map",
