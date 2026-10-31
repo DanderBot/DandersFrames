@@ -148,7 +148,9 @@ for _, unit in ipairs({ "player", "target", "targettarget", "focus", "focustarge
         eq(f._template, nil, unit .. ": NO secure template")
         eq(f.dfPreview, true, unit .. ": dfPreview (in test scope)")
         eq(f.dfIsTestFrame, true, unit .. ": a test frame for the painters")
-        eq(f.dfDB, UF:GetUnitDB(unit), unit .. ": the unit's own settings")
+        eq(f.dfDB, P:PreviewDB(unit), unit .. ": the unit's own settings (through the preview's table)")
+        eq(f.dfDB.frameWidth, UF:GetUnitDB(unit).frameWidth, unit .. ": ...which reads the unit's values")
+        eq(f.dfTestAuraSeed, P.AURA_SEEDS[unit], unit .. ": its window of the sample auras")
         check(type(f.dfTestData) == "table", unit .. ": its own fake unit (dfTestData)")
         eq(f:IsShown(), true, unit .. ": shown")
         check(f ~= UF.frames[unit], unit .. ": not the live button")
@@ -157,7 +159,7 @@ for _, unit in ipairs({ "player", "target", "targettarget", "focus", "focustarge
 end
 eq(#built, 6, "elements built once per unit")
 for _, b in ipairs(built) do
-    check(b.preview and b.standalone and b.test and b.db == UF:GetUnitDB(b.unit) and b.raid == false,
+    check(b.preview and b.standalone and b.test and b.db == P:PreviewDB(b.unit) and b.raid == false,
           b.unit .. ": marked standalone + preview BEFORE its elements were built")
 end
 eq(#painted, 6, "each painted by DF's test painter")
@@ -258,6 +260,76 @@ P:SetOwner("settings", false)
 painted = {}
 UF:RefreshAll()
 eq(#painted, 0, "nothing painted while off")
+
+print("-- Test auras: the preview reads the test panel's aura switches from the test mode on screen")
+do
+    local party = { testShowAuras = true, testBuffCount = 3, testDebuffCount = 4, frameWidth = 999 }
+    local raid = { testShowAuras = false, testBuffCount = 1, testDebuffCount = 1 }
+    function DF:GetDB() return party end
+    function DF:GetRaidDB() return raid end
+    local db = P:PreviewDB("target")
+    eq(db.testShowAuras, true, "Show Auras: the party table's")
+    eq(db.testBuffCount, 3, "...the buff count too")
+    eq(db.testDebuffCount, 4, "...and the debuff count")
+    eq(db.frameWidth, UF:GetUnitDB("target").frameWidth, "any other key: the unit's own (never the party table's)")
+    DF.raidTestMode = true
+    eq(db.testShowAuras, false, "raid test mode up: the raid table's")
+    eq(db.testBuffCount, 1, "...counts too")
+    DF.raidTestMode = nil
+    party.testDebuffCount = nil
+    eq(db.testDebuffCount, UF:GetUnitDB("target").testDebuffCount, "a switch the table lacks: the unit chain's default")
+    party.testDebuffCount = 4
+    db.buffMax = 6
+    eq(UF:GetStoredUnit("target").buffMax, 6, "a write lands in the unit's own table")
+    db.buffMax = nil
+    eq(P:PreviewDB("target"), db, "one table per unit")
+    eq(P.AURA_SEEDS.boss, nil, "boss slots seed from their own tokens (boss1..boss5)")
+    local seen = {}
+    for u, n in pairs(P.AURA_SEEDS) do
+        check(not seen[n], u .. ": a seed of its own")
+        seen[n] = true
+    end
+
+    -- Following the panel: a group frame's aura repaint after an aura switch moved
+    -- repaints the preview once; any other group repaint does not.
+    local hooks = {}
+    local savedHook = hooksecurefunc
+    hooksecurefunc = function(t, name, fn)
+        local orig = t[name]
+        hooks[name] = true
+        t[name] = function(...) local r = orig(...); fn(...); return r end
+    end
+    function DF:UpdateTestAuras() end
+    function DF:UpdateAllTestDispelGlow() end
+    function DF:UpdateAllTestMissingBuff() end
+    function DF:UpdateAllTestAuraDesigner() end
+    P.panelHooked = nil
+    P:SetOwner("settings", true)
+    check(hooks.UpdateTestAuras and hooks.UpdateAllTestDispelGlow and hooks.UpdateAllTestMissingBuff
+        and hooks.UpdateAllTestAuraDesigner, "the preview listens on the panel's aura repaints")
+    painted = {}
+    DF:UpdateTestAuras({})
+    eq(#painted, 0, "a group repaint with the switches unchanged: no preview repaint")
+    party.testShowAuras = false
+    DF:UpdateTestAuras(P.frames.target)
+    eq(#painted, 0, "...the preview's own repaint never triggers one")
+    DF:UpdateTestAuras({})
+    eq(#painted, 6, "Show Auras switched: the preview repaints once")
+    painted = {}
+    DF:UpdateTestAuras({})
+    eq(#painted, 0, "...and is quiet again after")
+    party.testShowDispelGlow = true
+    DF:UpdateAllTestDispelGlow()
+    eq(#painted, 6, "a Dispel Overlay switch repaints it too")
+    P:SetOwner("settings", false)
+    painted = {}
+    party.testShowAuras = true
+    DF:UpdateTestAuras({})
+    eq(#painted, 0, "nothing while the preview is down")
+    hooksecurefunc = savedHook
+    DF.GetDB, DF.GetRaidDB, DF.UpdateTestAuras = nil, nil, nil
+    DF.UpdateAllTestDispelGlow, DF.UpdateAllTestMissingBuff, DF.UpdateAllTestAuraDesigner = nil, nil, nil
+end
 
 print("-- The Settings page and DandersFrames' hook")
 local pages = options_file_source("UnitFrames/Pages.lua")

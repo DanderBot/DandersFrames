@@ -125,6 +125,63 @@ function P:TestData(unit, slot)
 end
 
 -- ============================================================
+-- TEST AURAS
+-- The aura rows preview through DandersFrames' own test path: the test painter
+-- (DF:UpdateTestFrame -> DF:UpdateTestAuras) drives the unit's real buff and
+-- debuff rows, and the aura containers paint them from the test mode's sample
+-- pool (DF.TestData) with the unit's own layout, size, max and borders. A preview
+-- frame (dfPreview) is always in that preview shape, test mode on or not
+-- (AuraContainer testShapeFor), so the mover session and the Preview switch show
+-- them too. Nothing here makes auras of its own.
+-- ============================================================
+
+-- The test panel's AURAS switches -- Show Auras, the Buffs / Debuffs counts, Dispel
+-- Overlay, Missing Buff, Aura Designer. They are stored in the PARTY or RAID table,
+-- never a unit's, so a preview frame reads them from the test mode on screen (the
+-- raid table while raid test mode is up, else the party table): the unit frames
+-- follow the same switches as the group frames. Every other key is the unit's own.
+P.TEST_KEYS = {
+    testShowAuras = true, testBuffCount = true, testDebuffCount = true,
+    testShowDispelGlow = true, testShowMissingBuff = true, testShowAuraDesigner = true,
+}
+
+function P:TestModeDB()
+    if DF.raidTestMode and DF.GetRaidDB then return DF:GetRaidDB() end
+    return DF.GetDB and DF:GetDB() or nil
+end
+
+-- A preview frame's settings table: the unit's own (UF:GetUnitDB), with the keys
+-- above read from the test mode's table. Writes go to the unit's table. One per
+-- unit, remade when the unit's table changes (a profile switch).
+local previewDBs = {}
+function P:PreviewDB(unit)
+    local db = UF:GetUnitDB(unit)
+    local cached = previewDBs[unit]
+    if cached and cached.src == db then return cached.proxy end
+    local proxy = setmetatable({}, {
+        __index = function(_, key)
+            if P.TEST_KEYS[key] then
+                local t = P:TestModeDB()
+                local v = t and t[key]
+                if v ~= nil then return v end
+            end
+            return db[key]
+        end,
+        __newindex = function(_, key, value) db[key] = value end,
+    })
+    previewDBs[unit] = { src = db, proxy = proxy }
+    return proxy
+end
+
+-- Which window of the sample pool each preview frame's rows draw (the frame's
+-- dfTestAuraSeed; DandersFrames' testPoolOffset). The unit tokens carry no number,
+-- so without a seed every frame would show the same samples. At the default count
+-- of two the debuff windows are: player (no seed) Bleed + Disease, target Curse +
+-- Poison (5 stacks), focus Magic + Curse, pet two untyped, so between them every
+-- debuff type shows. The boss slots seed from their own tokens (boss1..boss5).
+P.AURA_SEEDS = { target = 4, focus = 2, pet = 3, targettarget = 1, focustarget = 5 }
+
+-- ============================================================
 -- OWNERS
 -- ============================================================
 function P:IsActive()
@@ -198,7 +255,7 @@ end
 -- One preview frame on `unit`'s settings, named `name`, under `parent`. `slot`:
 -- the boss slot it stands for (Boss.lua builds those), nil otherwise.
 function P:Build(unit, name, parent, slot)
-    local db = UF:GetUnitDB(unit)
+    local db = P:PreviewDB(unit)
     local f = CreateFrame("Button", name, parent)
     -- Marked BEFORE the elements are built, so everything they read resolves to the
     -- unit's own table and to test scope.
@@ -213,6 +270,7 @@ function P:Build(unit, name, parent, slot)
     f.isRaidFrame = false
     f.unit = slot and (unit .. slot) or unit
     f.dfTestData = P:TestData(unit, slot)
+    f.dfTestAuraSeed = P.AURA_SEEDS[unit]
     f.index = f.dfTestData.index
     f:EnableMouse(true)
     if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end
@@ -245,7 +303,7 @@ end
 -- The test painter lives in the options addon; without it (it failed to load)
 -- the live refresh still paints the frame in test scope.
 function P:Paint(f)
-    local db = UF:GetUnitDB(f.dfUFUnit)
+    local db = P:PreviewDB(f.dfUFUnit)
     f.dfDB = db
     f.dfTextPresetOverride = db.textDesignerPreset
     f.dfMirrorText = UF.IsTextMirrored and UF:IsTextMirrored(f.dfUFUnit) or false
@@ -282,13 +340,55 @@ local function FadeLive(alpha)
     for _, h in pairs(holders or {}) do h:SetAlpha(alpha) end
 end
 
+-- ============================================================
+-- FOLLOWING THE TEST PANEL
+-- The test panel's aura switches (P.TEST_KEYS) repaint the GROUP test frames only:
+-- DF:UpdateTestAuras per frame, or DF:UpdateAllTestDispelGlow / ...MissingBuff /
+-- ...AuraDesigner. So the preview listens on those, and when the switches it reads
+-- have moved since its last paint it repaints once, on the next frame. The compare
+-- keeps it quiet on every other group repaint (a settings drag, a roster change).
+-- Hooked once, after the painter (the options addon) has loaded.
+-- ============================================================
+function P:TestKeysSig()
+    local t = P:TestModeDB()
+    if not t then return "" end
+    return tostring(t.testShowAuras) .. "|" .. tostring(t.testBuffCount) .. "|" .. tostring(t.testDebuffCount)
+        .. "|" .. tostring(t.testShowDispelGlow) .. "|" .. tostring(t.testShowMissingBuff)
+        .. "|" .. tostring(t.testShowAuraDesigner)
+end
+
+function P:RequestRefresh()
+    if not P.shown or P.refreshQueued then return end
+    P.refreshQueued = true
+    C_Timer.After(0, function()
+        P.refreshQueued = false
+        P:Refresh()
+    end)
+end
+
+local function OnGroupAurasPainted(_, frame)
+    if frame and frame.dfUFPreview then return end   -- our own paint
+    if P.shown and P:TestKeysSig() ~= P.testSig then P:RequestRefresh() end
+end
+
+function P:HookTestPanel()
+    if P.panelHooked or not hooksecurefunc or type(DF.UpdateTestAuras) ~= "function" then return end
+    P.panelHooked = true
+    hooksecurefunc(DF, "UpdateTestAuras", OnGroupAurasPainted)
+    for _, name in ipairs({ "UpdateAllTestDispelGlow", "UpdateAllTestMissingBuff", "UpdateAllTestAuraDesigner" }) do
+        if type(DF[name]) == "function" then hooksecurefunc(DF, name, OnGroupAurasPainted) end
+    end
+end
+
 function P:Show()
     -- The painter is in the load-on-demand options addon. Loading it is what
     -- DandersFrames' own mover session does too; never mid-fight.
     if not DF._optionsAddonLoaded and DF.EnsureOptionsLoaded and not InCombatLockdown() then
         DF:EnsureOptionsLoaded()
     end
+    P:HookTestPanel()
     P.shown = true
+    P.testSig = P:TestKeysSig()
     -- The parent carries the DETACHED pieces too (a detached preview cast bar is
     -- parented here, not to its frame), so it is shown and hidden with the preview.
     P:GetParent():Show()
@@ -317,6 +417,7 @@ end
 -- Settings changed, or the profile did: repaint what is up.
 function P:Refresh()
     if not P.shown then return end
+    P.testSig = P:TestKeysSig()
     for _, unit in ipairs(P:Units()) do
         local f = P:Acquire(unit)
         if not f:IsShown() then f:Show() end
