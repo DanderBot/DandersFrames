@@ -322,8 +322,13 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- page: GUI.PageBuildDb, companion GUI/ModuleRegistry.lua), whose predicates
     -- take that table.
     getSettingsDB = function()
-        local name = GUI.CurrentPageName
-        local page = name and GUI.Pages and GUI.Pages[name]
+        -- The page mid-sweep first (GUI.PageRefreshStates, companion Panel.lua):
+        -- a new page is swept before CurrentPageName names it.
+        local page = GUI.StatesPage
+        if not page then
+            local name = GUI.CurrentPageName
+            page = name and GUI.Pages and GUI.Pages[name]
+        end
         local own = page and GUI.PageBuildDb and GUI.PageBuildDb(page)
         if own then return own end
         return DF.db and DF.db[GUI.SelectedMode]

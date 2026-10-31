@@ -269,7 +269,7 @@ end
 -- capturing this value (see the assignment in BuildPage for why).
 --
 -- The parameter is named `self` because it IS the page.
-local function PageRefreshStates(self)
+local function PageRefreshStatesBody(self)
     if not self.children then return end
     -- The table this page was built against when it has one of its own (a module
     -- page -- GUI.PageBuildDb), else the frame mode's. hideOn / disableOn read it.
@@ -568,6 +568,20 @@ local function PageRefreshStates(self)
     if self.child and GUI.contentFrame then
         self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
     end
+end
+
+-- ☠ The page being swept answers the kit's getSettingsDB while the sweep runs.
+-- A boxed group's children read their predicates' table through that host call,
+-- which otherwise follows GUI.CurrentPageName -- and SelectTab shows and sweeps
+-- the new page BEFORE it sets that name. A module page swept on arrival read the
+-- PREVIOUS page's table: every gated control in a box greyed out with its
+-- feature switched on (Target's Portrait page, coming from Fading).
+local function PageRefreshStates(self)
+    local held = GUI.StatesPage
+    GUI.StatesPage = self
+    local ok, err = pcall(PageRefreshStatesBody, self)
+    GUI.StatesPage = held
+    if not ok then error(err, 0) end
 end
 GUI.PageRefreshStates = PageRefreshStates
 

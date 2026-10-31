@@ -40,6 +40,7 @@ for _, header in ipairs({
     "function GUI.PageUsableWidth(childWidth)",
     "function GUI.Column2X(contentWidth)",
     "local function LayoutWidthFor(widget, usesTwoColumns, usableWidth)",
+    "local function PageRefreshStatesBody(self)",
     "local function PageRefreshStates(self)",
 }) do
     local body = cut(header)
