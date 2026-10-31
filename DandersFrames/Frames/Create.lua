@@ -652,6 +652,151 @@ local InCombatLockdown = InCombatLockdown
 local RegisterUnitWatch = RegisterUnitWatch
 
 -- ============================================================
+-- RESTED INDICATOR BUILDER
+-- Three gold "Z"s (smallest to largest, stepping up and right)
+-- plus an optional ADD-blended glow around a host frame.
+-- Animated: the Zs fade/scale in a staggered loop and the glow
+-- pulses. Static: all Zs at full alpha and base size, glow at a
+-- fixed alpha, no OnUpdate running.
+-- The caller anchors the returned frame.
+-- ============================================================
+
+local RESTED_Z = {
+    sizes    = {8, 11, 14},
+    offsetsX = {0, 5, 12},
+    offsetsY = {0, 3, 7},
+    width = 24, height = 18,
+    cycle = 2.0,
+    staticGlowAlpha = 0.3,  -- midpoint of the animated pulse (0.15 - 0.45)
+}
+
+local function RestedIndicator_OnUpdate(self, elapsed)
+    self.animTime = self.animTime + elapsed
+    local cycle = self.animTime % self.cycleDuration
+    local progress = cycle / self.cycleDuration
+
+    -- Each Z starts at a staggered point in the cycle (0, 0.15, 0.30)
+    for i, z in ipairs(self.zTexts) do
+        local zDelay = (i - 1) * 0.15
+        local zProgress = (progress - zDelay) % 1
+
+        local alpha, scale
+        if zProgress < 0.4 then
+            local t = zProgress / 0.4
+            alpha = t
+            scale = 0.5 + (t * 0.5)
+        elseif zProgress < 0.7 then
+            alpha = 1
+            scale = 1
+        else
+            local t = (zProgress - 0.7) / 0.3
+            alpha = 1 - t
+            scale = 1
+        end
+
+        z:SetAlpha(alpha)
+        DF:SafeSetFont(z, nil, z.baseSize * scale, "OUTLINE")
+    end
+
+    local glow = self.glow
+    if glow and glow:IsShown() then
+        glow:SetAlpha(0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1))
+    end
+end
+
+local function RestedIndicator_ApplyStatic(self)
+    for _, z in ipairs(self.zTexts) do
+        z:SetAlpha(1)
+        DF:SafeSetFont(z, nil, z.baseSize, "OUTLINE")
+    end
+    if self.glow then self.glow:SetAlpha(RESTED_Z.staticGlowAlpha) end
+end
+
+local function RestedIndicator_OnShow(self)
+    self.animTime = 0
+    for _, z in ipairs(self.zTexts) do
+        z:Show()
+    end
+end
+
+local function RestedIndicator_OnHide(self)
+    for _, z in ipairs(self.zTexts) do
+        z:Hide()
+    end
+end
+
+-- Switch the loop on or off. Off stops the OnUpdate entirely.
+local function RestedIndicator_SetAnimated(self, animated)
+    animated = animated ~= false
+    self.animated = animated
+    if animated then
+        self:SetScript("OnUpdate", RestedIndicator_OnUpdate)
+    else
+        self:SetScript("OnUpdate", nil)
+        RestedIndicator_ApplyStatic(self)
+    end
+end
+
+-- Scale the Z group (font sizes, Z offsets and the container size).
+-- 1 = the party/raid player-frame look.
+local function RestedIndicator_SetZScale(self, scale)
+    scale = scale or 1
+    self.zScale = scale
+    for i, z in ipairs(self.zTexts) do
+        z.baseSize = RESTED_Z.sizes[i] * scale
+        z:ClearAllPoints()
+        z:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", RESTED_Z.offsetsX[i] * scale, RESTED_Z.offsetsY[i] * scale)
+        DF:SafeSetFont(z, nil, z.baseSize, "OUTLINE")
+    end
+    self:SetSize(RESTED_Z.width * scale, RESTED_Z.height * scale)
+    if not self.animated then RestedIndicator_ApplyStatic(self) end
+end
+
+-- parent:   frame the Zs live on (frame level parent + 5)
+-- glowHost: optional frame; when given, a glow texture is built around it
+--           (4px outset) and stored as indicator.glow
+-- Returns the indicator frame, hidden, unanchored, animated.
+function DF:CreateRestedIndicator(parent, glowHost)
+    local ind = CreateFrame("Frame", nil, parent)
+    ind:SetSize(RESTED_Z.width, RESTED_Z.height)
+    ind:SetFrameLevel(parent:GetFrameLevel() + 5)
+    ind:Hide()
+
+    ind.zTexts = {}
+    for i = 1, 3 do
+        local z = ind:CreateFontString(nil, "OVERLAY")
+        DF:SafeSetFont(z, nil, RESTED_Z.sizes[i], "OUTLINE")
+        z:SetText("Z")
+        z:SetTextColor(1, 0.82, 0, 1)
+        z:SetPoint("BOTTOMLEFT", ind, "BOTTOMLEFT", RESTED_Z.offsetsX[i], RESTED_Z.offsetsY[i])
+        z:SetAlpha(0)
+        z.baseSize = RESTED_Z.sizes[i]
+        ind.zTexts[i] = z
+    end
+
+    if glowHost then
+        local glow = glowHost:CreateTexture(nil, "BACKGROUND", nil, -8)
+        glow:SetPoint("TOPLEFT", glowHost, "TOPLEFT", -4, 4)
+        glow:SetPoint("BOTTOMRIGHT", glowHost, "BOTTOMRIGHT", 4, -4)
+        glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+        glow:SetVertexColor(1, 0.82, 0, 0.3)
+        glow:SetBlendMode("ADD")
+        glow:Hide()
+        ind.glow = glow
+    end
+
+    ind.animTime = 0
+    ind.cycleDuration = RESTED_Z.cycle
+    ind.zScale = 1
+    ind.SetAnimated = RestedIndicator_SetAnimated
+    ind.SetZScale = RestedIndicator_SetZScale
+    ind:SetScript("OnShow", RestedIndicator_OnShow)
+    ind:SetScript("OnHide", RestedIndicator_OnHide)
+    ind:SetAnimated(true)
+    return ind
+end
+
+-- ============================================================
 -- SAFE UNIT WATCH REGISTRATION (combat lockdown protection)
 -- ============================================================
 
@@ -1055,89 +1200,9 @@ function DF:CreateFrameElementsExtended(frame, db)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.restedIndicator:SetSize(24, 18)
-    frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)
-    frame.restedIndicator:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.restedIndicator:Hide()
-    
-    -- Create 3 Z FontStrings with increasing sizes
-    local zSizes = {8, 11, 14}
-    local zOffsets = {0, 5, 12}
-    local zYOffsets = {0, 3, 7}
-    
-    frame.restedIndicator.zTexts = {}
-    for i = 1, 3 do
-        local z = frame.restedIndicator:CreateFontString(nil, "OVERLAY")
-        DF:SafeSetFont(z, nil, zSizes[i], "OUTLINE")
-        z:SetText("Z")
-        z:SetTextColor(1, 0.82, 0, 1)
-        z:SetPoint("BOTTOMLEFT", frame.restedIndicator, "BOTTOMLEFT", zOffsets[i], zYOffsets[i])
-        z:SetAlpha(0)
-        z.baseSize = zSizes[i]
-        frame.restedIndicator.zTexts[i] = z
-    end
-
-    -- Create glow texture
-    frame.restedGlow = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame.restedGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", -4, 4)
-    frame.restedGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 4, -4)
-    frame.restedGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
-    frame.restedGlow:SetVertexColor(1, 0.82, 0, 0.3)
-    frame.restedGlow:SetBlendMode("ADD")
-    frame.restedGlow:Hide()
-    
-    -- Animation state
-    frame.restedIndicator.animTime = 0
-    frame.restedIndicator.cycleDuration = 2.0
-    
-    -- OnUpdate script for custom animation
-    frame.restedIndicator:SetScript("OnUpdate", function(self, elapsed)
-        self.animTime = self.animTime + elapsed
-        local cycle = self.animTime % self.cycleDuration
-        local progress = cycle / self.cycleDuration
-        
-        for i, z in ipairs(self.zTexts) do
-            local zDelay = (i - 1) * 0.15
-            local zProgress = (progress - zDelay) % 1
-            
-            local alpha, scale
-            if zProgress < 0.4 then
-                local t = zProgress / 0.4
-                alpha = t
-                scale = 0.5 + (t * 0.5)
-            elseif zProgress < 0.7 then
-                alpha = 1
-                scale = 1
-            else
-                local t = (zProgress - 0.7) / 0.3
-                alpha = 1 - t
-                scale = 1
-            end
-            
-            z:SetAlpha(alpha)
-            local baseSize = z.baseSize
-            DF:SafeSetFont(z, nil, baseSize * scale, "OUTLINE")
-        end
-        
-        local glowAlpha = 0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1)
-        if frame.restedGlow and frame.restedGlow:IsShown() then
-            frame.restedGlow:SetAlpha(glowAlpha)
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnShow", function(self)
-        self.animTime = 0
-        for _, z in ipairs(self.zTexts) do
-            z:Show()
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnHide", function(self)
-        for _, z in ipairs(self.zTexts) do
-            z:Hide()
-        end
-    end)
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame)
+    frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
+    frame.restedGlow = frame.restedIndicator.glow
     
     
     -- ========================================
@@ -1443,100 +1508,9 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- ========================================
     -- RESTED INDICATOR (solo mode) - Custom animated ZZZ with glow
     -- ========================================
-    frame.restedIndicator = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.restedIndicator:SetSize(24, 18)
+    frame.restedIndicator = DF:CreateRestedIndicator(frame.contentOverlay, frame)
     frame.restedIndicator:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", -18, -14)  -- Half on, half off corner
-    frame.restedIndicator:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.restedIndicator:Hide()
-    
-    -- Create 3 Z FontStrings with increasing sizes, going UP and to the right
-    -- Tighter spacing with some overlap
-    local zSizes = {8, 11, 14}  -- Smallest to largest (left to right)
-    local zOffsets = {0, 5, 12}  -- X positions (tighter, overlapping)
-    local zYOffsets = {0, 3, 7}  -- Y offsets going UP
-    
-    frame.restedIndicator.zTexts = {}
-    for i = 1, 3 do
-        local z = frame.restedIndicator:CreateFontString(nil, "OVERLAY")
-        DF:SafeSetFont(z, nil, zSizes[i], "OUTLINE")
-        z:SetText("Z")
-        z:SetTextColor(1, 0.82, 0, 1)  -- Yellow/gold color
-        z:SetPoint("BOTTOMLEFT", frame.restedIndicator, "BOTTOMLEFT", zOffsets[i], zYOffsets[i])
-        z:SetAlpha(0)
-        z.baseSize = zSizes[i]  -- PERFORMANCE FIX: Store base size to avoid table allocation in OnUpdate
-        frame.restedIndicator.zTexts[i] = z
-    end
-    
-    -- Create glow texture around the frame (more visible)
-    frame.restedGlow = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    frame.restedGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", -4, 4)
-    frame.restedGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 4, -4)
-    frame.restedGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
-    frame.restedGlow:SetVertexColor(1, 0.82, 0, 0.3)  -- Yellow glow, more visible
-    frame.restedGlow:SetBlendMode("ADD")
-    frame.restedGlow:Hide()
-    
-    -- Animation state
-    frame.restedIndicator.animTime = 0
-    frame.restedIndicator.cycleDuration = 2.0  -- Full cycle duration
-    
-    -- OnUpdate script for custom animation
-    frame.restedIndicator:SetScript("OnUpdate", function(self, elapsed)
-        self.animTime = self.animTime + elapsed
-        local cycle = self.animTime % self.cycleDuration
-        local progress = cycle / self.cycleDuration
-        
-        -- Animate each Z with staggered timing
-        for i, z in ipairs(self.zTexts) do
-            -- Each Z starts at different times in the cycle (0, 0.15, 0.30)
-            local zDelay = (i - 1) * 0.15
-            local zProgress = (progress - zDelay) % 1
-            
-            -- Z fades in, scales up, then fades out
-            local alpha, scale
-            if zProgress < 0.4 then
-                -- Fade in and scale up (0 to 0.4)
-                local t = zProgress / 0.4
-                alpha = t
-                scale = 0.5 + (t * 0.5)  -- Scale from 50% to 100%
-            elseif zProgress < 0.7 then
-                -- Hold (0.4 to 0.7)
-                alpha = 1
-                scale = 1
-            else
-                -- Fade out (0.7 to 1.0)
-                local t = (zProgress - 0.7) / 0.3
-                alpha = 1 - t
-                scale = 1
-            end
-            
-            z:SetAlpha(alpha)
-            -- Scale effect by adjusting font size
-            -- PERFORMANCE FIX: Use stored baseSize instead of creating table every frame
-            local baseSize = z.baseSize
-            DF:SafeSetFont(z, nil, baseSize * scale, "OUTLINE")
-        end
-        
-        -- Animate glow pulsing (stronger pulse)
-        local glowAlpha = 0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1)
-        if frame.restedGlow and frame.restedGlow:IsShown() then
-            frame.restedGlow:SetAlpha(glowAlpha)
-        end
-    end)
-    
-    -- Start/stop animation
-    frame.restedIndicator:SetScript("OnShow", function(self)
-        self.animTime = 0
-        for _, z in ipairs(self.zTexts) do
-            z:Show()
-        end
-    end)
-    
-    frame.restedIndicator:SetScript("OnHide", function(self)
-        for _, z in ipairs(self.zTexts) do
-            z:Hide()
-        end
-    end)
+    frame.restedGlow = frame.restedIndicator.glow
     
     
     -- ========================================
