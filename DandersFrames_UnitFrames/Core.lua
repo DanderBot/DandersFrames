@@ -250,6 +250,9 @@ function UF:RefreshAll()
     for _, f in pairs(UF.frames) do
         f.dfTextPresetOverride = f.dfDB and f.dfDB.textDesignerPreset or nil
         UF:RunOutOfCombat("layout:" .. tostring(f.dfUFUnit), function() UF.Units:ApplyLayout(f) end)
+        -- The unit-frame-only pieces are plain frames: their layout follows at once,
+        -- in combat too (ApplyLayout repeats it with the frame's own, later).
+        if UF.Elements then UF.Elements:Call("Layout", f) end
         if UF.Units.ApplyVisibility then UF.Units:ApplyVisibility(f) end
         -- A hidden frame (no target) has nothing to paint; it repaints when it shows.
         if f:IsVisible() then UF.Units:FullRefresh(f) end

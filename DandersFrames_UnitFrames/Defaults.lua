@@ -57,6 +57,147 @@ local COMMON = {
     visHideVehicle = false, visHideMounted = false, visHideSkyriding = false,
 }
 
+-- ============================================================
+-- CAST BAR / CLASS POWER / PORTRAIT / UNIT ICONS (keys new to unit frames)
+-- Shared by every unit; PER_UNIT below switches them on per unit.
+-- Colours are {r,g,b[,a]} tables (copied into the unit's table on first read,
+-- Core.lua). Textures are paths and fonts LibSharedMedia names, the same as
+-- DandersFrames' own keys.
+-- ⚠ The Border cards on these pages use their OWN keys (castbarBorder*,
+-- classPowerBorder*, portraitBorder*). The inventory listed the frame's
+-- frameBorder* keys there, which would have made the cast bar's border and the
+-- frame's border one setting.
+-- ============================================================
+local BAR = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
+local FONT = "DF Roboto SemiBold"
+
+local ELEMENTS = {
+    -- Cast bar (CastBar.lua)
+    castbarEnabled = false,
+    castbarHideIdle = true,
+    castbarLatency = false,
+    castbarEmpower = true,
+    castbarKickTick = true,
+    castbarImportantGlow = false,
+    castbarMatchWidth = true,
+    castbarWidth = 220,
+    castbarHeight = 18,
+    castbarDetached = false,
+    castbarSide = "BOTTOM",
+    castbarGap = 2,
+    castbarX = 0,
+    castbarY = 0,
+    castbarTexture = BAR,
+    castbarBgTexture = BAR,
+    castbarBgColor = { r = 0, g = 0, b = 0, a = 0.6 },
+    castbarReverse = false,
+    castbarSpark = true,
+    castbarColor = { r = 1, g = 0.7, b = 0 },
+    castbarNonInterruptibleColor = { r = 0.6, g = 0.6, b = 0.6 },
+    castbarChannelColor = { r = 0.3, g = 0.7, b = 1 },
+    castbarFailedColor = { r = 0.9, g = 0.2, b = 0.2 },
+    castbarKickNotReadyColor = { r = 0.9, g = 0.4, b = 0.1 },
+    castbarClassColor = false,
+    castbarImportantGlowColor = { r = 1, g = 0.2, b = 0.2 },
+    castbarShowIcon = true,
+    castbarIconSide = "LEFT",
+    castbarIconSize = 0,
+    castbarBorderEnabled = true,
+    castbarBorderSize = 1,
+    castbarBorderColor = { r = 0, g = 0, b = 0, a = 1 },
+    castbarShowSpell = true,
+    castbarSpellFont = FONT,
+    castbarSpellFontSize = 11,
+    castbarSpellOutline = "OUTLINE",
+    castbarSpellAnchor = "LEFT",
+    castbarSpellX = 4,
+    castbarSpellY = 0,
+    castbarSpellColor = { r = 1, g = 1, b = 1 },
+    castbarShowTimer = true,
+    castbarTimerFormat = "REMAINING",
+    castbarTimerDecimals = 1,
+    castbarTimerFont = FONT,
+    castbarTimerFontSize = 10,
+    castbarTimerOutline = "OUTLINE",
+    castbarTimerAnchor = "RIGHT",
+    castbarTimerX = -4,
+    castbarTimerY = 0,
+    castbarTimerColor = { r = 1, g = 1, b = 1 },
+    castbarShowTarget = false,
+    castbarTargetSep = " > ",
+
+    -- Class power (ClassPower.lua; the player only)
+    classPowerEnabled = false,
+    classPowerMode = "PIPS",
+    classPowerHideEmpty = false,
+    classPowerHideOOC = false,
+    classPowerRunes = true,
+    classPowerStagger = true,
+    classPowerMatchWidth = true,
+    classPowerWidth = 220,
+    classPowerHeight = 6,
+    classPowerGap = 2,
+    classPowerDetached = false,
+    classPowerPosition = "TOP",
+    classPowerX = 0,
+    classPowerY = 2,
+    classPowerTexture = BAR,
+    classPowerBg = { r = 0, g = 0, b = 0, a = 0.6 },
+    classPowerColorMode = "CLASS",
+    classPowerColor = { r = 1, g = 0.82, b = 0 },
+    classPowerEmptyColor = { r = 0.15, g = 0.15, b = 0.15, a = 0.6 },
+    classPowerChargedColor = { r = 0.4, g = 0.8, b = 1 },
+    classPowerBorderEnabled = true,
+    classPowerBorderSize = 1,
+    classPowerBorderColor = { r = 0, g = 0, b = 0, a = 1 },
+
+    -- Portrait (Portrait.lua)
+    portraitEnabled = false,
+    portraitMode = "3D",
+    portraitNpcMode = "3D",
+    portraitDesatDead = true,
+    portraitSide = "LEFT",
+    portraitSize = 0,
+    portraitX = 0,
+    portraitY = 0,
+    portraitAlpha = 1,
+    portrait3DZoom = 1,
+    portrait3DRotation = 0,
+    portraitBgColor = { r = 0, g = 0, b = 0, a = 0.8 },
+    portraitMirror = false,
+    portraitBorderEnabled = true,
+    portraitBorderSize = 1,
+    portraitBorderColor = { r = 0, g = 0, b = 0, a = 1 },
+
+    -- Unit icons (Indicators.lua)
+    restingIconEnabled = false,
+    restingIconSize = 16,
+    restingIconAnchor = "TOPLEFT",
+    restingIconX = 0,
+    restingIconY = 0,
+    pvpIconEnabled = false,
+    pvpIconSize = 16,
+    pvpIconAnchor = "TOPRIGHT",
+    pvpIconX = 0,
+    pvpIconY = 0,
+    classificationEnabled = false,
+    classificationStyle = "ICON",
+    classificationSize = 16,
+    classificationAnchor = "TOPRIGHT",
+    classificationX = 0,
+    classificationY = 0,
+}
+for k, v in pairs(ELEMENTS) do COMMON[k] = v end
+
+-- A detached element's position record: anchored to its owner, so the first
+-- detach leaves it where the attached one was (DandersMover solves the x/y;
+-- without the mover the x/y below are used and the anchor is ignored).
+local function Detached(unit, edge, x, y)
+    return { point = "CENTER", x = x, y = y,
+             anchor = { target = "DandersFrames_UnitFrames:" .. unit, edge = edge,
+                        align = "center", offsetX = 0, offsetY = 0 } }
+end
+
 -- Enemy-frame aura filter: debuffs you cast, buffs shown in full.
 local ENEMY_AURAS = {
     showDebuffs = true,
@@ -83,6 +224,20 @@ local PER_UNIT = {
         dispelOverlayEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = -280, y = -200 },
+        -- Spec Q7: the player cast bar is on (Blizzard's is hidden while it is).
+        -- ⚠ DETACHED by default, centred low on the screen where Blizzard's sits:
+        -- attached under the frame it would sit on top of the pet frame, which is
+        -- anchored to the player's bottom edge.
+        castbarEnabled = true,
+        castbarLatency = true,
+        castbarDetached = true,
+        castbarPosition = { point = "CENTER", x = 0, y = -250 },
+        classPowerEnabled = true,
+        classPowerPositionRecord = Detached("player", "top", -280, -175),
+        portraitEnabled = true,
+        restingIconEnabled = true,
+        pvpIconEnabled = true,
+        combatIconEnabled = true,
     },
     target = {
         frameWidth = 220, frameHeight = 46,
@@ -94,6 +249,11 @@ local PER_UNIT = {
         selectionHighlightMode = "NONE",
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = 280, y = -200 },
+        castbarEnabled = true,
+        castbarPosition = Detached("target", "bottom", 280, -234),
+        portraitEnabled = true,
+        pvpIconEnabled = true,
+        classificationEnabled = true,
     },
     targettarget = {
         frameWidth = 110, frameHeight = 24,
@@ -116,6 +276,11 @@ local PER_UNIT = {
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = -280, y = -300 },
+        castbarEnabled = true,
+        castbarHeight = 16,
+        castbarPosition = Detached("focus", "bottom", -280, -328),
+        portraitEnabled = true,
+        classificationEnabled = true,
     },
     pet = {
         frameWidth = 110, frameHeight = 24,
@@ -124,6 +289,8 @@ local PER_UNIT = {
         showBuffs = false, showDebuffs = false,
         oorEnabled = false,
         textDesignerPreset = UF.TEXT_PRESET_SMALL,
+        castbarHeight = 12,
+        castbarPosition = Detached("pet", "bottom", -335, -260),
         -- Under the player frame, left edges aligned.
         position = { point = "CENTER", x = -335, y = -239,
                      anchor = { target = "DandersFrames_UnitFrames:player", edge = "bottom",
@@ -137,6 +304,9 @@ local PER_UNIT = {
         oorEnabled = true,
         textDesignerPreset = UF.TEXT_PRESET,
         position = { point = "CENTER", x = 480, y = 120 },
+        castbarEnabled = true,
+        castbarHeight = 14,
+        classificationEnabled = true,
     },
 }
 

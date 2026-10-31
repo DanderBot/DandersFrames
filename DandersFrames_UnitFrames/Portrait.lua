@@ -1,0 +1,283 @@
+local addonName, UF = ...
+
+-- ============================================================
+-- PORTRAIT (spec §3.4)
+-- A portrait beside the frame (Left / Right) or over it (Inside Left / Inside
+-- Right). Styles: a 3D model (PlayerModel), Blizzard's 2D portrait
+-- (SetPortraitTexture), the class icon, or the spec icon (the player's own; other
+-- units fall back to their class icon). "For NPCs Use" picks 3D or 2D for units
+-- without a class (Class / Spec Icon have nothing to show for an NPC).
+-- Structure ported from DandersUF's Frames/Portrait.lua (the author's own).
+--
+-- ☠ SECRET VALUES. A unit's class token can be secret: it is checked with
+-- issecretvalue and an unreadable class shows the NPC style instead. The dead
+-- check (Desaturate When Dead) only desaturates when the answer is readable.
+-- ============================================================
+
+local DF = DandersFrames
+if not DF then return end
+
+local ipairs, type, pcall, select, tonumber = ipairs, type, pcall, select, tonumber
+
+local PO = { NAME = "Portrait" }
+UF.Portrait = PO
+
+local E = UF.Elements
+local K = E and E.Kit
+if not (E and K) then return end
+local IsSecret = K.IsSecret
+
+PO.UNITS = { player = true, target = true, focus = true, pet = true, boss = true }
+PO.EVENTS = { "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED" }
+PO.MODES = { ["3D"] = true, ["2D"] = true, CLASS = true, SPEC = true }
+PO.QUESTION_MODEL = "interface/buttons/talktomequestionmark.m2"
+PO.QUESTION_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+-- Class icon fallback when there is no class atlas (texcoords into the old sheet).
+PO.CLASS_SHEET = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
+PO.CLASS_TCOORDS = {
+    WARRIOR = { 0, 0.25, 0, 0.25 }, MAGE = { 0.25, 0.5, 0, 0.25 }, ROGUE = { 0.5, 0.75, 0, 0.25 },
+    DRUID = { 0.75, 1, 0, 0.25 }, HUNTER = { 0, 0.25, 0.25, 0.5 }, SHAMAN = { 0.25, 0.5, 0.25, 0.5 },
+    PRIEST = { 0.5, 0.75, 0.25, 0.5 }, WARLOCK = { 0.75, 1, 0.25, 0.5 }, PALADIN = { 0, 0.25, 0.5, 0.75 },
+    DEATHKNIGHT = { 0.25, 0.5, 0.5, 0.75 }, MONK = { 0.5, 0.75, 0.5, 0.75 },
+    DEMONHUNTER = { 0.75, 1, 0.5, 0.75 }, EVOKER = { 0, 0.25, 0.75, 1 },
+}
+
+local function Enabled(db) return db and db.portraitEnabled and true or false end
+
+function PO:Attach(f)
+    if not f or f.dfUFPortrait or not PO.UNITS[f.dfUFUnit] then return end
+    local p = CreateFrame("Frame", nil, f)
+    p:Hide()
+    p.owner = f
+    p.bg = p:CreateTexture(nil, "BACKGROUND")
+    p.bg:SetAllPoints(p)
+    p.bg:SetTexture(K.WHITE)
+    p.tex = p:CreateTexture(nil, "ARTWORK")
+    p.tex:SetAllPoints(p)
+    f.dfUFPortrait = p
+    if not f.dfUFPreview then
+        local l = CreateFrame("Frame")
+        l:SetScript("OnEvent", function(_, event, unit)
+            if unit == f.unit and f:IsVisible() then PO:Update(f) end
+        end)
+        p.listener = l
+    end
+    return p
+end
+
+-- The model is made on first use: most styles never need one.
+function PO:Model(p)
+    if p.model then return p.model end
+    local m = CreateFrame("PlayerModel", nil, p)
+    m:SetAllPoints(p)
+    p.model = m
+    return m
+end
+
+function PO:Layout(f)
+    local p = f and f.dfUFPortrait
+    if not p then return end
+    local db = K.DB(f)
+    if not Enabled(db) then p:Hide(); return end
+    local fh = K.FrameHeight(f, db)
+    local size = tonumber(db.portraitSize) or 0
+    if size <= 0 then size = fh end
+    p:SetSize(size, size)
+    p:ClearAllPoints()
+    local x, y = tonumber(db.portraitX) or 0, tonumber(db.portraitY) or 0
+    local side = db.portraitSide or "LEFT"
+    if side == "RIGHT" then
+        p:SetPoint("LEFT", f, "RIGHT", 2 + x, y)
+    elseif side == "INSIDE_LEFT" then
+        p:SetPoint("LEFT", f, "LEFT", x, y)
+    elseif side == "INSIDE_RIGHT" then
+        p:SetPoint("RIGHT", f, "RIGHT", x, y)
+    else
+        p:SetPoint("RIGHT", f, "LEFT", -2 + x, y)
+    end
+    -- Inside the frame it sits over the bars and under the text.
+    p:SetFrameLevel(f:GetFrameLevel() + ((side == "INSIDE_LEFT" or side == "INSIDE_RIGHT") and 4 or 1))
+    p:SetAlpha(tonumber(db.portraitAlpha) or 1)
+    p.bg:SetVertexColor(K.RGBA(db.portraitBgColor, 0, 0, 0, 0.8))
+    K.Border(p, db.portraitBorderEnabled ~= false, db.portraitBorderSize, db.portraitBorderColor)
+    if not f.dfUFPreview then PO:Update(f) end
+end
+
+-- The unit's class token, or nil (an NPC, or a secret answer).
+local function UnitClassToken(unit)
+    if not (UnitIsPlayer and UnitClass) then return nil end
+    local isPlayer = UnitIsPlayer(unit)
+    if IsSecret(isPlayer) or not isPlayer then return nil end
+    local class = select(2, UnitClass(unit))
+    if type(class) ~= "string" or IsSecret(class) then return nil end
+    return class
+end
+
+function PO:SetClassIcon(p, class, mirror)
+    local atlas = GetClassAtlas and GetClassAtlas(class)
+    if atlas then
+        p.tex:SetAtlas(atlas)
+        if mirror then p.tex:SetTexCoord(1, 0, 0, 1) else p.tex:SetTexCoord(0, 1, 0, 1) end
+        return
+    end
+    p.tex:SetTexture(PO.CLASS_SHEET)
+    local c = PO.CLASS_TCOORDS[class]
+    if c then
+        if mirror then p.tex:SetTexCoord(c[2], c[1], c[3], c[4]) else p.tex:SetTexCoord(c[1], c[2], c[3], c[4]) end
+    end
+end
+
+function PO:PlayerSpecIcon()
+    if not (GetSpecialization and GetSpecializationInfo) then return nil end
+    local idx = GetSpecialization()
+    if not idx or IsSecret(idx) then return nil end
+    local icon = select(4, GetSpecializationInfo(idx))
+    if IsSecret(icon) then return nil end
+    return icon
+end
+
+-- What to draw for `unit` with these settings: "3D" | "2D" | "CLASS" | "SPEC".
+function PO:StyleFor(db, unit, class)
+    local mode = PO.MODES[db.portraitMode] and db.portraitMode or "3D"
+    if (mode == "CLASS" or mode == "SPEC") and not class then
+        return (db.portraitNpcMode == "2D") and "2D" or "3D"
+    end
+    if mode == "SPEC" and unit ~= "player" then return "CLASS" end
+    return mode
+end
+
+function PO:Update(f)
+    local p = f and f.dfUFPortrait
+    if not p or f.dfUFPreview then return end
+    local db = K.DB(f)
+    local unit = f.unit
+    if not Enabled(db) or not unit or not (UnitExists and UnitExists(unit)) then
+        p:Hide()
+        return
+    end
+    local class = UnitClassToken(unit)
+    local style = PO:StyleFor(db, unit, class)
+    PO:Paint(p, db, style, unit, class)
+    PO:UpdateDead(f)
+    p:Show()
+end
+
+-- Desaturate When Dead (the 2D styles), only on a readable answer.
+function PO:UpdateDead(f)
+    local p = f and f.dfUFPortrait
+    if not p or not p.tex.SetDesaturated then return end
+    local db = K.DB(f)
+    local dead = false
+    if db and db.portraitDesatDead ~= false and UnitIsDeadOrGhost and f.unit then
+        local d = UnitIsDeadOrGhost(f.unit)
+        if not IsSecret(d) and d then dead = true end
+    end
+    p.tex:SetDesaturated(dead)
+end
+
+function PO:Paint(p, db, style, unit, class)
+    local mirror = db.portraitMirror and true or false
+    if style == "3D" then
+        p.tex:Hide()
+        local m = PO:Model(p)
+        m:Show()
+        local visible = UnitIsVisible and UnitIsVisible(unit)
+        if IsSecret(visible) then visible = true end
+        pcall(m.ClearModel, m)
+        if unit and visible then
+            pcall(m.SetUnit, m, unit)
+            pcall(m.SetPortraitZoom, m, tonumber(db.portrait3DZoom) or 1)
+            local rot = math.rad(tonumber(db.portrait3DRotation) or 0)
+            if mirror then rot = -rot end
+            pcall(m.SetFacing, m, rot)
+        else
+            pcall(m.SetModel, m, PO.QUESTION_MODEL)
+        end
+        return
+    end
+    if p.model then p.model:Hide() end
+    p.tex:Show()
+    if style == "2D" then
+        if unit and SetPortraitTexture then SetPortraitTexture(p.tex, unit) end
+        if mirror then p.tex:SetTexCoord(0.92, 0.08, 0.08, 0.92) else p.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    elseif style == "SPEC" then
+        local icon = PO:PlayerSpecIcon()
+        if icon then
+            p.tex:SetTexture(icon)
+            if mirror then p.tex:SetTexCoord(0.92, 0.08, 0.08, 0.92) else p.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+        elseif class then
+            PO:SetClassIcon(p, class, mirror)
+        end
+    elseif style == "CLASS" then
+        PO:SetClassIcon(p, class, mirror)
+    end
+end
+
+-- ============================================================
+-- EVENTS (only while the frame is shown and the portrait is on)
+-- ============================================================
+function PO:SetActive(f, on)
+    local p = f and f.dfUFPortrait
+    if not p or not p.listener then return end
+    on = on and Enabled(K.DB(f)) or false
+    if p.eventsOn == on then
+        if not on then p:Hide() end
+        return
+    end
+    p.eventsOn = on
+    local unit = f.dfUFUnit
+    local pair = (unit == "player") and { "player", "vehicle" } or (unit == "pet") and { "pet", "player" } or nil
+    for _, ev in ipairs(PO.EVENTS) do
+        if on then
+            if pair then pcall(p.listener.RegisterUnitEvent, p.listener, ev, pair[1], pair[2])
+            else pcall(p.listener.RegisterUnitEvent, p.listener, ev, unit) end
+        else
+            pcall(p.listener.UnregisterEvent, p.listener, ev)
+        end
+    end
+    if not on then p:Hide() end
+end
+
+function PO:Refresh(f)
+    local p = f and f.dfUFPortrait
+    if not p or f.dfUFPreview then return end
+    local want = Enabled(K.DB(f)) and f:IsVisible() or false
+    if (p.eventsOn or false) ~= want then PO:SetActive(f, want) end
+    if want then PO:Update(f) else p:Hide() end
+end
+
+function PO:OnUnitChanged(f) PO:Update(f) end
+
+-- Dead / alive changes the desaturation only (a model repaint per health tick
+-- would flicker).
+function PO:OnUnitEvent(f, event)
+    if event == "UNIT_HEALTH" or event == "UNIT_FLAGS" or event == "UNIT_CONNECTION" then
+        local p = f.dfUFPortrait
+        if p and p:IsShown() then PO:UpdateDead(f) end
+    end
+end
+
+-- ============================================================
+-- PREVIEW: the player's own portrait on the player preview, a question mark on
+-- the others (their sample units do not exist).
+-- ============================================================
+function PO:Preview(f)
+    local p = f and f.dfUFPortrait
+    if not p then return end
+    local db = K.DB(f)
+    PO:Layout(f)
+    if not Enabled(db) then p:Hide(); return end
+    if f.dfUFUnit == "player" then
+        local class = UnitClassToken("player")
+        PO:Paint(p, db, PO:StyleFor(db, "player", class), "player", class)
+    else
+        if p.model then p.model:Hide() end
+        p.tex:Show()
+        p.tex:SetTexture(PO.QUESTION_ICON)
+        p.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+    p:Show()
+end
+
+E:Register(PO)

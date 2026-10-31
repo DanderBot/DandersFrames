@@ -95,6 +95,14 @@ local function TD(f, hint)
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(f, hint) end
 end
 
+-- The unit-frame-only pieces (Elements.lua: cast bar, class power, portrait,
+-- unit icons). Absent in a build without them.
+local function Elements(method, f, ...)
+    local E = UF.Elements
+    if E then E:Call(method, f, ...) end
+end
+Units.CallElements = Elements
+
 -- ============================================================
 -- PAINTING (DF's updaters, nothing of our own)
 -- ============================================================
@@ -103,6 +111,7 @@ function Units:FullRefresh(f)
     if DF.FullFrameRefresh then DF:FullFrameRefresh(f) end
     TD(f, "all")
     if RANGED[f.dfUFUnit] and DF.UpdateRange then DF:UpdateRange(f) end
+    Elements("Refresh", f)
 end
 
 -- One full repaint per frame per rendered frame.
@@ -213,6 +222,7 @@ function Units.OnEvent(self, event, unit)
     if unit and unit ~= self.unit then return end
     local h = HANDLERS[event]
     if h then h(self, unit) end
+    Elements("OnUnitEvent", self, event, unit)
 end
 
 -- ============================================================
@@ -299,6 +309,7 @@ function Units:UpdateVehicle(f)
     if f.unit ~= want then
         f.unit = want
         UF.Debug("%s frame shows %s", tostring(f.dfUFUnit), want)
+        Elements("OnUnitChanged", f)
         Units:QueueFullRefresh(f)
     end
 end
@@ -311,6 +322,7 @@ function Units:ApplyLayout(f)
     if DF.ApplyFrameLayout then DF:ApplyFrameLayout(f) end
     local db = f.dfDB
     f:SetScale((db and db.frameScale) or 1)
+    Elements("Layout", f)
 end
 
 function Units:ApplyPosition(f)
@@ -411,11 +423,13 @@ end
 local function OnShow(self)
     Units:SetEventsEnabled(self, true)
     if VEHICLE[self.dfUFUnit] then Units:UpdateVehicle(self) end
+    Elements("SetActive", self, true)
     Units:FullRefresh(self)
 end
 
 local function OnHide(self)
     Units:SetEventsEnabled(self, false)
+    Elements("SetActive", self, false)
 end
 
 function Units:Spawn(unit)
@@ -450,6 +464,7 @@ function Units:Spawn(unit)
     if ClickCastFrames then ClickCastFrames[f] = true end
     if RANGED[unit] and DF.RegisterRangeFrame then DF:RegisterRangeFrame(f) end
     UF.frames[unit] = f
+    Elements("Attach", f)
     Units:ApplyLayout(f)
     Units:ApplyPosition(f)
     Units:ApplyVisibility(f)
@@ -494,6 +509,9 @@ function Units:OnDriverEvent(event, unit)
         Units:SweepFrameFade()
     elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
         Units:SweepFrameFade()
+        for _, f in pairs(frames) do
+            if f:IsVisible() then Elements("OnUnitEvent", f, event, nil) end
+        end
     elseif event == "UNIT_TARGET" then
         -- The target changed ITS target: the target-of-target is someone else now.
         local tt = frames.targettarget

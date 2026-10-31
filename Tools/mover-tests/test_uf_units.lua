@@ -379,6 +379,34 @@ runTimers()
 eq(n("FullFrameRefresh", "pet"), 0, "someone else's pet: ignored")
 PT:Hide()
 
+print("-- Elements: the frame's lifecycle reaches them (Elements.lua)")
+local calls = {}
+UF.Elements = { Call = function(_, method, f, ...)
+    local extra = (select("#", ...) > 0) and (":" .. tostring((...))) or ""
+    calls[#calls + 1] = method .. ":" .. tostring(f and f.dfUFUnit) .. extra
+end }
+UF.frames.focus = nil      -- spawned again, now with the elements in place
+local F2 = Units:Spawn("focus")
+check(table.concat(calls, ","):find("Attach:focus", 1, true) == 1, "spawn: Attach first")
+check(table.concat(calls, ","):find("Layout:focus", 1, true), "...then Layout")
+calls = {}
+F2:Show()
+local seq = table.concat(calls, ",")
+check(seq:find("SetActive:focus:true", 1, true), "shown: SetActive(true)")
+check(seq:find("Refresh:focus", 1, true), "...and a full refresh reaches Refresh")
+calls = {}
+Units.OnEvent(F2, "UNIT_FACTION", "focus")
+eq(calls[1], "OnUnitEvent:focus:UNIT_FACTION", "a unit event reaches OnUnitEvent")
+calls = {}
+F2:Hide()
+eq(calls[1], "SetActive:focus:false", "hidden: SetActive(false)")
+calls = {}
+Units:OnDriverEvent("PLAYER_REGEN_DISABLED")
+local regen = false
+for _, c in ipairs(calls) do if c == "OnUnitEvent:player:PLAYER_REGEN_DISABLED" then regen = true end end
+check(regen, "combat edges reach the shown frames' elements")
+UF.Elements = nil
+
 -- By NAME, not pairs(G): a global that was nil before is skipped by pairs and
 -- would leak this file's stub into every later suite.
 for _, k in ipairs(G_NAMES) do _G[k] = G[k] end

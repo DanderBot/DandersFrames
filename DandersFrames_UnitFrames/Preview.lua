@@ -190,6 +190,9 @@ function P:Acquire(unit)
     if DF.CreateFrameElements then DF:CreateFrameElements(f, false) end
     if DF.ApplyFrameStyle then DF:ApplyFrameStyle(f) end
     if DF.InitStandaloneFrame then DF:InitStandaloneFrame(f, db) end
+    -- The unit-frame-only pieces (cast bar, class power, portrait, unit icons),
+    -- built without event listeners: a preview frame only ever shows fake data.
+    if UF.Elements then UF.Elements:Call("Attach", f) end
     f:SetScript("OnEnter", OnEnter)
     f:SetScript("OnLeave", OnLeave)
     f:Hide()
@@ -218,6 +221,8 @@ function P:Paint(f)
     elseif DF.FullFrameRefresh then
         DF:FullFrameRefresh(f)
     end
+    -- A cast mid-way, class power half full, the portrait and icons (spec §1.8).
+    if UF.Elements then UF.Elements:Call("Preview", f) end
 end
 
 -- The units that get a preview: those this build draws itself.
@@ -241,6 +246,9 @@ function P:Show()
         DF:EnsureOptionsLoaded()
     end
     P.shown = true
+    -- The parent carries the DETACHED pieces too (a detached preview cast bar is
+    -- parented here, not to its frame), so it is shown and hidden with the preview.
+    P:GetParent():Show()
     for _, unit in ipairs(P:Units()) do
         local f = P:Acquire(unit)
         f:Show()
@@ -253,6 +261,7 @@ end
 function P:Hide()
     P.shown = false
     for _, f in pairs(P.frames) do f:Hide() end
+    if P.parent then P.parent:Hide() end
     FadeLive(1)
     -- The live frames missed nothing (they kept their events), but a repaint costs
     -- little and settles anything a settings change did meanwhile.

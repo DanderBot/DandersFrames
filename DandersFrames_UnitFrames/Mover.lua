@@ -27,7 +27,7 @@ local addonName, UF = ...
 local DF = DandersFrames
 if not DF then return end
 
-local ipairs, pairs, pcall = ipairs, pairs, pcall
+local ipairs, pairs, pcall, type = ipairs, pairs, pcall, type
 
 local Lib = LibStub and LibStub("DandersMover-1.0", true)
 
@@ -108,6 +108,142 @@ function M:BuildDef(unit)
     return def
 end
 
+-- ============================================================
+-- CHILD ELEMENTS (spec §1.5): a DETACHED cast bar / class power is an element of
+-- its own, `<unit>.castbar` / `player.classpower`, registered only while it is
+-- detached (attached, it is laid out inside the frame and is no element). Its
+-- record lives in the unit's settings (castbarPosition / classPowerPositionRecord)
+-- and starts anchored to its owner, so a first detach moves nothing. Not secure:
+-- these are plain frames, so a write applies at once, in combat too.
+-- ============================================================
+M.CHILDREN = {
+    castbar = { record = "castbarPosition", detached = "castbarDetached", enabled = "castbarEnabled",
+                field = "dfUFCastBar", edge = "bottom" },
+    classpower = { record = "classPowerPositionRecord", detached = "classPowerDetached",
+                   enabled = "classPowerEnabled", field = "dfUFClassPower", edge = "top" },
+}
+M.children = M.children or {}
+
+function M.ChildKey(unit, kind) return unit .. "." .. kind end
+
+function M:ChildTitle(unit, kind)
+    local L = DF.L or {}
+    local what = (kind == "castbar") and (L["Cast Bar"] or "Cast Bar") or (L["Class Power"] or "Class Power")
+    return string.format("%s \194\183 %s", M:Title(unit), what)
+end
+
+-- The element frame a child stands for right now (the preview's while it is up).
+function M:ChildFrame(unit, kind)
+    local spec = M.CHILDREN[kind]
+    local owner = M:FrameFor(unit)
+    return owner and spec and owner[spec.field] or nil
+end
+
+function M:ChildRect(unit, kind)
+    local el = M:ChildFrame(unit, kind)
+    if not (el and el:IsVisible()) then return nil end
+    local cx, cy = el:GetCenter()
+    if not cx then return nil end
+    local ratio = el:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local ux, uy = UIParent:GetCenter()
+    local w, h = el:GetSize()
+    return { x = cx * ratio - ux, y = cy * ratio - uy, w = w * ratio, h = h * ratio }
+end
+
+-- Re-place the live and preview copies at the record.
+function M:PlaceChild(unit, kind)
+    local spec = M.CHILDREN[kind]
+    local record = UF:GetUnitDB(unit)[spec.record]
+    local K = UF.Elements and UF.Elements.Kit
+    for _, owner in ipairs({ UF.frames[unit], UF.Preview and UF.Preview.frames and UF.Preview.frames[unit] }) do
+        local el = owner and owner[spec.field]
+        if el and K then K.PlaceDetached(el, owner, record) end
+    end
+end
+
+function M:BuildChildDef(unit, kind)
+    local L = DF.L or {}
+    local spec = M.CHILDREN[kind]
+    local defaults = UF.UnitDefaults and UF.UnitDefaults[unit]
+    return {
+        title     = M:ChildTitle(unit, kind),
+        group     = L["Unit Frames"] or "Unit Frames",
+        getFrame  = function() return M:ChildFrame(unit, kind) end,
+        getRect   = function() return M:ChildRect(unit, kind) end,
+        getPos    = function() return UF:GetUnitDB(unit)[spec.record] end,
+        onChanged = function() M:PlaceChild(unit, kind) end,
+        default   = defaults and defaults[spec.record] and DF:DeepCopy(defaults[spec.record]) or nil,
+        getSize   = function()
+            local el = M:ChildFrame(unit, kind)
+            if not el then return nil end
+            local w, h = el:GetSize()
+            local ratio = el:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            return w * ratio, h * ratio
+        end,
+    }
+end
+
+-- Should this child be an element now? Its owner is registered, and the piece is
+-- on and detached.
+function M:WantsChild(unit, kind)
+    local spec = M.CHILDREN[kind]
+    if not spec or not (M.registered and M.registered[unit]) then return false end
+    local db = UF:GetUnitDB(unit)
+    return (db[spec.enabled] and db[spec.detached]) and true or false
+end
+
+-- Register / unregister one child to match its settings. Called from the
+-- element's Layout (every settings change) and after Init.
+function M:SyncChild(unit, kind)
+    if not Lib or not M.initialised or not M.CHILDREN[kind] then return false end
+    local key = M.ChildKey(unit, kind)
+    local want = M:WantsChild(unit, kind)
+    if want and not M.children[key] then
+        Lib:Register(M.ADDON_KEY, key, M:BuildChildDef(unit, kind))
+        M.children[key] = true
+        pcall(Lib.Apply, Lib, M.ADDON_KEY, key)
+        UF.Debug("mover: %s registered", key)
+    elseif not want and M.children[key] then
+        if Lib.Unregister then pcall(Lib.Unregister, Lib, M.ADDON_KEY, key) end
+        M.children[key] = nil
+        UF.Debug("mover: %s unregistered", key)
+    end
+    return want
+end
+
+function M:SyncChildren()
+    for _, unit in ipairs(UF.SPAWNED_UNITS) do
+        for kind in pairs(M.CHILDREN) do M:SyncChild(unit, kind) end
+    end
+end
+
+-- "Follow the Frame" on a detached child's card: anchored to its owner's edge
+-- (Lib:SetAnchor), or free where it stands (Lib:Detach). Without the mover the
+-- record's anchor is written directly (and, as for every record, ignored until
+-- the mover is installed).
+function M:IsChildFollowing(unit, kind)
+    local spec = M.CHILDREN[kind]
+    local rec = spec and UF:GetUnitDB(unit)[spec.record]
+    return type(rec) == "table" and type(rec.anchor) == "table"
+end
+
+function M:SetChildFollowing(unit, kind, follow)
+    local spec = M.CHILDREN[kind]
+    if not spec then return false end
+    local key = M.ChildKey(unit, kind)
+    local anchor = { target = M.ADDON_KEY .. ":" .. unit, edge = spec.edge, align = "center",
+                     offsetX = 0, offsetY = 0 }
+    if Lib and M.children[key] then
+        if follow then return Lib:SetAnchor(M.ADDON_KEY, key, anchor) and true or false end
+        return Lib:Detach(M.ADDON_KEY, key) and true or false
+    end
+    local rec = UF:GetUnitDB(unit)[spec.record]
+    if type(rec) ~= "table" then return false end
+    rec.anchor = follow and anchor or nil
+    M:PlaceChild(unit, kind)
+    return true
+end
+
 -- Register every spawned frame. Returns false when the lib is not installed.
 function M:Init()
     if not Lib then return false end
@@ -137,6 +273,7 @@ function M:Init()
             if UF.Preview then UF.Preview:SetOwner("unlock", false) end
         end)
     end
+    M:SyncChildren()
     UF.Debug("registered unit frames with DandersMover")
     return true
 end
