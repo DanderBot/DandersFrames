@@ -10,7 +10,9 @@ local NS = ...
 --      glow only when a host is given;
 --   2. animated (default): an OnUpdate is set and drives alpha/size + glow;
 --   3. static: no OnUpdate, Zs at alpha 1 and base size, glow at 0.3;
---   4. SetZScale scales sizes, offsets and the container.
+--   4. SetZScale scales sizes, offsets and the container;
+--   5. the OUTER style: a frame of eight sliced pieces hanging outside the
+--      host, its own pulse range, and SetGlowExtents widening its rect.
 -- ============================================================
 
 local src = df_file_source("Frames/Create.lua")
@@ -39,6 +41,9 @@ local function newRegion(kind)
     function r:SetTexture(t) self.texture = t end
     function r:SetVertexColor(...) self.vertex = { ... } end
     function r:SetBlendMode(m) self.blend = m end
+    function r:SetTexCoord(...) self.coords = { ... } end
+    function r:SetWidth(w) self.w = w end
+    function r:SetHeight(h) self.h = h end
     function r:CreateFontString(_, layer) local f = newRegion("FontString"); f.layer = layer; return f end
     function r:CreateTexture(_, layer, _, sub) local t = newRegion("Texture"); t.layer = layer; t.sub = sub; return t end
     return r
@@ -118,6 +123,46 @@ for i = 1, 3 do
     eq(ind.zTexts[i].points[1][4], OX[i] * 2, "rested: scaled Z" .. i .. " x offset")
     eq(ind.zTexts[i].points[1][5], OY[i] * 2, "rested: scaled Z" .. i .. " y offset")
 end
+
+-- ---- 5. the OUTER style -------------------------------------------
+local oh = newRegion("Frame"); oh.level = 7
+local outer = fakeDF:CreateRestedIndicator(parent, oh, { glowStyle = "OUTER" })
+local og = outer.glow
+eq(outer.glowStyleName, "OUTER", "outer: style recorded")
+eq(og.kind, "Frame", "outer: the glow is a frame of pieces")
+eq(og.parent, oh, "outer: parented to the host")
+eq(og.level, 7, "outer: at the host's level")
+eq(og.shown, false, "outer: starts hidden")
+eq(#og.pieces, 8, "outer: eight pieces (the centre is never drawn)")
+for i, t in ipairs(og.pieces) do
+    eq(t.texture, "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlow", "outer: piece " .. i .. " art")
+    eq(t.blend, "ADD", "outer: piece " .. i .. " additive")
+    eq(t.vertex[1], 1, "outer: piece " .. i .. " gold r"); eq(t.vertex[2], 0.82, "outer: piece " .. i .. " gold g")
+end
+-- the top-left corner hangs off the rect's TOPLEFT by its BOTTOMRIGHT
+eq(og.pieces[1].points[1][1], "BOTTOMRIGHT", "outer: corner hangs outside")
+eq(og.pieces[1].points[1][3], "TOPLEFT", "...off the rect's corner")
+eq(og.pieces[1].w, 10, "outer: default spread 10")
+eq(og.pieces[2].h, 10, "outer: top edge 10 tall")
+eq(og.points[1][4], 0, "outer: no outset by default (left)")
+eq(og.points[1][5], 0, "outer: no outset by default (top)")
+outer:SetGlowExtents(30, 5, 2, 3)
+eq(og.points[1][2], oh, "extents: anchored to the host")
+eq(og.points[1][4], -30, "extents: left widens the rect")
+eq(og.points[1][5], 2, "extents: top")
+eq(og.points[2][4], 5, "extents: right")
+eq(og.points[2][5], -3, "extents: bottom")
+og:Show()
+outer:GetScript("OnUpdate")(outer, 0.3)
+check(og.alpha >= 0.5 and og.alpha <= 1, "outer: pulses within 0.5-1")
+outer:SetAnimated(false)
+eq(og.alpha, 0.75, "outer: static at 0.75")
+local spread = fakeDF:CreateRestedIndicator(parent, oh, { glowStyle = "OUTER", glowSpread = 6 })
+eq(spread.glow.pieces[1].w, 6, "outer: glowSpread honoured")
+-- FILL keeps its extents path too
+ind:SetGlowExtents(10, 0, 0, 0)
+eq(ind.glow.points[1][4], -14, "fill: extents add to the 4px outset")
+eq(fakeDF:CreateRestedIndicator(parent, host).glowStyleName, "FILL", "fill: the default style")
 
 -- ---- party/raid call sites use the builder ---------------------------
 local n = 0

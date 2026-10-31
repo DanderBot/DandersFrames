@@ -654,7 +654,13 @@ local RegisterUnitWatch = RegisterUnitWatch
 -- ============================================================
 -- RESTED INDICATOR BUILDER
 -- Three gold "Z"s (smallest to largest, stepping up and right)
--- plus an optional ADD-blended glow around a host frame.
+-- plus an optional ADD-blended glow around a host frame, in one of
+-- two styles:
+--   FILL  (default) a flat gold wash behind the host, 4px outset --
+--         the party/raid player-frame look
+--   OUTER a soft glow hanging OUTSIDE the host's edges (DF_OuterGlow,
+--         a nine-slice whose centre is never drawn), so nothing on the
+--         frame covers it; :SetGlowExtents widens it past the host
 -- Animated: the Zs fade/scale in a staggered loop and the glow
 -- pulses. Static: all Zs at full alpha and base size, glow at a
 -- fixed alpha, no OnUpdate running.
@@ -667,8 +673,60 @@ local RESTED_Z = {
     offsetsY = {0, 3, 7},
     width = 24, height = 18,
     cycle = 2.0,
-    staticGlowAlpha = 0.3,  -- midpoint of the animated pulse (0.15 - 0.45)
 }
+
+-- Per glow style: the pulse runs mid +/- amp (static = mid), and how far the
+-- glow's rect sits outside its host. FILL's numbers are the original look
+-- (0.15 - 0.45, static 0.3).
+local RESTED_GLOW = {
+    FILL  = { mid = 0.3,  amp = 0.15, outset = 4 },
+    OUTER = { mid = 0.75, amp = 0.25, outset = 0 },
+}
+
+-- The OUTER art: 64px, sliced 24 / 16 / 24 (corners / middle band / corners).
+-- Alpha is full at the inner edge and falls to nothing 24px out.
+local OUTER_GLOW_FILE = "Interface\\AddOns\\DandersFrames\\Media\\DF_OuterGlow"
+local OUTER_GLOW_SPREAD = 10
+local OG_LO, OG_HI = 24 / 64, 40 / 64
+-- { texcoords l, r, t, b; then point -> relativePoint pairs on the glow's rect;
+--   "wh" / "w" / "h" = which side(s) take the spread as a fixed size }
+local OUTER_GLOW_PIECES = {
+    { 0, OG_LO, 0, OG_LO,         { "BOTTOMRIGHT", "TOPLEFT" }, nil, "wh" },
+    { OG_LO, OG_HI, 0, OG_LO,     { "BOTTOMLEFT", "TOPLEFT" }, { "BOTTOMRIGHT", "TOPRIGHT" }, "h" },
+    { OG_HI, 1, 0, OG_LO,         { "BOTTOMLEFT", "TOPRIGHT" }, nil, "wh" },
+    { 0, OG_LO, OG_LO, OG_HI,     { "TOPRIGHT", "TOPLEFT" }, { "BOTTOMRIGHT", "BOTTOMLEFT" }, "w" },
+    { OG_HI, 1, OG_LO, OG_HI,     { "TOPLEFT", "TOPRIGHT" }, { "BOTTOMLEFT", "BOTTOMRIGHT" }, "w" },
+    { 0, OG_LO, OG_HI, 1,         { "TOPRIGHT", "BOTTOMLEFT" }, nil, "wh" },
+    { OG_LO, OG_HI, OG_HI, 1,     { "TOPLEFT", "BOTTOMLEFT" }, { "TOPRIGHT", "BOTTOMRIGHT" }, "h" },
+    { OG_HI, 1, OG_HI, 1,         { "TOPLEFT", "BOTTOMRIGHT" }, nil, "wh" },
+}
+
+-- A frame spanning the glow's rect, with the eight pieces hanging off its
+-- edges. Its own alpha is what the pulse drives.
+local function CreateOuterGlow(host, spread)
+    local glow = CreateFrame("Frame", nil, host)
+    glow:SetFrameLevel(host:GetFrameLevel())
+    glow.pieces = {}
+    for i, p in ipairs(OUTER_GLOW_PIECES) do
+        local t = glow:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(OUTER_GLOW_FILE)
+        t:SetTexCoord(p[1], p[2], p[3], p[4])
+        t:SetVertexColor(1, 0.82, 0, 1)
+        t:SetBlendMode("ADD")
+        t:SetPoint(p[5][1], glow, p[5][2], 0, 0)
+        if p[6] then t:SetPoint(p[6][1], glow, p[6][2], 0, 0) end
+        if p[7] == "wh" then
+            t:SetSize(spread, spread)
+        elseif p[7] == "w" then
+            t:SetWidth(spread)
+        else
+            t:SetHeight(spread)
+        end
+        glow.pieces[i] = t
+    end
+    glow:Hide()
+    return glow
+end
 
 local function RestedIndicator_OnUpdate(self, elapsed)
     self.animTime = self.animTime + elapsed
@@ -700,7 +758,8 @@ local function RestedIndicator_OnUpdate(self, elapsed)
 
     local glow = self.glow
     if glow and glow:IsShown() then
-        glow:SetAlpha(0.2 + (math.sin(self.animTime * 3) * 0.15 + 0.1))
+        local g = self.glowStyle
+        glow:SetAlpha(g.mid + math.sin(self.animTime * 3) * g.amp)
     end
 end
 
@@ -709,7 +768,7 @@ local function RestedIndicator_ApplyStatic(self)
         z:SetAlpha(1)
         DF:SafeSetFont(z, nil, z.baseSize, "OUTLINE")
     end
-    if self.glow then self.glow:SetAlpha(RESTED_Z.staticGlowAlpha) end
+    if self.glow then self.glow:SetAlpha(self.glowStyle.mid) end
 end
 
 local function RestedIndicator_OnShow(self)
@@ -752,11 +811,23 @@ local function RestedIndicator_SetZScale(self, scale)
     if not self.animated then RestedIndicator_ApplyStatic(self) end
 end
 
+-- Widen the glow's rect past its host by these amounts (host units; nil = 0),
+-- e.g. to take in a portrait beside the frame. The style's outset still applies.
+local function RestedIndicator_SetGlowExtents(self, left, right, top, bottom)
+    local glow, host = self.glow, self.glowHost
+    if not (glow and host) then return end
+    local o = self.glowStyle.outset
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", host, "TOPLEFT", -(o + (left or 0)), o + (top or 0))
+    glow:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", o + (right or 0), -(o + (bottom or 0)))
+end
+
 -- parent:   frame the Zs live on (frame level parent + 5)
--- glowHost: optional frame; when given, a glow texture is built around it
---           (4px outset) and stored as indicator.glow
+-- glowHost: optional frame; when given, a glow is built around it and stored
+--           as indicator.glow (the caller shows / hides it)
+-- opts:     optional { glowStyle = "FILL" | "OUTER", glowSpread = px (OUTER) }
 -- Returns the indicator frame, hidden, unanchored, animated.
-function DF:CreateRestedIndicator(parent, glowHost)
+function DF:CreateRestedIndicator(parent, glowHost, opts)
     local ind = CreateFrame("Frame", nil, parent)
     ind:SetSize(RESTED_Z.width, RESTED_Z.height)
     ind:SetFrameLevel(parent:GetFrameLevel() + 5)
@@ -774,15 +845,24 @@ function DF:CreateRestedIndicator(parent, glowHost)
         ind.zTexts[i] = z
     end
 
+    local styleName = (opts and opts.glowStyle == "OUTER") and "OUTER" or "FILL"
+    ind.glowStyleName = styleName
+    ind.glowStyle = RESTED_GLOW[styleName]
+    ind.SetGlowExtents = RestedIndicator_SetGlowExtents
     if glowHost then
-        local glow = glowHost:CreateTexture(nil, "BACKGROUND", nil, -8)
-        glow:SetPoint("TOPLEFT", glowHost, "TOPLEFT", -4, 4)
-        glow:SetPoint("BOTTOMRIGHT", glowHost, "BOTTOMRIGHT", 4, -4)
-        glow:SetTexture("Interface\\Buttons\\WHITE8x8")
-        glow:SetVertexColor(1, 0.82, 0, 0.3)
-        glow:SetBlendMode("ADD")
-        glow:Hide()
+        local glow
+        if styleName == "OUTER" then
+            glow = CreateOuterGlow(glowHost, (opts and opts.glowSpread) or OUTER_GLOW_SPREAD)
+        else
+            glow = glowHost:CreateTexture(nil, "BACKGROUND", nil, -8)
+            glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+            glow:SetVertexColor(1, 0.82, 0, 0.3)
+            glow:SetBlendMode("ADD")
+            glow:Hide()
+        end
         ind.glow = glow
+        ind.glowHost = glowHost
+        ind:SetGlowExtents(0, 0, 0, 0)
     end
 
     ind.animTime = 0
