@@ -2765,16 +2765,31 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
         return false
     end
 
+    -- seg.tooltip: a string (the title; opts.tooltipLines under it, shared by every
+    -- segment), a full ShowTooltip spec ({ title, lines }), or a function returning
+    -- one -- asked at hover time, so a tooltip can name what it acts on right now.
+    -- seg.accent: this segment's own accent when selected (a neutral one for an
+    -- "off" choice, so only the choices that DO something wear the theme accent).
+    -- opts.fontSize: the label size (9, the terse unit pickers' size).
+    local function TooltipSpec(seg)
+        local t = seg.tooltip
+        if type(t) == "function" then t = t() end
+        if type(t) == "table" then return t.title and t or nil end
+        if type(t) == "string" then return { title = t, lines = opts.tooltipLines } end
+        return nil
+    end
+
     local buttons = {}
     for i, seg in ipairs(segments) do
         local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label })
-        GUI:SetSettingsFont(btn.Text, 9, "")
+        GUI:StyleButton(btn, { width = segW, height = h, text = seg.label, accent = seg.accent })
+        GUI:SetSettingsFont(btn.Text, opts.fontSize or 9, "")
         btn:SetPoint("TOPLEFT", container, "TOPLEFT", pad + (i - 1) * segW, -pad)
         btn.value = seg.value
         if seg.tooltip then
             btn:HookScript("OnEnter", function(self)
-                GUI:ShowTooltip(self, { title = seg.tooltip, lines = opts.tooltipLines })
+                local spec = TooltipSpec(seg)
+                if spec then GUI:ShowTooltip(self, spec) end
             end)
             btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         end

@@ -104,6 +104,34 @@ function GUI.PageUsableWidth(childWidth)
     return (childWidth or 0) - 2 * SettingsBox.colMargin
 end
 
+-- ★ A PAGE'S OWN MINIMUM WINDOW WIDTH. GUI.PageMinWidths[pageName] = a number, or a
+-- function returning one (or nil) -- for a page that measures what it needs, such
+-- as one that reflows to a narrow layout and has to stop the window at that
+-- layout's width. Read by the panel's page-width bounds (with the wide pages and a
+-- module's deck row: the largest wins), whenever the page is selected. A page that
+-- only knows its number after its first build calls GUI.ApplyPageWidthBounds(name).
+GUI.PageMinWidths = GUI.PageMinWidths or {}
+function GUI:PageMinWidth(name)
+    local v = name and GUI.PageMinWidths[name]
+    if type(v) == "function" then
+        local ok, r = pcall(v)
+        v = ok and r or nil
+    end
+    return type(v) == "number" and v or nil
+end
+
+-- The window's width less the width a page's widgets get: what a page adds to its
+-- own content width to name a WINDOW width. Measured, not summed from the
+-- constants, so it can never disagree with the frames on screen; nil before the
+-- window exists.
+function GUI.PageChromeWidth()
+    local frame, content = DF.GUIFrame, GUI.contentFrame
+    if not (frame and content and frame.GetWidth and content.GetWidth) then return nil end
+    local fw, cw = frame:GetWidth() or 0, content:GetWidth() or 0
+    if fw <= 0 or cw <= 0 then return nil end
+    return fw - GUI.PageUsableWidth(GUI.PageChildWidth(cw))
+end
+
 -- ★ WHERE COLUMN 2 STARTS, in the page CHILD's x: the content box's midpoint. Its own
 -- helper so the layout pass and the resize guide below read ONE number.
 function GUI.Column2X(contentWidth)
@@ -2855,6 +2883,9 @@ function DF:CreateGUI()
         local view = GUI.ModuleView and GUI.GetModule and GUI:GetModule(GUI.ModuleView)
         local deckMin = view and GUI.ModuleDeckMinWidth and GUI:ModuleDeckMinWidth(view)
         if deckMin and deckMin > wanted then wanted = deckMin end
+        -- A page's own measured minimum (GUI:PageMinWidth) raises the floor.
+        local own = GUI:PageMinWidth(name)
+        if own and own > wanted then wanted = own end
         frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
         local widened = false
         if frame:GetWidth() < wanted then
@@ -2863,6 +2894,9 @@ function DF:CreateGUI()
         end
         return WIDE_PAGES[name], widened
     end
+    -- Published so a page that measures its own minimum after it is built can have
+    -- the window take it at once (GUI.PageMinWidths).
+    GUI.ApplyPageWidthBounds = ApplyPageWidthBounds
 
     -- Function to show normal Party/Raid content
     function GUI:ShowNormalContent()
