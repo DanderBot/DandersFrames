@@ -704,7 +704,9 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
 
     local isRaid = frame.isRaidFrame
     local isBoss = frame.isPinnedBossFrame
-    local testData = DF:GetTestUnitData(index, isRaid, isBoss)
+    -- A frame that carries its own test data (frame.dfTestData) paints that; every
+    -- pooled frame gets the shared lookup, exactly as before.
+    local testData = DF:GetTestDataForFrame(frame, index, isRaid, isBoss)
     if not testData then return end
     
     local db = DF:GetFrameDB(frame)
@@ -830,7 +832,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     local isRaid = frame.isRaidFrame
     local isBoss = frame.isPinnedBossFrame
-    local testData = DF:GetTestUnitData(index, isRaid, isBoss)
+    -- A frame that carries its own test data (frame.dfTestData) paints that; every
+    -- pooled frame gets the shared lookup, exactly as before.
+    local testData = DF:GetTestDataForFrame(frame, index, isRaid, isBoss)
     if not testData then return end
 
     -- Stamped rather than re-resolved: the aura drives below (and their bulk
@@ -869,6 +873,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     frame.dfIsDead = (testData.status == "Dead") or (testData.status == "Offline") or false
     frame.dfIsOffline = (testData.status == "Offline") or false
     frame.dfClassToken = testData.class
+    -- Reaction / tapped, for the REACTION health colours (nil on group test units:
+    -- assigning nil clears a previous frame's value). See Frames/Colors.lua.
+    frame.dfTestReaction = testData.reaction
+    frame.dfTestTapped = testData.isTapped or nil
     -- The health fraction, so the three curve-driven appearance functions can run
     -- on a preview frame. Live gets this from UnitHealthPercent(unit, true, curve),
     -- which is secret-safe and needs a REAL unit; the preview has a plain number.
@@ -1871,6 +1879,7 @@ function DF:ShowTestFrames(silent)
     if DF.PinnedFrames and DF.PinnedFrames.EnterTestMode then
         DF.PinnedFrames:EnterTestMode()
     end
+    if DF.NotifyTestModeChanged then DF:NotifyTestModeChanged("party") end
 end
 
 -- Refresh all test frames (call this when settings change in test mode)
@@ -2173,6 +2182,7 @@ function DF:HideTestFrames(silent)
         and not DF.raidTestMode then
         DF.PinnedFrames:ExitTestMode()
     end
+    if DF.NotifyTestModeChanged then DF:NotifyTestModeChanged("party") end
 end
 
 -- Toggle test mode (mode-aware based on GUI.SelectedMode)
@@ -2315,6 +2325,7 @@ function DF:ShowRaidTestFrames(silent)
     if not silent then
         DF:Say(L["Test mode enabled."])
     end
+    if DF.NotifyTestModeChanged then DF:NotifyTestModeChanged("raid") end
 end
 
 -- Hide raid test frames
@@ -2405,6 +2416,7 @@ function DF:HideRaidTestFrames(silent)
     if not silent then
         DF:Say(L["Test mode disabled."])
     end
+    if DF.NotifyTestModeChanged then DF:NotifyTestModeChanged("raid") end
 end
 
 -- Update raid test frames with test data
