@@ -677,7 +677,9 @@ function DF:UpdateRange(frame)
         return
     end
 
-    if not IsInGroup() and not IsInRaid() then
+    -- Solo: every group member is the player, so in range. A standalone frame shows
+    -- one fixed unit (a hostile one, often) and is checked whatever the group.
+    if not frame.dfStandalone and not IsInGroup() and not IsInRaid() then
         local dfSecret = issecretvalue and issecretvalue(frame.dfInRange)
         if dfSecret or frame.dfInRange ~= true then
             frame.dfInRange = true
@@ -876,8 +878,30 @@ local function RangeCheckFrame(frame)
     end
 end
 
+-- ============================================================
+-- REGISTERED FRAMES
+-- Frames outside the group headers (standalone frames) that want range fading
+-- register here and are polled on every tick, whatever the content type and
+-- whether or not any group header is ready. Weak-keyed: a dropped frame leaves.
+-- No registrations = the tick below is exactly the group walk it always was.
+-- ============================================================
+local registeredRangeFrames = setmetatable({}, { __mode = "k" })
+
+function DF:RegisterRangeFrame(frame)
+    if not frame then return end
+    registeredRangeFrames[frame] = true
+end
+
+function DF:UnregisterRangeFrame(frame)
+    if not frame then return end
+    registeredRangeFrames[frame] = nil
+end
+
 rangeAnimGroup:SetScript("OnLoop", function()
     if DF:MemTestDisabled("enableRange") then return end
+    for frame in pairs(registeredRangeFrames) do
+        RangeCheckFrame(frame)
+    end
     -- Any group header, not DF.partyHeader: party frames can be disabled.
     if not (DF.GroupHeadersReady and DF:GroupHeadersReady()) then return end
 

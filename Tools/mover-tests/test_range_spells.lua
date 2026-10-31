@@ -48,7 +48,7 @@ local STUBS = {
     UnitCanAttack = function() return S.hostile end,
     UnitIsDeadOrGhost = function() return S.dead end,
     UnitIsConnected = function() return true end,
-    IsInGroup = function() return true end,
+    IsInGroup = function() return S.inGroup ~= false end,
     IsInRaid = function() return false end,
     GetTime = function() return S.now end,
     time = function() return 0 end,
@@ -63,7 +63,7 @@ local STUBS = {
             local g = {}
             function g:CreateAnimation() return { SetDuration = function() end } end
             function g:SetLooping() end
-            function g:SetScript() end
+            function g:SetScript(kind, fn) S.scripts = S.scripts or {}; S.scripts[kind] = fn end
             function g:Play() end
             return g
         end
@@ -304,4 +304,59 @@ do  -- paladin rez: Intercession behind Redemption
     S.inRange[391054] = true
     eq(rangeOf(DF), true, "and its in-range answer stands")
     unload()
+end
+
+-- ============================================================
+-- STANDALONE FRAMES AND THE RANGE REGISTRY
+-- The solo shortcut (everyone in range when not grouped) is a group-frame rule; a
+-- standalone frame is range-checked whatever the group. Frames registered with
+-- DF:RegisterRangeFrame are polled on every tick, before the group-header gate;
+-- with no registrations the tick is the group walk it always was.
+-- ============================================================
+do
+    local DF = loadRange("PRIEST", function() S.specID = 256 end)
+    DF:RefreshRangeSpell()
+    S.inGroup, S.interact = false, false   -- solo, out of interact distance
+    DF:ClearRangeCache()
+    local party = { unit = "party1" }
+    DF:UpdateRange(party)
+    eq(party.dfInRange, true, "solo: a group frame takes the in-range shortcut")
+    local standalone = { unit = "target", dfStandalone = true }
+    DF:UpdateRange(standalone)
+    eq(standalone.dfInRange, false, "solo: a standalone frame is really checked")
+
+    local tick = S.scripts and S.scripts.OnLoop
+    check(tick ~= nil, "the range tick is captured")
+    local walked = 0
+    DF.GroupHeadersReady = function() return false end
+    DF.GetContentType = function() return nil end
+    DF.IteratePartyFrames = function() walked = walked + 1 end
+    if tick then
+        tick()
+        eq(walked, 0, "no registrations, headers not ready: the tick does nothing")
+        local polled = { unit = "target", dfStandalone = true, IsShown = function() return true end }
+        local hidden = { unit = "focus", dfStandalone = true, IsShown = function() return false end }
+        DF:RegisterRangeFrame(polled)
+        DF:RegisterRangeFrame(hidden)
+        DF:ClearRangeCache()
+        tick()
+        eq(polled.dfInRange, false, "a registered frame is polled even before any group header is ready")
+        eq(hidden.dfInRange, nil, "a hidden registered frame is skipped")
+        eq(walked, 0, "and the group walk still waits for its headers")
+        DF:UnregisterRangeFrame(polled)
+        polled.dfInRange = nil
+        tick()
+        eq(polled.dfInRange, nil, "an unregistered frame is no longer polled")
+        DF.GroupHeadersReady = function() return true end
+        tick()
+        eq(walked, 1, "headers ready: the party walk runs as before")
+    end
+    unload()
+end
+
+print("-- Highlights: the in-raid party-frame shortcut skips standalone frames")
+do
+    local hsrc = df_file_source("Features/Highlights.lua"):gsub("\r\n", "\n")
+    check(hsrc:find("if not frame%.dfIsTestFrame and not frame%.dfStandalone and not frame%.isRaidFrame\n%s*and not frame%.isArenaFrame and IsInRaid%(%) then"),
+        "UpdateHighlights: standalone frames are exempt from the in-raid hide")
 end

@@ -668,8 +668,10 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     end
     
     -- Skip party frames when in raid (they should be hidden but highlights are parented to UIParent)
-    -- But NOT for test frames - test mode controls its own visibility
-    if not frame.dfIsTestFrame and not frame.isRaidFrame and not frame.isArenaFrame and IsInRaid() then
+    -- But NOT for test frames - test mode controls its own visibility, nor for
+    -- standalone frames, which are in no group and show whatever the group type.
+    if not frame.dfIsTestFrame and not frame.dfStandalone and not frame.isRaidFrame
+        and not frame.isArenaFrame and IsInRaid() then
         -- Hide any existing highlights on party frames when in raid
         if frame.dfSelectionHighlight then frame.dfSelectionHighlight:Hide() end
         if frame.dfHoverHighlight then frame.dfHoverHighlight:Hide() end
