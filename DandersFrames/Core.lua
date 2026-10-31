@@ -7243,15 +7243,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
             elseif msg == "test units" then
-                -- The Unit Frames companion's own test mode and panel
-                -- (DandersFrames_Options/UnitFrames/TestPanel.lua).
+                -- The Unit Frames companion's own test mode: the test popup's
+                -- Units mode (DandersFrames_Options/UnitFrames/TestMode.lua).
                 if not DF.UnitFrames then
                     DF:Say(L["Unit Frames is not loaded."])
                     return
                 end
                 if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 local UFO = DF.GUI and DF.GUI.UnitFrameOptions
-                if UFO and UFO.ToggleTestPanel then UFO.ToggleTestPanel() end
+                if UFO and UFO.ToggleTestPopup then UFO.ToggleTestPopup() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then

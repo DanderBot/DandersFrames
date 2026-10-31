@@ -4657,6 +4657,17 @@ local function GroupIsRaidView()
     return DF.GUI and DF.GUI.SelectedMode == "raid" or false
 end
 
+-- The settings window shows a module with a test mode of its own (its def's
+-- testModeId -- Unit Frames' Units): Party / Raid are not current there, so
+-- the popup lands on that mode, and picking Party / Raid leaves the module.
+local function ModuleOwnsTestMode()
+    local GUI = DF.GUI
+    local def = GUI and GUI.GetModule and GUI:GetModule()
+    local id = def and def.testModeId
+    if type(id) == "function" then id = id() end
+    return type(id) == "string" and DF:GetTestMode(id) ~= nil
+end
+
 -- Put the settings window on this scope, through the one path every Party /
 -- Raid switch takes (GUI:SelectModule): the Party/Raid sync, locking the mode
 -- left behind, carrying a running preview across -- which is what keeps party
@@ -4667,7 +4678,7 @@ local function SwitchGroupScope(scope)
     local GUI = DF.GUI
     if not GUI then return end
     local cur = GroupIsRaidView() and "raid" or "party"
-    if cur == scope then return end
+    if cur == scope and not ModuleOwnsTestMode() then return end
     if not DF.GUIFrame and DF.CreateGUI then DF:CreateGUI() end
     if GUI.SelectModule then GUI:SelectModule("group", scope) end
 end
@@ -5010,7 +5021,7 @@ local function RegisterGroupTestMode(scope, order)
         end,
         -- Party / Raid follow the settings window's own Party / Raid: the popup
         -- is a view of the tab the user is on, exactly as the old panel was.
-        isCurrent = function() return GroupIsRaidView() == isRaid end,
+        isCurrent = function() return GroupIsRaidView() == isRaid and not ModuleOwnsTestMode() end,
         onEnter = function(fromId)
             SeedGroupDefaults()
             SwitchGroupScope(scope)

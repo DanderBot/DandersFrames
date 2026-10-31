@@ -32,8 +32,8 @@ UF.GlobalDefaults = {
 }
 
 -- ============================================================
--- UNITS TEST MODE (Preview.lua, the test panel in DandersFrames_Options/UnitFrames/
--- TestPanel.lua). Stored in DF.db.unitframes.global.testMode (UF:GetTestDB), apart
+-- UNITS TEST MODE (Preview.lua; its controls are the test popup's Units mode,
+-- DandersFrames_Options/UnitFrames/TestMode.lua). Stored in DF.db.unitframes.global.testMode (UF:GetTestDB), apart
 -- from the party and raid test settings: the two test modes never share a switch.
 -- The test* keys are the ones DandersFrames' test painter reads off a frame's
 -- settings table; a preview frame's table answers them from here (P.TEST_KEYS).

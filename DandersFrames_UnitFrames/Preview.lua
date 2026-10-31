@@ -23,9 +23,8 @@ local addonName, UF = ...
 --   "unlock"    a DandersMover session (Mover.lua's Unlocked / Locked). Every
 --               preview shows, so there is something to drag.
 --   "test"      the UNITS TEST MODE (P:SetTestMode): the Test button on a Unit
---               Frames page, its test panel, /df test units, the Test Mode switch
---               on the module's Settings page. Its panel's Frames switches pick
---               which previews show.
+--               Frames page, the test popup's Units mode, /df test units. The
+--               mode's Frames switches pick which previews show.
 --
 -- ★ THE UNITS TEST MODE AND DANDERSFRAMES' PARTY / RAID TEST MODE NEVER MIX.
 -- Turning this one on drops the user's party and raid claims (and closes their
@@ -299,8 +298,14 @@ local function GroupTestOwned()
 end
 
 local function ReleaseGroupTest()
-    -- Its panel releases both claims as it closes (TestMode.lua, the panel's OnHide).
-    if DF.TestPanel and DF.TestPanel.IsShown and DF.TestPanel:IsShown() then DF.TestPanel:Hide() end
+    -- The test popup showing Party / Raid releases both claims as it closes
+    -- (TestMode.lua, the popup's OnHide). Showing Units (the popup's Units mode
+    -- is what turns this on), it stays: the claims are dropped below.
+    local panel = DF.TestPanel
+    if panel and panel.IsShown and panel:IsShown() then
+        local st = panel.state
+        if not (st and st.modeId == "units") then panel:Hide() end
+    end
     if DF.SetTestModeOwner and GroupTestOwned() then
         DF:SetTestModeOwner("party", "user", false, true)
         DF:SetTestModeOwner("raid", "user", false, true)

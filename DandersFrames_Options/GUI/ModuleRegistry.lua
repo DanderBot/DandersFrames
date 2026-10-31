@@ -66,9 +66,11 @@ end
 -- nothing to switch on yet), view (a full-window page of its own, shown and
 -- hidden through showView / hideView -- Home, Modules), reset (the module's
 -- "reset to defaults": the Modules page's Reset button; see MODULE RESET below),
--- testMode ({ isOn(), toggle(), isPanelShown(), togglePanel() }: the module's own
--- test mode, which the window's Test button drives while the module shows --
--- GUI/Panel.lua; without one the button is the party / raid test mode).
+-- testModeId (the id of a mode registered with DF:RegisterTestMode,
+-- TestMode/Modes.lua: the module's own test mode, which the window's Test
+-- button speaks for while the module shows -- GUI/Panel.lua; without one the
+-- button is the party / raid test mode, and Party / Raid step aside in the
+-- test popup while a module with its own shows -- TestMode/TestMode.lua).
 -- A label may be a string or a function returning one (so a language override
 -- is picked up -- a string resolved from L at file scope freezes on enUS).
 function GUI:RegisterModule(def)
@@ -388,8 +390,12 @@ function GUI:SelectModule(id, tabId, opts)
     -- LeaveGlobalTo); never outlives the switch.
     GUI._leavingProfiles = nil
     GUI:SyncSelectedModule()
-    -- The Test button follows the module (def.testMode).
+    -- The Test button follows the module (def.testModeId), and so does an open
+    -- test popup (a module with its own test mode is that mode's -- the
+    -- popup's isCurrent). Not every onEnter repaints through UpdateThemeColors,
+    -- which is the other place the popup is refreshed.
     if GUI.UpdateTestButtonState then GUI.UpdateTestButtonState() end
+    if DF.TestPanel and DF.TestPanel:IsShown() then DF.TestPanel:UpdateStateNoCallback() end
     -- ★ THE RAIL AND DECK 2 FOLLOW EVERY SWITCH. Most onEnters end in a page
     -- select or UpdateThemeColors, which repaints them; one that has nothing
     -- to do (GLOBAL picked again from Home, with its view still up underneath)

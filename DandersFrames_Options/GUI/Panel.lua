@@ -2380,14 +2380,15 @@ function DF:CreateGUI()
     -- OnShow handler is composed with, not replaced.
     frame:HookScript("OnShow", function() UpdateThemeColors() end)
 
-    -- The module showing's own test mode (GUI/ModuleRegistry.lua def.testMode), or
-    -- nil: the Test button is the party / raid test mode.
-    GUI.ModuleTestRoute = function()
+    -- The test mode the Test button speaks for: the module showing's own
+    -- (GUI/ModuleRegistry.lua def.testModeId, a mode registered with
+    -- DF:RegisterTestMode), or nil: the party / raid test mode.
+    GUI.ModuleTestMode = function()
         local def = GUI.GetModule and GUI:GetModule()
-        local tm = def and def.testMode
-        if type(tm) == "table" and tm.isOn and tm.toggle and tm.isPanelShown and tm.togglePanel then
-            return tm
-        end
+        local id = def and def.testModeId
+        if type(id) == "function" then id = id() end
+        local mode = type(id) == "string" and DF.GetTestMode and DF:GetTestMode(id) or nil
+        if mode and mode.isPreviewOn and mode.togglePreview then return mode end
         return nil
     end
 
@@ -2400,13 +2401,15 @@ function DF:CreateGUI()
         -- its OWN claim, and driving the glyph off that made a plain unlock look like
         -- the user had switched test mode on. Frames being visible during an unlock is
         -- unlock's business; the chat line explains it.
-        local panelOpen, userWants
-        local route = GUI.ModuleTestRoute()
-        if route then
-            -- A module with a test mode of its own (def.testMode, e.g. Unit Frames).
-            panelOpen, userWants = route.isPanelShown(), route.isOn()
+        -- One popup for every mode (TestMode/TestMode.lua); the preview cue is
+        -- the mode this window shows: the module's own (def.testModeId, e.g.
+        -- Unit Frames' Units), else Party / Raid.
+        local panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
+        local userWants
+        local mode = GUI.ModuleTestMode()
+        if mode then
+            userWants = mode.isPreviewOn()
         else
-            panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
             local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
             userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
         end
@@ -2422,12 +2425,14 @@ function DF:CreateGUI()
     -- Test button scripts
     btnTest:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btnTest:SetScript("OnClick", function(self, button)
-        -- ★ THE BUTTON FOLLOWS THE MODULE. A module that brings its own test mode
-        -- (def.testMode -- Unit Frames' units test mode) gets this button while it
-        -- shows; everywhere else it is the party / raid test mode, as always.
-        local route = GUI.ModuleTestRoute()
-        if route then
-            if button == "RightButton" then route.toggle() else route.togglePanel() end
+        -- ★ THE BUTTON FOLLOWS THE MODULE. A left click always opens the one
+        -- test popup, which lands on the module's own mode by itself (the mode's
+        -- isCurrent). A right click quick-toggles the preview of the mode this
+        -- window shows: the module's own (def.testModeId -- Unit Frames' Units),
+        -- else the party / raid test mode, as always.
+        local mode = GUI.ModuleTestMode()
+        if mode and button == "RightButton" then
+            mode.togglePreview()
             UpdateTestButtonState()
             return
         end

@@ -1907,7 +1907,7 @@ end
 
 -- ---- the units test mode (UF.Preview's "test" owner) ------------------------------
 -- Its own mode, apart from the party / raid test mode: the two never mix
--- (Preview.lua). The panel is TestPanel.lua.
+-- (Preview.lua). Its controls are the test popup's Units mode (TestMode.lua).
 function UFO.IsTestModeOn()
     local UF = DF.UnitFrames
     local P = UF and UF.Preview
@@ -2229,14 +2229,10 @@ function UFO.RegisterModule()
         status = UFO.Status,
         description = function() return L["Player, target, target of target, focus, pet and boss frames."] end,
         reset = UFO.Reset,
-        -- The window's Test button follows this module: the units test mode and
-        -- its panel (TestPanel.lua), never the party / raid one.
-        testMode = {
-            isOn = function() return UFO.IsTestModeOn() end,
-            toggle = function() UFO.ToggleTestMode() end,
-            isPanelShown = function() return UFO.IsTestPanelShown and UFO.IsTestPanelShown() or false end,
-            togglePanel = function() if UFO.ToggleTestPanel then UFO.ToggleTestPanel() end end,
-        },
+        -- The window's Test button speaks for this module's own test mode while
+        -- it shows: the shared popup's Units mode (TestMode.lua), never the
+        -- party / raid one.
+        testModeId = "units",
     })
 end
 
