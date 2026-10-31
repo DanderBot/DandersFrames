@@ -335,6 +335,8 @@ local PER_UNIT = {
         classPowerPositionRecord = Detached("player", "top", -280, -175),
         portraitEnabled = true,
         restingIconEnabled = true,
+        -- The ZZZ just off the frame's top-right corner.
+        restingIconAnchor = "TOPRIGHT", restingIconX = 9, restingIconY = 5,
         pvpIconEnabled = true,
         combatIconEnabled = true,
     },

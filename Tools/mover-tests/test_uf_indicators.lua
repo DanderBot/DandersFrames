@@ -145,8 +145,12 @@ pdb.restingIconSize = 32
 IN:Layout(P)
 eq(R.zTexts[3]._fontSize, 28, "size 32: the Zs scale with it")
 local rp = R._points[#R._points]
-eq(rp and rp[1], "TOPLEFT", "anchored at the unit's anchor")
+eq(rp and rp[1], "TOPRIGHT", "anchored at the unit's anchor (player default: top right)")
 eq(rp and rp[2], P, "...on the frame")
+eq(rp and rp[4], 9, "player default: 9 right")
+eq(rp and rp[5], 5, "...5 up")
+eq(pdb.restingIconAnchor, "TOPRIGHT", "player default anchor")
+eq(pdb.restingIconX, 9, "player default X"); eq(pdb.restingIconY, 5, "player default Y")
 resting = false
 IN:Update(P)
 check(not R:IsShown() and not R.glow:IsShown(), "not resting: ZZZ and glow both hidden")
